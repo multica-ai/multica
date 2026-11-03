@@ -6,6 +6,7 @@ import {
   issueStatusCategory,
 } from "@multica/core/issues";
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
+import { IssueAppRequests } from "../../common/app-requests";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -3969,6 +3970,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
             </div>
           )}
+          <IssueAppRequests issueId={id} />
           <div
             ref={composerRef}
             className={cn(

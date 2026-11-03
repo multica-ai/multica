@@ -953,35 +953,6 @@
     "inbound_pending_hint": "Send this bot a message in Feishu/Lark to verify reception. If it does not arrive, check long connection mode, the im.message.receive_v1 subscription, and app publication/approval. Existing bindings may have no recorded verification yet.",
     "inbound_verified_hint": "This binding received a valid message. This does not confirm ongoing connectivity, agent execution, or replies."
   },
-  "composio": {
-    "page_description": "Connect apps your agents can use.",
-    "not_enabled_title": "Composio integration not enabled",
-    "not_enabled_description_prefix": "Set",
-    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
-    "loading": "Loading toolkits…",
-    "load_failed": "Failed to load Composio toolkits.",
-    "empty_title": "No connectable apps yet",
-    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
-    "search_placeholder": "Search toolkits…",
-    "connect": "Connect",
-    "connecting": "Connecting…",
-    "connected": "Connected",
-    "disconnect": "Disconnect",
-    "disconnecting": "Disconnecting…",
-    "connect_failed": "Couldn't start the connection. Please try again.",
-    "disconnect_failed": "Couldn't disconnect. Please try again.",
-    "toast_disconnected": "Disconnected",
-    "disconnect_confirm_title": "Disconnect this app?",
-    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
-    "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
-    "toast_connected": "Connected",
-    "toast_connect_failed": "Couldn't complete the connection. Please try again.",
-    "last_used": "Last used {{when}}",
-    "last_used_never": "Never used",
-    "expired": "Token expired",
-    "reconnect": "Reconnect"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "Chat with agents in Slack or use /issue to create an issue.",
@@ -1476,7 +1447,151 @@
     "title": "Ways to give agents tools",
     "current": "This page",
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "apps": "Authorized with your own account through Composio and enabled on agents you own.",
+    "apps": "Team or personal accounts connected through Multica, given to each agent with an account and a permission level.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
+  },
+  "connected_apps": {
+    "description": "Accounts your agents act through. Every call goes through Multica, which applies your rules and asks before sending, deleting or sharing.",
+    "add_app": "Add app",
+    "loading": "Loading apps…",
+    "load_failed": "Couldn't load apps.",
+    "team_title": "Team accounts",
+    "team_description": "Shared accounts the workspace owns, such as a support inbox or the company GitHub. Admins connect them; agents given the team account act as it.",
+    "team_empty": "No team accounts yet.",
+    "team_empty_member": "No team accounts yet. Ask a workspace admin to connect one.",
+    "personal_title": "My accounts",
+    "personal_description": "Your own accounts. When you trigger a run, agents use these for apps set to the triggerer's account.",
+    "personal_empty": "You haven't connected any accounts.",
+    "connected_by": "Connected by {{name}}",
+    "last_used": "Last used {{when}}",
+    "last_used_never": "Never used",
+    "used_by_one": "Used by {{count}} agent",
+    "used_by_other": "Used by {{count}} agents",
+    "expired": "Needs reconnecting",
+    "reconnect": "Reconnect",
+    "rules": "Rules",
+    "activity": "Activity",
+    "disconnect": "Disconnect",
+    "catalog_title": "Available apps",
+    "catalog_label": "Apps members can add",
+    "catalog_description": "Curated apps come with reviewed default rules. All apps adds everything Composio can connect; actions Multica can't classify always ask first.",
+    "catalog_all": "All apps",
+    "catalog_curated": "Curated only",
+    "toast_connected": "Account connected",
+    "toast_connect_failed": "Couldn't complete the connection. Please try again.",
+    "toast_disconnected": "Disconnected",
+    "toast_failed": "Something went wrong. Please try again.",
+    "add": {
+      "title": "Add an app",
+      "description": "Connect an account for the team or for yourself. Which agents use it is set on each agent's Apps page.",
+      "search": "Search apps…",
+      "empty": "No apps match.",
+      "curated": "Curated",
+      "recommended_team": "Usually a team account",
+      "recommended_personal": "Usually a personal account",
+      "connect_team": "Connect for team",
+      "connect_personal": "Connect my account",
+      "connecting": "Connecting…",
+      "connected": "Connected"
+    },
+    "disconnect_team": {
+      "title": "Disconnect the team {{app}} account?",
+      "description": "Agents using the team account lose access right away.",
+      "agents": "Agents using it",
+      "no_agents": "No agent uses it.",
+      "active_tasks": "Runs in progress: {{count}}",
+      "active_autopilots": "Active autopilots: {{count}}",
+      "pending": "Confirmations that will be cancelled: {{count}}",
+      "cancel": "Cancel",
+      "confirm": "Disconnect"
+    },
+    "disconnect_personal": {
+      "title": "Disconnect your {{app}} account?",
+      "description": "Runs you trigger can no longer use it. You can reconnect later.",
+      "cancel": "Cancel",
+      "confirm": "Disconnect"
+    },
+    "detail": {
+      "team_title": "{{app}} · team account",
+      "personal_title": "{{app}} · my account",
+      "rules_description": "What agents may do through this account. An agent's level can only make these stricter.",
+      "rules_read_only": "Only workspace admins can change team account rules.",
+      "default": "Default: {{policy}}",
+      "activity_empty": "No calls yet.",
+      "activity_failed": "Couldn't load activity."
+    },
+    "classes": {
+      "read": {
+        "label": "Read",
+        "description": "Search, list and fetch"
+      },
+      "write": {
+        "label": "Write",
+        "description": "Create and update content"
+      },
+      "send": {
+        "label": "Send",
+        "description": "Send email or messages, post, invite"
+      },
+      "delete": {
+        "label": "Delete",
+        "description": "Delete or archive"
+      },
+      "share": {
+        "label": "Share",
+        "description": "Change permissions or share outside"
+      }
+    },
+    "policies": {
+      "allow": "Allow",
+      "confirm": "Ask first",
+      "block": "Block"
+    },
+    "outcomes": {
+      "ok": "Ran",
+      "error": "Failed",
+      "blocked": "Blocked",
+      "pending": "Waiting",
+      "approved": "Approved",
+      "rejected": "Declined"
+    },
+    "scopes": {
+      "team": "Team account",
+      "personal": "Triggerer's account"
+    },
+    "levels": {
+      "read": "Read only",
+      "confirm_writes": "Ask before writes",
+      "write": "Can write"
+    },
+    "request": {
+      "title_action": "{{agent}} wants to run {{tool}}",
+      "title_connect": "{{agent}} asks you to connect {{app}}",
+      "pending_count_one": "{{count}} app action waiting for confirmation",
+      "pending_count_other": "{{count}} app actions waiting for confirmation",
+      "waiting_for": "Waiting for {{name}}",
+      "expires": "Expires {{when}}",
+      "redacted": "Only {{name}} can see the details.",
+      "arguments": "Arguments",
+      "edit": "Edit",
+      "invalid_json": "Arguments must be a JSON object.",
+      "approve": "Approve and run",
+      "approve_all": "Approve all",
+      "reject": "Decline",
+      "reject_reason": "Reason (optional, the agent sees it)",
+      "connect": "Connect {{app}}",
+      "connected_continue": "I've connected it",
+      "status": {
+        "approved": "Approved",
+        "rejected": "Declined",
+        "failed": "Failed",
+        "expired": "Expired",
+        "cancelled": "Cancelled"
+      },
+      "toast_approved": "Approved. The agent will continue.",
+      "toast_rejected": "Declined. The agent will adapt.",
+      "toast_failed": "Couldn't record your decision.",
+      "not_connected": "Connect the account first."
+    }
   }
 }

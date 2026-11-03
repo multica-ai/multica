@@ -34,7 +34,7 @@ import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
-import { AgentMcpTab } from "./tabs/agent-mcp-tab";
+import { AgentAppsTab } from "./tabs/agent-apps-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
@@ -186,11 +186,7 @@ export function AgentAdvancedSettings({
   const capabilitySections = useMemo(() => {
     if (qoderRuntime) return [];
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
-    const showComposioMcp =
-      composioMCPAppsEnabled &&
-      !!currentUserId &&
-      !!agent.owner_id &&
-      agent.owner_id === currentUserId;
+    const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
       if (item.id === "mcp_config") return showMcp;
       if (item.id === "composio_mcp") return showComposioMcp;
@@ -198,9 +194,8 @@ export function AgentAdvancedSettings({
       return true;
     });
   }, [
-    agent.owner_id,
+    canEdit,
     composioMCPAppsEnabled,
-    currentUserId,
     integrationsConfigured,
     qoderRuntime,
     runtime,
@@ -370,7 +365,7 @@ export function AgentAdvancedSettings({
                       onDirtyChange={setDirty}
                     />
                   )}
-                  {active.id === "composio_mcp" && <AgentMcpTab agent={agent} />}
+                  {active.id === "composio_mcp" && <AgentAppsTab agent={agent} />}
                   {active.id === "integrations" && (
                     <IntegrationsTab agent={agent} />
                   )}

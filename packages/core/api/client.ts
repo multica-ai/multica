@@ -196,6 +196,18 @@ import type {
   ComposioToolkit,
   ComposioConnection,
   ComposioConnectInitResponse,
+  AppsOverview,
+  AppCatalogResponse,
+  AppRule,
+  AppToolCall,
+  TeamAppImpact,
+  AppRequest,
+  AgentApp,
+  AppAccountScope,
+  AppActionClass,
+  AppActionPolicy,
+  AppCatalogMode,
+  UpdateAgentAppsRequest,
   SlackInstallation,
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
@@ -5223,6 +5235,93 @@ export class ApiClient {
   async deleteComposioConnection(connectionId: string): Promise<void> {
     await this.fetch(`/api/integrations/composio/connections/${connectionId}`, {
       method: "DELETE",
+    });
+  }
+
+  // Connected Apps (MUL-8516). Workspace-scoped: team accounts belong to the
+  // workspace, personal accounts to the caller.
+
+  async getAppsOverview(): Promise<AppsOverview> {
+    return this.fetch(`/api/apps`);
+  }
+
+  async listAppCatalog(): Promise<AppCatalogResponse> {
+    return this.fetch(`/api/apps/catalog`);
+  }
+
+  /** Starts connecting an account; the browser is sent to the returned URL. */
+  async connectApp(scope: AppAccountScope, toolkitSlug: string): Promise<ComposioConnectInitResponse> {
+    return this.fetch(`/api/apps/${scope}/connect`, {
+      method: "POST",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug }),
+    });
+  }
+
+  async disconnectTeamApp(connectionId: string): Promise<void> {
+    await this.fetch(`/api/apps/team/connections/${connectionId}`, { method: "DELETE" });
+  }
+
+  async getTeamAppImpact(toolkitSlug: string): Promise<TeamAppImpact> {
+    return this.fetch(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+  }
+
+  async updateAppSettings(catalogMode: AppCatalogMode): Promise<{ catalog_mode: AppCatalogMode }> {
+    return this.fetch(`/api/apps/settings`, {
+      method: "PUT",
+      body: JSON.stringify({ catalog_mode: catalogMode }),
+    });
+  }
+
+  async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {
+    return this.fetch(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+  }
+
+  async updateAppRules(
+    toolkitSlug: string,
+    scope: AppAccountScope,
+    rules: { action_class: AppActionClass; policy: AppActionPolicy }[],
+  ): Promise<{ rules: AppRule[] }> {
+    return this.fetch(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`, {
+      method: "PUT",
+      body: JSON.stringify({ rules }),
+    });
+  }
+
+  async listAppActivity(toolkitSlug: string, scope: AppAccountScope): Promise<{ calls: AppToolCall[] }> {
+    return this.fetch(`/api/apps/activity?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+  }
+
+  async listAgentApps(agentId: string): Promise<{ apps: AgentApp[] }> {
+    return this.fetch(`/api/agents/${agentId}/apps`);
+  }
+
+  async updateAgentApps(agentId: string, body: UpdateAgentAppsRequest): Promise<{ apps: AgentApp[] }> {
+    return this.fetch(`/api/agents/${agentId}/apps`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** Requests of an issue, of a chat, or (neither given) the caller's pending ones. */
+  async listAppRequests(params: { issueId?: string; chatSessionId?: string } = {}): Promise<{ requests: AppRequest[] }> {
+    const qs = new URLSearchParams();
+    if (params.issueId) qs.set("issue_id", params.issueId);
+    if (params.chatSessionId) qs.set("chat_session_id", params.chatSessionId);
+    const query = qs.toString();
+    return this.fetch(`/api/app-requests${query ? `?${query}` : ""}`);
+  }
+
+  async approveAppRequest(requestId: string, args?: Record<string, unknown>): Promise<AppRequest> {
+    return this.fetch(`/api/app-requests/${requestId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(args ? { arguments: args } : {}),
+    });
+  }
+
+  async rejectAppRequest(requestId: string, reason?: string): Promise<AppRequest> {
+    return this.fetch(`/api/app-requests/${requestId}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
     });
   }
 

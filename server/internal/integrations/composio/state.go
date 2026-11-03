@@ -40,7 +40,11 @@ type stateClaims struct {
 	// toolkit's auth config without re-resolving (which could fail-open). It is
 	// an opaque config handle (ac_…), not a credential.
 	AuthConfigID string `json:"a"`
-	Exp          int64  `json:"e"`
+	// WorkspaceID and ConnectedBy are set only for a team account: the
+	// workspace that owns it and the admin who started the handshake.
+	WorkspaceID string `json:"w,omitempty"`
+	ConnectedBy string `json:"c,omitempty"`
+	Exp         int64  `json:"e"`
 }
 
 // signState produces a URL-safe "<payload>.<sig>" token. payload is the

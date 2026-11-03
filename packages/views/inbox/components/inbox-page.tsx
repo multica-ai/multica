@@ -109,6 +109,7 @@ import {
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
 import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
 
@@ -875,6 +876,12 @@ export function InboxPage() {
           {detailItem.body}
         </div>
       ) : null}
+      {detailItem.details?.request_id && detailItem.type.startsWith("app_") && (
+        <InboxAppRequest
+          requestId={detailItem.details.request_id}
+          chatSessionId={detailItem.details.chat_session_id}
+        />
+      )}
       {isQuickCreateOutcome(detailItem.type) && detailItem.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
           <p className="text-caption font-medium text-muted-foreground">

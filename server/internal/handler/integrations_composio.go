@@ -118,15 +118,15 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	status := q.Get("status")
 	connectedAccountID := q.Get("connected_account_id")
 
-	slug, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
+	result, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
 	if err != nil {
 		// Every failure (tampered/expired state, non-success status, write
 		// error) collapses to the generic failure redirect — we never tell the
 		// browser which check failed.
-		http.Redirect(w, r, h.Composio.CallbackRedirect(slug, false), http.StatusFound)
+		http.Redirect(w, r, h.Composio.CallbackRedirect(result, false), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, h.Composio.CallbackRedirect(slug, true), http.StatusFound)
+	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
 }
 
 // ListComposioConnections (GET /api/integrations/composio/connections) returns

@@ -31,7 +31,12 @@ export type InboxItemType =
   | "autopilot_quota_exceeded"
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
-  | "children_done";
+  | "children_done"
+  // Connected Apps (MUL-8516): an agent waits on the recipient to confirm an
+  // app call, or to connect their account.
+  | "app_action_requested"
+  | "app_action_reminder"
+  | "app_connect_requested";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

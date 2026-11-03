@@ -248,6 +248,25 @@ export type {
   ComposioConnectInitResponse,
 } from "./composio";
 export type {
+  AppAccountScope,
+  AppAccessLevel,
+  AppActionClass,
+  AppActionPolicy,
+  AppCatalogMode,
+  AppConnection,
+  AgentApp,
+  AppsOverview,
+  AppCatalogEntry,
+  AppCatalogResponse,
+  AppRule,
+  AppToolCall,
+  TeamAppImpact,
+  AppRequestStatus,
+  AppRequest,
+  UpdateAgentAppsRequest,
+  AppRequestChangedPayload,
+} from "./connected-apps";
+export type {
   SlackInstallation,
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,

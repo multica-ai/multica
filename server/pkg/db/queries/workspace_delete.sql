@@ -493,6 +493,24 @@ deleted_channel_binding_tokens AS (
 deleted_wecom_install_sessions AS (
     DELETE FROM wecom_install_session WHERE workspace_id = $1
 ),
+deleted_workspace_composio_connections AS (
+    DELETE FROM workspace_composio_connection WHERE workspace_id = $1
+),
+deleted_agent_apps AS (
+    DELETE FROM agent_app WHERE workspace_id = $1
+),
+deleted_app_action_rules AS (
+    DELETE FROM app_action_rule WHERE workspace_id = $1
+),
+deleted_app_action_requests AS (
+    DELETE FROM app_action_request WHERE workspace_id = $1
+),
+deleted_app_tool_calls AS (
+    DELETE FROM app_tool_call WHERE workspace_id = $1
+),
+deleted_workspace_app_settings AS (
+    DELETE FROM workspace_app_setting WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)

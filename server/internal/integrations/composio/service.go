@@ -136,6 +136,10 @@ type Service struct {
 	authCache    map[string]string
 	authCacheExp time.Time
 	authCacheTTL time.Duration
+	// authCreateMu serializes creating managed auth configs so two concurrent
+	// connects for the same new app do not register two configs.
+	authCreateMu sync.Mutex
+	tools        toolCache
 }
 
 // NewService validates its inputs and returns a ready Service. It errors when a
@@ -240,7 +244,7 @@ func toolkitLogoURL(slug, upstreamLogoURL string) string {
 // invariant the rest of the integration relies on.
 func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitSlug string) (string, error) {
 	slug := strings.ToLower(strings.TrimSpace(toolkitSlug))
-	authConfigID, err := s.authConfigForToolkit(ctx, slug)
+	authConfigID, err := s.ensureAuthConfig(ctx, slug)
 	if err != nil {
 		return "", err
 	}
@@ -285,23 +289,28 @@ func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitS
 //
 // Idempotency: the upsert is keyed on (user_id, connected_account_id), so a
 // duplicate callback re-activates the same row instead of creating a second.
-func (s *Service) CompleteCallback(ctx context.Context, state, status, connectedAccountID string) (string, error) {
+func (s *Service) CompleteCallback(ctx context.Context, state, status, connectedAccountID string) (CallbackResult, error) {
 	claims, err := verifyState(s.secret, state, s.now())
 	if err != nil {
-		return "", err
+		return CallbackResult{}, err
 	}
+	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID}
 
 	if !strings.EqualFold(strings.TrimSpace(status), "success") {
 		// Honor the state for the redirect slug, but do not write an active row.
-		return claims.ToolkitSlug, ErrConnectNotSuccessful
+		return result, ErrConnectNotSuccessful
 	}
 	if strings.TrimSpace(connectedAccountID) == "" {
-		return claims.ToolkitSlug, errors.New("composio: callback missing connected_account_id")
+		return result, errors.New("composio: callback missing connected_account_id")
+	}
+
+	if result.Team() {
+		return result, s.completeTeamCallback(ctx, claims, connectedAccountID)
 	}
 
 	userID, err := util.ParseUUID(claims.UserID)
 	if err != nil {
-		return claims.ToolkitSlug, fmt.Errorf("composio: state has invalid user id: %w", err)
+		return result, fmt.Errorf("composio: state has invalid user id: %w", err)
 	}
 
 	// The auth_config_id was resolved at BeginConnect and signed into the state,
@@ -321,7 +330,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	// composio_user_id == multica user id invariant) and was created under the
 	// toolkit's auth config. Any mismatch fails closed with ErrAccountVerification.
 	if err := s.verifyAccountOwnership(ctx, connectedAccountID, claims.UserID, authConfigID); err != nil {
-		return claims.ToolkitSlug, err
+		return result, err
 	}
 
 	if _, err := s.store.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
@@ -332,9 +341,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 		// Invariant: composio_user_id == Multica user id.
 		ComposioUserID: claims.UserID,
 	}); err != nil {
-		return claims.ToolkitSlug, fmt.Errorf("composio: upsert connection: %w", err)
+		return result, fmt.Errorf("composio: upsert connection: %w", err)
 	}
-	return claims.ToolkitSlug, nil
+	return result, nil
 }
 
 // ListConnections returns the user's active connections.
@@ -459,14 +468,18 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 // the Composio tab. The older `/settings/integrations` path was NOT a real
 // route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
-func (s *Service) CallbackRedirect(slug string, success bool) string {
-	var path string
+func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
+	q := url.Values{}
+	q.Set("tab", "apps")
 	if success {
-		path = "/settings?tab=integrations&connected=" + url.QueryEscape(slug)
+		q.Set("connected", result.ToolkitSlug)
 	} else {
-		path = "/settings?tab=integrations&error=composio_connect_failed"
+		q.Set("error", "composio_connect_failed")
 	}
-	return s.frontendURL + path
+	if result.Team() {
+		q.Set("scope", "team")
+	}
+	return s.frontendURL + "/settings?" + q.Encode()
 }
 
 // rowToConnection maps a DB row to the API-facing Connection view.
@@ -530,7 +543,7 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 			seen[slug] = struct{}{}
 			// Filter out toolkits with no enabled auth config: the user has no
 			// working action for them, so they are omitted from the catalog.
-			if _, canConnect := connectable[slug]; !canConnect {
+			if _, canConnect := connectable[slug]; !canConnect && len(tk.ComposioManagedAuthSchemes) == 0 {
 				continue
 			}
 			category := ""

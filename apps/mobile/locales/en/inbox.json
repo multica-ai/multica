@@ -75,7 +75,10 @@
     "reacted_with": "Reacted with {{emoji}}",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
-    "run_limit_blocked": "Run blocked because the limit was reached"
+    "run_limit_blocked": "Run blocked because the limit was reached",
+    "app_action_requested": "Needs your confirmation",
+    "app_action_reminder": "Confirmation expiring soon",
+    "app_connect_requested": "Connect an app"
   },
   "body": {
     "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}.",
