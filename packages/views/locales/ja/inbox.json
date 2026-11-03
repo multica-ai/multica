@@ -3,6 +3,12 @@
     "title": "インボックス",
     "back": "インボックス"
   },
+  "sections": {
+    "action": "要対応",
+    "activity": "アクティビティ",
+    "action_empty": "対応が必要なものはありません",
+    "activity_empty": "最近のアクティビティはありません"
+  },
   "menu": {
     "mark_all_read": "すべて既読にする",
     "archive_all": "すべてアーカイブ",

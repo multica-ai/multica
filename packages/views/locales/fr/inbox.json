@@ -3,6 +3,12 @@
     "title": "Boîte de réception",
     "back": "Boîte de réception"
   },
+  "sections": {
+    "action": "À traiter",
+    "activity": "Activité",
+    "action_empty": "Rien ne requiert votre attention",
+    "activity_empty": "Aucune activité récente"
+  },
   "menu": {
     "mark_all_read": "Tout marquer comme lu",
     "archive_all": "Tout archiver",

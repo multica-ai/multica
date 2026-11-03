@@ -189,6 +189,7 @@ describe("SettingsPage header", () => {
     { search: "", label: "Profile" },
     { search: "tab=preferences", label: "Preferences" },
     { search: "tab=shortcuts", label: "Shortcuts" },
+    { search: "tab=notifications", label: "Inbox" },
     { search: "tab=members", label: "Members" },
     { search: "tab=channels", label: "Messaging" },
     { search: "tab=mcp", label: "MCP servers" },

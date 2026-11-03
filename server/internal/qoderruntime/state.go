@@ -35,14 +35,18 @@ type run struct {
 	SessionID          string           `json:"session_id,omitempty"`
 	Prompt             string           `json:"prompt,omitempty"`
 	Resources          []map[string]any `json:"resources,omitempty"`
-	Phase              string           `json:"phase"`
-	Cursor             string           `json:"cursor,omitempty"`
-	Seq                int              `json:"seq"`
-	Started            bool             `json:"started"`
-	Output             string           `json:"output,omitempty"`
-	Failure            string           `json:"failure,omitempty"`
-	Outcome            string           `json:"outcome,omitempty"`
-	QuickCreate        *quickCreate     `json:"quick_create,omitempty"`
+	// Files are issue attachments uploaded to Qoder Files; a session that
+	// lacks them cannot be continued. Images go into the task message.
+	Files       []map[string]any    `json:"files,omitempty"`
+	Images      []map[string]string `json:"images,omitempty"`
+	Phase       string              `json:"phase"`
+	Cursor      string              `json:"cursor,omitempty"`
+	Seq         int                 `json:"seq"`
+	Started     bool                `json:"started"`
+	Output      string              `json:"output,omitempty"`
+	Failure     string              `json:"failure,omitempty"`
+	Outcome     string              `json:"outcome,omitempty"`
+	QuickCreate *quickCreate        `json:"quick_create,omitempty"`
 }
 
 func save(path string, j *journal) error {

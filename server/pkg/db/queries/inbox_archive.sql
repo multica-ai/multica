@@ -2,7 +2,11 @@
 -- Select narrow group representatives before loading bodies or comment anchors.
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
-           i.id, i.issue_id, i.created_at, i.read,
+           i.id, i.issue_id, i.created_at,
+           -- Activity is never unread (inbox.Section); the caller passes
+           -- inbox.ActivityTypes and inbox.AgentActivityTypes.
+           (i.read OR COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg(activity_types)::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg(agent_activity_types)::text[])))) AS read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i
@@ -60,7 +64,11 @@ ORDER BY i.created_at DESC, i.id DESC;
 -- Select narrow group representatives before loading bodies or comment anchors.
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
-           i.id, i.issue_id, i.created_at, i.read,
+           i.id, i.issue_id, i.created_at,
+           -- Activity is never unread (inbox.Section); the caller passes
+           -- inbox.ActivityTypes and inbox.AgentActivityTypes.
+           (i.read OR COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg(activity_types)::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg(agent_activity_types)::text[])))) AS read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i

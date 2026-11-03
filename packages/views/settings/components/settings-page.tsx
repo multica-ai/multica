@@ -3,10 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock,
-  Bell,
   Blocks,
   CreditCard,
   FolderGit2,
+  Inbox,
   Keyboard,
   KeyRound,
   ListPlus,
@@ -142,7 +142,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry(
               "notifications",
               t(($) => $.page.tabs.notifications),
-              Bell,
+              Inbox,
               <NotificationsTab />,
             ),
             entry(

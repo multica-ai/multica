@@ -243,6 +243,7 @@
     "row_actions_aria": "聊天操作"
   },
   "header": {
+    "agent_settings": "智能体设置",
     "rename": "重命名会话",
     "delete": "删除会话",
     "archive": "归档会话",
