@@ -6767,7 +6767,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				return fmt.Errorf("load delegated failure exhaustion recipient preferences: %w", err)
 			}
 			actorType := pgtype.Text{String: "system", Valid: true}
-			section, routed := inbox.Route(prefs, "task_failed")
+			section, routed := inbox.Route(prefs, "task_failed", actorType)
 			if !routed {
 				return nil
 			}
@@ -6831,7 +6831,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"recipient_id":   util.UUIDToString(exhaustedInbox.RecipientID),
 				"type":           exhaustedInbox.Type,
 				"severity":       exhaustedInbox.Severity,
-				"section":        inbox.ItemSection(exhaustedInbox.Section, exhaustedInbox.Type),
+				"section":        inbox.ItemSection(exhaustedInbox.Section, exhaustedInbox.Type, exhaustedInbox.ActorType),
 				"issue_id":       util.UUIDToPtr(exhaustedInbox.IssueID),
 				"title":          exhaustedInbox.Title,
 				"body":           util.TextToPtr(exhaustedInbox.Body),
@@ -8378,7 +8378,7 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
-		"section":        inbox.ItemSection(item.Section, item.Type),
+		"section":        inbox.ItemSection(item.Section, item.Type, item.ActorType),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

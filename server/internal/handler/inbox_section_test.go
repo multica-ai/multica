@@ -90,12 +90,8 @@ func TestListInboxReturnsSection(t *testing.T) {
 	issueID := f.issue("Section field")
 	f.item(issueID, "mentioned", "member", "mention", false, "now() - interval '4 minutes'")
 	f.item(issueID, "status_changed", "agent", "agent status", false, "now() - interval '3 minutes'")
-	// Rows from before sections store none; a comment among them is action
-	// whoever wrote it, since the row does not record whom it @mentioned.
 	f.item(issueID, "new_comment", "agent", "agent comment", false, "now() - interval '2 minutes'")
 	f.item(issueID, "new_comment", "member", "member comment", false, "now() - interval '1 minute'")
-	// A comment routed to activity (it @mentioned someone else) keeps that.
-	f.routed(issueID, "new_comment", "member", "comment to others", "activity", "now() - interval '30 seconds'")
 
 	var items []InboxItemResponse
 	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
@@ -104,11 +100,10 @@ func TestListInboxReturnsSection(t *testing.T) {
 		JSON(&items)
 
 	want := map[string]string{
-		"mention":           "action",
-		"agent status":      "activity",
-		"agent comment":     "action",
-		"member comment":    "action",
-		"comment to others": "activity",
+		"mention":        "action",
+		"agent status":   "activity",
+		"agent comment":  "activity",
+		"member comment": "action",
 	}
 	if len(items) != len(want) {
 		t.Fatalf("items = %d, want %d: %+v", len(items), len(want), items)
@@ -125,15 +120,15 @@ func TestUnreadCountsIgnoreActivity(t *testing.T) {
 	// Only routine activity, all stored unread: nothing to count.
 	quietIssue := f.issue("Agent finished")
 	f.item(quietIssue, "status_changed", "agent", "quiet status", false, "now() - interval '3 minutes'")
-	f.routed(quietIssue, "new_comment", "agent", "quiet comment", "activity", "now() - interval '2 minutes'")
+	f.item(quietIssue, "new_comment", "agent", "quiet comment", false, "now() - interval '2 minutes'")
 	// An unread mention followed by newer activity: the activity must neither
 	// count nor decide the group's state.
 	mentionIssue := f.issue("Mentioned")
 	f.item(mentionIssue, "mentioned", "member", "mention", false, "now() - interval '3 minutes'")
 	f.item(mentionIssue, "status_changed", "agent", "later status", true, "now() - interval '1 minute'")
-	// A comment without a stored section is action, whoever wrote it.
-	commentIssue := f.issue("Agent comment")
-	f.item(commentIssue, "new_comment", "agent", "agent comment", false, "now() - interval '1 minute'")
+	// A person commenting without a mention still wants the recipient.
+	commentIssue := f.issue("Member comment")
+	f.item(commentIssue, "new_comment", "member", "member comment", false, "now() - interval '1 minute'")
 	// Read action rows never count.
 	readIssue := f.issue("Already handled")
 	f.item(readIssue, "issue_assigned", "member", "handled", true, "now() - interval '1 minute'")
@@ -150,7 +145,7 @@ func TestUnreadCountsIgnoreActivity(t *testing.T) {
 		}
 	}
 	if grouped != 2 {
-		t.Fatalf("unread summary = %d, want 2 (mention + agent comment): %+v", grouped, summary)
+		t.Fatalf("unread summary = %d, want 2 (mention + member comment): %+v", grouped, summary)
 	}
 
 	var raw struct {
@@ -193,7 +188,7 @@ func TestArchiveInboxItemScopesActivityToSection(t *testing.T) {
 	issueID := f.issue("Archive scope")
 	mentionID := f.item(issueID, "mentioned", "member", "mention", false, "now() - interval '3 minutes'")
 	activityID := f.item(issueID, "status_changed", "agent", "status", false, "now() - interval '2 minutes'")
-	f.routed(issueID, "new_comment", "agent", "agent comment", "activity", "now() - interval '1 minute'")
+	f.item(issueID, "new_comment", "agent", "agent comment", false, "now() - interval '1 minute'")
 
 	testutil.Call(t, inboxWorkspaceHandler(testHandler.ArchiveInboxItem),
 		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+activityID+"/archive", f.workspaceID), "id", activityID)).

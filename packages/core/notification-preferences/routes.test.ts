@@ -24,12 +24,12 @@ describe("resolveNotificationRoute", () => {
     expect(resolved({})).toEqual({
       assigned: "action",
       mentions: "action",
-      comments_without_mentions: "action",
+      member_comments: "action",
       agent_failures: "action",
       status_changes: "activity",
       assignee_changes: "activity",
       updates: "activity",
-      comments_mentioning_others: "activity",
+      agent_comments: "activity",
     });
     expect(notificationRoutesAreDefault({ status_changes: "all" })).toBe(true);
   });
@@ -47,12 +47,9 @@ describe("resolveNotificationRoute", () => {
   });
 
   it("keeps a muted legacy group muting both halves until the new key is set", () => {
-    const prefs: NotificationPreferences = {
-      comments: "muted",
-      comments_mentioning_others: "activity",
-    };
-    expect(resolveNotificationRoute(prefs, kind("comments_without_mentions"))).toBe("muted");
-    expect(resolveNotificationRoute(prefs, kind("comments_mentioning_others"))).toBe("activity");
+    const prefs: NotificationPreferences = { comments: "muted", agent_comments: "activity" };
+    expect(resolveNotificationRoute(prefs, kind("member_comments"))).toBe("muted");
+    expect(resolveNotificationRoute(prefs, kind("agent_comments"))).toBe("activity");
     expect(resolveNotificationRoute(prefs, kind("mentions"))).toBe("action");
     expect(resolveNotificationRoute({ assignments: "muted" }, kind("assignee_changes"))).toBe("muted");
   });
@@ -68,12 +65,12 @@ describe("withNotificationRoute", () => {
   it("retires a muted legacy group without unmuting the other kind it covered", () => {
     const next = withNotificationRoute(
       { comments: "muted", system_notifications: "muted" },
-      kind("comments_without_mentions"),
+      kind("member_comments"),
       "action",
     );
-    expect(next).toEqual({ comments_mentioning_others: "muted", system_notifications: "muted" });
-    expect(resolveNotificationRoute(next, kind("comments_without_mentions"))).toBe("action");
-    expect(resolveNotificationRoute(next, kind("comments_mentioning_others"))).toBe("muted");
+    expect(next).toEqual({ agent_comments: "muted", system_notifications: "muted" });
+    expect(resolveNotificationRoute(next, kind("member_comments"))).toBe("action");
+    expect(resolveNotificationRoute(next, kind("agent_comments"))).toBe("muted");
   });
 
   it("keeps a sibling's explicit choice when retiring the legacy group", () => {

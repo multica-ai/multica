@@ -662,21 +662,21 @@
       },
       "muted": {
         "label": "끄기",
-        "description": "인박스에 들어오지 않음. 태스크에서는 계속 표시"
+        "description": "인박스에 들어오지 않음. 이슈에서는 계속 표시"
       }
     },
     "kinds": {
       "assigned": {
         "label": "나에게 할당",
-        "description": "태스크가 나에게 할당될 때"
+        "description": "이슈가 나에게 할당될 때"
       },
       "mentions": {
         "label": "멘션",
         "description": "누군가 나를 @ 멘션할 때(@all, @squad 포함)"
       },
-      "comments_without_mentions": {
-        "label": "멘션 없는 댓글",
-        "description": "팔로우 중인 태스크에 아무도 @ 멘션하지 않은 댓글이 달릴 때"
+      "member_comments": {
+        "label": "멤버 댓글",
+        "description": "팔로우 중인 이슈에 멤버가 댓글을 달 때"
       },
       "agent_failures": {
         "label": "에이전트 오류",
@@ -684,19 +684,19 @@
       },
       "status_changes": {
         "label": "상태 변경",
-        "description": "팔로우 중인 태스크의 상태가 바뀔 때"
+        "description": "팔로우 중인 이슈의 상태가 바뀔 때"
       },
       "assignee_changes": {
         "label": "담당자 변경",
-        "description": "태스크 담당자가 바뀌거나 내 할당이 해제될 때"
+        "description": "이슈 담당자가 바뀌거나 내 할당이 해제될 때"
       },
       "updates": {
         "label": "우선순위와 날짜",
         "description": "우선순위, 시작일, 마감일이 바뀔 때"
       },
-      "comments_mentioning_others": {
-        "label": "다른 사람을 멘션한 댓글",
-        "description": "팔로우 중인 태스크의 댓글이 내가 아닌 다른 사람이나 에이전트를 @ 멘션할 때"
+      "agent_comments": {
+        "label": "에이전트 댓글",
+        "description": "팔로우 중인 이슈에 에이전트가 답할 때"
       }
     },
     "system": {

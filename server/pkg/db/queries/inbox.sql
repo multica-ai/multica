@@ -136,14 +136,15 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_
 -- is activity: clearing routine progress must not take an unread action item
 -- on the same issue (a mention, a failed run) with it. The activity predicate
 -- mirrors inbox.ItemSection: a stored section wins, otherwise the type rule
--- the caller passes as inbox.ActivityTypes.
+-- the caller passes as inbox.ActivityTypes and inbox.AgentActivityTypes.
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = sqlc.arg('workspace_id')
   AND i.recipient_type = sqlc.arg('recipient_type')
   AND i.recipient_id = sqlc.arg('recipient_id')
   AND i.issue_id = sqlc.arg('issue_id')
   AND i.archived = false
-  AND COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]));
+  AND COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])));
 
 -- name: MarkInboxReadByIssue :execrows
 -- Opening an issue anywhere (Work sidebar, search, a link) settles its inbox
@@ -182,7 +183,8 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
   AND i.recipient_id = sqlc.arg('recipient_id')
   AND i.read = false
   AND i.archived = false
-  AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]));
+  AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -208,7 +210,8 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg('recipient_id')
       AND i.archived = false
-      AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]))
+      AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -235,7 +238,8 @@ WITH active AS (
            COALESCE(i.issue_id, i.id) AS group_id,
            i.created_at,
            i.read,
-           COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])) AS is_activity
+           COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[]))) AS is_activity
     FROM inbox_item i
     WHERE i.workspace_id = sqlc.arg('workspace_id')
       AND i.recipient_type = 'member'

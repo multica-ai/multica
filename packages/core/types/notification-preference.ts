@@ -2,12 +2,12 @@
 export type NotificationRouteKey =
   | "assigned"
   | "mentions"
-  | "comments_without_mentions"
+  | "member_comments"
   | "agent_failures"
   | "status_changes"
   | "assignee_changes"
   | "updates"
-  | "comments_mentioning_others";
+  | "agent_comments";
 
 /** Where a routable kind lands: an Inbox section, or nowhere. */
 export type NotificationRoute = "action" | "activity" | "muted";

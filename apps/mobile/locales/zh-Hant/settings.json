@@ -97,9 +97,9 @@
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
-      "comments_without_mentions": {
-        "label": "未 @ 任何人的評論",
-        "description": "有人在你訂閱的任務裡評論，且沒有 @ 任何人時"
+      "member_comments": {
+        "label": "成員評論",
+        "description": "成員在你訂閱的任務裡發表評論時"
       },
       "agent_failures": {
         "label": "AI 代理出錯",
@@ -117,9 +117,9 @@
         "label": "優先順序與日期",
         "description": "優先順序、開始日期或截止日期變化時"
       },
-      "comments_mentioning_others": {
-        "label": "@ 了其他人的評論",
-        "description": "你訂閱的任務裡的評論 @ 了其他成員或 AI 代理、但沒有 @ 你時"
+      "agent_comments": {
+        "label": "AI 代理評論",
+        "description": "AI 代理在你訂閱的任務裡回覆時"
       }
     }
   }

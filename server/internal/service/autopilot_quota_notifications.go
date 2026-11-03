@@ -189,7 +189,7 @@ func (s *AutopilotService) publishAutopilotQuotaInboxItems(items []db.InboxItem)
 			Payload: map[string]any{"item": map[string]any{
 				"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
 				"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-				"type": item.Type, "severity": item.Severity, "section": inbox.ItemSection(item.Section, item.Type), "issue_id": nil,
+				"type": item.Type, "severity": item.Severity, "section": inbox.ItemSection(item.Section, item.Type, item.ActorType), "issue_id": nil,
 				"issue_status": nil, "issue_priority": nil,
 				"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read,
 				"archived": item.Archived, "created_at": util.TimestampToString(item.CreatedAt),

@@ -1,32 +1,42 @@
 package inbox
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 func TestDefaultSection(t *testing.T) {
+	agent := pgtype.Text{String: "agent", Valid: true}
+	member := pgtype.Text{String: "member", Valid: true}
+	none := pgtype.Text{}
+
 	cases := []struct {
 		notifType string
+		actor     pgtype.Text
 		want      string
 	}{
-		{"issue_assigned", SectionAction},
-		{"mentioned", SectionAction},
-		{"task_failed", SectionAction},
-		{"children_done", SectionAction},
-		{"quick_create_failed", SectionAction},
-		{"autopilot_paused", SectionAction},
-		// A row without a stored section does not record who the comment
-		// @mentioned, so it stays action whoever wrote it.
-		{"new_comment", SectionAction},
-		{"status_changed", SectionActivity},
-		{"priority_changed", SectionActivity},
-		{"assignee_changed", SectionActivity},
-		{"reaction_added", SectionActivity},
-		{"quick_create_done", SectionActivity},
-		{"task_completed", SectionActivity},
-		{"some_future_type", SectionAction},
+		{"issue_assigned", member, SectionAction},
+		{"mentioned", agent, SectionAction},
+		{"task_failed", none, SectionAction},
+		{"children_done", none, SectionAction},
+		{"quick_create_failed", agent, SectionAction},
+		{"autopilot_paused", none, SectionAction},
+		{"new_comment", member, SectionAction},
+		{"new_comment", none, SectionAction},
+		{"new_comment", agent, SectionActivity},
+		{"status_changed", agent, SectionActivity},
+		{"status_changed", member, SectionActivity},
+		{"priority_changed", member, SectionActivity},
+		{"assignee_changed", agent, SectionActivity},
+		{"reaction_added", member, SectionActivity},
+		{"quick_create_done", agent, SectionActivity},
+		{"task_completed", agent, SectionActivity},
+		{"some_future_type", agent, SectionAction},
 	}
 	for _, c := range cases {
-		if got := DefaultSection(c.notifType); got != c.want {
-			t.Errorf("DefaultSection(%q) = %q, want %q", c.notifType, got, c.want)
+		if got := DefaultSection(c.notifType, c.actor); got != c.want {
+			t.Errorf("DefaultSection(%q, %q) = %q, want %q", c.notifType, c.actor.String, got, c.want)
 		}
 	}
 }
