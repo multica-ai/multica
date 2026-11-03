@@ -866,7 +866,7 @@ func (w *LocalWorktree) commitAll(logger *slog.Logger) (bool, error) {
 // saved aside while the branch is recorded as carrying them; committing
 // everything, as before, is the side that cannot lose them.
 func (w *LocalWorktree) agentCommitted(head string) bool {
-	if w.snapshotPending || w.BaseCommit == "" || head == "" || head == w.BaseCommit {
+	if w.CommitsAllLeftovers() || w.BaseCommit == "" || head == "" || head == w.BaseCommit {
 		return false
 	}
 	// --is-ancestor exits 1 for "no" and something else when git cannot
@@ -874,6 +874,16 @@ func (w *LocalWorktree) agentCommitted(head string) bool {
 	_, err := runGit(w.Path, "merge-base", "--is-ancestor", head, w.BaseCommit)
 	var exitErr *exec.ExitError
 	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+// CommitsAllLeftovers reports that this turn is the exception to the #9788
+// rule: Finalize will commit everything it leaves uncommitted onto the branch
+// even after the agent's own commits, because the turn started on an
+// unresolved merge of the user's edits (see agentCommitted). Exported so the
+// prompt can tell the agent; a turn that is not told would leave generated
+// output behind expecting it to stay off the branch.
+func (w *LocalWorktree) CommitsAllLeftovers() bool {
+	return w != nil && w.snapshotPending
 }
 
 // leftoversStayOffBranch reports whether Finalize should save what the agent
@@ -1894,6 +1904,13 @@ type DeliveryProblem struct {
 	// Tip's tree on the branch and leaves the uncommitted changes where they
 	// are, for Finalize to save aside like any other turn's leftovers.
 	CommittedOnly bool
+	// IndexTree is the agent's index as a tree, captured when CommittedOnly
+	// is set. The repair has to load Tip's tree into the index to commit it,
+	// and that discards what the agent had staged; the last step loads this
+	// tree back. Without it a staged file the repository ignores (`git add
+	// -f`) would turn back into an ignored untracked file, and Finalize, which
+	// saves what `git add -A` would stage, would not see it at all.
+	IndexTree string
 }
 
 // RepairCommitMessage is the commit message RepairSteps uses for the one
@@ -1910,10 +1927,12 @@ const RepairCommitMessage = "chore(agent): put this turn's work back on its task
 // The tree to deliver follows the rule Finalize applies to the same turn. An
 // agent that made no commit delivers everything it left, so the sequence
 // stages it all (`add -A`). One that did delivers its commits, so the sequence
-// loads Tip's tree into the index (`read-tree`, which leaves the files alone)
-// and the uncommitted changes stay uncommitted. --allow-empty there covers a
-// turn whose commits add up to nothing: the sequence must still end on the
-// branch rather than fail halfway through.
+// loads Tip's tree into the index (`read-tree`, which leaves the files alone),
+// commits it, and then loads IndexTree back, so the index is what the agent
+// left and the uncommitted changes — staged ones included — are still there
+// for Finalize to save aside. --allow-empty there covers a turn whose commits
+// add up to nothing: the sequence must still end on the branch rather than
+// fail halfway through.
 //
 // Each step is a git argv (without the leading "git"). Rendered into the
 // repair prompt and executed verbatim by the tests, so the instruction the
@@ -1925,6 +1944,7 @@ func (p *DeliveryProblem) RepairSteps() [][]string {
 			{"symbolic-ref", "HEAD", "refs/heads/" + p.Branch},
 			{"reset", "--soft", p.BaseCommit},
 			{"commit", "--allow-empty", "-m", RepairCommitMessage},
+			{"read-tree", p.IndexTree},
 		}
 	}
 	return [][]string{
@@ -1935,10 +1955,11 @@ func (p *DeliveryProblem) RepairSteps() [][]string {
 	}
 }
 
-// CheckDelivery reports, without changing anything, whether Finalize would
-// refuse to record this turn's delivery because of where the run left its
-// history — and returns nil whenever it would not, or when it would refuse for
-// a reason a repair turn should not be asked to undo.
+// CheckDelivery reports, without changing the worktree, its index or any ref,
+// whether Finalize would refuse to record this turn's delivery because of where
+// the run left its history — and returns nil whenever it would not, or when it
+// would refuse for a reason a repair turn should not be asked to undo. (It
+// does write tree objects: the ones its checks compare.)
 //
 // It predicts the same verifyDeliveryPoint call Finalize makes, including what
 // Finalize does with uncommitted changes first. When the agent made no commit
@@ -2000,9 +2021,38 @@ func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 		if w.repairWouldRevertBase(tip, committedOnly) {
 			return nil
 		}
-		return &DeliveryProblem{Branch: w.Branch, BaseCommit: w.BaseCommit, Tip: tip, Reason: verifyErr.Error(), CommittedOnly: committedOnly}
+		problem := &DeliveryProblem{Branch: w.Branch, BaseCommit: w.BaseCommit, Tip: tip, Reason: verifyErr.Error(), CommittedOnly: committedOnly}
+		if committedOnly {
+			// No index to give back means no repair that keeps the agent's
+			// staged files: offer none, and Finalize keeps the whole worktree.
+			indexTree, err := worktreeIndexTree(w.Path)
+			if err != nil {
+				return nil
+			}
+			problem.IndexTree = indexTree
+		}
+		return problem
 	}
 	return nil
+}
+
+// worktreeIndexTree writes dir's index out as a tree, from a private copy so
+// the agent's index file is not touched, and returns the tree. Like
+// stagedWorktreeTree it adds tree objects to the repository, nothing else.
+// Intent-to-add entries are left out, as `git write-tree` always does; they
+// are untracked files again after a read-tree of the result, which `git add
+// -A` still picks up.
+func worktreeIndexTree(dir string) (string, error) {
+	tmp, err := os.MkdirTemp("", "multica-repair-index-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	index := filepath.Join(tmp, "index")
+	if !seedSnapshotIndex(dir, index) {
+		return "", errors.New("execenv: cannot copy the worktree index")
+	}
+	return runGitTrimmedEnv(dir, []string{"GIT_INDEX_FILE=" + index}, "write-tree")
 }
 
 // repairWouldRevertBase reports whether re-committing the worktree's current

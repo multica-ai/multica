@@ -236,11 +236,18 @@ func TestFinalizeCommitsEverythingOnATurnThatStartedMidMerge(t *testing.T) {
 	if len(second.ReplayConflicts) != 1 {
 		t.Fatalf("expected a replay conflict, got %v", second.ReplayConflicts)
 	}
-	// The agent resolves and commits only the conflicted file.
+	// The prompt states the exception from this same predicate.
+	if first.CommitsAllLeftovers() || !second.CommitsAllLeftovers() {
+		t.Fatalf("CommitsAllLeftovers: first turn %v, mid-merge turn %v; want false, true",
+			first.CommitsAllLeftovers(), second.CommitsAllLeftovers())
+	}
+	// The agent resolves and commits only the conflicted file, then leaves
+	// generated output behind.
 	writeFile(t, filepath.Join(second.WorkDir, "tracked.txt"), "agent B and user C\n")
 	gitRun(t, second.Path, "add", "tracked.txt")
 	gitRun(t, second.Path, "reset", "-q", "--", "notes.txt")
 	gitRun(t, second.Path, "commit", "-m", "resolve")
+	writeFile(t, filepath.Join(second.WorkDir, "generated.bin"), "scratch output\n")
 
 	outcome := finalizeOK(t, second)
 	if outcome.LeftoverRef != "" || !outcome.AutoCommitted {
@@ -248,6 +255,10 @@ func TestFinalizeCommitsEverythingOnATurnThatStartedMidMerge(t *testing.T) {
 	}
 	if got := gitRun(t, repo, "show", second.Branch+":notes.txt"); got != "user's other edit" {
 		t.Errorf("notes.txt on the branch = %q, want the user's replayed edit", got)
+	}
+	// This is the behaviour the prompt has to warn about.
+	if got := gitRun(t, repo, "show", second.Branch+":generated.bin"); got != "scratch output" {
+		t.Errorf("generated.bin on the branch = %q, want it committed under the exception", got)
 	}
 }
 

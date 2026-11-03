@@ -44,6 +44,23 @@ func TestWorktreeBranchBlock(t *testing.T) {
 			t.Errorf("prompt missing %q:\n%s", want, out)
 		}
 	}
+
+	// #9870 review: a turn that started mid-merge commits everything it leaves
+	// even after the agent's own commits, so it must not be promised the
+	// usual rule.
+	pending := BuildPrompt(task, "claude", WithWorktreeBranch("agent/j/mul-9404", "abc123def"), WithWorktreeCommitsAllLeftovers())
+	for _, want := range []string{
+		"## Your task branch",
+		"everything you leave that is not gitignored is committed onto the branch for you — even if you have made commits of your own",
+		"Delete scratch files and generated output you do not want delivered",
+	} {
+		if !strings.Contains(pending, want) {
+			t.Errorf("mid-merge prompt missing %q:\n%s", want, pending)
+		}
+	}
+	if strings.Contains(pending, "If you commit, only your commits are delivered") {
+		t.Errorf("mid-merge prompt promises the rule Finalize does not apply to it:\n%s", pending)
+	}
 }
 
 // The repair prompt renders exactly execenv's RepairSteps (which the execenv
@@ -58,16 +75,20 @@ func TestBuildWorktreeDeliveryRepairPrompt(t *testing.T) {
 		want          []string
 	}{
 		{name: "no commits of its own", want: []string{"keeps every file exactly as it is now", "git add -A"}},
-		{name: "committed this turn", committedOnly: true, want: []string{"exactly what your commits contain", "saved aside rather than delivered", "git read-tree fff000"}},
+		{name: "committed this turn", committedOnly: true, want: []string{"exactly what your commits contain", "puts back what you had staged", "saved aside rather than delivered", "git read-tree fff000", "git read-tree 4b825dc"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			checkWorktreeDeliveryRepairPrompt(t, &execenv.DeliveryProblem{
+			problem := &execenv.DeliveryProblem{
 				Branch:        "agent/j/mul-9404",
 				BaseCommit:    "abc123def",
 				Tip:           "fff000",
 				Reason:        "the delivered commit fff000 no longer contains abc123de, the commit this turn started from",
 				CommittedOnly: tc.committedOnly,
-			}, tc.want)
+			}
+			if tc.committedOnly {
+				problem.IndexTree = "4b825dc"
+			}
+			checkWorktreeDeliveryRepairPrompt(t, problem, tc.want)
 		})
 	}
 }

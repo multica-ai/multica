@@ -139,6 +139,53 @@ func TestCheckDeliveryRepairOfASquashKeepsLeftoversOffTheBranch(t *testing.T) {
 	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{"artifacts/render.bin": "generated"})
 }
 
+// #9870 review: the committed-only repair loads Tip's tree into the index to
+// commit it, which used to discard what the agent had staged. A file staged
+// past the repository's ignore rules (`git add -f`) then became an ignored
+// untracked file again, Finalize found the worktree clean, and the file was
+// deleted with it. The repair's last step now puts the agent's index back, so
+// the staged files — ignored or not — are saved aside exactly as a turn
+// without the repair would save them.
+func TestCheckDeliveryRepairKeepsWhatTheAgentStaged(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, ".gitignore"), "fixtures/*.bin\n")
+	gitRun(t, repo, "add", ".gitignore")
+	gitRun(t, repo, "commit", "-m", "ignore generated fixtures")
+	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
+
+	gitRun(t, wt.Path, "checkout", "--quiet", "-b", "feature/x")
+	writeFile(t, filepath.Join(wt.WorkDir, "doc.md"), "delivered documentation\n")
+	gitRun(t, wt.Path, "add", "doc.md")
+	gitRun(t, wt.Path, "commit", "-m", "docs")
+	writeFile(t, filepath.Join(wt.WorkDir, "fixtures", "sample.bin"), "staged past the ignore rule\n")
+	gitRun(t, wt.Path, "add", "-f", "fixtures/sample.bin")
+	writeFile(t, filepath.Join(wt.WorkDir, "notes.txt"), "staged, not ignored\n")
+	gitRun(t, wt.Path, "add", "notes.txt")
+	staged := gitRun(t, wt.Path, "diff", "--cached", "--name-only")
+
+	problem := wt.CheckDelivery()
+	if problem == nil || !problem.CommittedOnly || problem.IndexTree == "" {
+		t.Fatalf("CheckDelivery = %+v, want a committed-only repair carrying the agent's index", problem)
+	}
+	applyRepairSteps(t, wt, problem)
+	if got := gitRun(t, wt.Path, "diff", "--cached", "--name-only"); got != staged {
+		t.Fatalf("staged files after the repair = %q, want what the agent had staged: %q", got, staged)
+	}
+	if again := wt.CheckDelivery(); again != nil {
+		t.Fatalf("the repair steps did not fix the delivery: %s", again.Reason)
+	}
+
+	outcome := finalizeOK(t, wt)
+	if files := gitRun(t, repo, "diff", "--name-only", wt.BaseCommit, wt.Branch); files != "doc.md" {
+		t.Errorf("the branch gained %q, want just the committed doc.md", files)
+	}
+	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{
+		"fixtures/sample.bin": "staged past the ignore rule",
+		"notes.txt":           "staged, not ignored",
+	})
+}
+
 // Uncommitted changes on a detached HEAD would be auto-committed onto the
 // detached line, not the branch — the same refusal, predicted before it happens.
 func TestCheckDeliveryRepairsUncommittedWorkOnADetachedHead(t *testing.T) {
