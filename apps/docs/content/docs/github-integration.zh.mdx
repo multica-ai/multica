@@ -163,7 +163,7 @@ Repository permissions：
 | Metadata | Read-only |
 | Contents | Read & write；用于合并 PR、更新 PR 分支和删除已合并的分支 |
 | Pull requests | Read & write；用于合并、关闭、批准和请求评审 |
-| Actions | Read & write；用于重跑失败的 check |
+| Actions | Read & write；用于重跑失败的 check，以及读取工作流运行记录以汇总 CI 状态 |
 | Checks | Read-only；用于显示 CI 状态 |
 | Commit statuses | Read-only；用于汇总 legacy status 形式的 CI |
 
@@ -172,7 +172,7 @@ Repository permissions：
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用于触发 CI 与可合并性刷新。
 
-PR 快照只读取数据，通过 Pull requests、Checks 和 Commit statuses 的 API 获取。写权限只会在成员从 Multica 操作 PR 时，配合该成员自己的 GitHub 授权使用。
+PR 快照通过 Pull requests、Checks 和 Commit statuses 的 API 读取数据；installation 具备 Actions 的 Read-only 或更高权限时，还会读取该提交的工作流运行记录。快照不需要 Contents 权限。未授予 Actions 权限时，即使同一工作流的新运行已通过，被取消的旧运行仍按失败计算。写权限只会在成员从 Multica 操作 PR 时，配合该成员自己的 GitHub 授权使用。
 
 创建 App 后，在设置页的 **Client secrets → Generate a new client secret** 生成一个 client secret，并与上方显示的 **Client ID** 一起保存。
 

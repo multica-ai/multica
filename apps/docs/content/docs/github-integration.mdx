@@ -163,7 +163,7 @@ Repository permissions:
 | Metadata | Read-only |
 | Contents | Read & write; used to merge PRs, update PR branches, and delete merged branches |
 | Pull requests | Read & write; used to merge, close, approve, and request reviews |
-| Actions | Read & write; used to rerun failed checks |
+| Actions | Read & write; used to rerun failed checks and read workflow runs for CI status |
 | Checks | Read-only; used to show CI status |
 | Commit statuses | Read-only; used to aggregate legacy-status CI |
 
@@ -172,7 +172,7 @@ Subscribe to these events:
 - **Pull request**;
 - **Check suite**, **Check run**, and **Status**, which trigger CI and mergeability refreshes.
 
-PR snapshots only read, through the Pull requests, Checks, and Commit statuses APIs. The write permissions are only ever used with a member's own GitHub authorization, when that member acts on a PR from Multica.
+PR snapshots read through the Pull requests, Checks, and Commit statuses APIs, and also read the commit's workflow runs when the installation has at least Actions read permission. Snapshots do not require Contents access. Without Actions access, a cancelled run still counts as failed even after a newer run of the same workflow passes. The write permissions are only ever used with a member's own GitHub authorization, when that member acts on a PR from Multica.
 
 After creating the App, open **Client secrets → Generate a new client secret** on its settings page and keep the secret together with the **Client ID** shown above it.
 

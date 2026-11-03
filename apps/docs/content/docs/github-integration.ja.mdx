@@ -161,7 +161,7 @@ Repository permissions:
 | Metadata | Read-only |
 | Contents | Read & write。PR のマージ、PR ブランチの更新、マージ済みブランチの削除に使用 |
 | Pull requests | Read & write。マージ、クローズ、承認、レビュー依頼に使用 |
-| Actions | Read & write。失敗した check の再実行に使用 |
+| Actions | Read & write。失敗した check の再実行と、CI 状態を集計するためのワークフロー実行の読み取りに使用 |
 | Checks | Read-only。CI の状態表示に使用 |
 | Commit statuses | Read-only。legacy status 形式の CI 集計に使用 |
 
@@ -170,7 +170,7 @@ Repository permissions:
 - **Pull request**
 - **Check suite**、**Check run**、**Status**。CI とマージ可能性を更新するために使用します。
 
-PR スナップショットは Pull requests、Checks、Commit statuses の API から読み取るだけです。書き込み権限は、メンバーが Multica から PR を操作するときに、そのメンバー自身の GitHub 認可でのみ使われます。
+PR スナップショットは Pull requests、Checks、Commit statuses の API から読み取り、installation に Actions の読み取り以上の権限がある場合は、そのコミットのワークフロー実行も読み取ります。スナップショットに Contents 権限は不要です。Actions 権限を付与しない場合、同じワークフローの新しい実行が成功しても、キャンセルされた古い実行は失敗として数えられます。書き込み権限は、メンバーが Multica から PR を操作するときに、そのメンバー自身の GitHub 認可でのみ使われます。
 
 App を作成したら、設定ページの **Client secrets → Generate a new client secret** で client secret を生成し、その上に表示される **Client ID** と一緒に保管します。
 

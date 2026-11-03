@@ -161,7 +161,7 @@ Repository permissions:
 | Metadata | Read-only |
 | Contents | Read & write. PR merge, PR 브랜치 업데이트, merge된 브랜치 삭제에 사용 |
 | Pull requests | Read & write. merge, 닫기, 승인, 리뷰 요청에 사용 |
-| Actions | Read & write. 실패한 check 재실행에 사용 |
+| Actions | Read & write. 실패한 check 재실행과 CI 상태 집계를 위한 워크플로 실행 읽기에 사용 |
 | Checks | Read-only. CI 상태 표시에 사용 |
 | Commit statuses | Read-only. legacy status 형식의 CI 집계에 사용 |
 
@@ -170,7 +170,7 @@ Repository permissions:
 - **Pull request**
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
-PR snapshot은 Pull requests, Checks 및 Commit statuses API로 읽기만 합니다. 쓰기 권한은 멤버가 Multica에서 PR을 다룰 때 그 멤버 본인의 GitHub 승인으로만 사용됩니다.
+PR snapshot은 Pull requests, Checks 및 Commit statuses API로 읽으며, installation에 Actions 읽기 이상의 권한이 있으면 해당 커밋의 워크플로 실행도 읽습니다. snapshot에는 Contents 권한이 필요하지 않습니다. Actions 권한을 부여하지 않으면 같은 워크플로의 새 실행이 통과해도 취소된 이전 실행은 실패로 계산됩니다. 쓰기 권한은 멤버가 Multica에서 PR을 다룰 때 그 멤버 본인의 GitHub 승인으로만 사용됩니다.
 
 App을 만든 뒤 설정 페이지의 **Client secrets → Generate a new client secret**에서 client secret을 생성하고, 그 위에 표시된 **Client ID**와 함께 보관합니다.
 

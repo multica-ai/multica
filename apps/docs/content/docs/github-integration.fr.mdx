@@ -163,7 +163,7 @@ Permissions de dépôt (Repository permissions) :
 | Metadata | Read-only |
 | Contents | Read & write ; sert à fusionner les PR, mettre à jour leur branche et supprimer les branches fusionnées |
 | Pull requests | Read & write ; sert à fusionner, fermer, approuver et demander des revues |
-| Actions | Read & write ; sert à relancer les vérifications en échec |
+| Actions | Read & write ; sert à relancer les vérifications en échec et à lire les exécutions de workflow pour le statut CI |
 | Checks | Read-only ; sert à afficher le statut CI |
 | Commit statuses | Read-only ; sert à agréger la CI basée sur les statuts hérités (legacy statuses) |
 
@@ -172,7 +172,7 @@ Abonnez-vous à ces événements :
 - **Pull request** ;
 - **Check suite**, **Check run** et **Status**, qui déclenchent l'actualisation de la CI et de la possibilité de fusion.
 
-Les instantanés de PR ne font que lire, via les API Pull requests, Checks et Commit statuses. Les permissions d'écriture ne servent qu'avec l'autorisation GitHub d'un membre, lorsque ce membre agit sur une PR depuis Multica.
+Les instantanés de PR lisent les API Pull requests, Checks et Commit statuses, ainsi que les exécutions de workflow du commit lorsque l'installation dispose au moins de la permission Actions en lecture. Les instantanés ne nécessitent pas la permission Contents. Sans la permission Actions, une exécution annulée compte toujours comme un échec, même après la réussite d'une exécution plus récente du même workflow. Les permissions d'écriture ne servent qu'avec l'autorisation GitHub d'un membre, lorsque ce membre agit sur une PR depuis Multica.
 
 Une fois l'App créée, ouvrez **Client secrets → Generate a new client secret** sur sa page de paramètres et conservez ce secret avec le **Client ID** affiché au-dessus.
 
