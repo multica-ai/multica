@@ -3,6 +3,12 @@
     "title": "인박스",
     "back": "인박스"
   },
+  "sections": {
+    "action": "처리 필요",
+    "activity": "활동",
+    "action_empty": "처리할 항목이 없습니다",
+    "activity_empty": "최근 활동이 없습니다"
+  },
   "menu": {
     "mark_all_read": "모두 읽음으로 표시",
     "archive_all": "모두 보관",

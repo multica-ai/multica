@@ -11,6 +11,7 @@ export {
   CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
+  CollectionSearch,
   type CollectionScopeOption,
 } from "./collection-page";
 export {

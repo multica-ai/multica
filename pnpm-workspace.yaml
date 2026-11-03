@@ -37,7 +37,6 @@ catalog:
   tailwindcss: ^4
   # Keep the compiler API for ESLint, Next.js, and repository scripts; tsc uses @typescript/native.
   typescript: npm:@typescript/typescript6@6.0.2
-  unicode-animations: ^1.0.3
   vitest: ^4.1.0
   yaml: ^2.6.0
   zod: ^4.1.5

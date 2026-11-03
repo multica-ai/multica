@@ -106,6 +106,13 @@ GitHub integration links the pull request back to the issue.
   a fresh session starts with the current issue and triggering/coalesced comment
   context, or with the current chat message. Do not send additional messages
   directly to a bridge-owned session while its run is active.
+- Issue attachments: text files (Qoder Files' accepted types, up to 5 MB) are
+  uploaded through Qoder Files and mounted under `/data/attachments/`, which
+  always starts a fresh session. PNG, JPEG, WebP and GIF images (at most 8000 px
+  per side, about 4.5 MB in total per run so Qoder's echo of the message stays
+  readable) are sent as base64 image blocks in the task message;
+  use a Qoder Agent model with image input. Other files are listed in the prompt
+  as unavailable. Uploaded Qoder files are not deleted by the bridge.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without
@@ -138,7 +145,7 @@ GitHub integration links the pull request back to the issue.
 ## Current boundaries
 
 This is a PoC for issue runs and chat turns. Squad coordination, local
-directories, attachments (on issues and chat messages), arbitrary Git hosts,
+directories, chat message attachments, binary non-image issue attachments, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 file transfer and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`

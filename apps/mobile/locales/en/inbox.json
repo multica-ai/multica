@@ -4,6 +4,12 @@
     "title": "You're all caught up",
     "body": "Notifications and agent updates appear here."
   },
+  "sections": {
+    "action": "Needs action",
+    "activity": "Activity",
+    "activity_empty": "No recent activity",
+    "activity_empty_body": "Status changes and agent replies on your issues appear here."
+  },
   "actions": {
     "mark_read": "Mark read",
     "mark_unread": "Mark unread",
