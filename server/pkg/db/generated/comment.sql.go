@@ -1522,16 +1522,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
 `
 
@@ -1542,25 +1556,27 @@ type ListRootCommentsForIssueParams struct {
 }
 
 type ListRootCommentsForIssueRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	Revision       int64              `json:"revision"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
-	ReplyCount     int32              `json:"reply_count"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AuthorType        string             `json:"author_type"`
+	AuthorID          pgtype.UUID        `json:"author_id"`
+	Content           string             `json:"content"`
+	Type              string             `json:"type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ParentID          pgtype.UUID        `json:"parent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
+	Revision          int64              `json:"revision"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReplyCount        int32              `json:"reply_count"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	ResolutionID      pgtype.UUID        `json:"resolution_id"`
+	ResolutionContent pgtype.Text        `json:"resolution_content"`
 }
 
 // Top-level comments only, in issue chronological order, each annotated with
@@ -1604,6 +1620,8 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 			&i.DeletedAt,
 			&i.ReplyCount,
 			&i.LastActivityAt,
+			&i.ResolutionID,
+			&i.ResolutionContent,
 		); err != nil {
 			return nil, err
 		}
@@ -1642,16 +1660,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
 `
 
@@ -1663,25 +1695,27 @@ type ListRootCommentsSinceForIssueParams struct {
 }
 
 type ListRootCommentsSinceForIssueRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	Revision       int64              `json:"revision"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
-	ReplyCount     int32              `json:"reply_count"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AuthorType        string             `json:"author_type"`
+	AuthorID          pgtype.UUID        `json:"author_id"`
+	Content           string             `json:"content"`
+	Type              string             `json:"type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ParentID          pgtype.UUID        `json:"parent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
+	Revision          int64              `json:"revision"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReplyCount        int32              `json:"reply_count"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	ResolutionID      pgtype.UUID        `json:"resolution_id"`
+	ResolutionContent pgtype.Text        `json:"resolution_content"`
 }
 
 // Top-level comments created strictly after @since, each annotated with the
@@ -1725,6 +1759,8 @@ func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRoo
 			&i.DeletedAt,
 			&i.ReplyCount,
 			&i.LastActivityAt,
+			&i.ResolutionID,
+			&i.ResolutionContent,
 		); err != nil {
 			return nil, err
 		}

@@ -43,6 +43,7 @@ import { useLocale, useT } from "../../i18n";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -498,23 +499,24 @@ export function WorkspaceWakeups() {
     body = <CollectionPageState icon={Clock3} title={t(($) => $.wakeups.loading)} />;
   } else if (!rows.length) {
     const hasAny = (page?.counts.all ?? 0) > 0;
-    body = (
-      <CollectionPageState
-        icon={Bell}
-        title={t(($) => (hasAny || filtered ? $.wakeups.empty_filtered : $.wakeups.empty))}
-        actions={
-          filtered && hasAny ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => change({ scope: "all", kind: "all", source: "", agent_id: "" })}
-            >
-              {t(($) => $.wakeups.clear_filters)}
-            </Button>
-          ) : undefined
-        }
-      />
-    );
+    body =
+      hasAny || filtered ? (
+        <CollectionNoMatches
+          title={t(($) => $.wakeups.empty_filtered)}
+          onReset={
+            hasAny
+              ? () => change({ scope: "all", kind: "all", source: "", agent_id: "" })
+              : undefined
+          }
+          hasFilters={filtered}
+        />
+      ) : (
+        <CollectionPageState
+          icon={AlarmClock}
+          title={t(($) => $.wakeups.empty)}
+          description={t(($) => $.wakeups.empty_description)}
+        />
+      );
   } else {
     body = (
       <CollectionList

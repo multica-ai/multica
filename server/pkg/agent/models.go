@@ -341,6 +341,18 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
+	case "zcode":
+		// ZCode has no model-catalog command or RPC — the catalog lives only
+		// inside a running session's snapshot (settings.model.available,
+		// assembled from the logged-in account's provider registry). Discovery
+		// spawns a throwaway app-server, creates a deferred draft session and
+		// reads the snapshot (discoverZcodeModels, modelled on
+		// discoverTraecliModels); any failure degrades to the empty catalog so
+		// the UI keeps manual entry in the composite `providerId/modelId`
+		// format (see splitZcodeModelSelection).
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverZcodeModels(ctx, runtimeCmd)
+		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -442,6 +454,11 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
+//
+// zcode deliberately stays out of the false list: it supports model selection
+// end-to-end, but its selection string is the composite `providerId/modelId`
+// (the runtime's own picker format, model-selection.ts), split by the backend
+// in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
 	case "qwenpaw", "mcode", "zeroclaw":
@@ -2026,9 +2043,12 @@ type acpDiscoveryProvider struct {
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
 	// selectAuthMethod inspects the initialize response and child environment
-	// after initialize succeeds. A non-nil selector must return one advertised
-	// method id; its error aborts discovery before any session operation.
+	// after initialize succeeds. An empty method id skips authentication; an
+	// error aborts discovery before any session operation.
 	selectAuthMethod func(json.RawMessage, []string) (string, error)
+	// parseModels overrides the shared catalog parser for providers whose
+	// execution contract gives a different session field precedence.
+	parseModels func(json.RawMessage) ([]Model, error)
 	// strictErrors surfaces stage-specific handshake errors to the caller.
 	// Legacy discovery providers keep their empty-list behavior; Grok enables
 	// this so it can log the actual fallback reason.
@@ -2223,11 +2243,13 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 		if err != nil {
 			return fail("auth method selection", err)
 		}
-		if _, err := requestACP("authenticate", map[string]any{
-			"methodId": methodID,
-			"_meta":    map[string]any{"headless": true},
-		}); err != nil {
-			return fail(fmt.Sprintf("authenticate (%s)", methodID), err)
+		if methodID != "" {
+			if _, err := requestACP("authenticate", map[string]any{
+				"methodId": methodID,
+				"_meta":    map[string]any{"headless": true},
+			}); err != nil {
+				return fail(fmt.Sprintf("authenticate (%s)", methodID), err)
+			}
 		}
 	}
 
@@ -2238,7 +2260,15 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	if err != nil {
 		return fail("session/new", err)
 	}
-	models := parseACPSessionNewModels(sessionResult)
+	var models []Model
+	if p.parseModels != nil {
+		models, err = p.parseModels(sessionResult)
+		if err != nil {
+			return fail("session/new model parsing", err)
+		}
+	} else {
+		models = parseACPSessionNewModels(sessionResult)
+	}
 	if len(models) == 0 {
 		// session/new succeeded but carried no catalog we recognise. This
 		// is what upstream schema drift looks like from here (MUL-5239:

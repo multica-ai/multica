@@ -98,7 +98,7 @@ export interface CollectionListProps<T> {
   sort?: CollectionSort;
   selection?: CollectionSelection<T>;
   loading?: boolean;
-  /** Shown in place of rows when there are none. */
+  /** Shown in place of rows when there are none, usually `CollectionNoMatches`. */
   empty?: ReactNode;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -526,11 +526,7 @@ export function CollectionList<T>({
       <SkeletonRow key={i} columns={columns} selectable={selectable} menu={hasMenu} />
     ));
   } else if (flatRows.length === 0 && !groups?.length) {
-    body = empty ? (
-      <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-        {empty}
-      </div>
-    ) : null;
+    body = empty ? <div className="col-span-full">{empty}</div> : null;
   } else if (virtualize) {
     const virtualItems = virtualizer.getVirtualItems();
     const first = virtualItems[0];

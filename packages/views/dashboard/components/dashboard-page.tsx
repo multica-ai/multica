@@ -26,6 +26,7 @@ import {
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
+import { CollectionPageState } from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
@@ -642,12 +643,10 @@ function DashboardSkeleton() {
 function DashboardEmpty() {
   const { t } = useT("usage");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-      <BarChart3 className="h-6 w-6 text-faint-foreground" />
-      <p className="mt-3 text-body font-medium">{t(($) => $.empty.title)}</p>
-      <p className="mt-1 max-w-md text-caption text-muted-foreground">
-        {t(($) => $.empty.body)}
-      </p>
-    </div>
+    <CollectionPageState
+      icon={BarChart3}
+      title={t(($) => $.empty.title)}
+      description={t(($) => $.empty.body)}
+    />
   );
 }

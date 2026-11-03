@@ -341,6 +341,11 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			}
 			b.cleanup(ctx)
 		}
+		if err == nil {
+			if err := b.reportCredits(ctx, r); err != nil {
+				return err
+			}
+		}
 		if status.Status == "cancelled" {
 			if err := b.taskCall(ctx, r, "/cancel-ack", map[string]any{}, nil); err != nil {
 				return err
@@ -375,7 +380,8 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return b.reject(ctx, r, err.Error())
 		}
 		fingerprint := resourceFingerprint(resources)
-		if r.PriorSessionID != "" {
+		resources = append(resources, r.Files...)
+		if r.PriorSessionID != "" && len(r.Files) == 0 {
 			continued, err := b.continueSession(ctx, r, fingerprint)
 			if err != nil {
 				return err
@@ -398,6 +404,20 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if err := b.taskCall(ctx, r, "/session", map[string]string{"session_id": r.SessionID}, nil); err != nil {
 		return err
 	}
+	if r.Phase == "created" && r.Continued && r.Cursor == "" {
+		latest, err := b.latestEventID(ctx, r.SessionID)
+		if definitelyRejected(err) {
+			// The earlier session is gone; nothing was sent yet, so start fresh.
+			r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+			r.Credits = runCredits{}
+			r.Phase = "prepared"
+			return b.persist()
+		}
+		if err != nil {
+			return err
+		}
+		r.Cursor = latest
+	}
 	if r.Phase == "created" {
 		// Save intent before POST. After an ambiguous response/restart, never resend automatically.
 		r.Phase = "sending"
@@ -405,7 +425,11 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 		if err := b.persist(); err != nil {
 			return err
 		}
-		if err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/events", map[string]any{"events": []map[string]any{{"type": "user.message", "content": []map[string]string{{"type": "text", "text": r.Prompt}}}}}, nil); err != nil {
+		content := []map[string]any{{"type": "text", "text": r.Prompt}}
+		for _, source := range r.Images {
+			content = append(content, map[string]any{"type": "image", "source": source})
+		}
+		if err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/events", map[string]any{"events": []map[string]any{{"type": "user.message", "content": content}}}, nil); err != nil {
 			if rateLimited(err) {
 				r.Phase = "created"
 				r.SubmissionDeadline = time.Time{}
@@ -415,7 +439,8 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			if definitelyRejected(err) && r.Continued {
 				// The earlier session can no longer take messages; a definite
 				// rejection means nothing was delivered, so start a fresh session.
-				r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+				r.SessionID, r.PriorSessionID, r.Continued, r.Cursor = "", "", false, ""
+				r.Credits = runCredits{}
 				r.Phase = "prepared"
 				r.SubmissionDeadline = time.Time{}
 				return b.persist()
@@ -426,6 +451,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return err
 		}
 		r.Phase = "running"
+		r.Images = nil
 		if err := b.persist(); err != nil {
 			return err
 		}
@@ -506,6 +532,7 @@ func (b *Bridge) continueSession(ctx context.Context, r *run, fingerprint string
 		}
 	}
 	var s struct {
+		sessionUsage
 		Status        string            `json:"status"`
 		Agent         json.RawMessage   `json:"agent"`
 		EnvironmentID string            `json:"environment_id"`
@@ -523,7 +550,15 @@ func (b *Bridge) continueSession(ctx context.Context, r *run, fingerprint string
 	if id := sessionAgentID(s.Agent); (id != "" && id != r.AgentID) || (s.EnvironmentID != "" && s.EnvironmentID != b.cfg.EnvironmentID) {
 		return false, nil
 	}
-	return s.Metadata[resourcesMetadataKey] == fingerprint, nil
+	if s.Metadata[resourcesMetadataKey] != fingerprint {
+		return false, nil
+	}
+	r.Credits = runCredits{}
+	if total := s.total(); total != nil {
+		base := creditsMicros(*total)
+		r.Credits.Base = &base
+	}
+	return true, nil
 }
 
 // sessionAgentID accepts the agent as a bare ID or as an object with an id.
@@ -580,6 +615,9 @@ func (b *Bridge) deliver(ctx context.Context, r *run) error {
 		if err := b.createQuickIssue(ctx, r); err != nil {
 			return err
 		}
+	}
+	if err := b.reportCredits(ctx, r); err != nil {
+		return err
 	}
 	body := map[string]any{"session_id": r.SessionID}
 	suffix := "/complete"

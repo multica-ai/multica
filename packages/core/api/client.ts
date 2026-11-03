@@ -54,6 +54,7 @@ import type {
   UpdateRuntimeProfileRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   IssueSubscriber,
   IssueUnread,
   Comment,
@@ -415,6 +416,8 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   InboxItemListSchema,
@@ -2426,6 +2429,8 @@ export class ApiClient {
       custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
+      /** Runtime-wide concurrency cap; `null` removes it, omit to leave unchanged. */
+      max_concurrent_tasks?: number | null;
     },
   ): Promise<AgentRuntime> {
     const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
@@ -2960,6 +2965,14 @@ export class ApiClient {
 
   async markInboxRead(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
+  }
+
+  /** Marks every active notification on the issue read for the caller. */
+  async markIssueInboxRead(issueId: string): Promise<MarkIssueInboxReadResult> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+    return parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, {
+      endpoint: "POST /api/inbox/issues/:id/read",
+    });
   }
 
   async markInboxUnread(id: string): Promise<InboxItem> {
