@@ -106,18 +106,20 @@ GitHub integration links the pull request back to the issue.
   a fresh session starts with the current issue and triggering/coalesced comment
   context, or with the current chat message. Do not send additional messages
   directly to a bridge-owned session while its run is active.
-- Issue and chat attachments: text files (Qoder Files' accepted types, up to
-  5 MB) are uploaded through Qoder Files and mounted under `/data/attachments/`,
-  a chat message's files under `/data/attachments/<run id>/`. An issue run
-  uploads every issue attachment again, so it always starts a fresh session. A
-  chat turn that continues a session mounts its files into that session before
-  sending the message, and starts a fresh session if Qoder refuses them. PNG,
-  JPEG, WebP and GIF images (at most 8000 px per side, about 4.5 MB in total per
-  run so Qoder's echo of the message stays readable) are sent as base64 image
-  blocks in the task message; use a Qoder Agent model with image input. Other
-  files (PDF, Office documents, archives) and chat attachments deleted before
-  the run are listed in the prompt as unavailable; the run does not fail.
-  Uploaded Qoder files are not deleted by the bridge.
+- Issue and chat attachments: PNG, JPEG, WebP and GIF images (at most 8000 px
+  per side, about 4.5 MB in total per run so Qoder's echo of the message stays
+  readable) are sent as base64 image blocks in the task message; use a Qoder
+  Agent model with image input. Other files up to 5 MB, PDFs and Office
+  documents included, are uploaded through Qoder Files and mounted under
+  `/data/attachments/`, a chat message's files under
+  `/data/attachments/<run id>/`. Reading a binary format needs a tool for it in
+  the Qoder environment. An issue run uploads every issue attachment again, so
+  it always starts a fresh session. A chat turn that continues a session mounts
+  its files into that session before sending the message, and starts a fresh
+  session if Qoder refuses them. Larger files, files Qoder Files rejects,
+  images over the limits, and chat attachments deleted before the run are
+  listed in the prompt as unavailable; the run does not fail. Uploaded Qoder
+  files are not deleted by the bridge.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without
@@ -150,7 +152,7 @@ GitHub integration links the pull request back to the issue.
 ## Current boundaries
 
 This is a PoC for issue runs and chat turns. Squad coordination, local
-directories, binary non-image attachments, arbitrary Git hosts,
+directories, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 file transfer and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
