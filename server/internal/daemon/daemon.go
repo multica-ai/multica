@@ -9490,6 +9490,21 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if taskfailure.AuthMethodUnresolved(result.Error) {
 		return true
 	}
+	// Fourth form: the resume loaded, but the transcript it inherited plus the
+	// new trigger no longer fits the context window, so the provider refused
+	// the very first request. The session is retired either way (context
+	// overflow is on the resume blacklist); the only open question is whether
+	// THIS trigger is answered or silently dropped until a human re-runs it.
+	//
+	// "The next task starts clean" does not cover it: a comment follow-up has
+	// no next task unless someone notices the failure and retries by hand. And
+	// the reason a replay is unsafe — duplicated side effects — does not apply,
+	// because the tools == 0 gate above holds: the run died on its first
+	// request and did nothing. A run that overflowed mid-task (tools > 0) is
+	// still never replayed.
+	if taskfailure.ResumeContextOverflow(result.Error) {
+		return true
+	}
 	// Everything below is a bounded compatibility path for the backends that
 	// cannot answer question 1 at all. For every other backend a false
 	// ResumeRejected is a real answer — it checked and this was not a

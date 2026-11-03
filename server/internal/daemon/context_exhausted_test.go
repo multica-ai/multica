@@ -7,8 +7,8 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
-// TestContextExhaustionNeverReplaysTheTask pins the boundary between the two
-// questions GH #6402's fix has to keep apart.
+// TestContextExhaustionReplaysOnlyAnUntouchedResume pins the boundary between
+// the two questions GH #6402's fix has to keep apart.
 //
 // "Did this run produce an answer?" is decided by the output alone —
 // classifyPoisonedOutput takes no tool count, and it must not grow one: a
@@ -16,23 +16,45 @@ import (
 // tools == 0 gate would miss the common case and leave exactly the silent
 // stall the issue reports.
 //
-// "May we re-run it?" is where the tool count belongs, and the answer here is
-// always no. A saturated session is not a rejected resume, so there is nothing
-// a fresh-session retry of THIS task would cure that letting the NEXT task
-// start clean does not — while replaying a run that already used tools
-// duplicates its side effects.
-func TestContextExhaustionNeverReplaysTheTask(t *testing.T) {
-	failed := agent.Result{
+// "May we re-run it?" is where the tool count belongs. A run that already used
+// tools is never replayed: that would duplicate its side effects. But a RESUMED
+// run that overflowed on its first request did nothing, and its trigger is
+// otherwise lost until someone retries by hand — the session is retired either
+// way, so the fresh retry is the only thing that answers the request. A cold
+// run is never replayed: its fresh prompt is the same prompt.
+func TestContextExhaustionReplaysOnlyAnUntouchedResume(t *testing.T) {
+	structured := agent.Result{
 		Status:    "failed",
 		SessionID: "sess-full",
 		Error: "claude ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
 			": the session's context window is exhausted and compaction could not recover it (Prompt is too long)",
 	}
+	// The bare is_error shape, as observed in production on a comment
+	// follow-up that resumed a long support session.
+	bare := agent.Result{Status: "failed", Error: "Prompt is too long"}
 
-	for _, tools := range []int32{0, 1, 17} {
-		if shouldRetryWithFreshSession(failed, "sess-full", tools, "claude") {
-			t.Errorf("tools=%d: a full context window must not trigger an in-task replay", tools)
+	for _, failed := range []agent.Result{structured, bare} {
+		if !shouldRetryWithFreshSession(failed, "sess-full", 0, "claude") {
+			t.Errorf("%q: a resume that overflowed before any tool ran must retry fresh", failed.Error)
 		}
+		for _, tools := range []int32{1, 17} {
+			if shouldRetryWithFreshSession(failed, "sess-full", tools, "claude") {
+				t.Errorf("%q tools=%d: a run that used tools must not be replayed", failed.Error, tools)
+			}
+		}
+		if shouldRetryWithFreshSession(failed, "", 0, "claude") {
+			t.Errorf("%q: a cold run that overflowed would rebuild the same prompt; must not retry", failed.Error)
+		}
+	}
+
+	// Too large with no history at all: starting over builds the same request.
+	singleExchange := agent.Result{
+		Status: "failed",
+		Error: "Prompt is too long · this conversation is a single exchange and cannot be compacted — " +
+			"the request size comes mostly from system prompt, tool definitions, or attachments.",
+	}
+	if shouldRetryWithFreshSession(singleExchange, "sess-full", 0, "claude") {
+		t.Error("a single-exchange overflow must not retry: a fresh session cannot shrink it")
 	}
 }
 

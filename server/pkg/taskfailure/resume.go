@@ -85,6 +85,41 @@ func AuthMethodUnresolved(errText string) bool {
 	return strings.Contains(strings.ToLower(errText), authMethodUnresolvedPhrase)
 }
 
+// ResumeContextOverflow reports whether a failed RESUMED run died because the
+// conversation it inherited no longer fits the model's context window — the
+// transcript loaded, and the provider refused the first request built from it.
+//
+// The caller must already know the run was a resume and executed no tool; this
+// predicate only answers "would starting over fix it?". For an inherited
+// transcript the answer is yes: the fresh prompt is the agent's instructions
+// plus the current trigger, which is small by construction. That is the
+// difference from a cold run overflowing, where the same prompt would be
+// rebuilt and overflow again.
+//
+// It deliberately does NOT go through Classify. Classify's context-overflow
+// rule also fires on any text carrying both "token" and "limit", which a quota
+// refusal can contain (GH #9310); a false positive here would discard a
+// healthy session over a billing error. So it matches only the two signals
+// Claude Code emits for this condition: its structured terminal_reason token
+// (as quoted by claudeTerminalReasonFailure) and its bare result text, which
+// in the 2.1.220/2.1.221 captures arrives with is_error set and so reaches the
+// failed path, never a clean success.
+//
+// The single-exchange variants are excluded: "cannot be compacted" means the
+// request is too large with no history at all, so a fresh session would build
+// the same request and fail the same way.
+func ResumeContextOverflow(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	lower := strings.ToLower(errText)
+	if strings.Contains(lower, "cannot be compacted") {
+		return false
+	}
+	return strings.Contains(lower, TerminalReasonPromptTooLong) ||
+		strings.Contains(lower, "prompt is too long")
+}
+
 // authMethodUnresolvedPhrase is the lowercase provider phrase
 // AuthMethodUnresolved matches. It appears verbatim in the runtime's error
 // however the failure reached us — session/resume, session/set_model or

@@ -252,3 +252,47 @@ func TestAuthMethodUnresolvedMatchesResumeQueryGuard(t *testing.T) {
 		t.Fatalf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", sqlGuardPhrase)
 	}
 }
+
+// TestResumeContextOverflow pins the narrow predicate the daemon uses to decide
+// that an untouched resume should be retried in a fresh session. The negatives
+// matter more than the positives: a false positive discards a healthy session.
+func TestResumeContextOverflow(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		errMsg string
+		want   bool
+	}{
+		{"bare claude result", "Prompt is too long", true},
+		{
+			"structured terminal_reason as quoted by the claude backend",
+			"claude ended the turn with terminal_reason=" + TerminalReasonPromptTooLong +
+				": the session's context window is exhausted and compaction could not recover it",
+			true,
+		},
+		{
+			// Too large with no history: a fresh session builds the same request.
+			"single exchange cannot be compacted",
+			"Prompt is too long · this conversation is a single exchange and cannot be compacted",
+			false,
+		},
+		{
+			// GH #9310: Classify lands this in context_overflow via its
+			// "token"+"limit" arm. It is a quota refusal, not a full window.
+			"quota refusal carrying token and limit",
+			"launcher: provider quota exhausted: usage limit reached, token budget 0 left",
+			false,
+		},
+		{"rate limit", "API Error: 429 rate_limit_error: output tokens per minute limit exceeded", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ResumeContextOverflow(tc.errMsg); got != tc.want {
+				t.Fatalf("ResumeContextOverflow(%q) = %v, want %v", tc.errMsg, got, tc.want)
+			}
+		})
+	}
+}
