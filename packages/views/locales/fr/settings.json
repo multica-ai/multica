@@ -679,9 +679,9 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris @all et @squad"
       },
-      "member_comments": {
-        "label": "Commentaires des membres",
-        "description": "Quand un membre commente une tâche que vous suivez"
+      "comments_without_mentions": {
+        "label": "Commentaires sans mention",
+        "description": "Quand quelqu'un commente une tâche que vous suivez sans @mentionner personne"
       },
       "agent_failures": {
         "label": "Erreurs d'agent",
@@ -699,9 +699,9 @@
         "label": "Priorité et dates",
         "description": "Quand la priorité, la date de début ou l'échéance change"
       },
-      "agent_comments": {
-        "label": "Commentaires d'agent",
-        "description": "Quand un agent répond sur une tâche que vous suivez"
+      "comments_mentioning_others": {
+        "label": "Commentaires mentionnant d'autres",
+        "description": "Quand un commentaire sur une tâche que vous suivez @mentionne d'autres personnes ou agents, mais pas vous"
       }
     },
     "system": {

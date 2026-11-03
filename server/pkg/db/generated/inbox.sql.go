@@ -35,12 +35,11 @@ WITH active AS (
            COALESCE(i.issue_id, i.id) AS group_id,
            i.created_at,
            i.read,
-           COALESCE(i.section = 'activity', i.type = ANY($1::text[])
-               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($2::text[]))) AS is_activity
+           COALESCE(i.section = 'activity', i.type = ANY($1::text[])) AS is_activity
     FROM inbox_item i
-    WHERE i.workspace_id = $3
+    WHERE i.workspace_id = $2
       AND i.recipient_type = 'member'
-      AND i.recipient_id = $4
+      AND i.recipient_id = $3
       AND i.archived = false
 ), newest_groups AS (
     SELECT DISTINCT ON (group_id, is_activity)
@@ -61,10 +60,9 @@ WHERE i.id = a.id
 `
 
 type ArchiveAllReadInboxParams struct {
-	ActivityTypes      []string    `json:"activity_types"`
-	AgentActivityTypes []string    `json:"agent_activity_types"`
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	RecipientID        pgtype.UUID `json:"recipient_id"`
+	ActivityTypes []string    `json:"activity_types"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
 }
 
 // "Read" is the state of the one row the inbox renders per issue and section:
@@ -75,12 +73,7 @@ type ArchiveAllReadInboxParams struct {
 // reappear after the newest row is archived (and can archive an older read
 // sibling under an unread row).
 func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInboxParams) (int64, error) {
-	result, err := q.db.Exec(ctx, archiveAllReadInbox,
-		arg.ActivityTypes,
-		arg.AgentActivityTypes,
-		arg.WorkspaceID,
-		arg.RecipientID,
-	)
+	result, err := q.db.Exec(ctx, archiveAllReadInbox, arg.ActivityTypes, arg.WorkspaceID, arg.RecipientID)
 	if err != nil {
 		return 0, err
 	}
@@ -118,24 +111,22 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.issue_id = $4
   AND i.archived = false
-  AND COALESCE(i.section = 'activity', i.type = ANY($5::text[])
-           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($6::text[])))
+  AND COALESCE(i.section = 'activity', i.type = ANY($5::text[]))
 `
 
 type ArchiveInboxActivityByIssueParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	RecipientType      string      `json:"recipient_type"`
-	RecipientID        pgtype.UUID `json:"recipient_id"`
-	IssueID            pgtype.UUID `json:"issue_id"`
-	ActivityTypes      []string    `json:"activity_types"`
-	AgentActivityTypes []string    `json:"agent_activity_types"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	ActivityTypes []string    `json:"activity_types"`
 }
 
 // Section-scoped counterpart of ArchiveInboxByIssue, used when the archived row
 // is activity: clearing routine progress must not take an unread action item
 // on the same issue (a mention, a failed run) with it. The activity predicate
 // mirrors inbox.ItemSection: a stored section wins, otherwise the type rule
-// the caller passes as inbox.ActivityTypes and inbox.AgentActivityTypes.
+// the caller passes as inbox.ActivityTypes.
 func (q *Queries) ArchiveInboxActivityByIssue(ctx context.Context, arg ArchiveInboxActivityByIssueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, archiveInboxActivityByIssue,
 		arg.WorkspaceID,
@@ -143,7 +134,6 @@ func (q *Queries) ArchiveInboxActivityByIssue(ctx context.Context, arg ArchiveIn
 		arg.RecipientID,
 		arg.IssueID,
 		arg.ActivityTypes,
-		arg.AgentActivityTypes,
 	)
 	if err != nil {
 		return 0, err
@@ -250,16 +240,14 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.read = false
   AND i.archived = false
-  AND NOT COALESCE(i.section = 'activity', i.type = ANY($4::text[])
-           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($5::text[])))
+  AND NOT COALESCE(i.section = 'activity', i.type = ANY($4::text[]))
 `
 
 type CountUnreadInboxParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	RecipientType      string      `json:"recipient_type"`
-	RecipientID        pgtype.UUID `json:"recipient_id"`
-	ActivityTypes      []string    `json:"activity_types"`
-	AgentActivityTypes []string    `json:"agent_activity_types"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	ActivityTypes []string    `json:"activity_types"`
 }
 
 // Activity rows never count as unread, whatever their stored `read` flag; see
@@ -270,7 +258,6 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 		arg.RecipientType,
 		arg.RecipientID,
 		arg.ActivityTypes,
-		arg.AgentActivityTypes,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -287,8 +274,7 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
-      AND NOT COALESCE(i.section = 'activity', i.type = ANY($2::text[])
-           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($3::text[])))
+      AND NOT COALESCE(i.section = 'activity', i.type = ANY($2::text[]))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -296,9 +282,8 @@ GROUP BY newest.workspace_id
 `
 
 type CountUnreadInboxByWorkspaceParams struct {
-	RecipientID        pgtype.UUID `json:"recipient_id"`
-	ActivityTypes      []string    `json:"activity_types"`
-	AgentActivityTypes []string    `json:"agent_activity_types"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	ActivityTypes []string    `json:"activity_types"`
 }
 
 type CountUnreadInboxByWorkspaceRow struct {
@@ -321,7 +306,7 @@ type CountUnreadInboxByWorkspaceRow struct {
 // not decide a group's state either, so a routine status change landing after
 // an unread mention leaves the mention counted.
 func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, arg CountUnreadInboxByWorkspaceParams) ([]CountUnreadInboxByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, arg.RecipientID, arg.ActivityTypes, arg.AgentActivityTypes)
+	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, arg.RecipientID, arg.ActivityTypes)
 	if err != nil {
 		return nil, err
 	}
