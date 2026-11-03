@@ -189,7 +189,6 @@ describe("SettingsPage header", () => {
     { search: "", label: "Profile" },
     { search: "tab=preferences", label: "Preferences" },
     { search: "tab=shortcuts", label: "Shortcuts" },
-    { search: "tab=notifications", label: "Inbox" },
     { search: "tab=members", label: "Members" },
     { search: "tab=channels", label: "Messaging" },
     { search: "tab=mcp", label: "MCP servers" },
@@ -522,7 +521,7 @@ describe("SettingsPage search for the browser notifications row", () => {
     search("notifi");
     const results = screen.getByRole("listbox", { name: "Search settings" });
     expect(
-      within(results).getByRole("option", { name: /Send a system notification/ }),
+      within(results).getByRole("option", { name: /Show system notifications/ }),
     ).toBeInTheDocument();
   });
 });

@@ -52,7 +52,6 @@ import {
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
-import { inboxItemSection } from "../inbox/queries";
 import {
   notificationPreferenceOptions,
   notificationPreferenceKeys,
@@ -574,9 +573,6 @@ export async function handleInboxNew(
 ): Promise<void> {
   const sourceWsId = item.workspace_id;
   if (sourceWsId) void onInboxNew(qc, sourceWsId, item);
-  // Activity is never unread and never interrupts: it cannot move the unread
-  // summary, and routine progress does not earn an OS banner.
-  if (inboxItemSection(item) === "activity") return;
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
   void onInboxSummaryInvalidate(qc);

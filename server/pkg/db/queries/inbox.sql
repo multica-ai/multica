@@ -95,9 +95,9 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details, id, section
+    actor_type, actor_id, details, id
 )
-SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg('section')::text
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE ($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
@@ -111,15 +111,14 @@ WHERE id = $1
 RETURNING *;
 
 -- name: MarkInboxUnread :one
--- Item-level: the inbox renders one row per issue and section carrying that
--- group's NEWEST item, and the group's read state is that item's read state.
--- Flipping the whole group unread would resurrect older siblings the user
--- already dealt with and inflate CountUnreadInbox (which counts raw rows),
--- while changing nothing the UI shows. (Marking read, by contrast, also
--- settles the item's siblings; see the MarkInboxRead handler.)
--- A non-null section re-files the item; see the MarkInboxUnread handler.
-UPDATE inbox_item SET read = false, section = COALESCE(sqlc.narg('section')::text, section)
-WHERE id = @id
+-- Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+-- the inbox renders one row per issue carrying that group's NEWEST item, and
+-- the group's read state is that item's read state. Flipping the whole group
+-- unread would resurrect older siblings the user already dealt with and
+-- inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+-- UI shows.
+UPDATE inbox_item SET read = false
+WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveInboxItem :one
@@ -130,28 +129,6 @@ RETURNING *;
 -- name: ArchiveInboxByIssue :execrows
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
-
--- name: ArchiveInboxActivityByIssue :execrows
--- Section-scoped counterpart of ArchiveInboxByIssue, used when the archived row
--- is activity: clearing routine progress must not take an unread action item
--- on the same issue (a mention, a failed run) with it. The activity predicate
--- mirrors inbox.ItemSection: a stored section wins, otherwise the type rule
--- the caller passes as inbox.ActivityTypes.
-UPDATE inbox_item i SET archived = true
-WHERE i.workspace_id = sqlc.arg('workspace_id')
-  AND i.recipient_type = sqlc.arg('recipient_type')
-  AND i.recipient_id = sqlc.arg('recipient_id')
-  AND i.issue_id = sqlc.arg('issue_id')
-  AND i.archived = false
-  AND COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]));
-
--- name: MarkInboxReadByIssue :execrows
--- Opening an issue anywhere (Work sidebar, search, a link) settles its inbox
--- notifications, so the same event is never cleared twice. Every active row is
--- marked, not just the newest, so no older sibling resurfaces as unread.
-UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND issue_id = $3
-  AND archived = false AND read = false;
 
 -- name: UnarchiveInboxItem :one
 -- Deliberately does not touch `read`: unarchiving restores an item to the main
@@ -174,15 +151,8 @@ WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
--- Activity rows never count as unread, whatever their stored `read` flag; see
--- inbox.ItemSection for the rule the predicate mirrors.
-SELECT count(*) FROM inbox_item i
-WHERE i.workspace_id = sqlc.arg('workspace_id')
-  AND i.recipient_type = sqlc.arg('recipient_type')
-  AND i.recipient_id = sqlc.arg('recipient_id')
-  AND i.read = false
-  AND i.archived = false
-  AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]));
+SELECT count(*) FROM inbox_item
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -195,10 +165,6 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
 -- member join keeps counts scoped to workspaces the user still belongs to,
 -- so a stale item left behind in a workspace the user has since left cannot
 -- light the dot.
---
--- Only action rows take part (MUL-8483): activity is never unread, and it does
--- not decide a group's state either, so a routine status change landing after
--- an unread mention leaves the mention counted.
 SELECT newest.workspace_id, count(*) AS count
 FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
@@ -206,9 +172,8 @@ FROM (
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
     WHERE i.recipient_type = 'member'
-      AND i.recipient_id = sqlc.arg('recipient_id')
+      AND i.recipient_id = $1
       AND i.archived = false
-      AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -223,40 +188,33 @@ UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
 
 -- name: ArchiveAllReadInbox :execrows
--- "Read" is the state of the one row the inbox renders per issue and section:
--- the newest active notification in that group. Action and activity group
--- separately (MUL-8483), and an activity group always counts as read. Archive
--- every row in qualifying groups and leave an unread action group wholly
--- untouched. Updating raw read rows instead makes an older unread sibling
--- reappear after the newest row is archived (and can archive an older read
--- sibling under an unread row).
-WITH active AS (
-    SELECT i.id,
+-- "Read" is the state of the one issue row the inbox renders: the newest
+-- active notification in that issue group. Archive every row in groups whose
+-- newest row is read, and leave an unread group wholly untouched. Updating raw
+-- read rows instead makes an older unread sibling reappear after the newest
+-- row is archived (and can archive an older read sibling under an unread row).
+WITH newest_groups AS (
+    SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
            COALESCE(i.issue_id, i.id) AS group_id,
-           i.created_at,
-           i.read,
-           COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[])) AS is_activity
+           i.read
     FROM inbox_item i
-    WHERE i.workspace_id = sqlc.arg('workspace_id')
+    WHERE i.workspace_id = $1
       AND i.recipient_type = 'member'
-      AND i.recipient_id = sqlc.arg('recipient_id')
+      AND i.recipient_id = $2
       AND i.archived = false
-), newest_groups AS (
-    SELECT DISTINCT ON (group_id, is_activity)
-           group_id,
-           is_activity,
-           read
-    FROM active
-    ORDER BY group_id, is_activity, created_at DESC, id DESC
+    ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), read_groups AS (
-    SELECT group_id, is_activity
+    SELECT group_id
     FROM newest_groups
-    WHERE read = true OR is_activity
+    WHERE read = true
 )
 UPDATE inbox_item i SET archived = true
-FROM active a
-JOIN read_groups selected USING (group_id, is_activity)
-WHERE i.id = a.id;
+FROM read_groups selected
+WHERE i.workspace_id = $1
+  AND i.recipient_type = 'member'
+  AND i.recipient_id = $2
+  AND i.archived = false
+  AND COALESCE(i.issue_id, i.id) = selected.group_id;
 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true

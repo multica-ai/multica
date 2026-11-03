@@ -18,9 +18,6 @@
  *     packages/core/inbox/mutations.ts:37-46). Visually the row disappears
  *     because `deduplicateInboxItems` (apps/mobile/lib/inbox-display.ts)
  *     filters archived items out before render.
- *   - mark-issue-read: flip `read` on every row of the opened issue; refresh
- *     unless the server confirms nothing changed (an unreadable reply counts
- *     as a change).
  *   - mark-all-read: flip `read` to true on every non-archived row (matches
  *     web; the server-side query does the same predicate).
  *   - archive batch (all / all-read / completed): no optimistic patch — the
@@ -31,7 +28,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "@multica/core/types";
-import { inboxItemSection } from "@multica/core/inbox/section";
 import { api } from "@/data/api";
 import { inboxKeys } from "@/data/queries/inbox";
 import {
@@ -98,20 +94,16 @@ export function useArchiveInbox() {
       const key = inboxKeys.list(wsId);
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<InboxItem[]>(key);
-      // Match web: archive the rows that share the same issue_id, as the
-      // single archive endpoint does server-side — every sibling for an
-      // action row, only the issue's other activity for an activity row.
+      // Match web: archive every row that shares the same issue_id — the
+      // single archive endpoint archives all sibling rows server-side too
+      // (`server/internal/queries/inbox.sql` UPDATE … WHERE issue_id = ?).
       // Patching only the tapped row would let dedup'd siblings briefly
       // resurface between the request and the WS invalidate.
       const target = prev?.find((i) => i.id === id);
       const issueId = target?.issue_id ?? null;
-      const activityOnly = target ? inboxItemSection(target) === "activity" : false;
       qc.setQueryData<InboxItem[]>(key, (old) =>
         old?.map((item) =>
-          item.id === id ||
-          (issueId &&
-            item.issue_id === issueId &&
-            (!activityOnly || inboxItemSection(item) === "activity"))
+          item.id === id || (issueId && item.issue_id === issueId)
             ? { ...item, archived: true }
             : item,
         ),
@@ -123,40 +115,6 @@ export function useArchiveInbox() {
     },
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-/**
- * Mark every notification on an issue read when the issue is opened, so
- * reading it from anywhere settles the inbox (web: useMarkIssueInboxRead in
- * packages/core/inbox/mutations.ts). Nothing is refreshed when nothing
- * changed.
- */
-export function useMarkIssueInboxRead() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-
-  return useMutation({
-    mutationFn: (issueId: string) => api.markIssueInboxRead(issueId),
-    onMutate: async (issueId) => {
-      const key = inboxKeys.list(wsId);
-      await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<InboxItem[]>(key);
-      qc.setQueryData<InboxItem[]>(key, (old) =>
-        old?.map((item) =>
-          item.issue_id === issueId && !item.archived && !item.read
-            ? { ...item, read: true }
-            : item,
-        ),
-      );
-      return { prev, key };
-    },
-    onError: (_err, _issueId, ctx) => {
-      if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
-    },
-    onSuccess: (result) => {
-      if (result.count !== 0) refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

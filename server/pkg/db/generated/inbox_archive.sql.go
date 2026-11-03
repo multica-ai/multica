@@ -14,16 +14,13 @@ import (
 const archivedInboxFacets = `-- name: ArchivedInboxFacets :many
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
-           i.id, i.issue_id, i.created_at,
-           -- Activity is never unread (inbox.Section); the caller passes
-           -- inbox.ActivityTypes.
-           (i.read OR COALESCE(i.section = 'activity', i.type = ANY($1::text[]))) AS read,
+           i.id, i.issue_id, i.created_at, i.read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i
-    WHERE i.workspace_id = $2::uuid
+    WHERE i.workspace_id = $1::uuid
       AND i.recipient_type = 'member'
-      AND i.recipient_id = $3::uuid
+      AND i.recipient_id = $2::uuid
       AND i.archived = true
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
@@ -37,13 +34,13 @@ WITH newest AS MATERIALIZED (
     SELECT newest.id, newest.issue_id, newest.created_at, newest.read, newest.actor, iss.status AS issue_status, iss.priority AS issue_priority
     FROM newest
     LEFT JOIN issue iss ON iss.id = newest.issue_id
-      AND iss.workspace_id = $2::uuid
+      AND iss.workspace_id = $1::uuid
 ), matched AS (
     SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority,
-           (cardinality($4::text[]) = 0 OR issue_status = ANY($4::text[])) AS status_match,
-           (cardinality($5::text[]) = 0 OR issue_priority = ANY($5::text[])) AS priority_match,
-           (cardinality($6::text[]) = 0 OR actor = ANY($6::text[])) AS actor_match,
-           (NOT $7::boolean OR NOT read) AS read_match
+           (cardinality($3::text[]) = 0 OR issue_status = ANY($3::text[])) AS status_match,
+           (cardinality($4::text[]) = 0 OR issue_priority = ANY($4::text[])) AS priority_match,
+           (cardinality($5::text[]) = 0 OR actor = ANY($5::text[])) AS actor_match,
+           (NOT $6::boolean OR NOT read) AS read_match
     FROM projected
 )
 SELECT 'statuses'::text AS dimension, issue_status::text AS key,
@@ -64,13 +61,12 @@ FROM matched
 `
 
 type ArchivedInboxFacetsParams struct {
-	ActivityTypes []string    `json:"activity_types"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-	Statuses      []string    `json:"statuses"`
-	Priorities    []string    `json:"priorities"`
-	Actors        []string    `json:"actors"`
-	UnreadOnly    bool        `json:"unread_only"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Statuses    []string    `json:"statuses"`
+	Priorities  []string    `json:"priorities"`
+	Actors      []string    `json:"actors"`
+	UnreadOnly  bool        `json:"unread_only"`
 }
 
 type ArchivedInboxFacetsRow struct {
@@ -82,7 +78,6 @@ type ArchivedInboxFacetsRow struct {
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFacetsParams) ([]ArchivedInboxFacetsRow, error) {
 	rows, err := q.db.Query(ctx, archivedInboxFacets,
-		arg.ActivityTypes,
 		arg.WorkspaceID,
 		arg.RecipientID,
 		arg.Statuses,
@@ -111,19 +106,16 @@ func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFace
 const listArchivedInboxPage = `-- name: ListArchivedInboxPage :many
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
-           i.id, i.issue_id, i.created_at,
-           -- Activity is never unread (inbox.Section); the caller passes
-           -- inbox.ActivityTypes.
-           (i.read OR COALESCE(i.section = 'activity', i.type = ANY($1::text[]))) AS read,
+           i.id, i.issue_id, i.created_at, i.read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i
-    WHERE i.workspace_id = $2::uuid
+    WHERE i.workspace_id = $1::uuid
       AND i.recipient_type = 'member'
-      AND i.recipient_id = $3::uuid
+      AND i.recipient_id = $2::uuid
       AND i.archived = true
-      AND ($4::uuid IS NULL OR i.issue_id = $4::uuid
-           OR (i.issue_id IS NULL AND i.id = $4::uuid))
+      AND ($3::uuid IS NULL OR i.issue_id = $3::uuid
+           OR (i.issue_id IS NULL AND i.id = $3::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
@@ -136,22 +128,22 @@ WITH newest AS MATERIALIZED (
     SELECT newest.id, newest.issue_id, newest.created_at, newest.read, newest.actor, iss.status AS issue_status, iss.priority AS issue_priority
     FROM newest
     LEFT JOIN issue iss ON iss.id = newest.issue_id
-      AND iss.workspace_id = $2::uuid
+      AND iss.workspace_id = $1::uuid
 ), matched AS (
     SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority,
-           (cardinality($5::text[]) = 0 OR issue_status = ANY($5::text[])) AS status_match,
-           (cardinality($6::text[]) = 0 OR issue_priority = ANY($6::text[])) AS priority_match,
-           (cardinality($7::text[]) = 0 OR actor = ANY($7::text[])) AS actor_match,
-           (NOT $8::boolean OR NOT read) AS read_match
+           (cardinality($4::text[]) = 0 OR issue_status = ANY($4::text[])) AS status_match,
+           (cardinality($5::text[]) = 0 OR issue_priority = ANY($5::text[])) AS priority_match,
+           (cardinality($6::text[]) = 0 OR actor = ANY($6::text[])) AS actor_match,
+           (NOT $7::boolean OR NOT read) AS read_match
     FROM projected
 )
 , selected AS (
     SELECT id, issue_id, created_at, read, actor, issue_status, issue_priority, status_match, priority_match, actor_match, read_match FROM matched
     WHERE status_match AND priority_match AND actor_match AND read_match
-      AND ($9::timestamptz IS NULL OR
-           (created_at, id) < ($9::timestamptz, $10::uuid))
+      AND ($8::timestamptz IS NULL OR
+           (created_at, id) < ($8::timestamptz, $9::uuid))
     ORDER BY created_at DESC, id DESC
-    LIMIT $11::int
+    LIMIT $10::int
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
        COALESCE(anchor.comment_id, '')::text AS comment_id
@@ -170,17 +162,16 @@ ORDER BY i.created_at DESC, i.id DESC
 `
 
 type ListArchivedInboxPageParams struct {
-	ActivityTypes []string           `json:"activity_types"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	RecipientID   pgtype.UUID        `json:"recipient_id"`
-	GroupID       pgtype.UUID        `json:"group_id"`
-	Statuses      []string           `json:"statuses"`
-	Priorities    []string           `json:"priorities"`
-	Actors        []string           `json:"actors"`
-	UnreadOnly    bool               `json:"unread_only"`
-	BeforeTime    pgtype.Timestamptz `json:"before_time"`
-	BeforeID      pgtype.UUID        `json:"before_id"`
-	PageLimit     int32              `json:"page_limit"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	Statuses    []string           `json:"statuses"`
+	Priorities  []string           `json:"priorities"`
+	Actors      []string           `json:"actors"`
+	UnreadOnly  bool               `json:"unread_only"`
+	BeforeTime  pgtype.Timestamptz `json:"before_time"`
+	BeforeID    pgtype.UUID        `json:"before_id"`
+	PageLimit   int32              `json:"page_limit"`
 }
 
 type ListArchivedInboxPageRow struct {
@@ -193,7 +184,6 @@ type ListArchivedInboxPageRow struct {
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,
-		arg.ActivityTypes,
 		arg.WorkspaceID,
 		arg.RecipientID,
 		arg.GroupID,
