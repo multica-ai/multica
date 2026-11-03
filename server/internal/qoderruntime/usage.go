@@ -15,7 +15,7 @@ const usageProvider = "qoder_cloud"
 // Qoder reports credits instead of tokens. A session is cumulative across
 // continued runs, so Base is the session's total when this run took it over.
 type runCredits struct {
-	Base        int64  `json:"base,omitempty"`
+	Base        *int64 `json:"base,omitempty"`
 	Spans       int64  `json:"spans,omitempty"`
 	SpansSeen   bool   `json:"spans_seen,omitempty"`
 	Session     *int64 `json:"session,omitempty"`
@@ -37,7 +37,17 @@ func (r *run) addSpanCredits(credits float64) {
 // setSessionCredits records a session total. Totals are snapshots, so the
 // latest one replaces the previous figure instead of adding to it.
 func (r *run) setSessionCredits(total float64) {
-	v := max(creditsMicros(total)-r.Credits.Base, 0)
+	// A missing baseline is not zero. This also covers journals written
+	// before credit collection: charging the session total would bill history.
+	if r.Continued && r.Credits.Base == nil {
+		r.Credits.Session = nil
+		return
+	}
+	var base int64
+	if r.Credits.Base != nil {
+		base = *r.Credits.Base
+	}
+	v := max(creditsMicros(total)-base, 0)
 	r.Credits.Session = &v
 }
 
@@ -57,8 +67,9 @@ func (s sessionUsage) total() *float64 {
 // reportCredits sends the run's credit charge to Multica before the task is
 // finished. The session total is authoritative because span events do not
 // cover every billed call (sandbox runtime among them); spans are only the
-// fallback when Qoder exposes no total. Sandbox credits that settle after
-// this read are attributed to the next run that continues the session.
+// fallback when Qoder exposes no total or a continued run has no baseline.
+// This is a usage snapshot, not a final invoice: sandbox charges settled
+// after this read are not included and may enter a later run's baseline.
 func (b *Bridge) reportCredits(ctx context.Context, r *run) error {
 	if r.SessionID == "" || r.Credits.ReportedFor == r.SessionID {
 		return nil

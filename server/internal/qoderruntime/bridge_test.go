@@ -101,6 +101,9 @@ type harness struct {
 	usage                   []map[string]any
 	usageAfterFinish        bool
 	sessionUsage            string
+	usageStatus             int
+	cancelAcks              int
+	cancelAckStatus         int
 }
 
 func setup(t *testing.T) *harness {
@@ -171,6 +174,10 @@ func setup(t *testing.T) *harness {
 			h.messages = append(h.messages, req.Messages...)
 			io.WriteString(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/usage"):
+			if h.usageStatus != 0 {
+				w.WriteHeader(h.usageStatus)
+				return
+			}
 			var req struct {
 				Usage []map[string]any `json:"usage"`
 			}
@@ -178,7 +185,14 @@ func setup(t *testing.T) *harness {
 			h.usage = append(h.usage, req.Usage...)
 			h.usageAfterFinish = h.usageAfterFinish || h.complete != nil || h.failure != nil
 			io.WriteString(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/session"), strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			h.cancelAcks++
+			if h.cancelAckStatus != 0 {
+				w.WriteHeader(h.cancelAckStatus)
+				return
+			}
+			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/session"):
 			io.WriteString(w, `{}`)
 		default:
 			t.Errorf("unexpected Multica request %s", r.URL)
@@ -890,12 +904,14 @@ func TestRunDeadlineReleasesQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.b.state.first().Deadline = time.Now().Add(-time.Second)
+	h.sessionUsage = `{"total_credits":0.4}`
 	if err := h.b.step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if h.failure == nil || h.b.state.first() != nil || h.cancels != 1 {
 		t.Fatal("expired run did not cancel and finish")
 	}
+	h.wantCredits(t, 400000)
 }
 
 func TestAmbiguousCreationIsNotRepeated(t *testing.T) {

@@ -76,6 +76,115 @@ func TestNoCreditsNoUsageReport(t *testing.T) {
 	}
 }
 
+func TestTerminalTaskReportsCredits(t *testing.T) {
+	for _, status := range []string{"cancelled", "failed", "completed"} {
+		t.Run(status, func(t *testing.T) {
+			h := setup(t)
+			if err := h.b.step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			h.sessionUsage = `{"total_credits":0.4}`
+			h.status = status
+			if err := h.b.step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			h.wantCredits(t, 400000)
+			if h.cancels != 1 || h.b.state.first() != nil || h.complete != nil || h.failure != nil {
+				t.Fatal("terminal task was not cleaned up without redelivering its result")
+			}
+		})
+	}
+}
+
+func TestSessionCreditsRequireContinuationBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want *int64
+	}{
+		{"new session", `{}`, new(int64(1250000))},
+		{"known zero", `{"continued":true,"credits":{"base":0}}`, new(int64(1250000))},
+		{"known prior usage", `{"continued":true,"credits":{"base":500000}}`, new(int64(750000))},
+		{"missing baseline", `{"continued":true,"credits":{}}`, nil},
+		{"journal before credits", `{"continued":true}`, nil},
+		{"unreliable old snapshot", `{"continued":true,"credits":{"session":1250000}}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var r run
+			if err := json.Unmarshal([]byte(tc.raw), &r); err != nil {
+				t.Fatal(err)
+			}
+			// Recovery must preserve an explicitly known zero baseline too.
+			raw, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r = run{}
+			if err := json.Unmarshal(raw, &r); err != nil {
+				t.Fatal(err)
+			}
+			r.setSessionCredits(1.25)
+			if tc.want == nil {
+				if r.Credits.Session != nil {
+					t.Fatalf("session history charged without a baseline: %d", *r.Credits.Session)
+				}
+			} else if r.Credits.Session == nil || *r.Credits.Session != *tc.want {
+				t.Fatalf("session delta = %v, want %d", r.Credits.Session, *tc.want)
+			}
+		})
+	}
+}
+
+func TestContinuedRunWithoutBaselineReportsOnlyCurrentSpans(t *testing.T) {
+	h := setup(t)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.b.state.first().Continued = true
+	h.sessionUsage = `{"total_credits":1.25}`
+	h.events = append(h.events, spanEvent("evt_span", 0.05))
+	h.finish("end_turn")
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.wantCredits(t, 50000)
+}
+
+func TestCancelledCreditsRetryBeforeAcknowledging(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.status, h.sessionUsage, h.usageStatus = "cancelled", `{"total_credits":0.4}`, http.StatusServiceUnavailable
+	if err := h.b.step(ctx); err == nil {
+		t.Fatal("failed usage report was not retried")
+	}
+	if h.cancelAcks != 0 || h.b.state.first() == nil {
+		t.Fatal("usage was discarded before a successful report")
+	}
+	h.usageStatus, h.cancelAckStatus = 0, http.StatusServiceUnavailable
+	if err := h.b.step(ctx); err == nil {
+		t.Fatal("failed cancellation acknowledgement was not retried")
+	}
+	h.wantCredits(t, 400000)
+	// Recover after reporting but before acknowledgement: do not re-report
+	// usage or lose the pending cancellation acknowledgement.
+	var err error
+	h.b.state, err = readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cancelAckStatus = 0
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.wantCredits(t, 400000)
+	if h.cancelAcks != 2 || h.b.state.first() != nil {
+		t.Fatal("cancellation acknowledgement did not recover")
+	}
+}
+
 func TestContinuedSessionReportsOnlyItsOwnCredits(t *testing.T) {
 	h := setup(t)
 	var events []map[string]any

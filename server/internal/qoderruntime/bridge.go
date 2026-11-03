@@ -341,6 +341,11 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			}
 			b.cleanup(ctx)
 		}
+		if err == nil {
+			if err := b.reportCredits(ctx, r); err != nil {
+				return err
+			}
+		}
 		if status.Status == "cancelled" {
 			if err := b.taskCall(ctx, r, "/cancel-ack", map[string]any{}, nil); err != nil {
 				return err
@@ -550,7 +555,8 @@ func (b *Bridge) continueSession(ctx context.Context, r *run, fingerprint string
 	}
 	r.Credits = runCredits{}
 	if total := s.total(); total != nil {
-		r.Credits.Base = creditsMicros(*total)
+		base := creditsMicros(*total)
+		r.Credits.Base = &base
 	}
 	return true, nil
 }
