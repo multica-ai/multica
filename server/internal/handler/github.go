@@ -1503,7 +1503,10 @@ func (h *Handler) handlePullRequestReviewEvent(ctx context.Context, body []byte)
 		slog.Warn("github: bad pull_request_review payload", "err", err)
 		return
 	}
-	if p.Installation.ID == 0 || p.Repository.Name == "" || p.PullRequest.Number == 0 {
+	if p.Installation.ID == 0 || p.Repository.Owner.Login == "" || p.Repository.Name == "" || p.PullRequest.Number <= 0 {
+		return
+	}
+	if p.Action != "submitted" && p.Action != "edited" && p.Action != "dismissed" {
 		return
 	}
 	if h.Metrics != nil {

@@ -81,7 +81,7 @@ func newIssueWakeupCommand() *cobra.Command {
 			c.Flags().String("until-property", "", "Condition: property PROPERTY_ID equals VALUE (PROPERTY_ID=VALUE; VALUE may be JSON)")
 			c.Flags().Bool("until-children-done", false, "Condition: every sub-issue is closed (or those up to --stage)")
 			c.Flags().Int32("stage", 0, "With --until-children-done: wait for this stage and earlier ones")
-			c.Flags().String("until-pr", "", "Condition: a linked pull request's checks finish (checks), it merges (merged), it has merge conflicts on its current head (conflicts; GitHub only), or it receives a review (reviewed, approved, changes_requested)")
+			c.Flags().String("until-pr", "", "Condition: a linked pull request's checks finish (checks), it merges (merged), it has merge conflicts on its current head (conflicts; GitHub only), or it receives a new human approval or request for changes (reviewed, approved, changes_requested; GitHub only; excludes bots, PR authors and comment-only reviews)")
 			c.Flags().String("until-issue", "", "Condition: another issue in this workspace reaches --until-issue-state")
 			c.Flags().String("until-issue-state", "done", "With --until-issue: done, ended (done or cancelled), in_review or blocked")
 			c.Flags().Int32("max-fires", 0, "Repeating rules: stop after this many runs (1-1000; continuous event rules default to 20)")

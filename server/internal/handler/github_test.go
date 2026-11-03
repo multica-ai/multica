@@ -3483,7 +3483,7 @@ func TestWebhook_UninstallDeletesAllBindings(t *testing.T) {
 		t.Errorf("deleted broadcasts must cover both workspaces; saw %v", seen)
 	}
 }
-func TestWebhook_PullRequestReview_EnqueuesAndRecordsMetrics(t *testing.T) {
+func TestWebhook_PullRequestReview_AcceptsSignedEvent(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}

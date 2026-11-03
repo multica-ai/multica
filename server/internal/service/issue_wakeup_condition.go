@@ -263,6 +263,9 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
 	case "pull_request":
+		if isPRReviewEvent(c.Event) {
+			return s.evaluatePRReviews(ctx, tx, w, c.Event)
+		}
 		// Without the snapshot client GitHub rows are never refreshed, so their
 		// checks and mergeability neither satisfy nor stall the rule. Self-hosted VCS rows carry
 		// their own commit statuses and are evaluated regardless (#9034).
@@ -316,16 +319,6 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 				if mergeable == "CONFLICTING" || ((mergeable == "UNKNOWN" || mergeable == "") && previous[key] > 0) {
 					keys = append(keys, key)
 					prs = append(prs, map[string]any{"number": number, "head_sha": head, "mergeable": "conflicting"})
-				}
-			case "reviewed", "approved", "changes_requested":
-				if !githubChecks {
-					continue
-				}
-				missingSnapshot = missingSnapshot || head == ""
-				key := fmt.Sprintf("%d@%s:%s", number, head, c.Event)
-				if head != "" && previous[key] > 0 {
-					keys = append(keys, key)
-					prs = append(prs, map[string]any{"number": number, "head_sha": head, "review": c.Event})
 				}
 			}
 		}
@@ -396,11 +389,8 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 			if linked == 0 && vcsLinked == 0 {
 				return false, "", nil, errPRNotLinked
 			}
-			if (c.Event == "conflicts" || c.Event == "reviewed" || c.Event == "approved" || c.Event == "changes_requested") && linked == 0 {
-				if c.Event == "conflicts" {
-					return false, "", nil, errPRConflictsUnsupported
-				}
-				return false, "", nil, errPRReviewsUnsupported
+			if c.Event == "conflicts" && linked == 0 {
+				return false, "", nil, errPRConflictsUnsupported
 			}
 			if c.Event != "merged" && missingSnapshot {
 				return false, "", nil, errPRSnapshotPending
@@ -499,8 +489,8 @@ func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db
 	if err != nil && !conditionDiagnostic(err) {
 		return w.NextFireAt, err
 	}
-	if err = saveConditionDiagnostic(ctx, q, w, err); err != nil {
-		return w.NextFireAt, err
+	if diagnosticErr := saveConditionDiagnostic(ctx, q, w, err); diagnosticErr != nil {
+		return w.NextFireAt, diagnosticErr
 	}
 	// condition_state dedups a satisfied predicate; each new satisfaction
 	// gets its own receipt key.
@@ -512,6 +502,12 @@ func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db
 			}
 		}
 		state = fingerprint
+	} else if isPRReviewCondition(w.Condition) {
+		// Keep the registration boundary and seen review IDs through waits,
+		// dismissals, unlink/relink, and temporary snapshot/config failures.
+		if err == nil {
+			state = fingerprint
+		}
 	} else {
 		state = ""
 	}
@@ -550,8 +546,7 @@ func conditionNewlyMet(previous, current string) bool {
 }
 
 // conditionFiresOnChange reports whether facts already true at registration
-// are ignored. Finished checks usually belong to the head the agent just
-// replaced, so a checks condition waits for a newer result; states such as a
+// are ignored. Checks and reviews wait for newer results; states such as a
 // status value, finished sub-issues or a merged PR fire as soon as they hold.
 func conditionFiresOnChange(raw []byte) bool {
 	var c WakeupCondition
@@ -562,14 +557,20 @@ func conditionFiresOnChange(raw []byte) bool {
 // baselineCondition records which facts already satisfy a new or re-enabled
 // rule, so it wakes the agent when they change rather than immediately.
 func (s *IssueWakeupService) baselineCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) error {
+	reviewCondition := isPRReviewCondition(w.Condition)
+	if reviewCondition {
+		w.ConditionState = encodePRReviewState(prReviewState{Since: now})
+	}
 	met, fingerprint, _, err := s.evaluateCondition(ctx, tx, q, w)
 	if err != nil && !conditionDiagnostic(err) {
 		return err
 	}
-	if err = saveConditionDiagnostic(ctx, q, w, err); err != nil {
-		return err
+	if diagnosticErr := saveConditionDiagnostic(ctx, q, w, err); diagnosticErr != nil {
+		return diagnosticErr
 	}
-	if !met {
+	if reviewCondition && err != nil {
+		fingerprint = w.ConditionState
+	} else if !met && !reviewCondition {
 		fingerprint = ""
 	}
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: fingerprint, NextFireAt: pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}})

@@ -37,6 +37,7 @@ func snapshotServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 func writeTestPR(w http.ResponseWriter, sha string, mergeable any, state string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"head":      map[string]any{"sha": sha, "repo": map[string]any{"full_name": "external/fork"}},
+		"user":      map[string]any{"login": "author"},
 		"mergeable": mergeable, "mergeable_state": state,
 	})
 }
@@ -48,6 +49,8 @@ func TestFetchPRSnapshotRESTPagination(t *testing.T) {
 		case "/repos/o/r/pulls/5":
 			prCalls++
 			writeTestPR(w, "sha1", true, "clean")
+		case "/repos/o/r/pulls/5/reviews":
+			_ = json.NewEncoder(w).Encode([]map[string]any{reviewEntry(1, "APPROVED", "reviewer", "User")})
 		case "/repos/o/r/commits/sha1/check-runs":
 			runPages++
 			if r.URL.Query().Get("per_page") != "100" || r.URL.Query().Get("filter") != "latest" {
@@ -92,6 +95,9 @@ func TestFetchPRSnapshotRESTPagination(t *testing.T) {
 	if len(snap.Contexts) != 203 || prCalls != 2 || runPages != 2 || statusPages != 2 {
 		t.Fatalf("contexts=%d PR calls=%d check pages=%d status pages=%d", len(snap.Contexts), prCalls, runPages, statusPages)
 	}
+	if len(snap.Reviews) != 1 || snap.Reviews[0].ID != 1 {
+		t.Fatalf("fetched reviews missing from snapshot: %+v", snap.Reviews)
+	}
 	if snap.Contexts[100].Conclusion != "stale" || snap.Contexts[101].Status != "in_progress" || snap.Contexts[101].Conclusion != "" || snap.Decided() {
 		t.Fatalf("failure plus running checks = %+v", snap)
 	}
@@ -120,6 +126,8 @@ func TestFetchPRSnapshotRESTResults(t *testing.T) {
 				switch r.URL.Path {
 				case "/repos/o/r/pulls/5":
 					writeTestPR(w, "sha1", nil, "unknown")
+				case "/repos/o/r/pulls/5/reviews":
+					_, _ = w.Write([]byte(`[]`))
 				case "/repos/o/r/commits/sha1/check-runs":
 					var entries []json.RawMessage
 					_ = json.Unmarshal([]byte(tc.runs), &entries)
@@ -165,6 +173,8 @@ func TestFetchPRSnapshotRESTRejectsPartialResults(t *testing.T) {
 						sha = ""
 					}
 					writeTestPR(w, sha, false, "dirty")
+				case "/repos/o/r/pulls/5/reviews":
+					_, _ = w.Write([]byte(`[]`))
 				case "/repos/o/r/commits/sha1/check-runs":
 					page := r.URL.Query().Get("page")
 					if failure == "check page failed" && page == "2" {

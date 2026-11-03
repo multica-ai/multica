@@ -56,11 +56,11 @@ In the issue below, Ops helper has asked suppliers for quotes and is waiting for
 | Collaboration | A field changes to a value | The issue's status, assignee, label, or a custom property takes the value you chose. |
 | Runs and sub-issues | An agent's run ends | A run on this issue by a given agent (or any agent) succeeds, fails, or is cancelled. |
 | Runs and sub-issues | Sub-issues finish | Every sub-issue is closed (`done` or `cancelled`), or every stage up to the one you pick is. An issue without sub-issues never fires. |
-| Linked | A linked PR's CI finishes | Or the PR merges, has merge conflicts, or receives a review. Only PRs linked directly to this issue count; with several, any one is enough. CI, conflicts, and reviews work only for GitHub pull requests. |
+| Linked | A linked PR's CI finishes | Or the PR merges, has merge conflicts, or receives a human approval or request for changes. Only PRs linked directly to this issue count; with several, any one is enough. Conflicts and reviews work only for GitHub pull requests. |
 | Linked | Another issue's status | Another issue is done, done or cancelled, or moves to In Review. |
 | | Custom events | Pick from the 25 raw events, such as reactions, attachments, edited comments, or resolved threads. |
 
-Multica checks field, sub-issue, PR, and other-issue conditions itself. If the condition already holds when you create the rule, the next check (within about 30 seconds) wakes the agent. CI is the exception: it only counts checks that finish after the rule was created.
+Multica checks field, sub-issue, PR, and other-issue conditions itself. If the condition already holds when you create the rule, the next check (within about 30 seconds) wakes the agent. CI and reviews wait for new results after registration. Review conditions ignore bots, the PR author, comment-only reviews, and dismissed decisions. Re-enabling ignores earlier reviews; pushing a commit does not replay a review. An approval submission does not mean all required merge approvals are satisfied.
 
 Every condition other than time waits for something to happen, and has three more settings:
 

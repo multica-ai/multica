@@ -581,6 +581,7 @@ the scheduler evaluates:
 | `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
 | `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
 | `pull_request` | `event=checks_finished`, `merged` or `conflicts` | a linked PR's checks finished on its current head, it merged, or an open GitHub PR is `CONFLICTING` on its current head |
+| `pull_request` | `event=reviewed`, `approved` or `changes_requested` | a new human approval or request for changes on a directly linked open/draft GitHub PR |
 | `other_issue` | `issue_id`, `state=done`, `ended`, `in_review` or `blocked` | another issue in the workspace reaches that state |
 
 A condition rule stays `kind=event`. Validation derives the same-issue events
@@ -593,6 +594,22 @@ fires again only after the predicate turned false or its facts changed (a new PR
 head's result, another sub-issue set). States already true at registration fire
 on the first check; finished checks from before registration are ignored. The
 watched issue's identifier is stored in the condition for display.
+
+Review conditions read `review_snapshot`, fetched through the existing GitHub
+REST client with Pull requests read permission. Bots, PR authors, comment-only
+reviews and dismissed decisions are excluded. Each rule stores its registration
+time and seen `(PR id, review id)` pairs in `condition_state`; these survive
+temporary errors, dismissals and unlink/relink. A new registration or re-enable
+starts a new boundary. Head changes do not replay a review. These conditions
+observe individual submissions, not whether branch-protection approval gates
+are satisfied. Review-watched PRs remain in the bounded TTL refresh sweep even
+after checks settle, so missed webhooks can recover.
+
+Apply additive migration 608, complete the backend rollout, then deploy the
+web/Desktop and CLI. Disable review conditions before rolling the backend back;
+keep the nullable column and re-enable the rules after upgrading again.
+The GitHub App should subscribe to `pull_request_review` for prompt refreshes;
+no additional repository permission is needed.
 
 `conflicts` reads the GitHub API snapshot (`api_mergeable`) and counts only a
 snapshot fetched for the PR's current head, so a verdict from before a push
