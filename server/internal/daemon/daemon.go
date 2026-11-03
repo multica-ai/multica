@@ -8679,6 +8679,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil {
 		promptOptions = append(promptOptions, WithWorktreeBranch(env.LocalWorktree.Branch, env.LocalWorktree.BaseCommit))
 	}
+	if runtime.GOOS != "windows" {
+		if selfBin, err := resolveSelfExecutable(); err == nil {
+			if shadow := shadowingCLIOnPath(selfBin, os.Getenv("PATH")); shadow != "" {
+				taskLog.Warn("another multica binary on PATH may shadow the daemon's CLI inside the agent", "daemon_cli", selfBin, "shadow", shadow)
+				promptOptions = append(promptOptions, WithShadowedCLI(selfBin, shadow))
+			}
+		}
+	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI

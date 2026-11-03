@@ -65,6 +65,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
+	b.WriteString(buildShadowedCLIBlock(opts.cliSelf, opts.cliShadow))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -111,6 +112,8 @@ type promptOpts struct {
 	worktreeReplayConflicts []string
 	worktreeBranch          string
 	worktreeBase            string
+	cliSelf                 string
+	cliShadow               string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
