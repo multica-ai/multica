@@ -525,14 +525,13 @@ export function createEnDict(
       {
         version: "0.8.0",
         date: "2026-11-03",
-        title: "A new workspace layout, a two-part Inbox, and one window per workspace on desktop",
+        title: "A new workspace layout, rebuilt views, and one window per workspace on desktop",
         changes: [],
         features: [
           "A new workspace layout: an app bar for Work, Team, Chat, Inbox, and Auto, plus a side panel you can collapse and resize.",
           "Views are rebuilt. Save favorites, combine or exclude filters, and filter by agent status or \"Me and my agents\".",
           "Change an Issue's status or assignee right from the Work sidebar.",
           "On desktop, each workspace opens in its own window.",
-          "The Inbox is split into Needs action and Activity. Comments that mention you, or no one, need action. Comments that only mention others go to Activity.",
           "Set up a WeCom bot by scanning a QR code, and see the agent's progress while it replies.",
           "Qoder Cloud Agents supports chat, quick create, and Issue attachments, and shows Qoder credits for each run.",
           "Run tasks on ZCode.",
@@ -572,6 +571,7 @@ export function createEnDict(
           "An older cancelled run no longer marks PR checks as failed.",
           "The current release highlight on the changelog timeline is no longer cut off.",
           "Settings search hides notification settings that aren't available.",
+          "Selected tabs no longer look outlined in dark mode.",
         ],
       },
       {
