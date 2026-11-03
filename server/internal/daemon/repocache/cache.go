@@ -895,6 +895,19 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	dirName := repoNameFromURL(params.RepoURL)
 	worktreePath := filepath.Join(params.WorkDir, dirName)
 
+	if reason := orphanedWorktreeReason(worktreePath); reason != "" {
+		movedTo, err := moveAside(worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("move orphaned worktree aside: %w", err)
+		}
+		c.logger.Warn("repo checkout: moved orphaned worktree aside",
+			"url", params.RepoURL,
+			"path", worktreePath,
+			"reason", reason,
+			"moved_to", movedTo,
+		)
+	}
+
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
 	// that omits the mode hint. This also makes provider transitions on a reused
@@ -1502,9 +1515,95 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 		err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
 	}
 	if err != nil {
+		// The pre-check above proved the path did not exist, so whatever is
+		// there now is this call's partial checkout. A cancelled git is killed
+		// before it can clean up, and the leftover tree would otherwise be
+		// reused by every later checkout of this workdir.
+		removePartialWorktree(gitRoot, worktreePath)
 		return "", err
 	}
 	return branchName, nil
+}
+
+func removePartialWorktree(gitRoot, worktreePath string) {
+	_ = os.RemoveAll(worktreePath)
+	adminDirs, _ := filepath.Glob(filepath.Join(gitRoot, "worktrees", "*"))
+	for _, adminDir := range adminDirs {
+		if owner, ok := worktreeRegistrationOwner(adminDir); ok && samePath(owner, worktreePath) {
+			_ = os.RemoveAll(adminDir)
+		}
+	}
+}
+
+// orphanedWorktreeReason reports why a linked worktree's .git file no longer
+// leads back to it, or "" when it does (or the path is not a linked worktree).
+// A checkout killed mid-add can lose its registration in the bare cache, and
+// git then gives the registration's name, taken from the directory basename,
+// to the next checkout with the same basename. Git commands in the orphan
+// then read, and can rewrite, that other checkout's index and HEAD.
+func orphanedWorktreeReason(worktreePath string) string {
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return ""
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return ""
+	}
+	adminDir := resolveGitPath(worktreePath, strings.TrimSpace(gitdir))
+	owner, ok := worktreeRegistrationOwner(adminDir)
+	if !ok {
+		return "registration " + adminDir + " is missing"
+	}
+	if !samePath(owner, worktreePath) {
+		return "registration " + adminDir + " belongs to " + owner
+	}
+	return ""
+}
+
+// worktreeRegistrationOwner returns the worktree directory a registration in
+// <bare>/worktrees/ points back to.
+func worktreeRegistrationOwner(adminDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(adminDir, "gitdir"))
+	if err != nil {
+		return "", false
+	}
+	return filepath.Dir(resolveGitPath(adminDir, strings.TrimSpace(string(data)))), true
+}
+
+// resolveGitPath resolves a path git recorded, which is relative to base when
+// worktree.useRelativePaths is set.
+func resolveGitPath(base, path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(base, path)
+}
+
+func samePath(a, b string) bool {
+	return canonicalPath(a) == canonicalPath(b)
+}
+
+// canonicalPath resolves symlinks (git records /private/var for macOS's /var)
+// through the parent when path itself no longer exists.
+func canonicalPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	if parent, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		return filepath.Join(parent, filepath.Base(path))
+	}
+	return filepath.Clean(path)
+}
+
+// moveAside renames path to a sibling instead of deleting it: an orphaned tree
+// can still hold files an agent wrote.
+func moveAside(path string) (string, error) {
+	dest := fmt.Sprintf("%s.orphaned-%d", path, time.Now().UnixNano())
+	if err := os.Rename(path, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
 }
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
