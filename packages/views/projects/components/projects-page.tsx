@@ -7,8 +7,8 @@ import {
   LayoutGrid,
   Pin,
   PinOff,
+  Plus,
   Rows3,
-  Search,
   Trash2,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
@@ -69,6 +69,7 @@ import type {
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -849,9 +850,11 @@ export function ProjectsPage() {
         <CollectionPageState
           icon={FolderKanban}
           title={t(($) => $.page.empty)}
+          description={t(($) => $.page.empty_description)}
           actions={
-            <Button size="sm" variant="outline" onClick={openCreateProject}>
-              {t(($) => $.page.create_first)}
+            <Button size="sm" onClick={openCreateProject}>
+              <Plus aria-hidden="true" />
+              {t(($) => $.page.new_project)}
             </Button>
           }
         />
@@ -876,15 +879,22 @@ export function ProjectsPage() {
               )}
               sort={sort}
               selection={{ selectedIds, onChange: setSelectedIds }}
-              empty={t(($) => $.page.no_matches)}
+              empty={
+                <CollectionNoMatches
+                  title={t(($) => $.page.no_matches)}
+                  onReset={clearFilters}
+                  hasFilters={hasActiveFilters}
+                />
+              }
             />
           ) : isLoading ? (
             <CardsLoading />
           ) : visible.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
-              <Search className="mb-3 h-10 w-10 opacity-30" />
-              <p className="text-body">{t(($) => $.page.no_matches)}</p>
-            </div>
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              onReset={clearFilters}
+              hasFilters={hasActiveFilters}
+            />
           ) : (
             <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4 pb-16", PAGE_GUTTER)}>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

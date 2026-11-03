@@ -3,11 +3,8 @@ import type { ArchivedInboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, type ArchivedInboxFilters } from "./filter-store";
 import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { InboxItem, InboxSection, InboxWorkspaceUnread } from "../types";
+import type { InboxItem, InboxWorkspaceUnread } from "../types";
 import { focusManager } from "@tanstack/react-query";
-import { inboxItemSection } from "./section";
-
-export { inboxItemSection, isInboxItemUnread } from "./section";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
@@ -190,20 +187,6 @@ export function useInboxUnreadCount(
       unreadCountForWorkspace(summary, wsId),
   });
   return data ?? 0;
-}
-
-/**
- * Active inbox items split into the two sections, each grouped one entry per
- * issue like {@link deduplicateInboxItems}. An issue with both kinds appears
- * in both sections, and routine activity never moves its action entry: each
- * section orders by its own newest row.
- */
-export function groupInboxItemsBySection(items: InboxItem[]): Record<InboxSection, InboxItem[]> {
-  const active = items.filter((i) => !i.archived);
-  return {
-    action: groupInboxItemsByIssue(active.filter((i) => inboxItemSection(i) === "action")),
-    activity: groupInboxItemsByIssue(active.filter((i) => inboxItemSection(i) === "activity")),
-  };
 }
 
 /**

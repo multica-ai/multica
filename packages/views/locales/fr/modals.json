@@ -61,6 +61,12 @@
     "toast_failed": "Échec de l'ajout de la sous-tâche",
     "toast_success": "{{identifier}} ajoutée comme sous-tâche"
   },
+  "add_project_issue": {
+    "title": "Ajouter une tâche existante",
+    "description": "Recherchez une tâche à déplacer dans ce projet",
+    "toast_success": "{{identifier}} a été déplacée dans le projet",
+    "toast_failed": "Impossible de déplacer la tâche"
+  },
   "run_confirm": {
     "title_assign": "Confirmer l'assignation ?",
     "assign_single": "Assigner cette tâche à {{name}}. Le travail démarrera immédiatement si les conditions d'exécution sont réunies.",

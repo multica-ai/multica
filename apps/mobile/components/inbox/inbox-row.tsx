@@ -12,7 +12,6 @@
  */
 import { Pressable, View } from "react-native";
 import type { InboxItem } from "@multica/core/types";
-import { isInboxItemUnread } from "@multica/core/inbox/section";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -28,7 +27,7 @@ interface Props {
 }
 
 export function InboxRow({ item, onPress }: Props) {
-  const isUnread = isInboxItemUnread(item);
+  const isUnread = !item.read;
   const { categoryOf, colorOf, iconOf } = useIssueStatuses();
   const displayTitle = getInboxDisplayTitle(item);
   const actorType = item.actor_type ?? item.recipient_type;

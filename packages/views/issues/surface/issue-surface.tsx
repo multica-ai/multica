@@ -9,6 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import {
@@ -37,6 +38,7 @@ import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
+import { CollectionPageState } from "../../layout/collection-page";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
@@ -289,20 +291,32 @@ function IssueSurfaceContent({
           ) : renderEmpty ? (
             renderEmpty(renderContext)
           ) : (
-            <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-faint-foreground" />
-              <p className="text-body">{t(($) => $.detail.empty_issues_title)}</p>
-              <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1"
-                onClick={() => controller.openCreateIssue()}
-              >
-                <Plus className="size-3.5 mr-1.5" />
-                {t(($) => $.detail.empty_issues_new_button)}
-              </Button>
-            </div>
+            <CollectionPageState
+              icon={ListTodo}
+              title={t(($) => $.detail.empty_issues_title)}
+              description={t(($) => $.detail.empty_issues_hint)}
+              actions={
+                <>
+                  <Button size="sm" onClick={() => controller.openCreateIssue()}>
+                    <Plus aria-hidden="true" />
+                    {t(($) => $.detail.empty_issues_new_button)}
+                  </Button>
+                  {scope.type === "project" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        useModalStore
+                          .getState()
+                          .open("project-add-issue", { projectId: scope.projectId })
+                      }
+                    >
+                      {t(($) => $.detail.empty_issues_add_existing)}
+                    </Button>
+                  ) : null}
+                </>
+              }
+            />
           )
         ) : (
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
@@ -390,25 +404,24 @@ function FilterDependencyErrorState({
 }) {
   const { t } = useT("issues");
   return (
-    <div
+    <CollectionPageState
       role="alert"
-      className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground"
-    >
-      <AlertTriangle className="h-10 w-10 text-faint-foreground" />
-      <p className="text-body">
-        {kind === "working"
+      tone="warning"
+      icon={AlertTriangle}
+      title={
+        kind === "working"
           ? t(($) => $.working_filter_error.title)
           : kind === "unread"
             ? t(($) => $.unread_filter_error.title)
-            : t(($) => $.status_catalog_error.title)}
-      </p>
-      {kind === "status" && (
-        <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>
-      )}
-      <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
-        {t(($) => $.status_catalog_error.retry)}
-      </Button>
-    </div>
+            : t(($) => $.status_catalog_error.title)
+      }
+      description={kind === "status" ? t(($) => $.status_catalog_error.hint) : undefined}
+      actions={
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          {t(($) => $.status_catalog_error.retry)}
+        </Button>
+      }
+    />
   );
 }
 
@@ -424,13 +437,16 @@ function FilteredEmptyState() {
     : clearFilters;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-      <FilterX className="h-10 w-10 text-faint-foreground" />
-      <p className="text-body">{t(($) => $.filtered_empty.title)}</p>
-      <Button variant="outline" size="sm" className="mt-1" onClick={handleClear}>
-        {t(($) => $.filtered_empty.clear_button)}
-      </Button>
-    </div>
+    <CollectionPageState
+      size="compact"
+      icon={FilterX}
+      title={t(($) => $.filtered_empty.title)}
+      actions={
+        <Button variant="outline" size="sm" onClick={handleClear}>
+          {t(($) => $.filtered_empty.clear_button)}
+        </Button>
+      }
+    />
   );
 }
 

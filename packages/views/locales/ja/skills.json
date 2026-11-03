@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "まだスキルがありません",
-      "description": "skill を作成またはインポートします。"
+      "description": "skill はエージェントが再利用できる仕事のやり方です。作成するか、ランタイムからインポートします。"
     },
     "no_matches": {
       "title": "一致なし",

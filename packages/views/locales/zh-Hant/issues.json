@@ -120,6 +120,9 @@
     "breadcrumb_title": "任務",
     "breadcrumb_workspace_fallback": "工作區",
     "empty_title": "還沒有任務",
+    "empty_description": "任務是交給成員或 AI 代理的一件具體工作。指派給 AI 代理後，它會在你的執行時上自己開始。",
+    "break_down_with_chat": "用聊天拆解需求",
+    "break_down_prompt": "我想完成下面這件事。先問清楚你需要了解的，然後在這個工作區裡把它拆成任務：\n\n",
     "move_failed": "移動任務失敗"
   },
   "status": {
@@ -411,7 +414,7 @@
       }
     },
     "search_placeholder": "搜尋任務...",
-    "search_empty": "沒有匹配的任務。"
+    "search_empty": "沒有匹配的任務"
   },
   "list": {
     "empty_status": "無任務",
@@ -451,6 +454,7 @@
     "metadata_description": "AI 代理和整合記錄的鍵值資料，用於銜接工作流程。",
     "section_load_failed_retry": "載入失敗，點選重試",
     "not_found": "這個任務不存在或已在該工作區被刪除。",
+    "not_found_title": "未找到該任務",
     "breadcrumb_project_unknown": "未知專案",
     "back": "返回",
     "title_placeholder": "任務標題",
@@ -870,6 +874,7 @@
     "col_tokens": "Token",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} Token",
+    "credits_count": "{{credits}} {{provider}} 點數",
     "details_toggle": "執行詳情",
     "detail_breakdown": "費用明細",
     "detail_total": "合計",
@@ -1777,7 +1782,8 @@
       "star": "將{{name}}新增到側欄",
       "unstar": "將{{name}}從側欄移除",
       "row_actions": "{{name}} 的操作",
-      "no_matches": "沒有符合的檢視"
+      "empty_title": "還沒有儲存的檢視",
+      "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
     }
   }
 }

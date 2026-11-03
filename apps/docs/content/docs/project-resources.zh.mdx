@@ -122,7 +122,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 `<agent>` 由智能体名字得来：转成小写后只保留英文字母和数字，其余字符换成 `-`，最长 30 个字符；名字里没有英文字母和数字时写作 `agent`。所以"运营助手"处理 OPS-21 时，分支是 `agent/agent/ops-21`。`<issue>` 是小写的任务编号。
 
-中途失败的运行同样会报告它的分支，因为它已经把智能体做出来的部分提交进去了。
+中途失败的运行同样会报告它的分支：智能体的提交都在上面，没提交的部分按[不会静默丢东西](#nothing-is-silently-lost)里的方式保留。
 
 </Accordion>
 <Accordion title="后续对话接着上一轮继续" id="follow-ups-continue-the-branch">
@@ -157,9 +157,16 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Accordion>
 <Accordion title="不会静默丢东西" id="nothing-is-silently-lost">
 
-智能体留下的未提交改动，会在 worktree 被移除前提交到那个分支上，运行中途失败时同样如此。
+智能体留下的未提交改动不会随 worktree 一起删除，运行中途失败时同样如此。它们去哪里，取决于智能体这次运行有没有自己提交：
 
-极少数情况下连这次提交都做不了，例如仓库开了 `commit.gpgSign` 而运行时拿不到签名密钥。这时 worktree 会被刻意保留，运行标记为失败，在你仓库里执行 `git worktree list` 就能看到存放这些改动的目录。
+- **智能体没有提交过：** 所有没被 gitignore 的文件都会提交到分支上。这次提交不会运行仓库的提交钩子。
+- **智能体自己提交过：** 只交付它的提交。没提交的部分（生成的产物、临时文件、没提交的修改）存到隐藏 ref `refs/multica/leftovers/<branch>/<task>` 下，不进分支。每次运行开始时都会把这条规则告诉智能体，所以自己提交的智能体决定交付哪些内容。
+
+例外：一开始要先和你的本地改动完成 merge 的运行（见[冲突处理](#conflicts-are-resolved-by-the-agent)）会提交它留下的全部内容，因为这些未提交的改动里有你的修改。
+
+想看某次运行存下了什么，用 `git for-each-ref refs/multica/leftovers` 列出这些 ref，再用 `git show --stat <ref>` 查看。`git restore --source=<ref> -- <path>` 可以把某个文件取回到你的工作目录。
+
+极少数情况下连这次提交或保存都做不了，例如仓库开了 `commit.gpgSign` 而运行时拿不到签名密钥。这时 worktree 会被刻意保留，运行标记为失败，在你仓库里执行 `git worktree list` 就能看到存放这些改动的目录。
 
 </Accordion>
 <Accordion title="没有产生改动的运行不留下任何东西" id="no-changes-leave-nothing">
@@ -169,7 +176,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Accordion>
 <Accordion title="留在你仓库里的分支和隐藏 ref" id="what-stays-in-your-repo">
 
-worktree 位于运行时的工作区目录内，会按[正常的清理周期](/daemon-runtimes#cleanup)回收。留在你仓库里的有两样东西：分支，以及每条分支对应的一个隐藏 ref（在 `refs/multica/local-state/` 下），记录这条分支归谁所有、以及上次续接时你目录里的内容。
+worktree 位于运行时的工作区目录内，会按[正常的清理周期](/daemon-runtimes#cleanup)回收。留在你仓库里的有：分支；每条分支对应的一个隐藏 ref（在 `refs/multica/local-state/` 下），记录这条分支归谁所有、以及上次续接时你目录里的内容；以及智能体自己提交后又留下未提交改动的每次运行，各对应一个隐藏 ref（在 `refs/multica/leftovers/` 下）。
 
 隐藏 ref 不会出现在 `git branch` 里，可以用 `git for-each-ref refs/multica` 查看。Multica 删除分支时会一并删掉它；你自己删掉的分支所对应的 ref，会在下一次该仓库上有运行开始时被清理。也可以用 `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d` 一次性清掉。
 
