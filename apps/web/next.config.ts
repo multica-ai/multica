@@ -8,6 +8,7 @@ import {
   resolveRemoteApiUrl,
 } from "./config/runtime-urls";
 import { createMDX } from "fumadocs-mdx/next";
+import { MAX_UPLOAD_REQUEST_SIZE } from "./config/upload-limit";
 
 // Load root .env so local next.config.ts rewrites see REMOTE_API_URL / DOCS_URL.
 // Production requests use proxy.ts runtime rewrites, which read process.env
@@ -41,6 +42,7 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
+  experimental: { proxyClientMaxBodySize: MAX_UPLOAD_REQUEST_SIZE },
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),

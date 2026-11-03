@@ -228,6 +228,57 @@ func (m *failingMockStorage) GetReader(_ context.Context, key string) (io.ReadCl
 	return nil, fmt.Errorf("failingMockStorage GetReader: key not found: %q", key)
 }
 
+type zeroFilledReader struct{}
+
+func (zeroFilledReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func TestUploadFileSizeLimit(t *testing.T) {
+	originalStorage := testHandler.Storage
+	defer func() { testHandler.Storage = originalStorage }()
+
+	for _, testCase := range []struct {
+		name       string
+		fileSize   int64
+		wantStatus int
+	}{
+		{"at limit", maxUploadSize, http.StatusOK},
+		{"over limit", maxUploadSize + 1, http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			storage := &mockStorage{}
+			testHandler.Storage = storage
+
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			part, err := writer.CreateFormFile("file", "size-limit.bin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.CopyN(part, zeroFilledReader{}, testCase.fileSize); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			request := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
+			request.Header.Set("Content-Type", writer.FormDataContentType())
+			request.Header.Set("X-User-ID", testUserID)
+			response := httptest.NewRecorder()
+			testHandler.UploadFile(response, request)
+			if response.Code != testCase.wantStatus {
+				t.Fatalf("file size %d: want status %d, got %d: %s", testCase.fileSize, testCase.wantStatus, response.Code, response.Body.String())
+			}
+			if testCase.wantStatus == http.StatusRequestEntityTooLarge && storage.files != nil {
+				t.Fatal("oversized file was uploaded")
+			}
+		})
+	}
+}
+
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
 	testHandler.Storage = &mockStorage{}
