@@ -16,7 +16,7 @@ interface Job {
   state: "active" | "uploaded" | "failed";
 }
 
-async function contentHash(file: File): Promise<string | null> {
+export async function contentHash(file: File): Promise<string | null> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -29,7 +29,7 @@ async function contentHash(file: File): Promise<string | null> {
  * before its bytes arrive; the sender waits for the outcome instead of the
  * composer. Content the daemon already has is never transferred again.
  */
-export function createLocalV2Uploads(client: Pick<LocalV2ScopeClient, "upload" | "linkUpload" | "discardUpload">, capabilities: () => Promise<string[]>, onOutcome: (outcome: UploadOutcome) => void) {
+export function createLocalV2Uploads(client: Pick<LocalV2ScopeClient, "upload" | "linkUpload" | "discardUpload">, capabilities: () => Promise<string[]>, onOutcome: (outcome: UploadOutcome) => void, hash: (file: File) => Promise<string | null> = contentHash) {
   const jobs = new Map<string, Job>();
   const waiting: (() => void)[] = [];
   let active = 0;
@@ -45,7 +45,7 @@ export function createLocalV2Uploads(client: Pick<LocalV2ScopeClient, "upload" |
     await slot();
     try {
       if (job.abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
-      const sha256 = await contentHash(job.file);
+      const sha256 = await hash(job.file);
       if (sha256) {
         try {
           await client.linkUpload({ id: job.id, sha256, name: job.file.name, mime_type: job.file.type || "application/octet-stream" });

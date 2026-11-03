@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { ATTACHMENT_RESERVE_CAPABILITY, createLocalV2Uploads, type UploadOutcome } from "./local-v2-uploads";
+import { ATTACHMENT_RESERVE_CAPABILITY, contentHash, createLocalV2Uploads, type UploadOutcome } from "./local-v2-uploads";
 
 const file = (name = "a.txt") => new File(["hello"], name, { type: "text/plain" });
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
@@ -14,11 +14,16 @@ function setup(overrides: Partial<Parameters<typeof createLocalV2Uploads>[0]> = 
     ...overrides,
   };
   const outcomes: UploadOutcome[] = [];
-  const uploads = createLocalV2Uploads(client as never, async () => capabilities, (outcome) => outcomes.push(outcome));
+  // A fixed hash keeps these tests off the crypto thread pool, whose timing varies.
+  const uploads = createLocalV2Uploads(client as never, async () => capabilities, (outcome) => outcomes.push(outcome), async () => "hash-of-file");
   return { client, outcomes, uploads };
 }
 
 describe("local v2 uploads", () => {
+  it("identifies content by its SHA-256", async () => {
+    await expect(contentHash(file())).resolves.toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+  });
+
   it("answers with the final id before the bytes arrive", async () => {
     let finish!: (value: ReturnType<typeof stored>) => void;
     const { client, outcomes, uploads } = setup({ upload: vi.fn(() => new Promise((resolve) => { finish = resolve; })) as never });
@@ -37,8 +42,7 @@ describe("local v2 uploads", () => {
     const { client, outcomes, uploads } = setup({ linkUpload: vi.fn(async () => stored()) });
     const started = await uploads.begin(file());
     await flush();
-    // SHA-256 of "hello".
-    expect(client.linkUpload).toHaveBeenCalledWith({ id: started.id, sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", name: "a.txt", mime_type: "text/plain" });
+    expect(client.linkUpload).toHaveBeenCalledWith({ id: started.id, sha256: "hash-of-file", name: "a.txt", mime_type: "text/plain" });
     expect(client.upload).not.toHaveBeenCalled();
     expect(outcomes).toEqual([{ attachmentId: started.id, state: "uploaded" }]);
   });
