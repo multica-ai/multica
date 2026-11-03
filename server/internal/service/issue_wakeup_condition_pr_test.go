@@ -31,6 +31,12 @@ func (tx *prConditionTx) Query(_ context.Context, sql string, args ...any) (pgx.
 	if strings.Contains(sql, "UPDATE issue_wakeup_receipt") {
 		return &sliceRows{}, nil
 	}
+	// The canned GitHub rows below describe an issue with no self-hosted VCS
+	// pull requests; the VCS aggregation finds nothing to add. The VCS path
+	// itself is covered against PostgreSQL by the condition test suite.
+	if strings.Contains(sql, "FROM vcs_pull_request") {
+		return &sliceRows{}, nil
+	}
 	if !strings.Contains(sql, "WHERE ipr.issue_id=$1") || len(args) != 1 || args[0] != tx.issue {
 		return nil, fmt.Errorf("unexpected PR scope: %s %v", sql, args)
 	}
@@ -51,7 +57,12 @@ func (tx *prConditionTx) Exec(_ context.Context, sql string, args ...any) (pgcon
 }
 
 func TestWakeupConditionPREvaluation(t *testing.T) {
-	row := func(state, head, checks string) []any { return []any{int32(1), state, head, checks} }
+	row := func(state, head, checks string) []any { return []any{int32(1), state, head, checks, head, "", "p1"} }
+	// conflictRow describes a PR whose snapshot was fetched for snapshotHead
+	// while the PR's current head is "head".
+	conflictRow := func(state, snapshotHead, mergeable string) []any {
+		return []any{int32(1), state, snapshotHead, "", "head", mergeable, "p1"}
+	}
 	for _, tc := range []struct {
 		name, event string
 		available   bool
@@ -71,6 +82,17 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 		{"one matching PR", "checks_finished", true, [][]any{row("open", "", ""), row("open", "head", "SUCCESS")}, nil, true},
 		{"merge without snapshots", "merged", false, [][]any{row("merged", "", "")}, nil, true},
 		{"open without snapshots", "merged", false, [][]any{row("open", "", "")}, nil, false},
+		{"conflicts unconfigured", "conflicts", false, [][]any{conflictRow("open", "head", "CONFLICTING")}, errPRSnapshotsUnavailable, false},
+		{"conflicts unlinked", "conflicts", true, nil, errPRNotLinked, false},
+		{"conflicts no snapshot", "conflicts", true, [][]any{conflictRow("open", "", "")}, errPRSnapshotPending, false},
+		{"conflicts verdict for an older head", "conflicts", true, [][]any{conflictRow("open", "old", "CONFLICTING")}, errPRSnapshotPending, false},
+		{"mergeable", "conflicts", true, [][]any{conflictRow("open", "head", "MERGEABLE")}, nil, false},
+		{"mergeability unknown", "conflicts", true, [][]any{conflictRow("open", "head", "UNKNOWN")}, nil, false},
+		{"conflicting", "conflicts", true, [][]any{conflictRow("open", "head", "CONFLICTING")}, nil, true},
+		{"conflicting draft", "conflicts", true, [][]any{conflictRow("draft", "head", "CONFLICTING")}, nil, true},
+		{"conflicting but closed", "conflicts", true, [][]any{conflictRow("closed", "head", "CONFLICTING")}, nil, false},
+		{"conflicting but merged", "conflicts", true, [][]any{conflictRow("merged", "head", "CONFLICTING")}, nil, false},
+		{"one conflicting PR", "conflicts", true, [][]any{conflictRow("open", "old", "MERGEABLE"), conflictRow("open", "head", "CONFLICTING")}, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: tc.available}}
@@ -82,6 +104,65 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 			}
 			if met && (fingerprint == "" || len(observed["pull_requests"].([]map[string]any)) != 1) {
 				t.Fatalf("missing terminal PR evidence: fingerprint=%q observed=%v", fingerprint, observed)
+			}
+		})
+	}
+}
+
+func TestConditionNewlyMet(t *testing.T) {
+	for _, tc := range []struct {
+		previous, current string
+		want              bool
+	}{
+		{"", "pr:a@1:conflicting", true},
+		{"pr:a@1:conflicting", "pr:a@1:conflicting", false},
+		{"pr:a@1:conflicting,b@1:conflicting", "pr:b@1:conflicting", false},
+		{"pr:b@1:conflicting", "pr:a@1:conflicting,b@1:conflicting", true},
+		{"pr:a@1:conflicting", "pr:a@2:conflicting", true},
+		{"pr:1@h:SUCCESS,2@h:FAILURE", "pr:2@h:FAILURE", false},
+		// Number-only keys repeat across repositories; a second one is news.
+		{"pr:7", "pr:7,7", true},
+		{"pr:7,7", "pr:7", false},
+		{"pr:7,7", "pr:7,7", false},
+		{"status:todo", "status:in_review", true},
+		{"status:in_review", "status:in_review", false},
+		{`property:{"a":1,"b":2}`, `property:{"a":1,"b":2}`, false},
+		{"children:2", "children:3", true},
+	} {
+		if got := conditionNewlyMet(tc.previous, tc.current); got != tc.want {
+			t.Errorf("conditionNewlyMet(%q, %q) = %t, want %t", tc.previous, tc.current, got, tc.want)
+		}
+	}
+}
+
+func TestWakeupConditionPRConflictsAcrossRecompute(t *testing.T) {
+	ctx := context.Background()
+	s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: true}}
+	w := db.IssueWakeup{ID: dbid.NewV7(), IssueID: dbid.NewV7(), Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})}
+	tx := &prConditionTx{issue: w.IssueID}
+	q := db.New(tx)
+	snapshot := func(head, mergeable string) [][]any {
+		return [][]any{{int32(1), "open", head, "", head, mergeable, "p1"}}
+	}
+	for _, step := range []struct {
+		name, previous string
+		prs            [][]any
+		wantMet        bool
+		wantState      string
+	}{
+		{"conflict", "", snapshot("a", "CONFLICTING"), true, "pr:p1@a:conflicting"},
+		{"recompute on the same head keeps it", "pr:p1@a:conflicting", snapshot("a", "UNKNOWN"), true, "pr:p1@a:conflicting"},
+		{"resolved", "pr:p1@a:conflicting", snapshot("a", "MERGEABLE"), false, ""},
+		{"recompute after resolving stays resolved", "", snapshot("a", "UNKNOWN"), false, ""},
+		{"recompute on a new head starts over", "pr:p1@a:conflicting", snapshot("b", "UNKNOWN"), false, ""},
+		{"new head still conflicting", "pr:p1@a:conflicting", snapshot("b", "CONFLICTING"), true, "pr:p1@b:conflicting"},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			tx.prs = step.prs
+			w.ConditionState = step.previous
+			met, fingerprint, _, err := s.evaluateCondition(ctx, tx, q, w)
+			if err != nil || met != step.wantMet || (met && fingerprint != step.wantState) {
+				t.Fatalf("met=%t fingerprint=%q err=%v; want met=%t fingerprint=%q", met, fingerprint, err, step.wantMet, step.wantState)
 			}
 		})
 	}
@@ -108,8 +189,8 @@ func TestWakeupConditionPRDiagnosticPolling(t *testing.T) {
 		want error
 	}{
 		{nil, errPRNotLinked},
-		{[][]any{{int32(1), "open", "", ""}}, errPRSnapshotPending},
-		{[][]any{{int32(1), "open", "head", "PENDING"}}, nil},
+		{[][]any{{int32(1), "open", "", "", "head", "", "p1"}}, errPRSnapshotPending},
+		{[][]any{{int32(1), "open", "head", "PENDING", "head", "MERGEABLE", "p1"}}, nil},
 	} {
 		tx.prs = step.prs
 		w.LastError = tx.lastError
@@ -132,35 +213,39 @@ func TestWakeupConditionPRDiagnosticPolling(t *testing.T) {
 	}
 }
 
-func TestSaveConditionDiagnosticPreservesDispatchErrors(t *testing.T) {
+func TestSaveConditionDiagnosticReplacesEarlierFailures(t *testing.T) {
 	ctx := context.Background()
 	tx := &prConditionTx{}
 	q := db.New(tx)
 	realFailure := pgtype.Text{String: "dispatch failed", Valid: true}
+	tx.lastError = realFailure
 	w := db.IssueWakeup{ID: dbid.NewV7(), LastError: realFailure}
 
 	if err := saveConditionDiagnostic(ctx, q, w, errPRNotLinked); err != nil {
 		t.Fatal(err)
 	}
+	if tx.writes != 1 || tx.lastError.String != conditionDiagnosticPrefix+errPRNotLinked.Error() {
+		t.Fatalf("recovered evaluation kept the earlier dispatch failure: writes=%d error=%+v", tx.writes, tx.lastError)
+	}
 	if err := saveConditionDiagnostic(ctx, q, w, nil); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 0 || tx.lastError.Valid {
-		t.Fatalf("condition evaluation changed an unrelated error: writes=%d error=%+v", tx.writes, tx.lastError)
+	if tx.writes != 2 || tx.lastError.Valid {
+		t.Fatalf("recovered evaluation did not clear the earlier dispatch failure: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 
 	w.LastError = pgtype.Text{String: conditionDiagnosticPrefix + errPRNotLinked.Error(), Valid: true}
 	if err := saveConditionDiagnostic(ctx, q, w, errPRSnapshotPending); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 1 || tx.lastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
+	if tx.writes != 3 || tx.lastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
 		t.Fatalf("owned diagnostic was not updated: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 	w.LastError = tx.lastError
 	if err := saveConditionDiagnostic(ctx, q, w, nil); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 2 || tx.lastError.Valid {
+	if tx.writes != 4 || tx.lastError.Valid {
 		t.Fatalf("owned diagnostic was not cleared: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 }

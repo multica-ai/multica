@@ -2,11 +2,9 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Settings, Workflow } from "lucide-react";
+import { Check, ChevronDown, Settings, Workflow } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, clientErrorMessage } from "@multica/core/api";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { handoffStepCount, resolveProjectWorkflow, useIssueWorkflows, useSetProjectWorkflow } from "@multica/core/issue-workflows";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -112,16 +110,14 @@ export function WorkflowChoiceItems({
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const { workflows } = useIssueWorkflows(wsId);
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = resolveProjectWorkflow(workflows, project);
   const separator = t(($) => $.workflows.list_separator);
-  const options = enabled ? workflows : workflows.filter((w) => w.is_default || w.id === current?.id);
 
   return (
     <>
-      {options.map((workflow) => {
+      {workflows.map((workflow) => {
         const usedBy = projects
           .filter((p) => (workflow.is_default ? !p.workflow_id : workflow.project_ids.includes(p.id)))
           .map((p) => p.title)
@@ -140,6 +136,8 @@ export function WorkflowChoiceItems({
               </span>
               <span className="mt-0.5 block text-caption text-muted-foreground">
                 {t(($) => $.workflows.settings.statuses, { count: workflow.steps.length })}
+                {handoffStepCount(workflow) > 0 &&
+                  ` · ${t(($) => $.workflows.settings.handoffs, { count: handoffStepCount(workflow) })}`}
               </span>
               <span className="block truncate text-caption text-muted-foreground">
                 {usedBy
@@ -164,19 +162,18 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const { workflows } = useIssueWorkflows(wsId);
   const { canManageProject } = useWorkflowPermissions(project);
   const { choose, busy, dialog } = useProjectWorkflowSwitch(project);
   const current = resolveProjectWorkflow(workflows, project);
 
-  if (!enabled && !project.workflow_id) return null;
   const name = current?.name ?? t(($) => $.workflows.default_name);
   const handoffs = current ? handoffStepCount(current) : 0;
+  const handoffLabel = handoffs > 0 ? t(($) => $.workflows.settings.handoffs, { count: handoffs }) : null;
 
   if (!canManageProject) {
     return (
-      <span className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
+      <span title={name} className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
         <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-medium">{name}</span>
       </span>
@@ -191,15 +188,15 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
           render={
             <button
               type="button"
-              className="-ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
+              title={handoffLabel ? `${name} · ${handoffLabel}` : name}
+              className="-ml-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
             >
               <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate font-medium">{name}</span>
-              {handoffs > 0 && (
-                <span className="shrink-0 text-muted-foreground">
-                  · {t(($) => $.workflows.settings.handoffs, { count: handoffs })}
-                </span>
-              )}
+              {/* Only the name competes for the narrow sidebar row (MUL-8119):
+                  a sibling summary, however it is weighted, still takes width
+                  from the name. The handoff count lives in the title and the
+                  picker items instead. */}
+              <span className="min-w-0 truncate font-medium">{name}</span>
               <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
             </button>
           }
@@ -209,15 +206,11 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
             <DropdownMenuLabel>{t(($) => $.workflows.project.picker_title)}</DropdownMenuLabel>
             <WorkflowChoiceItems project={project} onChoose={(w) => void choose(w)} />
           </DropdownMenuGroup>
-          {enabled && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>
-                <Settings aria-hidden className="size-3.5" />
-                {t(($) => $.workflows.project.manage)}
-              </DropdownMenuItem>
-            </>
-          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>
+            <Settings aria-hidden className="size-3.5" />
+            {t(($) => $.workflows.project.manage)}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {dialog}

@@ -995,7 +995,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'opencode_clock_skew')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       -- Mirrors the GetLastTaskSession auth-resolution guard: a provider that
       -- cannot resolve its auth method fails deterministically on resume, and
@@ -1009,6 +1009,10 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+      -- MUL-8188: a runtime that names its own transcript invalid (Kiro panics
+      -- with "invalid conversation history received" on every prompt) replays
+      -- the same failure on every resume. Mirrors taskfailure.UnresumableHistory.
+      AND NOT (COALESCE(error, '') ILIKE '%invalid conversation history%')
     )
   )
   -- MUL-5722, mirroring GetLastTaskSession: an overflowed resume records no
@@ -2281,6 +2285,38 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 			&i.ChannelOutboundMessageIds,
 			&i.ChannelTypingSettled,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionCreators = `-- name: ListChatSessionCreators :many
+SELECT id, creator_id FROM chat_session
+WHERE id = ANY($1::uuid[])
+`
+
+type ListChatSessionCreatorsRow struct {
+	ID        pgtype.UUID `json:"id"`
+	CreatorID pgtype.UUID `json:"creator_id"`
+}
+
+// Owners of a page of chat tasks, so task lists can hide the content of chat
+// tasks the viewer did not start.
+func (q *Queries) ListChatSessionCreators(ctx context.Context, ids []pgtype.UUID) ([]ListChatSessionCreatorsRow, error) {
+	rows, err := q.db.Query(ctx, listChatSessionCreators, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatSessionCreatorsRow{}
+	for rows.Next() {
+		var i ListChatSessionCreatorsRow
+		if err := rows.Scan(&i.ID, &i.CreatorID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -1,12 +1,14 @@
 "use client";
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { isInboxItemUnread } from "@multica/core/inbox/queries";
 import { StatusIcon } from "../../issues/components";
 import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, ArchiveRestore } from "lucide-react";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
+import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
@@ -79,7 +81,7 @@ export function InboxListItem({
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
   // real unread state, so archived rows would otherwise keep an unread marker
   // the user cannot clear from this view. Suppress the affordance here only.
-  const showUnread = item.read !== true && !isArchivedView;
+  const showUnread = isInboxItemUnread(item) && !isArchivedView;
   const ActionIcon = isArchivedView ? ArchiveRestore : Archive;
   const actionLabel = isArchivedView
     ? t(($) => $.list.unarchive_tooltip)
@@ -154,24 +156,27 @@ export function InboxListItem({
                 focus anywhere in the row so it is reachable by Tab. Touch has
                 neither, so it stays hidden on a pointer that cannot hover and
                 the compact menu below carries the same action. */}
-            <button
-              type="button"
-              title={actionLabel}
-              aria-label={actionLabel}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAction();
-              }}
-              className="hidden rounded-xs p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
-            >
-              <ActionIcon className="h-3.5 w-3.5" />
-            </button>
+            <DeferredTooltip
+              content={actionLabel}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={actionLabel}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAction();
+                  }}
+                  className="hidden rounded-xs p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
+                >
+                  <ActionIcon className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
             <InboxRowMenu item={item} view={view} />
             {item.issue_status && (
               // Icon-only, like every other issue row — but a colour is not a
               // name, and this row has no space for the CustomStatusChip the
-              // board card and list row carry. `title` is that name, and it is
-              // the same affordance the archive button above already uses.
+              // board card and list row carry. `title` is that name.
               <span
                 title={statusLabelOf(item.issue_status)}
                 className="flex shrink-0 items-center"

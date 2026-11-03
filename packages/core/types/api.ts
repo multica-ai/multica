@@ -312,6 +312,38 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
+export type IssueTableRelation = "assigned" | "created" | "my_agents";
+
+export type IssueTableNegatableFilter =
+  | "statuses"
+  | "priorities"
+  | "assignees"
+  | "creators"
+  | "project_ids"
+  | "project_statuses"
+  | "label_ids"
+  | "relations"
+  | "due_dates";
+
+export type IssueTableDueDate = "overdue" | "today" | "this_week" | "next_7_days" | "none";
+
+/** One node of `filters.advanced`: a group when it has `children`. */
+export type IssueTableFilterNode = IssueTableFilterGroup | IssueTableFilterCondition;
+
+export interface IssueTableFilterGroup {
+  match: "all" | "any";
+  children: IssueTableFilterNode[];
+}
+
+export interface IssueTableFilterCondition {
+  /** A flat filter's field, or `property:<definitionId>`. */
+  field: IssueTableNegatableFilter | `property:${string}`;
+  negate?: boolean;
+  /** Actors are `${type}:${id}`; assignees and project_ids accept "none".
+   *  A property takes `filters.properties` members. */
+  values: PropertyFilterValue[];
+}
+
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
   priorities?: IssuePriority[];
@@ -325,6 +357,19 @@ export interface IssueTableFilters {
    *  matches. */
   project_statuses?: ProjectStatus[];
   label_ids?: string[];
+  /** How the requesting user relates to the issue, OR within the list:
+   *  assigned to me, created by me, assigned to an agent I own. */
+  relations?: IssueTableRelation[];
+  /** Dimensions whose predicate is inverted ("is not"). Listing a dimension
+   *  that has no values of its own changes nothing. */
+  negate?: IssueTableNegatableFilter[];
+  /** Relative due-date buckets, OR within the list. Needs `today`. */
+  due_dates?: IssueTableDueDate[];
+  /** The viewer's calendar day ("YYYY-MM-DD") the due-date buckets resolve
+   *  against. */
+  today?: string;
+  /** A condition tree ANDed with the flat filters above. */
+  advanced?: IssueTableFilterGroup;
   /** Same shape as `ListIssuesParams.properties`: bare strings are exact
    *  equality / "No value", operator objects narrow scalar matches. */
   properties?: Record<string, PropertyFilterValue[]>;

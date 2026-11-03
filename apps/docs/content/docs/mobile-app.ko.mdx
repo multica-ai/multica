@@ -4,10 +4,11 @@ description: 소스에서 Multica를 빌드해 iPhone에 설치하고 Cloud 또�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica iOS 클라이언트는 아직 App Store에 출시되지 않았습니다. Mac에서 공개 소스 저장소의 Release 버전을 빌드해 자신의 iPhone에 설치할 수 있습니다. Android 클라이언트는 아직 제공하지 않습니다.
 
-설치된 앱은 기본적으로 Multica Cloud에 연결되며 기존 계정으로 로그인하면 됩니다. 워크스페이스, 태스크, 댓글, 실행 기록은 모두 서버에 저장되므로 Web이나 Desktop에서 직접 동기화할 필요가 없습니다.
+설치된 앱은 기본적으로 Multica Cloud에 연결되며 기존 계정으로 로그인하면 됩니다. 워크스페이스, 태스크, 댓글, 실행 기록은 모두 서버에 저장되므로 Web이나 Desktop에서 동기화할 필요가 없습니다.
 
 ## 준비 사항
 
@@ -23,6 +24,8 @@ Xcode 또는 실제 기기 개발 환경이 설정되지 않았다면 먼저 Exp
 
 ## iPhone에 설치
 
+<Steps>
+<Step>
 저장소를 clone하고 의존성을 설치합니다.
 
 ```bash
@@ -30,16 +33,20 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 pnpm install
 ```
-
-그런 다음 저장소 루트에서 다음 명령을 실행합니다.
+</Step>
+<Step>
+저장소 루트에서 다음 명령을 실행합니다.
 
 ```bash
 pnpm ios:mobile:device:prod:release
 ```
 
 Metro에 의존하지 않는 Release 버전을 빌드해 연결된 iPhone에 설치합니다. 처음 빌드할 때는 iOS 의존성을 내려받고 React Native를 컴파일하며 이후에는 Xcode 캐시를 재사용합니다.
-
-iPhone에서 앱 실행을 차단하면 **설정 → 일반 → VPN 및 기기 관리**에서 해당 개발자 인증서를 신뢰하도록 설정하세요.
+</Step>
+<Step>
+iPhone에서 앱을 엽니다. 실행이 차단되면 **설정 → 일반 → VPN 및 기기 관리**에서 해당 개발자 인증서를 신뢰하도록 설정하세요.
+</Step>
+</Steps>
 
 ## 무료 서명의 7일 제한
 
@@ -72,16 +79,23 @@ pnpm ios:mobile:device:prod:release
 
 Release 빌드는 API 주소를 앱에 포함합니다. `apps/mobile/.env.production`은 공개 multica.ai 기본값과 함께 커밋되어 있어 새로 클론한 상태에서도 프로덕션 빌드가 가능합니다.
 
-자체 호스팅 인스턴스에 연결하려면 `apps/mobile/.env.production.example`을 `apps/mobile/.env.production.local`로 복사한 뒤 복사본을 수정합니다.
+자체 호스팅 인스턴스에 연결하려면 다음과 같이 합니다.
+
+<Steps>
+<Step>
+`apps/mobile/.env.production.example`을 `apps/mobile/.env.production.local`로 복사하고 복사본에 주소를 적습니다.
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`.local` 파일은 커밋된 기본값을 키 단위로 덮어쓰며 gitignore되므로 개인 API 주소가 저장소에 들어가지 않습니다. `EXPO_PUBLIC_API_URL`은 필수입니다. `EXPO_PUBLIC_WEB_URL`은 "Copy link", "Open on web" 같은 메뉴에 사용됩니다. 복사본에 두 값을 모두 설정하세요. 적지 않은 키는 multica.ai 기본값을 그대로 쓰므로 이 메뉴가 자체 호스팅 인스턴스 대신 multica.ai를 엽니다.
-
-수정한 뒤 빌드 명령을 다시 실행합니다. iPhone에서 이 API 주소에 접근할 수 있어야 합니다. 로컬 네트워크 주소를 사용할 때는 `localhost`를 쓰지 마세요. iPhone에서는 휴대전화 자체를 가리킵니다.
+`.local` 파일은 커밋된 기본값을 키 단위로 덮어쓰며 gitignore되므로 개인 API 주소가 저장소에 들어가지 않습니다. `EXPO_PUBLIC_API_URL`은 필수입니다. `EXPO_PUBLIC_WEB_URL`은 "Copy link", "Open on web" 같은 메뉴에 사용됩니다. 두 값을 모두 설정하세요. 적지 않은 키는 multica.ai 기본값을 그대로 쓰므로 이 메뉴가 자체 호스팅 인스턴스 대신 multica.ai를 엽니다.
+</Step>
+<Step>
+빌드 명령 `pnpm ios:mobile:device:prod:release`를 다시 실행합니다. iPhone에서 이 API 주소에 접근할 수 있어야 합니다. 로컬 네트워크 주소를 사용할 때는 `localhost`를 쓰지 마세요. iPhone에서는 휴대전화 자체를 가리킵니다.
+</Step>
+</Steps>
 
 <Callout type="warning">
 `.env.production`을 직접 수정하면 현재 checkout의 프로덕션 설정이 바뀝니다. 개인 값은 gitignore된 `.env.production.local`에 두세요.

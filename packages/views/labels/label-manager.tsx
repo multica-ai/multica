@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@multica/core/labels";
 import type { Label, LabelResourceType } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label as FieldLabel } from "@multica/ui/components/ui/label";
@@ -160,13 +161,13 @@ export function LabelManager({ scope }: { scope: LabelScope }) {
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={t(($) => $.labels.actions.open, { name: label.name })}
+                          label={t(($) => $.labels.actions.open, { name: label.name })}
                         >
                           <MoreHorizontal className="size-4" />
-                        </Button>
+                        </IconButton>
                       }
                     />
                     <DropdownMenuContent align="end">

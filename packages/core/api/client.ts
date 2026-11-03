@@ -1,9 +1,11 @@
 import type { ZodType } from "zod";
+import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -54,7 +56,9 @@ import type {
   UpdateRuntimeProfileRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   IssueSubscriber,
+  IssueUnread,
   Comment,
   CommentTriggerPreview,
   IssueTriggerPreview,
@@ -208,6 +212,8 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
   RedeemWecomBindingTokenResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
@@ -385,8 +391,14 @@ import {
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
+  BeginWecomInstallResponseSchema,
+  MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+  WecomInstallStatusResponseSchema,
+  MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  ListLarkInstallationsResponseSchema,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
@@ -408,6 +420,10 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+  IssueUnreadPageSchema,
+  EMPTY_ISSUE_UNREAD_PAGE,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2020,6 +2036,34 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
+  async listQoderEnvironments(wsId: string, token: string, baseUrl: string, signal?: AbortSignal) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", body: JSON.stringify({ qoder_token: token, base_url: baseUrl }), signal }));
+  }
+  async listQoderAgents(wsId: string) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/agents`));
+  }
+  async stopQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/stop`, { method: "POST" }));
+  }
+  // Refuses with 409 `runtime_delete_plan_changed` and the current
+  // `active_agents` when the confirmed list no longer matches.
+  async disconnectQoderConnection(wsId: string, expectedActiveAgentIds: string[]) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "DELETE", body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }) }));
+  }
+  async getQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`));
+  }
+  // Saving keeps a paused connection paused; use resumeQoderConnection to run again.
+  async saveQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "PUT", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async resumeQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/resume`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async checkQoderConnection(wsId: string, input: QoderInput): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/qoder/check`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) });
+  }
+
   async listRuntimes(
     params?: { workspace_id?: string; owner?: "me" },
     workspaceSlug?: string,
@@ -2030,9 +2074,10 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    return this.fetch(`/api/runtimes?${search}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema.array(), [], { endpoint: "listRuntimes" });
   }
 
   async listCloudRuntimeNodes(
@@ -2379,6 +2424,7 @@ export class ApiClient {
     runtimeId: string,
     patch: {
       visibility?: "private" | "public";
+      shared_with?: string[];
       /**
        * Custom display name. Pass an empty string to clear it (the server
        * reverts to the default name). Omit to leave it unchanged — a JSON
@@ -2387,15 +2433,18 @@ export class ApiClient {
       custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
+      /** Runtime-wide concurrency cap; `null` removes it, omit to leave unchanged. */
+      max_concurrent_tasks?: number | null;
     },
   ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema, EMPTY_RUNTIME, { endpoint: "updateRuntime" });
   }
 
-  // Confirmed counterpart to a public→private visibility PATCH. The PATCH
+  // Confirmed counterpart to a runtime access restriction PATCH. The PATCH
   // returns a structured 409 when teammates still have bound agents or active
   // tasks on the runtime; callers present that plan, then submit its exact
   // agent/task ID sets here. The server rechecks both sets in one transaction.
@@ -2403,12 +2452,14 @@ export class ApiClient {
     runtimeId: string,
     expectedNonownerAgentIds: string[],
     expectedTaskIds: string[],
+    sharedWith?: string[],
   ): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}/revoke-workspace-access`, {
       method: "POST",
       body: JSON.stringify({
         expected_nonowner_agent_ids: expectedNonownerAgentIds,
         expected_task_ids: expectedTaskIds,
+        shared_with: sharedWith,
       }),
     });
   }
@@ -2688,12 +2739,14 @@ export class ApiClient {
   async initiateListModels(
     runtimeId: string,
     options: { force?: boolean } = {},
+    workspaceSlug?: string,
   ): Promise<RuntimeModelListRequest> {
     const query = options.force === true ? "?force=true" : "";
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models${query}`,
       {
         method: "POST",
+        headers: workspaceHeader(workspaceSlug),
       },
     );
     return parseWithFallback<RuntimeModelListRequest>(
@@ -2707,9 +2760,11 @@ export class ApiClient {
   async getListModelsResult(
     runtimeId: string,
     requestId: string,
+    workspaceSlug?: string,
   ): Promise<RuntimeModelListRequest> {
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models/${requestId}`,
+      { headers: workspaceHeader(workspaceSlug) },
     );
     return parseWithFallback<RuntimeModelListRequest>(
       raw,
@@ -2880,6 +2935,30 @@ export class ApiClient {
     return task;
   }
 
+  /** Every unread mark, across all pages: a row missing here reads as "read". */
+  async listIssueUnread(): Promise<IssueUnread[]> {
+    const items: IssueUnread[] = [];
+    let cursor: string | null = null;
+    do {
+      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const raw = await this.fetch<unknown>(`/api/issues/unread${query}`);
+      const page = parseWithFallback(raw, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, {
+        endpoint: "GET /api/issues/unread",
+      });
+      items.push(...page.items);
+      cursor = page.next_cursor === cursor ? null : page.next_cursor;
+    } while (cursor);
+    return items;
+  }
+
+  async markIssueRead(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/read`, { method: "POST" });
+  }
+
+  async markIssueUnread(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unread`, { method: "POST" });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     const raw = await this.fetch<unknown>("/api/inbox");
@@ -2890,6 +2969,14 @@ export class ApiClient {
 
   async markInboxRead(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
+  }
+
+  /** Marks every active notification on the issue read for the caller. */
+  async markIssueInboxRead(issueId: string): Promise<MarkIssueInboxReadResult> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+    return parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, {
+      endpoint: "POST /api/inbox/issues/:id/read",
+    });
   }
 
   async markInboxUnread(id: string): Promise<InboxItem> {
@@ -4164,10 +4251,8 @@ export class ApiClient {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
   }
 
-  // Workspace workflows (MUL-7420). Reads are open to any workspace member;
-  // creating, editing and deleting a workflow is owner/admin only. Adoption
-  // (creating a workflow, pointing a project at one) is gated server-side by
-  // the project_workflows_v1 flag and returns 403 when it is off.
+  // Workspace workflows (MUL-7420). Any workspace member may read and create
+  // workflows; only the workflow owner and workspace admins may edit or delete.
   async listIssueWorkflows(): Promise<ListIssueWorkflowsResponse> {
     const raw = await this.fetch<unknown>(`/api/issue-workflows`);
     return parseWithFallback(raw, ListIssueWorkflowsResponseSchema, EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE, {
@@ -4632,14 +4717,18 @@ export class ApiClient {
     });
   }
 
-  async putIssueViewPreference(data: {
-    scope_type: string;
-    scope_id?: string | null;
-    prefs: { hidden: string[]; order: string[] };
-  }): Promise<IssueViewPreference> {
+  async putIssueViewPreference(
+    data: {
+      scope_type: string;
+      scope_id?: string | null;
+      prefs: Record<string, unknown>;
+    },
+    workspaceSlug?: string,
+  ): Promise<IssueViewPreference> {
     const raw = await this.fetch<unknown>("/api/issue-view-preferences", {
       method: "PUT",
       body: JSON.stringify(data),
+      headers: workspaceHeader(workspaceSlug),
     });
     return parseWithFallback(raw, IssueViewPreferenceSchema, EMPTY_ISSUE_VIEW_PREFERENCE, {
       endpoint: "PUT /api/issue-view-preferences",
@@ -5075,7 +5164,13 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const endpoint = `/api/workspaces/${workspaceId}/lark/installations`;
+    return parseWithFallback(
+      await this.fetch(endpoint),
+      ListLarkInstallationsResponseSchema,
+      EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
+      { endpoint },
+    );
   }
 
   async beginLarkInstall(
@@ -5333,6 +5428,51 @@ export class ApiClient {
     return parseWithFallback(raw, WecomInstallationSchema, EMPTY_WECOM_INSTALLATION, {
       endpoint: "POST /api/workspaces/:id/wecom/install/byo",
     });
+  }
+
+  // beginWecomInstall starts (or resumes) a scan-code install: the backend
+  // hands back a session id, and the install worker fetches the QR from WeCom
+  // out of band. Callers poll getWecomInstallStatus for the QR itself.
+  //
+  // idempotencyKey must be stable for one user gesture — a retried or
+  // double-submitted request with the same key reuses the existing session
+  // rather than burning a WeCom generate quota slot on a second QR.
+  async beginWecomInstall(
+    workspaceId: string,
+    agentId: string,
+    idempotencyKey: string,
+  ): Promise<BeginWecomInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/begin?${search.toString()}`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+      },
+    );
+    return parseWithFallback(
+      raw,
+      BeginWecomInstallResponseSchema,
+      MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/wecom/install/begin" },
+    );
+  }
+
+  // getWecomInstallStatus is one poll of a scan-install session. The response
+  // carries the QR while pending, and the installation id once bound.
+  async getWecomInstallStatus(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<WecomInstallStatusResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/${sessionId}`,
+    );
+    return parseWithFallback(
+      raw,
+      WecomInstallStatusResponseSchema,
+      MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/install/:sessionId" },
+    );
   }
 
   async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {

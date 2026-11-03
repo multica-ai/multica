@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Workflow } from "lucide-react";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
+import { Settings, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow } from "@multica/core/issue-workflows";
@@ -29,11 +27,10 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const catalog = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
   const { project, workflow } = useProjectWithWorkflow(wsId, projectId);
-  const { isAdmin } = useWorkflowPermissions(project);
+  const { canCreateWorkflow } = useWorkflowPermissions(project);
   const handlerLabel = useStepHandlerLabel(project);
   const [open, setOpen] = useState(false);
   if (!workflow || !project) return null;
@@ -87,9 +84,8 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
             );
           })}
         </ol>
-        <p className="mt-2 text-caption text-muted-foreground">{t(($) => $.workflows.detail.card_hint)}</p>
-        {isAdmin && enabled && (
-          <div className="-mx-3 -mb-3 mt-1 border-t border-surface-border p-1">
+        {canCreateWorkflow && (
+          <div className="-mx-3 -mb-3 mt-2 border-t border-surface-border p-1">
             <Button
               variant="ghost"
               size="sm"

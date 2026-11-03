@@ -1,0 +1,126 @@
+{
+  "title": "設定",
+  "account": {
+    "title": "帳號",
+    "sign_out": "退出登入",
+    "sign_out_message": "你需要重新登入才能在此裝置上使用 Multica。",
+    "workspace": "工作區",
+    "workspaces": "工作區",
+    "notifications_subtitle": "通知去向和系統通知",
+    "load_failed": "工作區載入失敗"
+  },
+  "profile": {
+    "title": "個人資料",
+    "name": "姓名",
+    "email": "信箱",
+    "save": "儲存個人資料",
+    "saving": "儲存中..."
+  },
+  "appearance": {
+    "title": "外觀",
+    "theme": "主題",
+    "light": "淺色",
+    "dark": "深色",
+    "system": "跟隨系統"
+  },
+  "language": {
+    "title": "語言",
+    "system": "跟隨系統",
+    "english": "English",
+    "chinese_simplified": "簡體中文",
+    "chinese_traditional": "繁體中文"
+  },
+  "notifications": {
+    "title": "收件箱",
+    "issues": "任務",
+    "inbox": "收件箱",
+    "chat": "聊天",
+    "mentions": "提及",
+    "assignments": "分配給我的",
+    "status_changes": "狀態變更",
+    "saved": "通知設定已儲存"
+  },
+  "workspace": {
+    "switch": "切換工作區",
+    "select": "選擇工作區",
+    "empty": "還沒有工作區"
+  },
+  "avatar": {
+    "take": "拍照",
+    "library": "從相簿選擇",
+    "remove": "移除頭像",
+    "change_hint": "點按更換頭像",
+    "permission_title": "需要權限",
+    "permission_message": "拍照需要相機權限。",
+    "too_large_title": "圖片過大",
+    "too_large_message": "請選擇小於 5 MB 的圖片。",
+    "upload_failed": "上傳失敗",
+    "upload_failed_default": "無法上傳頭像。",
+    "remove_failed": "移除失敗",
+    "remove_failed_default": "無法移除頭像。"
+  },
+  "errors": {
+    "load_failed": "通知偏好設定載入失敗。",
+    "save_failed": "個人資料儲存失敗。",
+    "save_failed_default": "無法儲存你的個人資料。"
+  },
+  "email_fixed": "信箱在註冊時設定，無法在這裡修改。",
+  "groups": {
+    "system": "系統",
+    "system_notifications": "系統通知",
+    "system_description": "帳號變更、安全提醒和產品更新。"
+  },
+  "routing": {
+    "title": "通知去向",
+    "description": "變更只影響之後的新通知。",
+    "reset": "恢復預設",
+    "routes": {
+      "action": {
+        "label": "需要處理",
+        "description": "計入未讀"
+      },
+      "activity": {
+        "label": "動態",
+        "description": "安靜記錄，不計未讀"
+      },
+      "muted": {
+        "label": "關閉",
+        "description": "不進收件箱，在任務裡仍能看到"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "分配給我",
+        "description": "任務分配給你時"
+      },
+      "mentions": {
+        "label": "提及",
+        "description": "有人 @ 你時，包括 @all 和 @squad"
+      },
+      "member_comments": {
+        "label": "成員評論",
+        "description": "成員在你訂閱的任務裡發表評論時"
+      },
+      "agent_failures": {
+        "label": "AI 代理出錯",
+        "description": "AI 代理執行失敗或被阻塞、需要你介入時"
+      },
+      "status_changes": {
+        "label": "狀態變更",
+        "description": "你訂閱的任務狀態變化時"
+      },
+      "assignee_changes": {
+        "label": "負責人變更",
+        "description": "任務換了負責人，或你被取消分配時"
+      },
+      "updates": {
+        "label": "優先順序與日期",
+        "description": "優先順序、開始日期或截止日期變化時"
+      },
+      "agent_comments": {
+        "label": "AI 代理評論",
+        "description": "AI 代理在你訂閱的任務裡回覆時"
+      }
+    }
+  }
+}

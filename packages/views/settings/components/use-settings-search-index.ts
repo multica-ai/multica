@@ -1,18 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { NOTIFICATION_ROUTE_KINDS } from "@multica/core/notification-preferences/routes";
 import { useT } from "../../i18n";
 import type { SettingsSearchEntry } from "./settings-search";
 import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
-
-const NOTIFICATION_GROUPS = [
-  "assignments",
-  "status_changes",
-  "comments",
-  "mentions",
-  "updates",
-  "agent_activity",
-] as const;
 
 export interface SettingsSearchPage {
   value: string;
@@ -89,17 +81,22 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.issue_fields_title),
         description: t(($) => $.issue.description),
       },
-      ...NOTIFICATION_GROUPS.map((group) => ({
+      {
         tab: "notifications",
-        anchor: group,
-        title: t(($) => $.notifications.groups[group].label),
-        description: t(($) => $.notifications.groups[group].description),
+        anchor: "inbox",
+        title: t(($) => $.notifications.title),
+        description: t(($) => $.notifications.description),
+      },
+      ...NOTIFICATION_ROUTE_KINDS.map(({ key }) => ({
+        tab: "notifications",
+        anchor: key,
+        title: t(($) => $.notifications.kinds[key].label),
+        description: t(($) => $.notifications.kinds[key].description),
       })),
       {
         tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
-        description: t(($) => $.notifications.system.description),
       },
       {
         tab: "notifications",

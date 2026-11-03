@@ -58,6 +58,7 @@ let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "https://api.example.test",
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
@@ -272,6 +273,12 @@ function renderReplyInput({
 // same way a user does.
 function activateComposer(shellTestId: "comment-composer-shell" | "reply-composer-shell") {
   fireEvent.click(screen.getByTestId(shellTestId));
+}
+
+/** Native `disabled` while empty or sending; `aria-disabled` while an upload
+ *  blocks it, so the reason tooltip stays reachable. */
+function isSendBlocked(button: HTMLButtonElement): boolean {
+  return button.disabled || button.getAttribute("aria-disabled") === "true";
 }
 
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
@@ -629,7 +636,7 @@ describe("comment composers", () => {
     resolveSubmit(true);
 
     // Success: the composer clears (now empty → submit disabled, lock released).
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
   });
 
@@ -827,7 +834,7 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 });
 
@@ -880,7 +887,7 @@ describe("comment composers — upload submit gate", () => {
 
     const pending = startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     // Screen readers must hear "busy", not just a dead control.
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
@@ -888,7 +895,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     expect(getSubmitButton(container)).not.toHaveAttribute("aria-busy");
   });
 
@@ -903,7 +910,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
     const pending = startPendingUpload(container, "mine.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(insertPlaceholderSpy).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -956,7 +963,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
 
     const pending = startPendingUpload(container, "doomed.png");
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     await act(async () => {
       pending.fail();
@@ -1032,7 +1039,7 @@ describe("comment composers — upload submit gate", () => {
     // Draft + pending upload mount the editor directly (no shell).
     const editor = await screen.findByTestId("editor");
 
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
     // The shortcut path bypasses the button — the submit-time re-read of the
@@ -1052,7 +1059,7 @@ describe("comment composers — upload submit gate", () => {
           uploadAttachment("att-prev", "https://cdn.example/att-prev.png"),
         );
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
   });
@@ -1065,18 +1072,18 @@ describe("comment composers — upload submit gate", () => {
     const first = startPendingUpload(container, "a.png");
     const second = startPendingUpload(container, "b.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // First one lands — the second is still in flight, so send must stay shut.
     await act(async () => {
       first.resolve(uploadAttachment("att-a", "https://cdn.example/att-a.png"));
     });
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
 
     await act(async () => {
       second.resolve(uploadAttachment("att-b", "https://cdn.example/att-b.png"));
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("re-enables send after a FAILED upload so the draft isn't stuck", async () => {
@@ -1085,14 +1092,14 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
 
     const pending = startPendingUpload(container);
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // uploadWithToast reports the failure and resolves null — the placeholder
     // is dropped and the body never referenced it, so submit must come back.
     await act(async () => {
       pending.fail();
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("sends the attachment id once the upload completes", async () => {
@@ -1105,7 +1112,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-9", "https://cdn.example/att-9.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() =>
@@ -1231,7 +1238,7 @@ describe("comment composers — upload submit gate", () => {
 
     startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
   });
 
@@ -1314,7 +1321,7 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
     expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

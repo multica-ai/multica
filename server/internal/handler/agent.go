@@ -300,6 +300,23 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 	gw["token"] = prev.Gateway.Token
 }
 
+// openclawModelOverride reads the agent's persistent underlying-model override
+// from runtime_config. Every claim snapshots the current setting until it is
+// changed or cleared. Absent, malformed, or whitespace-only values return "".
+func openclawModelOverride(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var rc struct {
+		ModelOverride string `json:"model_override"`
+	}
+	if err := json.Unmarshal(trimmed, &rc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(rc.ModelOverride)
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -356,6 +373,16 @@ type TaskIssueStatusData struct {
 // in the per-turn prompt, never in the cached runtime brief.
 type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
+}
+
+// ClaimParentIssue points a sub-issue's run at its parent issue, where the
+// discussion that produced the sub-issue lives. Identifier is empty when the
+// workspace prefix could not be loaded; the daemon then names the parent by ID.
+type ClaimParentIssue struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
 }
 
 // TaskCancellationActor is the point-in-time actor snapshot attached to a
@@ -435,6 +462,11 @@ type AgentTaskResponse struct {
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// ModelOverride snapshots the agent's persistent OpenClaw model override at
+	// claim time. Later config edits affect subsequent claims, not this payload.
+	// Mirrors internal/daemon/types.go with the same JSON name; empty for other
+	// providers.
+	ModelOverride string `json:"model_override,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
@@ -482,6 +514,16 @@ type AgentTaskResponse struct {
 	TriggerAuthorName     string                 `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	NewCommentCount       int                    `json:"new_comment_count,omitempty"`       // ISSUE-WIDE comments since this agent's last run — every thread, not just the triggering one (CountNewCommentsSince); excludes the injected trigger and the agent's own comments; omitempty so old daemons ignore it
 	NewCommentsSince      string                 `json:"new_comments_since,omitempty"`      // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it. Suppressed with the count when the delta is zero — NewCommentsDeltaKnown, not this field, is what says the server looked
+
+	ProcessCleanupCapability string `json:"process_cleanup_capability,omitempty"`
+
+	// MUL-8218: set only when the trigger comment was edited AFTER the run
+	// whose session this claim resumes had started, so that session's history
+	// may still hold an earlier version of the text. EditedAt is RFC3339;
+	// Revision is the comment's current revision. omitempty so old daemons
+	// ignore both.
+	TriggerCommentEditedAt string `json:"trigger_comment_edited_at,omitempty"`
+	TriggerCommentRevision int64  `json:"trigger_comment_revision,omitempty"`
 	// NewCommentsDeltaKnown reports that the issue-wide delta above was
 	// actually COMPUTED this claim — both the anchor lookup and the count
 	// query succeeded. Without it, NewCommentCount == 0 is ambiguous: a true
@@ -532,6 +574,12 @@ type AgentTaskResponse struct {
 	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
 	ParentIssueID            string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	// ParentIssue is the parent of the issue this run works on, for issue-bound
+	// runs on a sub-issue. Unrelated to ParentIssueID above, which is where a
+	// quick-create run must file the issue it is about to create. Omitted when
+	// the issue has no parent or the parent cannot be read in this workspace;
+	// the daemon then renders no parent block.
+	ParentIssue *ClaimParentIssue `json:"parent_issue,omitempty"`
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -744,6 +792,15 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	// MUL-8218: set when this comment was edited after the run whose session
+	// this claim resumes had started (see triggerCommentEditedSince). omitempty
+	// so old daemons ignore both.
+	EditedAt string `json:"edited_at,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+
+	// source is the row this entry was read from, kept so the claim can run
+	// the edit check once the resumed session is known. Never serialized.
+	source db.Comment
 }
 
 // TaskUsageData is one (provider, model) slice of a single run's token usage.
@@ -756,6 +813,9 @@ type CoalescedCommentData struct {
 // from its rate table. A pointer, not a zero value: 0 ticks is a real answer
 // ("the provider says this was free") and must stay distinguishable from
 // "the provider said nothing".
+//
+// CreditsMicros is the provider's charge in millionths of its own credit unit,
+// nil for token-metered providers. It is never converted to USD.
 type TaskUsageData struct {
 	Provider         string `json:"provider,omitempty"`
 	Model            string `json:"model"`
@@ -764,6 +824,7 @@ type TaskUsageData struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	CostUsdTicks     *int64 `json:"cost_usd_ticks,omitempty"`
+	CreditsMicros    *int64 `json:"credits_micros,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -1108,10 +1169,10 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 			continue
 		}
 		// ListAgentRuntimes exposes every row to workspace owner/admin and only
-		// owner/public rows to regular members. Keep the coarse bridge for the
+		// owner/shared/public rows to regular members. Keep the coarse bridge for the
 		// rows that the viewer's runtime list cannot carry.
 		if runtime.Visibility == "public" ||
-			(runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == viewerID) {
+			service.RuntimeAllowsUser(runtime, parseUUID(viewerID)) {
 			continue
 		}
 		result[uuidToString(runtime.ID)] = deriveAgentRuntimeAvailability(runtime, now)
@@ -1467,10 +1528,26 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
 
+	if err := agent.ValidateCustomArgs(runtime.Provider, req.CustomArgs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if runtime.Provider == "qoder_cloud" {
+		raw, _ := json.Marshal(req.RuntimeConfig)
+		if err := validateQoderAgentConfig(raw); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		overrides := qoderOverrides{skills: len(req.SkillIDs), customEnv: len(req.CustomEnv), customArgs: len(req.CustomArgs), mcpConfig: req.McpConfig, model: req.Model, thinkingLevel: req.ThinkingLevel, serviceTier: req.ServiceTier}
+		if err := overrides.validate(); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+	}
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
@@ -1598,7 +1675,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
 
@@ -2021,20 +2098,90 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
 			return
 		}
 		// Task delivery authorizes private runtimes against the agent owner,
 		// not the member making this update. Admin management permission must
 		// not save a binding that the existing delivery gate will reject.
-		if runtime.Visibility == "private" && runtime.OwnerID != existing.OwnerID {
-			writeError(w, http.StatusForbidden, "this runtime is private; its owner must match the agent owner")
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "this runtime is private; its owner must grant the agent owner access")
 			return
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	// Validate the settings the agent will have after this update, not only the
+	// fields in the request: a Qoder agent must never be left with settings the
+	// bridge refuses at run time.
+	runtimeChange := req.RuntimeConfig != nil || req.RuntimeID != nil
+	if runtimeChange || req.CustomArgs != nil || req.McpConfig != nil || req.Model != nil || req.ThinkingLevel != nil || req.ServiceTier != nil {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, 400, "cannot resolve agent runtime")
+				return
+			}
+		}
+		if req.CustomArgs != nil || req.RuntimeID != nil {
+			var customArgs []string
+			if req.CustomArgs != nil {
+				customArgs = *req.CustomArgs
+			} else if len(existing.CustomArgs) > 0 {
+				if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to read existing custom_args")
+					return
+				}
+			}
+			if err := agent.ValidateCustomArgs(provider, customArgs); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if provider == "qoder_cloud" {
+			if runtimeChange {
+				raw := existing.RuntimeConfig
+				if req.RuntimeConfig != nil {
+					raw, _ = json.Marshal(req.RuntimeConfig)
+				}
+				if err := validateQoderAgentConfig(raw); err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
+			}
+			overrides := storedQoderOverrides(existing)
+			if req.RuntimeID != nil {
+				skills, err := h.Queries.ListAgentSkills(r.Context(), existing.ID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+					return
+				}
+				overrides.skills = len(skills)
+			}
+			if req.CustomArgs != nil {
+				overrides.customArgs = len(*req.CustomArgs)
+			}
+			if req.McpConfig != nil {
+				overrides.mcpConfig = *req.McpConfig
+			}
+			if req.Model != nil {
+				overrides.model = *req.Model
+			}
+			if req.ThinkingLevel != nil {
+				overrides.thinkingLevel = *req.ThinkingLevel
+			}
+			if req.ServiceTier != nil {
+				overrides.serviceTier = *req.ServiceTier
+			}
+			if err := overrides.validate(); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -2304,7 +2451,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
+			return
+		}
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "the agent owner does not have access to this runtime")
 			return
 		}
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
@@ -2836,6 +2987,11 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 			taskIDs[i] = t.ID
 		}
 	}
+	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), tasks, resp); err != nil {
+		slog.Warn("list agent tasks: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
@@ -3125,11 +3281,18 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	}
 
 	resp := make([]AgentTaskResponse, 0, len(tasks))
+	kept := make([]db.AgentTaskQueue, 0, len(tasks))
 	for _, t := range tasks {
 		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
 			continue
 		}
 		resp = append(resp, taskToResponse(t, workspaceID))
+		kept = append(kept, t)
+	}
+	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
+		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
+		return
 	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CircleEqual, CornerDownRight } from "lucide-react";
+import { CircleEqual, CornerDownRight } from "@multica/ui/icons";
 import type { IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -25,6 +25,7 @@ export function StatusPicker({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -44,6 +45,8 @@ export function StatusPicker({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -58,7 +61,9 @@ export function StatusPicker({
   /**
    * The issue's project. When it uses a workflow, only that workflow's steps
    * are offered, in workflow order, each naming who entering it hands the
-   * issue to. Omit when the surface spans projects. (MUL-7420)
+   * issue to. (MUL-7420) `null` is an issue outside any project: it offers
+   * only the Default workflow's statuses, search included. (MUL-8121,
+   * MUL-8250) Omit (`undefined`) when the surface spans projects.
    */
   projectId?: string | null;
   /**
@@ -87,7 +92,12 @@ export function StatusPicker({
 
   // The project workflow's steps, or the catalog in canonical category order
   // without archived statuses (MUL-6243).
-  const { options: projectOptions, workflow, project } = useIssueStatusOptions(wsId, projectId);
+  const {
+    options: projectOptions,
+    workflow,
+    project,
+    defaultScope,
+  } = useIssueStatusOptions(wsId, projectId, status);
   const allOptions = useMemo(
     () => (allowedStatuses ? projectOptions.filter((o) => allowedStatuses.has(o.key)) : projectOptions),
     [projectOptions, allowedStatuses],
@@ -99,7 +109,7 @@ export function StatusPicker({
     return allOptions.filter((o) => o.label.toLowerCase().includes(q));
   }, [allOptions, query]);
 
-  const searchable = !!workflow || allOptions.length > SEARCH_THRESHOLD;
+  const searchable = !!workflow || !!defaultScope || allOptions.length > SEARCH_THRESHOLD;
   const [pendingStatus, setPendingStatus] = useState<IssueStatus | null>(null);
 
   const markDuplicate = onMarkDuplicate ? (
@@ -134,18 +144,10 @@ export function StatusPicker({
       width={workflow ? "w-60" : "w-52"}
       align={align}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       searchable={searchable}
       searchPlaceholder={t(($) => $.filters.search_status)}
       onSearchChange={setQuery}
-      header={
-        workflow ? (
-          <div className="truncate px-2 pb-1 pt-1.5 text-caption text-muted-foreground">
-            {project
-              ? t(($) => $.workflows.picker.header, { workflow: workflow.name, project: project.title })
-              : workflow.name}
-          </div>
-        ) : undefined
-      }
       footer={markDuplicate ?? undefined}
       trigger={
         customTrigger ??

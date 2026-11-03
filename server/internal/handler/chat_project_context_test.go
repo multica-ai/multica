@@ -327,12 +327,10 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(
+	req := newOwnerDaemonRequest(
 		http.MethodPost,
 		"/api/daemon/runtimes/"+runtimeID+"/claim",
 		nil,
-		testWorkspaceID,
-		"chat-project-context-test",
 	)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)

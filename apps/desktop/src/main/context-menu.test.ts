@@ -16,7 +16,7 @@ const ctx = vi.hoisted(() => ({
   capturedItems: [] as CapturedMenuItem[][],
   browserWindowFromWebContents: vi.fn(),
   popupSpy: vi.fn(),
-  clipboardWriteText: vi.fn(),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   openExternalSpy: vi.fn().mockResolvedValue(undefined),
   preferredLanguagesRef: { current: ["en-US"] as string[] },
 }));
@@ -63,6 +63,8 @@ type ContextMenuParams = {
   linkURL: string;
   mediaType: string;
   hasImageContents: boolean;
+  misspelledWord: string;
+  dictionarySuggestions: string[];
   x: number;
   y: number;
   editFlags: {
@@ -83,6 +85,8 @@ function makeWebContents() {
   const handlers: Listener[] = [];
   return {
     copyImageAt: vi.fn(),
+    replaceMisspelling: vi.fn(),
+    session: { addWordToSpellCheckerDictionary: vi.fn() },
     on(event: string, fn: Listener) {
       if (event === "context-menu") handlers.push(fn);
     },
@@ -98,6 +102,45 @@ const baseEditFlags = {
   canPaste: false,
   canSelectAll: false,
 };
+
+describe("installContextMenu — spelling", () => {
+  beforeEach(() => {
+    ctx.capturedItems.length = 0;
+    ctx.preferredLanguagesRef.current = ["en-US"];
+  });
+
+  it("shows suggestions and 'Add to Dictionary' first for a misspelled word in an editable field", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({
+        isEditable: true,
+        misspelledWord: "teh",
+        dictionarySuggestions: ["the", "tea"],
+        editFlags: { ...baseEditFlags, canPaste: true },
+      }),
+    );
+
+    expect(lastMenuLabelsOrEmpty().slice(0, 3)).toEqual([
+      "the",
+      "tea",
+      "Add to Dictionary",
+    ]);
+    invokeByLabel("the");
+    expect(wc.replaceMisspelling).toHaveBeenCalledWith("the");
+    invokeByLabel("Add to Dictionary");
+    expect(wc.session.addWordToSpellCheckerDictionary).toHaveBeenCalledWith("teh");
+  });
+
+  it("omits spelling items when the field is not editable", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({ selectionText: "teh", misspelledWord: "teh", dictionarySuggestions: ["the"] }),
+    );
+    expect(lastMenuLabelsOrEmpty()).not.toContain("Add to Dictionary");
+  });
+});
 
 describe("installContextMenu — link items", () => {
   beforeEach(() => {
@@ -255,6 +298,8 @@ function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
     linkURL: "",
     mediaType: "none",
     hasImageContents: false,
+    misspelledWord: "",
+    dictionarySuggestions: [],
     x: 0,
     y: 0,
     editFlags: { ...baseEditFlags },

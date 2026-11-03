@@ -1656,6 +1656,48 @@ func TestScanKimiMainTurnFailureSanitizesWireDiagnostic(t *testing.T) {
 	}
 }
 
+func TestScanKimiMainTurnFailureErrorMessageFormats(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "string", raw: `"Connection error."`, want: "Connection error."},
+		{name: "opaque string", raw: `" [object Object] "`},
+		{name: "empty string", raw: `""`},
+		{name: "null", raw: `null`},
+		{name: "object", raw: `{"code":"provider.failure","message":"Connection error.","details":"private-details","retryable":true}`, want: "[provider.failure] Connection error."},
+		{name: "message only", raw: `{"message":"Connection error."}`, want: "Connection error."},
+		{name: "code only", raw: `{"code":"provider.failure","message":"[object Object]"}`, want: "[provider.failure]"},
+		{name: "invalid code", raw: `{"code":{},"message":"Connection error."}`, want: "Connection error."},
+		{name: "empty object", raw: `{}`},
+		{name: "invalid message", raw: `{"message":{"secret":"private-details"}}`},
+		{name: "array", raw: `["private-details"]`},
+		{name: "number", raw: `42`},
+		{name: "boolean", raw: `true`},
+		{name: "redacted object", raw: `{"code":"provider.failure","message":"api_key=fixture-secret","details":"private-details"}`, want: "[provider.failure] [REDACTED CREDENTIAL]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			now := time.Now()
+			line := fmt.Sprintf(`{"type":"agent.turn.ended","outcome":"failed","time":%d,"errorMessage":%s}`, now.UnixMilli(), tc.raw)
+			writeKimiWireLog(t, home, "session_formats", "main", line)
+			detail, failed := scanKimiMainTurnFailure(kimiUsageScan{
+				startTime: now.Add(-time.Minute), kimiHome: home, sessionID: "session_formats",
+			})
+			if !failed {
+				t.Fatal("errorMessage shape must not hide the failed terminal event")
+			}
+			if detail != tc.want {
+				t.Errorf("detail = %q, want %q", detail, tc.want)
+			}
+		})
+	}
+}
+
 // TestScanKimiMainTurnFailureIgnoresHealthyStaleAndDelegated guards the flip
 // against false positives: a successful main turn stays completed, a failed
 // record from a previous task on a resumed session is outside the turn
@@ -1814,6 +1856,40 @@ func TestKimiBackendWireTurnFailureFailsCompletedRun(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKimiBackendWireTurnFailureDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "opaque", raw: `"[object Object]"`, want: "kimi turn failed: runtime did not record error details (error category unknown)"},
+		{name: "empty", raw: `""`, want: "kimi turn failed: runtime did not record error details (error category unknown)"},
+		{name: "object", raw: `{"code":"provider.failure","message":"Unspecified failure","details":"private-details"}`, want: "kimi turn failed: [provider.failure] Unspecified failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			fakePath := filepath.Join(t.TempDir(), "kimi")
+			script := fakeKimiWireTurnFailureScript("ses_diagnostic")
+			script = strings.Replace(script,
+				`"OAuthConnectionError: OAuth request to https://auth.kimi.com/api/oauth/token failed: fetch failed: Connect Timeout Error"`, tc.raw, 1)
+			writeTestExecutable(t, fakePath, []byte(script))
+			result := runKimiThinkingTest(t, fakePath, map[string]string{"KIMI_CODE_HOME": home}, ExecOptions{})
+			if result.Status != "failed" || result.Error != tc.want {
+				t.Fatalf("status=%q error=%q, want failed with %q", result.Status, result.Error, tc.want)
+			}
+			if !strings.Contains(result.Output, "partial narration") || result.ResumeRejected {
+				t.Errorf("partial output or session state changed: output=%q resumeRejected=%v", result.Output, result.ResumeRejected)
+			}
+			if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentUnknown {
+				t.Errorf("unspecified failure classified as %q, want unknown", got)
+			}
+		})
 	}
 }
 

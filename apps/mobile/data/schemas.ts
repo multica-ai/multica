@@ -21,6 +21,7 @@ import type {
   Comment,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -336,25 +337,26 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
 // error). Mirrors web's TaskMessagePayload type and the WS `task:message`
 // payload so the mobile cache shape stays interchangeable with web's.
 export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object({
-  task_id: z.string(),
-  issue_id: z.string().default(""),
-  chat_session_id: z.string().optional(),
-  seq: z.number().default(0),
+  call_id: z.string().optional().catch(undefined),
+  task_id: z.string().default("").catch(""),
+  issue_id: z.string().default("").catch(""),
+  chat_session_id: z.string().optional().catch(undefined),
+  seq: z.number().default(0).catch(0),
   // Enum drift defense: unknown server-side types fall back to "text" so
   // the row still renders (as a plain markdown chunk) instead of crashing
   // the timeline. Matches root CLAUDE.md "Enum drift downgrades, not crashes".
   type: z
     .enum(["text", "thinking", "tool_use", "tool_result", "error"])
     .catch("text"),
-  tool: z.string().optional(),
-  content: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
-  output: z.string().optional(),
+  tool: z.string().optional().catch(undefined),
+  content: z.string().optional().catch(undefined),
+  input: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  output: z.string().optional().catch(undefined),
   // Optional with no default: absent means no daemon measured this record's
   // completeness, which is not the same as measured-and-complete. `.catch`
   // keeps a malformed value from failing the row and emptying the transcript.
   output_truncated: z.boolean().optional().catch(undefined),
-  created_at: z.string().optional(),
+  created_at: z.string().optional().catch(undefined),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
@@ -413,7 +415,16 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
   status: z
-    .enum(["queued", "dispatched", "running", "completed", "failed", "cancelled"])
+    .enum([
+      "queued",
+      "deferred",
+      "dispatched",
+      "waiting_local_directory",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+    ])
     .catch("queued"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),
@@ -572,6 +583,10 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   issue_status: z.string().nullable().default(null) as unknown as z.ZodType<
     InboxItem["issue_status"]
   >,
+  // Inbox section (packages/core/types/inbox.ts InboxSection). A missing or
+  // unknown value reads as "action" through inboxItemSection, the behavior
+  // before sections existed.
+  section: z.enum(["action", "activity"]).optional().catch(undefined),
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: z.string().default(""),
@@ -598,6 +613,16 @@ export const InboxUnreadSummarySchema = z
   .array(InboxWorkspaceUnreadSchema)
   .default([]);
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// `POST /api/inbox/issues/{id}/read`. Mirrors MarkIssueInboxReadResultSchema
+// in packages/core/api/schemas.ts: a malformed body yields an unknown (null)
+// count, which the mutation treats as a change and refreshes.
+export const MarkIssueInboxReadResultSchema = z
+  .object({ count: z.number() })
+  .loose();
+export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = {
+  count: null,
+};
 
 export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),

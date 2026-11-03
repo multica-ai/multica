@@ -8,7 +8,7 @@
  *
  * Subscreens push under more/settings/:
  *   - more/settings/profile        — edit name + avatar
- *   - more/settings/notifications  — per-group inbox + system toggles
+ *   - more/settings/notifications  — Inbox routing per kind + system toggle
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
@@ -34,7 +34,12 @@ import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
-const LANGUAGE_OPTIONS: LocalePreference[] = ["system", "en", "zh-Hans"];
+const LANGUAGE_OPTIONS: LocalePreference[] = [
+  "system",
+  "en",
+  "zh-Hans",
+  "zh-Hant",
+];
 
 function initialsOf(name: string | undefined): string {
   if (!name) return "?";
@@ -66,6 +71,7 @@ export default function SettingsPage() {
     system: t("language.system"),
     en: t("language.english"),
     "zh-Hans": t("language.chinese_simplified"),
+    "zh-Hant": t("language.chinese_traditional"),
   };
 
   const onSwitch = async (ws: Workspace) => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BotOff, CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "lucide-react";
+import { BotOff, CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "@multica/ui/icons";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import {
   filterInboxItems,
@@ -19,6 +19,7 @@ import { archivedInboxFacetsOptions } from "@multica/core/inbox/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -167,12 +168,6 @@ export function InboxFilterMenu({
       ).filter((item) => item.read !== true).length,
     [items, effectiveFilters, activeIssueIds],
   );
-  const idleCount = useMemo(
-    () =>
-      filterInboxItems(items, { ...effectiveFilters, idleOnly: true }, { activeIssueIds })
-        .length,
-    [items, effectiveFilters, activeIssueIds],
-  );
   const localStatuses = useMemo(
     () => statusCounts(statusFacetItems),
     [statusFacetItems],
@@ -215,11 +210,11 @@ export function InboxFilterMenu({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
-          <Button
+          <IconButton
             variant={activeCount > 0 ? "default" : "ghost"}
             size="icon-sm"
-            aria-label={triggerLabel}
-            title={triggerLabel}
+            label={triggerLabel}
+            tooltipSide="bottom"
             className={cn(
               "text-muted-foreground",
               activeCount > 0 &&
@@ -259,11 +254,6 @@ export function InboxFilterMenu({
           >
             <BotOff className="size-3.5" />
             <span className="flex-1">{t(($) => $.filters.no_agents_working)}</span>
-            {idleCount > 0 && (
-              <span className="text-caption text-muted-foreground">
-                {t(($) => $.filters.notification_count, { count: idleCount })}
-              </span>
-            )}
           </DropdownMenuCheckboxItem>
         )}
         <DropdownMenuSeparator />

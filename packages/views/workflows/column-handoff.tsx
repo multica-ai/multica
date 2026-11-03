@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Workflow } from "lucide-react";
+import { Plus, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { statusAcceptsHandoff, workflowStep } from "@multica/core/issue-workflows";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -33,13 +33,13 @@ export function ColumnHandoff({
   const labelOf = useStatusLabel(wsId);
   const handlerLabel = useStepHandlerLabel(project);
   const { getActorName } = useActorName();
-  const { isAdmin } = useWorkflowPermissions(project);
+  const { canEditWorkflow: canEdit, canManageProject } = useWorkflowPermissions(project, workflow);
   const [open, setOpen] = useState(false);
   const sharing = useWorkflowSharing(workflow, project.id);
   const step = workflowStep(workflow, status);
   if (!step || !statusAcceptsHandoff(status)) return null;
   const label = handlerLabel(step);
-  if (!label && !isAdmin) return null;
+  if (!label && !canEdit) return null;
   const actor = stepHandlerActor(step, project);
 
   return (
@@ -82,7 +82,8 @@ export function ColumnHandoff({
         <WorkflowHandoffForm
           workflow={workflow}
           statusKey={status}
-          canEdit={isAdmin}
+          canEdit={canEdit}
+          canCopyForProject={canManageProject}
           project={project}
           onSaved={() => setOpen(false)}
         />

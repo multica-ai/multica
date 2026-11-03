@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "lucide-react";
+import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "@multica/ui/icons";
 import type { TimelineEntry, WakeupCondition, WakeupPreview } from "@multica/core/types";
 import { useT } from "../../i18n";
 import type { useWakeupText } from "./wakeup-presentation";
@@ -100,7 +100,11 @@ export function formatWakeupActivity(
   const agent = preview?.agent_name ?? "";
   switch (entry.action) {
     case "wakeup_created":
-      return t(($) => $.activity.wakeup_created, { condition, agent });
+      // A time rule's label already says "wake at ...", so the sentence names
+      // the agent up front instead of repeating "wake" after it.
+      return preview && !preview.condition && preview.kind !== "event"
+        ? t(($) => $.activity.wakeup_created_scheduled, { condition, agent })
+        : t(($) => $.activity.wakeup_created, { condition, agent });
     case "wakeup_triggered": {
       if (details.rule === "child_done") {
         const count = details.total ?? 1;

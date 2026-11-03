@@ -8,8 +8,8 @@ const DEFAULT_E2E_EMAIL = `e2e-${E2E_WORKER}-${E2E_RUN_ID}@multica.ai`;
 const DEFAULT_E2E_WORKSPACE = `e2e-workspace-${E2E_WORKER}-${E2E_RUN_ID}`;
 
 async function waitForIssuesPage(page: Page) {
-  await waitForPageText(page, "New Issue");
-  await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible({
+  // The Issues panel's create button is icon-only; its label is the name.
+  await expect(page.getByRole("button", { name: "New Issue" }).first()).toBeVisible({
     timeout: 15000,
   });
 }
@@ -80,11 +80,21 @@ export async function preferManualCreateMode(page: Page) {
   await waitForIssuesPage(page);
 }
 
-export async function openWorkspaceMenu(page: Page) {
-  // Click the workspace switcher button (has ChevronDown icon)
-  const workspaceButton = page.getByRole("button", { name: /E2E Workspace/ }).first();
-  await expect(workspaceButton).toBeVisible({ timeout: 15000 });
-  await workspaceButton.click();
-  // Wait for dropdown to appear
-  await expect(page.locator('[class*="popover"]')).toBeVisible();
+/** The app rail: workspace tiles, spaces, and the account menu. */
+export function appRail(page: Page) {
+  return page.getByRole("navigation", { name: "App navigation" });
+}
+
+/** The current workspace's tile in the rail; its accessible name is the workspace name. */
+export function currentWorkspaceTile(page: Page) {
+  return appRail(page)
+    .getByRole("link", { name: /E2E Workspace|Renamed WS/ })
+    .and(page.locator('[aria-current="page"]'));
+}
+
+export async function openAccountMenu(page: Page) {
+  const accountButton = appRail(page).getByRole("button", { name: "Account" });
+  await expect(accountButton).toBeVisible({ timeout: 15000 });
+  await accountButton.click();
+  await expect(page.getByRole("menu")).toBeVisible();
 }

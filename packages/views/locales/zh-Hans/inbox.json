@@ -3,6 +3,14 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "sections": {
+    "action": "需要处理",
+    "activity": "动态",
+    "action_empty": "需要你处理的都处理完了",
+    "activity_empty": "暂无动态",
+    "activity_waiting_other": "动态里还有 {{count}} 条更新，随时可以看。",
+    "open_activity": "查看动态"
+  },
   "menu": {
     "mark_all_read": "全部标为已读",
     "archive_all": "归档全部",
@@ -69,7 +77,7 @@
     "due_date_changed": "截止日期已更改",
     "new_comment": "新评论",
     "mentioned": "提及了你",
-    "review_requested": "请求审阅",
+    "review_requested": "请求审查",
     "task_completed": "运行已完成",
     "task_failed": "运行失败",
     "agent_blocked": "智能体被阻塞",

@@ -16,6 +16,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
+// agentBuilderSystemKeyPrefix marks the hidden execution carrier behind an
+// AI agent-creation flow. The suffix is the flow id.
+const agentBuilderSystemKeyPrefix = "agent_builder:"
+
 const agentBuilderInstructions = `You are Multica Agent Builder. Help the user design one practical AI agent through a short conversation.
 
 Your job is to propose and refine configuration, never to create resources yourself. Ask only questions that materially change behavior. Prefer making a reasonable draft immediately, then ask at most two focused questions per turn.
@@ -353,7 +357,7 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 // resolveBuilderRuntime loads a runtime the caller is allowed to execute a
 // builder conversation on. Shared by session create and runtime switch so both
 // enforce the same three gates in the same order: it exists in this workspace,
-// this member may use it (private runtimes stay owner/admin-only), and it is
+// this member may use it (private runtimes require owner consent), and it is
 // online. verb names the attempted action in the offline error so the two call
 // sites read naturally.
 func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, verb string) (db.AgentRuntime, bool) {
@@ -381,7 +385,7 @@ func (h *Handler) authorizeBuilderRuntime(w http.ResponseWriter, r *http.Request
 		return false
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access")
 		return false
 	}
 	if runtime.Status != "online" {

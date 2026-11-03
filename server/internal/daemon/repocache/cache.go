@@ -19,12 +19,23 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
 // It passes the full daemon environment so credential helpers (e.g. gh) can
 // locate their config, and disables TTY prompting so auth failures produce
 // clear errors instead of blocking on a non-existent terminal.
+//
+// GIT_TERMINAL_PROMPT=0 does not stop GUI credential helpers: on Windows the
+// Git Credential Manager (credential.helper=manager) opens a login window —
+// for GitLab hosts a browser OAuth page — for every clone/fetch that has no
+// stored credential. Startup runs one sync goroutine per workspace in
+// parallel, so a first open on a fresh machine sprayed dozens of GCM dialogs
+// at once. GCM_INTERACTIVE=never keeps stored-credential lookup working but
+// makes GCM fail fast instead of prompting, so background sync reports a
+// clear error and the user authenticates deliberately once; the next sync
+// cycle picks up the stored credential automatically.
 //
 // safe.directory=* is set via GIT_CONFIG_* env vars so git trusts all
 // directories regardless of ownership. The daemon manages its own bare
@@ -49,6 +60,7 @@ func gitEnv() []string {
 	idx := strconv.Itoa(existing)
 	return append(base,
 		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=never",
 		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
 		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
 		"GIT_CONFIG_VALUE_"+idx+"=*",
@@ -173,6 +185,7 @@ type Cache struct {
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
 	repoLocks sync.Map // barePath -> *repoLock
+	caMu      sync.Mutex
 }
 
 // ErrRepoBusy means a foreground checkout could not acquire its repository
@@ -379,6 +392,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		if isBareRepo(barePath) {
 			// Already cached — fetch latest.
 			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
+			c.configureRepoCABundleLogged(ctx, barePath)
 			if err := gitFetchContext(ctx, barePath); err != nil {
 				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
 				if firstErr == nil {
@@ -593,10 +607,16 @@ func gitCloneBare(url, dest string) error {
 }
 
 func gitCloneBareContext(ctx context.Context, url, dest string) error {
-	if out, err := runGitCombinedOutputContext(ctx, "clone", "--bare", url, dest); err != nil {
+	args := append(caCloneArgs(), "clone", "--bare", url, dest)
+	if out, err := runGitCombinedOutputContext(ctx, args...); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
 		return fmt.Errorf("git clone --bare: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	// Record the CA bundle before the refspec migration below fetches again.
+	if err := configureRepoCABundleContext(ctx, dest); err != nil {
+		os.RemoveAll(dest)
+		return err
 	}
 	// `git clone --bare` populates refs/heads/* as a snapshot and defaults to
 	// a mirror-style fetch refspec. Convert the bare repo to the standard
@@ -757,6 +777,10 @@ type WorktreeResult struct {
 	// that no remote-tracking ref reaches.
 	UncommittedFiles int `json:"uncommitted_files,omitempty"`
 	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
+	// FetchError is set when refreshing the cache from the remote failed and
+	// the checkout was based on what the cache already held, so it may be
+	// behind the remote. It carries the redacted git error for the caller.
+	FetchError string `json:"fetch_error,omitempty"`
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -815,18 +839,21 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// ultimately succeeds. Stamping only on success would let a repo whose
 	// checkouts keep failing age out from under the tasks still trying to use it.
 	MarkUsed(barePath, c.logger)
+	c.configureRepoCABundleLogged(ctx, barePath)
 
 	// Fetch latest from origin. This also migrates the bare cache's refspec
 	// to the modern remote-tracking layout on first run, so subsequent fetches
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
+	var fetchErr string
 	if err := gitFetchContext(ctx, barePath); err != nil {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		// Non-fatal: preserve cached state and continue, but make the warning
-		// loud enough that it's findable in the daemon log. The agent will
-		// receive an older snapshot than the remote head.
+		// Non-fatal: preserve cached state and continue. The agent will
+		// receive an older snapshot than the remote head, so the result
+		// carries the error back to the CLI as well as the daemon log.
+		fetchErr = redact.Text(err.Error())
 		c.logger.Warn("repo checkout: fetch failed, agent will see possibly stale code",
 			"url", params.RepoURL,
 			"error", err,
@@ -897,6 +924,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: isolated checkout ready", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -927,6 +955,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: existing worktree updated", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -965,6 +994,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	return &WorktreeResult{
 		Path:       worktreePath,
 		BranchName: actualBranch,
+		FetchError: fetchErr,
 	}, nil
 }
 
@@ -1016,6 +1046,9 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 
 	if isIsolatedCheckoutContext(ctx, checkoutPath) {
 		if err := setIsolatedCheckoutOriginContext(ctx, checkoutPath, repoURL); err != nil {
+			return nil, err
+		}
+		if err := configureRepoCABundleContext(ctx, checkoutPath); err != nil {
 			return nil, err
 		}
 		// Idempotent, and required for a workdir that was first created while
@@ -1177,6 +1210,10 @@ func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, check
 	}
 	if out, err := runGitCombinedOutputContext(ctx, "-C", checkoutPath, "remote", "add", "origin", repoURL); err != nil {
 		return "", fmt.Errorf("add origin remote: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	// Before the first checkout, which may lazily fetch from origin.
+	if err := configureRepoCABundleContext(ctx, checkoutPath); err != nil {
+		return "", err
 	}
 	if isPartialCloneContext(ctx, barePath) {
 		if err := configurePromisorRemoteContext(ctx, checkoutPath); err != nil {

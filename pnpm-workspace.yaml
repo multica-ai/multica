@@ -15,6 +15,7 @@ catalog:
   '@types/node': ^25.0.10
   '@types/react': ^19.2.0
   '@types/react-dom': ^19.2.0
+  '@typescript/native': npm:typescript@7.0.2
   '@vitejs/plugin-react': ^6.0.1
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
@@ -22,7 +23,6 @@ catalog:
   i18next: ^26.0.8
   jsdom: ^29.0.1
   katex: ^0.16.45
-  lucide-react: ^1.0.1
   mermaid: ^11.14.0
   postcss: ^8
   posthog-js: ^1.176.1
@@ -35,8 +35,8 @@ catalog:
   remark-math: ^6.0.0
   tailwind-merge: ^3.4.0
   tailwindcss: ^4
-  typescript: ^5.9.3
-  unicode-animations: ^1.0.3
+  # Keep the compiler API for ESLint, Next.js, and repository scripts; tsc uses @typescript/native.
+  typescript: npm:@typescript/typescript6@6.0.2
   vitest: ^4.1.0
   yaml: ^2.6.0
   zod: ^4.1.5

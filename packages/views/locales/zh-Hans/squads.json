@@ -2,7 +2,8 @@
   "page": {
     "title": "小队",
     "new_button": "新建小队",
-    "empty_no_squads": "暂无小队。",
+    "empty_no_squads": "还没有小队",
+    "empty_description": "把智能体和成员编成小队，任务可以直接交给整个小队。",
     "empty_no_match": "没有匹配筛选条件的小队。",
     "table": {
       "name": "小队",
@@ -14,10 +15,6 @@
     "no_matches": "没有匹配的小队",
     "row_menu": "小队操作",
     "archive_action": "归档"
-  },
-  "inspector": {
-    "details_section": "详情",
-    "archive_button": "归档"
   },
   "member_type": {
     "agent": "智能体",
@@ -65,16 +62,11 @@
     "responsibility_placeholder": "这个小队负责什么？",
     "save": "保存"
   },
-  "discard_changes_dialog": {
-    "title": "放弃未保存的修改？",
-    "description": "当前标签页有未保存的修改，切换标签会丢弃这些修改。",
-    "keep_editing": "继续编辑",
-    "discard_button": "放弃"
-  },
   "members_tab": {
     "section_title": "成员",
-    "section_count_other": "该小队有 {{count}} 名成员",
     "add_member_button": "添加成员",
+    "empty_title": "还没有成员",
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。",
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",
@@ -86,19 +78,31 @@
     "status_unstable": "不稳定",
     "status_archived": "已归档",
     "issue_status_blocked": "已阻塞",
-    "active_issue_more": "还有 {{count}} 个",
-    "last_active_label": "最近活动 {{time}}"
+    "active_issue_more": "还有 {{count}} 个"
   },
-  "detail_tabs": {
-    "members": "成员",
-    "instructions": "指引"
+  "detail": {
+    "assign_work": "分配工作",
+    "copy_link": "复制链接",
+    "link_copied": "已复制链接",
+    "not_found": "未找到该小队",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部小队",
+    "instructions": "指引",
+    "edit": "编辑",
+    "cancel": "取消",
+    "recent_work": "近期工作",
+    "recent_work_empty": "还没有分配给这个小队的任务。",
+    "member_menu": "{{name}} 的操作",
+    "working_on": "正在处理"
   },
   "details": {
     "leader": "队长",
     "members": "成员",
     "created_by": "创建者",
     "created": "创建时间",
-    "updated": "更新时间"
+    "updated": "更新时间",
+    "visibility": "可见范围",
+    "visibility_workspace": "工作区"
   },
   "toasts": {
     "member_added": "已添加成员",
@@ -127,18 +131,8 @@
     "placeholder": "例如：始终先编写失败测试。提交应保持小而独立。"
   },
   "scope": {
-    "mine": "我的",
-    "all": "全部"
+    "mine": "我的小队",
+    "all": "全部小队"
   },
-  "toolbar": {
-    "display": "显示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
-    "result_count_title": "当前结果 / 全部小队",
-    "filter_label": "筛选",
-    "filter_active_count_other": "{{count}} 项筛选",
-    "clear_filters": "清除筛选"
-  }
+  "toolbar": {}
 }

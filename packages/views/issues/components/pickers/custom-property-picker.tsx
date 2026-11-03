@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CalendarDays, Check, ExternalLink, X } from "lucide-react";
+import { CalendarDays, Check, ExternalLink, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
-import { hasUnknownActorRef, isListPropertyType } from "@multica/core/types";
+import { hasUnknownActorRef, isListPropertyType, MAX_ISSUE_PROPERTY_SELECT_VALUES } from "@multica/core/types";
 import {
   useSetIssueProperty,
   useUnsetIssueProperty,
@@ -20,10 +20,11 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useLocale, useT } from "../../../i18n";
-import { PropertyPicker, PickerItem } from "./property-picker";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { PropertyPicker, PickerItem, PickerEmpty } from "./property-picker";
 import { ActorPropertyPicker, ActorPropertyDisplay } from "./actor-property-picker";
 
 const EDITABLE_PROPERTY_TYPES = [
@@ -156,9 +157,15 @@ export function CustomPropertyValueInput({
 }) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const [optionSearch, setOptionSearch] = useState("");
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const hasValue = value !== undefined;
+  const options = property.config.options ?? [];
+  const optionQuery = optionSearch.trim().toLowerCase();
+  const filteredOptions = options.filter((option) =>
+    option.name.toLowerCase().includes(optionQuery) || matchesPinyin(option.name, optionQuery),
+  );
 
   const commit = (next: IssuePropertyValue) => onChange(next);
   const clear = () => onChange(undefined);
@@ -211,18 +218,18 @@ export function CustomPropertyValueInput({
 
   switch (property.type) {
     case "select": {
-      const options = property.config.options ?? [];
       return (
         <PropertyPicker
           open={open}
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
         >
           {emptyRow}
-          {options.map((option) => (
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={value === option.id}
@@ -235,12 +242,13 @@ export function CustomPropertyValueInput({
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
     case "multi_select": {
-      const options = property.config.options ?? [];
       const selected = Array.isArray(value) ? value : [];
+      const atCapacity = selected.length >= MAX_ISSUE_PROPERTY_SELECT_VALUES;
       const toggle = (optionId: string) => {
         const next = selected.includes(optionId)
           ? selected.filter((id) => id !== optionId)
@@ -254,20 +262,23 @@ export function CustomPropertyValueInput({
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
         >
           {emptyRow}
-          {options.map((option) => (
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={selected.includes(option.id)}
+              disabled={atCapacity && !selected.includes(option.id)}
               onClick={() => toggle(option.id)}
             >
               <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
@@ -468,15 +479,15 @@ function TextishPropertyEditor({
             className="h-8"
           />
           {property.type === "url" && typeof value === "string" && (
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t(($) => $.pickers.custom_property.open_link)}
+              label={t(($) => $.pickers.custom_property.open_link)}
               onClick={() => window.open(value, "_blank", "noopener,noreferrer")}
             >
               <ExternalLink className="size-3.5" />
-            </Button>
+            </IconButton>
           )}
         </form>
       </PopoverContent>
@@ -574,26 +585,26 @@ function ListPropertyEditor({
               <li key={item} className="flex min-w-0 items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent/40">
                 <span className="min-w-0 flex-1 truncate text-body">{item}</span>
                 {property.type === "multi_url" && (
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={t(($) => $.pickers.custom_property.open_link)}
+                    label={t(($) => $.pickers.custom_property.open_link)}
                     onClick={() => window.open(item, "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink className="size-3.5" />
-                  </Button>
+                  </IconButton>
                 )}
-                <Button
+                <IconButton
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
+                  label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
                   disabled={saving}
                   onClick={() => void save(items.filter((entry) => entry !== item))}
                 >
                   <X className="size-3.5" />
-                </Button>
+                </IconButton>
               </li>
             ))}
           </ul>

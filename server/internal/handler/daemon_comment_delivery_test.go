@@ -220,8 +220,7 @@ func makeCommentDeliverySingleThread(t *testing.T, fixture commentDeliveryFixtur
 func claimCommentDeliveryFixture(t *testing.T, fixture commentDeliveryFixture, capabilities string) AgentTaskResponse {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "comment-delivery-matrix")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil)
 	if capabilities != "" {
 		req.Header.Set("X-Client-Capabilities", capabilities)
 	}
@@ -365,8 +364,7 @@ func testClaimRepairsDeletedTrigger(t *testing.T, deleteTriggerSQL string) {
 	}
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "stale-comment-plan-repair")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil)
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityCoalescedCommentsV1)
 	req = withURLParam(req, "runtimeId", fixture.runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
@@ -773,7 +771,7 @@ func TestRerunIssue_PreservesSourceCommentPlanAndResetsReceipt(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	})
 
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, util.MustParseUUID(issueID), util.MustParseUUID(sourceID), pgtype.UUID{}, pgtype.UUID{}, nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, util.MustParseUUID(issueID), util.MustParseUUID(sourceID), pgtype.UUID{}, pgtype.UUID{}, false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}
@@ -820,7 +818,7 @@ func testRerunPromotesSurvivorAfterTriggerDeleted(t *testing.T, deleteTriggerSQL
 		t.Fatalf("delete rerun source trigger: %v", err)
 	}
 
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(fixture.issueID), parseUUID(fixture.taskID), pgtype.UUID{}, pgtype.UUID{}, nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(fixture.issueID), parseUUID(fixture.taskID), pgtype.UUID{}, pgtype.UUID{}, false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}
@@ -933,8 +931,7 @@ func TestClaimTaskByRuntime_FinalizationFailureRequeuesImmediately(t *testing.T)
 	defer func() { testHandler.TaskService.TxStarter = originalTxStarter }()
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "comment-delivery-finalize-failure")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil)
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityCoalescedCommentsV1)
 	req = withURLParam(req, "runtimeId", fixture.runtimeID)
 	failingHandler.ClaimTaskByRuntime(w, req)

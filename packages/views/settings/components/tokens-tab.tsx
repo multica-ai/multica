@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Copy, Check, Info } from "lucide-react";
+import { Trash2, Copy, Check, Info } from "@multica/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
 import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";

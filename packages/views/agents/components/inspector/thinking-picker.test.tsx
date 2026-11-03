@@ -97,9 +97,7 @@ describe("ThinkingPicker", () => {
   it("clears to empty string via the footer button when a value is set", () => {
     const { onChange } = renderPicker({ value: "high" });
     fireEvent.click(screen.getByRole("button"));
-    // Footer copy resolves through i18n — match a substring so we don't
-    // pin to the exact translated wording.
-    const clearButton = screen.getByTitle(/Clear the override/i);
+    const clearButton = screen.getByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });
@@ -107,6 +105,6 @@ describe("ThinkingPicker", () => {
   it("does not render the clear button when value is already empty", () => {
     renderPicker({ value: "" });
     fireEvent.click(screen.getByRole("button"));
-    expect(screen.queryByTitle(/Clear and fall back/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Follow CLI config" })).toBeNull();
   });
 });

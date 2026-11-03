@@ -48,8 +48,8 @@ export interface AgentInvocationTargetInput {
 
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
-// only the runtime owner can bind agents to it — workspace admins included,
-// and only the owner may flip the flag (MUL-6126); "public" opens binding to
+// the runtime owner and shared_with members can bind agents to it;
+// only the owner may edit access (MUL-6126); "public" opens binding to
 // any workspace member. Older backends that haven't shipped MUL-2062 omit the
 // field; the consumer must default to "private" so the strictest behavior is
 // the fallback.
@@ -76,6 +76,8 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
+  /** Workspace user IDs granted access while visibility is private. */
+  shared_with?: string[];
   /**
    * The custom runtime profile this registered runtime was launched from,
    * or `null` for a built-in protocol family. The UI uses this to stamp a
@@ -84,6 +86,12 @@ export interface RuntimeDevice {
    * a missing value as `null` (built-in).
    */
   profile_id?: string | null;
+  /**
+   * Runtime-wide cap on tasks running at once across every agent bound to
+   * this runtime (GitHub #9626). `null` means no runtime cap; each agent's
+   * own limit still applies. Older backends omit the field.
+   */
+  max_concurrent_tasks?: number | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -129,6 +137,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwenpaw",
   "mcode",
   "muse",
+  "devin",
   "zeroclaw",
 ] as const;
 
@@ -466,6 +475,10 @@ export interface AgentTask {
  * instead. Unlike the aggregate rows there is no `uncosted_*` split here: a
  * `task_usage` row is priced or it isn't, so "uncosted" is just "all of them
  * when cost_usd_ticks is absent", which is what the estimator already assumes.
+ *
+ * `credits_micros` is the charge of a provider that bills in its own credits
+ * instead of exposing tokens (Qoder Cloud Agents), in millionths of a credit.
+ * It has no USD rate and is shown beside the cost, never folded into it.
  */
 export interface TaskUsage {
   provider?: string;
@@ -475,6 +488,7 @@ export interface TaskUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd_ticks?: number;
+  credits_micros?: number;
 }
 
 /**
@@ -715,6 +729,7 @@ export type AgentPermissionScope = "private" | "workspace" | "members";
  * over edits the user made after it.
  */
 export interface StoredAgentDraft {
+  qoder_agent_id?: string;
   name: string;
   description: string;
   instructions: string;

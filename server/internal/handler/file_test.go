@@ -1682,10 +1682,8 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 	}
 }
 
-// isTextPreviewable is the whitelist linkpin between the proxy and the
-// client-side dispatcher. Regress against the most common content types so
-// drifting one of the lists alone fails loud. The same table runs against the
-// client in packages/views/editor/utils/preview.test.ts — change both.
+// Regress representative text-preview inputs in addition to the exhaustive
+// source-driven checks in attachment_text_preview_test.go.
 func TestIsTextPreviewable(t *testing.T) {
 	t.Helper()
 	cases := []struct {

@@ -44,6 +44,19 @@ export interface InboxWorkspaceUnread {
   count: number;
 }
 
+/** Rows `POST /api/inbox/issues/{id}/read` marked read; null when the reply was unreadable. */
+export interface MarkIssueInboxReadResult {
+  count: number | null;
+}
+
+/**
+ * Inbox section, derived by the server from the notification type and who
+ * caused it. "action" waits on the recipient and is the only section that
+ * counts as unread; "activity" is routine progress (status moves, agent
+ * replies, property edits) that the Work sidebar already tracks.
+ */
+export type InboxSection = "action" | "activity";
+
 export interface InboxItem {
   id: string;
   workspace_id: string;
@@ -63,6 +76,12 @@ export interface InboxItem {
    * projection; null also covers notifications without a linked issue.
    */
   issue_priority?: IssuePriority | null;
+  /**
+   * Optional so a client remains compatible with a backend that predates the
+   * split; read it through `inboxItemSection`, which treats a missing value
+   * as "action" — the behavior before sections existed.
+   */
+  section?: InboxSection;
   read: boolean;
   archived: boolean;
   created_at: string;

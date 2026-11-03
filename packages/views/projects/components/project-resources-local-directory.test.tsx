@@ -83,9 +83,9 @@ describe("ProjectResourcesSection — local directory row", () => {
   // change how tasks run on the folder.
   it("offers the execution mode and remove actions, and no rename", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    expect(screen.getByTitle(strings.mode_edit_tooltip)).toBeInTheDocument();
-    expect(screen.getByTitle(strings.remove_tooltip)).toBeInTheDocument();
-    expect(screen.queryByTitle(/rename/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: strings.mode_edit_tooltip })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: strings.remove_tooltip })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 });

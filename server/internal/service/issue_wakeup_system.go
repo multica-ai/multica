@@ -434,6 +434,11 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if w.Revision != prev.Revision {
 		return tx.Commit(ctx)
 	}
+	// Every commit below, including those that evaluate nothing, means this
+	// pass got the locks an earlier failed pass did not; an error rolls it back.
+	if _, err = tx.Exec(ctx, "UPDATE issue_wakeup SET last_error=NULL WHERE id=$1 AND last_error IS NOT NULL", w.ID); err != nil {
+		return err
+	}
 	current, err := resolveWakeTarget(ctx, q, issue)
 	if err != nil {
 		return err
@@ -695,7 +700,7 @@ func (s *IssueWakeupService) publishSystemInbox(item db.InboxItem, issueStatus s
 		Payload: map[string]any{"item": map[string]any{
 			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
 			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
+			"type": item.Type, "severity": item.Severity, "section": inboxwriter.ItemSection(item.Section, item.Type, item.ActorType), "issue_id": util.UUIDToPtr(item.IssueID),
 			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
 			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
 			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,

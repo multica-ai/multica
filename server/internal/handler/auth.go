@@ -56,6 +56,7 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"zh-Hant": {},
 	"ko":      {},
 	"ja":      {},
 	"fr":      {},
@@ -745,7 +746,15 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 // IssueCliToken returns a fresh JWT for the authenticated user.
 // This allows cookie-authenticated browser sessions to obtain a bearer token
 // that can be handed off to the CLI via the cli_callback redirect.
+//
+// Machine credentials (mat_ task tokens, mcn_ cloud-node PATs) are refused
+// here as well as at the router (MUL-8154), so a route refactor cannot turn
+// a scoped agent credential into a long-lived session.
 func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

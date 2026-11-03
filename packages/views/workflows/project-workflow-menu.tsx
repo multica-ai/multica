@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, ListTree, Settings, Workflow } from "lucide-react";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
+import { ChevronRight, ListTree, Settings, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -15,10 +13,7 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { IssueWorkflow, Project } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -26,7 +21,6 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@multica/ui/components/ui/sheet";
 import { cn } from "@multica/ui/lib/utils";
@@ -41,69 +35,78 @@ import { useProjectWorkflowSwitch, WorkflowChoiceItems } from "./project-workflo
 import { stepHandlerActor, useStepHandlerLabel } from "./step-handler";
 
 /**
- * The project board's "Workflow" menu (MUL-7420): open the full flow or switch
- * workflows; workflows themselves are made in settings. Shown while workflows
- * are on, or when the project already names one.
+ * The project's "Workflow" submenu (MUL-7420), shown in the project title's
+ * menu: open the full flow or switch workflows; workflows themselves are made
+ * in settings.
+ *
+ * The flow sheet and the switch dialog must outlive the menu that opens them,
+ * so this host owns both and hands the submenu to `children` to place.
  */
-export function ProjectWorkflowMenu({ project }: { project: Project }) {
+export function ProjectWorkflowMenuHost({
+  project,
+  children,
+}: {
+  project: Project;
+  children: (submenu: ReactNode) => ReactNode;
+}) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const { workflows } = useIssueWorkflows(wsId);
-  const { canManageProject, isAdmin } = useWorkflowPermissions(project);
+  const { canManageProject, canCreateWorkflow } = useWorkflowPermissions(project);
   const { choose, busy, dialog } = useProjectWorkflowSwitch(project);
   const [flowOpen, setFlowOpen] = useState(false);
   const workflow = resolveProjectWorkflow(workflows, project);
 
-  if (!workflow || (!enabled && !project.workflow_id)) return null;
+  const submenu = workflow ? (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger disabled={busy}>
+        <Workflow className="size-3.5" />
+        <span className="flex-1">{t(($) => $.workflows.project.label)}</span>
+        <span className="ml-3 max-w-32 truncate text-caption font-medium text-muted-foreground">
+          {workflow.name}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-64">
+        <DropdownMenuItem onClick={() => setFlowOpen(true)}>
+          <ListTree className="size-3.5" />
+          {t(($) => $.workflows.menu.view_flow)}
+        </DropdownMenuItem>
+        {canManageProject && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Workflow className="size-3.5" />
+              {t(($) => $.workflows.menu.switch)}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-80">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.workflows.project.picker_title)}</DropdownMenuLabel>
+                <WorkflowChoiceItems project={project} onChoose={(w) => void choose(w)} />
+              </DropdownMenuGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+        {canCreateWorkflow && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>
+              <Settings className="size-3.5" />
+              {t(($) => $.workflows.project.manage)}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  ) : null;
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          disabled={busy}
-          render={
-            <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-              <Workflow className="size-3.5" />
-              <span className="max-w-40 truncate">{workflow.name}</span>
-              <ChevronDown className="size-3" />
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuItem onClick={() => setFlowOpen(true)}>
-            <ListTree className="size-3.5" />
-            {t(($) => $.workflows.menu.view_flow)}
-          </DropdownMenuItem>
-          {canManageProject && (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <Workflow className="size-3.5" />
-                {t(($) => $.workflows.menu.switch)}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-80">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{t(($) => $.workflows.project.picker_title)}</DropdownMenuLabel>
-                  <WorkflowChoiceItems project={project} onChoose={(w) => void choose(w)} />
-                </DropdownMenuGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          )}
-          {isAdmin && enabled && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>
-                <Settings className="size-3.5" />
-                {t(($) => $.workflows.project.manage)}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {children(submenu)}
       {dialog}
-      <WorkflowFlowSheet open={flowOpen} onOpenChange={setFlowOpen} project={project} workflow={workflow} />
+      {workflow && (
+        <WorkflowFlowSheet open={flowOpen} onOpenChange={setFlowOpen} project={project} workflow={workflow} />
+      )}
     </>
   );
 }
@@ -111,7 +114,7 @@ export function ProjectWorkflowMenu({ project }: { project: Project }) {
 /**
  * The project's whole flow in one panel (MUL-7420): every column, who it
  * hands to, and the same handoff form the column header opens. Handoffs
- * belong to the workflow, so only admins edit them here.
+ * belong to the workflow, so only its owner and admins edit them here.
  */
 export function WorkflowFlowSheet({
   open,
@@ -127,7 +130,7 @@ export function WorkflowFlowSheet({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { isAdmin } = useWorkflowPermissions(project);
+  const { canEditWorkflow, canManageProject } = useWorkflowPermissions(project, workflow);
   const [expanded, setExpanded] = useState<string | null>(null);
   const usedBy = workflow.is_default
     ? projects.filter((p) => !p.workflow_id).length
@@ -151,7 +154,8 @@ export function WorkflowFlowSheet({
               project={project}
               workflow={workflow}
               statusKey={step.status_key}
-              canEdit={isAdmin}
+              canEdit={canEditWorkflow}
+              canCopyForProject={canManageProject}
               expanded={expanded === step.status_key}
               onToggle={() => setExpanded((current) => (current === step.status_key ? null : step.status_key))}
             />
@@ -167,6 +171,7 @@ function FlowRow({
   workflow,
   statusKey,
   canEdit,
+  canCopyForProject,
   expanded,
   onToggle,
 }: {
@@ -174,6 +179,7 @@ function FlowRow({
   workflow: IssueWorkflow;
   statusKey: string;
   canEdit: boolean;
+  canCopyForProject: boolean;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -223,7 +229,13 @@ function FlowRow({
       </button>
       {expanded && accepts && (
         <div className="border-t border-surface-border px-3 py-3">
-          <WorkflowHandoffForm workflow={workflow} statusKey={statusKey} canEdit={canEdit} project={project} />
+          <WorkflowHandoffForm
+            workflow={workflow}
+            statusKey={statusKey}
+            canEdit={canEdit}
+            canCopyForProject={canCopyForProject}
+            project={project}
+          />
         </div>
       )}
     </li>

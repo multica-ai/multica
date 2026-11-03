@@ -10,6 +10,7 @@ import {
   type IssueFilters,
   type IssueFilterState,
 } from "./filter";
+import { createFilterCondition, createFilterGroup } from "@multica/core/issues/stores/filter-tree";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -712,5 +713,177 @@ describe("scalar operator filters", () => {
       },
     });
     expect(result.map((i) => i.id)).toEqual(["B"]);
+  });
+});
+
+describe("negated filters", () => {
+  const ids = (filters: Partial<IssueFilters>) =>
+    filterIssues(issues, { ...NO_FILTER, ...filters }).map((i) => i.id);
+
+  it("status is not done", () => {
+    expect(ids({ statusFilters: ["done"], negatedFilters: ["status"] })).toEqual(["1", "2", "4"]);
+  });
+
+  it("assignee is not a member keeps unassigned issues, like the server", () => {
+    expect(
+      ids({ assigneeFilters: [{ type: "member", id: "u-1" }], negatedFilters: ["assignee"] }),
+    ).toEqual(["2", "3", "4"]);
+  });
+
+  it("assignee is not 'No assignee' keeps every assigned issue", () => {
+    expect(ids({ includeNoAssignee: true, negatedFilters: ["assignee"] })).toEqual(["1", "2", "4"]);
+  });
+
+  it("project is not p-1 keeps projectless issues", () => {
+    expect(ids({ projectFilters: ["p-1"], negatedFilters: ["project"] })).toEqual(["2", "3"]);
+  });
+
+  it("label is not keeps unlabeled issues", () => {
+    const labeled = makeIssue({ id: "L", labels: [{ id: "bug", name: "Bug", color: "#f00" }] as Issue["labels"] });
+    const plain = makeIssue({ id: "P" });
+    const result = filterIssues([labeled, plain], {
+      ...NO_FILTER,
+      labelFilters: ["bug"],
+      negatedFilters: ["label"],
+    });
+    expect(result.map((i) => i.id)).toEqual(["P"]);
+  });
+
+  it("negation is per dimension and ANDs with the others", () => {
+    expect(
+      ids({ statusFilters: ["done"], priorityFilters: ["high"], negatedFilters: ["status"] }),
+    ).toEqual(["1"]);
+  });
+
+  it("a negated dimension without values filters nothing", () => {
+    expect(ids({ negatedFilters: ["status", "label"] })).toEqual(["1", "2", "3", "4"]);
+  });
+});
+
+describe("relation filters", () => {
+  const relationContext = { userId: "u-1", myAgentIds: new Set(["a-1"]) };
+  const ids = (filters: Partial<IssueFilters>) =>
+    filterIssues(issues, { ...NO_FILTER, relationContext, ...filters }).map((i) => i.id);
+
+  it("ORs the selected relations", () => {
+    expect(ids({ relationFilters: ["assigned"] })).toEqual(["1"]);
+    expect(ids({ relationFilters: ["my_agents"] })).toEqual(["2"]);
+    expect(ids({ relationFilters: ["assigned", "my_agents"] })).toEqual(["1", "2"]);
+    // Issue 2 was created by agent a-1, not by the member u-1.
+    expect(ids({ relationFilters: ["created"] })).toEqual(["1", "4"]);
+  });
+
+  it("can be negated", () => {
+    expect(ids({ relationFilters: ["created"], negatedFilters: ["relation"] })).toEqual(["2", "3"]);
+  });
+
+  it("is a no-op until the viewer is known", () => {
+    expect(
+      filterIssues(issues, { ...NO_FILTER, relationFilters: ["assigned"] }).map((i) => i.id),
+    ).toEqual(["1", "2", "3", "4"]);
+  });
+});
+
+describe("due date filters", () => {
+  const today = "2026-03-11";
+  const dated = [
+    makeIssue({ id: "late", due_date: "2026-03-10" }),
+    makeIssue({ id: "now", due_date: "2026-03-11" }),
+    makeIssue({ id: "sunday", due_date: "2026-03-15" }),
+    makeIssue({ id: "later", due_date: "2026-03-30" }),
+    makeIssue({ id: "undated", due_date: null }),
+  ];
+  const ids = (filters: Partial<IssueFilters>) =>
+    filterIssues(dated, { ...NO_FILTER, today, ...filters }).map((i) => i.id);
+
+  it("ORs the buckets", () => {
+    expect(ids({ dueDateFilters: ["overdue"] })).toEqual(["late"]);
+    expect(ids({ dueDateFilters: ["this_week"] })).toEqual(["late", "now", "sunday"]);
+    expect(ids({ dueDateFilters: ["today", "none"] })).toEqual(["now", "undated"]);
+  });
+
+  it("keeps undated issues under 'is not'", () => {
+    expect(ids({ dueDateFilters: ["overdue"], negatedFilters: ["dueDate"] })).toEqual([
+      "now", "sunday", "later", "undated",
+    ]);
+  });
+});
+
+describe("advanced filter", () => {
+  const ids = (advancedFilter: ReturnType<typeof createFilterGroup>, context: Partial<IssueFilters> = {}) =>
+    filterIssues(issues, { ...NO_FILTER, advancedFilter, ...context }).map((i) => i.id);
+
+  it("ORs across fields inside an any group", () => {
+    const tree = createFilterGroup("all", [
+      createFilterCondition("project", ["p-1", "none"]),
+      createFilterGroup("any", [
+        createFilterCondition("priority", ["urgent"]),
+        createFilterCondition("status", ["done"]),
+      ]),
+    ]);
+    expect(ids(tree)).toEqual(["3", "4"]);
+  });
+
+  it("negates one condition and keeps empty values", () => {
+    expect(ids(createFilterGroup("all", [createFilterCondition("assignee", ["member:u-1"], true)]))).toEqual([
+      "2", "3", "4",
+    ]);
+    expect(ids(createFilterGroup("all", [createFilterCondition("assignee", ["none"])]))).toEqual(["3"]);
+  });
+
+  it("drops empty and unanswerable conditions instead of matching everything", () => {
+    const tree = createFilterGroup("any", [
+      createFilterCondition("status", ["in_progress"]),
+      createFilterCondition("label"),
+      // No viewer context on this surface: the relation cannot be answered.
+      createFilterCondition("relation", ["assigned"]),
+    ]);
+    expect(ids(tree)).toEqual(["2"]);
+    expect(ids(createFilterGroup("any", [createFilterCondition("label")]))).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("evaluates relations once the viewer is known", () => {
+    const tree = createFilterGroup("any", [
+      createFilterCondition("relation", ["my_agents"]),
+      createFilterCondition("creator", ["member:u-2"]),
+    ]);
+    expect(ids(tree, { relationContext: { userId: "u-1", myAgentIds: new Set(["a-1"]) } })).toEqual(["2", "3"]);
+  });
+
+  it("is ANDed with the simple filters", () => {
+    const tree = createFilterGroup("all", [createFilterCondition("project", ["p-1"])]);
+    expect(ids(tree, { priorityFilters: ["high"] })).toEqual(["1"]);
+  });
+
+  it("tests custom properties like any other field", () => {
+    const estimate = "prop-estimate";
+    const small = makeIssue({ id: "S", priority: "low", properties: { [estimate]: 1 } });
+    const big = makeIssue({ id: "B", priority: "low", properties: { [estimate]: 8 } });
+    const unset = makeIssue({ id: "U", priority: "urgent" });
+    const run = (tree: ReturnType<typeof createFilterGroup>) =>
+      filterIssues([small, big, unset], { ...NO_FILTER, advancedFilter: tree }).map((i) => i.id);
+    const field = `property:${estimate}` as const;
+
+    expect(run(createFilterGroup("all", [createFilterCondition(field, [{ op: "gte", value: "5" }])]))).toEqual(["B"]);
+    // "Is not" keeps issues without a value, like the simple dimensions.
+    expect(run(createFilterGroup("all", [createFilterCondition(field, [{ op: "gte", value: "5" }], true)]))).toEqual([
+      "S", "U",
+    ]);
+    expect(
+      run(
+        createFilterGroup("any", [
+          createFilterCondition(field, [NO_PROPERTY_VALUE]),
+          createFilterCondition(field, [{ op: "lte", value: "1" }]),
+        ]),
+      ),
+    ).toEqual(["S", "U"]);
+    expect(
+      run(
+        createFilterGroup("any", [
+          createFilterCondition(field, [{ op: "gte", value: "5" }]),
+          createFilterCondition("priority", ["urgent"]),
+        ]),
+      ),
+    ).toEqual(["B", "U"]);
   });
 });

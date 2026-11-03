@@ -70,7 +70,10 @@ import type {
   ListDingTalkGroupsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
+  ListLarkInstallationsResponse,
   ListWecomInstallationsResponse,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
   RedeemWecomBindingTokenResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
@@ -80,6 +83,8 @@ import type {
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
+  IssueUnread,
   Label,
   MemberWithUser,
   IssueProperty,
@@ -595,6 +600,7 @@ export const IssueWorkflowSchema = z.object({
   name: z.string(),
   description: z.string().default(""),
   is_default: z.boolean().default(false),
+  owner_id: z.string().nullable().default(null),
   steps: z.array(IssueWorkflowStepSchema).default([]),
   project_ids: z.array(z.string()).default([]),
   created_at: z.string(),
@@ -617,6 +623,7 @@ export const EMPTY_ISSUE_WORKFLOW: IssueWorkflow = {
   name: "",
   description: "",
   is_default: false,
+  owner_id: null,
   steps: [],
   project_ids: [],
   created_at: "",
@@ -741,6 +748,30 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   prefs: { hidden: [], order: [] },
   updated_at: "",
 };
+
+/**
+ * The `sidebar_projects` preference document. Another client version may have
+ * saved values this one does not know; every field that does not parse comes
+ * out undefined so the caller's default stands in for it.
+ */
+export const SidebarProjectPrefsDocSchema = z.object({
+  projects: z.object({
+    ordering: z.enum(["manual", "name", "updated", "created"]).optional().catch(undefined),
+    statuses: z.array(z.string()).optional().catch(undefined),
+    onlyMine: z.boolean().optional().catch(undefined),
+    showCount: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  issues: z.object({
+    sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
+    sortDirection: z.enum(["asc", "desc"]).optional().catch(undefined),
+    hiddenStatuses: z.array(z.string()).nullable().optional().catch(undefined),
+    assignee: z.enum(["anyone", "me", "my_agents", "me_and_my_agents"]).optional().catch(undefined),
+    showSubIssues: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  order: z.array(z.unknown()).catch([]).transform((ids) => ids.filter((id): id is string => typeof id === "string")),
+});
+
+export type SidebarProjectPrefsDoc = z.infer<typeof SidebarProjectPrefsDocSchema>;
 
 export interface CreateIssueViewRequest {
   name: string;
@@ -905,6 +936,7 @@ export interface AppConfigResponse {
   analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
+  daemon_setup_target?: "cloud" | "self_host" | "unknown";
   workspace_creation_disabled?: boolean;
   /** Whether this deployment offers the self-hosted Git provider integration
    * (self-host only; off on the managed cloud). Absent/false hides the whole
@@ -1182,6 +1214,7 @@ export const AppConfigSchema = z.object({
   analytics_environment: OptionalStringSchema,
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
+  daemon_setup_target: z.enum(["cloud", "self_host", "unknown"]).optional().catch("unknown"),
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
@@ -1200,6 +1233,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   google_client_id: "",
   daemon_server_url: "",
   daemon_app_url: "",
+  daemon_setup_target: "unknown",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
   // Fail closed: an unreadable config must not look like a server that
@@ -2047,6 +2081,7 @@ const TaskUsageSchema = z.object({
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
   cost_usd_ticks: z.number().optional(),
+  credits_micros: z.number().optional().catch(undefined),
 }).loose();
 
 export const AgentTaskSchema = z.object({
@@ -2348,6 +2383,7 @@ export const StoredAgentDraftSchema = z.object({
     .catch("private"),
   member_ids: z.array(z.string()).catch([]),
   team_ids: z.array(z.string()).catch([]),
+  qoder_agent_id: z.string().catch(""),
   applied_message_id: z.string().nullable().catch(null),
   dismissed_message_id: z.string().nullish().catch(null),
 }).loose();
@@ -2755,6 +2791,38 @@ export const InboxUnreadSummarySchema = z.array(
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
+// Rows marked read by `POST /api/inbox/issues/{id}/read`. On a malformed body
+// the count is unknown (null), and callers refresh rather than trust it.
+
+export const MarkIssueInboxReadResultSchema = z.object({ count: z.number() }).loose();
+
+export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = { count: null };
+
+// The viewer's unread issues (`/api/issues/unread` GET), behind the sidebar's
+// unread dot. `outcome` stays a string so a future kind still lights the dot;
+// on malformed JSON parseWithFallback returns the empty list, which hides it.
+
+export const IssueUnreadPageSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          issue_id: z.string(),
+          outcome: z.string(),
+          agent_id: z.string().nullish().transform((v) => v ?? null),
+          created_at: z.string(),
+        })
+        .loose(),
+    ),
+    next_cursor: z.string().nullish().transform((v) => v ?? null),
+  })
+  .loose();
+
+export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: string | null } = {
+  items: [],
+  next_cursor: null,
+};
+
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still
@@ -2779,6 +2847,9 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
+      // An unknown section from a newer server drops to undefined, which
+      // inboxItemSection reads as "action" so nothing is hidden from unread.
+      section: z.enum(["action", "activity"]).optional().catch(undefined),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
@@ -3464,11 +3535,46 @@ export const ListWecomInstallationsResponseSchema = z.object({
   installations: z.array(WecomInstallationSchema).default([]),
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
+  // The settings tab gates the QR install entry point on this, so it is
+  // declared and validated here rather than left to pass through the loose
+  // object unchecked.
+  scan_install_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+export const BeginWecomInstallResponseSchema = z.object({
+  session_id: z.string(),
+  status: z.string().default("error"),
+  poll_interval_seconds: z.number().optional().default(1),
+}).loose();
+
+// A malformed begin response degrades to a terminal error rather than a session
+// the client would poll forever with an empty id.
+export const MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE: BeginWecomInstallResponse = {
+  session_id: "",
+  status: "error",
+  poll_interval_seconds: 1,
+};
+
+export const WecomInstallStatusResponseSchema = z.object({
+  status: z.string().default("error"),
+  qr_code_url: z.string().optional(),
+  expires_in_seconds: z.number().optional(),
+  poll_interval_seconds: z.number().optional().default(2),
+  installation_id: z.string().optional(),
+  error_reason: z.string().optional(),
+}).loose();
+
+// Same reasoning: an unparseable status stops the poll loop instead of leaving
+// the dialog spinning on a response nobody can read.
+export const MALFORMED_WECOM_INSTALL_STATUS_RESPONSE: WecomInstallStatusResponse = {
+  status: "error",
+  poll_interval_seconds: 2,
+  error_reason: "internal_error",
 };
 
 export const RedeemWecomBindingTokenResponseSchema = z.object({
@@ -3743,8 +3849,8 @@ export const WakeupConditionSchema = z.union([
   z.object({ type: z.literal("issue_field"), field: z.literal("label"), label_id: z.string() }),
   z.object({ type: z.literal("issue_field"), field: z.literal("property"), property_id: z.string(), value: z.unknown() }),
   z.object({ type: z.literal("children_done"), stage: z.number().int().nullish() }),
-  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged"]) }),
-  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review"]), identifier: z.string().optional() }),
+  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged", "conflicts"]) }),
+  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review", "blocked"]), identifier: z.string().optional() }),
 ]);
 
 export const WakeupRunSchema = z.object({
@@ -3852,3 +3958,32 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Receipt evidence is optional across mixed server/desktop versions. A malformed
+// timestamp must never render the binding as verified.
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  app_id: z.string().default(""),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  tenant_key: z.string().nullable().optional(),
+  status: z.string().default("revoked"),
+  region: z.string().optional(),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  first_message_received_at: z.iso.datetime({ offset: true }).nullable().optional().catch(undefined),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
+  installations: [],
+  configured: false,
+};

@@ -39,8 +39,11 @@ describe("matchLocale", () => {
     expect(matchLocale(["es", "de"])).toBe("en");
   });
 
-  it("zh-Hant (traditional) collapses to zh-Hans — same base subtag, better UX than English fallback", () => {
-    expect(matchLocale(["zh-Hant"])).toBe("zh-Hans");
+  it("Traditional-script and TW/HK tags resolve to zh-Hant, mainland tags to zh-Hans", () => {
+    expect(matchLocale(["zh-Hant"])).toBe("zh-Hant");
+    expect(matchLocale(["zh-TW"])).toBe("zh-Hant");
+    expect(matchLocale(["zh-HK"])).toBe("zh-Hant");
+    expect(matchLocale(["zh-CN"])).toBe("zh-Hans");
   });
 
   it("uses the first supported candidate when multiple appear", () => {

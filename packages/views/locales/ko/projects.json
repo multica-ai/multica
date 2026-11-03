@@ -2,11 +2,13 @@
   "page": {
     "title": "프로젝트",
     "new_project": "새 프로젝트",
+    "scope_all": "전체 프로젝트",
+    "scope_active": "진행 중인 프로젝트",
+    "scope_closed": "종료된 프로젝트",
     "empty": "아직 프로젝트가 없습니다",
-    "create_first": "첫 프로젝트 만들기",
+    "empty_description": "관련 태스크를 프로젝트로 묶어 진행 상황과 담당자를 추적하세요.",
     "view_compact": "간결하게",
     "view_comfortable": "넓게",
-    "search_placeholder": "프로젝트 검색...",
     "no_search_results": "검색 결과가 없습니다",
     "view_table": "테이블",
     "view_cards": "카드",
@@ -14,9 +16,7 @@
     "pin": "사이드바에 고정",
     "unpin": "고정 해제",
     "delete": "삭제",
-    "no_matches": "일치하는 프로젝트가 없습니다",
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+    "no_matches": "일치하는 프로젝트가 없습니다"
   },
   "table": {
     "name": "이름",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "프로젝트를 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 프로젝트",
     "breadcrumb_fallback": "프로젝트",
     "title_placeholder": "프로젝트 제목",
     "icon_tooltip": "아이콘 변경",
@@ -73,9 +75,10 @@
     "no_due_date": "마감일 없음",
     "description_placeholder": "설명 추가...",
     "description_hint": "이 프로젝트의 모든 실행에서 컨텍스트로 에이전트에게 공유됩니다.",
-    "empty_issues_title": "연결된 태스크가 없습니다",
-    "empty_issues_hint": "기존 태스크를 이 프로젝트에 추가할 수도 있습니다.",
+    "empty_issues_title": "이 프로젝트에는 아직 태스크가 없습니다",
+    "empty_issues_hint": "새로 만들거나 기존 태스크를 여기로 옮기세요.",
     "empty_issues_new_button": "새 태스크",
+    "empty_issues_add_existing": "기존 태스크 추가",
     "no_issues_yet": "아직 태스크가 없습니다",
     "toast_link_copied": "링크를 복사했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
@@ -167,18 +170,9 @@
     "fallback_label": "프로젝트"
   },
   "toolbar": {
-    "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_lead": "리드",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "view": "보기"
   }
 }

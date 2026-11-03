@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -179,6 +180,30 @@ func TestDaemonProfileLockHolderProcess(t *testing.T) {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(releasePath); err == nil {
+			if path := os.Getenv("MULTICA_TEST_DAEMON_STOP_RESULT"); path != "" {
+				outcome, _ := os.ReadFile(releasePath + ".outcome")
+				result := daemonShutdownResult{PID: os.Getpid(), CleanupConfirmed: true}
+				switch string(outcome) {
+				case "missing":
+					return
+				case "malformed":
+					if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					return
+				case "unconfirmed":
+					result.CleanupConfirmed = false
+				case "stale":
+					result.PID++
+				}
+				data, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

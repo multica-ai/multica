@@ -52,11 +52,13 @@ import {
   Tablet,
   WrapText,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { copyImage } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
@@ -81,6 +83,7 @@ import {
 } from "./utils/preview";
 import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
@@ -594,7 +597,7 @@ export function AttachmentPreviewModal({
 
 // Panel — top bar + stage
 
-const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
+const KIND_ICONS: Record<PreviewKind, IconComponent> = {
   image: ImageIcon,
   pdf: FileText,
   video: FileVideo,
@@ -608,7 +611,7 @@ const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
 
 type StructuredView = "tree" | "raw";
 
-const VIEWPORT_ICONS: Record<HtmlViewport, LucideIcon> = {
+const VIEWPORT_ICONS: Record<HtmlViewport, IconComponent> = {
   fill: Maximize2,
   desktop: Monitor,
   tablet: Tablet,
@@ -833,10 +836,8 @@ function PreviewPanel({
 
   return (
     <>
-      {/* Three columns so the counter stays centered on the window while a
-          long filename truncates before reaching it. */}
       <header
-        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 pl-3 pr-2 text-foreground"
+        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 pl-3 pr-2 text-foreground"
         style={surface === "viewer" ? DRAG : undefined}
       >
         <div className="flex min-w-0 items-center gap-2.5">
@@ -864,17 +865,6 @@ function PreviewPanel({
             )}
           </div>
         </div>
-        <span
-          className="select-none text-label tabular-nums text-muted-foreground"
-          aria-live="polite"
-        >
-          {sequence
-            ? t(($) => $.attachment.sequence_position, {
-                index: sequence.index + 1,
-                total: sequence.total,
-              })
-            : null}
-        </span>
         <div
           className="flex items-center justify-self-end gap-0.5"
           style={NO_DRAG}
@@ -1010,58 +1000,41 @@ function PreviewPanel({
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        {/* The stage. In a sequence its sides are 64px gutters holding the
-            prev / next buttons, so a fitted image or a page never runs under
-            them. */}
-        <motion.div
-          className={cn(
-            "relative min-h-0 min-w-0 flex-1",
-            sequence ? "px-16" : "px-4",
-          )}
-          onClick={closeOnBackdrop}
-          initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
-          animate={{
-            transform: "scale(1)",
-            transition: {
-              duration: UI_MOTION_DURATION.standard,
-              ease: UI_EASE_OUT,
-            },
-          }}
-        >
-          {kind === "image" ? (
-            <ImagePreview
-              state={state}
-              mediaUrl={mediaUrl}
-              canvas={canvas}
-              natural={natural}
-              onNaturalSize={handleNaturalSize}
-              onError={imageLoadError}
-            />
-          ) : (
-            <PreviewContent
-              kind={kind}
-              source={source}
-              state={state}
-              view={view}
-              onDownload={onDownload}
-              onBackdropClick={closeOnBackdrop}
-            />
-          )}
-          {sequence && (
-            <>
-              <SequenceButton
-                side="prev"
-                label={t(($) => $.attachment.previous)}
-                onClick={sequence.onPrev}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <motion.div
+            className="min-h-0 flex-1 px-4"
+            onClick={closeOnBackdrop}
+            initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
+            animate={{
+              transform: "scale(1)",
+              transition: {
+                duration: UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {kind === "image" ? (
+              <ImagePreview
+                state={state}
+                mediaUrl={mediaUrl}
+                canvas={canvas}
+                natural={natural}
+                onNaturalSize={handleNaturalSize}
+                onError={imageLoadError}
               />
-              <SequenceButton
-                side="next"
-                label={t(($) => $.attachment.next)}
-                onClick={sequence.onNext}
+            ) : (
+              <PreviewContent
+                kind={kind}
+                source={source}
+                state={state}
+                view={view}
+                onDownload={onDownload}
+                onBackdropClick={closeOnBackdrop}
               />
-            </>
-          )}
-        </motion.div>
+            )}
+          </motion.div>
+          {sequence && <SequencePager sequence={sequence} />}
+        </div>
         {info?.open && (
           // A column beside the stage rather than a layer over it: the file
           // re-fits into what is left instead of hiding under the panel.
@@ -1099,21 +1072,30 @@ function ChromeButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className={cn(
-        "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-        pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-      )}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      aria-label={label}
-      aria-keyshortcuts={shortcut}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
+    <TooltipHint
+      label={label}
+      shortcut={
+        shortcut ? (
+          <ShortcutKeycaps shortcut={createShortcutChord(shortcut)} decorative className="ml-1.5" />
+        ) : undefined
+      }
+      side="bottom"
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        className={cn(
+          "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+          pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+        )}
+        aria-label={label}
+        aria-keyshortcuts={shortcut}
+        aria-pressed={pressed}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -1129,7 +1111,7 @@ function ChromeSegmented<T extends string>({
 }: {
   label: string;
   value: T;
-  options: ReadonlyArray<{ value: T; label: string; icon: LucideIcon }>;
+  options: ReadonlyArray<{ value: T; label: string; icon: IconComponent }>;
   disabled?: boolean;
   onChange: (value: T) => void;
 }) {
@@ -1139,24 +1121,24 @@ function ChromeSegmented<T extends string>({
         const pressed = option.value === value;
         const Icon = option.icon;
         return (
-          <button
-            key={option.value}
-            type="button"
-            className={cn(
-              "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-              pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-            )}
-            title={option.label}
-            aria-label={option.label}
-            aria-pressed={pressed}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-          >
-            <Icon className="size-4 shrink-0" />
-            <span className="hidden @7xl:inline" aria-hidden>
-              {option.label}
-            </span>
-          </button>
+          <TooltipHint key={option.value} label={option.label} side="bottom">
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+                pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+              )}
+              aria-label={option.label}
+              aria-pressed={pressed}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className="hidden @7xl:inline" aria-hidden>
+                {option.label}
+              </span>
+            </button>
+          </TooltipHint>
         );
       })}
     </div>
@@ -1167,11 +1149,44 @@ function ChromeDivider() {
   return <span className="mx-1.5 h-4 w-px bg-input" aria-hidden />;
 }
 
-// Prev / next in the stage gutters, vertically centered — next to the
-// content, never on it. `onClick` undefined means "boundary reached": the
-// button stays mounted but disabled, so the reader can see they are at one
-// end instead of the control vanishing. `enabled:hover` so the disabled state
-// gets no hover feedback.
+// Prev / next with the position between them, centered under the stage. The
+// strip is not backdrop: a click that misses a button must not close the
+// viewer. The counter's min width keeps the buttons still as digits change.
+function SequencePager({ sequence }: { sequence: PreviewSequence }) {
+  const { t } = useT("editor");
+  return (
+    <div className="dark flex h-12 shrink-0 items-center justify-center gap-1 text-foreground">
+      <SequenceButton
+        side="prev"
+        label={t(($) => $.attachment.previous)}
+        onClick={sequence.onPrev}
+      />
+      <span
+        className="min-w-16 select-none text-center text-label tabular-nums text-muted-foreground"
+        aria-live="polite"
+      >
+        {t(($) => $.attachment.sequence_position, {
+          index: sequence.index + 1,
+          total: sequence.total,
+        })}
+      </span>
+      <SequenceButton
+        side="next"
+        label={t(($) => $.attachment.next)}
+        onClick={sequence.onNext}
+      />
+    </div>
+  );
+}
+
+const SEQUENCE_KEYS = {
+  prev: { chord: createShortcutChord("Left"), aria: "ArrowLeft", Icon: ChevronLeft },
+  next: { chord: createShortcutChord("Right"), aria: "ArrowRight", Icon: ChevronRight },
+} as const;
+
+// `onClick` undefined means "boundary reached": the button stays mounted but
+// disabled, so the reader can see they are at one end instead of the control
+// vanishing. `enabled:hover` so the disabled state gets no hover feedback.
 function SequenceButton({
   side,
   label,
@@ -1181,21 +1196,23 @@ function SequenceButton({
   label: string;
   onClick?: () => void;
 }) {
-  const Icon = side === "prev" ? ChevronLeft : ChevronRight;
+  const { chord, aria, Icon } = SEQUENCE_KEYS[side];
   return (
-    <button
-      type="button"
-      className={cn(
-        "dark absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-secondary/80 text-foreground transition-colors enabled:hover:bg-secondary disabled:opacity-30",
-        side === "prev" ? "left-3" : "right-3",
-      )}
-      title={label}
-      aria-label={label}
-      disabled={!onClick}
-      onClick={onClick}
+    <TooltipHint
+      label={label}
+      shortcut={<ShortcutKeycaps shortcut={chord} decorative className="ml-1.5" />}
     >
-      <Icon className="size-5" />
-    </button>
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40"
+        aria-label={label}
+        aria-keyshortcuts={aria}
+        disabled={!onClick}
+        onClick={onClick}
+      >
+        <Icon className="size-4" />
+      </button>
+    </TooltipHint>
   );
 }
 
