@@ -192,6 +192,14 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if task.QuickCreatePrompt != "" {
+		assigneeType, assigneeID := "agent", task.AgentID
+		if task.SquadID != "" {
+			assigneeType, assigneeID = "squad", task.SquadID
+		}
+		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE"] = assigneeType
+		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID"] = assigneeID
+	}
 	if runtime.GOOS != "windows" {
 		return env
 	}
@@ -2088,6 +2096,12 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	// Sweep orphaned ZCode provider credential snapshots left by a prior
+	// crash/SIGKILL (prepareZcodeRuntimeEnv writes 0600 files under
+	// $TMPDIR/multica-zcode-providers-*; normal exits remove them in defer).
+	if n := agent.CleanupStaleZcodeProviderSnapshots(); n > 0 {
+		d.logger.Info("removed stale ZCode provider credential snapshots", "count", n)
+	}
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -5803,13 +5817,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		err = nil // Cleanup uncertainty must outrank worktree-finalization errors.
 	}
 
+	// Shutdown cancels ctx before the runner returns. Keep the final usage,
+	// server-cancellation check and acknowledgement deliverable during cleanup.
+	finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalTaskReportTimeout)
+	defer finalCancel()
+
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
 	// goroutine. Both claude.go and codex.go populate result.Usage even when
 	// runCtx is cancelled, so dropping this on the cancelled path silently
 	// under-reports billing.
 	if len(result.Usage) > 0 {
-		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
+		if usageErr := d.client.ReportTaskUsage(finalCtx, task.ID, result.Usage); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
@@ -5833,7 +5852,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// got a single message out of must not stay this issue's resume
 		// pointer (MUL-8188).
 		ack := taskCancelAcknowledgement(result, err, provider)
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, ack); ackErr != nil {
+		if ackErr := d.client.AckTaskCancelled(finalCtx, task.ID, ack); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
@@ -5864,14 +5883,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
+	_ = d.client.ReportProgress(finalCtx, task.ID, "Finishing task", 2, 2)
 
 	// Final pre-completion check: if the server already moved the task to a
 	// terminal state (completed/failed/cancelled) or deleted the row
 	// outright, skip reporting — the complete/fail callbacks would fail
 	// anyway. Reuse shouldInterruptAgent so this guard honors the same
 	// signals as the in-flight watcher.
-	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
+	if status, err := d.client.GetTaskStatus(finalCtx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result",
 			"status", status, "error", err, "branch_name", result.BranchName)
 		// Same contract as the poll-cancelled path above: the transcript is
@@ -5883,10 +5902,20 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// completed/failed rows the complete/fail callback is the
 		// authoritative channel and a stale run's late ack must not touch
 		// them.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, taskCancelAcknowledgement(result, nil, provider)); ackErr != nil {
+		if ackErr := d.client.AckTaskCancelled(finalCtx, task.ID, taskCancelAcknowledgement(result, nil, provider)); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
+	}
+
+	// Only the parent (daemon) context identifies shutdown. A cancelled agent
+	// with a live parent remains a deliberate cancellation; server terminal
+	// states and poll cancellation have already taken precedence above.
+	// Infrastructure interruptions carry a diagnostic, matching server-side orphan
+	// recovery; deliberate cancellation relies on its localized reason label.
+	if result.Status == "cancelled" && result.FailureReason == "" && errors.Is(ctx.Err(), context.Canceled) {
+		result.FailureReason = taskfailure.ReasonRuntimeRecovery.String()
+		result.Comment = "daemon shut down while task was in flight"
 	}
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
@@ -6241,13 +6270,26 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		taskLog.Error("local_directory: lock acquire failed", "error", err)
 		failureReason := "local_directory_error"
+		errorMessage := fmt.Sprintf("local_directory wait cancelled: %s", err.Error())
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			failureReason = "cancelled"
+			if errors.Is(ctx.Err(), context.Canceled) {
+				// Shutdown can stop the wait poller before it observes a user
+				// cancellation. Honor server terminal state before enabling retry.
+				finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalTaskReportTimeout)
+				defer finalCancel()
+				if status, statusErr := d.client.GetTaskStatus(finalCtx, task.ID); shouldInterruptAgent(status, statusErr) {
+					taskLog.Info("local_directory: wait aborted by server-side terminal state", "status", status, "error", statusErr)
+					return nil, true
+				}
+				failureReason = taskfailure.ReasonRuntimeRecovery.String()
+				errorMessage = "daemon shut down while task was waiting for its local directory lock"
+			}
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
-			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			errorMessage:  errorMessage,
 			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
@@ -6492,6 +6534,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
+	"zcode":      "ZCode",
 	"zeroclaw":   "ZeroClaw",
 }
 
@@ -6568,6 +6611,10 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // Codex also has a conversation-scoped store for local_directory tasks. A
 // continued worktree may use a new cwd while retaining its branch and rollout.
 // Managed Codex tasks still require the same existing directory.
+// Claude is cwd-keyed and has no conversation-scoped store, but a continued
+// worktree can bring the prior transcript with it: when the transcript has
+// been migrated into this run's encoded projects directory (#9731), the same
+// relaxed rule applies. Everywhere else Claude keeps the strict rule.
 // sameExistingDir reports whether two paths name the same existing directory.
 // False when either cannot be stat'd, which is the safe answer for cwd-keyed
 // providers: an absent prior workdir means there is nothing to resume from.
@@ -6594,13 +6641,91 @@ func codexWorktreeResumeEligible(env *execenv.Environment, store string) bool {
 	return env != nil && env.LocalWorktree != nil && env.LocalWorktree.Continued && env.CodexHome != "" && store != ""
 }
 
-func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd, codexWorktreeResumeEligible bool, taskLog *slog.Logger) bool {
+// encodeClaudeCwd mirrors Claude Code's on-disk projects directory naming: it
+// flattens the task's cwd by replacing every non-alphanumeric character with a
+// dash, so /home/u/repo resolves to ~/.claude/projects/-home-u-repo. The
+// mapping is lossy (two cwds can flatten to the same name), which is fine —
+// the CLI resolves sessions through the same mapping.
+// Long-path truncation/hashing and Windows drive-letter normalization are not
+// modeled here; paths requiring them may fall back to a fresh session.
+func encodeClaudeCwd(cwd string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return '-'
+	}, cwd)
+}
+
+// migrateClaudeWorktreeTranscript copies the prior session's transcript into
+// this run's encoded projects directory so Claude Code can resolve it from the
+// continued worktree's new cwd (#9731). Claude Code looks sessions up under
+// <config-dir>/projects/<encoded-cwd>/ and only falls back to a global search
+// when the local directory misses; copying the transcript in makes the resume
+// take the primary path instead of depending on that fallback. Idempotent: a
+// transcript already present from an earlier migration is left as-is. Reports
+// whether this run's directory now holds the transcript — anything else
+// (changed cwd outside a continued worktree, missing source, unwritable
+// destination) reports false and the gate keeps the strict same-directory
+// rule. The copy left behind in the prior task's directory is orphaned until
+// the operator or a future GC pass reclaims it.
+func migrateClaudeWorktreeTranscript(env *execenv.Environment, sessionID, envWorkDir, priorWorkDir string, childEnv map[string]string, taskLog *slog.Logger) bool {
+	if env == nil || env.LocalWorktree == nil || !env.LocalWorktree.Continued {
+		return false
+	}
+	if sessionID == "" || priorWorkDir == "" || envWorkDir == "" || priorWorkDir == envWorkDir {
+		return false
+	}
+	if sessionID == "." || sessionID == ".." || strings.ContainsAny(sessionID, "/\\:\x00") {
+		taskLog.Debug("claude: invalid session id for transcript migration")
+		return false
+	}
+	priorConfigDir, err := agent.ClaudeConfigDir(childEnv, priorWorkDir)
+	if err != nil {
+		taskLog.Debug("claude: cannot resolve prior transcript config directory", "error", err)
+		return false
+	}
+	configDir, err := agent.ClaudeConfigDir(childEnv, envWorkDir)
+	if err != nil {
+		taskLog.Debug("claude: cannot resolve transcript config directory", "error", err)
+		return false
+	}
+	src := filepath.Join(priorConfigDir, "projects", encodeClaudeCwd(priorWorkDir), sessionID+".jsonl")
+	dstDir := filepath.Join(configDir, "projects", encodeClaudeCwd(envWorkDir))
+	dst := filepath.Join(dstDir, sessionID+".jsonl")
+	if info, err := os.Stat(dst); err == nil && info.Mode().IsRegular() {
+		return true
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		taskLog.Debug("claude: cannot read prior session transcript", "path", src, "error", err)
+		return false
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		taskLog.Debug("claude: cannot create transcript directory", "path", dstDir, "error", err)
+		return false
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		taskLog.Debug("claude: cannot write migrated transcript", "path", dst, "error", err)
+		return false
+	}
+	taskLog.Info("claude: migrated prior session transcript into the continued worktree cwd",
+		"session_id", sessionID,
+		"prior_workdir", priorWorkDir,
+		"workdir", envWorkDir,
+	)
+	return true
+}
+
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd, codexWorktreeResumeEligible, claudeResumeReady bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
 		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
 	} else if provider == "hermes" {
 		reachable = sessionHomeReachable
 	} else if provider == "codex" && codexWorktreeResumeEligible {
+		reachable = sessionHomeReachable
+	} else if provider == "claude" && claudeResumeReady {
 		reachable = sessionHomeReachable
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
@@ -8505,15 +8630,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
+	taskCtx = execenv.ApplyPreparedSkillNames(taskCtx, env.PreparedSkillNames)
 	// usesCustomProfileCommand is the same provenance the backend receives as
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
 	// binary from an arbitrary command speaking its protocol. Reused here so
 	// the gate and the backend cannot disagree about which one is running.
+	// Claude's config lookup needs only the inherited environment plus allowed
+	// custom_env; taskMulticaEnvironment below does not override its config or
+	// home variables. Apply the same blocklist as the eventual child env.
+	claudeResumeReady := provider == "claude" && migrateClaudeWorktreeTranscript(
+		env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, sanitizeAgentEnv(agentEnvOverrides), taskLog,
+	)
 	resumeReachable := gateResumeToReachableSession(
 		&task, &taskCtx, provider, env.WorkDir,
 		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
 		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
+		claudeResumeReady,
 		taskLog,
 	)
 	// A reachable workdir or continued local worktree is not sufficient for a
@@ -8525,7 +8658,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
+	// Build the runtime brief and inject it into the provider-specific
+	// instruction file when supported.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
@@ -8800,6 +8934,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		EnableTaskSupplement:       taskSupplementNegotiated,
 		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
+		PiSkillPaths:               env.PiSkillPaths,
 		Model:                      model,
 		ThreadName:                 deriveTaskThreadName(task),
 		Timeout:                    d.cfg.AgentTimeout,
@@ -8907,6 +9042,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
+	// STOE-30: mirror the agent's cumulative token counters into task_usage
+	// while the run is live, so a long run's cost moves on the board instead of
+	// appearing only after it ends. The backend calls OnUsage from its protocol
+	// reader goroutine, so this records the latest snapshot only; the flush
+	// goroutine owns the HTTP call and its cadence.
+	var liveUsage atomic.Value // []TaskUsageEntry
+	execOpts.OnUsage = func(usage map[string]agent.TokenUsage) {
+		if entries := taskUsageEntries(provider, usage); len(entries) > 0 {
+			liveUsage.Store(entries)
+		}
+	}
+	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
+	defer stopUsageFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
@@ -8959,7 +9107,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start; keeping the original poisoned result", "error", retryErr)
 		} else if retryResult.Status != "completed" && retryResult.SessionID == "" {
@@ -9018,22 +9166,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"agent_error", result.Error,
 	)
 
-	// Convert agent usage map to task usage entries.
-	var usageEntries []TaskUsageEntry
-	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks <= 0 {
-			continue
-		}
-		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUSDTicks:     u.CostUSDTicks,
-		})
-	}
+	// Convert agent usage map to task usage entries. Same conversion the live
+	// flush above uses, so both reports write the same rows.
+	usageEntries := taskUsageEntries(provider, result.Usage)
 
 	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
 	// store, for ANY terminal state — including `completed`, since a completed
@@ -9155,21 +9290,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Usage:         usageEntries,
 		}, nil
 	case "cancelled":
-		// The daemon's own context was cancelled (server cancel or daemon
-		// shutdown): the parent context cancellation propagates here as
-		// context.Canceled and the fail callback runs. A user cancel or issue
-		// reassignment is discarded earlier by handleTask's cancelledByPoll
-		// branch, so this case is mainly defensive — and preserves the
-		// "cancelled" status string for the "agent finished" log line so
-		// operators can distinguish a server cancellation from a real timeout.
-		//
-		// Comment stays empty on purpose. reportTaskResult forwards it as the
-		// task's `error`, which the UI shows verbatim under "Technical
-		// details", so a sentence written here would reach the reader
-		// untranslated. The status alone already yields failure_reason
-		// "cancelled", whose label is localized in every shipped locale, and
-		// it says the same thing — an English sentence beside it would only
-		// be a worse copy of it.
+		// handleTask distinguishes daemon shutdown from explicit cancellation
+		// using its parent context, after checking the server's terminal state.
+		// Keep deliberate cancellation's comment empty: its localized reason
+		// already explains the outcome without untranslated duplicate prose.
 		return TaskResult{
 			Status:    "cancelled",
 			SessionID: result.SessionID,
@@ -9422,7 +9546,7 @@ func (d *Daemon) repairWorktreeDelivery(ctx context.Context, backend agent.Backe
 	taskLog.Warn("local_directory: worktree delivery would be refused; asking the agent to repair it",
 		"branch", problem.Branch, "base", problem.BaseCommit, "tip", problem.Tip, "reason", problem.Reason)
 
-	opts := execOpts
+	opts := withPriorTaskUsage(execOpts, result.Usage)
 	// Continue the conversation when there is one, so the agent knows what it
 	// just did; the prompt is self-contained for the backends that cannot.
 	opts.ResumeSessionID = result.SessionID
@@ -9513,6 +9637,106 @@ func freshSessionMayHelp(errText string) bool {
 	default:
 		return true
 	}
+}
+
+// withPriorTaskUsage keeps retries and repair turns on the same task-wide total
+// as the terminal report, even though each backend execution starts at zero.
+func withPriorTaskUsage(opts agent.ExecOptions, prior map[string]agent.TokenUsage) agent.ExecOptions {
+	if report := opts.OnUsage; report != nil && len(prior) > 0 {
+		opts.OnUsage = func(usage map[string]agent.TokenUsage) { report(mergeUsage(prior, usage)) }
+	}
+	return opts
+}
+
+// taskUsageEntries converts a backend's per-model usage map into the rows the
+// server upserts. A model whose buckets are all zero is skipped rather than
+// written as 0: an unreported run keeps its cost NULL server-side, which is what
+// makes the board render it as unknown instead of $0.
+func taskUsageEntries(provider string, usage map[string]agent.TokenUsage) []TaskUsageEntry {
+	var entries []TaskUsageEntry
+	for model, u := range usage {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks <= 0 {
+			continue
+		}
+		entries = append(entries, TaskUsageEntry{
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+			CostUSDTicks:     u.CostUSDTicks,
+		})
+	}
+	// Stable ordering lets the flush compare snapshots across map iterations.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Model < entries[j].Model })
+	return entries
+}
+
+// liveUsageFlushEvery bounds how often a running task's cumulative counters are
+// POSTed. The agent emits them per model call; this only bounds the traffic.
+const liveUsageFlushEvery = 30 * time.Second
+
+// startUsageFlush POSTs the newest snapshot held in `live` until the returned
+// stop func runs, so a long run's cost is visible before it ends (STOE-30).
+// Repeating it is safe by construction: UpsertTaskUsage overwrites absolutely
+// per (task_id, provider, model) and bumps updated_at, which is what makes the
+// hourly rollup re-aggregate those rows, so cumulative snapshots cannot add up
+// twice. It is sent as a snapshot so the server keeps its additive metrics
+// counter on the terminal report (see Client.ReportTaskUsageSnapshot). That
+// report stays the authoritative final value, so the caller stops this flush
+// before the terminal report is made.
+func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomic.Value, taskLog *slog.Logger) (stop func()) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(liveUsageFlushEvery)
+		defer ticker.Stop()
+		var reported string
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case <-done:
+					return
+				case <-ctx.Done():
+					return
+				default:
+				}
+				entries, _ := live.Load().([]TaskUsageEntry)
+				if len(entries) == 0 {
+					continue
+				}
+				// An idle agent costs nothing: re-posting the numbers the server
+				// already has is traffic, not information.
+				key := fmt.Sprintf("%v", entries)
+				if key == reported {
+					continue
+				}
+				// Preserve ordering with the terminal report even when the run is
+				// cancelled. The HTTP timeout still bounds an in-flight request.
+				if err := d.client.ReportTaskUsageSnapshot(context.WithoutCancel(ctx), taskID, entries); err != nil {
+					// Not fatal — the terminal report carries the run's usage
+					// again if a flush is lost.
+					taskLog.Warn("live usage flush failed", "error", err)
+					continue
+				}
+				reported = key
+			}
+		}
+	}()
+	return sync.OnceFunc(func() {
+		close(done)
+		// Let an in-flight POST finish before the terminal overwrite. Cancelling
+		// only the client request can return before the server finishes writing.
+		// The control-plane HTTP client's timeout bounds this wait.
+		<-stopped
+	})
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the

@@ -227,11 +227,10 @@ export function buildCreateAgentRequest(options: {
   const { runtimeId, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
-  // hides them (plus conversation starters) once Qoder is chosen.
+  // hides them once Qoder is chosen.
   const draft: AgentDraft = qoder
     ? {
         ...options.draft,
-        conversationStarters: [],
         model: "",
         thinkingLevel: "",
         serviceTier: "",

@@ -625,3 +625,48 @@ func TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient(t *testing.T) {
 		}
 	})
 }
+
+// A structured error body past 4 KiB must arrive whole: callers parse it as
+// JSON (e.g. a workflow's 409 status mapping plan), and a cut body does not
+// parse.
+func TestHTTPErrorKeepsLargeStructuredBody(t *testing.T) {
+	required := make([]map[string]any, 0, 45)
+	for i := 0; i < 45; i++ {
+		required = append(required, map[string]any{
+			"status_key":  "custom_status_" + strings.Repeat("x", 20) + string(rune('a'+i%26)) + string(rune('a'+i/26)),
+			"issue_count": 1, "suggested_status_key": "todo",
+		})
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"error": "map every status", "code": "workflow_status_mapping_required",
+		"plan": map[string]any{"required": required},
+	})
+	if len(payload) <= 4096 {
+		t.Fatalf("fixture is %d bytes; it must exceed 4096 to cover the old cap", len(payload))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "", "test-token")
+	err := client.PostJSON(context.Background(), "/api/projects/p/workflow", map[string]any{}, nil)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	var got struct {
+		Code string `json:"code"`
+		Plan struct {
+			Required []any `json:"required"`
+		} `json:"plan"`
+	}
+	if jerr := json.Unmarshal([]byte(httpErr.Body), &got); jerr != nil {
+		t.Fatalf("body of %d bytes did not parse (kept %d): %v", len(payload), len(httpErr.Body), jerr)
+	}
+	if got.Code != "workflow_status_mapping_required" || len(got.Plan.Required) != 45 {
+		t.Fatalf("code = %q, required = %d; want the full plan", got.Code, len(got.Plan.Required))
+	}
+}

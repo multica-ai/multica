@@ -82,12 +82,48 @@ export function isShowingLiveEndRow(scrollEl: HTMLElement): boolean {
  * is the window the list waits for that to stop — raise it to absorb slower
  * content at the cost of showing the conversation later, lower it to paint
  * sooner and let late arrivals shift the view.
+ *
+ * A list that names its conversation pays it only on that conversation's first
+ * reveal in a page session (see `revealedLists`).
  */
 const LIVE_END_SETTLE_MS = 120;
 
 // A list whose content never stops moving must not stay hidden. Past this,
 // reveal whatever Virtuoso has: a shift beats a blank chat.
 const REVEAL_DEADLINE_MS = 1000;
+
+/**
+ * Conversations whose list has already been revealed in this page session.
+ *
+ * What the settle window waits out is cold content: fonts, image decodes,
+ * diagram heights. A conversation the reader has already seen here has none
+ * left — fonts are loaded, images are in the memory cache, code highlighting is
+ * synchronous and rich blocks reserve their session-cached height — so waiting
+ * again buys nothing. It does cost: the floating chat unmounts its list on
+ * close (MUL-8030), so without this every Cmd+J paid the full window again as
+ * an empty panel (MUL-8417). A warm list still waits to land; it only skips the
+ * settle.
+ *
+ * Module-level for the same reason as `rich-content/mounted-block-registry.ts`:
+ * the list that would remember is the one that just unmounted. Bounded,
+ * oldest-first; an evicted conversation only pays the settle once more.
+ */
+const MAX_TRACKED_REVEALS = 200;
+const revealedLists = new Set<string>();
+
+function markListRevealed(key: string): void {
+  if (revealedLists.has(key)) return;
+  if (revealedLists.size >= MAX_TRACKED_REVEALS) {
+    const oldest = revealedLists.values().next();
+    if (!oldest.done) revealedLists.delete(oldest.value);
+  }
+  revealedLists.add(key);
+}
+
+/** Test-only: the registry outlives individual lists by design. */
+export function resetRevealedLists(): void {
+  revealedLists.clear();
+}
 
 export interface StickToBottom {
   /** For `followOutput`: the reader is still following the live end. */
@@ -122,11 +158,15 @@ export interface StickToBottom {
  * releases and the list cannot be scrolled at all (MUL-6879). An index-based
  * scroll to the last row is what Virtuoso's own `followOutput` does, and it
  * converges because Virtuoso measures that row before deciding where to stop.
+ *
+ * `revealKey` names the conversation for `revealedLists`; without one, every
+ * mount pays the settle window.
  */
 export function useStickToBottom(
   scrollEl: HTMLElement | null,
   pinToLiveEnd: () => void,
   active = true,
+  revealKey: string | null = null,
 ): StickToBottom {
   const followRef = useRef<LiveEndFollow | null>(null);
   if (followRef.current === null) {
@@ -151,6 +191,13 @@ export function useStickToBottom(
   // on the frame the correcting scroll lands. A frame loop that stops as soon
   // as the list holds still costs a handful of rect reads at open.
   const [hasReachedLiveEnd, setHasReachedLiveEnd] = useState(false);
+  // Read once at mount: the registry is bookkeeping, not render state.
+  const [settleMs] = useState(() =>
+    revealKey !== null && revealedLists.has(revealKey) ? 0 : LIVE_END_SETTLE_MS,
+  );
+  useEffect(() => {
+    if (hasReachedLiveEnd && revealKey !== null) markListRevealed(revealKey);
+  }, [hasReachedLiveEnd, revealKey]);
   useEffect(() => {
     if (!active || !scrollEl || hasReachedLiveEnd) return;
     let frame = 0;
@@ -164,10 +211,12 @@ export function useStickToBottom(
       const steady = height === lastHeight && isShowingLiveEndRow(scrollEl);
       lastHeight = height;
       if (!steady) steadySince = null;
-      else if (steadySince === null) steadySince = now;
-      else if (now - steadySince >= LIVE_END_SETTLE_MS) {
-        setHasReachedLiveEnd(true);
-        return;
+      else {
+        steadySince ??= now;
+        if (now - steadySince >= settleMs) {
+          setHasReachedLiveEnd(true);
+          return;
+        }
       }
       frame = requestAnimationFrame(poll);
     };
@@ -177,7 +226,7 @@ export function useStickToBottom(
       cancelAnimationFrame(frame);
       clearTimeout(deadline);
     };
-  }, [active, scrollEl, hasReachedLiveEnd]);
+  }, [active, scrollEl, hasReachedLiveEnd, settleMs]);
 
   // Content grew or the viewport resized — displacement with no scroll event,
   // so it can never promote staged reader input.

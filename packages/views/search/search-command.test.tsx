@@ -727,6 +727,23 @@ describe("SearchCommand", () => {
     });
   });
 
+  describe("current agent", () => {
+    it("opens the agent's settings when 'settings' is typed", async () => {
+      const user = userEvent.setup();
+      const agent = makeAgent("agent-lambda", "Lambda");
+      seed(agentListOptions("ws-test"), [agent]);
+      registerContext({ kind: "agent", agent } as CommandBarContext);
+      renderSearch();
+      await user.type(input(), "settings");
+
+      await waitFor(() =>
+        expect(renderedValues()).toContain("command:context-agent:agent-settings"),
+      );
+      await user.click(await rowText("Open agent settings"));
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/agents/agent-lambda?view=general");
+    });
+  });
+
   describe("current issue", () => {
     const issue = makeIssue({ id: "issue-1", identifier: "MUL-42", title: "Safari login loop" });
 

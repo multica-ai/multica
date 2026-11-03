@@ -58,6 +58,18 @@ import (
 // the clock starts at the opening frame, and waiting in line does not stop it.
 const streamMaxAge = 10 * time.Minute
 
+// streamGuardAfter is when a live bubble is rotated onto a fresh stream rather
+// than let run into streamMaxAge. A minute of headroom covers a slow frame:
+// the old stream still has to take the closing frame that hands over to the
+// new one. It stays clear of the measured ceiling's lower bound, not just of
+// streamMaxAge.
+// maxRotations bounds how many fresh bubbles one run may be handed. Twenty-
+// four is four hours of a run that keeps stepping; past it the guard leaves
+// the bubble to the server's window and the answer goes plain.
+const maxRotations = 24
+
+const streamGuardAfter = 9 * time.Minute
+
 // streamCloseRetries is how many times a closing frame whose ack never came is
 // written again, and streamCloseRetryDelay the gap between attempts. See seal.
 const (
@@ -111,8 +123,28 @@ type streamHandle struct {
 	// knew who asked is gone.
 	Locale Locale
 
-	// CreatedAt is when the stream was opened, which is what the protocol's
-	// window counts from.
+	// Level is how much of the run this bubble may show while it is still
+	// going (progress_render.go). It is settled when the bubble is opened,
+	// while who asked and where they asked is still known, and read again on
+	// every refresh — the events that drive those refreshes name a task and
+	// nothing about a person.
+	//
+	// Settled PER ROUND, never carried over from the last one: the binding it
+	// is decided from can be revoked, or re-pointed at a different person,
+	// between two questions in the same chat, and the round after that must
+	// not still be showing file paths on the strength of the round before it.
+	Level progressLevel
+
+	// Unusable says the server has disowned this stream (846605 / 846608): the
+	// bubble it painted is on the user's screen and no frame will ever touch
+	// it again, so what is left of the handle is the addressing. A caller that
+	// gets one writes its words as a plain message instead of a frame. Set by
+	// the store on the way out of take.
+	Unusable bool
+
+	// CreatedAt is when the CURRENT stream was opened, which is what the
+	// protocol's window counts from. Rotating a round onto a fresh stream
+	// resets it.
 	CreatedAt time.Time
 }
 
@@ -220,6 +252,54 @@ type roundEntry struct {
 	// round has to carry the name of what it is waiting for until an ending
 	// can resolve the lineage.
 	retryOf string
+
+	// guard rotates the bubble onto a fresh stream before the protocol's
+	// window runs out on the current one.
+	guard *time.Timer
+
+	// steps counts the run's signs of life — every progress report for it that
+	// reaches this replica, from its own bus or relayed from another, whether
+	// or not a line was painted — and stepsAtOpen is the count when the
+	// current stream opened. The guard
+	// rotates a bubble only for a run that has stepped since: a run that ended
+	// without an event (an agent archived on main publishes no task:cancelled)
+	// would otherwise be handed a fresh bubble every nine minutes for as long
+	// as the process lives. A quiet run keeps its stream until the server ends
+	// it at the window, and its answer, if one still comes, goes out as a
+	// plain message. Counts rather than clocks, so a step and an open in the
+	// same instant still tell apart.
+	steps       int
+	stepsAtOpen int
+
+	// rotations counts hand-overs, bounded by maxRotations as a backstop for a
+	// run that keeps stepping and never ends.
+	rotations int
+
+	// feed is the bubble's scrolling list of steps, created on the first one
+	// that reaches it (progress_render.go). It lives here rather than beside
+	// the store's maps so it dies exactly when the round does — a list of a
+	// finished run's tool calls has nothing left to be painted into. A
+	// rotation starts a fresh one: the new stream is a new bubble.
+	feed *progressFeed
+
+	// folded is how far each run's transcript has been read into the feed,
+	// by the run's own seq (task_message.seq), and it is the dedupe for every
+	// progress report: a report at or below it is one already shown, however
+	// many copies of it arrive and from whichever replica. Per run, because a
+	// round can see two — an auto-retry clone starts its own seq at one.
+	// It survives a rotation, unlike the feed: the new bubble starts empty,
+	// not by replaying the transcript from the beginning.
+	folded map[string]int32
+
+	// started says the "starting the agent" line has been put into this
+	// round's feed, so a second copy of the milestone is not a second line.
+	started bool
+
+	// unusable is the server's verdict that this stream takes no further
+	// frame, kept rather than acted on by forgetting the round. The bubble is
+	// over either way; the round is not, and the handle is the only address
+	// its ending has.
+	unusable bool
 
 	// createdAt bounds the entry for the sweep when there is no handle to read
 	// a time off.
@@ -375,6 +455,17 @@ func (s *streamStore) boundLocked(key, taskID string) *roundEntry {
 	}
 	for _, r := range s.sessions[key] {
 		if r.taskID == taskID {
+			return r
+		}
+	}
+	return nil
+}
+
+// seqLocked finds the round with this sequence number, or nil. Caller holds
+// s.mu.
+func (s *streamStore) seqLocked(key string, seq roundSeq) *roundEntry {
+	for _, r := range s.sessions[key] {
+		if r.seq == seq {
 			return r
 		}
 	}
@@ -687,6 +778,22 @@ func (s *streamStore) forget(sessionID pgtype.UUID, taskID string) {
 	s.retireLocked(key, taskID)
 }
 
+// arm attaches the expiry guard to a round, replacing any earlier one. A
+// round that ended between the open and this call has already left the list,
+// so there is nothing to guard and the timer is stopped instead of leaked.
+func (s *streamStore) arm(sessionID pgtype.UUID, seq roundSeq, t *time.Timer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.seqLocked(util.UUIDToString(sessionID), seq); e != nil {
+		if e.guard != nil && e.guard != t {
+			e.guard.Stop()
+		}
+		e.guard = t
+		return
+	}
+	t.Stop()
+}
+
 // indexLocked finds the round an ending speaks for, or -1. Matching is by the
 // name the caller carried in and there is no positional fallback: a run whose
 // id is not on file has no bubble here, and taking somebody else's would seal
@@ -725,11 +832,19 @@ func (s *streamStore) takeAtLocked(key string, i int) roundTurn {
 	} else {
 		s.sessions[key] = rounds
 	}
+	if entry.guard != nil {
+		entry.guard.Stop()
+	}
 	s.retireLocked(key, entry.taskID)
 
 	turn := roundTurn{}
 	if entry.painted && !s.expiredLocked(entry.handle.CreatedAt) {
 		turn.Handle, turn.HasBubble = entry.handle, true
+		// The server's verdict travels with the handle: a stream it has
+		// disowned still names the chat, and that addressing is all a caller
+		// can use. Writing another frame to it would be one more refusal
+		// charged against the whole bot's rate limit.
+		turn.Handle.Unusable = entry.unusable
 	}
 	return turn
 }
@@ -804,6 +919,184 @@ func (s *streamStore) take(ctx context.Context, sessionID pgtype.UUID, k roundKe
 	return roundTurn{}, false
 }
 
+// progressSlot is what a progress report needs from the round it belongs to.
+type progressSlot struct {
+	handle streamHandle
+	// feed is nil unless writable.
+	feed *progressFeed
+	// folded is how far the reporting run's transcript is already in the
+	// feed; started, whether the starting line is.
+	folded  int32
+	started bool
+	// writable: painted, not disowned, inside the window. A round that is
+	// here but not writable still counts the report (see steps) and still
+	// makes this replica the one the report was for.
+	writable bool
+}
+
+// progressFor finds the round a progress report belongs to and counts the
+// report as a sign of life on it. roundKey is the run the session's
+// task:queued bound to the round (an auto-retry clone's parent); taskID is
+// the run that reported, whose transcript seq the report carries. seq is zero
+// for the milestone, which has no seq.
+//
+// The second result says whether the round is on this replica at all, and
+// that is a different question from whether it can take a frame: a round
+// that is here is this replica's to show or not show, and the report must not
+// be passed on to anyone else.
+//
+// A report at or below what is already folded is a copy of one already
+// counted — a relayed duplicate, a replay — and does not count again.
+//
+// The feed is created lazily, on the first report that reaches a writable
+// round, and lives on the entry so it dies exactly when the round does — a
+// list of a finished run's tool calls has nothing left to be painted into.
+func (s *streamStore) progressFor(sessionID pgtype.UUID, roundKey, taskID string, seq int32) (progressSlot, bool) {
+	if roundKey == "" {
+		return progressSlot{}, false
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.sessions[key] {
+		if r.taskID != roundKey {
+			continue
+		}
+		slot := progressSlot{folded: r.folded[taskID], started: r.started}
+		if seq == 0 || seq > slot.folded {
+			r.steps++
+		}
+		// Three ways a round on the list still has nowhere to put a step. No
+		// bubble: the run was bound before the ingest goroutine painted one,
+		// or the opening frame was refused. Past the window: the server
+		// refuses the frame and the ending will fall back to a plain message.
+		// Disowned: another connection owns this conversation now, and every
+		// frame from here is a refusal counted against the whole bot's rate
+		// limit.
+		if !r.painted || r.unusable || s.expiredLocked(r.handle.CreatedAt) {
+			return slot, true
+		}
+		if r.feed == nil {
+			r.feed = newProgressFeed(s.now)
+		}
+		slot.handle, slot.feed, slot.writable = r.handle, r.feed, true
+		return slot, true
+	}
+	return progressSlot{}, false
+}
+
+// markFolded records that taskID's transcript is in the round's feed up to
+// seq, and, with started, that the starting line is too. Never backwards: a
+// slower read that finishes second cannot unfold what a faster one recorded.
+// A round that has ended since is left alone; there is nothing to record on.
+func (s *streamStore) markFolded(sessionID pgtype.UUID, roundKey, taskID string, seq int32, started bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.sessions[util.UUIDToString(sessionID)] {
+		if r.taskID != roundKey {
+			continue
+		}
+		if seq > r.folded[taskID] {
+			if r.folded == nil {
+				r.folded = map[string]int32{}
+			}
+			r.folded[taskID] = seq
+		}
+		if started {
+			r.started = true
+		}
+		return
+	}
+}
+
+// markUnusable records the server's verdict that a round's stream will take no
+// further frame. It reports whether this call is the one that learned it, so
+// the reader is told once rather than on every refusal that follows.
+//
+// The round is kept rather than forgotten: the bubble is over, the round is
+// not, and the handle is the only address its ending has.
+func (s *streamStore) markUnusable(sessionID pgtype.UUID, streamID string) bool {
+	if streamID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.sessions[util.UUIDToString(sessionID)] {
+		if r.painted && r.handle.StreamID == streamID {
+			if r.unusable {
+				return false
+			}
+			r.unusable = true
+			return true
+		}
+	}
+	return false
+}
+
+// rotate moves a live round onto a fresh stream id, and hands back the handle
+// it had (old) and the one it has now (next). false when there is nothing to
+// rotate: the round is gone, was never painted, has been disowned, or is
+// already past the window — in which case the caller has nothing to seal and
+// nothing to reopen.
+//
+// THE ROUND IS NAMED BY ITS SEQUENCE NUMBER, not by the run bound to it, and
+// that is what makes a rotation safe under an identity that arrives on the
+// bus. The task id on an entry moves — it is empty until task:queued binds one
+// and empty again while an auto-retry clone is replacing it (retryUnbind) — so
+// a guard that named its round by task would rotate the wrong bubble, or none,
+// depending on when it happened to fire. The sequence number is handed out
+// once at open and nothing revises it.
+//
+// Nothing else about the entry moves either: the round keeps its task, its
+// everBound, and its place in the list. So a rotated round is still bound,
+// which is what keeps bindNext (which takes the oldest UNBOUND round) from
+// handing a later question's run to a bubble that is mid-answer, and its own
+// answer still finds it by task id and is written to the stream it holds now.
+//
+// The swap happens BEFORE either frame is written, under the lock, so an
+// answer that takes the round while the hand-over is on the wire gets the new
+// stream id. Its closing frame then queues behind the seal (one frame in
+// flight per req_id, ws_sender.go) and lands as the new bubble's only frame,
+// which WeCom accepts as creating the message — measured 2026-08-09, see
+// senders_registry.go. Had the answer been handed the OLD id it would have
+// written a second closing frame onto a stream the hand-over had just sealed.
+//
+// The window restarts: CreatedAt is stamped now, so expiry and the next guard
+// count from the new stream's opening frame, which is what the server counts
+// from. The new stream is a new bubble and carries none of the old one's
+// step lines, but it does carry the reasoning buffer (progressFeed.continued):
+// redaction runs over that joined buffer, and a label at the end of the old
+// bubble's reasoning (`password=`) is what lets the value at the start of the
+// new one be recognised. The old bubble is sealed with the hand-over line, so
+// the reasoning it showed is not on screen twice.
+func (s *streamStore) rotate(sessionID pgtype.UUID, seq roundSeq, streamID string) (old, next streamHandle, ok bool) {
+	if streamID == "" {
+		return streamHandle{}, streamHandle{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.seqLocked(util.UUIDToString(sessionID), seq)
+	if e == nil || !e.painted || e.unusable || s.expiredLocked(e.handle.CreatedAt) {
+		return streamHandle{}, streamHandle{}, false
+	}
+	// Only a run that has stepped since this stream opened is alive enough
+	// to deserve the next one; see steps. The cap is the backstop.
+	if e.steps <= e.stepsAtOpen || e.rotations >= maxRotations {
+		return streamHandle{}, streamHandle{}, false
+	}
+	old = e.handle
+	next = old
+	next.StreamID = streamID
+	next.CreatedAt = s.now()
+	e.handle = next
+	e.createdAt = next.CreatedAt
+	e.feed = e.feed.continued()
+	e.rotations++
+	e.stepsAtOpen = e.steps
+	return old, next, true
+}
+
 // holding reports whether this store has anything on file anywhere — a round,
 // painted or not, or a run still waiting for its bubble. It is the "nothing
 // here to close" test at the head of the two ending subscribers.
@@ -837,6 +1130,9 @@ func (s *streamStore) drop(sessionID pgtype.UUID, seq roundSeq) {
 	for i, r := range rounds {
 		if r.seq != seq {
 			continue
+		}
+		if r.guard != nil {
+			r.guard.Stop()
 		}
 		rounds = append(rounds[:i], rounds[i+1:]...)
 		if len(rounds) == 0 {
@@ -939,6 +1235,16 @@ func (s *streamStore) sweepLocked() {
 // The ending is counted once, whatever the number of attempts: a bubble that
 // took the frame on the second try ended in words all the same.
 func (s *streamStore) seal(ctx context.Context, senders *sendersRegistry, h streamHandle, text string) error {
+	// A bubble the server has disowned mid-run is not written to again: the
+	// typing indicator was told this stream takes no frame and has already
+	// said so to the reader, and every further attempt is a refusal charged
+	// against the whole bot's rate limit. Every closer comes through here, so
+	// each of them takes its own fallback — the answer and a failure notice go
+	// out as the new message the reader was promised.
+	if h.Unusable {
+		senders.recordEnding(errStreamDisowned)
+		return errStreamDisowned
+	}
 	var err error
 	for attempt := 0; ; attempt++ {
 		// The first attempt is an ordinary frame and waits its turn like one.
