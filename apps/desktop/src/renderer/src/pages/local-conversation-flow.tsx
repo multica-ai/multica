@@ -451,7 +451,7 @@ function LocalConversationFlow() {
                 </div>
                 {expanded && <>
                   {group.sessions.length ? <div className="flex flex-col gap-1">{group.sessions.map(renderSession)}</div> : <p className="px-3 py-2 text-caption text-muted-foreground">{projectLabels.empty}</p>}
-                  {group.nextCursor && <Button variant="ghost" size="sm" className="mx-2" disabled={sessions.loading.has(group.id) || sessions.isFetching} aria-busy={sessions.loading.has(group.id)} onClick={() => { void sessions.loadMore(group).catch(report); }}>{sessions.loading.has(group.id) ? labels.loading : chinese ? "加载更多" : "Load more"}</Button>}
+                  {group.nextCursor && <Button variant="ghost" size="sm" className="mx-2 bg-muted/50 dark:bg-muted/25" disabled={sessions.loading.has(group.id) || sessions.isFetching} aria-busy={sessions.loading.has(group.id)} onClick={() => { void sessions.loadMore(group).catch(report); }}>{sessions.loading.has(group.id) ? labels.loading : chinese ? "加载更多" : "Load more"}</Button>}
                 </>}
               </section>;
             }) : <p className="px-3 py-8 text-center text-body text-muted-foreground">{search ? labels.noResults : labels.empty}</p>}
