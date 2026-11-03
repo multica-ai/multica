@@ -181,6 +181,7 @@
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "Assigned to my agents",
+    "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
     "operator_label": "Match",

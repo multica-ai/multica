@@ -181,6 +181,7 @@
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Assignés à mes agents",
+    "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
     "operator_label": "Condition",

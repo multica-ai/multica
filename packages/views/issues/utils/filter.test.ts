@@ -782,6 +782,17 @@ describe("relation filters", () => {
       filterIssues(issues, { ...NO_FILTER, relationFilters: ["assigned"] }).map((i) => i.id),
     ).toEqual(["1", "2", "3", "4"]);
   });
+
+  it("leaves subscribed to the server, either way round", () => {
+    expect(ids({ relationFilters: ["subscribed"] })).toEqual(["1", "2", "3", "4"]);
+    expect(ids({ relationFilters: ["subscribed"], negatedFilters: ["relation"] })).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("still decides an issue a known relation matches alongside subscribed", () => {
+    expect(
+      ids({ relationFilters: ["assigned", "subscribed"], negatedFilters: ["relation"] }),
+    ).toEqual(["2", "3", "4"]);
+  });
 });
 
 describe("due date filters", () => {
@@ -848,6 +859,14 @@ describe("advanced filter", () => {
       createFilterCondition("creator", ["member:u-2"]),
     ]);
     expect(ids(tree, { relationContext: { userId: "u-1", myAgentIds: new Set(["a-1"]) } })).toEqual(["2", "3"]);
+  });
+
+  it("drops subscribed and keeps the rest of 'subscribed, not mine'", () => {
+    const tree = createFilterGroup("all", [
+      createFilterCondition("relation", ["subscribed"]),
+      createFilterCondition("relation", ["assigned", "my_agents"], true),
+    ]);
+    expect(ids(tree, { relationContext: { userId: "u-1", myAgentIds: new Set(["a-1"]) } })).toEqual(["3", "4"]);
   });
 
   it("is ANDed with the simple filters", () => {

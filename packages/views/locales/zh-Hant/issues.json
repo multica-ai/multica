@@ -179,6 +179,7 @@
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
     "operator_label": "關係",

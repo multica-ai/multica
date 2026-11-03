@@ -312,7 +312,7 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
-export type IssueTableRelation = "assigned" | "created" | "my_agents";
+export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed";
 
 export type IssueTableNegatableFilter =
   | "statuses"
