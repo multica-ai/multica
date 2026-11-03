@@ -94,7 +94,10 @@ function projectTurn(turn: V2Turn, agentSessionId: string, waiting: boolean): Ag
     outcome: turn.status === "running" ? null : turn.status === "cancelled" ? "canceled" : turn.status,
     startedAtUnixMs: millis(turn.startedAt), updatedAtUnixMs: updated,
     settledAtUnixMs: settled ? updated : null,
-    ...(turn.error ? { error: { message: turn.error.message, code: turn.error.kind } } : {}),
+    ...(turn.error ? { error: {
+      message: turn.error.message, code: turn.error.kind,
+      ...(turn.error.message.trim() ? { detail: turn.error.message } : {}),
+    } } : {}),
   };
 }
 

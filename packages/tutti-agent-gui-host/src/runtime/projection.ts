@@ -103,6 +103,7 @@ export function projectDetail(
   locale: "en" | "zh-CN" = "en",
 ): { session: AgentActivitySession; turns: AgentActivityTurn[]; messages: AgentActivityDurableMessage[] } {
   const sessionId = ledger.guiId(detail.session.id);
+  const local = detail.session.agent_id.startsWith("local:");
   const turns = new Map<string, AgentActivityTurn>();
   const taskById = new Map((detail.tasks ?? []).map((task) => [task.id, task]));
   const raw: Omit<AgentActivityDurableMessage, "version" | "sequence">[] = [];
@@ -159,11 +160,14 @@ export function projectDetail(
         outcome: message.failure_reason ? "failed" : "completed",
         startedAtUnixMs: message.elapsed_ms == null ? createdAt : createdAt - message.elapsed_ms,
         updatedAtUnixMs: createdAt, settledAtUnixMs: createdAt,
-        ...(message.failure_reason ? { error: { code: message.failure_reason, message: message.content } } : {}),
+        ...(message.failure_reason ? { error: {
+          code: message.failure_reason, message: message.content,
+          ...(local && message.content.trim() ? { detail: message.content } : {}),
+        } } : {}),
       });
     }
   }
-  for (const task of detail.tasks ?? []) turns.set(task.id, projectTask(task, sessionId));
+  for (const task of detail.tasks ?? []) turns.set(task.id, projectTask(task, sessionId, local));
   if (detail.pending.task_id && !taskById.has(detail.pending.task_id)) {
     turns.set(detail.pending.task_id, {
       agentSessionId: sessionId, turnId: detail.pending.task_id, origin: "legacy_unknown",
@@ -277,7 +281,7 @@ function imageGenerationOutput(tool: unknown, output: string): unknown {
   return output;
 }
 
-function projectTask(task: AgentTask, sessionId: string): AgentActivityTurn {
+function projectTask(task: AgentTask, sessionId: string, local: boolean): AgentActivityTurn {
   const terminal = ["completed", "failed", "cancelled"].includes(task.status);
   return {
     agentSessionId: sessionId, turnId: task.id, origin: "legacy_unknown",
@@ -286,7 +290,10 @@ function projectTask(task: AgentTask, sessionId: string): AgentActivityTurn {
     startedAtUnixMs: millis(task.started_at ?? task.created_at),
     updatedAtUnixMs: millis(task.completed_at ?? task.started_at ?? task.created_at),
     settledAtUnixMs: task.completed_at ? millis(task.completed_at) : null,
-    ...(task.error ? { error: { message: task.error, ...(task.failure_reason ? { code: task.failure_reason } : {}) } } : {}),
+    ...(task.error ? { error: {
+      message: task.error, ...(task.failure_reason ? { code: task.failure_reason } : {}),
+      ...(local && task.error.trim() ? { detail: task.error } : {}),
+    } } : {}),
   };
 }
 
