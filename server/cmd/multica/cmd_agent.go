@@ -278,6 +278,10 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
+	client.InvocationContext = &cli.InvocationContext{
+		Profile:     resolveProfile(cmd),
+		ManagedTask: taskContext || strings.HasPrefix(token, cli.TaskTokenPrefix),
+	}
 	// When running inside a daemon task, attribute actions to the agent.
 	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
 		client.AgentID = agentID
