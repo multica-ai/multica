@@ -19,6 +19,7 @@
  * come back quickly instead of consuming the normal cadence. Only a real 401
  * ends a session, and `onUnauthorized` in app/_layout.tsx already owns that.
  */
+import { refreshPushRegistration } from "./push-registration";
 import { api, ApiError } from "./api";
 import { commitRenewedToken, getToken } from "./secure-storage";
 import { currentSessionEpoch, sessionEpochChanged } from "./session-epoch";
@@ -127,6 +128,7 @@ export async function renewSessionNow(): Promise<void> {
       // clear the in-memory token too, so stay out of its way.
       if (sessionEpochChanged(epochAtStart)) return;
       api.setToken(result.token);
+      void refreshPushRegistration();
     } catch (err) {
       // A 401 has already been routed to the sign-out path by the client's
       // onUnauthorized hook. Everything else — airplane mode, a captive

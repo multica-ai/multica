@@ -388,6 +388,13 @@ class ApiClient {
     });
   }
 
+  async updateMobilePush(token: string, enabled: boolean): Promise<void> {
+    await this.fetch<void>("/api/mobile-push", {
+      method: enabled ? "PUT" : "DELETE",
+      body: JSON.stringify({ token }),
+    });
+  }
+
   // --- Auth ---
   async sendCode(email: string): Promise<void> {
     await this.fetch<void>("/auth/send-code", {

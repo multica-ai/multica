@@ -13,6 +13,7 @@ import { create } from "zustand";
 import type { User } from "@multica/core/types";
 import { api, ApiError } from "./api";
 import { clearToken, getToken, setToken } from "./secure-storage";
+import { unregisterPushToken } from "./push-registration";
 import { invalidateSessionEpoch } from "./session-epoch";
 import { useWorkspaceStore } from "./workspace-store";
 
@@ -83,6 +84,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     // below is async, so until it lands a concurrent read still returns the
     // token being removed — the epoch is what makes this instant.
     invalidateSessionEpoch();
+    await unregisterPushToken();
     await clearToken();
     api.setToken(null);
     set({ user: null });

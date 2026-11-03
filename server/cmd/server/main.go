@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/mobilepush"
 	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
@@ -617,6 +618,15 @@ func main() {
 	registerNotificationListeners(bus, queries)
 	registerIssueUnreadListeners(bus, queries)
 
+	pushEnabled := os.Getenv("MULTICA_MOBILE_PUSH_ENABLED") == "true"
+	if pushEnabled {
+		pushContext, stopPush := context.WithCancel(context.Background())
+		defer stopPush()
+		notifier := mobilepush.New(queries, os.Getenv("EXPO_PUSH_ACCESS_TOKEN"))
+		notifier.Register(bus)
+		go notifier.Run(pushContext)
+	}
+
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
 	var httpMetrics *obsmetrics.HTTPMetrics
@@ -702,6 +712,7 @@ func main() {
 	if replicaPool != nil {
 		replicaQueries = db.New(replicaPool)
 	}
+	h.MobilePushEnabled = pushEnabled
 	// Reuse the handler's primary Queries handle so replica routing does not
 	// create a second wrapper around the same primary pool.
 	h.ReadSelector = dbreader.New(h.Queries, replicaQueries, readRecorder)

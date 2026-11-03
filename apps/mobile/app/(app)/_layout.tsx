@@ -1,4 +1,5 @@
 import { Stack, Redirect } from "expo-router";
+import { useMobilePush } from "@/data/use-mobile-push";
 import { useAuthStore } from "@/data/auth-store";
 
 /**
@@ -10,6 +11,7 @@ import { useAuthStore } from "@/data/auth-store";
  */
 export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
+  useMobilePush(user?.id ?? null);
   if (!user) return <Redirect href="/login" />;
   return <Stack screenOptions={{ headerShown: false }} />;
 }

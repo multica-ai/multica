@@ -38,3 +38,17 @@ describe("api.deleteComment", () => {
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "DELETE" }));
   });
 });
+
+it("registers and removes push tokens at the authenticated account endpoint", async () => {
+  const request = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", request);
+  try {
+    await api.updateMobilePush("ExpoPushToken[test]", true);
+    await api.updateMobilePush("ExpoPushToken[test]", false);
+    expect(request.mock.calls[0]).toEqual([
+      "https://api.example.test/api/mobile-push",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ token: "ExpoPushToken[test]" }) }),
+    ]);
+    expect(request.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  } finally { vi.unstubAllGlobals(); }
+});

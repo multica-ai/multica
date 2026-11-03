@@ -68,7 +68,10 @@
   "groups": {
     "system": "系統",
     "system_notifications": "系統通知",
-    "system_description": "帳號變更、安全提醒和產品更新。"
+    "system_description": "Multica 在背景時接收收件匣通知。",
+    "push_unavailable": "通知暫時無法使用，請檢查 iOS 通知權限後重試。",
+    "push_cancel": "取消",
+    "push_settings": "開啟設定"
   },
   "routing": {
     "title": "通知去向",

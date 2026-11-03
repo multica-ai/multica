@@ -105,6 +105,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
+	"mobile_push_subscription":           workspaceDeleteKeep, // Account/device-owned across workspaces; expires with the user session.
+	"mobile_push_receipt":                workspaceDeleteKeep, // Provider delivery receipts follow the account/device registration.
 	"notification_preference":            workspaceDelete,
 	"personal_access_token":              workspaceDeleteKeep,
 	"pinned_item":                        workspaceDelete,
