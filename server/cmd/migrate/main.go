@@ -141,6 +141,9 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
 	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
+	"612_task_tool_confirmation_call_index":                     "task_tool_confirmation_task_call_uidx",
+	"613_task_tool_confirmation_workspace_index":                "task_tool_confirmation_workspace_idx",
+	"614_task_tool_confirmation_issue_index":                    "task_tool_confirmation_issue_idx",
 	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",
 	"603_wecom_install_session_agent_pending_idx":               "idx_wecom_install_session_agent_pending",
 	"602_wecom_install_session_request_idx":                     "idx_wecom_install_session_request",
