@@ -404,6 +404,9 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if err := b.taskCall(ctx, r, "/session", map[string]string{"session_id": r.SessionID}, nil); err != nil {
 		return err
 	}
+	if r.Phase == "awaiting_confirmation" {
+		return b.resolveActions(ctx, r)
+	}
 	if r.Phase == "created" && r.Continued && r.Cursor == "" {
 		latest, err := b.latestEventID(ctx, r.SessionID)
 		if definitelyRejected(err) {

@@ -104,6 +104,9 @@ type harness struct {
 	usageStatus             int
 	cancelAcks              int
 	cancelAckStatus         int
+	replies                 []map[string]any
+	confirmations           []map[string]any
+	confirmationStatus      int
 }
 
 func setup(t *testing.T) *harness {
@@ -194,6 +197,26 @@ func setup(t *testing.T) *harness {
 			io.WriteString(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/session"):
 			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/tool-confirmations") && r.Method == http.MethodPost:
+			if h.confirmationStatus != 0 {
+				w.WriteHeader(h.confirmationStatus)
+				return
+			}
+			var req struct {
+				Confirmations []map[string]any `json:"confirmations"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			for _, c := range req.Confirmations {
+				known := false
+				for _, existing := range h.confirmations {
+					known = known || existing["call_id"] == c["call_id"]
+				}
+				if !known {
+					c["status"] = "pending"
+					h.confirmations = append(h.confirmations, c)
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"confirmations": h.confirmations})
 		default:
 			t.Errorf("unexpected Multica request %s", r.URL)
 			http.NotFound(w, r)
@@ -231,6 +254,15 @@ func setup(t *testing.T) *harness {
 				} `json:"events"`
 			}
 			json.Unmarshal(raw, &content)
+			if len(req.Events) > 0 && req.Events[0].Type != "user.message" {
+				var replies struct {
+					Events []map[string]any `json:"events"`
+				}
+				json.Unmarshal(raw, &replies)
+				h.replies = append(h.replies, replies.Events...)
+				io.WriteString(w, `{}`)
+				return
+			}
 			h.sentContent = content.Events[0].Content
 			h.prompt = req.Events[0].text()
 			// Like Qoder, echo the full submitted content on send and in the event list.
@@ -672,7 +704,7 @@ func TestCancelStopsRemote(t *testing.T) {
 		t.Fatal("incorrect cancellation")
 	}
 }
-func TestRequiresActionIsNotSuccess(t *testing.T) {
+func TestRequiresActionWithoutCallsIsNotSuccess(t *testing.T) {
 	h := setup(t)
 	if err := h.b.step(context.Background()); err != nil {
 		t.Fatal(err)
@@ -683,6 +715,100 @@ func TestRequiresActionIsNotSuccess(t *testing.T) {
 	}
 	if h.complete != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "requires_action") {
 		t.Fatalf("unexpected report: %#v", h.failure)
+	}
+}
+func (h *harness) pauseFor(events ...map[string]any) {
+	ids := []string{}
+	for _, e := range events {
+		ids = append(ids, e["id"].(string))
+	}
+	h.events = append(h.events, events...)
+	h.events = append(h.events, map[string]any{"id": "evt_pause", "type": "session.status_idle", "stop_reason": map[string]any{"type": "requires_action", "event_ids": ids}})
+}
+func TestToolConfirmationWaitsForDecision(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.pauseFor(
+		map[string]any{"id": "evt_bash", "type": "agent.tool_use", "name": "Bash", "input": map[string]any{"command": "make deploy"}, "evaluated_permission": "ask"},
+		map[string]any{"id": "evt_mcp", "type": "agent.mcp_tool_use", "name": "create_issue", "mcp_server_name": "github", "evaluated_permission": "ask"},
+	)
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := h.b.state.first()
+	if h.failure != nil || r == nil || r.Phase != "awaiting_confirmation" || len(h.confirmations) != 2 || len(h.replies) != 0 {
+		t.Fatalf("pause handled incorrectly: failure=%v run=%+v confirmations=%v", h.failure, r, h.confirmations)
+	}
+	if h.confirmations[1]["mcp_server_name"] != "github" || h.confirmations[0]["tool_name"] != "Bash" {
+		t.Fatalf("confirmation details lost: %v", h.confirmations)
+	}
+	// Survives a restart while waiting.
+	raw, _ := json.Marshal(h.b.state)
+	if _, err := decodeJournal(raw, "test"); err != nil {
+		t.Fatal(err)
+	}
+	h.confirmations[0]["status"] = "allowed"
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.replies) != 0 {
+		t.Fatal("replied before every call was decided")
+	}
+	h.confirmations[1]["status"] = "denied"
+	h.confirmations[1]["deny_message"] = "file it by hand"
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.replies) != 2 || h.replies[0]["result"] != "allow" || h.replies[0]["tool_use_id"] != "evt_bash" ||
+		h.replies[1]["result"] != "deny" || h.replies[1]["deny_message"] != "file it by hand" {
+		t.Fatalf("unexpected replies: %v", h.replies)
+	}
+	if h.complete == nil || h.failure != nil {
+		t.Fatalf("run did not resume to completion: %v", h.failure)
+	}
+}
+func TestCustomToolIsAnsweredWithError(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.pauseFor(map[string]any{"id": "evt_custom", "type": "agent.custom_tool_use", "name": "lookup_order"})
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.replies) != 1 || h.replies[0]["type"] != "user.custom_tool_result" || h.replies[0]["custom_tool_use_id"] != "evt_custom" || h.replies[0]["is_error"] != true {
+		t.Fatalf("unexpected replies: %v", h.replies)
+	}
+	if len(h.confirmations) != 0 || h.complete == nil {
+		t.Fatalf("custom tool was not resolved: confirmations=%v failure=%v", h.confirmations, h.failure)
+	}
+	found := false
+	for _, m := range h.messages {
+		found = found || (m["type"] == "error" && strings.Contains(fmt.Sprint(m["content"]), "lookup_order"))
+	}
+	if !found {
+		t.Fatalf("custom tool error not shown: %v", h.messages)
+	}
+}
+func TestToolConfirmationUnsupportedRunFails(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.confirmationStatus = http.StatusNotFound
+	h.pauseFor(map[string]any{"id": "evt_bash", "type": "agent.tool_use", "name": "Bash", "evaluated_permission": "ask"})
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure == nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "Bash") || h.cancels != 1 {
+		t.Fatalf("unexpected failure: %v cancels=%d", h.failure, h.cancels)
 	}
 }
 func TestLocalDirectoryFailsBeforeExecution(t *testing.T) {

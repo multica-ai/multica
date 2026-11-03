@@ -48,6 +48,10 @@ type run struct {
 	Outcome     string              `json:"outcome,omitempty"`
 	QuickCreate *quickCreate        `json:"quick_create,omitempty"`
 	Credits     runCredits          `json:"credits"`
+	// Actions remembers tool calls that may pause the session; Awaiting lists
+	// the call IDs the current requires_action pause is waiting on.
+	Actions  map[string]pendingAction `json:"actions,omitempty"`
+	Awaiting []string                 `json:"awaiting,omitempty"`
 }
 
 func save(path string, j *journal) error {
@@ -115,7 +119,7 @@ func decodeJournal(b []byte, binding string) (*journal, error) {
 		seen[r.TaskID] = true
 		switch r.Phase {
 		case "prepared", "creating", "final":
-		case "created", "sending", "running":
+		case "created", "sending", "running", "awaiting_confirmation":
 			if r.SessionID == "" {
 				return nil, fmt.Errorf("bridge journal has no session ID")
 			}

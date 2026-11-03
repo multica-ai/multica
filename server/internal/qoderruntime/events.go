@@ -18,9 +18,12 @@ type event struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Input      map[string]any `json:"input"`
-	StopReason struct {
-		Type string `json:"type"`
+	Input               map[string]any `json:"input"`
+	EvaluatedPermission string         `json:"evaluated_permission"`
+	McpServerName       string         `json:"mcp_server_name"`
+	StopReason          struct {
+		Type     string   `json:"type"`
+		EventIDs []string `json:"event_ids"`
 	} `json:"stop_reason"`
 	Error struct {
 		Message     string `json:"message"`
@@ -114,11 +117,12 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 			msg["type"] = "text"
 			msg["content"] = e.text()
 			r.Output = e.text()
-		case "agent.tool_use", "agent.mcp_tool_use":
+		case "agent.tool_use", "agent.mcp_tool_use", "agent.custom_tool_use":
 			msg["type"] = "tool_use"
 			msg["call_id"] = e.ID
 			msg["tool"] = e.Name
 			msg["input"] = e.Input
+			r.trackAction(e)
 		case "agent.tool_result", "agent.mcp_tool_result":
 			msg["type"] = "tool_result"
 			if e.ToolUseID != "" {
@@ -132,6 +136,11 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 				r.Failure = e.Error.Message
 			}
 		case "session.status_idle":
+			if e.StopReason.Type == "requires_action" && len(e.StopReason.EventIDs) > 0 && r.Failure == "" {
+				r.Phase = "awaiting_confirmation"
+				r.Awaiting = append([]string(nil), e.StopReason.EventIDs...)
+				break
+			}
 			r.Phase = "final"
 			if e.StopReason.Type == "end_turn" && r.Failure == "" {
 				r.Outcome = "completed"
@@ -161,6 +170,9 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 		}
 		if r.Phase == "final" {
 			return b.deliver(ctx, r)
+		}
+		if r.Phase == "awaiting_confirmation" {
+			return b.resolveActions(ctx, r)
 		}
 	}
 	r.Page = ""
