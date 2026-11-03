@@ -9,6 +9,13 @@ import { SelfHostStack } from '../lib/self-host-stack';
 
 const baseContext = { allowedEmails: 'owner@example.com' };
 
+/** An account at its VPC limit deploys into a network it already has. */
+const existingNetwork = {
+  vpcId: 'vpc-0123abc',
+  subnetId: 'subnet-0123abc',
+  availabilityZone: 'ap-south-1a',
+};
+
 // One synth per configuration, shared across cases. See the note in
 // agent-runtime-stack.test.ts: the first one is slow enough to matter.
 const templates = new Map<string, Template>();
@@ -82,6 +89,45 @@ describe('network', () => {
     const { template } = synth();
     template.hasResourceProperties('AWS::EC2::EIP', { Domain: 'vpc' });
     expect(Object.keys(template.findResources('AWS::EC2::EIPAssociation'))).toHaveLength(1);
+  });
+
+  it('creates no VPC or internet gateway when given an existing network', () => {
+    // An account at its VPC or internet-gateway limit cannot create another.
+    const { template } = synth(existingNetwork);
+    expect(Object.keys(template.findResources('AWS::EC2::VPC'))).toHaveLength(0);
+    expect(Object.keys(template.findResources('AWS::EC2::InternetGateway'))).toHaveLength(0);
+    expect(Object.keys(template.findResources('AWS::EC2::Subnet'))).toHaveLength(0);
+  });
+
+  it('still gives the server its own security group inside a borrowed VPC', () => {
+    const { template } = synth(existingNetwork);
+    const groups = Object.values(template.findResources('AWS::EC2::SecurityGroup'));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.Properties?.VpcId).toBe('vpc-0123abc');
+  });
+
+  it('allocates no Elastic IP when told not to', () => {
+    const { template } = synth({ elasticIp: 'false' });
+    expect(Object.keys(template.findResources('AWS::EC2::EIP'))).toHaveLength(0);
+    expect(Object.keys(template.findResources('AWS::EC2::EIPAssociation'))).toHaveLength(0);
+  });
+
+  it('leaves the address empty in the bootstrap when there is no Elastic IP', () => {
+    // The instance reads its own from metadata; passing it in would be a
+    // circular reference to the instance's own attribute.
+    const script = userData(synth({ elasticIp: 'false' }).template);
+    expect(script).toContain('PUBLIC_IP=""');
+    expect(script).toContain('/latest/meta-data/public-ipv4');
+  });
+
+  it('rejects half an imported network', () => {
+    expect(() => synth({ vpcId: 'vpc-0123abc' })).toThrow(/go together/);
+  });
+
+  it('rejects an id that is not a VPC id', () => {
+    expect(() => synth({ ...existingNetwork, vpcId: 'Multica-AgentRuntime/Vpc' })).toThrow(
+      /must look like vpc-/,
+    );
   });
 });
 

@@ -37,6 +37,17 @@ DATA_DIR="/var/lib/multica"
 log() { echo "[multica-selfhost] $*"; }
 trap 'log "FAILED on line ${LINENO}"' ERR
 
+# With no Elastic IP the stack cannot pass the address in — an instance's
+# public IP is an attribute of the instance, and its own user data cannot
+# reference it without a circular dependency. Metadata knows it at boot.
+if [ -z "${PUBLIC_IP}" ]; then
+  imds_token="$(curl -fsS -X PUT http://169.254.169.254/latest/api/token \
+    -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')"
+  PUBLIC_IP="$(curl -fsS -H "X-aws-ec2-metadata-token: ${imds_token}" \
+    http://169.254.169.254/latest/meta-data/public-ipv4)"
+  log "Auto-assigned public IP is ${PUBLIC_IP}"
+fi
+
 # sslip.io resolves <ip>.sslip.io to <ip>, so a deployment with no domain of
 # its own still gets a real hostname and therefore a real certificate.
 if [ -n "${DOMAIN_NAME}" ]; then

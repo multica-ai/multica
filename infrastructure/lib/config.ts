@@ -164,6 +164,25 @@ export interface SelfHostConfig {
    * a self-host exists so the data stays here.
    */
   telemetry: boolean;
+  /**
+   * Existing VPC to deploy into, with the public subnet and availability zone
+   * to place the instance in. All three together, or none.
+   *
+   * An account at its VPC or internet-gateway limit cannot create another one,
+   * and those limits are per region and slow to raise. Reusing a VPC keeps the
+   * server a separate instance with its own security group — the machines stay
+   * isolated from each other by their rules, not by having separate networks.
+   */
+  vpcId: string;
+  subnetId: string;
+  availabilityZone: string;
+  /**
+   * Allocate an Elastic IP. False uses the instance's auto-assigned address,
+   * for an account at its Elastic IP limit. That address survives a reboot but
+   * not a stop/start, and the hostname and certificate are derived from it, so
+   * a move needs ./scripts/selfhost-apply.sh to re-issue them.
+   */
+  elasticIp: boolean;
   parameterPrefix: string;
   logRetentionDays: number;
   caddyVersion: string;
@@ -179,6 +198,10 @@ const selfHostDefaults: SelfHostConfig = {
   imageTag: 'latest',
   allowedEmails: '',
   telemetry: false,
+  vpcId: '',
+  subnetId: '',
+  availabilityZone: '',
+  elasticIp: true,
   parameterPrefix: '/multica/self-host',
   logRetentionDays: 14,
   caddyVersion: '2.10.0',
@@ -195,6 +218,10 @@ export function resolveSelfHostConfig(app: App): SelfHostConfig {
     imageTag: contextString(app, 'imageTag', selfHostDefaults.imageTag),
     allowedEmails: contextString(app, 'allowedEmails', selfHostDefaults.allowedEmails),
     telemetry: contextBoolean(app, 'telemetry', selfHostDefaults.telemetry),
+    vpcId: contextString(app, 'vpcId', selfHostDefaults.vpcId),
+    subnetId: contextString(app, 'subnetId', selfHostDefaults.subnetId),
+    availabilityZone: contextString(app, 'availabilityZone', selfHostDefaults.availabilityZone),
+    elasticIp: contextBoolean(app, 'elasticIp', selfHostDefaults.elasticIp),
     parameterPrefix: contextString(app, 'selfHostParameterPrefix', selfHostDefaults.parameterPrefix),
     logRetentionDays: contextNumber(app, 'logRetentionDays', selfHostDefaults.logRetentionDays),
     caddyVersion: contextString(app, 'caddyVersion', selfHostDefaults.caddyVersion),
@@ -213,6 +240,21 @@ export function resolveSelfHostConfig(app: App): SelfHostConfig {
     throw new Error(
       'allowedEmails is required: this server is reachable from the internet, and without an allowlist anyone who finds the URL can sign up. Pass -c allowedEmails=you@example.com,teammate@example.com',
     );
+  }
+  // Importing a VPC needs all three: the subnet decides placement and the zone
+  // is not discoverable from an id at synth, so a missing one would land the
+  // instance in a zone CloudFormation picks and the data volume in another.
+  const network = [config.vpcId, config.subnetId, config.availabilityZone];
+  if (network.some(Boolean) && !network.every(Boolean)) {
+    throw new Error(
+      'vpcId, subnetId and availabilityZone go together: pass all three to reuse an existing network, or none to create one.',
+    );
+  }
+  if (config.vpcId && !/^vpc-[0-9a-f]+$/.test(config.vpcId)) {
+    throw new Error(`vpcId must look like vpc-0123abc, got ${config.vpcId}`);
+  }
+  if (config.subnetId && !/^subnet-[0-9a-f]+$/.test(config.subnetId)) {
+    throw new Error(`subnetId must look like subnet-0123abc, got ${config.subnetId}`);
   }
   if (config.domainName && !/^[a-z0-9.-]+$/i.test(config.domainName)) {
     throw new Error(`domainName ${config.domainName} is not a hostname`);

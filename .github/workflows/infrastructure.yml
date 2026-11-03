@@ -38,6 +38,10 @@ on:
         description: "I have read the diff and accept its IAM and security group changes (every first deploy of a stack has them)"
         type: boolean
         default: false
+      extra_context:
+        description: "Further CDK context, e.g. -c vpcId=vpc-0123abc -c subnetId=subnet-0123abc -c availabilityZone=ap-south-1a -c elasticIp=false"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -137,15 +141,16 @@ jobs:
         env:
           STACK: ${{ inputs.stack }}
           ALLOWED_EMAILS: ${{ inputs.allowed_emails }}
+          EXTRA: ${{ inputs.extra_context }}
         run: |
           if [ "$STACK" = "Multica-SelfHost" ]; then
             if [ -z "$ALLOWED_EMAILS" ]; then
               echo "::error::allowed_emails is required for Multica-SelfHost: port 443 is open to the internet, so without an allowlist anyone who finds the URL can sign up."
               exit 1
             fi
-            echo "args=-c selfHost=true -c allowedEmails=$ALLOWED_EMAILS" >> "$GITHUB_OUTPUT"
+            echo "args=-c selfHost=true -c allowedEmails=$ALLOWED_EMAILS $EXTRA" >> "$GITHUB_OUTPUT"
           else
-            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "args=$EXTRA" >> "$GITHUB_OUTPUT"
           fi
 
       # Only for a diff run: `cdk deploy` prints the same change set itself.

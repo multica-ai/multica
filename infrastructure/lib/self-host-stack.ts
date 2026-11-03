@@ -39,12 +39,22 @@ export class SelfHostStack extends cdk.Stack {
     super(scope, id, props);
     const { config } = props;
 
-    const vpc = new ec2.Vpc(this, 'Vpc', {
-      ipAddresses: ec2.IpAddresses.cidr('10.30.0.0/24'),
-      maxAzs: 1,
-      natGateways: 0,
-      subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 26 }],
-    });
+    // A VPC of its own by default. An account at its VPC or internet-gateway
+    // limit cannot create one, so an existing network can be passed in
+    // instead; the server is still a separate instance behind its own
+    // security group either way.
+    const vpc: ec2.IVpc = config.vpcId
+      ? ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
+          vpcId: config.vpcId,
+          availabilityZones: [config.availabilityZone],
+          publicSubnetIds: [config.subnetId],
+        })
+      : new ec2.Vpc(this, 'Vpc', {
+          ipAddresses: ec2.IpAddresses.cidr('10.30.0.0/24'),
+          maxAzs: 1,
+          natGateways: 0,
+          subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 26 }],
+        });
 
     // 80 and 443 only. 80 is not decoration: Let's Encrypt's HTTP-01 challenge
     // arrives there, and Caddy redirects everything else to HTTPS. The app's
@@ -129,7 +139,12 @@ export class SelfHostStack extends cdk.Stack {
     // A fixed address the team can bookmark, and — through sslip.io — the
     // hostname Caddy requests a certificate for. Allocated before the instance
     // so the bootstrap can build the URL from it.
-    const address = new ec2.CfnEIP(this, 'Address', { domain: 'vpc' });
+    //
+    // Without one, the bootstrap reads the auto-assigned address from instance
+    // metadata at boot instead. It cannot be passed in here: the instance's own
+    // public IP is an attribute of the instance, and its user data cannot
+    // reference it without a circular dependency.
+    const address = config.elasticIp ? new ec2.CfnEIP(this, 'Address', { domain: 'vpc' }) : undefined;
 
     const userData = ec2.UserData.custom(
       renderScript('selfhost-bootstrap.sh', {
@@ -139,7 +154,7 @@ export class SelfHostStack extends cdk.Stack {
         DB_PASSWORD_ID: databasePassword.secretArn,
         COMPOSE_URL: composeFile.s3ObjectUrl,
         DOMAIN_NAME: config.domainName,
-        PUBLIC_IP: address.ref,
+        PUBLIC_IP: address ? address.ref : '',
         IMAGE_TAG: config.imageTag,
         ALLOWED_EMAILS: config.allowedEmails,
         // The backend reads any non-empty value as "do not send".
@@ -198,19 +213,25 @@ export class SelfHostStack extends cdk.Stack {
       volumeId: dataVolume.volumeId,
     });
 
-    new ec2.CfnEIPAssociation(this, 'AddressAssociation', {
-      allocationId: address.attrAllocationId,
-      instanceId: instance.instanceId,
-    });
+    if (address) {
+      new ec2.CfnEIPAssociation(this, 'AddressAssociation', {
+        allocationId: address.attrAllocationId,
+        instanceId: instance.instanceId,
+      });
+    }
 
     this.addSnapshotPolicy(config, dataVolume);
 
-    const publicHost = config.domainName || `${address.ref}.sslip.io`;
+    const publicIp = address ? address.ref : instance.instancePublicIp;
+    const publicHost = config.domainName || `${publicIp}.sslip.io`;
     new cdk.CfnOutput(this, 'Url', {
       value: `https://${publicHost}`,
       description: 'Open Multica here',
     });
-    new cdk.CfnOutput(this, 'PublicIp', { value: address.ref, description: 'Fixed public IP' });
+    new cdk.CfnOutput(this, 'PublicIp', {
+      value: publicIp,
+      description: address ? 'Fixed public IP' : 'Auto-assigned public IP; changes on stop/start',
+    });
     new cdk.CfnOutput(this, 'InstanceId', { value: instance.instanceId, description: 'Server instance' });
     new cdk.CfnOutput(this, 'DataVolumeId', {
       value: dataVolume.volumeId,

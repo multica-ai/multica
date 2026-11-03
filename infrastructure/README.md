@@ -101,6 +101,33 @@ widens a security group or an IAM policy stops and asks before it is applied.
 First boot takes a few minutes. Watch it with `sudo cloud-init status --long`
 on the machine, or read the `bootstrap` log stream in CloudWatch.
 
+### When the account is out of quota
+
+VPCs, internet gateways and Elastic IPs are per-region limits that are slow to
+raise. A busy account can be at all three, and then the stack cannot create its
+own network:
+
+```
+Vpc      CREATE_FAILED  The maximum number of VPCs has been reached
+VpcIGW   CREATE_FAILED  The maximum number of internet gateways has been reached
+Address  CREATE_FAILED  The maximum number of addresses has been reached
+```
+
+Point it at a network that already exists and skip the Elastic IP:
+
+```bash
+./scripts/selfhost-deploy.sh you@example.com   -c vpcId=vpc-0123abc -c subnetId=subnet-0123abc   -c availabilityZone=ap-south-1a -c elasticIp=false
+```
+
+That needs no new quota at all. The server is still its own instance behind its
+own security group — the two machines are isolated by their rules, not by
+having separate networks.
+
+The cost is the address. Without an Elastic IP the instance uses its
+auto-assigned one, which survives a reboot but not a stop/start. The hostname
+and the certificate are both derived from it, so if it ever moves, run
+`./scripts/selfhost-apply.sh` to re-issue them for the new name.
+
 ### Context overrides
 
 ```bash
@@ -299,6 +326,8 @@ from your server's settings page.
 | `snapshotRetentionDays` | `7` | Daily snapshots kept. |
 | `imageTag` | `latest` | GHCR tag; pin a release for a reproducible deploy. |
 | `telemetry` | `false` | `true` re-enables the first-party deployment telemetry. |
+| `vpcId` / `subnetId` / `availabilityZone` | empty | Deploy into an existing network instead of creating one. All three or none. |
+| `elasticIp` | `true` | `false` uses the instance's auto-assigned address. |
 
 ## If you delete the stack
 
