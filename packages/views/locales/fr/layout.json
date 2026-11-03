@@ -95,6 +95,7 @@
       "project_issues": "Tâches de {{name}}",
       "project_issues_empty": "Aucune tâche",
       "project_issues_error": "Impossible de charger les tâches",
+      "project_issues_retry": "Réessayer",
       "project_issues_settings": "Tâches des projets",
       "settings_status": "Statut",
       "settings_assignee": "Responsable",

@@ -94,6 +94,7 @@
       "project_issues": "{{name}} のタスク",
       "project_issues_empty": "タスクはありません",
       "project_issues_error": "タスクを読み込めませんでした",
+      "project_issues_retry": "再試行",
       "project_issues_settings": "プロジェクトのタスク",
       "settings_status": "ステータス",
       "settings_assignee": "担当者",

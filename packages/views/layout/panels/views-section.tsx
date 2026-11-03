@@ -419,9 +419,9 @@ function SavedViewRow({
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const needsUnread = viewSidebarNeedsUnread(view);
-  const { ids: unreadIssueIds } = useIssueUnreadIds(wsId, needsUnread);
+  const unread = useIssueUnreadIds(wsId, needsUnread);
   const request =
-    needsUnread && !unreadIssueIds ? undefined : viewSidebarRequest(view, todayDateOnly(), unreadIssueIds);
+    needsUnread && !unread.ids ? undefined : viewSidebarRequest(view, todayDateOnly(), unread.ids);
   const prefetch = usePrefetch(wsId, source, request);
   const canManage = actions.canManage(view);
 
@@ -501,6 +501,8 @@ function SavedViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={needsUnread && unread.isError}
+          onRetry={() => void unread.refetch()}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);

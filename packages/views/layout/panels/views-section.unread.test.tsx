@@ -1,0 +1,132 @@
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setApiInstance } from "@multica/core/api";
+import type { ApiClient } from "@multica/core/api/client";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { viewSidebarSource } from "@multica/core/issues/sidebar-list";
+import { renderWithI18n } from "../../test/i18n";
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { ViewsSection } from "./views-section";
+
+const actions = vi.hoisted(() => ({
+  sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
+  create: vi.fn(),
+  remove: vi.fn(),
+  canManage: () => true,
+}));
+
+vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
+vi.mock("../../issue-views/delete-view-dialog", () => ({ DeleteViewDialog: () => null }));
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
+  PointerSensor: vi.fn(),
+  closestCenter: vi.fn(),
+  useSensor: vi.fn(),
+  useSensors: vi.fn(),
+}));
+vi.mock("@dnd-kit/sortable", () => ({
+  SortableContext: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useSortable: () => ({ listeners: {}, setNodeRef: vi.fn(), setActivatorNodeRef: vi.fn() }),
+  verticalListSortingStrategy: vi.fn(),
+  arrayMove: vi.fn(),
+}));
+vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
+  TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
+});
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/hooks")>()),
+  useWorkspaceId: () => "ws-1",
+}));
+vi.mock("@multica/core/issue-statuses/hooks", async () => {
+  const { buildIssueStatusCatalog } = await import("@multica/core/issue-statuses/queries");
+  return { useIssueStatuses: () => buildIssueStatusCatalog([]) };
+});
+
+const adapter: NavigationAdapter = {
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  pathname: "/acme/issues",
+  searchParams: new URLSearchParams(),
+  hash: "",
+  getShareableUrl: (path) => path,
+};
+
+const UNREAD_VIEW = {
+  id: "v1",
+  name: "Unread",
+  scope_type: "workspace",
+  scope_id: null,
+  scope_variant: null,
+  query: { unreadFilter: true },
+  display: {},
+};
+
+let listIssueUnread: ReturnType<typeof vi.fn>;
+let listIssueTableRows: ReturnType<typeof vi.fn>;
+
+function renderSection() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <NavigationProvider value={adapter}>
+        <ViewsSection
+          wsId="ws-1"
+          pathname="/acme/issues"
+          plainRowsLit
+          issueLitInTree={false}
+          activeIssueId={null}
+        />
+      </NavigationProvider>
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  listIssueUnread = vi.fn();
+  listIssueTableRows = vi.fn(async () => ({
+    rows: [],
+    total: 0,
+    next_cursor: null,
+    query_fingerprint: "fp",
+    group_key: null,
+    parent_id: null,
+  }));
+  setApiInstance({ listIssueUnread, listIssueTableRows } as unknown as ApiClient);
+  actions.sidebar.items = [{ id: "view:v1", kind: "view", view: UNREAD_VIEW }];
+  useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [viewSidebarSource("v1")] });
+});
+
+describe("ViewsSection saved view with the unread filter", () => {
+  it("offers a retry when the unread list fails, then lists the view's issues", async () => {
+    listIssueUnread.mockRejectedValueOnce(new Error("offline"));
+    renderSection();
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByText("Couldn't load issues")).toBeInTheDocument();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+
+    listIssueUnread.mockResolvedValue([
+      { issue_id: "issue-1", outcome: "manual", agent_id: null, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    fireEvent.click(retry);
+
+    await screen.findByText("No issues");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    await waitFor(() =>
+      expect(listIssueTableRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.objectContaining({
+            filters: expect.objectContaining({ unread_issue_ids: ["issue-1"] }),
+          }),
+        }),
+      ),
+    );
+  });
+});

@@ -45,14 +45,14 @@ const selectUnreadIssueIds = (items: IssueUnread[]) => items.map((item) => item.
 
 /** The ids of the viewer's unread issues. `ids` stays `undefined` until the
  *  list loads (or while `enabled` is false); `isError` means it failed with
- *  nothing cached. */
+ *  nothing cached and no retry in flight. */
 export function useIssueUnreadIds(wsId: string, enabled = true) {
-  const { data, isError, refetch } = useQuery({
+  const { data, isError, isFetching, refetch } = useQuery({
     ...issueUnreadOptions(wsId),
     select: selectUnreadIssueIds,
     enabled: enabled && !!wsId,
   });
-  return { ids: data, isError: isError && data === undefined, refetch };
+  return { ids: data, isError: isError && !isFetching && data === undefined, refetch };
 }
 
 function useSetIssueUnread(wsId: string, unread: boolean) {
