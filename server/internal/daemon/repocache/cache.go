@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -78,6 +79,7 @@ var agentGitExcludePatterns = []string{
 	".codebuddy",
 	".pi",
 	".omp",
+	".zcode",
 }
 
 const repoCacheGitTimeout = 10 * time.Minute
@@ -776,6 +778,10 @@ type WorktreeResult struct {
 	// that no remote-tracking ref reaches.
 	UncommittedFiles int `json:"uncommitted_files,omitempty"`
 	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
+	// FetchError is set when refreshing the cache from the remote failed and
+	// the checkout was based on what the cache already held, so it may be
+	// behind the remote. It carries the redacted git error for the caller.
+	FetchError string `json:"fetch_error,omitempty"`
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -840,13 +846,15 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// to the modern remote-tracking layout on first run, so subsequent fetches
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
+	var fetchErr string
 	if err := gitFetchContext(ctx, barePath); err != nil {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		// Non-fatal: preserve cached state and continue, but make the warning
-		// loud enough that it's findable in the daemon log. The agent will
-		// receive an older snapshot than the remote head.
+		// Non-fatal: preserve cached state and continue. The agent will
+		// receive an older snapshot than the remote head, so the result
+		// carries the error back to the CLI as well as the daemon log.
+		fetchErr = redact.Text(err.Error())
 		c.logger.Warn("repo checkout: fetch failed, agent will see possibly stale code",
 			"url", params.RepoURL,
 			"error", err,
@@ -917,6 +925,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: isolated checkout ready", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -947,6 +956,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: existing worktree updated", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -985,6 +995,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	return &WorktreeResult{
 		Path:       worktreePath,
 		BranchName: actualBranch,
+		FetchError: fetchErr,
 	}, nil
 }
 

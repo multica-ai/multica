@@ -17,6 +17,11 @@ import (
 // Replays the reported Devin CLI v3000.10.21 wire contract without account access.
 const fakeDevinContractScript = `#!/bin/sh
 if [ "$1" = models ]; then
+  if [ -n "$DEVIN_REQUESTS_FILE" ]; then printf '%s\n' 'models list' >> "$DEVIN_REQUESTS_FILE"; fi
+  if [ -n "$DEVIN_TEST_CATALOG_ERROR" ]; then
+    printf '%s\n' "$DEVIN_TEST_CATALOG_ERROR" >&2
+    exit 1
+  fi
   printf '%s\n' "${DEVIN_TEST_CATALOG:-null}"
   exit 0
 fi
@@ -25,6 +30,10 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
   if [ "$method" = "$DEVIN_TEST_FAIL_RPC" ]; then
+    if [ -n "$DEVIN_TEST_RPC_ERROR" ]; then
+      printf '{"jsonrpc":"2.0","id":%s,"error":%s}\n' "$id" "$DEVIN_TEST_RPC_ERROR"
+      exit 0
+    fi
     printf '{"jsonrpc":"2.0","id":%s,"error":{"code":%s,"message":"%s"}}\n' "$id" "${DEVIN_TEST_ERROR_CODE:--32016}" "${DEVIN_TEST_ERROR_MESSAGE:-Session not found}"
     if [ "$DEVIN_TEST_IGNORE_EOF" != 1 ]; then exit 0; fi
     continue
@@ -37,6 +46,10 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     session/new|session/load|session/set_config_option)
+      if [ "$method" = session/new ] && [ -n "$DEVIN_TEST_SESSION_RESULT" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$DEVIN_TEST_SESSION_RESULT"
+        continue
+      fi
       model=${DEVIN_TEST_INITIAL_MODEL:-default-model}
       if [ "$method" = session/set_config_option ] && [ "$DEVIN_TEST_APPLY_MODEL" = 1 ]; then model=selected-model; fi
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"devin-session","configOptions":[{"id":"model","category":"model","name":"Model","type":"select","currentValue":"%s","options":[{"value":"default-model","name":"Default"},{"value":"selected-model","name":"Selected"}]}]}}\n' "$id" "$model"
@@ -133,13 +146,18 @@ func runDevinContract(t *testing.T, opts ExecOptions, env map[string]string) (Re
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fake CLI; native Windows lifecycle is covered by the shared process ownership tests")
 	}
+	fakePath := filepath.Join(t.TempDir(), "devin")
+	writeTestExecutable(t, fakePath, []byte(fakeDevinContractScript))
+	return runDevinContractAt(t, fakePath, opts, env)
+}
+
+func runDevinContractAt(t *testing.T, fakePath string, opts ExecOptions, env map[string]string) (Result, []Message, string) {
+	t.Helper()
 	if env == nil {
 		env = make(map[string]string)
 	}
 	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
 	env["DEVIN_REQUESTS_FILE"] = requestsFile
-	fakePath := filepath.Join(t.TempDir(), "devin")
-	writeTestExecutable(t, fakePath, []byte(fakeDevinContractScript))
 	backend, err := New("devin", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Env: env})
 	if err != nil {
 		t.Fatal(err)

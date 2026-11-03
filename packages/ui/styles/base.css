@@ -48,15 +48,50 @@
   color: var(--shiki-dark) !important;
 }
 
-/* Multica icon: entrance spin animation */
-@keyframes entrance-spin {
-  0% { transform: rotate(0deg); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: rotate(360deg); opacity: 1; }
-}
+/* Multica brand motion — brand guidelines v3.1 §08. The word writes, the m
+ * rises; every brand animation is one of those two actions. Only the tile and
+ * the i dot overshoot (pop); nothing else does. Delays are set inline by the
+ * components so a sequence stays readable in one place. */
+@keyframes multica-pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes multica-rise { from { transform: translateY(82px); } }
+@keyframes multica-arch-rise { from { transform: translateY(102%); } }
+@keyframes multica-write { from { stroke-dashoffset: 1; } }
+@keyframes multica-think { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes multica-fade-in { from { opacity: 0; } }
+@keyframes multica-fade-out { to { opacity: 0; } }
+@keyframes multica-hop { 40% { transform: translateY(-14%); } }
 
-.animate-entrance-spin {
-  animation: entrance-spin 0.6s ease-out forwards;
+.multica-pop {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.multica-rise {
+  animation: multica-rise 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arch-rise {
+  transform-box: fill-box;
+  animation: multica-arch-rise 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-write {
+  stroke-dasharray: 1 1;
+  animation: multica-write 0.5s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+.multica-dot {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.multica-think {
+  stroke-dasharray: 0.24 0.76;
+  animation: multica-think 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.multica-fade-in { animation: multica-fade-in 0.24s ease both; }
+.multica-fade-out { animation: multica-fade-out 0.24s ease both; }
+/* Website nav only — the product never animates the wordmark on hover. */
+.multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.multica-hop-on-hover:hover > g {
+  animation: multica-hop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Onboarding: step / phase entry — 400ms fade.
@@ -102,7 +137,9 @@
  * per-frame text repaint caused by animating a clipped background-position.
  * The old 200%-wide gradient travelled four label widths per 2.5s cycle.
  * A six-width window with a repeating two-width mask preserves that spacing
- * and covers the label throughout the sweep, including the loop seam. */
+ * and covers the label throughout the sweep, including the loop seam.
+ * Hosts can raise contrast through the --shimmer-text-* variables (base and
+ * highlight colors, and how far the highlight band spreads from its peak). */
 @keyframes shimmer-text-window {
   from { transform: translateX(-66.6666666667%); }
   to { transform: translateX(0%); }
@@ -121,7 +158,7 @@
   vertical-align: bottom;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--muted-foreground);
+  color: var(--shimmer-text-base, var(--muted-foreground));
 }
 
 .shimmer-text-window {
@@ -132,7 +169,12 @@
   height: 100%;
   pointer-events: none;
   user-select: none;
-  mask-image: linear-gradient(90deg, transparent 35%, black 50%, transparent 65%);
+  mask-image: linear-gradient(
+    90deg,
+    transparent calc(50% - var(--shimmer-text-spread, 15%)),
+    black 50%,
+    transparent calc(50% + var(--shimmer-text-spread, 15%))
+  );
   mask-size: calc(100% / 3) 100%;
   mask-repeat: repeat-x;
   animation: shimmer-text-window 2.5s linear infinite;
@@ -146,7 +188,7 @@
   width: calc(100% / 6);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--foreground);
+  color: var(--shimmer-text-highlight, var(--foreground));
   animation: shimmer-text-copy 2.5s linear infinite;
 }
 
@@ -280,12 +322,23 @@ html[data-dnd-dragging="true"] * {
 
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
 [data-sidebar-resizing="true"] [data-slot="sidebar-container"],
-[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer],
+[data-sidebar-resizing="true"] [data-slot="space-panel"],
+[data-sidebar-resizing="true"] [data-slot="list-column"] {
   transition: none !important;
 }
 
 [data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
   background-color: var(--sidebar-border);
+}
+
+[data-sidebar-resizing="true"] [data-slot="space-panel-resize"]::after {
+  background-color: color-mix(in oklab, var(--ring) 60%, transparent);
+}
+
+html[data-sidebar-resizing="true"] {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 /* Right detail sidebars use react-resizable-panels, which sizes panels by
@@ -318,7 +371,17 @@ html[data-dnd-dragging="true"] * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-entrance-spin,
+  /* Brand motion settles on its final frame. The think highlight stops and
+     its 22% track stays, so "working" still reads without movement. */
+  .multica-pop,
+  .multica-rise,
+  .multica-arch-rise,
+  .multica-write,
+  .multica-dot,
+  .multica-think,
+  .multica-fade-in,
+  .multica-fade-out,
+  .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
   .shimmer-text-window,

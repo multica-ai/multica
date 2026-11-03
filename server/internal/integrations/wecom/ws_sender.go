@@ -249,6 +249,12 @@ var errNotAttempted = errors.New("wecom: nothing was written")
 // that are provably non-deliveries.
 var errChatBusy = fmt.Errorf("%w; the wait for this chat's turn ended first", errNotAttempted)
 
+// errStreamDisowned is a closing frame that was never written because the
+// server had already refused this round's stream for good (846605 / 846608,
+// recorded by markUnusable). Nothing left the process, so the words are
+// provably not in the bubble and the caller's fallback may say them.
+var errStreamDisowned = fmt.Errorf("%w; the server has disowned this round's stream", errNotAttempted)
+
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
 		log = slog.Default()
@@ -1146,7 +1152,15 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 // caller's question — may this send be tried again? — has a different answer
 // once part of the answer is in the chat.
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
-	pieces := splitForWire(content)
+	return s.sendPiecesCtx(ctx, chatID, chatTypeInt, splitForWire(content))
+}
+
+// sendPiecesCtx sends pieces that are already cut to fit, in order, under one
+// hold of the chat's lock. sendTextCtx is the caller for a whole answer; the
+// other is the remainder of an answer whose head went into its bubble, which
+// is split before the bubble is sealed and so arrives here already in pieces.
+// Each piece must fit in one frame.
+func (s *wsSender) sendPiecesCtx(ctx context.Context, chatID string, chatTypeInt int, pieces []string) error {
 	// Held for every send, not only a split one: a single-frame push from
 	// another caller — an inbox card, the file this same answer produced
 	// (sendMedia takes the same lock), the unsupported-type notice — is

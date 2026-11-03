@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -403,6 +404,120 @@ func TestClaudeSupplementInitializeFailure(t *testing.T) {
 			}
 			if session.SupplementReady() {
 				t.Fatal("failed handshake enabled supplements")
+			}
+		})
+	}
+}
+
+// The oversized request IDs force replies to exceed the pipe capacity. The
+// child keeps writing stdout before reading replies, exercising both pipes.
+func runFakeClaudePendingControlResult() {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		os.Exit(21)
+	}
+	fmt.Println(`{"type":"control_response","response":{"subtype":"success","request_id":"multica-supplement-initialize"}}`)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		os.Exit(22)
+	}
+	ids := []string{strings.Repeat("a", 1024*1024), strings.Repeat("b", 1024*1024)}
+	for _, id := range ids {
+		hook := claudeSupplementHook("UserPromptSubmit", "")
+		hook.RequestID = id
+		if err := json.NewEncoder(os.Stdout).Encode(hook); err != nil {
+			os.Exit(23)
+		}
+	}
+	fmt.Println(`{"type":"result","subtype":"success","result":"done"}`)
+	for i := 0; i < 128; i++ {
+		fmt.Printf(`{"type":"log","log":{"level":"info","message":"%s"}}`+"\n", strings.Repeat("x", 4096))
+	}
+	fmt.Println(`{"type":"log","log":{"level":"info","message":"release replies"}}`)
+	for {
+		if _, err := os.Stat(os.Getenv("CLAUDE_REPLY_GATE")); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for range ids {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read control reply: %v\n", err)
+			os.Exit(24)
+		}
+		var frame struct {
+			Type     string `json:"type"`
+			Response struct {
+				RequestID string `json:"request_id"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(line, &frame) != nil || frame.Type != "control_response" {
+			os.Exit(25)
+		}
+		found := false
+		for i, id := range ids {
+			if id != "" && frame.Response.RequestID == id {
+				ids[i] = ""
+				found = true
+				break
+			}
+		}
+		if !found {
+			os.Exit(26)
+		}
+	}
+	if _, err := reader.ReadBytes('\n'); err != io.EOF {
+		os.Exit(27)
+	}
+}
+
+func TestClaudeResultDrainsPendingControlReplies(t *testing.T) {
+	for _, cancelRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%t", cancelRun), func(t *testing.T) {
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			gate := filepath.Join(t.TempDir(), "read-replies")
+			b := &claudeBackend{cfg: Config{ExecutablePath: self, Logger: slog.Default(), Env: map[string]string{
+				"CLAUDE_FAKE_MODE": "pending_control_result", "CLAUDE_REPLY_GATE": gate, "IS_SANDBOX": "1",
+			}}}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			session, err := b.Execute(ctx, "test prompt", ExecOptions{EnableTaskSupplement: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The marker proves the reader processed the result and drained the burst
+			// while the child still has not read any control reply.
+			released := false
+			for msg := range session.Messages {
+				if msg.Content != "release replies" {
+					continue
+				}
+				released = true
+				if session.SupplementReady() {
+					t.Error("result must close supplement admission")
+				}
+				if cancelRun {
+					cancel()
+				} else if err := os.WriteFile(gate, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := <-session.Result
+			if !released {
+				t.Fatalf("stdout did not drain past result: %+v", result)
+			}
+			want := "completed"
+			if cancelRun {
+				want = "aborted"
+			}
+			if result.Status != want {
+				t.Fatalf("status = %s, want %s: %+v", result.Status, want, result)
+			}
+			if !cancelRun && result.Output != "done" {
+				t.Fatalf("output = %q", result.Output)
 			}
 		})
 	}

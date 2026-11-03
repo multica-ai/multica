@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -55,7 +56,25 @@ func createTestCustomStatus(t *testing.T, key, category string) db.IssueStatus {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, entry.ID)
 	})
+	listInTestDefault(t, key)
 	return entry
+}
+
+// listInTestDefault does what CreateIssueStatus does for a status a test
+// inserts directly: lists it in the stored Default, so issues outside a
+// project may take it. Cleanup takes it out again.
+func listInTestDefault(t *testing.T, key string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := issueworkflow.AddToDefault(ctx, testHandler.Queries, parseUUID(testWorkspaceID), key); err != nil {
+		t.Fatalf("list %q in Default: %v", key, err)
+	}
+	t.Cleanup(func() {
+		testHandler.Queries.RemoveStatusFromDefaultIssueWorkflow(ctx, db.RemoveStatusFromDefaultIssueWorkflowParams{
+			WorkspaceID: parseUUID(testWorkspaceID),
+			StatusKey:   key,
+		})
+	})
 }
 
 // TestEnsureIsIdempotent covers the rolling-deploy case: two pods can seed the
@@ -1661,6 +1680,7 @@ func TestIssueResponseCarriesCustomStatusName(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, entry.ID)
 	})
+	listInTestDefault(t, "in_review_8")
 
 	var custom IssueResponse
 	testutil.Call(t, testHandler.CreateIssue,
@@ -1911,6 +1931,7 @@ func TestCustomStatusPayloadsAgreeAcrossRenderings(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, entry.ID)
 	})
+	listInTestDefault(t, "in_review_7")
 
 	var fromHTTP IssueResponse
 	testutil.Call(t, testHandler.CreateIssue,

@@ -9,6 +9,7 @@ import {
   getIssueSurfaceViewStateRegistrySnapshot,
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
+  seedIssueSurfaceViewState,
 } from "./surface-view-store";
 
 const flush = async () => {
@@ -221,6 +222,24 @@ describe("issue surface view store registry", () => {
     setCurrentWorkspace("beta", "ws_b");
     await flush();
     expect(projectA.getState().viewMode).toBe("swimlane");
+  });
+
+  // Later opens of a saved view read this local copy, not the definition, so
+  // a condition missing here silently drops out of the view.
+  it("keeps a saved view's agent running filter across a reload", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    seedIssueSurfaceViewState("view:running", { agentRunningFilter: true });
+    const view = getIssueSurfaceViewStore("view:running");
+    expect(view.getState().agentRunningFilter).toBe(true);
+
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    expect(view.getState().agentRunningFilter).toBe(false);
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(view.getState().agentRunningFilter).toBe(true);
   });
 
   it("clears one surface without touching sibling surfaces", async () => {
