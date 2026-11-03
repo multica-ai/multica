@@ -6536,6 +6536,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"muse":       "Muse Code",
 	"zcode":      "ZCode",
 	"zeroclaw":   "ZeroClaw",
+	"pai":        "P-ai",
 }
 
 func init() {
@@ -6576,9 +6577,13 @@ func providerDisplayName(name string) string {
 // hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
 // native runtime contract. kiro was confirmed earlier by a kiro-cli
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
+//
+// pai is inline by design rather than by probe: P-ai has no AGENTS.md-style
+// workdir convention to pick the brief up from, so the runtime brief rides in
+// the turn prompt (the backend prepends ExecOptions.SystemPrompt).
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli", "qwenpaw":
+	case "openclaw", "kimi", "traecli", "qwenpaw", "pai":
 		return true
 	default:
 		return false

@@ -353,6 +353,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			}
 		}
 	}
+	// P-ai (`p-ai`, https://github.com/kawayiYokami/P-ai) is a desktop AI
+	// work system whose binary doubles as an ACP agent server through
+	// `p-ai acp`. The model catalog is the set of LLM provider endpoints
+	// configured inside P-ai, so MULTICA_PAI_MODEL only seeds the
+	// daemon-wide default (an api_config id from the user's P-ai config).
+	if e, ok := probe("MULTICA_PAI_PATH", "p-ai", "MULTICA_PAI_MODEL"); ok {
+		agents["pai"] = e
+	}
 	return agents
 }
 
