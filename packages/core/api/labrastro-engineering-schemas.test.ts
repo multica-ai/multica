@@ -13,6 +13,7 @@ describe("engineering API response contracts", () => {
     expect(parsed.engineering.enabled).toBe(false);
     expect(parsed.engineering).not.toHaveProperty("agentDecisionsEnabled");
     expect(parsed.engineering.currentStage).toBe(1);
+    expect(parsed.engineering.stages).toEqual([]);
     expect(parsed.chapters).toEqual([]);
   });
   it("keeps audit identity and unknown enums explicit", () => {
@@ -45,4 +46,14 @@ describe("engineering API response contracts", () => {
     expect(parseWithFallback({ chapters: [], open_issues: null }, BaselineDecisionSchema, null, { endpoint: "engineering test" })).toBeNull();
     expect(parseWithFallback({ revisions: [revision], has_more: false, next_before: "bad" }, BaselineHistorySchema, null, { endpoint: "engineering test" })).toBeNull();
   });
+});
+
+it.each([undefined, null, "W10=", {}, [null], [{ stage: 0, title: "Bad" }], [{ stage: 1.5, title: "Bad" }], [{ stage: 1, title: 42 }], [{ stage: 1, title: "Bad", goal: null }]])("isolates malformed stages: %j", (stages) => {
+  const parsed = EngineeringOverviewSchema.parse({ engineering: { project_id: id, workspace_id: id, stages, current_stage: 9 }, chapters: [] });
+  expect(parsed.engineering.stages).toEqual([]);
+  expect(parsed.engineering.currentStage).toBe(9);
+});
+it("parses dynamic stages and defaults an omitted goal", () => {
+  const parsed = EngineeringUpdatedSchema.parse({ engineering: { project_id: id, workspace_id: id, stages: [{ stage: 9, title: "Release" }] } });
+  expect(parsed.engineering.stages).toEqual([{ stage: 9, title: "Release", goal: "" }]);
 });

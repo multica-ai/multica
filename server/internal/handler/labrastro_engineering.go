@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,7 +49,11 @@ func writeEngineeringError(w http.ResponseWriter, err error) {
 	case errors.As(err, &e):
 		writeErrorCode(w, e.status, e.code, e.message)
 	case errors.As(err, &invalid):
-		writeErrorCode(w, 422, invalid.Code, "invalid baseline content")
+		status := 422
+		if invalid.Code == "invalid_request" {
+			status = 400
+		}
+		writeErrorCode(w, status, invalid.Code, "invalid baseline content")
 	case errors.Is(err, pgx.ErrNoRows):
 		writeErrorCode(w, 404, "not_found", "project or revision not found")
 	default:
@@ -169,7 +174,7 @@ func (h *Handler) engineeringState(w http.ResponseWriter, r *http.Request, write
 	}
 	s.config, err = s.q.LabrastroGetEngineering(r.Context(), db.LabrastroGetEngineeringParams{WorkspaceID: project.WorkspaceID, ProjectID: project.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		s.config = db.ProjectEngineering{WorkspaceID: project.WorkspaceID, ProjectID: project.ID, CurrentStage: 1, DeciderMemberIds: []pgtype.UUID{}}
+		s.config = db.ProjectEngineering{WorkspaceID: project.WorkspaceID, ProjectID: project.ID, CurrentStage: 1, Stages: []byte("[]"), DeciderMemberIds: []pgtype.UUID{}}
 		err = nil
 	}
 	if err != nil {
@@ -257,10 +262,26 @@ func (h *Handler) LabrastroGetEngineering(w http.ResponseWriter, r *http.Request
 		writeEngineeringError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"engineering": s.config, "chapters": chapters})
+	writeJSON(w, 200, map[string]any{"engineering": engineeringConfigResponse{s.config, json.RawMessage(s.config.Stages)}, "chapters": chapters})
+}
+
+type engineeringConfigResponse struct {
+	db.ProjectEngineering
+	Stages json.RawMessage `json:"stages"`
+}
+
+type engineeringStage struct {
+	Stage int64  `json:"stage"`
+	Title string `json:"title"`
+	Goal  string `json:"goal"`
 }
 
 type patchEngineeringRequest struct {
+	Stages *[]struct {
+		Stage json.RawMessage `json:"stage"`
+		Title json.RawMessage `json:"title"`
+		Goal  json.RawMessage `json:"goal"`
+	} `json:"stages"`
 	Enabled          *bool     `json:"enabled"`
 	CurrentStage     *int32    `json:"current_stage"`
 	ModeSummary      *string   `json:"mode_summary"`
@@ -281,6 +302,35 @@ func (h *Handler) LabrastroPatchEngineering(w http.ResponseWriter, r *http.Reque
 		writeErrorCode(w, 422, "invalid_request", "invalid engineering configuration")
 		return
 	}
+	var stages []byte
+	if req.Stages != nil {
+		normalized := make([]engineeringStage, 0, len(*req.Stages))
+		seen := map[int64]bool{}
+		if len(*req.Stages) > 50 {
+			writeErrorCode(w, 422, "invalid_request", "stages must contain at most 50 entries")
+			return
+		}
+		for _, item := range *req.Stages {
+			var stage int64
+			var title, goal string
+			if json.Unmarshal(item.Stage, &stage) != nil || json.Unmarshal(item.Title, &title) != nil ||
+				len(item.Goal) > 0 && (string(item.Goal) == "null" || json.Unmarshal(item.Goal, &goal) != nil) ||
+				strings.ContainsAny(title+goal, "\r\n\x00") {
+				writeErrorCode(w, 422, "invalid_request", "invalid stage number, title or goal")
+				return
+			}
+			title, goal = strings.TrimSpace(title), strings.TrimSpace(goal)
+			if stage < 1 || seen[stage] ||
+				utf8.RuneCountInString(title) < 1 || utf8.RuneCountInString(title) > 60 || utf8.RuneCountInString(goal) > 280 {
+				writeErrorCode(w, 422, "invalid_request", "invalid stage number, title or goal")
+				return
+			}
+			seen[stage] = true
+			normalized = append(normalized, engineeringStage{stage, title, goal})
+		}
+		slices.SortFunc(normalized, func(a, b engineeringStage) int { return cmp.Compare(a.Stage, b.Stage) })
+		stages, _ = json.Marshal(normalized)
+	}
 	s, ok := h.engineeringState(w, r, true)
 	if !ok {
 		return
@@ -292,6 +342,9 @@ func (h *Handler) LabrastroPatchEngineering(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	config := s.config
+	if stages != nil {
+		config.Stages = stages
+	}
 	if req.Enabled != nil {
 		config.Enabled = *req.Enabled
 	}
@@ -321,28 +374,17 @@ func (h *Handler) LabrastroPatchEngineering(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
-	s.config, err = s.q.LabrastroPutEngineering(r.Context(), db.LabrastroPutEngineeringParams{WorkspaceID: s.project.WorkspaceID, ProjectID: s.project.ID, Enabled: config.Enabled, CurrentStage: config.CurrentStage, ModeSummary: config.ModeSummary, DeciderMemberIds: config.DeciderMemberIds, UpdatedByType: actor.kind, UpdatedByID: actor.id})
+	s.config, err = s.q.LabrastroPutEngineering(r.Context(), db.LabrastroPutEngineeringParams{WorkspaceID: s.project.WorkspaceID, ProjectID: s.project.ID, Enabled: config.Enabled, CurrentStage: config.CurrentStage, ModeSummary: config.ModeSummary, DeciderMemberIds: config.DeciderMemberIds, UpdatedByType: actor.kind, UpdatedByID: actor.id, Stages: config.Stages})
 	if err != nil {
 		writeEngineeringError(w, err)
 		return
-	}
-	seeded := false
-	if config.Enabled {
-		seeded, err = s.seedRisk(r.Context(), actor)
-		if err != nil {
-			writeEngineeringError(w, err)
-			return
-		}
 	}
 	if err = s.tx.Commit(r.Context()); err != nil {
 		writeEngineeringError(w, err)
 		return
 	}
 	h.publish(protocol.EventProjectEngineeringUpdated, uuidToString(s.project.WorkspaceID), actor.kind, uuidToString(actor.id), map[string]any{"project_id": uuidToString(s.project.ID)})
-	if seeded {
-		h.baselineChanged(s, actor, "exclusions_and_risks")
-	}
-	writeJSON(w, 200, map[string]any{"engineering": s.config})
+	writeJSON(w, 200, map[string]any{"engineering": engineeringConfigResponse{s.config, json.RawMessage(s.config.Stages)}})
 }
 
 func (s *engineeringState) updateDoc(ctx context.Context, chapter string, adopted, candidate pgtype.UUID) error {
@@ -366,15 +408,6 @@ func (s *engineeringState) retire(ctx context.Context, id pgtype.UUID, status st
 }
 func (h *Handler) baselineChanged(s *engineeringState, a baselineActor, chapter string) {
 	h.publish(protocol.EventProjectBaselineChanged, uuidToString(s.project.WorkspaceID), a.kind, uuidToString(a.id), map[string]any{"project_id": uuidToString(s.project.ID), "chapter": chapter})
-}
-func (s *engineeringState) exclusions(ctx context.Context, docs []db.ProjectBaselineDoc) (string, error) {
-	d := baselineDoc(docs, "exclusions_and_risks")
-	id := d.CandidateRevisionID
-	if !id.Valid {
-		id = d.AdoptedRevisionID
-	}
-	revision, err := s.revision(ctx, id)
-	return revision.ContentMarkdown, err
 }
 
 type proposeBaselineRequest struct {
@@ -461,12 +494,7 @@ func (h *Handler) LabrastroProposeBaseline(w http.ResponseWriter, r *http.Reques
 		writeEngineeringError(w, err)
 		return
 	}
-	exclusions, err := s.exclusions(r.Context(), docs)
-	if err != nil {
-		writeEngineeringError(w, err)
-		return
-	}
-	diff, err := engineering.Compute(req.Chapter, old.ContentMarkdown, req.Content, old.RevisionNumber, exclusions, s.issuePrefix)
+	diff, err := engineering.Compute(req.Chapter, old.ContentMarkdown, req.Content, old.RevisionNumber)
 	if err != nil {
 		writeEngineeringError(w, err)
 		return
@@ -506,6 +534,10 @@ func (h *Handler) LabrastroDecideBaseline(w http.ResponseWriter, r *http.Request
 		writeEngineeringError(w, err)
 		return
 	}
+	if actor.kind == "agent" {
+		writeEngineeringError(w, baselineError(403, "baseline_human_required"))
+		return
+	}
 	var req decideBaselineRequest
 	if !decodeEngineering(w, r, &req) {
 		return
@@ -531,7 +563,7 @@ func (h *Handler) LabrastroDecideBaseline(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer s.tx.Rollback(r.Context())
-	if actor.kind == "member" && !s.isDecider() {
+	if !s.isDecider() {
 		writeEngineeringError(w, baselineError(403, "baseline_not_decider"))
 		return
 	}
@@ -540,11 +572,6 @@ func (h *Handler) LabrastroDecideBaseline(w http.ResponseWriter, r *http.Request
 		return
 	}
 	docs, err := s.docs(r.Context(), true)
-	if err != nil {
-		writeEngineeringError(w, err)
-		return
-	}
-	exclusions, err := s.exclusions(r.Context(), docs)
 	if err != nil {
 		writeEngineeringError(w, err)
 		return
@@ -576,7 +603,7 @@ func (h *Handler) LabrastroDecideBaseline(w http.ResponseWriter, r *http.Request
 			writeEngineeringError(w, err)
 			return
 		}
-		diff, err := engineering.Compute(candidate.Chapter, base.ContentMarkdown, candidate.ContentMarkdown, base.RevisionNumber, exclusions, s.issuePrefix)
+		diff, err := engineering.Compute(candidate.Chapter, base.ContentMarkdown, candidate.ContentMarkdown, base.RevisionNumber)
 		if err != nil {
 			writeEngineeringError(w, err)
 			return
@@ -684,7 +711,7 @@ func (s *engineeringState) openIssues(ctx context.Context) (baselineOpenIssues, 
 func (h *Handler) LabrastroBaselineHistory(w http.ResponseWriter, r *http.Request) {
 	chapter := r.URL.Query().Get("chapter")
 	if !engineering.ValidChapter(chapter) {
-		writeEngineeringError(w, &engineering.Error{Code: "baseline_anchor_invalid"})
+		writeEngineeringError(w, baselineError(400, "invalid_request"))
 		return
 	}
 	number := func(key string, defaultValue int) (int32, bool) {
@@ -741,17 +768,7 @@ func (h *Handler) LabrastroBaselineHistory(w http.ResponseWriter, r *http.Reques
 			writeEngineeringError(w, err)
 			return
 		}
-		docs, err := s.docs(r.Context(), false)
-		if err != nil {
-			writeEngineeringError(w, err)
-			return
-		}
-		exclusions, err := s.exclusions(r.Context(), docs)
-		if err != nil {
-			writeEngineeringError(w, err)
-			return
-		}
-		diff, err := engineering.Compute(chapter, old.ContentMarkdown, next.ContentMarkdown, from, exclusions, s.issuePrefix)
+		diff, err := engineering.Compute(chapter, old.ContentMarkdown, next.ContentMarkdown, from)
 		if err != nil {
 			writeEngineeringError(w, err)
 			return
@@ -778,4 +795,11 @@ func (h *Handler) LabrastroBaselineHistory(w http.ResponseWriter, r *http.Reques
 		nextBefore = &n
 	}
 	writeJSON(w, 200, map[string]any{"revisions": versions, "has_more": more, "next_before": nextBefore})
+}
+
+func deleteWorkspaceEngineeringAndProjects(ctx context.Context, q *db.Queries, workspace pgtype.UUID) error {
+	if err := q.LabrastroDeleteWorkspaceEngineering(ctx, workspace); err != nil {
+		return err
+	}
+	return q.DeleteWorkspaceRuntimesAndProjects(ctx, workspace)
 }

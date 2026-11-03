@@ -26,6 +26,7 @@ export {
   BaselineHistorySchema,
   BaselineRevisionSchema,
   EngineeringConfigSchema,
+  EngineeringStageSchema,
   EngineeringOverviewSchema,
   EngineeringUpdatedSchema,
 } from "./labrastro-engineering-schemas";
@@ -36,6 +37,7 @@ export type {
   BaselineHistory,
   BaselineRevision,
   EngineeringConfig,
+  EngineeringStage,
   EngineeringOverview,
 } from "./labrastro-engineering-schemas";
 export type BaselineChange = import("./labrastro-engineering-schemas").BaselineDiff["added"][number];

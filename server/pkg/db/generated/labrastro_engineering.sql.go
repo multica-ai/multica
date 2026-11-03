@@ -311,7 +311,7 @@ func (q *Queries) LabrastroGetBaselineRevisionNumber(ctx context.Context, arg La
 }
 
 const labrastroGetEngineering = `-- name: LabrastroGetEngineering :one
-SELECT workspace_id, project_id, enabled, current_stage, mode_summary, decider_member_ids, updated_by_type, updated_by_id, created_at, updated_at FROM project_engineering WHERE workspace_id = $1 AND project_id = $2
+SELECT workspace_id, project_id, enabled, current_stage, mode_summary, decider_member_ids, updated_by_type, updated_by_id, created_at, updated_at, stages FROM project_engineering WHERE workspace_id = $1 AND project_id = $2
 `
 
 type LabrastroGetEngineeringParams struct {
@@ -333,6 +333,7 @@ func (q *Queries) LabrastroGetEngineering(ctx context.Context, arg LabrastroGetE
 		&i.UpdatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Stages,
 	)
 	return i, err
 }
@@ -506,7 +507,7 @@ type LabrastroLockEngineeringProjectParams struct {
 	ID          pgtype.UUID `json:"id"`
 }
 
-// Serializes cross-chapter diffs, configuration changes and project deletion.
+// Serializes baseline decisions, configuration changes and project deletion.
 func (q *Queries) LabrastroLockEngineeringProject(ctx context.Context, arg LabrastroLockEngineeringProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, labrastroLockEngineeringProject, arg.WorkspaceID, arg.ID)
 	var i Project
@@ -531,13 +532,13 @@ func (q *Queries) LabrastroLockEngineeringProject(ctx context.Context, arg Labra
 
 const labrastroPutEngineering = `-- name: LabrastroPutEngineering :one
 INSERT INTO project_engineering (workspace_id, project_id, enabled, current_stage, mode_summary,
-    decider_member_ids, updated_by_type, updated_by_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    decider_member_ids, updated_by_type, updated_by_id, stages)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT (workspace_id, project_id) DO UPDATE SET
     enabled = EXCLUDED.enabled, current_stage = EXCLUDED.current_stage, mode_summary = EXCLUDED.mode_summary,
-    decider_member_ids = EXCLUDED.decider_member_ids,
+    decider_member_ids = EXCLUDED.decider_member_ids, stages = EXCLUDED.stages,
     updated_by_type = EXCLUDED.updated_by_type, updated_by_id = EXCLUDED.updated_by_id, updated_at = now()
-RETURNING workspace_id, project_id, enabled, current_stage, mode_summary, decider_member_ids, updated_by_type, updated_by_id, created_at, updated_at
+RETURNING workspace_id, project_id, enabled, current_stage, mode_summary, decider_member_ids, updated_by_type, updated_by_id, created_at, updated_at, stages
 `
 
 type LabrastroPutEngineeringParams struct {
@@ -549,6 +550,7 @@ type LabrastroPutEngineeringParams struct {
 	DeciderMemberIds []pgtype.UUID `json:"decider_member_ids"`
 	UpdatedByType    string        `json:"updated_by_type"`
 	UpdatedByID      pgtype.UUID   `json:"updated_by_id"`
+	Stages           []byte        `json:"stages"`
 }
 
 func (q *Queries) LabrastroPutEngineering(ctx context.Context, arg LabrastroPutEngineeringParams) (ProjectEngineering, error) {
@@ -561,6 +563,7 @@ func (q *Queries) LabrastroPutEngineering(ctx context.Context, arg LabrastroPutE
 		arg.DeciderMemberIds,
 		arg.UpdatedByType,
 		arg.UpdatedByID,
+		arg.Stages,
 	)
 	var i ProjectEngineering
 	err := row.Scan(
@@ -574,6 +577,7 @@ func (q *Queries) LabrastroPutEngineering(ctx context.Context, arg LabrastroPutE
 		&i.UpdatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Stages,
 	)
 	return i, err
 }

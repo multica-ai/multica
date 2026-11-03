@@ -3,19 +3,16 @@ package engineering
 
 import (
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
 var Chapters = []string{"overview", "domain_rules", "architecture", "exclusions_and_risks"}
 
-var prefixes = map[string]string{
-	"overview": "Stage", "domain_rules": "Term Rule", "architecture": "ADR Contract", "exclusions_and_risks": "Out Defer Risk",
-}
-
-var anchorPattern = regexp.MustCompile(`^### \[(Stage|Term|Rule|ADR|Contract|Out|Defer|Risk)-([^\]\r\n]{1,64})\][ \t]*(.*)$`)
-var headingPattern = regexp.MustCompile(`^ {0,3}#{1,3}(?:[ \t]|$)`)
-var issueLinkPattern = regexp.MustCompile(`(?:mention://issue/|/issues/)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+var headingPattern = regexp.MustCompile(`^ {0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$`)
+var explicitKeyPattern = regexp.MustCompile(`^\[([\pL\pN_]+-[^\]\r\n]{1,64})\][ \t]*(.*)$`)
 
 type Error struct{ Code string }
 
@@ -28,12 +25,10 @@ type Section struct {
 }
 
 type Change struct {
-	Anchor      string `json:"anchor"`
-	Title       string `json:"title"`
-	Before      string `json:"before,omitempty"`
-	After       string `json:"after,omitempty"`
-	BeforeChars int    `json:"before_chars,omitempty"`
-	AfterChars  int    `json:"after_chars,omitempty"`
+	Anchor string `json:"anchor"`
+	Title  string `json:"title"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
 }
 
 type Warning struct {
@@ -51,7 +46,7 @@ type Diff struct {
 	Warnings           []Warning `json:"warnings"`
 }
 
-func ValidChapter(chapter string) bool { _, ok := prefixes[chapter]; return ok }
+func ValidChapter(chapter string) bool { return slices.Contains(Chapters, chapter) }
 
 func normalize(s string) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
@@ -70,19 +65,19 @@ func normalize(s string) string {
 // Parse ignores fenced examples and ends each anchor at the next H1-H3 heading.
 func Parse(chapter, content string) ([]Section, error) {
 	if !ValidChapter(chapter) {
-		return nil, &Error{"baseline_anchor_invalid"}
+		return nil, &Error{"invalid_request"}
 	}
 	if len(content) > 65536 {
 		return nil, &Error{"baseline_too_large"}
 	}
 	if !utf8.ValidString(content) || strings.ContainsRune(content, 0) {
-		return nil, &Error{"baseline_anchor_invalid"}
+		return nil, &Error{"baseline_content_invalid"}
 	}
 	sections := []Section{{Anchor: "_preamble"}}
 	bodies := []*strings.Builder{new(strings.Builder)}
 	seen := map[string]bool{}
 	current := 0
-	unanchored := -1
+	parent := ""
 	fence := ""
 	for _, line := range strings.Split(normalize(content), "\n") {
 		trimmed := strings.TrimLeft(line, " ")
@@ -98,33 +93,29 @@ func Parse(chapter, content string) ([]Section, error) {
 			inFence = true
 		}
 		if !inFence {
-			match := anchorPattern.FindStringSubmatch(line)
-			if match != nil {
-				if !strings.Contains(" "+prefixes[chapter]+" ", " "+match[1]+" ") {
-					return nil, &Error{"baseline_anchor_invalid"}
+			if match := headingPattern.FindStringSubmatch(line); match != nil {
+				if current == 0 && normalize(bodies[0].String()) != "" {
+					seen["_preamble"] = true
 				}
-				id := match[1] + "-" + match[2]
-				if seen[id] {
-					return nil, &Error{"baseline_anchor_duplicate"}
+				title := strings.Join(strings.Fields(match[2]), " ")
+				key := title
+				if explicit := explicitKeyPattern.FindStringSubmatch(strings.TrimSpace(match[2])); explicit != nil {
+					key, title = explicit[1], explicit[2]
+				} else if len(match[1]) == 3 && parent != "" {
+					key = parent + " / " + key
 				}
-				seen[id] = true
-				sections = append(sections, Section{Anchor: id, Title: match[3]})
+				base := key
+				for n := 2; seen[key]; n++ {
+					key = base + " (" + strconv.Itoa(n) + ")"
+				}
+				seen[key] = true
+				if len(match[1]) < 3 {
+					parent = key
+				}
+				sections = append(sections, Section{Anchor: key, Title: title})
 				bodies = append(bodies, new(strings.Builder))
 				current = len(sections) - 1
 				continue
-			}
-			if strings.HasPrefix(trimmed, "### [") {
-				return nil, &Error{"baseline_anchor_invalid"}
-			}
-			if current > 0 && headingPattern.MatchString(line) {
-				// Keep text outside anchor sections visible without extending a rule
-				// past its H1-H3 boundary.
-				if unanchored < 0 {
-					sections = append(sections, Section{Anchor: "_unanchored"})
-					bodies = append(bodies, new(strings.Builder))
-					unanchored = len(sections) - 1
-				}
-				current = unanchored
 			}
 		}
 		if current >= 0 {
@@ -141,17 +132,13 @@ func Parse(chapter, content string) ([]Section, error) {
 	return sections, nil
 }
 
-func Compute(chapter, before, after string, baseNumber int32, exclusions, issuePrefix string) (Diff, error) {
+func Compute(chapter, before, after string, baseNumber int32) (Diff, error) {
 	d := Diff{Chapter: chapter, BaseRevisionNumber: baseNumber, Added: []Change{}, Modified: []Change{}, Removed: []Change{}, Warnings: []Warning{}}
 	old, err := Parse(chapter, before)
 	if err != nil {
 		return d, err
 	}
 	next, err := Parse(chapter, after)
-	if err != nil {
-		return d, err
-	}
-	deferred, err := Parse("exclusions_and_risks", exclusions)
 	if err != nil {
 		return d, err
 	}
@@ -178,47 +165,13 @@ func Compute(chapter, before, after string, baseNumber int32, exclusions, issueP
 			oldText = previous.Title + "\n" + oldText
 			newText = s.Title + "\n" + newText
 		}
-		oldChars, newChars := utf8.RuneCountInString(previous.Body), utf8.RuneCountInString(s.Body)
-		d.Modified = append(d.Modified, Change{Anchor: s.Anchor, Title: s.Title, Before: oldText, After: newText, BeforeChars: oldChars, AfterChars: newChars})
-		if strings.HasPrefix(s.Anchor, "Rule-") && newChars*100 < oldChars*60 {
-			d.Warnings = append(d.Warnings, Warning{"rule_shrunk", s.Anchor})
-		}
+		d.Modified = append(d.Modified, Change{Anchor: s.Anchor, Title: s.Title, Before: oldText, After: newText})
 	}
 	for _, s := range old {
 		if _, exists := nextMap[s.Anchor]; exists {
 			continue
 		}
 		d.Removed = append(d.Removed, Change{Anchor: s.Anchor, Title: s.Title, Before: s.Body})
-		if strings.HasPrefix(s.Anchor, "Rule-") {
-			d.Warnings = append(d.Warnings, Warning{"rule_removed", s.Anchor})
-		}
-	}
-	var deferredText strings.Builder
-	for _, section := range deferred {
-		if strings.HasPrefix(section.Anchor, "Defer-") {
-			deferredText.WriteString(section.Title + "\n" + section.Body + "\n")
-		}
-	}
-	references := deferredText.String()
-	for _, w := range append([]Warning(nil), d.Warnings...) {
-		if referencesRule(references, w.Anchor) {
-			d.Warnings = append(d.Warnings, Warning{"rule_deferred", w.Anchor})
-		}
-	}
-
-	if chapter == "exclusions_and_risks" {
-		issuePattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(issuePrefix) + `-[0-9]+\b`)
-		for _, s := range next {
-			text := s.Title + "\n" + s.Body
-			if strings.HasPrefix(s.Anchor, "Defer-") && !issueLinkPattern.MatchString(text) && !(issuePrefix != "" && issuePattern.MatchString(text)) {
-				d.Warnings = append(d.Warnings, Warning{"defer_missing_pool", s.Anchor})
-			}
-		}
 	}
 	return d, nil
-}
-
-func referencesRule(text, anchor string) bool {
-	// Delimit the identifier: Rule-1 must not match Rule-10.
-	return regexp.MustCompile(`(?:^|[^\pL\pN_-])` + regexp.QuoteMeta(anchor) + `(?:$|[^\pL\pN_-])`).MatchString(text)
 }

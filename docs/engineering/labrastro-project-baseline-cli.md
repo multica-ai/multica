@@ -1,6 +1,6 @@
 # Project baseline CLI
 
-`multica project baseline` implements Strixnova contract v3.2 section 7 using
+`multica project baseline` implements Strixnova contract v3.3 section 7 using
 the engineering API. The four chapter keys are `overview`, `domain_rules`,
 `architecture`, and `exclusions_and_risks`.
 
@@ -38,10 +38,8 @@ resolved to IDs for the API; writes are never retried automatically.
 
 `propose` and `diff` display server-computed anchor changes. Text output prints
 each changed anchor's before/after body with line prefixes. It does not compute
-another Diff or infer semantic warnings from words such as MUST/SHOULD. Server
-warnings `rule_removed`, `rule_shrunk`, and `rule_deferred` print
-`[RULE DOWNGRADE WARNING]` on stderr. `defer_missing_pool` and future warning
-codes print `[BASELINE WARNING]`. JSON retains structured changes and warnings.
+another Diff or infer semantic warnings from words such as MUST/SHOULD. New diffs have no warnings. Historical warning codes print
+`[BASELINE WARNING]` on stderr without special rule-downgrade labeling. JSON retains structured changes and warnings.
 Candidate Diff JSON is `{diffs: [...]}`; historical Diff and proposal JSON are
 the corresponding server objects.
 
@@ -53,11 +51,13 @@ candidate or refreshes the expected base. A concurrently replaced candidate or
 changed base is rejected by the server. `--reject` uses the same selection and
 atomic decision endpoint with `action=reject`.
 
-Authorization remains with the server. Members must be deciders; tasks bound to
-the workspace can adopt or reject candidates, including those with rule warnings.
-`baseline_not_decider` and `baseline_credential_denied` exit 1 without looking up
-an approval link or suggesting another credential. The CLI uses its normal
-credential resolver and never switches credentials.
+Authorization remains with the server. Only human deciders using a session or
+member PAT can adopt or reject. A task receives 403 `baseline_human_required`:
+the CLI prints “基线只能由决定人采用或驳回”, adds the candidate's engineering
+approval link and exits 1. If the app address or workspace slug is unavailable,
+it directs the decider to the engineering overview. It never reads or switches
+to another credential. `baseline_not_decider` and `baseline_credential_denied`
+exit 1 without looking up an approval link.
 
 After successful `propose` text output, stderr prints the new candidate's
 engineering URL for review. The URL uses `MULTICA_APP_URL`,
@@ -80,10 +80,11 @@ the CLI change.
 Successful decision text prints Diff summaries followed by `open_issues` in
 the server's `in_flight`/`queued` groups, including custom statuses and a
 truncation notice. Decision JSON preserves the full server response. There is
-no approval-comment proof or candidate UUID flag: the v3.2 decision API uses
-explicit chapter versions and authenticated member/task checks. All four
-warning types are repeated on stderr after successful adoption, including JSON
-output; warnings do not change the successful exit code 0.
+no approval-comment proof or candidate UUID flag: the decision API uses explicit
+chapter versions and authenticated human checks. Text output for `propose`,
+`diff` and `adopt` retains the `+a ~m -r; unchanged u` summary and lists every
+removed section's key and title. Historical warnings are repeated on stderr
+after successful adoption, including JSON output, without changing exit code 0.
 
 `export` writes only adopted versions to `01-overview.md`, `02-domain-rules.md`,
 `03-architecture.md`, and `04-exclusions-and-risks.md`. Empty chapters have an
@@ -103,3 +104,32 @@ HTTP 400/404 also exit 2. Invalid, missing, or ambiguous project prefixes retain
 the resolver's explanation (including matching IDs) and exit 2; failures while
 fetching project candidates still use the transport/HTTP error handling.
 Other CLI commands retain their existing exit conventions.
+
+
+## Engineering configuration
+
+```sh
+multica project engineering get <project-id> --output json
+multica project engineering set <project-id> --current-stage 9 --mode-summary "Verify release"
+multica project engineering set <project-id> --stages-file ./stages.json
+multica project engineering set <project-id> --clear-stages
+```
+
+`get` text output includes the enabled flag, current stage, approach summary and
+a stage/title/goal table. JSON output is the original `engineering` object.
+`set` requires at least one change; it does not expose enabled or decider-list
+changes. `--stages-file` and `--clear-stages` are mutually exclusive (exit 2).
+An empty `--mode-summary` clears the summary. Files must be UTF-8 JSON arrays
+under the current directory; traversal and escaping symlinks are rejected, as
+with baseline `--content-file`. Files are bounded by the API's 1 MiB request
+limit; stage count and element validation are performed by the server.
+
+```json
+[{"stage": 1, "title": "Contract", "goal": "Accepted"},
+ {"stage": 9, "title": "Release", "goal": ""}]
+```
+
+A task's `set` receives 403 and prints
+“工程配置只能由人类决定人修改，请在工程总览设置中修改”, then exits 1.
+The same 0/1/2 exit convention as baseline commands applies. Requests are not
+retried and credentials are never changed.

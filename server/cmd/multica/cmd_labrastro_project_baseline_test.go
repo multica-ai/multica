@@ -74,7 +74,7 @@ func serveBaseline(t *testing.T, respond func(http.ResponseWriter, *http.Request
 			t.Error("request lost task credentials or workspace")
 		}
 		var body map[string]any
-		if r.Method == "POST" {
+		if r.Method == "POST" || r.Method == "PATCH" {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Error(err)
 			}
@@ -169,7 +169,7 @@ func TestLabrastroBaselineReadAndDiff(t *testing.T) {
 		t.Fatalf("history lookup was not bounded: %+v", last)
 	}
 	out, stderr, code = executeBaseline(t, "diff", baselineTestProject, "--chapter", "domain_rules", "--output", "json")
-	if code != 0 || len(baselineJSON(t, out)["diffs"].([]any)) != 1 || strings.Count(stderr, "[RULE DOWNGRADE WARNING]") != 3 || !strings.Contains(stderr, "[BASELINE WARNING]") {
+	if code != 0 || len(baselineJSON(t, out)["diffs"].([]any)) != 1 || strings.Count(stderr, "[BASELINE WARNING]") != 4 || !strings.Contains(stderr, "[BASELINE WARNING]") {
 		t.Fatalf("warnings: %d %s %s", code, out, stderr)
 	}
 	out, _, code = executeBaseline(t, "diff", baselineTestProject, "--chapter", "domain_rules", "--from", "1", "--to", "2")
@@ -221,7 +221,7 @@ func TestLabrastroBaselineProposeReviewLink(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("proposal failed: %s", stderr)
 			}
-			if !strings.Contains(stderr, "[RULE DOWNGRADE WARNING]") {
+			if !strings.Contains(stderr, "[BASELINE WARNING]") {
 				t.Fatalf("missing warning: %s", stderr)
 			}
 			link := "https://workspace.example/chosen-workspace/projects/" + baselineTestProject + "/engineering?candidate=" + baselineTestCandidate
@@ -340,7 +340,7 @@ func TestLabrastroBaselineProposeCAS(t *testing.T) {
 				if !reflect.DeepEqual(baselineJSON(t, out), baselineJSONRoundtrip(t, c)) {
 					t.Error("proposal response lost fields")
 				}
-				if !strings.Contains(stderr, "[RULE DOWNGRADE WARNING]") {
+				if !strings.Contains(stderr, "[BASELINE WARNING]") {
 					t.Error("proposal red card absent")
 				}
 			} else if out != "" {
@@ -351,7 +351,7 @@ func TestLabrastroBaselineProposeCAS(t *testing.T) {
 }
 
 func TestLabrastroBaselineDecisionVersionAndCredentials(t *testing.T) {
-	for _, mode := range []string{"adopt", "reject", "multi", "closed", "stale", "denied", "forbidden", "invalid", "server failure", "missing"} {
+	for _, mode := range []string{"adopt", "reject", "multi", "closed", "stale", "denied", "forbidden", "human required", "invalid", "server failure", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("MULTICA_AGENT_ID", baselineTestIssue)
 			t.Setenv("MULTICA_TASK_ID", baselineTestCandidate)
@@ -415,8 +415,10 @@ func TestLabrastroBaselineDecisionVersionAndCredentials(t *testing.T) {
 					status, code = 403, "baseline_credential_denied"
 				case "forbidden":
 					status, code = 403, "baseline_not_decider"
+				case "human required":
+					status, code = 403, "baseline_human_required"
 				case "invalid":
-					status, code = 422, "baseline_anchor_invalid"
+					status, code = 422, "baseline_content_invalid"
 				case "server failure":
 					status, code = 500, "engineering_failed"
 				}
@@ -451,6 +453,11 @@ func TestLabrastroBaselineDecisionVersionAndCredentials(t *testing.T) {
 			if code != want || actualWrites != writes || strings.Contains(stderr, "SECRET_BASELINE_CONTENT") {
 				t.Fatalf("code=%d writes=%d\n%s\n%s", code, actualWrites, out, stderr)
 			}
+			if mode == "human required" {
+				if !strings.Contains(stderr, "基线只能由决定人采用或驳回") || !strings.Contains(stderr, "https://workspace.example/chosen-workspace/projects/"+baselineTestProject+"/engineering?candidate="+baselineTestCandidate) {
+					t.Fatalf("missing human decision link: %s", stderr)
+				}
+			}
 			if mode == "multi" {
 				m := baselineJSON(t, out)
 				if m["open_issues"] == nil || m["future_field"] != "preserved" {
@@ -458,7 +465,7 @@ func TestLabrastroBaselineDecisionVersionAndCredentials(t *testing.T) {
 				}
 			}
 			if mode == "adopt" || mode == "reject" {
-				if !strings.Contains(out, "OL-93") || !strings.Contains(out, "OL-94") || strings.Index(out, "base 1") > strings.Index(out, "Open issues:") || !strings.Contains(stderr, "truncated") {
+				if !strings.Contains(out, "OL-93") || !strings.Contains(out, "OL-94") || !strings.Contains(out, "@@ removed [Rule-中文] 保留规则 @@") || strings.Index(out, "base 1") > strings.Index(out, "Open issues:") || !strings.Contains(stderr, "truncated") {
 					t.Errorf("missing ordered Diff/issues/truncation: %s %s", out, stderr)
 				}
 			}
@@ -473,7 +480,7 @@ func TestLabrastroBaselineDecisionVersionAndCredentials(t *testing.T) {
 				}
 			}
 			if want == 0 {
-				for _, warning := range []string{"rule_removed", "rule_shrunk", "rule_deferred", "defer_missing_pool", "[RULE DOWNGRADE WARNING]", "[BASELINE WARNING]"} {
+				for _, warning := range []string{"rule_removed", "rule_shrunk", "rule_deferred", "defer_missing_pool", "[BASELINE WARNING]"} {
 					if !strings.Contains(stderr, warning) {
 						t.Errorf("successful decision lost warning %s: %s", warning, stderr)
 					}
