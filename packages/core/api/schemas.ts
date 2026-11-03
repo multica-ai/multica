@@ -2776,6 +2776,8 @@ export const IssueUnreadPageSchema = z
           issue_id: z.string(),
           outcome: z.string(),
           agent_id: z.string().nullish().transform((v) => v ?? null),
+          task_id: z.string().nullish().transform((v) => v ?? null),
+          comment_id: z.string().nullish().transform((v) => v ?? null),
           created_at: z.string(),
         })
         .loose(),
