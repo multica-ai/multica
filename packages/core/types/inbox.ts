@@ -44,6 +44,11 @@ export interface InboxWorkspaceUnread {
   count: number;
 }
 
+/** Rows `POST /api/inbox/issues/{id}/read` marked read; null when the reply was unreadable. */
+export interface MarkIssueInboxReadResult {
+  count: number | null;
+}
+
 /**
  * Inbox section, derived by the server from the notification type and who
  * caused it. "action" waits on the recipient and is the only section that

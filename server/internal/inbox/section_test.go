@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func TestSection(t *testing.T) {
+func TestDefaultSection(t *testing.T) {
 	agent := pgtype.Text{String: "agent", Valid: true}
 	member := pgtype.Text{String: "member", Valid: true}
 	none := pgtype.Text{}
@@ -35,8 +35,8 @@ func TestSection(t *testing.T) {
 		{"some_future_type", agent, SectionAction},
 	}
 	for _, c := range cases {
-		if got := Section(c.notifType, c.actor); got != c.want {
-			t.Errorf("Section(%q, %q) = %q, want %q", c.notifType, c.actor.String, got, c.want)
+		if got := DefaultSection(c.notifType, c.actor); got != c.want {
+			t.Errorf("DefaultSection(%q, %q) = %q, want %q", c.notifType, c.actor.String, got, c.want)
 		}
 	}
 }

@@ -394,7 +394,7 @@
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
       "issue": "任务",
-      "notifications": "通知",
+      "notifications": "收件箱",
       "tokens": "API Token",
       "general": "常规",
       "github": "GitHub",
@@ -647,38 +647,61 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
-    "title": "收件箱通知",
-    "description": "关闭通知后，仍可在任务中查看相关动态。",
+    "title": "通知去向",
+    "description": "为每类通知选择去向：「需要处理」计入未读并可弹出系统通知，「动态」安静记录，「关闭」则不进收件箱。更改只影响之后的新通知。",
+    "reset": "恢复默认",
     "toast_failed": "更新通知设置失败",
-    "groups": {
-      "assignments": {
-        "label": "分配",
-        "description": "你被分配或取消分配某个任务时"
+    "routes": {
+      "action": {
+        "label": "需要处理",
+        "description": "计入未读，可弹出系统通知"
       },
-      "status_changes": {
-        "label": "状态变更",
-        "description": "你订阅的任务状态变化时（例如 todo、in_progress、done）"
+      "activity": {
+        "label": "动态",
+        "description": "安静记录，不计未读"
       },
-      "comments": {
-        "label": "评论",
-        "description": "你订阅的任务有新评论时"
+      "muted": {
+        "label": "关闭",
+        "description": "不进收件箱，在任务里仍能看到"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "分配给我",
+        "description": "任务分配给你时"
       },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
       },
-      "updates": {
-        "label": "优先级与截止日期",
-        "description": "你订阅的任务优先级或截止日期变更时"
+      "member_comments": {
+        "label": "成员评论",
+        "description": "成员在你订阅的任务里发表评论时"
       },
-      "agent_activity": {
-        "label": "智能体活动",
-        "description": "智能体运行失败时"
+      "agent_failures": {
+        "label": "智能体出错",
+        "description": "智能体运行失败或被阻塞、需要你介入时"
+      },
+      "status_changes": {
+        "label": "状态变更",
+        "description": "你订阅的任务状态变化时"
+      },
+      "assignee_changes": {
+        "label": "负责人变更",
+        "description": "任务换了负责人，或你被取消分配时"
+      },
+      "updates": {
+        "label": "优先级与日期",
+        "description": "优先级、开始日期或截止日期变化时"
+      },
+      "agent_comments": {
+        "label": "智能体评论",
+        "description": "智能体在你订阅的任务里回复时"
       }
     },
     "system": {
       "title": "系统通知",
-      "label": "Multica 在后台时显示系统通知"
+      "label": "Multica 在后台时，为「需要处理」的通知弹出系统通知"
     },
     "browser": {
       "label": "浏览器通知",

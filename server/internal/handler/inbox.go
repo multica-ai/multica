@@ -43,7 +43,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		RecipientID:   uuidToString(i.RecipientID),
 		Type:          i.Type,
 		Severity:      i.Severity,
-		Section:       inbox.Section(i.Type, i.ActorType),
+		Section:       inbox.ItemSection(i.Section, i.Type, i.ActorType),
 		IssueID:       uuidToPtr(i.IssueID),
 		Title:         i.Title,
 		Body:          textToPtr(i.Body),
@@ -120,7 +120,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		RecipientID:   uuidToString(r.RecipientID),
 		Type:          r.Type,
 		Severity:      r.Severity,
-		Section:       inbox.Section(r.Type, r.ActorType),
+		Section:       inbox.ItemSection(r.Section, r.Type, r.ActorType),
 		IssueID:       uuidToPtr(r.IssueID),
 		Title:         r.Title,
 		Body:          inboxListBody(r.Type, r.IssueID, r.Body),
@@ -243,6 +243,27 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 		"recipient_id": uuidToString(item.RecipientID),
 	})
 
+	// Reading one row settles the whole issue, as opening the issue does.
+	// Clients from before the Inbox sections group an issue under its newest
+	// row, which may be activity, and mark only that row; an older unread
+	// action row would otherwise keep the badge lit with nothing left to open.
+	if item.IssueID.Valid && item.RecipientType == "member" {
+		count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+			WorkspaceID: item.WorkspaceID,
+			RecipientID: item.RecipientID,
+			IssueID:     item.IssueID,
+		})
+		if err != nil {
+			slog.Warn("mark issue inbox read after item read failed", append(logger.RequestAttrs(r), "error", err)...)
+		} else if count > 0 {
+			h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+				"recipient_id": uuidToString(item.RecipientID),
+				"issue_id":     uuidToString(item.IssueID),
+				"count":        count,
+			})
+		}
+	}
+
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -291,7 +312,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	// Archive the sibling inbox items for the same issue. An action row takes
 	// the whole issue with it; an activity row only clears the issue's other
 	// activity, so an unread mention or failure on it stays in the inbox.
-	section := inbox.Section(item.Type, item.ActorType)
+	section := inbox.ItemSection(item.Section, item.Type, item.ActorType)
 	if item.IssueID.Valid {
 		if section == inbox.SectionActivity {
 			h.Queries.ArchiveInboxActivityByIssue(r.Context(), db.ArchiveInboxActivityByIssueParams{

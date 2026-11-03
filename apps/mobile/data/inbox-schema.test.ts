@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
+import { parseWithFallback } from "@/lib/parse-response";
+import {
+  InboxListSchema,
+  InboxUnreadSummarySchema,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+} from "./schemas";
 
 /**
  * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox.
@@ -164,5 +170,25 @@ describe("inbox unread summary schema", () => {
     expect(
       InboxUnreadSummarySchema.safeParse([{ count: 3 }]).success,
     ).toBe(false);
+  });
+});
+
+describe("mark issue inbox read result schema", () => {
+  const parse = (raw: unknown) =>
+    parseWithFallback(
+      raw,
+      MarkIssueInboxReadResultSchema,
+      UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+      { endpoint: "POST /api/inbox/issues/:id/read" },
+    );
+
+  it("keeps the server's count", () => {
+    expect(parse({ count: 2 })).toEqual({ count: 2 });
+  });
+
+  it("reports an unknown count for a malformed reply, so the caller refreshes", () => {
+    for (const raw of [null, "<html>", { count: "2" }, {}]) {
+      expect(parse(raw)).toEqual({ count: null });
+    }
   });
 });

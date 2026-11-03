@@ -21,6 +21,7 @@ import type {
   Comment,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -612,6 +613,16 @@ export const InboxUnreadSummarySchema = z
   .array(InboxWorkspaceUnreadSchema)
   .default([]);
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// `POST /api/inbox/issues/{id}/read`. Mirrors MarkIssueInboxReadResultSchema
+// in packages/core/api/schemas.ts: a malformed body yields an unknown (null)
+// count, which the mutation treats as a change and refreshes.
+export const MarkIssueInboxReadResultSchema = z
+  .object({ count: z.number() })
+  .loose();
+export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = {
+  count: null,
+};
 
 export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),

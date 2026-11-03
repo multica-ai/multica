@@ -4,9 +4,10 @@
  * event is never cleared twice. Mirrors web's useMarkInboxReadWhileViewing
  * (packages/views/issues/hooks/use-mark-inbox-read-while-viewing.ts).
  *
- * Runs once per opened issue. Skips the request when nothing can be unread:
- * the workspace's unread count is zero, or the loaded inbox list holds no
- * unread row for this issue.
+ * Runs once per opened issue. Skips the request only on fresh evidence that
+ * nothing can be unread: a settled workspace unread count of zero, or an
+ * up-to-date inbox list with no unread row for this issue. A refetching
+ * summary is waited for and a stale list is ignored.
  */
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,7 +21,7 @@ export function useMarkInboxReadOnOpen(
   issueId: string | undefined,
 ) {
   const qc = useQueryClient();
-  const { data: workspaceUnread, isSuccess } = useQuery({
+  const { data: workspaceUnread, isSuccess, isFetching } = useQuery({
     ...inboxUnreadSummaryOptions(wsId),
     select: (summary) =>
       summary.find((s) => s.workspace_id === wsId)?.count ?? 0,
@@ -29,11 +30,16 @@ export function useMarkInboxReadOnOpen(
   const openedIssueId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!wsId || !issueId || !isSuccess) return;
+    if (!wsId || !issueId || !isSuccess || isFetching) return;
     if (openedIssueId.current === issueId) return;
     openedIssueId.current = issueId;
     if (workspaceUnread === 0) return;
-    const list = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+    const listQuery = qc.getQueryCache().find<InboxItem[]>({
+      queryKey: inboxKeys.list(wsId),
+      exact: true,
+    });
+    const list =
+      listQuery && !listQuery.isStale() ? listQuery.state.data : undefined;
     if (
       list &&
       !list.some(
@@ -44,5 +50,5 @@ export function useMarkInboxReadOnOpen(
       return;
     }
     markRead(issueId);
-  }, [wsId, issueId, isSuccess, workspaceUnread, qc, markRead]);
+  }, [wsId, issueId, isSuccess, isFetching, workspaceUnread, qc, markRead]);
 }

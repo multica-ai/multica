@@ -47,6 +47,30 @@ func (f sectionFixture) item(issueID, notifType, actorType, title string, read b
 	return dbfx.Insert(f.t, "inbox_item", cols)
 }
 
+// routed inserts an unread notification whose section was chosen by the
+// recipient's routing preferences when it was created.
+func (f sectionFixture) routed(issueID, notifType, actorType, title, section string, createdAt testutil.Raw) string {
+	f.t.Helper()
+	id := f.item(issueID, notifType, actorType, title, false, createdAt)
+	dbfx.Exec(f.t, `UPDATE inbox_item SET section = $2 WHERE id = $1`, id, section)
+	return id
+}
+
+func (f sectionFixture) unreadSummary() int64 {
+	f.t.Helper()
+	var summary []InboxWorkspaceUnreadResponse
+	testutil.Call(f.t, testHandler.UnreadInboxSummary,
+		inboxRequest(http.MethodGet, "/api/inbox/unread-summary", f.workspaceID)).
+		Want(http.StatusOK).
+		JSON(&summary)
+	for _, row := range summary {
+		if row.WorkspaceID == f.workspaceID {
+			return row.Count
+		}
+	}
+	return 0
+}
+
 func (f sectionFixture) archived(title string) bool {
 	f.t.Helper()
 	return dbfx.Count(f.t,
@@ -220,6 +244,67 @@ func TestMarkIssueInboxRead(t *testing.T) {
 	foreignWorkspaceID := dbfx.Workspace(t, "Foreign inbox issue", "inbox-section-foreign-"+uuid.NewString())
 	foreignIssueID := dbfx.Issue(t, "Foreign", testutil.Cols{"workspace_id": foreignWorkspaceID})
 	call(foreignIssueID).Want(http.StatusNotFound)
+}
+
+func TestStoredSectionOverridesDefault(t *testing.T) {
+	f := newSectionFixture(t, "Routed sections")
+	statusIssue := f.issue("Status routed to action")
+	f.routed(statusIssue, "status_changed", "agent", "routed status", "action", "now() - interval '2 minutes'")
+	mentionIssue := f.issue("Mention routed to activity")
+	f.routed(mentionIssue, "mentioned", "member", "routed mention", "activity", "now() - interval '1 minute'")
+
+	var items []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", f.workspaceID)).
+		Want(http.StatusOK).
+		JSON(&items)
+	want := map[string]string{"routed status": "action", "routed mention": "activity"}
+	for _, item := range items {
+		if item.Section != want[item.Title] {
+			t.Errorf("%s: section = %q, want %q", item.Title, item.Section, want[item.Title])
+		}
+	}
+
+	if got := f.unreadSummary(); got != 1 {
+		t.Fatalf("unread summary = %d, want 1 (the status routed to action)", got)
+	}
+
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ArchiveAllReadInbox),
+		inboxRequest(http.MethodPost, "/api/inbox/archive-all-read", f.workspaceID)).
+		Want(http.StatusOK)
+	if !f.archived("routed mention") {
+		t.Error("a mention routed to activity counts as read and should be archived")
+	}
+	if f.archived("routed status") {
+		t.Error("an unread status routed to action was archived")
+	}
+}
+
+// Clients from before the Inbox sections group rows once per issue across
+// sections and mark only the newest row read through the item endpoint. That
+// must still settle the issue, or an older unread mention keeps the badge lit
+// with nothing left in their list to open.
+func TestMarkInboxReadSettlesIssueForLegacyClients(t *testing.T) {
+	f := newSectionFixture(t, "Legacy inbox read")
+	issueID := f.issue("Mention then status")
+	otherIssueID := f.issue("Untouched")
+	f.item(issueID, "mentioned", "member", "older unread mention", false, "now() - interval '3 minutes'")
+	activityID := f.item(issueID, "status_changed", "agent", "newer status", false, "now() - interval '2 minutes'")
+	f.item(otherIssueID, "issue_assigned", "member", "other issue", false, "now() - interval '1 minute'")
+
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxRead),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+activityID+"/read", f.workspaceID), "id", activityID)).
+		Want(http.StatusOK)
+
+	if !f.read("older unread mention") || !f.read("newer status") {
+		t.Fatal("reading one row should settle every row of its issue")
+	}
+	if f.read("other issue") {
+		t.Fatal("reading one row marked another issue's notification read")
+	}
+	if got := f.unreadSummary(); got != 1 {
+		t.Fatalf("unread summary = %d, want 1 (the other issue)", got)
+	}
 }
 
 func TestArchivedInboxTreatsActivityAsRead(t *testing.T) {

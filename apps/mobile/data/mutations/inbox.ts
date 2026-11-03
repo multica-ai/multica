@@ -19,7 +19,8 @@
  *     because `deduplicateInboxItems` (apps/mobile/lib/inbox-display.ts)
  *     filters archived items out before render.
  *   - mark-issue-read: flip `read` on every row of the opened issue; refresh
- *     only when the server reports a change.
+ *     unless the server confirms nothing changed (an unreadable reply counts
+ *     as a change).
  *   - mark-all-read: flip `read` to true on every non-archived row (matches
  *     web; the server-side query does the same predicate).
  *   - archive batch (all / all-read / completed): no optimistic patch — the
@@ -155,7 +156,7 @@ export function useMarkIssueInboxRead() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSuccess: (result) => {
-      if (result.count > 0) refreshInboxAfterWrite(qc, wsId);
+      if (result.count !== 0) refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

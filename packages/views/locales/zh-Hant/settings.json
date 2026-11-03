@@ -394,7 +394,7 @@
       "preferences": "偏好設定",
       "shortcuts": "快捷鍵",
       "issue": "任務",
-      "notifications": "通知",
+      "notifications": "收件箱",
       "tokens": "API Token",
       "general": "常規",
       "github": "GitHub",
@@ -647,38 +647,61 @@
     "toast_profile_failed": "更新資料失敗"
   },
   "notifications": {
-    "title": "收件箱通知",
-    "description": "關閉通知後，仍可在任務中檢視相關動態。",
+    "title": "通知去向",
+    "description": "為每類通知選擇去向：「需要處理」計入未讀並可彈出系統通知，「動態」安靜記錄，「關閉」則不進收件箱。變更只影響之後的新通知。",
+    "reset": "恢復預設",
     "toast_failed": "更新通知設定失敗",
-    "groups": {
-      "assignments": {
-        "label": "分配",
-        "description": "你被分配或取消分配某個任務時"
+    "routes": {
+      "action": {
+        "label": "需要處理",
+        "description": "計入未讀，可彈出系統通知"
       },
-      "status_changes": {
-        "label": "狀態變更",
-        "description": "你訂閱的任務狀態變化時（例如 todo、in_progress、done）"
+      "activity": {
+        "label": "動態",
+        "description": "安靜記錄，不計未讀"
       },
-      "comments": {
-        "label": "評論",
-        "description": "你訂閱的任務有新評論時"
+      "muted": {
+        "label": "關閉",
+        "description": "不進收件箱，在任務裡仍能看到"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "指派給我",
+        "description": "任務指派給你時"
       },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
-      "updates": {
-        "label": "優先順序與截止日期",
-        "description": "你訂閱的任務優先順序或截止日期變更時"
+      "member_comments": {
+        "label": "成員留言",
+        "description": "成員在你訂閱的任務裡留言時"
       },
-      "agent_activity": {
-        "label": "AI 代理活動",
-        "description": "AI 代理執行失敗時"
+      "agent_failures": {
+        "label": "智慧體出錯",
+        "description": "智慧體執行失敗或被阻塞、需要你介入時"
+      },
+      "status_changes": {
+        "label": "狀態變更",
+        "description": "你訂閱的任務狀態變化時"
+      },
+      "assignee_changes": {
+        "label": "負責人變更",
+        "description": "任務換了負責人，或你被取消指派時"
+      },
+      "updates": {
+        "label": "優先級與日期",
+        "description": "優先級、開始日期或截止日期變化時"
+      },
+      "agent_comments": {
+        "label": "智慧體留言",
+        "description": "智慧體在你訂閱的任務裡回覆時"
       }
     },
     "system": {
       "title": "系統通知",
-      "label": "Multica 在背景時顯示系統通知"
+      "label": "Multica 在背景時，為「需要處理」的通知彈出系統通知"
     },
     "browser": {
       "label": "瀏覽器通知",

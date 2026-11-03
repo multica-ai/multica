@@ -198,7 +198,7 @@ export function useMarkIssueInboxRead(wsId: string) {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
     },
     onSuccess: (result) => {
-      if (result.count > 0) refreshInboxAfterWrite(qc, wsId);
+      if (result.count !== 0) refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

@@ -394,7 +394,7 @@
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
       "issue": "タスク",
-      "notifications": "通知",
+      "notifications": "インボックス",
       "tokens": "API トークン",
       "general": "一般",
       "github": "GitHub",
@@ -647,38 +647,61 @@
     "toast_profile_failed": "プロフィールを更新できませんでした"
   },
   "notifications": {
-    "title": "インボックス通知",
-    "description": "通知をオフにしても、タスク上で履歴を確認できます。",
+    "title": "通知の振り分け",
+    "description": "通知の種類ごとに行き先を選べます。「要対応」は未読に数えられシステム通知も届きます。「アクティビティ」は静かに記録され、「オフ」はインボックスに入りません。変更はこれからの通知に適用されます。",
+    "reset": "デフォルトに戻す",
     "toast_failed": "通知設定を更新できませんでした",
-    "groups": {
-      "assignments": {
-        "label": "担当の割り当て",
-        "description": "タスクの担当者に割り当てられたとき、または解除されたとき"
+    "routes": {
+      "action": {
+        "label": "要対応",
+        "description": "未読に数え、システム通知を送れる"
       },
-      "status_changes": {
-        "label": "ステータス変更",
-        "description": "フォロー中のタスクのステータスが変わったとき（例: todo、in progress、done）"
+      "activity": {
+        "label": "アクティビティ",
+        "description": "静かに記録し、未読に数えない"
       },
-      "comments": {
-        "label": "コメント",
-        "description": "フォロー中のタスクに新しいコメントが付いたとき"
+      "muted": {
+        "label": "オフ",
+        "description": "インボックスに入らない。課題では引き続き表示"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "自分への割り当て",
+        "description": "課題が自分に割り当てられたとき"
       },
       "mentions": {
         "label": "メンション",
-        "description": "誰かがあなたを @メンションしたとき（@all と @squad を含む）"
+        "description": "誰かがあなたを @ したとき（@all と @squad を含む）"
+      },
+      "member_comments": {
+        "label": "メンバーのコメント",
+        "description": "フォロー中の課題にメンバーがコメントしたとき"
+      },
+      "agent_failures": {
+        "label": "エージェントのエラー",
+        "description": "エージェントの実行が失敗またはブロックされ、対応が必要なとき"
+      },
+      "status_changes": {
+        "label": "ステータス変更",
+        "description": "フォロー中の課題のステータスが変わったとき"
+      },
+      "assignee_changes": {
+        "label": "担当者の変更",
+        "description": "課題の担当者が変わったとき、または割り当てが外れたとき"
       },
       "updates": {
-        "label": "優先度と期限",
-        "description": "フォロー中のタスクの優先度や期限が変わったとき"
+        "label": "優先度と日付",
+        "description": "優先度、開始日、期日が変わったとき"
       },
-      "agent_activity": {
-        "label": "エージェントのアクティビティ",
-        "description": "エージェントの実行が失敗したとき"
+      "agent_comments": {
+        "label": "エージェントのコメント",
+        "description": "フォロー中の課題でエージェントが返信したとき"
       }
     },
     "system": {
       "title": "システム通知",
-      "label": "Multica がバックグラウンドにあるときにシステム通知を表示"
+      "label": "Multica がバックグラウンドのとき、「要対応」の通知をシステム通知で知らせる"
     },
     "browser": {
       "label": "ブラウザ通知",

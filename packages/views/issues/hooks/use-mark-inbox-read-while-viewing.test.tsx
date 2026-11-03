@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@multica/core/query-client";
 import { api } from "@multica/core/api";
 import { inboxKeys } from "@multica/core/inbox/queries";
+import { onInboxNew } from "@multica/core/inbox/ws-updaters";
 import type { InboxItem } from "@multica/core/types";
 import { useMarkInboxReadWhileViewing } from "./use-mark-inbox-read-while-viewing";
 
@@ -122,5 +123,29 @@ describe("useMarkInboxReadWhileViewing", () => {
     await waitFor(() => expect(api.markIssueInboxRead).toHaveBeenCalledWith("issue-1"));
     rerender({ issueId: "issue-2" });
     await waitFor(() => expect(api.markIssueInboxRead).toHaveBeenCalledWith("issue-2"));
+  });
+
+  it("ignores an invalidated list that only holds the issue's old read row", async () => {
+    vi.mocked(api.getInboxUnreadSummary).mockResolvedValue([{ workspace_id: "ws-1", count: 1 }]);
+    vi.mocked(api.listInbox).mockResolvedValue([item({ id: "new-mention" })]);
+    client.setQueryData(inboxKeys.list("ws-1"), [item({ id: "previous-mention", read: true })]);
+    await onInboxNew(client, "ws-1", item({ id: "new-mention" }));
+    expect(client.getQueryState(inboxKeys.list("ws-1"))?.isInvalidated).toBe(true);
+    client.setQueryData(inboxKeys.unreadSummary(), [{ workspace_id: "ws-1", count: 1 }]);
+
+    renderHook(() => useMarkInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+
+    await waitFor(() => expect(api.markIssueInboxRead).toHaveBeenCalledWith("issue-1"));
+  });
+
+  it("waits for an invalidated zero summary to refresh before deciding", async () => {
+    vi.mocked(api.getInboxUnreadSummary).mockResolvedValue([{ workspace_id: "ws-1", count: 1 }]);
+    client.setQueryData(inboxKeys.unreadSummary(), []);
+    await client.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+
+    renderHook(() => useMarkInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+
+    await waitFor(() => expect(api.getInboxUnreadSummary).toHaveBeenCalled());
+    await waitFor(() => expect(api.markIssueInboxRead).toHaveBeenCalledWith("issue-1"));
   });
 });

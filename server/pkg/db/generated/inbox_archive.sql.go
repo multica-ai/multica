@@ -17,8 +17,8 @@ WITH newest AS MATERIALIZED (
            i.id, i.issue_id, i.created_at,
            -- Activity is never unread (inbox.Section); the caller passes
            -- inbox.ActivityTypes and inbox.AgentActivityTypes.
-           (i.read OR i.type = ANY($1::text[])
-               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($2::text[]))) AS read,
+           (i.read OR COALESCE(i.section = 'activity', i.type = ANY($1::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($2::text[])))) AS read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i
@@ -117,8 +117,8 @@ WITH newest AS MATERIALIZED (
            i.id, i.issue_id, i.created_at,
            -- Activity is never unread (inbox.Section); the caller passes
            -- inbox.ActivityTypes and inbox.AgentActivityTypes.
-           (i.read OR i.type = ANY($1::text[])
-               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($2::text[]))) AS read,
+           (i.read OR COALESCE(i.section = 'activity', i.type = ANY($1::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY($2::text[])))) AS read,
            CASE WHEN i.actor_type = 'system' THEN 'system'
                 ELSE i.actor_type || ':' || i.actor_id::text END AS actor
     FROM inbox_item i
@@ -157,7 +157,7 @@ WITH newest AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $12::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
        COALESCE(anchor.comment_id, '')::text AS comment_id
 FROM selected
 JOIN inbox_item i ON i.id = selected.id
@@ -234,6 +234,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.ActorType,
 			&i.InboxItem.ActorID,
 			&i.InboxItem.Details,
+			&i.InboxItem.Section,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.CommentID,

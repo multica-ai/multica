@@ -8,7 +8,7 @@
  *
  * Subscreens push under more/settings/:
  *   - more/settings/profile        — edit name + avatar
- *   - more/settings/notifications  — per-group inbox + system toggles
+ *   - more/settings/notifications  — Inbox routing per kind + system toggle
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */

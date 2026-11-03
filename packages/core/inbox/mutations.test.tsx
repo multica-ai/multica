@@ -151,6 +151,21 @@ describe("useMarkIssueInboxRead", () => {
 
     expect(invalidate).not.toHaveBeenCalled();
   });
+
+  it("refreshes the badge when the reply could not be read", async () => {
+    markIssueInboxRead.mockResolvedValueOnce({ count: null });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    await act(() => result.current.mutateAsync("issue-1"));
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: inboxKeys.unreadSummary() }),
+      ),
+    );
+  });
 });
 
 describe("useMarkInboxUnread", () => {

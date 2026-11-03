@@ -170,34 +170,6 @@ func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
 	return statusIsHandoff
 }
 
-// notifTypeToGroup maps each InboxItemType to a user-configurable preference
-// group. Types not in this map are always delivered (not configurable).
-var notifTypeToGroup = map[string]string{
-	"issue_assigned":     "assignments",
-	"unassigned":         "assignments",
-	"assignee_changed":   "assignments",
-	"status_changed":     "status_changes",
-	"new_comment":        "comments",
-	"mentioned":          "mentions",
-	"priority_changed":   "updates",
-	"start_date_changed": "updates",
-	"due_date_changed":   "updates",
-	"task_completed":     "agent_activity",
-	"task_failed":        "agent_activity",
-	"agent_blocked":      "agent_activity",
-	"agent_completed":    "agent_activity",
-}
-
-// isNotifMuted returns true if the given notification type is muted for a user
-// based on their parsed preferences map.
-func isNotifMuted(prefs map[string]string, notifType string) bool {
-	group, ok := notifTypeToGroup[notifType]
-	if !ok {
-		return false // unconfigurable types are always delivered
-	}
-	return prefs[group] == "muted"
-}
-
 // loadUserPrefs loads notification preferences for a set of user IDs in a
 // workspace. Returns a map from user_id string to parsed preferences.
 func loadUserPrefs(
@@ -436,8 +408,9 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		// Skip if this notification type is muted by the user
-		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+		// The recipient decides which Inbox section this lands in, or mutes it.
+		section, routed := inbox.Route(userPrefs[subID], notifType, util.StrToText(e.ActorType))
+		if !routed {
 			continue
 		}
 
@@ -461,6 +434,7 @@ func notifyIssueSubscribers(
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
+			Section:       inbox.SectionText(section),
 		})
 		if err != nil {
 			slog.Error("subscriber notification creation failed",
@@ -509,10 +483,13 @@ func notifyDirect(
 		return
 	}
 
-	// Check notification preferences for member recipients.
+	// Member recipients route the notification through their preferences.
+	section := inbox.DefaultSection(notifType, util.StrToText(e.ActorType))
 	if recipientType == "member" {
 		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
-		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType) {
+		var routed bool
+		section, routed = inbox.Route(prefs[recipientID], notifType, util.StrToText(e.ActorType))
+		if !routed {
 			return
 		}
 	}
@@ -530,6 +507,7 @@ func notifyDirect(
 		ActorType:     util.StrToText(e.ActorType),
 		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
+		Section:       inbox.SectionText(section),
 	})
 	if err != nil {
 		slog.Error("direct notification creation failed",
@@ -632,10 +610,10 @@ func notifyMentionedMembers(
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		// Skip if mentions are muted by this user. This is deliberately a
-		// different group from `comments`: muting comment volume must not
-		// silence someone asking for you by name.
-		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
+		// Mentions route on their own key, deliberately apart from comments:
+		// muting comment volume must not silence someone asking for you by name.
+		section, routed := inbox.Route(mentionPrefs[id], "mentioned", util.StrToText(e.ActorType))
+		if !routed {
 			continue
 		}
 		item, inserted, err := inbox.CreateIfEligible(context.Background(), queries, db.CreateInboxItemParams{
@@ -650,6 +628,7 @@ func notifyMentionedMembers(
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
+			Section:       inbox.SectionText(section),
 		})
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
@@ -1090,7 +1069,7 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
-		"section":        inbox.Section(item.Type, item.ActorType),
+		"section":        inbox.ItemSection(item.Section, item.Type, item.ActorType),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

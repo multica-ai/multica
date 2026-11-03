@@ -57,6 +57,7 @@ import type {
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   IssueUnread,
   Label,
   MemberWithUser,
@@ -2762,6 +2763,13 @@ export const InboxUnreadSummarySchema = z.array(
 );
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// Rows marked read by `POST /api/inbox/issues/{id}/read`. On a malformed body
+// the count is unknown (null), and callers refresh rather than trust it.
+
+export const MarkIssueInboxReadResultSchema = z.object({ count: z.number() }).loose();
+
+export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = { count: null };
 
 // The viewer's unread issues (`/api/issues/unread` GET), behind the sidebar's
 // unread dot. `outcome` stays a string so a future kind still lights the dot;

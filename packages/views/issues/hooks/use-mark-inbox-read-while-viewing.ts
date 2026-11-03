@@ -17,13 +17,16 @@ import { useAppForeground } from "../../common/use-app-foreground";
  * twice. Runs once per opening, in the foreground: a "Mark as unread" made
  * while the issue stays open is kept.
  *
- * Skips the request when nothing can be unread: the workspace's unread count
- * is zero, or the loaded Inbox list holds no unread row for this issue.
+ * Skips the request only on fresh evidence that nothing can be unread: a
+ * settled workspace unread count of zero, or an up-to-date Inbox list with no
+ * unread row for this issue. A summary that is refetching is waited for, and
+ * an invalidated or stale list is ignored, so a mention that just arrived is
+ * never skipped on old data.
  */
 export function useMarkInboxReadWhileViewing(wsId: string, issueId: string) {
   const qc = useQueryClient();
   const foreground = useAppForeground();
-  const { data: workspaceUnread, isSuccess } = useQuery({
+  const { data: workspaceUnread, isSuccess, isFetching } = useQuery({
     ...inboxUnreadSummaryOptions(),
     enabled: inboxUnreadSummaryEnabled(wsId),
     select: (summary: InboxWorkspaceUnread[]) => unreadCountForWorkspace(summary, wsId),
@@ -32,14 +35,18 @@ export function useMarkInboxReadWhileViewing(wsId: string, issueId: string) {
   const viewedIssueId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!issueId || !foreground || !isSuccess) return;
+    if (!issueId || !foreground || !isSuccess || isFetching) return;
     if (viewedIssueId.current === issueId) return;
     viewedIssueId.current = issueId;
     if (workspaceUnread === 0) return;
-    const list = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+    const listQuery = qc.getQueryCache().find<InboxItem[]>({
+      queryKey: inboxKeys.list(wsId),
+      exact: true,
+    });
+    const list = listQuery && !listQuery.isStale() ? listQuery.state.data : undefined;
     if (list && !list.some((item) => item.issue_id === issueId && !item.archived && isInboxItemUnread(item))) {
       return;
     }
     markRead(issueId);
-  }, [issueId, foreground, isSuccess, workspaceUnread, qc, wsId, markRead]);
+  }, [issueId, foreground, isSuccess, isFetching, workspaceUnread, qc, wsId, markRead]);
 }
