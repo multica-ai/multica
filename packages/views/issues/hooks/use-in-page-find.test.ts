@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { configureShortcutPlatform } from "@multica/core/shortcuts";
 import { collectTextMatches, useInPageFind } from "./use-in-page-find";
 
 function makeRoot(html: string): HTMLElement {
@@ -127,5 +128,77 @@ describe("useInPageFind without the CSS Custom Highlight API", () => {
     await flushFrames();
     expect(result.current.matchCount).toBe(0);
     expect(result.current.activeIndex).toBe(-1);
+  });
+});
+
+// Cmd+F is a document-level listener and dialogs are portaled to the body, so
+// keypresses inside an open dialog still reach it. The bar must stay shut
+// while one owns the keyboard — it would otherwise open behind the dialog and
+// steal focus into an input nobody can see.
+describe("useInPageFind Cmd+F while a dialog owns the keyboard", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    configureShortcutPlatform("macos");
+    container = document.createElement("div");
+    container.innerHTML = "<p>find</p>";
+    // jsdom lays nothing out, so isElementVisible would reject the container
+    // and mask whatever the portal guard does. Give it one zero-size rect.
+    container.getClientRects = () =>
+      [{ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }] as unknown as DOMRectList;
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    configureShortcutPlatform(null);
+    document.body.innerHTML = "";
+  });
+
+  const pressCmdF = (from: EventTarget) =>
+    act(() => {
+      from.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "f",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+  it("opens the bar when nothing is layered over the issue detail", () => {
+    const { result } = renderHook(() =>
+      useInPageFind({ container, contentKey: 0 }),
+    );
+    expect(result.current.open).toBe(false);
+
+    pressCmdF(container);
+    expect(result.current.open).toBe(true);
+  });
+
+  it("does not open the bar while a modal layer has inerted the page", () => {
+    // Base UI marks everything outside a modal dialog `data-base-ui-inert`,
+    // which is the state the run transcript leaves the issue detail in.
+    const inert = document.createElement("div");
+    inert.setAttribute("data-base-ui-inert", "");
+    document.body.appendChild(inert);
+
+    const { result } = renderHook(() =>
+      useInPageFind({ container, contentKey: 0 }),
+    );
+    pressCmdF(container);
+    expect(result.current.open).toBe(false);
+  });
+
+  it("does not open the bar when the keypress originates inside a dialog", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+
+    const { result } = renderHook(() =>
+      useInPageFind({ container, contentKey: 0 }),
+    );
+    pressCmdF(dialog);
+    expect(result.current.open).toBe(false);
   });
 });
