@@ -64,6 +64,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       "expo-router",
+      ["expo-notifications", { mode: isProd ? "production" : "development" }],
       "expo-image",
       "expo-localization",
       "expo-secure-store",
@@ -94,6 +95,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
     ],
-    extra: { APP_ENV: env },
+    extra: { APP_ENV: env, eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID } },
   };
 };

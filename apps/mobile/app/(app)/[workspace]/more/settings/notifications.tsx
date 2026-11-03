@@ -7,7 +7,8 @@
  * notifications-tab.tsx; both resolve routes through
  * @multica/core/notification-preferences/routes so the two never disagree.
  */
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { useEffect, useState } from "react";
+import { AppState, Alert, Linking, ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import type {
@@ -35,6 +36,7 @@ import { notificationPreferenceOptions } from "@/data/queries/notification-prefe
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
 import { useT } from "@/lib/i18n";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { mobilePushAllowed, registerMobilePush } from "@/data/mobile-push";
 import { THEME } from "@/lib/theme";
 
 const ROUTES: readonly NotificationRoute[] = ["action", "activity", "muted"];
@@ -67,6 +69,13 @@ export default function NotificationsSettingsScreen() {
   const mutation = useUpdateNotificationPreferences();
 
   const preferences: NotificationPreferences = data?.preferences ?? {};
+  const [pushAllowed, setPushAllowed] = useState(false);
+  useEffect(() => {
+    const refresh = () => { void mobilePushAllowed().then(setPushAllowed).catch(() => setPushAllowed(false)); };
+    refresh();
+    const listener = AppState.addEventListener("change", (state) => { if (state === "active") refresh(); });
+    return () => listener.remove();
+  }, []);
   const systemEnabled = preferences.system_notifications !== "muted";
 
   if (isLoading) {
@@ -208,8 +217,16 @@ export default function NotificationsSettingsScreen() {
             </Text>
           </View>
           <Switch
-            checked={systemEnabled}
-            onCheckedChange={(checked) => {
+            checked={systemEnabled && pushAllowed}
+            onCheckedChange={async (checked) => {
+              if (checked && !await registerMobilePush(true)) {
+                Alert.alert(t("groups.system"), t("groups.push_unavailable"), [
+                  { text: t("groups.push_cancel"), style: "cancel" },
+                  { text: t("groups.push_settings"), onPress: () => { void Linking.openSettings(); } },
+                ]);
+                return;
+              }
+              if (checked) setPushAllowed(true);
               const next: NotificationPreferences = { ...preferences };
               if (checked) delete next.system_notifications;
               else next.system_notifications = "muted";

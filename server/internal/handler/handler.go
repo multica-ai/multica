@@ -213,6 +213,7 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	MobilePushEnabled      bool
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor

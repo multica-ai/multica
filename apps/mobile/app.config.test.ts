@@ -63,3 +63,10 @@ describe("iOS scene lifecycle configuration", () => {
     expect(config.scheme).toBe("multica");
   });
 });
+
+it("configures native notifications and reads the explicitly supplied Expo project", () => {
+  vi.stubEnv("EXPO_PUBLIC_EAS_PROJECT_ID", "11111111-1111-4111-8111-111111111111");
+  const config = createConfig({ config: {} } as ConfigContext);
+  expect(config.plugins).toContainEqual(["expo-notifications", { mode: "development" }]);
+  expect(config.extra?.eas.projectId).toBe("11111111-1111-4111-8111-111111111111");
+});

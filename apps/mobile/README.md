@@ -155,3 +155,53 @@ Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.
 - For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
 
 For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+
+## iOS background notifications
+
+Mobile WebSockets intentionally pause in the background. Native notifications
+use the Expo Push Service (which forwards to APNs), independently of that socket.
+
+To enable this channel in a deployment:
+
+1. Apply the backend migrations and set `MULTICA_MOBILE_PUSH_ENABLED=true`.
+   If enhanced push security is enabled on the Expo project, supply its existing
+   token to the backend as `EXPO_PUSH_ACCESS_TOKEN`.
+2. Set `EXPO_PUBLIC_EAS_PROJECT_ID` to the UUID of the existing Expo project for
+   the build variant. Development, staging and production builds must use the
+   appropriate project and bundle identifier. Do not reuse another team's keys.
+3. Have the app owner configure APNs credentials/provisioning for that project
+   and build a new native app through the normal iOS build/release workflow.
+   Adding the Expo notifications plugin requires a native rebuild; an OTA update
+   or Expo Go is insufficient. Background JavaScript modes are not required for
+   visible APNs alert notifications.
+4. In the app, open Settings → Inbox → System notifications and enable the
+   switch. This requests iOS permission only after the user's action. A denied
+   permission can be changed in iOS Settings. Existing granted permissions are
+   registered at authenticated launch and on foreground/token changes.
+
+A registration belongs to the signed-in account across its workspaces and
+expires with the session JWT. Renewal extends its lifetime. Sign-out removes
+this device's registration before clearing the credential (best effort offline).
+If offline cleanup fails, generic banners may continue until registration expiry
+or the next successful cleanup. The last push token is kept in secure storage
+so sign-out can clean up even immediately after a cold launch. Expired registrations are pruned. Notification preferences remain workspace
+scoped; muting system notifications in one workspace does not mute another.
+
+Only a generic English “You have new inbox activity.” alert and a workspace slug
+are sent to Expo/APNs; private issue/comment content is not sent. Tapping opens
+that workspace's Inbox after checking current account membership. Foreground
+banners are suppressed because the app already displays Inbox activity.
+
+Delivery is best effort: a bounded in-process queue avoids blocking Inbox writes,
+with no retry/replay of send failures or server-restart losses. Inbox remains the
+source of truth. Tickets are persisted and receipts checked after 15 minutes;
+`DeviceNotRegistered` removes only the corresponding registration generation.
+An accepted ticket/receipt does not prove delivery to a device. Do not enable this
+channel until the app owner's project and credentials are ready.
+
+Before release, use a signed build on a physical device: grant/deny permission,
+background/terminate the app, trigger a mention or assignment from another client,
+verify one banner and tap navigation (including a cold start), mute the workspace,
+sign out/switch accounts, and verify no further banners for the old account.
+Also verify renewal, token rotation and APNs failure receipts. Simulator/unit
+checks cannot prove APNs delivery.

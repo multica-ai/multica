@@ -1236,6 +1236,20 @@ type MemberDelegationDay struct {
 	ActivityDate pgtype.Date `json:"activity_date"`
 }
 
+type MobilePushReceipt struct {
+	ID                    string             `json:"id"`
+	Token                 string             `json:"token"`
+	SubscriptionUpdatedAt pgtype.Timestamptz `json:"subscription_updated_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type MobilePushSubscription struct {
+	Token     string             `json:"token"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

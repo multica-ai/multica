@@ -68,7 +68,10 @@
   "groups": {
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Account changes, security alerts, product updates."
+    "system_description": "Inbox activity while Multica is in the background.",
+    "push_unavailable": "Notifications are unavailable. Check iOS notification permissions and try again.",
+    "push_cancel": "Cancel",
+    "push_settings": "Open Settings"
   },
   "routing": {
     "title": "Routing",

@@ -68,7 +68,10 @@
   "groups": {
     "system": "系统",
     "system_notifications": "系统通知",
-    "system_description": "账号变更、安全提醒和产品更新。"
+    "system_description": "Multica 在后台时接收收件箱通知。",
+    "push_unavailable": "通知暂不可用，请检查 iOS 通知权限后重试。",
+    "push_cancel": "取消",
+    "push_settings": "打开设置"
   },
   "routing": {
     "title": "通知去向",
