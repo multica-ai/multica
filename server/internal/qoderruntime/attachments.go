@@ -11,16 +11,20 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
 
-type issueAttachment struct {
+type attachment struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	DownloadURL string `json:"download_url"`
+	// Gone marks a chat attachment deleted before the run read it.
+	Gone bool `json:"-"`
 }
 
 const (
@@ -49,16 +53,16 @@ func init() {
 	}
 }
 
-func isTextAttachment(a issueAttachment) bool {
+func isTextAttachment(a attachment) bool {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
 	return strings.HasPrefix(mediaType, "text/") || textMediaTypes[mediaType] || textExtensions[strings.ToLower(path.Ext(a.Filename))]
 }
 
-// attachIssueFiles hands issue attachments to the Qoder session: text files are
-// uploaded through Qoder Files and mounted into the session, and images are
+// attachFiles hands issue or chat attachments to the Qoder session: text files
+// are uploaded through Qoder Files and mounted under mountDir, and images are
 // sent as image blocks with the task message. Other files are listed in the
-// prompt as unavailable so the agent knows they exist.
-func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments []issueAttachment, r *run, p *strings.Builder) error {
+// prompt under heading as unavailable so the agent knows they exist.
+func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDir string, attachments []attachment, r *run, p *strings.Builder) error {
 	if len(attachments) == 0 {
 		return nil
 	}
@@ -69,6 +73,8 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 		name := attachmentName(a, used)
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
 		switch {
+		case a.Gone:
+			skipped = append(skipped, name+" (deleted)")
 		case imageMediaTypes[mediaType]:
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentImageBytes)
 			if errors.Is(err, errTooLarge) || err == nil && imageEncoded+base64.StdEncoding.EncodedLen(len(data)) > maxAttachmentImageEncoded {
@@ -114,14 +120,14 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 			if file.ID == "" {
 				return fmt.Errorf("Qoder file upload returned no file ID")
 			}
-			mountPath := attachmentMountDir + name
+			mountPath := mountDir + name
 			r.Files = append(r.Files, map[string]any{"type": "file", "file_id": file.ID, "mount_path": mountPath})
 			mounted = append(mounted, mountPath)
 		default:
 			skipped = append(skipped, name+" (unsupported file type)")
 		}
 	}
-	p.WriteString("\nIssue attachments:\n")
+	fmt.Fprintf(p, "\n%s:\n", heading)
 	for _, m := range mounted {
 		fmt.Fprintf(p, "- %s (mounted file)\n", m)
 	}
@@ -134,7 +140,26 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 	return nil
 }
 
-func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a issueAttachment, limit int64) ([]byte, error) {
+// chatAttachments reads the metadata of a chat message's attachments with the
+// task credential, as `multica attachment download` does; the claim carries
+// only their IDs and names.
+func chatAttachments(ctx context.Context, taskAPI *api, claimed []claimedAttachment) ([]attachment, error) {
+	out := make([]attachment, 0, len(claimed))
+	for _, c := range claimed {
+		var a attachment
+		err := taskAPI.call(ctx, http.MethodGet, "/api/attachments/"+url.PathEscape(c.ID), nil, &a)
+		var missing *apiError
+		if errors.As(err, &missing) && missing.Status == http.StatusNotFound {
+			a = attachment{ID: c.ID, Filename: c.Filename, Gone: true}
+		} else if err != nil {
+			return nil, fmt.Errorf("read chat attachment %s: %w", c.Filename, err)
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a attachment, limit int64) ([]byte, error) {
 	if a.SizeBytes > limit {
 		return nil, errTooLarge
 	}
@@ -149,7 +174,7 @@ func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a issueAt
 }
 
 // attachmentName returns a unique, path-free file name for the mount path.
-func attachmentName(a issueAttachment, used map[string]bool) string {
+func attachmentName(a attachment, used map[string]bool) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || r < 0x20 {
 			return '_'

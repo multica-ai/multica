@@ -611,18 +611,66 @@ func TestChatAudience(t *testing.T) {
 		}
 	}
 }
-func TestChatAttachmentsFailBeforeExecution(t *testing.T) {
+
+// chatAttach puts files on the chat message the way the claim does: IDs and
+// names only, with metadata and content behind /api/attachments. A file with
+// no content was deleted before the run read it.
+func chatAttach(downloads map[string]string, task *daemon.Task, files ...[3]string) {
+	for i, f := range files {
+		id := fmt.Sprint("c", i)
+		task.ChatMessageAttachments = append(task.ChatMessageAttachments, daemon.ChatAttachmentMeta{ID: id, Filename: f[0], ContentType: f[1]})
+		if f[2] == "" {
+			continue
+		}
+		u := "/api/attachments/" + id + "/download"
+		meta, _ := json.Marshal(map[string]any{"id": id, "filename": f[0], "content_type": f[1], "size_bytes": len(f[2]), "download_url": u})
+		downloads["/api/attachments/"+id] = string(meta)
+		downloads[u] = f[2]
+	}
+}
+
+func TestChatAttachmentsReachSession(t *testing.T) {
 	h := setup(t)
 	h.task.IssueID = ""
 	h.task.ChatSessionID = "chat-1"
-	h.task.ChatMessageAttachments = []daemon.ChatAttachmentMeta{{ID: "att-1"}}
-	if err := h.b.step(context.Background()); err != nil {
+	h.task.ChatMessage = "What is in these?"
+	screen := testPNG(t, 4, 4, false)
+	h.downloads = map[string]string{}
+	chatAttach(h.downloads, h.task,
+		[3]string{"notes.md", "text/markdown", "hello"},
+		[3]string{"screen.png", "image/png", screen},
+		[3]string{"report.pdf", "application/pdf", "%PDF"},
+		[3]string{"old.txt", "text/plain", ""})
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if h.creates != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
-		t.Fatalf("chat attachment ignored: %#v", h.failure)
+	if h.failure != nil || h.sends != 1 {
+		t.Fatalf("run failed: %#v", h.failure)
+	}
+	if h.uploads["notes.md"] != "hello" || len(h.uploads) != 1 {
+		t.Fatalf("uploads: %#v", h.uploads)
+	}
+	if len(h.sessionResources) != 1 || h.sessionResources[0]["mount_path"] != "/data/attachments/task-1/notes.md" {
+		t.Fatalf("mounted resources: %v", h.sessionResources)
+	}
+	if len(h.sentContent) != 2 || h.sentContent[1]["type"] != "image" {
+		t.Fatalf("message content: %#v", h.sentContent)
+	}
+	for _, s := range []string{"What is in these?", "Message attachments:", "/data/attachments/task-1/notes.md (mounted file)", "screen.png (image attached", "report.pdf (unsupported file type): not available", "old.txt (deleted): not available"} {
+		if !strings.Contains(h.prompt, s) {
+			t.Fatalf("prompt missing %q: %s", s, h.prompt)
+		}
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
 	}
 }
+
 func TestAmbiguousSubmitReconcilesAfterRestart(t *testing.T) {
 	h := setup(t)
 	h.lostSend = true
