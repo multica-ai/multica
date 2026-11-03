@@ -146,11 +146,6 @@ export default function Inbox() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        {section === "activity" ? (
-          <Text className="pt-2 text-xs text-muted-foreground">
-            {t("sections.activity_hint")}
-          </Text>
-        ) : null}
       </View>
       {isLoading ? (
         <InboxLoading />

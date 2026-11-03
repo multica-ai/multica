@@ -653,7 +653,7 @@
   },
   "notifications": {
     "title": "Tri des notifications",
-    "description": "Choisissez où va chaque type de notification. « À traiter » compte comme non lu et peut envoyer une notification système, « Activité » est consigné discrètement, et « Désactivé » reste hors de la boîte de réception. Les changements s'appliquent aux nouvelles notifications.",
+    "description": "Les changements s'appliquent aux nouvelles notifications.",
     "reset": "Rétablir les valeurs par défaut",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "routes": {

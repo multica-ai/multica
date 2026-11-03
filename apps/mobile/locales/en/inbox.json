@@ -7,7 +7,6 @@
   "sections": {
     "action": "Needs action",
     "activity": "Activity",
-    "activity_hint": "Routine activity doesn't count as unread or move issues to the top.",
     "activity_empty": "No recent activity",
     "activity_empty_body": "Status changes and agent replies on your issues appear here."
   },

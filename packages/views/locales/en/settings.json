@@ -653,7 +653,7 @@
   },
   "notifications": {
     "title": "Routing",
-    "description": "Choose where each kind of notification goes. Needs action counts as unread and can send a system notification, Activity is recorded quietly, and Off keeps it out of the Inbox. Changes apply to new notifications.",
+    "description": "Changes apply to new notifications.",
     "reset": "Restore defaults",
     "toast_failed": "Failed to update notification settings",
     "routes": {

@@ -280,7 +280,14 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.Queries.MarkInboxUnread(r.Context(), prev.ID)
+	// Activity is never unread, so an explicit "mark unread" on it (only
+	// clients from before the Inbox sections offer one) files it under Needs
+	// action: it counts again and archive-all-read leaves it in place.
+	params := db.MarkInboxUnreadParams{ID: prev.ID}
+	if inbox.ItemSection(prev.Section, prev.Type, prev.ActorType) == inbox.SectionActivity {
+		params.Section = inbox.SectionText(inbox.SectionAction)
+	}
+	item, err := h.Queries.MarkInboxUnread(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark unread")
 		return

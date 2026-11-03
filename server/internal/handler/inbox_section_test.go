@@ -342,3 +342,51 @@ func TestArchivedInboxTreatsActivityAsRead(t *testing.T) {
 		t.Fatalf("unread archived page = %+v, want only the mention", page.Items)
 	}
 }
+
+// Clients from before the Inbox sections can mark an issue's newest row unread
+// even when it is activity. That parks the issue: it must count as unread and
+// survive archive-all-read, so the row is re-filed under Needs action.
+func TestMarkInboxUnreadParksActivityForLegacyClients(t *testing.T) {
+	f := newSectionFixture(t, "Legacy mark unread")
+	issueID := f.issue("Park for later")
+	f.routed(issueID, "mentioned", "member", "older mention", "action", "now() - interval '2 minutes'")
+	activityID := f.routed(issueID, "status_changed", "agent", "latest status", "activity", "now() - interval '1 minute'")
+
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxRead),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+activityID+"/read", f.workspaceID), "id", activityID)).Want(http.StatusOK)
+	var item InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxUnread),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+activityID+"/unread", f.workspaceID), "id", activityID)).
+		Want(http.StatusOK).
+		JSON(&item)
+	if item.Section != "action" || item.Read {
+		t.Fatalf("unread activity row = section %q read %v, want an unread action row", item.Section, item.Read)
+	}
+	if got := f.unreadSummary(); got != 1 {
+		t.Fatalf("unread summary = %d, want 1 for the parked issue", got)
+	}
+
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ArchiveAllReadInbox),
+		inboxRequest(http.MethodPost, "/api/inbox/archive-all-read", f.workspaceID)).Want(http.StatusOK)
+	if f.archived("latest status") {
+		t.Error("archive-all-read removed the row the client explicitly marked unread")
+	}
+}
+
+func TestMarkInboxUnreadKeepsActionSection(t *testing.T) {
+	f := newSectionFixture(t, "Unread keeps section")
+	issueID := f.issue("Mention")
+	mentionID := f.item(issueID, "mentioned", "member", "mention", true, "now() - interval '1 minute'")
+
+	var item InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxUnread),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+mentionID+"/unread", f.workspaceID), "id", mentionID)).
+		Want(http.StatusOK).
+		JSON(&item)
+	if item.Section != "action" || item.Read {
+		t.Fatalf("unread mention = section %q read %v", item.Section, item.Read)
+	}
+	if n := dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE id = $1 AND section IS NULL", mentionID); n != 1 {
+		t.Fatal("marking an action row unread should not write a section")
+	}
+}

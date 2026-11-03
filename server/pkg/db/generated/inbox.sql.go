@@ -763,10 +763,15 @@ func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByI
 }
 
 const markInboxUnread = `-- name: MarkInboxUnread :one
-UPDATE inbox_item SET read = false
-WHERE id = $1
+UPDATE inbox_item SET read = false, section = COALESCE($1::text, section)
+WHERE id = $2
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section
 `
+
+type MarkInboxUnreadParams struct {
+	Section pgtype.Text `json:"section"`
+	ID      pgtype.UUID `json:"id"`
+}
 
 // Item-level: the inbox renders one row per issue and section carrying that
 // group's NEWEST item, and the group's read state is that item's read state.
@@ -774,8 +779,9 @@ RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_
 // already dealt with and inflate CountUnreadInbox (which counts raw rows),
 // while changing nothing the UI shows. (Marking read, by contrast, also
 // settles the item's siblings; see the MarkInboxRead handler.)
-func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
-	row := q.db.QueryRow(ctx, markInboxUnread, id)
+// A non-null section re-files the item; see the MarkInboxUnread handler.
+func (q *Queries) MarkInboxUnread(ctx context.Context, arg MarkInboxUnreadParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, markInboxUnread, arg.Section, arg.ID)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

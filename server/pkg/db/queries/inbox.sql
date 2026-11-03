@@ -117,8 +117,9 @@ RETURNING *;
 -- already dealt with and inflate CountUnreadInbox (which counts raw rows),
 -- while changing nothing the UI shows. (Marking read, by contrast, also
 -- settles the item's siblings; see the MarkInboxRead handler.)
-UPDATE inbox_item SET read = false
-WHERE id = $1
+-- A non-null section re-files the item; see the MarkInboxUnread handler.
+UPDATE inbox_item SET read = false, section = COALESCE(sqlc.narg('section')::text, section)
+WHERE id = @id
 RETURNING *;
 
 -- name: ArchiveInboxItem :one

@@ -72,7 +72,7 @@
   },
   "routing": {
     "title": "Routing",
-    "description": "Needs action counts as unread, Activity is recorded quietly, and Off keeps it out of the Inbox. Changes apply to new notifications.",
+    "description": "Changes apply to new notifications.",
     "reset": "Restore defaults",
     "routes": {
       "action": {

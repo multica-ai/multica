@@ -7,7 +7,6 @@
   "sections": {
     "action": "需要處理",
     "activity": "動態",
-    "activity_hint": "例行動態不計入未讀，也不會把任務頂到最前。",
     "activity_empty": "暫無動態",
     "activity_empty_body": "你的任務上的狀態變更和智能體回覆會顯示在這裡。"
   },

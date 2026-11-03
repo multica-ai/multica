@@ -6,7 +6,6 @@
   "sections": {
     "action": "À traiter",
     "activity": "Activité",
-    "activity_hint": "L'activité courante ne compte pas comme non lue et ne fait pas remonter les tâches. Les résultats des agents s'affichent en direct dans la barre latérale Travail.",
     "action_empty": "Rien ne requiert votre attention",
     "activity_empty": "Aucune activité récente"
   },

@@ -70,7 +70,6 @@ import {
   ChevronDown,
   ListChecks,
   ArrowLeft,
-  Eye,
 } from "@multica/ui/icons";
 import type { InboxItem, InboxSection } from "@multica/core/types";
 import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
@@ -807,12 +806,6 @@ export function InboxPage() {
     <>
       {listHeader}
       {sectionTabs}
-      {!isArchivedView && section === "activity" && (
-        <p className="mx-3 mb-2 flex shrink-0 items-start gap-2 rounded-md bg-muted/50 px-2.5 py-2 text-caption text-muted-foreground">
-          <Eye className="mt-0.5 size-3.5 shrink-0" />
-          <span>{t(($) => $.sections.activity_hint)}</span>
-        </p>
-      )}
       {lookupLoading && (
         <p role="status" className="shrink-0 border-b px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.list.loading_selection)}

@@ -72,7 +72,7 @@
   },
   "routing": {
     "title": "通知去向",
-    "description": "「需要处理」计入未读，「动态」安静记录，「关闭」则不进收件箱。更改只影响之后的新通知。",
+    "description": "更改只影响之后的新通知。",
     "reset": "恢复默认",
     "routes": {
       "action": {
