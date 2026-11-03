@@ -120,6 +120,8 @@
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
     "empty_description": "An issue is one concrete piece of work for a member or an agent. Assign it to an agent and it starts on your runtime.",
+    "break_down_with_chat": "Break down with chat",
+    "break_down_prompt": "I want to get the following done. Ask me what you need to know, then break it into issues in this workspace:\n\n",
     "move_failed": "Failed to move issue"
   },
   "status": {

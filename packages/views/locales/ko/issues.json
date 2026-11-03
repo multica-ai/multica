@@ -118,6 +118,8 @@
     "breadcrumb_workspace_fallback": "워크스페이스",
     "empty_title": "아직 태스크가 없습니다",
     "empty_description": "태스크는 멤버나 에이전트에게 맡기는 구체적인 작업입니다. 에이전트에게 할당하면 런타임에서 바로 시작됩니다.",
+    "break_down_with_chat": "채팅으로 나누기",
+    "break_down_prompt": "다음 일을 하고 싶습니다. 필요한 것을 먼저 물어본 뒤 이 워크스페이스의 태스크로 나눠 주세요:\n\n",
     "move_failed": "태스크를 이동하지 못했습니다"
   },
   "status": {

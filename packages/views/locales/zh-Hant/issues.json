@@ -118,6 +118,8 @@
     "breadcrumb_workspace_fallback": "工作區",
     "empty_title": "還沒有任務",
     "empty_description": "任務是交給成員或 AI 代理的一件具體工作。指派給 AI 代理後，它會在你的執行時上自己開始。",
+    "break_down_with_chat": "用聊天拆解需求",
+    "break_down_prompt": "我想完成下面這件事。先問清楚你需要了解的，然後在這個工作區裡把它拆成任務：\n\n",
     "move_failed": "移動任務失敗"
   },
   "status": {

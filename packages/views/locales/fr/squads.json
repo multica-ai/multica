@@ -65,6 +65,8 @@
   "members_tab": {
     "section_title": "Membres",
     "add_member_button": "Ajouter un membre",
+    "empty_title": "Aucun membre pour l'instant",
+    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront.",
     "create_agent_button": "Créer un agent",
     "leader_chip": "Chef",
     "view_agent_tooltip": "Ouvrir le détail de l'agent",

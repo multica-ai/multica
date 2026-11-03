@@ -9,6 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import {
@@ -293,10 +294,25 @@ function IssueSurfaceContent({
               title={t(($) => $.detail.empty_issues_title)}
               description={t(($) => $.detail.empty_issues_hint)}
               actions={
-                <Button size="sm" onClick={() => controller.openCreateIssue()}>
-                  <Plus aria-hidden="true" />
-                  {t(($) => $.detail.empty_issues_new_button)}
-                </Button>
+                <>
+                  <Button size="sm" onClick={() => controller.openCreateIssue()}>
+                    <Plus aria-hidden="true" />
+                    {t(($) => $.detail.empty_issues_new_button)}
+                  </Button>
+                  {scope.type === "project" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        useModalStore
+                          .getState()
+                          .open("project-add-issue", { projectId: scope.projectId })
+                      }
+                    >
+                      {t(($) => $.detail.empty_issues_add_existing)}
+                    </Button>
+                  ) : null}
+                </>
               }
             />
           )

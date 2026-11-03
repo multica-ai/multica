@@ -6,8 +6,11 @@
   "sections": {
     "action": "Needs action",
     "activity": "Activity",
-    "action_empty": "Nothing needs your attention",
-    "activity_empty": "No recent activity"
+    "action_empty": "You're all caught up",
+    "activity_empty": "No recent activity",
+    "activity_waiting_other": "{{count}} updates are waiting in Activity.",
+    "open_activity": "View activity",
+    "activity_waiting_one": "{{count}} update is waiting in Activity."
   },
   "menu": {
     "mark_all_read": "Mark all as read",

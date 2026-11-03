@@ -120,6 +120,8 @@
     "breadcrumb_workspace_fallback": "Espace de travail",
     "empty_title": "Aucune tâche pour l'instant",
     "empty_description": "Une tâche est un travail concret confié à un membre ou à un agent. Assignée à un agent, elle démarre seule sur votre runtime.",
+    "break_down_with_chat": "Découper avec le chat",
+    "break_down_prompt": "Voici ce que je veux accomplir. Posez-moi les questions nécessaires, puis découpez-le en tâches dans cet espace de travail :\n\n",
     "move_failed": "Échec du déplacement de la tâche"
   },
   "status": {

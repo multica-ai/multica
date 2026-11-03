@@ -23,6 +23,7 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { CollectionPageState } from "../../layout/collection-page";
 import {
@@ -32,6 +33,7 @@ import {
   FileQuestion,
   Globe,
   Link2,
+  ListTodo,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -39,6 +41,7 @@ import {
   Save,
   Trash2,
   UserPlus,
+  Users,
 } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -704,7 +707,21 @@ function SquadMembersSection({
             );
           })}
         </ObjectSectionCard>
-      ) : null}
+      ) : (
+        <ObjectSectionEmpty
+          icon={Users}
+          title={t(($) => $.members_tab.empty_title)}
+          description={t(($) => $.members_tab.empty_description)}
+          action={
+            canManage ? (
+              <Button type="button" variant="outline" size="sm" onClick={onAddMemberClick}>
+                <Plus aria-hidden="true" />
+                {t(($) => $.members_tab.add_member_button)}
+              </Button>
+            ) : null
+          }
+        />
+      )}
     </ObjectSection>
   );
 }
@@ -850,7 +867,7 @@ function SquadRecentWorkSection({
           ))}
         </ObjectSectionCard>
       ) : (
-        <p className="text-caption text-muted-foreground">{t(($) => $.detail.recent_work_empty)}</p>
+        <ObjectSectionEmpty icon={ListTodo} description={t(($) => $.detail.recent_work_empty)} />
       )}
     </ObjectSection>
   );

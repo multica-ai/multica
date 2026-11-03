@@ -76,7 +76,7 @@
     "header_rate": "失败率",
     "other_agents": "其他智能体",
     "low_sample": "所选时间范围内运行不足 {{count}} 次，失败率参考价值有限。",
-    "no_data": "所选时间范围内没有失败的运行。",
+    "no_data": "所选时间范围内没有失败的运行",
     "show_reasons": "展开错误码",
     "hide_reasons": "收起错误码",
     "show_all": "展开全部 {{count}} 个",

@@ -47,7 +47,15 @@
   },
   "empty": {
     "title": "Aucun agent pour l'instant",
-    "description": "Créez un agent, puis assignez-lui des tâches."
+    "description": "Un agent prend en charge les tâches qui lui sont assignées et les mène à bien sur votre runtime.",
+    "setup": {
+      "label": "Étapes de configuration",
+      "runtime": "Connecter un runtime",
+      "agent": "Créer un agent",
+      "issue": "Lui assigner une tâche",
+      "done": "(fait)",
+      "connect_runtime": "Connecter"
+    }
   },
   "no_matches": {
     "title": "Aucune correspondance",
@@ -722,6 +730,7 @@
       "load_failed": "Impossible de charger vos applications connectées. Réessayez dans un instant.",
       "empty_title": "Aucune application connectée pour l'instant",
       "empty_link_to_settings": "Connectez-en un dans Paramètres → Intégrations",
+      "open_settings": "Ouvrir les paramètres",
       "connected": "Connecté",
       "toggle_aria": "Autoriser {{toolkit}} pour cet agent",
       "saving": "Enregistrement…",

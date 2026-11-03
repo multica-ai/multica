@@ -76,7 +76,7 @@
     "header_rate": "Rate",
     "other_agents": "Other agents",
     "low_sample": "Fewer than {{count}} runs in this window — this rate is not meaningful.",
-    "no_data": "No failed runs in this window.",
+    "no_data": "No failed runs in this window",
     "show_reasons": "Show error codes",
     "hide_reasons": "Hide error codes",
     "show_all": "Show all {{count}}",

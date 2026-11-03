@@ -69,6 +69,7 @@ import {
 } from "../../layout/collection-list";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
+import { AgentSetupChecklist } from "./agent-setup-checklist";
 import {
   AgentListFilterMenu,
   countActiveFilterDimensions,
@@ -216,7 +217,17 @@ function ListError({
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({
+  onCreate,
+  runtimesLoaded,
+  hasRuntime,
+  runtimesHref,
+}: {
+  onCreate: () => void;
+  runtimesLoaded: boolean;
+  hasRuntime: boolean;
+  runtimesHref: string;
+}) {
   const { t } = useT("agents");
   return (
     <CollectionPageState
@@ -225,11 +236,15 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       description={t(($) => $.empty.description)}
       actions={
         <Button type="button" onClick={onCreate} size="sm">
-          <Plus aria-hidden="true" className="size-3" />
+          <Plus aria-hidden="true" />
           {t(($) => $.page.new_agent)}
         </Button>
       }
-    />
+    >
+      {runtimesLoaded ? (
+        <AgentSetupChecklist hasRuntime={hasRuntime} runtimesHref={runtimesHref} />
+      ) : null}
+    </CollectionPageState>
   );
 }
 
@@ -401,7 +416,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [] } = useQuery(
+  const { data: runtimes = [], isSuccess: runtimesLoaded } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -756,7 +771,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         <ListError listError={listError} onRetry={() => refetchList()} />
       ) : showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={openCreate} />
+          <EmptyState
+            onCreate={openCreate}
+            runtimesLoaded={runtimesLoaded}
+            hasRuntime={runtimes.length > 0}
+            runtimesHref={paths.runtimes()}
+          />
         </div>
       ) : (
         <CollectionList

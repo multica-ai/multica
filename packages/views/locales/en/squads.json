@@ -65,6 +65,8 @@
   "members_tab": {
     "section_title": "Members",
     "add_member_button": "Add member",
+    "empty_title": "No members yet",
+    "empty_description": "Add agents or members, and issues assigned to this squad go to them.",
     "create_agent_button": "Create Agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",

@@ -1,6 +1,9 @@
 {
   "page": {
     "title": "聊天",
+    "no_agent_title": "還沒有可以對話的 AI 代理",
+    "no_agent_description": "建立一個 AI 代理後，就能在這裡和它聊需求，讓它拆成任務。",
+    "no_agent_action": "新建 AI 代理",
     "select_prompt": "選擇一個對話，或點 + 新建",
     "agent_link_no_access": "你沒有權限與該 AI 代理聊天。"
   },

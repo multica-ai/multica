@@ -76,7 +76,7 @@
     "header_rate": "실패율",
     "other_agents": "기타 에이전트",
     "low_sample": "이 기간의 실행이 {{count}}회 미만이어서 이 실패율은 의미가 크지 않습니다.",
-    "no_data": "이 기간에는 실패한 실행이 없습니다.",
+    "no_data": "이 기간에 실패한 실행이 없습니다",
     "show_reasons": "오류 코드 표시",
     "hide_reasons": "오류 코드 숨기기",
     "show_all": "전체 {{count}}개 보기",

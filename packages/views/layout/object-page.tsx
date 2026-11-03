@@ -287,6 +287,41 @@ export function ObjectSectionCard({ children, className }: { children: ReactNode
   );
 }
 
+/**
+ * A section with nothing in it yet. The section's heading already names the
+ * object, so this is a quiet row rather than a centered page state: what will
+ * appear here, or what to do first, with the action at its end.
+ */
+export function ObjectSectionEmpty({
+  icon: Icon,
+  title,
+  description,
+  action,
+  className,
+}: {
+  icon?: IconComponent;
+  title?: ReactNode;
+  description: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-h-13 items-center gap-3 rounded-lg border border-dashed border-input py-2.5 pr-2.5 pl-3.5 text-muted-foreground",
+        className,
+      )}
+    >
+      {Icon ? <Icon aria-hidden="true" className="size-4.5 shrink-0 text-faint-foreground" /> : null}
+      <div className="min-w-0 flex-1 text-label">
+        {title ? <p className="text-body font-medium text-foreground">{title}</p> : null}
+        <p>{description}</p>
+      </div>
+      {action ? <div className="flex shrink-0 items-center gap-1">{action}</div> : null}
+    </div>
+  );
+}
+
 /** A titled group in the properties panel, collapsible like the issue page's. */
 export function ObjectPanelSection({
   title,

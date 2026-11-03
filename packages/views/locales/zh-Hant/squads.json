@@ -65,6 +65,8 @@
   "members_tab": {
     "section_title": "成員",
     "add_member_button": "新增成員",
+    "empty_title": "還沒有成員",
+    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。",
     "create_agent_button": "建立 AI 代理",
     "leader_chip": "隊長",
     "view_agent_tooltip": "開啟 AI 代理詳情",

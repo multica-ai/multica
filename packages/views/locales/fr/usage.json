@@ -76,7 +76,7 @@
     "header_rate": "Taux",
     "other_agents": "Autres agents",
     "low_sample": "Moins de {{count}} exécutions sur cette fenêtre — ce taux n'est pas significatif.",
-    "no_data": "Aucune exécution en échec sur cette fenêtre.",
+    "no_data": "Aucune exécution en échec sur cette période",
     "show_reasons": "Afficher les codes d'erreur",
     "hide_reasons": "Masquer les codes d'erreur",
     "show_all": "Afficher les {{count}}",

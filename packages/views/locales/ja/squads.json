@@ -65,6 +65,8 @@
   "members_tab": {
     "section_title": "メンバー",
     "add_member_button": "メンバーを追加",
+    "empty_title": "メンバーはまだいません",
+    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。",
     "create_agent_button": "エージェントを作成",
     "leader_chip": "リーダー",
     "view_agent_tooltip": "エージェントの詳細を開く",

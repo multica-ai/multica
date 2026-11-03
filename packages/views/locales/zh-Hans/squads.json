@@ -65,6 +65,8 @@
   "members_tab": {
     "section_title": "成员",
     "add_member_button": "添加成员",
+    "empty_title": "还没有成员",
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。",
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",

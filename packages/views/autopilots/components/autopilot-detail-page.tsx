@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server, FileQuestion,
+  Webhook, RotateCw, Server, FileQuestion, FileText,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -98,6 +98,7 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { CollectionPageState } from "../../layout/collection-page";
 import { useT } from "../../i18n";
@@ -1182,9 +1183,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <ReadonlyContent content={autopilot.description} />
             </ObjectSectionCard>
           ) : (
-            <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
-              {t(($) => $.detail.no_prompt)}
-            </div>
+            <ObjectSectionEmpty icon={FileText} description={t(($) => $.detail.no_prompt)} />
           )}
         </ObjectSection>
 
@@ -1200,9 +1199,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           }
         >
           {triggers.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
-              {t(($) => $.detail.no_triggers)}
-            </div>
+            <ObjectSectionEmpty icon={Clock} description={t(($) => $.detail.no_triggers)} />
           ) : (
             <ObjectSectionCard>
               {triggers.map((trig) => (
@@ -1231,9 +1228,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               ))}
             </div>
           ) : runs.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
-              {t(($) => $.detail.no_runs)}
-            </div>
+            <ObjectSectionEmpty icon={Play} description={t(($) => $.detail.no_runs)} />
           ) : (
             <RunHistoryList
               runs={runs}

@@ -118,6 +118,8 @@
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有任务",
     "empty_description": "任务是交给成员或智能体的一件具体工作。分配给智能体后，它会在你的运行时上自己开始。",
+    "break_down_with_chat": "用聊天拆解需求",
+    "break_down_prompt": "我想完成下面这件事。先问清楚你需要了解的，然后在这个工作区里把它拆成任务：\n\n",
     "move_failed": "移动任务失败"
   },
   "status": {

@@ -76,7 +76,7 @@
     "header_rate": "失敗率",
     "other_agents": "其他 AI 代理",
     "low_sample": "所選時間範圍內執行不足 {{count}} 次，失敗率參考價值有限。",
-    "no_data": "所選時間範圍內沒有失敗的執行。",
+    "no_data": "所選時間範圍內沒有失敗的執行",
     "show_reasons": "展開錯誤碼",
     "hide_reasons": "收起錯誤碼",
     "show_all": "展開全部 {{count}} 個",
