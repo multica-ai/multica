@@ -1,4 +1,4 @@
-// Package ghsnapshot fetches a GitHub pull request's CI, reviews and mergeability
+// Package ghsnapshot fetches a GitHub pull request's CI + mergeability state
 // from the GitHub API and treats that response as the single source of truth
 // for the PR card (MUL-5265, Plan C). Webhooks and page visits only trigger a
 // refresh; nothing here infers state incrementally from webhook payloads.
@@ -6,7 +6,7 @@
 // The package has three layers:
 //   - Client (this file): GitHub App auth — App JWT → installation access
 //     token (cached per installation, refreshed early) → REST calls.
-//   - snapshot.go and reviews.go: PR / Checks / Statuses / Reviews queries, pagination, and
+//   - snapshot.go: PR / Checks / Statuses queries, pagination, and
 //     normalization into a flat per-check snapshot.
 //   - refresh.go: the outbound work queue (dedup, single in-flight per PR,
 //     bounded concurrency, Retry-After backoff), the head-SHA-guarded atomic
@@ -76,6 +76,8 @@ type Client struct {
 type cachedToken struct {
 	token  string
 	expiry time.Time
+	// permissions is what GitHub granted this token, e.g. {"checks": "read"}.
+	permissions map[string]string
 }
 
 // NewClientFromEnv builds a Client from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.
@@ -187,8 +189,9 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 		return "", fmt.Errorf("github installation token: unexpected status %d", resp.StatusCode)
 	}
 	var parsed struct {
-		Token     string `json:"token"`
-		ExpiresAt string `json:"expires_at"`
+		Token       string            `json:"token"`
+		ExpiresAt   string            `json:"expires_at"`
+		Permissions map[string]string `json:"permissions"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", errors.New("github installation token: malformed response")
@@ -203,9 +206,22 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 		}
 	}
 	c.mu.Lock()
-	c.tokens[installationID] = cachedToken{token: parsed.Token, expiry: expiry}
+	c.tokens[installationID] = cachedToken{token: parsed.Token, expiry: expiry, permissions: parsed.Permissions}
 	c.mu.Unlock()
 	return parsed.Token, nil
+}
+
+// tokenCanRead reports whether the installation's cached token was granted at
+// least read access to permission. It answers false until a request on this
+// installation has minted a token, so callers ask after their first request.
+func (c *Client) tokenCanRead(installationID int64, permission string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch c.tokens[installationID].permissions[permission] {
+	case "read", "write", "admin":
+		return true
+	}
+	return false
 }
 
 // restGet authenticates against a fixed API path. Response bodies and tokens

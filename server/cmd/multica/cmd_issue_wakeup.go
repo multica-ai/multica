@@ -81,7 +81,7 @@ func newIssueWakeupCommand() *cobra.Command {
 			c.Flags().String("until-property", "", "Condition: property PROPERTY_ID equals VALUE (PROPERTY_ID=VALUE; VALUE may be JSON)")
 			c.Flags().Bool("until-children-done", false, "Condition: every sub-issue is closed (or those up to --stage)")
 			c.Flags().Int32("stage", 0, "With --until-children-done: wait for this stage and earlier ones")
-			c.Flags().String("until-pr", "", "Condition: a linked pull request's checks finish (checks), it merges (merged), it has merge conflicts on its current head (conflicts; GitHub only), or it receives a new human approval or request for changes (reviewed, approved, changes_requested; GitHub only; excludes bots, PR authors and comment-only reviews)")
+			c.Flags().String("until-pr", "", "Condition: a linked pull request's checks finish (checks), it merges (merged), or it has merge conflicts on its current head (conflicts; GitHub only)")
 			c.Flags().String("until-issue", "", "Condition: another issue in this workspace reaches --until-issue-state")
 			c.Flags().String("until-issue-state", "done", "With --until-issue: done, ended (done or cancelled), in_review or blocked")
 			c.Flags().Int32("max-fires", 0, "Repeating rules: stop after this many runs (1-1000; continuous event rules default to 20)")
@@ -291,16 +291,9 @@ func wakeupConditionFromFlags(ctx context.Context, cmd *cobra.Command, client *c
 		return nil, fmt.Errorf("--stage requires --until-children-done")
 	}
 	if v, _ := cmd.Flags().GetString("until-pr"); v != "" {
-		event := map[string]string{
-			"checks":            "checks_finished",
-			"merged":            "merged",
-			"conflicts":         "conflicts",
-			"reviewed":          "reviewed",
-			"approved":          "approved",
-			"changes_requested": "changes_requested",
-		}[v]
+		event := map[string]string{"checks": "checks_finished", "merged": "merged", "conflicts": "conflicts"}[v]
 		if event == "" {
-			return nil, fmt.Errorf("--until-pr takes checks, merged, conflicts, reviewed, approved or changes_requested")
+			return nil, fmt.Errorf("--until-pr takes checks, merged or conflicts")
 		}
 		conditions = append(conditions, map[string]any{"type": "pull_request", "event": event})
 	}

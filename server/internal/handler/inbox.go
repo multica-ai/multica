@@ -43,7 +43,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		RecipientID:   uuidToString(i.RecipientID),
 		Type:          i.Type,
 		Severity:      i.Severity,
-		Section:       inbox.ItemSection(i.Section, i.Type, i.ActorType),
+		Section:       inbox.ItemSection(i.Section, i.Type),
 		IssueID:       uuidToPtr(i.IssueID),
 		Title:         i.Title,
 		Body:          textToPtr(i.Body),
@@ -120,7 +120,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		RecipientID:   uuidToString(r.RecipientID),
 		Type:          r.Type,
 		Severity:      r.Severity,
-		Section:       inbox.ItemSection(r.Section, r.Type, r.ActorType),
+		Section:       inbox.ItemSection(r.Section, r.Type),
 		IssueID:       uuidToPtr(r.IssueID),
 		Title:         r.Title,
 		Body:          inboxListBody(r.Type, r.IssueID, r.Body),
@@ -292,7 +292,7 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	// clients from before the Inbox sections offer one) files it under Needs
 	// action: it counts again and archive-all-read leaves it in place.
 	params := db.MarkInboxUnreadParams{ID: prev.ID}
-	if inbox.ItemSection(prev.Section, prev.Type, prev.ActorType) == inbox.SectionActivity {
+	if inbox.ItemSection(prev.Section, prev.Type) == inbox.SectionActivity {
 		params.Section = inbox.SectionText(inbox.SectionAction)
 	}
 	item, err := h.Queries.MarkInboxUnread(r.Context(), params)
@@ -327,16 +327,15 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	// Archive the sibling inbox items for the same issue. An action row takes
 	// the whole issue with it; an activity row only clears the issue's other
 	// activity, so an unread mention or failure on it stays in the inbox.
-	section := inbox.ItemSection(item.Section, item.Type, item.ActorType)
+	section := inbox.ItemSection(item.Section, item.Type)
 	if item.IssueID.Valid {
 		if section == inbox.SectionActivity {
 			h.Queries.ArchiveInboxActivityByIssue(r.Context(), db.ArchiveInboxActivityByIssueParams{
-				WorkspaceID:        item.WorkspaceID,
-				RecipientType:      item.RecipientType,
-				RecipientID:        item.RecipientID,
-				IssueID:            item.IssueID,
-				ActivityTypes:      inbox.ActivityTypes,
-				AgentActivityTypes: inbox.AgentActivityTypes,
+				WorkspaceID:   item.WorkspaceID,
+				RecipientType: item.RecipientType,
+				RecipientID:   item.RecipientID,
+				IssueID:       item.IssueID,
+				ActivityTypes: inbox.ActivityTypes,
 			})
 		} else {
 			h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
@@ -415,11 +414,10 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:        wsUUID,
-		RecipientType:      "member",
-		RecipientID:        parseUUID(userID),
-		ActivityTypes:      inbox.ActivityTypes,
-		AgentActivityTypes: inbox.AgentActivityTypes,
+		WorkspaceID:   wsUUID,
+		RecipientType: "member",
+		RecipientID:   parseUUID(userID),
+		ActivityTypes: inbox.ActivityTypes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
@@ -449,9 +447,8 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), db.CountUnreadInboxByWorkspaceParams{
-		RecipientID:        parseUUID(userID),
-		ActivityTypes:      inbox.ActivityTypes,
-		AgentActivityTypes: inbox.AgentActivityTypes,
+		RecipientID:   parseUUID(userID),
+		ActivityTypes: inbox.ActivityTypes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
@@ -572,10 +569,9 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count, err := h.Queries.ArchiveAllReadInbox(r.Context(), db.ArchiveAllReadInboxParams{
-		WorkspaceID:        wsUUID,
-		RecipientID:        parseUUID(userID),
-		ActivityTypes:      inbox.ActivityTypes,
-		AgentActivityTypes: inbox.AgentActivityTypes,
+		WorkspaceID:   wsUUID,
+		RecipientID:   parseUUID(userID),
+		ActivityTypes: inbox.ActivityTypes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all read inbox")

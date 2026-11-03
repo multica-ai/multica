@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // CheckContext is one normalized check for a PR head. Both check runs and commit
@@ -39,15 +38,6 @@ type PRSnapshot struct {
 	// as passed (acceptance criterion 5).
 	HasChecks bool
 	Contexts  []CheckContext
-	Reviews   []PRReview
-}
-
-// PRReview carries only submitted human decisions, without review bodies or
-// user metadata. Its ID survives pushes, webhook redelivery, and body edits.
-type PRReview struct {
-	ID          int64     `json:"id"`
-	State       string    `json:"state"`
-	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // Decided reports whether the snapshot has settled: no check is still running
@@ -82,9 +72,6 @@ type restPullRequest struct {
 	} `json:"head"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeableState string `json:"mergeable_state"`
-	User           struct {
-		Login string `json:"login"`
-	} `json:"user"`
 }
 
 type restCheckRun struct {
@@ -94,6 +81,24 @@ type restCheckRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	DetailsURL string `json:"details_url"`
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
+	App struct {
+		Slug string `json:"slug"`
+	} `json:"app"`
+}
+
+// restWorkflowRun is one GitHub Actions workflow run; each run owns exactly one
+// check suite.
+type restWorkflowRun struct {
+	ID           int64  `json:"id"`
+	HeadSHA      string `json:"head_sha"`
+	WorkflowID   int64  `json:"workflow_id"`
+	Event        string `json:"event"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+	CheckSuiteID int64  `json:"check_suite_id"`
 }
 
 type restStatusContext struct {
@@ -103,7 +108,7 @@ type restStatusContext struct {
 }
 
 // FetchPRSnapshot uses only Pull requests, Checks and Commit statuses read
-// permissions. CI pages are pinned to one head; a final PR read detects pushes
+// permissions. Every page is pinned to one head; a final PR read detects pushes
 // before the guarded atomic write in refresh.go.
 func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner, repo string, number int32) (*PRSnapshot, error) {
 	if !c.Enabled() {
@@ -124,12 +129,8 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 	if err != nil {
 		return nil, err
 	}
-	reviews, err := fetchPRReviews(ctx, c, installationID, prPath+"/reviews", pr.User.Login)
-	if err != nil {
-		return nil, err
-	}
 
-	snap := &PRSnapshot{HeadSHA: pr.Head.SHA, Reviews: reviews}
+	snap := &PRSnapshot{HeadSHA: pr.Head.SHA}
 	seenRuns := make(map[int64]struct{}, len(runs))
 	for _, run := range runs {
 		if run.ID <= 0 || run.Name == "" || run.HeadSHA != snap.HeadSHA {
@@ -139,6 +140,15 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 			return nil, errors.New("ghsnapshot: duplicate check run during pagination")
 		}
 		seenRuns[run.ID] = struct{}{}
+	}
+	superseded, err := fetchSupersededSuites(ctx, c, installationID, base, snap.HeadSHA, runs)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if _, drop := superseded[run.CheckSuite.ID]; drop {
+			continue
+		}
 		status := normalizeRunStatus(run.Status)
 		conclusion := strings.ToLower(run.Conclusion)
 		if status != "completed" {
@@ -187,6 +197,87 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 		snap.RollupState = rollupContexts(snap.Contexts)
 	}
 	return snap, nil
+}
+
+// actionsAppSlug identifies GitHub Actions check runs; only Actions exposes
+// which workflow and trigger a check suite belongs to.
+const actionsAppSlug = "github-actions"
+
+// fetchSupersededSuites returns the check suites on this head that a newer run
+// of the same workflow has replaced, so their check runs stay out of the
+// rollup. `filter=latest` only drops older attempts inside one suite; a second
+// workflow run on the same head (cancel-in-progress, a re-trigger on `edited`)
+// is a separate suite, and its cancelled predecessor would otherwise keep the
+// rollup at FAILURE after the newer run goes green.
+//
+// A suite is dropped only when its workflow run concluded cancelled and a newer
+// run of the same workflow for the same event exists on this head. That newer
+// run must already have check runs in this snapshot, and must be finished or
+// still have one running, so the rollup reads PENDING rather than passing
+// before the replacement has reported. A failed run is never dropped.
+//
+// Workflow identity is only available through the Actions API. Without the
+// optional Actions read permission nothing is dropped and the cancelled run
+// still fails the rollup: no Checks-only signal (check name, app, suite order)
+// proves two suites come from the same workflow. The lookup also runs only
+// when a failing Actions check sits beside another Actions suite.
+func fetchSupersededSuites(ctx context.Context, c *Client, installationID int64, base, headSHA string, runs []restCheckRun) (map[int64]struct{}, error) {
+	shown := make(map[int64]struct{})
+	running := make(map[int64]struct{})
+	failing := false
+	for _, run := range runs {
+		if run.App.Slug != actionsAppSlug || run.CheckSuite.ID <= 0 {
+			continue
+		}
+		shown[run.CheckSuite.ID] = struct{}{}
+		if normalizeRunStatus(run.Status) != "completed" {
+			running[run.CheckSuite.ID] = struct{}{}
+		} else if rollupConclusion(strings.ToLower(run.Conclusion)) == "FAILURE" {
+			failing = true
+		}
+	}
+	if len(shown) < 2 || !failing || !c.tokenCanRead(installationID, "actions") {
+		return nil, nil
+	}
+	workflowRuns, err := fetchSnapshotPages[restWorkflowRun](ctx, c, installationID,
+		base+"/actions/runs?exclude_pull_requests=true&head_sha="+url.QueryEscape(headSHA), "workflow_runs")
+	if err != nil {
+		return nil, err
+	}
+	type trigger struct {
+		workflow int64
+		event    string
+	}
+	newest := make(map[trigger]restWorkflowRun, len(workflowRuns))
+	seen := make(map[int64]struct{}, len(workflowRuns))
+	for _, wr := range workflowRuns {
+		if wr.ID <= 0 || wr.WorkflowID <= 0 || wr.CheckSuiteID <= 0 || wr.HeadSHA != headSHA {
+			return nil, errors.New("ghsnapshot: invalid workflow run or mismatched head")
+		}
+		if _, dup := seen[wr.ID]; dup {
+			return nil, errors.New("ghsnapshot: duplicate workflow run during pagination")
+		}
+		seen[wr.ID] = struct{}{}
+		key := trigger{wr.WorkflowID, wr.Event}
+		if cur, ok := newest[key]; !ok || wr.ID > cur.ID {
+			newest[key] = wr
+		}
+	}
+	superseded := make(map[int64]struct{})
+	for _, wr := range workflowRuns {
+		latest := newest[trigger{wr.WorkflowID, wr.Event}]
+		if latest.ID == wr.ID || !strings.EqualFold(wr.Conclusion, "cancelled") {
+			continue
+		}
+		if _, ok := shown[latest.CheckSuiteID]; !ok {
+			continue
+		}
+		if _, ok := running[latest.CheckSuiteID]; !ok && !strings.EqualFold(latest.Status, "completed") {
+			continue
+		}
+		superseded[wr.CheckSuiteID] = struct{}{}
+	}
+	return superseded, nil
 }
 
 func fetchSnapshotPR(ctx context.Context, c *Client, installationID int64, path string) (*restPullRequest, error) {
