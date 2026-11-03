@@ -45,10 +45,6 @@
     "active_link": "Agents actifs",
     "title": "Agents archivés"
   },
-  "empty": {
-    "title": "Aucun agent pour l'instant",
-    "description": "Créez un agent, puis assignez-lui des tâches."
-  },
   "no_matches": {
     "title": "Aucune correspondance",
     "search_active": "Aucun agent ne correspond à « {{query}} ».",
@@ -1058,5 +1054,29 @@
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "Recrutez votre premier coéquipier IA",
+    "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",
+    "slides": {
+      "describe": {
+        "title": "Décrivez son rôle en une phrase",
+        "description": "Décrivez la mission, choisissez un runtime et un modèle, puis créez-le. Modifiez ses instructions ou ajoutez des skills quand vous voulez."
+      },
+      "assign": {
+        "title": "Confiez-lui du travail comme à un collègue",
+        "description": "Choisissez-le comme responsable de n'importe quelle tâche. Il s'y met tout seul, sans surveillance."
+      },
+      "deliver": {
+        "title": "Suivez son travail, recevez le résultat en commentaire",
+        "description": "Chaque étape est visible pendant l'exécution. Une fois terminé, il publie le résultat et la PR sur la tâche."
+      }
+    },
+    "art": {
+      "prompt": "Relire les PR frontend en priorité pour l'accessibilité et les performances, et publier les conclusions en commentaire de PR.",
+      "issue_title": "Mise en page de la page tarifs cassée sur mobile",
+      "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
+      "step_read": "Lecture de {{file}}"
+    }
+  }
 }

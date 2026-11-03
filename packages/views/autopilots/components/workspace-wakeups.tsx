@@ -67,6 +67,7 @@ import {
   useWakeupText,
 } from "../../issues/components/wakeup-presentation";
 import { wakeupCountsOptions } from "./wakeups-tab";
+import { WakeupsIntro } from "./wakeups-intro";
 
 const SCOPES = ["active", "paused", "disabled", "ended", "all"] as const;
 
@@ -496,12 +497,14 @@ export function WorkspaceWakeups() {
     );
   } else if (query.isPending) {
     body = <CollectionPageState icon={Clock3} title={t(($) => $.wakeups.loading)} />;
+  } else if (!rows.length && (page?.counts.all ?? 0) === 0 && filterCount === 0) {
+    body = <WakeupsIntro onCreate={() => setCreateOpen(true)} />;
   } else if (!rows.length) {
     const hasAny = (page?.counts.all ?? 0) > 0;
     body = (
       <CollectionPageState
         icon={Bell}
-        title={t(($) => (hasAny || filtered ? $.wakeups.empty_filtered : $.wakeups.empty))}
+        title={t(($) => $.wakeups.empty_filtered)}
         actions={
           filtered && hasAny ? (
             <Button

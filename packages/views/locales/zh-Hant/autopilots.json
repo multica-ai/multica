@@ -479,7 +479,6 @@
     "select_page": "選擇所有已開啟的喚醒",
     "load_error": "無法載入喚醒",
     "loading": "正在載入喚醒…",
-    "empty": "暫無喚醒規則",
     "disable_selected": "關閉所選",
     "confirm_title": "關閉 {{count}} 個喚醒？",
     "confirm_body": "關閉後將停止後續喚醒，並撤回仍在排隊、尚未交給 AI 代理的執行。已交給 AI 代理的執行會繼續，可在執行日誌中停止。",
@@ -516,7 +515,32 @@
     "banner_view": "檢視",
     "create": "新建喚醒",
     "create_pick_issue": "選擇要新增喚醒的任務",
-    "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。"
+    "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。",
+    "intro": {
+      "title": "讓 AI 代理在對的時候回來",
+      "description": "喚醒掛在任務上：PR 合併了、有人回覆了、到點了，就把 AI 代理叫回來接著做。任務結束，喚醒自動停止。",
+      "slides": {
+        "event": {
+          "title": "等事件發生",
+          "description": "不用讓 AI 代理空轉等待。條件滿足時，平臺自動把它叫回來。"
+        },
+        "time": {
+          "title": "或者定個時間",
+          "description": "單次定時適合「明天下午再看看」，週期適合每天的例行檢查。"
+        },
+        "ends": {
+          "title": "任務結束就停",
+          "description": "喚醒屬於任務，任務完成或取消後自動關閉，不會留下孤兒規則。"
+        }
+      },
+      "art": {
+        "issue_inbox": "收件匣分組的空狀態",
+        "issue_board": "看板欄寬可拖曳",
+        "issue_paste": "評論支援貼上圖片",
+        "reply": "「PR 已合併，開始更新文件並關閉任務。」",
+        "event_examples": "PR 合併、有新評論"
+      }
+    }
   },
   "intro": {
     "label": "自動化",

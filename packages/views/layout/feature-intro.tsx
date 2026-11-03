@@ -17,7 +17,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { docsLocalePrefix } from "../common/docs-locale";
 import { useLocale, useT } from "../i18n";
 
-export type FeatureDocsSlug = "squads" | "projects" | "skills" | "autopilots";
+export type FeatureDocsSlug =
+  | "squads"
+  | "projects"
+  | "skills"
+  | "autopilots"
+  | "agents"
+  | "daemon-runtimes"
+  | "issue-wakeups";
 
 export function featureDocsHref(slug: FeatureDocsSlug, language?: string): string {
   return `https://multica.ai/docs${docsLocalePrefix(language)}/${slug}`;
@@ -31,6 +38,8 @@ interface FeatureIntroProps {
   /** Primary call to action, usually the feature's create flow. */
   action: ReactNode;
   docs: FeatureDocsSlug;
+  /** Takes the docs link's place when the page has a more useful next step. */
+  secondaryAction?: ReactNode;
   /** Column labels for the faded list behind the intro. */
   columns: string[];
   /** Wide asides fit a grid of choices instead of a single card. */
@@ -50,6 +59,7 @@ export function FeatureIntro({
   description,
   action,
   docs,
+  secondaryAction,
   columns,
   aside = "card",
   children,
@@ -89,15 +99,17 @@ export function FeatureIntro({
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-2">
               {action}
-              <a
-                href={featureDocsHref(docs, locale)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={buttonVariants({ variant: "outline" })}
-              >
-                <BookOpen aria-hidden="true" />
-                {t(($) => $.feature_intro.read_docs)}
-              </a>
+              {secondaryAction ?? (
+                <a
+                  href={featureDocsHref(docs, locale)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: "outline" })}
+                >
+                  <BookOpen aria-hidden="true" />
+                  {t(($) => $.feature_intro.read_docs)}
+                </a>
+              )}
             </div>
           </div>
           <div className="min-w-0">{children}</div>

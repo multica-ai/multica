@@ -479,7 +479,6 @@
     "select_page": "选择所有已开启的唤醒",
     "load_error": "无法加载唤醒",
     "loading": "正在加载唤醒…",
-    "empty": "暂无唤醒规则",
     "disable_selected": "关闭所选",
     "confirm_title": "关闭 {{count}} 个唤醒？",
     "confirm_body": "关闭后将停止后续唤醒，并撤回仍在排队、尚未交给智能体的运行。已交给智能体的运行会继续，可在执行日志中停止。",
@@ -516,7 +515,32 @@
     "banner_view": "查看",
     "create": "新建唤醒",
     "create_pick_issue": "选择要添加唤醒的任务",
-    "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。"
+    "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。",
+    "intro": {
+      "title": "让智能体在对的时候回来",
+      "description": "唤醒挂在任务上：PR 合并了、有人回复了、到点了，就把智能体叫回来接着做。任务结束，唤醒自动停止。",
+      "slides": {
+        "event": {
+          "title": "等事件发生",
+          "description": "不用让智能体空转等待。条件满足时，平台自动把它叫回来。"
+        },
+        "time": {
+          "title": "或者定个时间",
+          "description": "单次定时适合“明天下午再看看”，周期适合每天的例行检查。"
+        },
+        "ends": {
+          "title": "任务结束就停",
+          "description": "唤醒属于任务，任务完成或取消后自动关闭，不会留下孤儿规则。"
+        }
+      },
+      "art": {
+        "issue_inbox": "收件箱分组的空状态",
+        "issue_board": "看板列宽可拖拽",
+        "issue_paste": "评论支持粘贴图片",
+        "reply": "“PR 已合并，开始更新文档并关闭任务。”",
+        "event_examples": "PR 合并、有新评论"
+      }
+    }
   },
   "intro": {
     "label": "自动化",

@@ -1,12 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   Check,
   Cloud,
   Download,
   Laptop,
   Loader2,
+  Plus,
   Server,
   SquareTerminal,
 } from "@multica/ui/icons";
@@ -82,6 +90,7 @@ import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
+import { RuntimesIntro } from "./runtimes-intro";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
 import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
 import {
@@ -174,7 +183,7 @@ export function RuntimesPage({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
-  const { data: qoderConnection } = useQuery(qoderOptions(wsId));
+  const { data: qoderConnection, isLoading: qoderLoading } = useQuery(qoderOptions(wsId));
   const navigation = useNavigation();
   const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
@@ -290,6 +299,14 @@ export function RuntimesPage({
   const showThisComputerRow =
     !filtering && !isDesktop && machineList.length === 0;
   const showAddMachineRow = !filtering && machineList.length === 0;
+  const showIntro =
+    !listLoading &&
+    !qoderLoading &&
+    !filtering &&
+    !isDesktop &&
+    machineList.length === 0 &&
+    !qoderConfigured &&
+    orphanProfileRuntimes.length === 0;
   const nothingMatches =
     filtering &&
     visibleMachines.length === 0 &&
@@ -315,6 +332,15 @@ export function RuntimesPage({
 
   const openQoder = () =>
     qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
+  const addMenuProps = {
+    isDesktop,
+    localMachineName: localMachineName ?? localMachine?.title ?? null,
+    qoder,
+    cloudRuntimeEnabled,
+    onAddMachine: () => setShowConnectDialog(true),
+    onQoder: openQoder,
+    onCloudRuntime: () => setShowCloudRuntimeDialog(true),
+  };
 
   const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
     () => [
@@ -465,60 +491,68 @@ export function RuntimesPage({
             }))}
           />
         }
-        actions={
-          <AddRuntimeMenu
-            isDesktop={isDesktop}
-            localMachineName={localMachineName ?? localMachine?.title ?? null}
-            qoder={qoder}
-            cloudRuntimeEnabled={cloudRuntimeEnabled}
-            onAddMachine={() => setShowConnectDialog(true)}
-            onQoder={openQoder}
-            onCloudRuntime={() => setShowCloudRuntimeDialog(true)}
-          />
-        }
+        actions={<AddRuntimeMenu {...addMenuProps} />}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <CollectionList
-          embedded
-          pageShortcuts
-          label={scopeLabels[statusFilter]}
-          columns={columns}
-          groups={groups}
-          loading={listLoading}
-          getRowId={(row) => row.id}
-          getRowHref={rowHref}
-          getRowTitle={(row) =>
-            row.kind === "machine"
-              ? row.machine.title
-              : row.kind === "qoder"
-                ? t(($) => $.qoder.cloud_title)
-                : undefined
+      {showIntro ? (
+        <RuntimesIntro
+          cloudRuntimeEnabled={cloudRuntimeEnabled}
+          action={
+            <AddRuntimeMenu
+              {...addMenuProps}
+              align="start"
+              trigger={
+                <Button>
+                  <Plus aria-hidden="true" />
+                  {t(($) => $.page.add)}
+                </Button>
+              }
+            />
           }
-          empty={t(($) => $.page.rows.no_matches)}
         />
-        <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
-          {!agentsLoading &&
-            !chatSessionsLoading &&
-            memberNeedsMikaSetup(agents, chatSessions) &&
-            runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
-              <MikaSetupCard
-                workspaceId={wsId}
-                runtimes={runtimes.filter(
-                  (runtime) => runtime.provider !== "qoder_cloud",
-                )}
-                runtimesLoading={runtimesLoading}
-                currentUserId={currentUserId ?? null}
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <CollectionList
+            embedded
+            pageShortcuts
+            label={scopeLabels[statusFilter]}
+            columns={columns}
+            groups={groups}
+            loading={listLoading}
+            getRowId={(row) => row.id}
+            getRowHref={rowHref}
+            getRowTitle={(row) =>
+              row.kind === "machine"
+                ? row.machine.title
+                : row.kind === "qoder"
+                  ? t(($) => $.qoder.cloud_title)
+                  : undefined
+            }
+            empty={t(($) => $.page.rows.no_matches)}
+          />
+          <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
+            {!agentsLoading &&
+              !chatSessionsLoading &&
+              memberNeedsMikaSetup(agents, chatSessions) &&
+              runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
+                <MikaSetupCard
+                  workspaceId={wsId}
+                  runtimes={runtimes.filter(
+                    (runtime) => runtime.provider !== "qoder_cloud",
+                  )}
+                  runtimesLoading={runtimesLoading}
+                  currentUserId={currentUserId ?? null}
+                />
+              )}
+            {orphanProfileRuntimes.length > 0 && (
+              <OrphanRuntimeProfiles
+                runtimes={orphanProfileRuntimes}
+                now={now}
               />
             )}
-          {orphanProfileRuntimes.length > 0 && (
-            <OrphanRuntimeProfiles
-              runtimes={orphanProfileRuntimes}
-              now={now}
-            />
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {qoderDialogOpen && (
         <RemoteRuntimeDialog onClose={() => setQoderDialogOpen(false)} />
@@ -541,6 +575,8 @@ function AddRuntimeMenu({
   onAddMachine,
   onQoder,
   onCloudRuntime,
+  trigger,
+  align = "end",
 }: {
   isDesktop: boolean;
   localMachineName: string | null;
@@ -549,14 +585,16 @@ function AddRuntimeMenu({
   onAddMachine: () => void;
   onQoder: () => void;
   onCloudRuntime: () => void;
+  trigger?: ReactElement;
+  align?: "start" | "end";
 }) {
   const { t } = useT("runtimes");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<CollectionCreateButton label={t(($) => $.page.add)} />}
+        render={trigger ?? <CollectionCreateButton label={t(($) => $.page.add)} />}
       />
-      <DropdownMenuContent align="end" className="w-80">
+      <DropdownMenuContent align={align} className="w-80">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t(($) => $.page.add_menu.machines)}</DropdownMenuLabel>
           {isDesktop ? (

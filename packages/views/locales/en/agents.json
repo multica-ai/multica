@@ -45,10 +45,6 @@
     "active_link": "Active agents",
     "title": "Archived agents"
   },
-  "empty": {
-    "title": "No agents yet",
-    "description": "Create an agent, then assign it issues."
-  },
   "no_matches": {
     "title": "No matches",
     "search_active": "No agents match \"{{query}}\".",
@@ -1058,5 +1054,29 @@
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "Hire your first AI teammate",
+    "description": "Agents take on issues like teammates do: they work on your runtime with tools like Claude Code and Codex, then deliver in the comments.",
+    "slides": {
+      "describe": {
+        "title": "Say what it does in a sentence",
+        "description": "Describe the job, pick a runtime and a model, and create it. Change its instructions or add skills any time."
+      },
+      "assign": {
+        "title": "Assign it work like a teammate",
+        "description": "Pick it as the assignee on any issue. It gets started on its own, no need to watch over it."
+      },
+      "deliver": {
+        "title": "Watch it work, get results in comments",
+        "description": "Each step is visible while it runs. When it's done, it posts the result and the PR on the issue."
+      }
+    },
+    "art": {
+      "prompt": "Review frontend PRs for accessibility and performance, and post findings as PR comments.",
+      "issue_title": "Pricing page layout breaks on mobile",
+      "comment": "Fixed: pricing cards stack into one column under 375px. PR is open and tests pass.",
+      "step_read": "Read {{file}}"
+    }
+  }
 }
