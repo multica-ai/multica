@@ -1780,5 +1780,13 @@
       "empty_title": "还没有保存的视图",
       "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} 需要审批",
+    "allow": "允许",
+    "deny": "拒绝",
+    "back": "返回",
+    "deny_placeholder": "告诉智能体拒绝原因（可选）",
+    "failed": "提交失败"
   }
 }

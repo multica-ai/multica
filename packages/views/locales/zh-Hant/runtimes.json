@@ -651,6 +651,8 @@
       "working": "正在斷開…",
       "cancel": "取消",
       "done": "已斷開 Qoder"
-    }
+    },
+    "approval_tools_warning": "執行 {{tools}} 前需要審批。在 issue 中批准或拒絕每次呼叫；沒有 issue 的 chat 或 autopilot 執行會失敗。",
+    "custom_tools_warning": "不支援自訂工具（{{tools}}），呼叫會向 AI 代理返回錯誤。"
   }
 }

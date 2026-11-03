@@ -2058,6 +2058,16 @@ const TaskUsageSchema = z.object({
   credits_micros: z.number().optional().catch(undefined),
 }).loose();
 
+export const TaskToolConfirmationSchema = z.object({
+  call_id: z.string(),
+  tool_name: z.string().catch(""),
+  mcp_server_name: z.string().optional().catch(undefined),
+  input: z.unknown().default(null),
+  status: z.string().catch("pending"),
+  deny_message: z.string().optional().catch(undefined),
+  created_at: z.string().catch(""),
+}).loose();
+
 export const AgentTaskSchema = z.object({
   wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
@@ -2088,6 +2098,7 @@ export const AgentTaskSchema = z.object({
   supplement_capability: z.string().optional().catch(undefined),
   supplement_comment_ids: OptionalStringArraySchema,
   can_supplement: z.boolean().optional().catch(undefined),
+  pending_tool_confirmations: z.array(TaskToolConfirmationSchema).optional().catch(undefined),
   trigger_summary: z.string().optional(),
   kind: z.string().optional(),
   work_dir: z.string().optional().catch(undefined),

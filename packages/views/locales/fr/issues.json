@@ -1849,5 +1849,13 @@
       "empty_title": "Aucune vue enregistrée pour l'instant",
       "empty_description": "Réglez les filtres et l'affichage d'une liste de tâches, puis enregistrez-les comme vue."
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} nécessite une approbation",
+    "allow": "Autoriser",
+    "deny": "Refuser",
+    "back": "Retour",
+    "deny_placeholder": "Motif pour l’agent (facultatif)",
+    "failed": "Échec de l’envoi de la décision"
   }
 }

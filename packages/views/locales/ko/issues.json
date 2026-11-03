@@ -1780,5 +1780,13 @@
       "empty_title": "아직 저장된 뷰가 없습니다",
       "empty_description": "태스크 목록에서 필터와 표시 방식을 맞춘 뒤 뷰로 저장하세요."
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} 승인이 필요합니다",
+    "allow": "허용",
+    "deny": "거부",
+    "back": "뒤로",
+    "deny_placeholder": "에이전트에 전달할 사유(선택)",
+    "failed": "결정을 제출하지 못했습니다"
   }
 }

@@ -2913,6 +2913,18 @@ export class ApiClient {
     return task;
   }
 
+  async decideTaskToolConfirmation(
+    issueId: string,
+    taskId: string,
+    callId: string,
+    body: { decision: "allow" | "deny"; message?: string },
+  ): Promise<void> {
+    await this.fetch(
+      `/api/issues/${issueId}/tasks/${taskId}/tool-confirmations/${encodeURIComponent(callId)}`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
+
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",

@@ -1229,6 +1229,24 @@ export function useCancelIssueRun(issueId: string) {
   });
 }
 
+export function useDecideToolConfirmation(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      callId,
+      decision,
+      message,
+    }: {
+      taskId: string;
+      callId: string;
+      decision: "allow" | "deny";
+      message?: string;
+    }) => api.decideTaskToolConfirmation(issueId, taskId, callId, { decision, message }),
+    onSettled: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
+
 export function useRetryTaskSupplement(issueId: string) {
   const client = useQueryClient();
   return useMutation({

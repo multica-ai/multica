@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ToolConfirmationCard } from "./tool-confirmation-card";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
@@ -523,7 +524,11 @@ export function ActiveTaskRow({
   ) : (
     <TriggerText text={trigger} />
   );
+  const pending = (task.pending_tool_confirmations ?? []).filter(
+    (c) => c.status === "pending",
+  );
   return (
+    <>
     <RowShell task={task}>
       {onJump ? (
         <button
@@ -593,6 +598,10 @@ export function ActiveTaskRow({
         }
       />
     </RowShell>
+    {pending.map((c) => (
+      <ToolConfirmationCard key={c.call_id} issueId={issueId} taskId={task.id} confirmation={c} />
+    ))}
+    </>
   );
 }
 

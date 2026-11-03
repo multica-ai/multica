@@ -84,7 +84,16 @@ export function parseQoderConnection(data: unknown): QoderConnection {
 }
 
 const catalogSchema = z.object({
-  items: z.array(z.object({ id: z.string().min(1), name: z.string() })),
+  items: z.array(
+    z.object({
+      id: z.string().min(1),
+      name: z.string(),
+      // Tools that make a run pause: approvals are answered in Multica,
+      // custom tools are refused by the bridge.
+      approval_tools: z.array(z.string()).catch([]).default([]),
+      custom_tools: z.array(z.string()).catch([]).default([]),
+    }),
+  ),
 });
 export type QoderCatalogItem = z.output<typeof catalogSchema>["items"][number];
 export function parseQoderCatalog(data: unknown): QoderCatalogItem[] {

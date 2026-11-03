@@ -69,7 +69,10 @@ describe("QCA response boundary", () => {
 
 
 it("validates catalogs and strips provider secrets", () => {
-  expect(parseQoderCatalog({ items: [{ id: "env_a", name: "Web", config: { token: "secret" } }] })).toEqual([{ id: "env_a", name: "Web" }]);
+  expect(parseQoderCatalog({ items: [{ id: "env_a", name: "Web", config: { token: "secret" } }] })).toEqual([{ id: "env_a", name: "Web", approval_tools: [], custom_tools: [] }]);
+  expect(
+    parseQoderCatalog({ items: [{ id: "a", name: "A", approval_tools: ["Bash"], custom_tools: 7 }] }),
+  ).toEqual([{ id: "a", name: "A", approval_tools: ["Bash"], custom_tools: [] }]);
   for (const malformed of [null, {}, { items: "bad" }, { items: [{ id: 1, name: "bad" }] }]) {
     expect(parseQoderCatalog(malformed)).toEqual([]);
   }

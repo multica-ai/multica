@@ -1780,5 +1780,13 @@
       "empty_title": "還沒有儲存的檢視",
       "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} 需要審批",
+    "allow": "允許",
+    "deny": "拒絕",
+    "back": "返回",
+    "deny_placeholder": "告訴 AI 代理拒絕原因（選填）",
+    "failed": "提交失敗"
   }
 }

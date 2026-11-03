@@ -671,6 +671,8 @@
       "working": "Déconnexion…",
       "cancel": "Annuler",
       "done": "Qoder déconnecté"
-    }
+    },
+    "approval_tools_warning": "Demande une approbation avant d’exécuter {{tools}}. Approuvez ou refusez chaque appel depuis le ticket ; les exécutions sans ticket (chat ou autopilot) échouent.",
+    "custom_tools_warning": "Les outils personnalisés ({{tools}}) ne sont pas pris en charge. Les appels renvoient une erreur à l’agent."
   }
 }

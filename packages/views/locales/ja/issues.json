@@ -1780,5 +1780,13 @@
       "empty_title": "保存したビューはまだありません",
       "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} の承認が必要です",
+    "allow": "許可",
+    "deny": "拒否",
+    "back": "戻る",
+    "deny_placeholder": "エージェントへの理由（任意）",
+    "failed": "判断を送信できませんでした"
   }
 }

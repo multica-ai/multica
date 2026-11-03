@@ -1849,5 +1849,13 @@
       "empty_title": "No saved views yet",
       "empty_description": "Set up filters and display options in an issue list, then save them as a view."
     }
+  },
+  "tool_confirmation": {
+    "title": "{{tool}} needs approval",
+    "allow": "Allow",
+    "deny": "Deny",
+    "back": "Back",
+    "deny_placeholder": "Reason for the agent (optional)",
+    "failed": "Failed to submit decision"
   }
 }

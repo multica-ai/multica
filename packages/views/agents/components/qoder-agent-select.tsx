@@ -28,6 +28,7 @@ export function QoderAgentSelect({
   const labelId = useId();
   const query = useQuery(qoderAgentsOptions(wsId));
   const items = query.data ?? [];
+  const selected = items.find((item) => item.id === value);
   const missing =
     !!value && query.isSuccess && !items.some((item) => item.id === value);
   return (
@@ -68,6 +69,20 @@ export function QoderAgentSelect({
       {query.isSuccess && !items.length && (
         <p role="status" className="text-caption text-muted-foreground">
           {t(($) => $.qoder.no_agents)}
+        </p>
+      )}
+      {selected && selected.approval_tools.length > 0 && (
+        <p role="status" className="text-caption text-warning">
+          {t(($) => $.qoder.approval_tools_warning, {
+            tools: selected.approval_tools.join(", "),
+          })}
+        </p>
+      )}
+      {selected && selected.custom_tools.length > 0 && (
+        <p role="alert" className="text-caption text-destructive">
+          {t(($) => $.qoder.custom_tools_warning, {
+            tools: selected.custom_tools.join(", "),
+          })}
         </p>
       )}
       {missing && (

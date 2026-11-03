@@ -671,6 +671,8 @@
       "working": "Disconnecting…",
       "cancel": "Cancel",
       "done": "Qoder disconnected"
-    }
+    },
+    "approval_tools_warning": "Asks for approval before running {{tools}}. Approve or deny each call on the issue; runs from chat or autopilot without an issue fail instead.",
+    "custom_tools_warning": "Custom tools ({{tools}}) are not supported. Calls return an error to the agent."
   }
 }

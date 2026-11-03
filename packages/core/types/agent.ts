@@ -308,6 +308,17 @@ export interface TaskCancellationActor {
   name?: string;
 }
 
+export interface TaskToolConfirmation {
+  call_id: string;
+  tool_name: string;
+  /** Set for MCP tool calls. */
+  mcp_server_name?: string;
+  input: unknown;
+  status: "pending" | "allow" | "deny" | (string & {});
+  deny_message?: string;
+  created_at: string;
+}
+
 export interface AgentTask {
   wakeup_id?: string;
   id: string;
@@ -383,6 +394,8 @@ export interface AgentTask {
   supplement_comment_ids?: string[];
   /** Server-side invocation verdict for the current member and this agent. */
   can_supplement?: boolean;
+  /** Tool calls the running agent is paused on until a member decides. */
+  pending_tool_confirmations?: TaskToolConfirmation[];
   /**
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the
