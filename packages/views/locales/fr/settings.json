@@ -667,13 +667,13 @@
       },
       "muted": {
         "label": "Désactivé",
-        "description": "Hors de la boîte de réception ; toujours visible sur le ticket"
+        "description": "Hors de la boîte de réception ; toujours visible sur la tâche"
       }
     },
     "kinds": {
       "assigned": {
         "label": "Assigné à moi",
-        "description": "Quand un ticket vous est assigné"
+        "description": "Quand une tâche vous est assignée"
       },
       "mentions": {
         "label": "Mentions",
@@ -681,7 +681,7 @@
       },
       "member_comments": {
         "label": "Commentaires des membres",
-        "description": "Quand un membre commente un ticket que vous suivez"
+        "description": "Quand un membre commente une tâche que vous suivez"
       },
       "agent_failures": {
         "label": "Erreurs d'agent",
@@ -689,11 +689,11 @@
       },
       "status_changes": {
         "label": "Changements de statut",
-        "description": "Quand un ticket que vous suivez change de statut"
+        "description": "Quand une tâche que vous suivez change de statut"
       },
       "assignee_changes": {
         "label": "Changements d'assigné",
-        "description": "Quand un ticket change d'assigné, ou que vous n'êtes plus assigné"
+        "description": "Quand une tâche change d'assigné, ou que vous n'êtes plus assigné"
       },
       "updates": {
         "label": "Priorité et dates",
@@ -701,7 +701,7 @@
       },
       "agent_comments": {
         "label": "Commentaires d'agent",
-        "description": "Quand un agent répond sur un ticket que vous suivez"
+        "description": "Quand un agent répond sur une tâche que vous suivez"
       }
     },
     "system": {

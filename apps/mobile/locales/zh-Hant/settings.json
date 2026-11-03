@@ -90,20 +90,20 @@
     },
     "kinds": {
       "assigned": {
-        "label": "指派給我",
-        "description": "任務指派給你時"
+        "label": "分配給我",
+        "description": "任務分配給你時"
       },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
       "member_comments": {
-        "label": "成員留言",
-        "description": "成員在你訂閱的任務裡留言時"
+        "label": "成員評論",
+        "description": "成員在你訂閱的任務裡發表評論時"
       },
       "agent_failures": {
-        "label": "智慧體出錯",
-        "description": "智慧體執行失敗或被阻塞、需要你介入時"
+        "label": "AI 代理出錯",
+        "description": "AI 代理執行失敗或被阻塞、需要你介入時"
       },
       "status_changes": {
         "label": "狀態變更",
@@ -111,15 +111,15 @@
       },
       "assignee_changes": {
         "label": "負責人變更",
-        "description": "任務換了負責人，或你被取消指派時"
+        "description": "任務換了負責人，或你被取消分配時"
       },
       "updates": {
-        "label": "優先級與日期",
-        "description": "優先級、開始日期或截止日期變化時"
+        "label": "優先順序與日期",
+        "description": "優先順序、開始日期或截止日期變化時"
       },
       "agent_comments": {
-        "label": "智慧體留言",
-        "description": "智慧體在你訂閱的任務裡回覆時"
+        "label": "AI 代理評論",
+        "description": "AI 代理在你訂閱的任務裡回覆時"
       }
     }
   }
