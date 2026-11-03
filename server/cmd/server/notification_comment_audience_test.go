@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -84,6 +86,20 @@ func TestNotification_CommentRoutedByAudience(t *testing.T) {
 		{
 			name:      "member mentioned",
 			content:   mentionMember(target) + " can you confirm?",
+			want:      map[string]string{target: "action", bystander: "activity", optedIn: "action"},
+			mentioned: []string{target},
+		},
+		{
+			// The mention parser accepts these forms; they must still reach
+			// the member they name.
+			name:      "member mentioned in uppercase",
+			content:   fmt.Sprintf("[@M](mention://member/%s) can you confirm?", strings.ToUpper(target)),
+			want:      map[string]string{target: "action", bystander: "activity", optedIn: "action"},
+			mentioned: []string{target},
+		},
+		{
+			name:      "member mentioned without hyphens",
+			content:   fmt.Sprintf("[@M](mention://member/%s) can you confirm?", strings.ReplaceAll(target, "-", "")),
 			want:      map[string]string{target: "action", bystander: "activity", optedIn: "action"},
 			mentioned: []string{target},
 		},
@@ -170,5 +186,25 @@ func TestNotification_CommentRoutedByAudience(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCommentAudienceCanonicalizesMemberIDs guards the comparison behind
+// commentAudience: subscriber IDs are canonical (lowercase, hyphenated), and a
+// member mention written in another accepted form must match them, so the
+// comment follows the member's mentions choice instead of landing in
+// Activity as if it were written to someone else.
+func TestCommentAudienceCanonicalizesMemberIDs(t *testing.T) {
+	const member = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	for _, id := range []string{member, strings.ToUpper(member), strings.ReplaceAll(member, "-", "")} {
+		mentioned := expandMentionedMembers(context.Background(), nil, "",
+			parseMentions(fmt.Sprintf("[@M](mention://member/%s) please look", id)))
+		if got := mentioned.commentAudience(member); got != inbox.CommentToRecipient {
+			t.Errorf("mention of %q: audience = %v, want CommentToRecipient", id, got)
+		}
+		section, ok := inbox.RouteComment(map[string]string{"mentions": "muted"}, mentioned.commentAudience(member))
+		if ok {
+			t.Errorf("mention of %q with mentions muted: route = (%q, delivered), want muted", id, section)
+		}
 	}
 }

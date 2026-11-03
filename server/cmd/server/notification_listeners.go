@@ -591,10 +591,14 @@ func expandMentionedMembers(ctx context.Context, queries *db.Queries, workspaceI
 			hasAll = true
 			out.addressesPeople = true
 		case "member":
-			if _, err := util.ParseUUID(m.ID); err != nil {
+			memberUUID, err := util.ParseUUID(m.ID)
+			if err != nil {
 				continue
 			}
-			out.ids[m.ID] = true
+			// Keyed by the canonical form, which is how subscriber and actor
+			// IDs read: the parser also accepts uppercase or unhyphenated
+			// UUIDs, and those must still match the member they name.
+			out.ids[util.UUIDToString(memberUUID)] = true
 			out.addressesPeople = true
 		case "agent":
 			if _, err := util.ParseUUID(m.ID); err != nil {
