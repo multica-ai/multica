@@ -97,7 +97,6 @@ func TestLabrastroEngineeringCLIArgumentsAndFiles(t *testing.T) {
 	cases := [][]string{
 		{"get"}, {"set", baselineTestProject}, {"set", baselineTestProject, "--current-stage", "0"},
 		{"set", baselineTestProject, "--current-stage", "1.5"}, {"get", baselineTestProject, "--output", "yaml"},
-		{"set", baselineTestProject, "--stages-file", "x", "--clear-stages"},
 		{"set", baselineTestProject, "--clear-stages=false"},
 		{"set", baselineTestProject, "--mainline-issue", "OL-1"},
 	}
@@ -109,6 +108,25 @@ func TestLabrastroEngineeringCLIArgumentsAndFiles(t *testing.T) {
 		if code != 2 || out != "" || stderr == "" {
 			t.Fatalf("%v: %d %s %s", args, code, out, stderr)
 		}
+	}
+}
+
+func TestLabrastroEngineeringCLIStageFlagsMutuallyExclusive(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("ok.json", []byte("[]"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, calls := serveBaseline(t, func(w http.ResponseWriter, _ *http.Request, _ map[string]any) {
+		json.NewEncoder(w).Encode(map[string]any{"engineering": map[string]any{
+			"enabled": true, "current_stage": 1, "mode_summary": "", "stages": []any{},
+		}})
+	})
+	out, stderr, code := executeEngineering(t, "set", baselineTestProject, "--stages-file", "ok.json", "--clear-stages")
+	if code != 2 || out != "" || !strings.Contains(stderr, "mutually exclusive") {
+		t.Errorf("expected mutually exclusive argument error: code=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	if got := calls(); len(got) != 0 {
+		t.Errorf("mutually exclusive flags must not send requests: %+v", got)
 	}
 }
 
