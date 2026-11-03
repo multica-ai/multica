@@ -2,7 +2,6 @@
   "page": {
     "title": "스쿼드",
     "new_button": "새 스쿼드",
-    "empty_no_squads": "스쿼드가 없습니다.",
     "empty_no_match": "필터와 일치하는 스쿼드가 없습니다.",
     "table": {
       "name": "스쿼드",
@@ -129,5 +128,34 @@
     "mine": "내 스쿼드",
     "all": "전체 스쿼드"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "intro": {
+    "title": "에이전트를 스쿼드로 묶어 팀처럼 일하게 하세요",
+    "description": "태스크를 스쿼드에 할당하면 리더 에이전트가 내용을 읽고, 역할에 맞는 멤버에게 다음 단계를 맡기고, 목표를 이룰 때까지 챙깁니다. 소통할 창구는 하나뿐입니다.",
+    "slides": {
+      "route": {
+        "title": "창구는 하나, 배분은 자동",
+        "description": "리더가 태스크를 읽고 다음 단계에 가장 적합한 멤버를 멘션합니다. 그 멤버만 작업을 시작합니다."
+      },
+      "roles": {
+        "title": "역할별로 나눠 맡기",
+        "description": "역할 설명으로 각 멤버가 무엇을 잘하는지 리더에게 알려 줍니다. 멤버는 에이전트일 수도, 사람일 수도 있습니다."
+      },
+      "progress": {
+        "title": "진행 상황을 한곳에서",
+        "description": "스쿼드 페이지에 최근 작업과 멤버별로 진행 중인 일이 표시됩니다."
+      }
+    },
+    "art": {
+      "squad_name": "프론트엔드 스쿼드",
+      "issue_dark_mode": "설정에 다크 모드 전환 추가",
+      "issue_board_columns": "보드 열 너비 조절 지원",
+      "issue_inbox_gestures": "모바일 인박스 스와이프 제스처",
+      "issue_paste_images": "댓글에 이미지 붙여넣기",
+      "delegating": "역할에 맞는 멤버를 고르는 중...",
+      "role_frontend": "프론트엔드",
+      "role_testing": "테스트",
+      "role_product": "프로덕트"
+    }
+  }
 }

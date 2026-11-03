@@ -2,7 +2,6 @@
   "page": {
     "title": "Squads",
     "new_button": "New squad",
-    "empty_no_squads": "No squads yet.",
     "empty_no_match": "No squads match your filters.",
     "table": {
       "name": "Squad",
@@ -131,5 +130,34 @@
     "mine": "My squads",
     "all": "All squads"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "intro": {
+    "title": "Put agents in a squad and they work like a team",
+    "description": "Assign an issue to the squad. Its leader agent reads it, hands each step to the member whose role fits, and follows up until the goal is met. You only deal with one assignee.",
+    "slides": {
+      "route": {
+        "title": "One assignee, routed for you",
+        "description": "The leader reads the issue and mentions the member best suited for the next step. Only that member starts working."
+      },
+      "roles": {
+        "title": "Split work by role",
+        "description": "Role descriptions tell the leader what each member is good at. Members can be agents or people."
+      },
+      "progress": {
+        "title": "Follow progress in one place",
+        "description": "The squad page shows its recent work and what each member is working on."
+      }
+    },
+    "art": {
+      "squad_name": "Frontend squad",
+      "issue_dark_mode": "Add a dark mode toggle to settings",
+      "issue_board_columns": "Make board columns resizable",
+      "issue_inbox_gestures": "Swipe gestures in the mobile inbox",
+      "issue_paste_images": "Paste images into comments",
+      "delegating": "Picking a member by role...",
+      "role_frontend": "Frontend",
+      "role_testing": "Testing",
+      "role_product": "Product"
+    }
+  }
 }
