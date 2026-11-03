@@ -57,6 +57,7 @@ multica issue wakeup create ISSUE --kind cron --cron '0 * * * *' --timezone Asia
 multica issue wakeup create ISSUE --kind event --event task.completed,task.failed,task.cancelled --task-id RUN --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --until-status in_review --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --until-pr checks --expires-in 2h --on-timeout wake --instruction-file ./instruction.md
+multica issue wakeup create ISSUE --until-pr reviewed --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --until-children-done --stage 1 --instruction-file ./instruction.md
 multica issue wakeup create ISSUE --until-issue MUL-123 --until-issue-state done --instruction-file ./instruction.md
 multica issue wakeup list ISSUE

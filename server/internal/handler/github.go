@@ -1107,6 +1107,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		// never read for display. Each just asks the API pipeline to re-fetch
 		// the authoritative snapshot for the PR(s) it concerns.
 		h.triggerPRRefreshFromCIEvent(ctx, body)
+	case "pull_request_review":
+		h.handlePullRequestReviewEvent(ctx, body)
 	default:
 		// Acknowledge every event so GitHub doesn't mark the endpoint failing,
 		// but ignore types we don't model.
@@ -1474,6 +1476,45 @@ type ghCIEventPayload struct {
 			HeadSHA string `json:"head_sha"`
 		} `json:"check_suite"`
 	} `json:"check_run"`
+}
+
+type ghPRReviewEventPayload struct {
+	Action      string `json:"action"`
+	PullRequest struct {
+		Number int32 `json:"number"`
+	} `json:"pull_request"`
+	Review struct {
+		State string `json:"state"`
+	} `json:"review"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+func (h *Handler) handlePullRequestReviewEvent(ctx context.Context, body []byte) {
+	var p ghPRReviewEventPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad pull_request_review payload", "err", err)
+		return
+	}
+	if p.Installation.ID == 0 || p.Repository.Name == "" || p.PullRequest.Number == 0 {
+		return
+	}
+	if h.Metrics != nil {
+		h.Metrics.RecordGithubEventReceived("pull_request_review", p.Action)
+		if reviewState := strings.ToLower(p.Review.State); reviewState != "" {
+			h.Metrics.RecordGithubPRReview(reviewState)
+		}
+	}
+	if h.PRRefresh.Enabled() {
+		h.PRRefresh.Enqueue(p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+	}
 }
 
 // triggerPRRefreshFromCIEvent enqueues an API refresh for the PR(s) a

@@ -47,7 +47,7 @@ type WakeupCondition struct {
 	// every stage closing while a later one waits, then every sub-issue
 	// closing. Only the platform sets it.
 	EachStage bool `json:"each_stage,omitempty"`
-	// pull_request: checks_finished | merged | conflicts
+	// pull_request: checks_finished | merged | conflicts | reviewed | approved | changes_requested
 	Event string `json:"event,omitempty"`
 	// other_issue: the watched issue and done | ended | in_review | blocked. The
 	// identifier is recorded for display; clients never set it.
@@ -65,10 +65,11 @@ var (
 	errPRNotLinked            = errors.New("No pull request is linked to this issue; link the PR to this issue (a parent issue's PR is not included), or wait for the linking webhook")
 	errPRSnapshotPending      = errors.New("PR check snapshot is not available yet; inspect this issue's pull-requests snapshot_available field and ask the server administrator to check snapshot refresh if it persists")
 	errPRConflictsUnsupported = errors.New("Merge conflicts can only be detected on GitHub pull requests; this issue links only self-hosted (Forgejo/Gitea/GitLab) pull requests")
+	errPRReviewsUnsupported   = errors.New("PR reviews can only be detected on GitHub pull requests; this issue links only self-hosted (Forgejo/Gitea/GitLab) pull requests")
 )
 
 func conditionDiagnostic(err error) bool {
-	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) || errors.Is(err, errPRConflictsUnsupported)
+	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) || errors.Is(err, errPRConflictsUnsupported) || errors.Is(err, errPRReviewsUnsupported)
 }
 
 func badCondition(msg string) error {
@@ -187,10 +188,12 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		}
 		out = WakeupCondition{Type: c.Type, Stage: c.Stage}
 	case "pull_request":
-		if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "conflicts" {
-			return nil, nil, badCondition("event must be checks_finished, merged or conflicts")
+		switch c.Event {
+		case "checks_finished", "merged", "conflicts", "reviewed", "approved", "changes_requested":
+			out = WakeupCondition{Type: c.Type, Event: c.Event}
+		default:
+			return nil, nil, badCondition("event must be checks_finished, merged, conflicts, reviewed, approved or changes_requested")
 		}
-		out = WakeupCondition{Type: c.Type, Event: c.Event}
 	case "other_issue":
 		id, err := uuidArg(c.IssueID, "issue_id")
 		if err != nil {
@@ -314,6 +317,16 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 					keys = append(keys, key)
 					prs = append(prs, map[string]any{"number": number, "head_sha": head, "mergeable": "conflicting"})
 				}
+			case "reviewed", "approved", "changes_requested":
+				if !githubChecks {
+					continue
+				}
+				missingSnapshot = missingSnapshot || head == ""
+				key := fmt.Sprintf("%d@%s:%s", number, head, c.Event)
+				if head != "" && previous[key] > 0 {
+					keys = append(keys, key)
+					prs = append(prs, map[string]any{"number": number, "head_sha": head, "review": c.Event})
+				}
 			}
 		}
 		rows.Close()
@@ -383,8 +396,11 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 			if linked == 0 && vcsLinked == 0 {
 				return false, "", nil, errPRNotLinked
 			}
-			if c.Event == "conflicts" && linked == 0 {
-				return false, "", nil, errPRConflictsUnsupported
+			if (c.Event == "conflicts" || c.Event == "reviewed" || c.Event == "approved" || c.Event == "changes_requested") && linked == 0 {
+				if c.Event == "conflicts" {
+					return false, "", nil, errPRConflictsUnsupported
+				}
+				return false, "", nil, errPRReviewsUnsupported
 			}
 			if c.Event != "merged" && missingSnapshot {
 				return false, "", nil, errPRSnapshotPending
@@ -540,7 +556,7 @@ func conditionNewlyMet(previous, current string) bool {
 func conditionFiresOnChange(raw []byte) bool {
 	var c WakeupCondition
 	_ = json.Unmarshal(raw, &c)
-	return c.Type == "pull_request" && c.Event == "checks_finished"
+	return c.Type == "pull_request" && (c.Event == "checks_finished" || c.Event == "reviewed" || c.Event == "approved" || c.Event == "changes_requested")
 }
 
 // baselineCondition records which facts already satisfy a new or re-enabled

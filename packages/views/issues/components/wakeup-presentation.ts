@@ -237,7 +237,18 @@ export function useWakeupText() {
         return c.stage ? { key: "children_stage" as const, values: { stage: c.stage } } : { key: "children_all" as const, values: {} };
       case "pull_request":
         return {
-          key: c.event === "merged" ? ("pr_merged" as const) : c.event === "conflicts" ? ("pr_conflicts" as const) : ("pr_checks" as const),
+          key:
+            c.event === "merged"
+              ? ("pr_merged" as const)
+              : c.event === "conflicts"
+                ? ("pr_conflicts" as const)
+                : c.event === "reviewed"
+                  ? ("pr_reviewed" as const)
+                  : c.event === "approved"
+                    ? ("pr_approved" as const)
+                    : c.event === "changes_requested"
+                      ? ("pr_changes_requested" as const)
+                      : ("pr_checks" as const),
           values: {},
         };
       case "other_issue":

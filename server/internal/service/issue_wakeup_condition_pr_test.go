@@ -93,6 +93,11 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 		{"conflicting but closed", "conflicts", true, [][]any{conflictRow("closed", "head", "CONFLICTING")}, nil, false},
 		{"conflicting but merged", "conflicts", true, [][]any{conflictRow("merged", "head", "CONFLICTING")}, nil, false},
 		{"one conflicting PR", "conflicts", true, [][]any{conflictRow("open", "old", "MERGEABLE"), conflictRow("open", "head", "CONFLICTING")}, nil, true},
+		{"reviewed unconfigured", "reviewed", false, [][]any{row("open", "head", "SUCCESS")}, errPRSnapshotsUnavailable, false},
+		{"reviewed unlinked", "reviewed", true, nil, errPRNotLinked, false},
+		{"reviewed no snapshot", "reviewed", true, [][]any{row("open", "", "")}, errPRSnapshotPending, false},
+		{"approved unlinked", "approved", true, nil, errPRNotLinked, false},
+		{"changes_requested unlinked", "changes_requested", true, nil, errPRNotLinked, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: tc.available}}
@@ -119,6 +124,10 @@ func TestConditionNewlyMet(t *testing.T) {
 		{"pr:a@1:conflicting,b@1:conflicting", "pr:b@1:conflicting", false},
 		{"pr:b@1:conflicting", "pr:a@1:conflicting,b@1:conflicting", true},
 		{"pr:a@1:conflicting", "pr:a@2:conflicting", true},
+		{"pr:1@h:reviewed", "pr:1@h:reviewed", false},
+		{"", "pr:1@h:reviewed", true},
+		{"pr:1@h:reviewed", "pr:1@h:reviewed,2@h:reviewed", true},
+		{"pr:1@h:approved", "pr:1@h:approved", false},
 		{"pr:1@h:SUCCESS,2@h:FAILURE", "pr:2@h:FAILURE", false},
 		// Number-only keys repeat across repositories; a second one is news.
 		{"pr:7", "pr:7,7", true},
