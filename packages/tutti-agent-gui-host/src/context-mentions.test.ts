@@ -177,3 +177,74 @@ it("omits execution tool entries from agent mentions while retaining agents that
     expect(state.agents).toHaveLength(6);
   } finally { service.dispose(); }
 });
+
+it("ranks local agents by selections before search and truncation, with recency breaking ties", async () => {
+  const stored = new Map<string, string>();
+  const request = vi.fn(async (method: string, params: { key: string; value?: string }) => {
+    if (method === "storage.read") return stored.get(params.key) ?? null;
+    if (method === "storage.write") {
+      expect(params.key).toBe("agent-mention-selection:v1");
+      const usage = JSON.parse(stored.get("agent-mention-usage:v1") ?? '{"version":1,"agents":{}}');
+      const agentId = params.value!;
+      usage.agents[agentId] = { count: (usage.agents[agentId]?.count ?? 0) + 1, lastUsedAt: Date.now() };
+      stored.set("agent-mention-usage:v1", JSON.stringify(usage));
+    }
+  });
+  const source = workspaceSource(avatarWorkspace());
+  const client = { request } as unknown as AgentGuiRpcClient;
+  let service = createMulticaContextMentions(client, { workspaceId: "ws", local: true }, source);
+  const input = { keyword: "", trigger: "@" as const, context: {} };
+  try {
+    let provider = service.getProvider("agent-target")!;
+    const items = await provider.query(input);
+    expect(items.map((item) => provider.getItemKey(item))).toEqual(["design", "code"]);
+    await provider.query(input);
+    expect(request.mock.calls.filter(([method]) => method === "storage.write")).toHaveLength(0);
+    const code = items.find((item) => provider.getItemKey(item) === "code")!;
+    provider.toInsertResult(code);
+    provider.toInsertResult(code);
+    expect((await provider.query({ ...input, maxResults: 1 })).map((item) => provider.getItemKey(item))).toEqual(["code"]);
+    expect((await provider.query({ ...input, keyword: "design" })).map((item) => provider.getItemKey(item))).toEqual(["design"]);
+    service.dispose();
+    service = createMulticaContextMentions(client, { workspaceId: "ws", local: true }, source);
+    provider = service.getProvider("agent-target")!;
+    expect((await provider.query(input)).map((item) => provider.getItemKey(item))).toEqual(["code", "design"]);
+    const design = items.find((item) => provider.getItemKey(item) === "design")!;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1000);
+    provider.toInsertResult(design);
+    provider.toInsertResult(design);
+    expect((await provider.query(input)).map((item) => provider.getItemKey(item))).toEqual(["design", "code"]);
+    clock.mockRestore();
+  } finally { vi.restoreAllMocks(); service.dispose(); }
+});
+
+it("does not record cloud agent, session or task selections", async () => {
+  const request = vi.fn().mockResolvedValue([]);
+  const client = { request } as unknown as AgentGuiRpcClient;
+  for (const local of [false, true]) {
+    const service = createMulticaContextMentions(client, { workspaceId: "ws", local }, workspaceSource(avatarWorkspace()));
+    try {
+      for (const id of ["agent-session", "workspace-issue", ...(!local ? ["agent-target"] : [])]) {
+        const provider = service.getProvider(id)!;
+        const items = await provider.query({ keyword: "", trigger: "@", context: {} });
+        if (items.length) provider.toInsertResult(items[0]);
+      }
+      await Promise.resolve();
+      expect(request.mock.calls.every(([method]) => method === "context.tasks")).toBe(true);
+    } finally { service.dispose(); }
+  }
+});
+
+it("preserves existing order and availability when usage ties, and filters archived agents before the limit", async () => {
+  const source = workspaceSource({ ...avatarWorkspace(), agents: [
+    { ...avatarWorkspace().agents[0]!, agent: { ...avatarWorkspace().agents[0]!.agent, archived_at: "2026-10-01" } },
+    ...avatarWorkspace().agents,
+  ] });
+  const request = vi.fn().mockResolvedValue(JSON.stringify({ version: 1, agents: { design: { count: 2, lastUsedAt: 100 }, code: { count: 2, lastUsedAt: 100 } } }));
+  const service = createMulticaContextMentions({ request } as unknown as AgentGuiRpcClient, { workspaceId: "ws", local: true }, source);
+  try {
+    const provider = service.getProvider("agent-target")!;
+    const items = await provider.query({ keyword: "", trigger: "@", context: {}, maxResults: 2 });
+    expect(items).toMatchObject([{ id: "design", status: "available" }, { id: "code", status: "available" }]);
+  } finally { service.dispose(); }
+});

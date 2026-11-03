@@ -1,3 +1,5 @@
+import { defaultStorage } from "@multica/core/platform";
+import { AGENT_MENTION_SELECTION_KEY, AGENT_MENTION_USAGE_KEY, parseAgentMentionUsage } from "@multica/tutti-agent-gui-host/agent-mention-usage";
 import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
@@ -58,6 +60,8 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   storagePrefix?: string;
   locale?: string;
 }, transport: LocalV2Transport): ReturnType<typeof createAgentGuiParentService> {
+  const storage = options.storage ?? defaultStorage;
+  const usageStorageKey = `multica:local-agent-mentions:v1:${JSON.stringify([api.getBaseUrl(), options.userId, options.workspaceId])}`;
   const scope: LocalV2Scope = { userId: options.userId, workspaceId: options.workspaceId };
   const client: LocalV2ScopeClient = localV2(transport, scope);
   const cloud = createAgentGuiParentService(options);
@@ -265,7 +269,19 @@ export function createLocalConversationParentService(options: ParentServiceOptio
             windows: usage.account.windows.map((window) => ({ id: window.id, label: window.label, usedPercent: window.used_percent, resetsAt: window.resets_at })) },
         } satisfies LocalProviderUsage;
       }
-      case "storage.read": case "storage.write": return cloud.request(method, { ...params, key: `local-provider:${options.storagePrefix ?? ""}${params.key}` } as never);
+      case "storage.read":
+      case "storage.write": {
+        if (method === "storage.read" && params.key === AGENT_MENTION_USAGE_KEY) return storage.getItem(usageStorageKey);
+        if (method === "storage.write" && params.key === AGENT_MENTION_SELECTION_KEY) {
+          if (typeof params.value !== "string" || !params.value.trim()) throw new Error("Missing selected agent ID");
+          // Main and Side share a synchronous read/increment/write in the parent document.
+          const agents = parseAgentMentionUsage(storage.getItem(usageStorageKey));
+          agents[params.value] = { count: (agents[params.value]?.count ?? 0) + 1, lastUsedAt: Date.now() };
+          storage.setItem(usageStorageKey, JSON.stringify({ version: 1, agents }));
+          return undefined;
+        }
+        return cloud.request(method, { ...params, key: `local-provider:${options.storagePrefix ?? ""}${params.key}` } as never);
+      }
       case "host.selectSession": {
         const sequence = ++selectionSequence;
         const intent = options.getSelectionIntent?.();

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-mention-usage": "./src/agent-mention-usage.ts",
     "./local-projects": "./src/local-projects.ts",
     "./frame-messaging": "./src/frame-messaging.ts",
     "./message-resource-links": "./src/message-resource-links.ts",

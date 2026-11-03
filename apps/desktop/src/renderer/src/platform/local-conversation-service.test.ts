@@ -2,6 +2,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CREATE_TASK_MENTION_ID } from "@multica/core/local-conversation/protocol";
+import type { StorageAdapter } from "@multica/core/types";
 import type { LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { createLocalConversationParentService } from "./local-conversation-service";
 
@@ -39,7 +40,7 @@ function transport(): LocalV2Transport {
   };
 }
 
-function setup(options: { getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null } = {}, deviceId?: string) {
+function setup(options: { getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null; storagePrefix?: string; userId?: string; workspaceId?: string; storage?: StorageAdapter } = {}, deviceId?: string) {
   const callbacks = { onLocalSelect: vi.fn(), onOpenSide: vi.fn(), onShowMessage: vi.fn() };
   const qc = new QueryClient();
   const service = createLocalConversationParentService({ queryClient: qc, workspaceId: "ws", workspaceSlug: "workspace", userId: "user", isCurrent: () => true, resolveAvatar: (value) => value,
@@ -219,4 +220,27 @@ describe("file menu", () => {
     expect(show.mock.calls.map((call) => (call as unknown[])[2])).toEqual(["peer-1", "local"]);
     vi.unstubAllGlobals();
   });
+});
+
+
+it("shares agent selection counts across main and Side while isolating API, user and workspace", async () => {
+  const records = new Map<string, string>();
+  const storage = { getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); }, removeItem: (key: string) => { records.delete(key); }, keys: () => [...records.keys()] };
+  const main = setup({ storage }).service;
+  const side = setup({ storage, storagePrefix: "side:c1:" }).service;
+  await Promise.all([main.request("storage.write", { key: "agent-mention-selection:v1", value: "design" }), side.request("storage.write", { key: "agent-mention-selection:v1", value: "design" })]);
+  const usage = await main.request("storage.read", { key: "agent-mention-usage:v1" });
+  expect(JSON.parse(usage!)).toMatchObject({ version: 1, agents: { design: { count: 2 } } });
+  expect(await side.request("storage.read", { key: "agent-mention-usage:v1" })).toBe(usage);
+  for (const options of [{ userId: "other-user" }, { workspaceId: "other-ws" }]) {
+    expect(await setup({ storage, ...options }).service.request("storage.read", { key: "agent-mention-usage:v1" })).toBeNull();
+  }
+  mock.api.getBaseUrl.mockReturnValue("https://other.test");
+  expect(await setup({ storage }).service.request("storage.read", { key: "agent-mention-usage:v1" })).toBeNull();
+  mock.api.getBaseUrl.mockReturnValue("https://example.test");
+  expect(await setup({ storage }).service.request("storage.read", { key: "agent-mention-usage:v1" })).toBe(usage);
+  await main.request("storage.write", { key: "draft", value: "main" });
+  await side.request("storage.write", { key: "draft", value: "side" });
+  expect(await main.request("storage.read", { key: "draft" })).toBe("main");
+  expect(await side.request("storage.read", { key: "draft" })).toBe("side");
 });

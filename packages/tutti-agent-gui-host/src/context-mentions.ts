@@ -2,6 +2,7 @@ import { createRichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { AgentContextMentionProvider } from "@tutti-os/agent-gui/context-mention-provider";
 import type { AgentGuiContextItem, AgentGuiInitSnapshot, AgentGuiRpcClient, AgentGuiWorkspaceState } from "./protocol";
 import { CREATE_TASK_MENTION_ID } from "./task-creation-mention";
+import { AGENT_MENTION_SELECTION_KEY, AGENT_MENTION_USAGE_KEY, parseAgentMentionUsage } from "./agent-mention-usage";
 
 const executionToolNames = new Set(["codex", "claudecode"]);
 
@@ -10,6 +11,7 @@ export function createMulticaContextMentions(
   initial: Pick<AgentGuiInitSnapshot, "workspaceId"> & Partial<Pick<AgentGuiInitSnapshot, "locale" | "local">>,
   source: { getWorkspaceState(): AgentGuiWorkspaceState; subscribeWorkspace(listener: () => void): () => void },
 ) {
+  let pendingSelection = Promise.resolve();
   const itemLabel = (item: AgentGuiContextItem) => item.id === CREATE_TASK_MENTION_ID && item.description ? `${item.label}${initial.locale === "en" ? ": " : "："}${item.description}` : item.label;
   const providers = ["agent-session", "workspace-issue", "agent-target"].map((id): AgentContextMentionProvider<AgentGuiContextItem> => ({
     id, trigger: "@",
@@ -21,12 +23,23 @@ export function createMulticaContextMentions(
         if (initial.local !== true) return tasks;
         return [{ id: CREATE_TASK_MENTION_ID, label: initial.locale === "en" ? "New task" : "新建任务", description: input.keyword.trim() }, ...tasks];
       }
+      let usage = parseAgentMentionUsage(null);
+      if (id === "agent-target" && initial.local === true) {
+        await pendingSelection;
+        try { usage = parseAgentMentionUsage(await client.request("storage.read", { key: AGENT_MENTION_USAGE_KEY })); }
+        catch (error) { console.warn("Could not read agent mention usage", error); }
+        input.abortSignal?.throwIfAborted();
+      }
       const state = source.getWorkspaceState();
       const agents = new Map(state.agents.map((entry) => [entry.agent.id, entry]));
       const items: AgentGuiContextItem[] = id === "agent-target"
         ? state.agents.filter(({ agent }) => !agent.archived_at && !executionToolNames.has(agent.name.toLocaleLowerCase().replace(/[\s_-]+/g, ""))).sort((left, right) => {
             const configured = (entry: typeof left) => Number(Boolean(entry.agent.instructions?.trim() || entry.agent.description?.trim() || entry.agent.system_key));
-            return configured(right) - configured(left);
+            const leftUsage = usage[left.agent.id];
+            const rightUsage = usage[right.agent.id];
+            return (rightUsage?.count ?? 0) - (leftUsage?.count ?? 0)
+              || (rightUsage?.lastUsedAt ?? 0) - (leftUsage?.lastUsedAt ?? 0)
+              || configured(right) - configured(left);
           }).map(({ agent, provider, iconUrl, canInvoke, runtimeBound }) => ({
             id: agent.id, agentId: agent.id, label: agent.name, description: agent.description ?? undefined, provider, iconUrl,
             status: canInvoke && runtimeBound ? "available" : "unavailable",
@@ -43,11 +56,17 @@ export function createMulticaContextMentions(
     getItemLabel: itemLabel,
     getItemSubtitle: (item) => item.description,
     getItemIconUrl: (item) => item.iconUrl,
-    toInsertResult: (item) => ({ kind: "mention", mention: {
-      entityId: item.id, label: itemLabel(item),
-      scope: { workspaceId: initial.workspaceId, ...(item.userId ? { userId: item.userId } : {}), ...(item.agentId ? { agentTargetId: item.agentId } : {}) },
-      presentation: { description: item.description, subtitle: item.description, agentProviderId: item.provider, iconUrl: item.iconUrl, status: item.status, statusLabel: item.statusLabel, multicaStatusCategory: item.statusCategory },
-    } }),
+    toInsertResult: (item) => {
+      if (id === "agent-target" && initial.local === true) {
+        pendingSelection = pendingSelection.then(() => client.request("storage.write", { key: AGENT_MENTION_SELECTION_KEY, value: item.id }))
+          .catch((error) => { console.warn("Could not record agent mention selection", error); });
+      }
+      return { kind: "mention", mention: {
+        entityId: item.id, label: itemLabel(item),
+        scope: { workspaceId: initial.workspaceId, ...(item.userId ? { userId: item.userId } : {}), ...(item.agentId ? { agentTargetId: item.agentId } : {}) },
+        presentation: { description: item.description, subtitle: item.description, agentProviderId: item.provider, iconUrl: item.iconUrl, status: item.status, statusLabel: item.statusLabel, multicaStatusCategory: item.statusCategory },
+      } };
+    },
     resolveMention: (identity) => {
       if (identity.scope?.workspaceId && identity.scope.workspaceId !== initial.workspaceId) return { label: identity.label };
       if (id !== "agent-target" && id !== "agent-session") return { label: identity.label };
