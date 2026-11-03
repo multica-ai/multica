@@ -81,18 +81,19 @@ export function findFencedCodeRanges(text: string): CodeRange[] {
 
   for (const line of text.split('\n')) {
     // Include fences nested in blockquotes or list items in the protected range.
-    const match = line.match(/^((?:[ \t]*>[ \t]?)*[ \t]*)((?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/)
+    const match = line.match(/^((?:(?:[ \t]*>[ \t]?)|(?:[ \t]*(?:[-+*]|\d+[.)])[ \t]+))*[ \t]*)(`{3,}|~{3,})(.*)$/)
     if (match) {
       const quoteDepth = (match[1]!.match(/>/g) ?? []).length
-      const fence = match[3]!
-      const suffix = match[4]!
+      const hasListMarker = /(?:^|[ \t>])(?:[-+*]|\d+[.)])[ \t]/.test(match[1]!)
+      const fence = match[2]!
+      const suffix = match[3]!
       if (!opening) {
         // Backtick fence info strings cannot themselves contain backticks.
         if (fence[0] === '~' || !suffix.includes('`')) {
           opening = { start: offset, marker: fence[0]!, length: fence.length, quoteDepth }
         }
       } else if (
-        !match[2] &&
+        !hasListMarker &&
         quoteDepth === opening.quoteDepth &&
         fence[0] === opening.marker &&
         fence.length >= opening.length &&
@@ -115,7 +116,8 @@ export function findFencedCodeRanges(text: string): CodeRange[] {
  * These ranges should be excluded from link detection
  */
 export function findCodeRanges(text: string): CodeRange[] {
-  const ranges = findFencedCodeRanges(text)
+  const fencedRanges = findFencedCodeRanges(text)
+  const ranges = [...fencedRanges]
   let match
 
   // Find display math blocks ($$...$$)
@@ -140,14 +142,23 @@ export function findCodeRanges(text: string): CodeRange[] {
 
   // Find inline code spans with matching backtick runs.
   // Ignore spans inside fenced code or math blocks.
-  const inlineRegex = /(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)/g
+  // Inline code can span soft line breaks, but not a blank paragraph boundary.
+  const inlineRegex = /(?<!`)(`+)(?!`)((?:[^\n]|\n(?![ \t]*\n))*?)(?<!`)\1(?!`)/g
   while ((match = inlineRegex.exec(text)) !== null) {
     const pos = match.index
-    // Check if this is inside a fenced block or math block
-    const insideOther = ranges.some((r) => pos >= r.start && pos < r.end)
-    if (!insideOther) {
-      ranges.push({ start: pos, end: pos + match[0].length })
+    const end = pos + match[0].length
+    // Never let a candidate consume an opener after a fenced block's closer.
+    const crossedFence = fencedRanges.find((r) => pos < r.end && end > r.start)
+    if (crossedFence) {
+      inlineRegex.lastIndex = crossedFence.end
+      continue
     }
+    const insideOther = ranges.find((r) => pos >= r.start && pos < r.end)
+    if (insideOther) {
+      inlineRegex.lastIndex = insideOther.end
+      continue
+    }
+    ranges.push({ start: pos, end })
   }
 
   return ranges

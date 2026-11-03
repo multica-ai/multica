@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { findFencedCodeRanges, preprocessLinks } from './linkify'
+import { findCodeRanges, findFencedCodeRanges, preprocessLinks } from './linkify'
 
 describe('fenced code boundaries used by preprocessing and chunked loading', () => {
   it.each([
@@ -44,4 +44,44 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
     const source = `before ${ticks}https://example.com${ticks} after`
     expect(preprocessLinks(source)).toBe(source)
   })
+})
+
+it('keeps the URL inside a multiline triple-backtick inline span literal', () => {
+  const source = 'before ```https://example.com\ncontinuation``` after'
+  expect(preprocessLinks(source)).toBe(source)
+  expect(findCodeRanges(source)).toContainEqual({ start: 7, end: source.indexOf(' after') })
+})
+
+it('protects a URL on the second line of a multiline inline span', () => {
+  const source = 'before ```first\nhttps://example.com\ncontinuation``` after'
+  expect(preprocessLinks(source)).toBe(source)
+})
+
+it.each([
+  ['- > ', '  > '],
+  ['> - ', '>   '],
+  ['- > - ', '  >   '],
+  ['> - > ', '>   > '],
+])('protects mixed container fences starting with %j', (opening, continuation) => {
+  const source = `${opening}\`\`\`text\n${continuation}https://example.com\n${continuation}\`\`\``
+  expect(preprocessLinks(source)).toBe(source)
+})
+
+it('does not join inline code across a blank paragraph boundary', () => {
+  const source = 'before `unmatched\n\nhttps://example.com\n` after'
+  expect(preprocessLinks(source)).toBe(
+    'before `unmatched\n\n[https://example.com](https://example.com)\n` after',
+  )
+})
+
+it('protects inline code immediately after a longer fenced closer', () => {
+  const source = '```text\nliteral\n````\nbefore ``` https://example.com ``` after'
+  expect(preprocessLinks(source)).toBe(source)
+})
+
+it('does not extend inline code across a fenced block', () => {
+  const source = 'before `unmatched https://outside.example\n~~~text\n`literal\n~~~'
+  expect(preprocessLinks(source)).toBe(
+    'before `unmatched [https://outside.example](https://outside.example)\n~~~text\n`literal\n~~~',
+  )
 })
