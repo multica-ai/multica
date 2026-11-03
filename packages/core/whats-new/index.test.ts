@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { parseVersion, unreadReleases, visibleReleases } from "./index";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { User } from "../types";
+import { markWhatsNewSeen, parseVersion, unreadReleases, visibleReleases } from "./index";
+
+const api = vi.hoisted(() => ({ markWhatsNewSeen: vi.fn() }));
+const authStore = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { create } = require("zustand") as typeof import("zustand");
+  return create<{ user: User | null; setUser: (user: User) => void }>((set) => ({
+    user: null,
+    setUser: (user) => set({ user }),
+  }));
+});
+
+vi.mock("../api", () => ({ api }));
+vi.mock("../auth", () => ({ useAuthStore: authStore }));
 
 const releases = [
   { version: "0.7.0", date: "2026-10-20" },
@@ -58,5 +72,70 @@ describe("unreadReleases", () => {
   it("counts only releases after signup before the first dismissal", () => {
     const user = { whats_new_seen_version: null, created_at: "2026-10-30T09:00:00Z" };
     expect(versions(unreadReleases(visible, user))).toEqual(["0.7.10", "0.7.9"]);
+  });
+});
+
+describe("markWhatsNewSeen", () => {
+  const ada = { id: "u-ada", whats_new_seen_version: "0.7.0" } as User;
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (err: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  afterEach(() => {
+    api.markWhatsNewSeen.mockReset();
+    authStore.setState({ user: null });
+  });
+
+  it("applies the marker before the server answers and keeps the server's value", async () => {
+    authStore.setState({ user: ada });
+    const pending = deferred<User>();
+    api.markWhatsNewSeen.mockReturnValue(pending.promise);
+
+    const done = markWhatsNewSeen("0.7.2");
+    expect(authStore.getState().user?.whats_new_seen_version).toBe("0.7.2");
+
+    pending.resolve({ ...ada, whats_new_seen_version: "0.7.3" });
+    await done;
+    expect(authStore.getState().user?.whats_new_seen_version).toBe("0.7.3");
+  });
+
+  it("rolls the marker back when the write fails so the next open retries", async () => {
+    authStore.setState({ user: ada });
+    api.markWhatsNewSeen.mockRejectedValue(new Error("offline"));
+
+    await expect(markWhatsNewSeen("0.7.2")).rejects.toThrow("offline");
+    expect(authStore.getState().user?.whats_new_seen_version).toBe("0.7.0");
+  });
+
+  it("does not sign a logged-out session back in when the response is late", async () => {
+    authStore.setState({ user: ada });
+    const pending = deferred<User>();
+    api.markWhatsNewSeen.mockReturnValue(pending.promise);
+
+    const done = markWhatsNewSeen("0.7.2");
+    authStore.setState({ user: null });
+    pending.resolve({ ...ada, whats_new_seen_version: "0.7.2" });
+    await done;
+    expect(authStore.getState().user).toBeNull();
+  });
+
+  it("leaves another account untouched after a switch", async () => {
+    authStore.setState({ user: ada });
+    const pending = deferred<User>();
+    api.markWhatsNewSeen.mockReturnValue(pending.promise);
+
+    const done = markWhatsNewSeen("0.7.2");
+    const bob = { id: "u-bob", whats_new_seen_version: null } as User;
+    authStore.setState({ user: bob });
+    pending.reject(new Error("aborted"));
+    await expect(done).rejects.toThrow("aborted");
+    expect(authStore.getState().user).toBe(bob);
   });
 });

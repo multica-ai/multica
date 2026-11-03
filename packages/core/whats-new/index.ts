@@ -67,14 +67,31 @@ export function unreadReleases<R extends ReleaseStamp>(
 }
 
 /**
- * Persists the dismissal and syncs the auth store. Applied optimistically so
- * the rail dot clears at once; a failed write resurfaces it on next launch.
- * The server only advances the marker, so the returned user may carry a
+ * Persists the dismissal. Applied optimistically so the rail dot clears at
+ * once, and rolled back on failure so the dot returns and the next open
+ * retries. The server only advances the marker, so the response may carry a
  * newer version than `version`.
  */
 export async function markWhatsNewSeen(version: string): Promise<void> {
-  const current = useAuthStore.getState().user;
-  if (current) useAuthStore.getState().setUser({ ...current, whats_new_seen_version: version });
-  const user = await api.markWhatsNewSeen(version);
-  if (user.id) useAuthStore.getState().setUser(user);
+  const requester = useAuthStore.getState().user;
+  if (!requester) return;
+  const previous = requester.whats_new_seen_version;
+
+  // Writes only the marker, and only onto the account that made the request
+  // while it is still signed in: the response can land after a logout or an
+  // account switch, and must not resurrect or overwrite that session.
+  const applyMarker = (value: string | null | undefined) => {
+    const current = useAuthStore.getState().user;
+    if (current?.id !== requester.id) return;
+    useAuthStore.getState().setUser({ ...current, whats_new_seen_version: value });
+  };
+
+  applyMarker(version);
+  try {
+    const user = await api.markWhatsNewSeen(version);
+    if (user.id === requester.id) applyMarker(user.whats_new_seen_version);
+  } catch (err) {
+    if (useAuthStore.getState().user?.whats_new_seen_version === version) applyMarker(previous);
+    throw err;
+  }
 }

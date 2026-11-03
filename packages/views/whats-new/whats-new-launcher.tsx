@@ -8,6 +8,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { RAIL_ICON_BUTTON_CLASS } from "../layout/rail-styles";
 import type { WhatsNewRelease } from "./releases";
+import { useWhatsNewSessionStore } from "./session-store";
 import { useWhatsNew } from "./use-whats-new";
 import { WhatsNewCard } from "./whats-new-card";
 import { WhatsNewPanel } from "./whats-new-panel";
@@ -19,9 +20,16 @@ type View =
   | { kind: "card"; releases: WhatsNewRelease[] }
   | { kind: "panel"; unreadVersions: ReadonlySet<string> };
 
+/** A rail can be mounted but hidden (the md:flex rail on narrow screens). */
+function isRendered(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  return typeof el.checkVisibility === "function" ? el.checkVisibility() : true;
+}
+
 /**
  * Rail entry for release highlights. After an update the card opens by
- * itself once per mount; dismissing it (or opening the panel) records the
+ * itself once per page session, from whichever launcher is on screen;
+ * dismissing it (or opening the panel) records the
  * newest release as seen. Clicking away only hides the card, so the dot
  * stays until the user acknowledges it.
  */
@@ -32,13 +40,15 @@ export function WhatsNewLauncher() {
   // Snapshotted on open: marking seen empties `unread` while the popup is
   // still visible and animating out.
   const [view, setView] = useState<View>({ kind: "panel", unreadVersions: new Set() });
-  const autoOpened = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const hasUnread = unread.length > 0;
 
   useEffect(() => {
-    if (unread.length === 0 || autoOpened.current) return;
+    if (unread.length === 0 || useWhatsNewSessionStore.getState().autoShown) return;
     const timer = window.setTimeout(() => {
-      autoOpened.current = true;
+      const session = useWhatsNewSessionStore.getState();
+      if (session.autoShown || !isRendered(triggerRef.current)) return;
+      session.markAutoShown();
       setView({ kind: "card", releases: unread });
       setOpen(true);
     }, AUTO_OPEN_DELAY_MS);
@@ -69,7 +79,12 @@ export function WhatsNewLauncher() {
       }}
     >
       <TooltipHint label={label} side="right">
-        <PopoverTrigger aria-label={label} data-unread={hasUnread || undefined} className={RAIL_ICON_BUTTON_CLASS}>
+        <PopoverTrigger
+          ref={triggerRef}
+          aria-label={label}
+          data-unread={hasUnread || undefined}
+          className={RAIL_ICON_BUTTON_CLASS}
+        >
           <Gift />
           {hasUnread && (
             <span

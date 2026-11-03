@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { configStore } from "@multica/core/config";
 import { Command, Globe, Terminal } from "@multica/ui/icons";
 import type { User } from "@multica/core/types";
 import enLayout from "../locales/en/layout.json";
 import { useSearchStore } from "../search/search-store";
 import type { WhatsNewRelease } from "./releases";
+import { useWhatsNewSessionStore } from "./session-store";
 import { AUTO_OPEN_DELAY_MS, WhatsNewLauncher } from "./whats-new-launcher";
 
 const mocks = vi.hoisted(() => ({
@@ -141,6 +142,7 @@ afterEach(() => {
   authStore.setState({ user: null });
   configStore.getState().setServerVersion("");
   useSearchStore.getState().setOpen(false);
+  useWhatsNewSessionStore.setState({ autoShown: false });
 });
 
 describe("WhatsNewLauncher", () => {
@@ -241,5 +243,44 @@ describe("WhatsNewLauncher", () => {
 
     expect(screen.getByRole("heading", { name: "Palette title" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Titre langue/ })).toBeInTheDocument();
+  });
+
+  it("auto-opens from the visible rail only, once per session", () => {
+    signIn({ whats_new_seen_version: "0.1.0" });
+    // Narrow layouts keep a display:none rail mounted next to the nav sheet's.
+    // jsdom has no checkVisibility, so stand one in for this test.
+    const visibility = vi.fn(() => false);
+    Object.defineProperty(HTMLElement.prototype, "checkVisibility", { value: visibility, configurable: true });
+    onTestFinished(() => {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).checkVisibility;
+    });
+    const hidden = renderLauncher();
+    expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
+
+    visibility.mockReturnValue(true);
+    const sheet = renderLauncher();
+    expect(screen.getByText("3 new features since your last visit")).toBeInTheDocument();
+
+    // Clicking away and reopening the sheet remounts the launcher.
+    sheet.unmount();
+    hidden.unmount();
+    renderLauncher();
+    expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
+    expect(dot()).toBeInTheDocument();
+  });
+
+  it("keeps the dot and retries when recording the dismissal fails", async () => {
+    signIn({ whats_new_seen_version: "0.1.0" });
+    mocks.markWhatsNewSeen.mockRejectedValueOnce(new Error("offline"));
+    renderLauncher();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    });
+    expect(dot()).toBeInTheDocument();
+
+    fireEvent.click(trigger());
+    expect(mocks.markWhatsNewSeen).toHaveBeenCalledTimes(2);
+    expect(dot()).not.toBeInTheDocument();
   });
 });
