@@ -13,16 +13,13 @@ public final class MulticaDeviceLinkModule: Module {
   private func currentFileEpoch() -> Int { fileLock.lock(); defer { fileLock.unlock() }; return fileEpoch }
   private let queue = DispatchQueue(label: "ai.multica.mobile.device-link")
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-  private var backgroundClose: DispatchWorkItem?
 
   private func closeClient() {
     self.client?.close()
     self.client = nil
   }
 
-  private func endBackgroundGrace() {
-    self.backgroundClose?.cancel()
-    self.backgroundClose = nil
+  private func endBackgroundTask() {
     if self.backgroundTask != .invalid {
       UIApplication.shared.endBackgroundTask(self.backgroundTask)
       self.backgroundTask = .invalid
@@ -34,7 +31,7 @@ public final class MulticaDeviceLinkModule: Module {
 
     AsyncFunction("start") { (configuration: String) -> String in
       self.invalidateFiles()
-      self.endBackgroundGrace()
+      self.endBackgroundTask()
       self.closeClient()
       guard var values = try JSONSerialization.jsonObject(with: Data(configuration.utf8)) as? [String: Any] else {
         throw NSError(domain: "MulticaDeviceLink", code: 2)
@@ -53,7 +50,7 @@ public final class MulticaDeviceLinkModule: Module {
 
     AsyncFunction("stop") {
       self.invalidateFiles()
-      self.endBackgroundGrace()
+      self.endBackgroundTask()
       self.closeClient()
     }.runOnQueue(queue)
 
@@ -65,29 +62,20 @@ public final class MulticaDeviceLinkModule: Module {
       self.client?.networkChanged()
     }.runOnQueue(queue)
 
-    // The close runs natively because JavaScript timers cannot be relied on once
-    // the app is in the background.
-    AsyncFunction("enterBackground") { (graceSeconds: Double) in
+    // The link is never closed for being in the background: it runs for as long as
+    // iOS lets the app run. Expiry only returns the task, which iOS requires.
+    AsyncFunction("enterBackground") { () in
       guard self.client != nil else { return }
-      self.endBackgroundGrace()
-      let close = DispatchWorkItem { [weak self] in
-        self?.client?.closeInBackground()
-        self?.client = nil
-        self?.endBackgroundGrace()
-      }
-      self.backgroundClose = close
+      self.client?.backgrounded()
+      self.endBackgroundTask()
       self.backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MulticaDeviceLink") { [weak self] in
-        self?.queue.async { if !close.isCancelled { close.perform() } }
-      }
-      if self.backgroundTask == .invalid {
-        close.perform()
-      } else {
-        self.queue.asyncAfter(deadline: .now() + graceSeconds, execute: close)
+        self?.queue.async { self?.endBackgroundTask() }
       }
     }.runOnQueue(queue)
 
     AsyncFunction("enterForeground") { () -> Bool in
-      self.endBackgroundGrace()
+      self.endBackgroundTask()
+      self.client?.foregrounded()
       return self.client != nil
     }.runOnQueue(queue)
 
@@ -149,7 +137,7 @@ public final class MulticaDeviceLinkModule: Module {
 
     OnDestroy {
       self.queue.async {
-        self.endBackgroundGrace()
+        self.endBackgroundTask()
         self.closeClient()
       }
     }

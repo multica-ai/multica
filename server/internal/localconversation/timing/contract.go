@@ -242,6 +242,11 @@ const (
 	ReasonSlow       = "slow"
 	ReasonLateDirect = "late_direct"
 
+	// Why a device connection closed: this device's decision, or anything else.
+	ReasonPathChanged      = "path_changed"
+	ReasonProbeFailed      = "probe_failed"
+	ReasonConnectionClosed = "connection_closed"
+
 	// Why a relay refused; its own text can name addresses.
 	ReasonReservationRefused = "reservation_refused"
 	ReasonResourceLimit      = "resource_limit"
@@ -313,7 +318,7 @@ var (
 		ReasonMaxAge, ReasonConfigChanged, ReasonCLIChanged, ReasonEnvironmentChanged, ReasonNoClients, ReasonExited, ReasonStopped,
 		ReasonIdlePreheated, ReasonIdleSent, ReasonOverLimit,
 		ReasonExplicit, ReasonConfig, ReasonCatalog, ReasonCatalogCached, ReasonNativeDefault,
-		ReasonBackground, ReasonSlow, ReasonLateDirect,
+		ReasonBackground, ReasonSlow, ReasonLateDirect, ReasonPathChanged, ReasonProbeFailed, ReasonConnectionClosed,
 		ReasonReservationRefused, ReasonResourceLimit, ReasonPermissionDenied, ReasonConnectionFailed,
 		ReasonWSNormal, ReasonWSGoingAway, ReasonWSAbnormal, ReasonWSProtocol, ReasonWSHandshakeTimeout)
 	outcomes = setOf("completed", "failed", "cancelled")

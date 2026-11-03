@@ -233,7 +233,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request, userID string)
 		writeError(w, http.StatusBadRequest, "public_key must be a base64 libp2p ed25519 public key")
 		return
 	}
-	d, err := s.Store.Upsert(r.Context(), Device{
+	now := s.now()
+	d, changed, err := s.Store.Upsert(r.Context(), Device{
 		UserID:     userID,
 		DaemonID:   req.DaemonID,
 		Profile:    truncate(strings.TrimSpace(req.Profile)),
@@ -241,7 +242,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request, userID string)
 		PublicKey:  publicKey,
 		DeviceName: truncate(strings.TrimSpace(req.DeviceName)),
 		Addrs:      cleanAddrs(req.Addrs),
-	}, s.now())
+	}, now, now.Add(-s.ttl()))
 	if errors.Is(err, ErrPeerTaken) {
 		writeError(w, http.StatusConflict, "public_key is registered to another account")
 		return
@@ -251,7 +252,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request, userID string)
 		writeError(w, http.StatusInternalServerError, "failed to register device")
 		return
 	}
-	s.devicesChanged(userID)
+	if changed {
+		s.devicesChanged(userID)
+	}
 	writeJSON(w, http.StatusOK, d)
 }
 

@@ -86,34 +86,40 @@ func (s *Store) Ping(ctx context.Context) error {
 
 // Upsert registers or refreshes a device. A key is one device: registering
 // it under another daemon or profile of the same account moves it there,
-// while a key owned by another account is refused with ErrPeerTaken.
-func (s *Store) Upsert(ctx context.Context, d Device, now time.Time) (Device, error) {
+// while a key owned by another account is refused with ErrPeerTaken. It reports
+// whether the account's other devices would see anything different: a refresh of
+// an unchanged, unexpired device (one updated at or after liveSince) is not news.
+func (s *Store) Upsert(ctx context.Context, d Device, now, liveSince time.Time) (Device, bool, error) {
 	d.UpdatedAt = now.UTC().Truncate(time.Millisecond)
 	if d.Addrs == nil {
 		d.Addrs = []string{}
 	}
 	addrs, err := json.Marshal(d.Addrs)
 	if err != nil {
-		return Device{}, err
+		return Device{}, false, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Device{}, err
+		return Device{}, false, err
 	}
 	defer tx.Rollback()
 
-	var owner, daemonID, profile string
-	err = tx.QueryRowContext(ctx, `SELECT user_id, daemon_id, profile FROM device WHERE peer_id = ?`, d.PeerID).Scan(&owner, &daemonID, &profile)
+	var owner, daemonID, profile, deviceName, previousAddrs string
+	var updated int64
+	changed := true
+	err = tx.QueryRowContext(ctx, `SELECT user_id, daemon_id, profile, device_name, addrs, updated_at FROM device WHERE peer_id = ?`, d.PeerID).Scan(&owner, &daemonID, &profile, &deviceName, &previousAddrs, &updated)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
-		return Device{}, err
+		return Device{}, false, err
 	case owner != d.UserID:
-		return Device{}, ErrPeerTaken
+		return Device{}, false, ErrPeerTaken
 	case daemonID != d.DaemonID || profile != d.Profile:
 		if _, err := tx.ExecContext(ctx, `DELETE FROM device WHERE peer_id = ?`, d.PeerID); err != nil {
-			return Device{}, err
+			return Device{}, false, err
 		}
+	default:
+		changed = deviceName != d.DeviceName || previousAddrs != string(addrs) || updated < liveSince.UnixMilli()
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO device (user_id, daemon_id, profile, peer_id, public_key, device_name, addrs, updated_at)
@@ -126,9 +132,9 @@ ON CONFLICT (user_id, daemon_id, profile) DO UPDATE SET
     updated_at = excluded.updated_at`,
 		d.UserID, d.DaemonID, d.Profile, d.PeerID, d.PublicKey, d.DeviceName, string(addrs), d.UpdatedAt.UnixMilli())
 	if err != nil {
-		return Device{}, err
+		return Device{}, false, err
 	}
-	return d, tx.Commit()
+	return d, changed, tx.Commit()
 }
 
 // List returns the account's devices refreshed at or after since.

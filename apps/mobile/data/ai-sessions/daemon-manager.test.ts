@@ -5,7 +5,7 @@ import { EmbeddedDaemonManager, networkSignature } from "./daemon-manager";
 const configuration = { userId: "account-a", token: "login-a", apiUrl: "https://api.test", registryUrl: "https://registry.test", deviceName: "iPhone" };
 const endpoint = JSON.stringify({ url: "http://127.0.0.1:3456", token: "private-loopback" });
 afterEach(() => vi.useRealTimers());
-const lifecycle = () => ({ updateToken: vi.fn(async (_token: string) => {}), networkChanged: vi.fn(async () => {}), enterBackground: vi.fn(async (_seconds: number) => {}), enterForeground: vi.fn(async () => true) });
+const lifecycle = () => ({ updateToken: vi.fn(async (_token: string) => {}), networkChanged: vi.fn(async () => {}), enterBackground: vi.fn(async () => {}), enterForeground: vi.fn(async () => true) });
 const running = () => ({ start: vi.fn(async (_configuration: string) => endpoint), stop: vi.fn(async () => {}), ...lifecycle() });
 
 it("starts independently of screens, reports readiness and shuts down its endpoint", async () => {
@@ -112,7 +112,7 @@ it("falls back to a restart when the token cannot be updated in place", async ()
   await manager.stop();
 });
 
-it("keeps the link across a quick app switch and pauses health probes meanwhile", async () => {
+it("leaves the link running in the background, pauses health probes, and checks it at once on return", async () => {
   vi.useFakeTimers();
   const native = running();
   const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 503 }));
@@ -120,7 +120,7 @@ it("keeps the link across a quick app switch and pauses health probes meanwhile"
   await manager.configure(configuration);
   const before = manager.snapshot();
   await manager.setForeground(false);
-  expect(native.enterBackground).toHaveBeenCalledWith(20);
+  expect(native.enterBackground).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(60_000);
   expect(fetcher).not.toHaveBeenCalled();
   await manager.setForeground(true);
@@ -128,12 +128,14 @@ it("keeps the link across a quick app switch and pauses health probes meanwhile"
   expect(native.start).toHaveBeenCalledOnce();
   expect(manager.snapshot()).toBe(before);
   fetcher.mockResolvedValue(new Response(null, { status: 200 }));
-  await vi.advanceTimersByTimeAsync(15_000);
+  await vi.advanceTimersByTimeAsync(0);
   expect(fetcher).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(fetcher).toHaveBeenCalledTimes(2);
   await manager.stop();
 });
 
-it("restarts on return when the background grace already closed the link", async () => {
+it("restarts on return when the link is no longer running", async () => {
   const native = running();
   native.enterForeground.mockResolvedValueOnce(false);
   const manager = new EmbeddedDaemonManager(native);
@@ -144,7 +146,7 @@ it("restarts on return when the background grace already closed the link", async
   await manager.stop();
 });
 
-it("uses the refreshed token when returning to a link the grace closed", async () => {
+it("uses the refreshed token when returning to a link that stopped", async () => {
   const native = running();
   native.enterForeground.mockResolvedValueOnce(false);
   const manager = new EmbeddedDaemonManager(native);

@@ -197,8 +197,17 @@ func TestDeviceLinkForwardsDesktopToAnotherDevice(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if _, body := viewer.do(t, renderer, http.MethodGet, "/local/devices", nil); len(body["devices"].([]any)) != 0 {
-		t.Fatalf("devices after turning off = %v", body)
+	// A forward learns this from the refused stream; the list waits for Identify.
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		_, body := viewer.do(t, renderer, http.MethodGet, "/local/devices", nil)
+		if len(body["devices"].([]any)) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("devices after turning off = %v", body)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if status, body := viewer.do(t, renderer, http.MethodGet, "/local/devices/"+idA.String()+"x/local/v2/sessions", nil); status != http.StatusNotFound {
 		t.Fatalf("unknown device = %d %v", status, body)

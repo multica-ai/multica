@@ -98,7 +98,7 @@ export const LOCAL_TIMING_REASONS = [
   "max_age", "config_changed", "cli_changed", "environment_changed", "no_clients", "exited", "stopped",
   "idle_preheated", "idle_sent", "over_limit",
   "explicit", "config", "catalog", "catalog_cached", "native_default",
-  "background", "slow", "late_direct", "reservation_refused", "resource_limit", "permission_denied", "connection_failed", "ws_normal", "ws_going_away", "ws_abnormal", "ws_protocol", "ws_handshake_timeout",
+  "background", "slow", "late_direct", "path_changed", "probe_failed", "connection_closed", "reservation_refused", "resource_limit", "permission_denied", "connection_failed", "ws_normal", "ws_going_away", "ws_abnormal", "ws_protocol", "ws_handshake_timeout",
 ] as const;
 export type LocalTimingReason = typeof LOCAL_TIMING_REASONS[number];
 

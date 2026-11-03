@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -52,7 +54,16 @@ const (
 	relayRecheckInterval = 10 * time.Minute
 	peerProbeInterval    = 15 * time.Second
 	peerProbeTimeout     = 5 * time.Second
-	peerRetryMax         = 30 * time.Second
+	// peerProbeRetry follows a missed probe, so a dead path is still found quickly
+	// although it takes peerProbeMisses in a row to close one.
+	peerProbeRetry  = time.Second
+	peerProbeMisses = 3
+	peerRetryMax    = 30 * time.Second
+	// A device still unreachable after peerOfflineAfter is treated as offline, such
+	// as a suspended phone. It dials us when it returns, and address changes and
+	// network events wake the retry, so slow retries do not delay its recovery.
+	peerOfflineAfter    = 5 * time.Minute
+	peerOfflineRetryMax = 5 * time.Minute
 )
 
 var relayRetrySchedule = []time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute}
@@ -91,6 +102,11 @@ type Config struct {
 	Logger      *slog.Logger
 	// Marks records connection state changes; nil records nothing.
 	Marks *timing.Marks
+
+	// Tests replace the operating system's view of the network; nil uses it.
+	route     func(net.IP) (pathRoute, error)
+	localIPs  func() (map[string]bool, error)
+	tunnelIPs func() map[netip.Addr]bool
 }
 
 type peerDial struct {
@@ -98,12 +114,19 @@ type peerDial struct {
 	cancel context.CancelFunc
 }
 
+// connHealth is what the service knows about one open connection.
+type connHealth struct {
+	route       pathRoute
+	routeKnown  bool
+	misses      int
+	closeReason string
+}
+
 // Service is this device's endpoint on the account's peer-to-peer network.
 type Service struct {
 	marks      *timing.Marks
 	connState  connectionStates
 	fetchState fetchState
-	stopReason atomic.Value
 
 	host     host.Host
 	allow    *allowlist
@@ -126,14 +149,19 @@ type Service struct {
 	discovered   map[peer.ID]peer.AddrInfo
 
 	directRetries directRetries
-	// localIPs lists this device's addresses; tests replace it.
-	localIPs func() (map[string]bool, error)
 
 	relayFetch RelayFunc
 	onAddrs    func()
 	onPeers    func(error)
 	relayLost  chan struct{}
 	probePeers chan struct{}
+
+	route     func(net.IP) (pathRoute, error)
+	localIPs  func() (map[string]bool, error)
+	tunnelIPs func() map[netip.Addr]bool
+
+	healthMu sync.Mutex
+	health   map[string]*connHealth
 
 	relayMu       sync.Mutex
 	relayInfo     *peer.AddrInfo
@@ -181,20 +209,32 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		kick:       make(chan struct{}, 1),
 		dialing:    map[peer.ID]*peerDial{},
 		discovered: map[peer.ID]peer.AddrInfo{},
-		localIPs:   interfaceIPs,
 		relayFetch: cfg.Relay,
 		onAddrs:    cfg.OnAddrsChanged,
 		onPeers:    cfg.OnPeersRead,
 		relayLost:  make(chan struct{}, 1),
 		probePeers: make(chan struct{}, 1),
+		route:      cfg.route,
+		localIPs:   cfg.localIPs,
+		tunnelIPs:  cfg.tunnelIPs,
+		health:     map[string]*connHealth{},
 	}
 	if s.interval <= 0 {
 		s.interval = defaultRefreshInterval
 	}
+	if s.route == nil {
+		s.route = systemRoute
+	}
+	if s.localIPs == nil {
+		s.localIPs = interfaceIPs
+	}
+	if s.tunnelIPs == nil {
+		s.tunnelIPs = systemTunnelIPs
+	}
 	gater := &accountGater{allow: s.allow, isRelay: s.isRelay, onUnknown: func(peer.ID) { s.requestRefresh() }}
 
 	tracer := &holePunchMarks{marks: cfg.Marks}
-	h, err := newHost(cfg.Key, listen, gater, s.withCircuitAddrs, holepunch.WithMetricsAndEventTracer(tracer, tracer))
+	h, err := newHost(cfg.Key, listen, gater, s.advertisableAddrs, holepunch.WithMetricsAndEventTracer(tracer, tracer))
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("p2p: start host: %w", err)
@@ -214,8 +254,12 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		s.Close()
 		return nil, fmt.Errorf("p2p: subscribe to address updates: %w", err)
 	}
-	h.Network().Notify(&network.NotifyBundle{ConnectedF: func(_ network.Network, c network.Conn) { s.noteConnection(c, true) }, DisconnectedF: func(n network.Network, c network.Conn) {
+	h.Network().Notify(&network.NotifyBundle{ConnectedF: func(_ network.Network, c network.Conn) {
+		s.recordPath(c)
+		s.noteConnection(c, true)
+	}, DisconnectedF: func(n network.Network, c network.Conn) {
 		s.noteConnection(c, false)
+		s.forgetConnection(c)
 		s.onDisconnected(n, c)
 	}})
 	s.wg.Add(3)
@@ -244,20 +288,9 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 	return s, nil
 }
 
-// CloseBecause is Close with a closed-enum reason on its record, such as a phone
-// that stopped the link because the app went to the background.
-func (s *Service) CloseBecause(reason string) error {
-	s.stopReason.Store(reason)
-	return s.Close()
-}
-
 // Close stops discovery and the host, closing every connection.
 func (s *Service) Close() error {
-	reason, _ := s.stopReason.Load().(string)
-	if reason == "" {
-		reason = timing.ReasonStopped
-	}
-	s.marks.Write(timing.Record{Stage: timing.StageLinkStop, Reason: reason})
+	s.marks.Write(timing.Record{Stage: timing.StageLinkStop, Reason: timing.ReasonStopped})
 	s.dialMu.Lock()
 	s.cancel()
 	s.dialMu.Unlock()
@@ -320,6 +353,8 @@ func (s *Service) AddAddrs(info peer.AddrInfo) { s.addDiscovered(info) }
 func (s *Service) HandlePeerFound(info peer.AddrInfo) {
 	if info.ID != s.host.ID() && len(info.Addrs) > 0 {
 		s.marks.Write(timing.Record{Stage: timing.StagePeerMDNSFound, Peer: info.ID.String(), AddrType: bestAddrType(info.Addrs)})
+		// Seeing a device on the LAN is news to a retry that has slowed down.
+		s.wakeDials(info.ID)
 	}
 	s.addDiscovered(info)
 }
@@ -377,7 +412,8 @@ func (s *Service) connect(info peer.AddrInfo) {
 		}()
 		attempts := int64(0)
 		began := s.marks.Now()
-		for delay := minKickInterval; s.ctx.Err() == nil; delay = min(delay*2, peerRetryMax) {
+		unreachableSince := time.Now()
+		for delay := minKickInterval; s.ctx.Err() == nil; delay = nextDialDelay(delay, time.Since(unreachableSince)) {
 			p, allowed := s.allow.get(info.ID)
 			if !allowed || s.host.Network().Connectedness(info.ID) == network.Connected {
 				return
@@ -438,32 +474,43 @@ func (s *Service) connect(info peer.AddrInfo) {
 			case <-job.wake:
 				timer.Stop()
 				delay = minKickInterval / 2
+				unreachableSince = time.Now()
 			}
 		}
 	}()
 }
 
+func nextDialDelay(delay, unreachableFor time.Duration) time.Duration {
+	if unreachableFor >= peerOfflineAfter {
+		return min(delay*2, peerOfflineRetryMax)
+	}
+	return min(delay*2, peerRetryMax)
+}
+
 // Probe established paths too: a network switch can leave a TCP connection
 // looking connected until a read/write eventually times out.
 func (s *Service) checkPeersLoop() {
-	ticker := time.NewTicker(peerProbeInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(peerProbeInterval)
+	defer timer.Stop()
 	for {
-		timeout := peerProbeTimeout
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		case <-s.probePeers:
-			timeout = time.Second
 		}
 		s.closeIdleCircuits()
 		s.retryRelayed(time.Now())
-		s.probeAll(timeout)
+		next := peerProbeInterval
+		if s.probeAll(peerProbeTimeout) {
+			next = peerProbeRetry
+		}
+		timer.Reset(next)
 	}
 }
 
-func (s *Service) probeAll(timeout time.Duration) {
+// probeAll checks every connection and reports whether any missed its probe.
+func (s *Service) probeAll(timeout time.Duration) bool {
 	s.relayMu.Lock()
 	var relayID peer.ID
 	if s.relayInfo != nil {
@@ -471,9 +518,15 @@ func (s *Service) probeAll(timeout time.Duration) {
 	}
 	s.relayMu.Unlock()
 	var probes sync.WaitGroup
+	var missed atomic.Bool
 	probe := func(id peer.ID) {
 		probes.Add(1)
-		go func() { defer probes.Done(); s.checkPeerWithin(id, timeout) }()
+		go func() {
+			defer probes.Done()
+			if s.checkPeerWithin(id, timeout) {
+				missed.Store(true)
+			}
+		}()
 	}
 	if relayID != "" {
 		probe(relayID)
@@ -482,25 +535,35 @@ func (s *Service) probeAll(timeout time.Duration) {
 		probe(p.ID)
 	}
 	probes.Wait()
+	return missed.Load()
 }
 
-func (s *Service) checkPeer(id peer.ID) { s.checkPeerWithin(id, peerProbeTimeout) }
-
-func (s *Service) checkPeerWithin(id peer.ID, timeout time.Duration) {
+// checkPeerWithin probes each connection to id and reports whether any missed.
+func (s *Service) checkPeerWithin(id peer.ID, timeout time.Duration) bool {
 	if !s.allow.allowed(id) && !s.isRelay(id) {
-		return
+		return false
 	}
 	var probes sync.WaitGroup
+	var missed atomic.Bool
 	for _, conn := range s.host.Network().ConnsToPeer(id) {
 		probes.Add(1)
-		go func() { defer probes.Done(); s.checkConnection(conn, timeout) }()
+		go func() {
+			defer probes.Done()
+			if s.checkConnection(conn, timeout) {
+				missed.Store(true)
+			}
+		}()
 	}
 	probes.Wait()
+	return missed.Load()
 }
 
-func (s *Service) checkConnection(conn network.Conn, timeout time.Duration) {
+// checkConnection reports whether conn missed its probe. Closing is a separate
+// decision: a path that stalls briefly recovers, and closing it would drop every
+// stream on it, and on a relay every device behind it.
+func (s *Service) checkConnection(conn network.Conn, timeout time.Duration) bool {
 	if conn.IsClosed() {
-		return
+		return false
 	}
 	id := conn.RemotePeer()
 	ctx, cancel := context.WithTimeout(network.WithAllowLimitedConn(s.ctx, "multica-peer-probe"), timeout)
@@ -516,29 +579,103 @@ func (s *Service) checkConnection(conn network.Conn, timeout time.Duration) {
 		err = ctx.Err()
 	}
 	cancel()
-	if err == nil || s.ctx.Err() != nil {
-		return
+	if s.ctx.Err() != nil {
+		return false
+	}
+	if err == nil {
+		s.noteProbeAnswered(conn)
+		return false
+	}
+	if conn.IsClosed() {
+		return false
+	}
+	misses := s.noteProbeMissed(conn)
+	if misses < peerProbeMisses {
+		s.logger.Debug("p2p: peer path missed a probe", "peer_id", id.String(), "connection_id", conn.ID(), "misses", misses, "error", err)
+		return true
 	}
 	s.logger.Info("p2p: peer path stopped responding; reconnecting", "peer_id", id.String(), "connection_id", conn.ID(), "error", err)
-	_ = conn.Close()
+	s.closeConnection(conn, timing.ReasonProbeFailed)
 	s.requestRefresh()
 	if p, allowed := s.allow.get(id); allowed {
 		s.connect(peer.AddrInfo{ID: id, Addrs: p.RegisteredAddrs})
 	}
+	return true
 }
 
-// PeersChanged refreshes after an authenticated registry invalidation. It also
-// checks stale paths and interrupts dial backoff even if a relay address is unchanged.
+func (s *Service) noteProbeAnswered(conn network.Conn) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	if health := s.health[conn.ID()]; health != nil {
+		health.misses = 0
+	}
+}
+
+func (s *Service) noteProbeMissed(conn network.Conn) int {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	health := s.health[conn.ID()]
+	if health == nil {
+		health = &connHealth{}
+		s.health[conn.ID()] = health
+	}
+	health.misses++
+	return health.misses
+}
+
+// recordPath remembers the route a new connection was established on. A relayed
+// connection has no route of its own: it lives on the connection to the relay.
+func (s *Service) recordPath(conn network.Conn) {
+	health := &connHealth{}
+	if ip, ok := remoteIP(conn); ok {
+		if route, err := s.route(ip); err == nil {
+			health.route, health.routeKnown = route, true
+		}
+	}
+	s.healthMu.Lock()
+	s.health[conn.ID()] = health
+	s.healthMu.Unlock()
+}
+
+func remoteIP(conn network.Conn) (net.IP, bool) {
+	if isCircuit(conn.RemoteMultiaddr()) {
+		return nil, false
+	}
+	ip, err := manet.ToIP(conn.RemoteMultiaddr())
+	return ip, err == nil
+}
+
+func (s *Service) forgetConnection(conn network.Conn) {
+	s.healthMu.Lock()
+	delete(s.health, conn.ID())
+	s.healthMu.Unlock()
+}
+
+// closeConnection closes conn because of what this device decided, so the record
+// of the lost connection can say why.
+func (s *Service) closeConnection(conn network.Conn, reason string) {
+	s.healthMu.Lock()
+	if health := s.health[conn.ID()]; health != nil {
+		health.closeReason = reason
+	}
+	s.healthMu.Unlock()
+	_ = conn.Close()
+}
+
+func (s *Service) closeReason(conn network.Conn) string {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	if health := s.health[conn.ID()]; health != nil && health.closeReason != "" {
+		return health.closeReason
+	}
+	return timing.ReasonConnectionClosed
+}
+
+// PeersChanged refreshes after an authenticated registry invalidation. Refresh
+// wakes only the dials whose device registered new addresses; the registry's
+// periodic ready event must not reset backoff or disturb working connections.
 func (s *Service) PeersChanged(ctx context.Context) error {
-	if err := s.Refresh(ctx); err != nil {
-		return err
-	}
-	s.wakeDials()
-	select {
-	case s.probePeers <- struct{}{}:
-	default:
-	}
-	return nil
+	return s.Refresh(ctx)
 }
 
 func (s *Service) wakeDials(ids ...peer.ID) {
@@ -558,54 +695,42 @@ func (s *Service) wakeDials(ids ...peer.ID) {
 	}
 }
 
-// NetworkChanged is called when local interfaces or routes change, rather than
-// waiting for old TCP/QUIC paths to time out. Paths on a vanished address close
-// now. The rest may be unaffected, as a VPN or default route change often leaves
-// them, so they stay unless a short probe fails.
+// NetworkChanged is called when local interfaces or routes change. Only a
+// connection whose own route moved is closed; every other one keeps working.
+// Failed dials and a missing reservation may succeed on the new network, and a
+// relayed device may now be directly reachable, so those are retried.
 func (s *Service) NetworkChanged() {
 	s.marks.Write(timing.Record{Stage: timing.StageNetworkChanged})
+	s.logger.Info("p2p: local network changed; checking paths")
+	s.closeMovedPaths()
 	s.relayMu.Lock()
-	if s.relayCancel != nil {
+	reserved := s.relayReserved
+	if !reserved && s.relayCancel != nil {
 		s.relayCancel()
 	}
 	s.relayMu.Unlock()
-	s.logger.Info("p2p: local network changed; checking paths")
-	s.closeConnsOnVanishedAddrs()
 	s.directRetries.clear()
-	s.wakeDials()
-	select {
-	case s.relayLost <- struct{}{}:
-	default:
+	if !reserved {
+		select {
+		case s.relayLost <- struct{}{}:
+		default:
+		}
 	}
+	s.wakeDials()
+	for _, p := range s.allow.list() {
+		if s.Connection(p.ID) == ConnectionRelayed {
+			s.dialDirect(p)
+		}
+	}
+	s.requestProbe()
 	s.requestRefresh()
 	if s.onAddrs != nil {
 		s.onAddrs()
 	}
-	// A periodic probe of a dead path can hold the loop for its full timeout.
-	s.dialMu.Lock()
-	if s.ctx.Err() != nil {
-		s.dialMu.Unlock()
-		return
-	}
-	s.wg.Add(1)
-	s.dialMu.Unlock()
-	go func() {
-		defer s.wg.Done()
-		s.probeAll(time.Second)
-	}()
-}
-
-func (s *Service) closeConnsOnVanishedAddrs() {
-	ips, err := s.localIPs()
-	for _, conn := range s.host.Network().Conns() {
-		if err != nil || localAddrVanished(conn.LocalMultiaddr(), ips) {
-			_ = conn.Close()
-		}
-	}
 }
 
 // localAddrVanished is false for a wildcard address, which QUIC connections
-// sharing a socket report: only the probe can tell for those.
+// sharing a socket report: only their route can tell for those.
 func localAddrVanished(local ma.Multiaddr, ips map[string]bool) bool {
 	ip, err := manet.ToIP(local)
 	if err != nil || ip.IsUnspecified() {
@@ -626,6 +751,53 @@ func interfaceIPs() (map[string]bool, error) {
 		}
 	}
 	return ips, nil
+}
+
+// closeMovedPaths closes connections whose route moved. Where the route cannot be
+// compared the signal is still real, so one missed probe is enough to close.
+func (s *Service) closeMovedPaths() {
+	localIPs, localErr := s.localIPs()
+	for _, conn := range s.host.Network().Conns() {
+		ip, ok := remoteIP(conn)
+		if !ok {
+			continue
+		}
+		current, err := s.route(ip)
+		s.healthMu.Lock()
+		health := s.health[conn.ID()]
+		known := health != nil && health.routeKnown && err == nil && localErr == nil
+		moved := known && pathMoved(health.route, current, localIPs)
+		if localErr == nil && localAddrVanished(conn.LocalMultiaddr(), localIPs) {
+			moved = true
+		}
+		if !known && health != nil {
+			health.misses = peerProbeMisses - 1
+		}
+		s.healthMu.Unlock()
+		if moved {
+			s.logger.Info("p2p: peer path moved; reconnecting", "peer_id", conn.RemotePeer().String(), "connection_id", conn.ID())
+			s.closeConnection(conn, timing.ReasonPathChanged)
+		}
+	}
+}
+
+// RecheckPaths verifies every connection now, for when this process may have been
+// frozen and a connection's state cannot be assumed. One missed probe closes it,
+// and a connection that answers keeps working as if nothing happened.
+func (s *Service) RecheckPaths() {
+	s.healthMu.Lock()
+	for _, health := range s.health {
+		health.misses = peerProbeMisses - 1
+	}
+	s.healthMu.Unlock()
+	s.requestProbe()
+}
+
+func (s *Service) requestProbe() {
+	select {
+	case s.probePeers <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Service) requestRefresh() {
@@ -916,10 +1088,6 @@ func (s *Service) addrsLoop(events <-chan any) {
 		case <-fire:
 			fire = nil
 			s.requestRefresh()
-			select {
-			case s.probePeers <- struct{}{}:
-			default:
-			}
 			if s.onAddrs != nil {
 				s.onAddrs()
 			}
@@ -933,20 +1101,27 @@ func (s *Service) isRelay(p peer.ID) bool {
 	return s.relayInfo != nil && s.relayInfo.ID == p
 }
 
-// withCircuitAddrs is the host's address factory: it appends this device's
-// address on the relay while a reservation is held.
-func (s *Service) withCircuitAddrs(addrs []ma.Multiaddr) []ma.Multiaddr {
+// advertisableAddrs is the host's address factory: it drops addresses other
+// devices could not dial and appends this device's address on the relay while a
+// reservation is held.
+func (s *Service) advertisableAddrs(addrs []ma.Multiaddr) []ma.Multiaddr {
+	tunnelIPs := s.tunnelIPs()
+	out := make([]ma.Multiaddr, 0, len(addrs))
+	for _, a := range addrs {
+		if usableByOtherDevices(a, tunnelIPs) {
+			out = append(out, a)
+		}
+	}
 	s.relayMu.Lock()
 	info, reserved := s.relayInfo, s.relayReserved
 	s.relayMu.Unlock()
 	if !reserved || info == nil {
-		return addrs
+		return out
 	}
 	circuit, err := ma.NewMultiaddr("/p2p/" + info.ID.String() + "/p2p-circuit")
 	if err != nil {
-		return addrs
+		return out
 	}
-	out := append([]ma.Multiaddr(nil), addrs...)
 	for _, a := range info.Addrs {
 		out = append(out, a.Encapsulate(circuit))
 	}
@@ -1036,7 +1211,14 @@ func (s *Service) reserve() (time.Duration, error) {
 		return 0, err
 	}
 	s.host.ConnManager().Protect(info.ID, "multica-relay")
+	s.relayMu.Lock()
+	regained := !s.relayReserved
+	s.relayMu.Unlock()
 	s.setReservation(true, rsvp.Expiration)
+	if regained {
+		// Dials through the relay failed while this device had no reservation path.
+		s.wakeDials()
+	}
 	s.logger.Info("p2p: relay reservation held", "relay", info.ID.String(), "expires", rsvp.Expiration)
 	return max(time.Until(rsvp.Expiration)-relayRenewMargin, 30*time.Second), nil
 }

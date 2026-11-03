@@ -74,10 +74,10 @@ func (rh *relayHarness) newDevice(t *testing.T, user, daemonID string) host.Host
 	})
 	if user != "" {
 		raw, _ := crypto.MarshalPublicKey(pub)
-		_, err := rh.store.Upsert(context.Background(), Device{
+		_, _, err := rh.store.Upsert(context.Background(), Device{
 			UserID: user, DaemonID: daemonID, PeerID: h.ID().String(),
 			PublicKey: base64.StdEncoding.EncodeToString(raw),
-		}, time.Now())
+		}, time.Now(), time.Time{})
 		if err != nil {
 			t.Fatal(err)
 		}

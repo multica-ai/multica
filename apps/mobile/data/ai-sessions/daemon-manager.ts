@@ -6,14 +6,13 @@ export interface NativeDaemon {
   stop(): Promise<void>;
   updateToken(token: string): Promise<void>;
   networkChanged(): Promise<void>;
-  /** Holds a background task; the native side closes the link when it ends, even if JS is suspended. */
-  enterBackground(graceSeconds: number): Promise<void>;
-  /** Cancels the pending close and reports whether the link is still running. */
+  /** Holds a background task; the link keeps running until iOS suspends the app. */
+  enterBackground(): Promise<void>;
+  /** Verifies connections after a possible suspension and reports whether the link is still running. */
   enterForeground(): Promise<boolean>;
 }
 export interface DaemonConfiguration { registryUrl: string; apiUrl: string; token: string; userId: string; deviceName: string }
 export interface DaemonState { status: "stopped" | "starting" | "ready" | "failed"; endpoint: DeviceEndpoint | null; error: string | null }
-const BACKGROUND_GRACE_SECONDS = 20;
 const sameLink = (a: DaemonConfiguration, b: DaemonConfiguration) => a.userId === b.userId && a.registryUrl === b.registryUrl && a.apiUrl === b.apiUrl && a.deviceName === b.deviceName;
 
 /** Changes when the network type or its details do; `isInternetReachable` flips alone do not rebuild connections. */
@@ -101,7 +100,7 @@ export class EmbeddedDaemonManager {
   restart = () => this.apply(this.desired);
   stop = () => this.configure(null);
 
-  /** A ready link survives a short background grace so quick app switches keep it. */
+  /** A ready link is left running in the background; iOS decides when it stops. */
   setForeground(foreground: boolean): Promise<void> {
     if (this.foreground === foreground) return this.queue;
     this.foreground = foreground;
@@ -110,7 +109,7 @@ export class EmbeddedDaemonManager {
       this.parked = true;
       this.healthRun++;
       clearTimeout(this.timer);
-      return this.enqueue(async (native) => { await native.enterBackground(BACKGROUND_GRACE_SECONDS).catch(() => {}); });
+      return this.enqueue(async (native) => { await native.enterBackground().catch(() => {}); });
     }
     if (!this.parked) return this.apply(this.desired);
     this.parked = false;
@@ -118,7 +117,7 @@ export class EmbeddedDaemonManager {
     return this.enqueue(async (native) => {
       const alive = await native.enterForeground().catch(() => false);
       if (revision !== this.revision) return;
-      if (alive) this.health(); else void this.apply(this.desired);
+      if (alive) this.health(0); else void this.apply(this.desired);
     });
   }
 
@@ -127,7 +126,8 @@ export class EmbeddedDaemonManager {
     return this.enqueue(async (native) => { await native.networkChanged().catch(() => {}); });
   }
 
-  private health() {
+  /** iOS may have reclaimed the local server while suspended, so a return checks it at once. */
+  private health(delay = 15_000) {
     const run = ++this.healthRun;
     this.timer = setTimeout(() => {
       const endpoint = this.state.endpoint;
@@ -140,6 +140,6 @@ export class EmbeddedDaemonManager {
           if (!response.ok) void this.restart(); else this.health();
         }).catch(() => { if (run === this.healthRun) void this.restart(); })
         .finally(() => clearTimeout(timeout));
-    }, 15_000);
+    }, delay);
   }
 }

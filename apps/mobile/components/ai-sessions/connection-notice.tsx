@@ -1,12 +1,23 @@
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import { useAIDeviceLink } from "@/data/ai-sessions/provider";
 
+/** Long enough for a dead path to be found and redialed after returning to the app. */
+const OFFLINE_NOTICE_DELAY_MS = 8_000;
+
 export function ConnectionNotice({ connected, subscriptionRejected = false, onRetrySubscription }: { connected: boolean; subscriptionRejected?: boolean; onRetrySubscription?: () => void }) {
   const { error, retry } = useAIDeviceLink();
   const { t } = useT("aiSessions");
+  const [offlineSettled, setOfflineSettled] = useState(false);
+  useEffect(() => {
+    if (connected) return;
+    const timer = setTimeout(() => setOfflineSettled(true), OFFLINE_NOTICE_DELAY_MS);
+    return () => { clearTimeout(timer); setOfflineSettled(false); };
+  }, [connected]);
+  if (!connected && !error && !offlineSettled) return null;
   if (connected && !error) {
     if (!subscriptionRejected) return null;
     return <View className="mx-4 my-2 rounded-lg bg-secondary p-3 gap-2" accessibilityRole="alert">

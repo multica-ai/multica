@@ -60,7 +60,8 @@ func (c *p2pRegistryClient) watch(ctx context.Context, changed func() error) err
 
 // networkFingerprint reads local kernel state only; it sends no probe packets.
 // Include gateways and source addresses to notice VPN/default-route changes
-// even when the Wi-Fi interface itself stays up.
+// even when the Wi-Fi interface itself stays up. A tunnel that takes no default
+// route, such as the one Xcode opens to a phone on a cable, changes nothing here.
 func networkFingerprint() (string, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -68,7 +69,7 @@ func networkFingerprint() (string, error) {
 	}
 	var parts []string
 	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || p2p.IsTunnelInterface(iface) {
 			continue
 		}
 		addrs, err := iface.Addrs()

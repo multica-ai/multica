@@ -211,6 +211,18 @@ func (c *Client) NetworkChanged() {
 	}
 }
 
+// Backgrounded saves diagnostics, since iOS may end the process without notice.
+// The link itself keeps running.
+func (c *Client) Backgrounded() { c.ring.Save() }
+
+// Foregrounded verifies connections when the app returns, since iOS may have
+// suspended it. The link stays up in the background until iOS decides otherwise.
+func (c *Client) Foregrounded() {
+	if c.ctx.Err() == nil {
+		c.svc.RecheckPaths()
+	}
+}
+
 // UpdateToken replaces the login credential for later registry calls. Device
 // connections do not depend on it, so they stay up.
 func (c *Client) UpdateToken(token string) {
@@ -242,13 +254,7 @@ func (c *Client) Endpoint() string {
 }
 
 // Close also closes hijacked WebSockets, which http.Server.Close does not own.
-func (c *Client) Close() { c.close(timing.ReasonStopped) }
-
-// CloseInBackground is Close when iOS ends the app's background grace, so the link's
-// record says why it stopped.
-func (c *Client) CloseInBackground() { c.close(timing.ReasonBackground) }
-
-func (c *Client) close(reason string) {
+func (c *Client) Close() {
 	c.once.Do(func() {
 		c.cancel()
 		_ = c.server.Close()
@@ -261,7 +267,7 @@ func (c *Client) close(reason string) {
 		for _, tunnel := range tunnels {
 			tunnel.Close()
 		}
-		_ = c.svc.CloseBecause(reason)
+		_ = c.svc.Close()
 		c.ring.Save()
 	})
 }

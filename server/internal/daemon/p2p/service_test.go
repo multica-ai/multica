@@ -284,27 +284,6 @@ func TestPeerReconnectsAtNewAddressAfterDisconnect(t *testing.T) {
 	}
 }
 
-func TestUnresponsivePeerConnectionIsClosedForReconnect(t *testing.T) {
-	keyA, idA := newKey(t)
-	keyB, idB := newKey(t)
-	acct := &testAccount{}
-	acct.set(Peer{ID: idA}, Peer{ID: idB})
-	a, b := startDevice(t, keyA, acct, ""), startDevice(t, keyB, acct, "")
-	introduce(a, b)
-	if !waitFor(t, 5*time.Second, func() bool { return a.host.Network().Connectedness(idB) == network.Connected }) {
-		t.Fatal("initial connection failed")
-	}
-	// Keep the transport open but stop answering pings, as a stale network path does.
-	b.host.SetStreamHandler(ping.ID, func(st network.Stream) { defer st.Close(); _, _ = io.Copy(io.Discard, st) })
-	conns := a.host.Network().ConnsToPeer(idB)
-	a.checkPeer(idB)
-	for _, c := range conns {
-		if !c.IsClosed() {
-			t.Fatal("unresponsive connection remained cached")
-		}
-	}
-}
-
 func TestRegistryInvalidationInterruptsPeerDialBackoff(t *testing.T) {
 	keyA, idA := newKey(t)
 	keyB, idB := newKey(t)
@@ -394,33 +373,6 @@ func TestNetworkChangeKeepsHealthyPathsAndItsStreams(t *testing.T) {
 	_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := io.ReadFull(st, buf); err != nil {
 		t.Fatalf("stream did not survive a network change on a healthy path: %v", err)
-	}
-}
-
-func TestNetworkChangeClosesAPathThatStoppedResponding(t *testing.T) {
-	keyA, idA := newKey(t)
-	keyB, idB := newKey(t)
-	acct := &testAccount{}
-	acct.set(Peer{ID: idA}, Peer{ID: idB})
-	a := startDevice(t, keyA, acct, "", "/ip4/127.0.0.1/tcp/0")
-	b := startDevice(t, keyB, acct, "", "/ip4/127.0.0.1/tcp/0")
-	introduce(a, b)
-	if !waitFor(t, 5*time.Second, func() bool { return peerStatus(a, idB).Connected }) {
-		t.Fatal("not connected")
-	}
-	old := a.host.Network().ConnsToPeer(idB)
-	// Accepts a ping and never answers, like a path whose route has gone.
-	b.host.SetStreamHandler(ping.ID, func(st network.Stream) { defer st.Close(); _, _ = io.Copy(io.Discard, st) })
-	a.NetworkChanged()
-	if !waitFor(t, 3*time.Second, func() bool {
-		for _, conn := range old {
-			if !conn.IsClosed() {
-				return false
-			}
-		}
-		return true
-	}) {
-		t.Fatal("unresponsive path retained after a network change")
 	}
 }
 
@@ -514,7 +466,9 @@ func TestPeerProbePreservesAnAlreadyHealthyReplacementPath(t *testing.T) {
 			replacement = conn
 		}
 	}
-	a.checkPeerWithin(idB, time.Second)
+	for range peerProbeMisses {
+		a.checkPeerWithin(idB, 200*time.Millisecond)
+	}
 	if !old.IsClosed() {
 		t.Fatal("stale original path retained")
 	}

@@ -113,7 +113,7 @@ func startMigrationFixture(t *testing.T) *migrationFixture {
 		return base64.StdEncoding.EncodeToString(raw)
 	}
 	for i, id := range []peer.ID{desktopID, phoneID} {
-		if _, err := store.Upsert(context.Background(), p2pserver.Device{UserID: "user-1", DaemonID: "d" + strconv.Itoa(i), PeerID: id.String(), PublicKey: publicKey(id)}, time.Now()); err != nil {
+		if _, _, err := store.Upsert(context.Background(), p2pserver.Device{UserID: "user-1", DaemonID: "d" + strconv.Itoa(i), PeerID: id.String(), PublicKey: publicKey(id)}, time.Now(), time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,5 +93,60 @@ func TestDeviceEventsAreAuthenticatedScopedAndRemovedOnDisconnect(t *testing.T) 
 			t.Fatal("watch subscriptions leaked")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestRepeatedRegistrationOnlyNotifiesWhenTheDeviceChanged(t *testing.T) {
+	h := newHarness(t)
+	key, _ := newKey(t)
+	updates := make(chan struct{}, 1)
+	h.srv.watchMu.Lock()
+	h.srv.watchers = map[string]map[chan struct{}]struct{}{"user-alice": {updates: {}}}
+	h.srv.watchMu.Unlock()
+	register := func(name string, addrs ...string) bool {
+		t.Helper()
+		if code, _ := h.do(t, http.MethodPost, "/v1/devices", "tok-alice", registerRequest{DaemonID: "a", PublicKey: key, DeviceName: name, Addrs: addrs}); code != http.StatusOK {
+			t.Fatal(code)
+		}
+		select {
+		case <-updates:
+			return true
+		default:
+			return false
+		}
+	}
+	const lan, hotspot = "/ip4/192.168.1.5/tcp/1", "/ip4/172.20.10.2/tcp/1"
+	if !register("Mac", lan) {
+		t.Fatal("new device not announced")
+	}
+	if register("Mac", lan) {
+		t.Fatal("unchanged refresh announced")
+	}
+	if !register("Mac", hotspot) {
+		t.Fatal("new address not announced")
+	}
+	if !register("MacBook", hotspot) {
+		t.Fatal("new name not announced")
+	}
+}
+
+func TestRegistrationAfterExpiryIsAnnouncedEvenWithSameAddresses(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "p2p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	device := Device{UserID: "u", DaemonID: "d", PeerID: "p", PublicKey: "k", Addrs: []string{"/ip4/192.168.1.5/tcp/1"}}
+	start := time.Now()
+	ctx := context.Background()
+	if _, changed, err := store.Upsert(ctx, device, start, start.Add(-time.Hour)); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if _, changed, err := store.Upsert(ctx, device, start.Add(time.Minute), start.Add(-time.Hour)); err != nil || changed {
+		t.Fatal(changed, err)
+	}
+	later := start.Add(3 * time.Hour)
+	if _, changed, err := store.Upsert(ctx, device, later, later.Add(-time.Hour)); err != nil || !changed {
+		t.Fatal(changed, err)
 	}
 }

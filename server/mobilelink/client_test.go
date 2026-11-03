@@ -309,6 +309,18 @@ func TestTokenUpdateRestoresRegistryAccessWithoutRestart(t *testing.T) {
 	}
 }
 
+func TestForegroundedIsSafeAfterClose(t *testing.T) {
+	registry, _ := fakeRegistry(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "{}") }, func(string) bool { return true })
+	config, _ := json.Marshal(map[string]string{"registryUrl": registry.URL, "apiUrl": "https://api.multica.test", "token": "login", "userId": "user-1", "storagePath": t.TempDir(), "deviceName": "Phone"})
+	client, err := Start(string(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Foregrounded()
+	client.Close()
+	client.Foregrounded()
+}
+
 func TestNetworkChangedIsSafeAfterClose(t *testing.T) {
 	registry, _ := fakeRegistry(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("{}")) }, func(string) bool { return true })
 	client := startTestClient(t, registry.URL)
@@ -381,18 +393,48 @@ func TestDiagnosticsSurviveAStoppedLinkAndSayWhyItStopped(t *testing.T) {
 		return client
 	}
 	first := start()
-	first.CloseInBackground()
+	first.Close()
 	second := start()
 	t.Cleanup(second.Close)
 	records, _, _ := diagnostics(t, second, "")
 	stopped := false
 	for _, r := range records {
-		if r.Stage == timing.StageLinkStop && r.Reason == timing.ReasonBackground {
+		if r.Stage == timing.StageLinkStop && r.Reason == timing.ReasonStopped {
 			stopped = true
 		}
 	}
 	if !stopped {
-		t.Fatalf("no background stop in %+v", records)
+		t.Fatalf("no stop in %+v", records)
+	}
+}
+
+func TestBackgroundingSavesDiagnosticsAndKeepsTheLinkRunning(t *testing.T) {
+	registry, _ := fakeRegistry(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "{}") }, func(string) bool { return true })
+	storage := t.TempDir()
+	start := func() *Client {
+		config, _ := json.Marshal(map[string]string{"registryUrl": registry.URL, "apiUrl": "https://api.multica.test", "token": "login", "userId": "user-1", "storagePath": storage, "deviceName": "Phone"})
+		client, err := Start(string(config))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(client.Close)
+		return client
+	}
+	first := start()
+	first.Backgrounded()
+	if first.ctx.Err() != nil {
+		t.Fatal("backgrounding stopped the link")
+	}
+	// A second start reads what a killed process would have left behind.
+	records, _, _ := diagnostics(t, start(), "")
+	starts := 0
+	for _, r := range records {
+		if r.Stage == timing.StageLinkStart {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("link starts = %d in %+v", starts, records)
 	}
 }
 

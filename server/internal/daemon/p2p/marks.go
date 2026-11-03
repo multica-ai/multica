@@ -112,14 +112,16 @@ func (s *Service) noteConnection(c network.Conn, connected bool) {
 	if !changed {
 		return
 	}
-	stage, kind, transport := timing.StageConnectionLost, "", ""
+	stage, kind, transport, reason := timing.StageConnectionLost, "", "", ""
 	switch state {
 	case ConnectionDirect:
 		stage, kind, transport = timing.StageConnectionDirect, s.connectedAddrType(id), s.connectedTransport(id)
 	case ConnectionRelayed:
 		stage, kind, transport = timing.StageConnectionRelay, timing.AddrRelay, timing.TransportRelay
+	default:
+		reason = s.closeReason(c)
 	}
-	s.marks.Write(timing.Record{Stage: stage, Peer: id.String(), AddrType: kind, Transport: transport})
+	s.marks.Write(timing.Record{Stage: stage, Peer: id.String(), AddrType: kind, Transport: transport, Reason: reason})
 }
 
 // fetchState keeps a registry that stays down to one record, not one per refresh.

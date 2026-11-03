@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/netip"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -26,6 +28,7 @@ import (
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/libp2p/go-libp2p/x/rate"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/quic-go/quic-go"
 )
@@ -73,7 +76,7 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 	}
 
 	limits := rcmgr.DefaultLimits
-	rm, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()))
+	rm, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()), rcmgr.WithConnRateLimiters(deviceConnRateLimiter()))
 	if err != nil {
 		return fail(err)
 	}
@@ -121,6 +124,10 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 	sw, err := swarm.NewSwarm(self, ps, bus,
 		swarm.WithConnectionGater(gater),
 		swarm.WithResourceManager(rm),
+		// The detector is meant for dialing the open internet. Here a single offline
+		// device fails enough dials to get UDP and IPv6 refused for healthy devices.
+		swarm.WithUDPBlackHoleSuccessCounter(nil),
+		swarm.WithIPv6BlackHoleSuccessCounter(nil),
 	)
 	if err != nil {
 		return fail(err)
@@ -177,6 +184,25 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 	h.Start()
 	// The host closes the swarm; the remaining components are ours.
 	return &ownedHost{BasicHost: h, closers: []func() error{observed.Close, quicConns.Close, cm.Close, rm.Close, ps.Close}}, nil
+}
+
+// deviceConnRateLimiter replaces libp2p's public-node default of one connection
+// per IP every five seconds, which also counts outbound dials. One device's retry
+// tries every address it registered, and all relayed dials and the reservation
+// share the relay's IP, so the default let retries lock out the reservation.
+func deviceConnRateLimiter() *rate.Limiter {
+	limit := rate.Limit{RPS: 2, Burst: 64}
+	return &rate.Limiter{
+		NetworkPrefixLimits: []rate.PrefixLimit{
+			{Prefix: netip.MustParsePrefix("127.0.0.0/8"), Limit: rate.Limit{}},
+			{Prefix: netip.MustParsePrefix("::1/128"), Limit: rate.Limit{}},
+		},
+		SubnetRateLimiter: rate.SubnetLimiter{
+			IPv4SubnetLimits: []rate.SubnetLimit{{PrefixLength: 32, Limit: limit}},
+			IPv6SubnetLimits: []rate.SubnetLimit{{PrefixLength: 56, Limit: limit}},
+			GracePeriod:      time.Minute,
+		},
+	}
 }
 
 // ownedHost closes the components newHost created alongside the host.
