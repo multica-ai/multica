@@ -1547,6 +1547,9 @@ importers:
       '@types/use-sync-external-store':
         specifier: 0.0.6
         version: 0.0.6
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
 
   vendor/tutti/packages/analytics/core:
     dependencies:

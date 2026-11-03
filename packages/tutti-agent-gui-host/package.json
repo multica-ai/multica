@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test scripts/publish.test.mjs && vitest run --exclude 'scripts/**'",
+    "test": "node --test scripts/publish.test.mjs && vitest run --exclude 'scripts/**' && vitest run --root ../../vendor/tutti/packages/agent/gui agent-gui/agentGuiNode/composer/useComposerFocusAndDrop.spec.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

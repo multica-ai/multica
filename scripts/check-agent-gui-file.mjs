@@ -23,13 +23,16 @@ try {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText);
   await writeFile(join(temporary, "host.html"), `<html><body>
+    <input id="search" aria-label="Search conversations" placeholder="Search conversations">
     <iframe id="unrelated"></iframe><iframe id="gui" title="Agent GUI" style="width:100%;height:90vh"></iframe>
     <script type="module">
       import { isAgentGuiFrameMessage, agentGuiMessageTargetOrigin } from './frame-messaging.js';
       const gui = document.getElementById('gui');
-      const workspace = { agents: [], sessions: [], local: true };
+      const workspace = { agents: [], sessions: [], local: true, executionTargets: [
+        { id: 'local:codex', provider: 'codex', name: 'Codex', iconUrl: '', canInvoke: true, runtimeBound: true, runtimeOnline: true }
+      ] };
       const snapshot = { ...workspace, workspaceId: 'smoke-workspace', workspaceSlug: 'smoke',
-        userId: 'smoke-user', locale: 'en', theme: 'light', activeSessionId: null, hostVisible: true, hostActive: true };
+        userId: 'smoke-user', locale: 'en', theme: 'light', activeSessionId: null, selectedAgentId: 'local:codex', hostVisible: true, hostActive: true };
       window.evidence = { origin: location.origin, messages: [], rejectedSources: 0, requests: [], connected: false, rendered: false };
       window.addEventListener('message', event => {
         if (!isAgentGuiFrameMessage(event, gui.contentWindow)) {
@@ -40,10 +43,19 @@ try {
         if (event.data?.type === 'multica:agent-gui:rendered') window.evidence.rendered = true;
         if (event.data?.type !== 'multica:agent-gui:ready' || event.data.version !== 1) return;
         const channel = new MessageChannel();
+        window.setHostActive = (active, newConversationSequence) => {
+          snapshot.hostActive = active;
+          if (newConversationSequence !== undefined) snapshot.newConversationRequest = { sequence: newConversationSequence, projectPath: null };
+          channel.port1.postMessage({ type: 'event', event: { type: 'init', snapshot } });
+        };
+        window.appendPrompt = prompt => channel.port1.postMessage({
+          type: 'event', event: { type: 'appendPrompt', sequence: 1, prompt }
+        });
         channel.port1.onmessage = ({ data }) => {
           if (data.type !== 'request') return;
           window.evidence.requests.push(data.method);
-          const result = data.method === 'workspace.load' ? workspace : null;
+          const result = data.method === 'workspace.load' ? workspace
+            : data.method === 'models.list' ? { supported: true, models: [] } : null;
           channel.port1.postMessage({ type: 'response', id: data.id, result });
           window.evidence.connected = true;
         };
@@ -73,7 +85,7 @@ try {
     await expect.poll(() => page.evaluate(() => globalThis.evidence?.connected), { timeout: 25_000 }).toBe(true);
     await expect.poll(() => page.evaluate(() => globalThis.evidence?.rendered), { timeout: 25_000 }).toBe(true);
     const frame = page.frameLocator("#gui");
-    await expect(frame.getByText("What can Agent help you with?", { exact: true })).toBeVisible();
+    await expect(frame.getByRole("heading", { name: "What can Codex help you with?" })).toBeVisible();
     await expect(frame.getByRole("alert")).toHaveCount(0);
     const evidence = await page.evaluate(() => globalThis.evidence);
     assert.equal(evidence.origin, "file://");
@@ -82,15 +94,51 @@ try {
     assert.ok(evidence.requests.includes("workspace.load"));
     assert.equal(evidence.rejectedSources, 1);
     console.log(JSON.stringify({ round, ...evidence }));
+    const editor = frame.getByTestId("agent-gui-composer-editor");
+    await page.evaluate(() => globalThis.setHostActive(false));
+    await expect(frame.locator('[data-agent-gui-active="false"]')).toHaveCount(1);
+    await page.getByRole("textbox", { name: "Search conversations" }).click();
+    await page.evaluate(() => globalThis.setHostActive(true));
+    await expect(frame.locator('[data-agent-gui-active="true"]')).toHaveCount(1);
+    // Wait past both focus frames in the real file-origin child document.
+    await editor.evaluate(() => new Promise(resolve => {
+      globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve)));
+    }));
+    await expect(page.getByRole("textbox", { name: "Search conversations" })).toBeFocused();
+    await page.keyboard.type("Find my conversation");
+    await expect(page.getByRole("textbox", { name: "Search conversations" })).toHaveValue("Find my conversation");
+    await expect(editor).toHaveText("");
+    await page.evaluate(() => globalThis.setHostActive(true, 1));
+    await expect(editor).toBeFocused();
+    await editor.fill("Explicit draft focus still works");
+    await expect(editor).toContainText("Explicit draft focus still works");
+    await editor.fill("");
+    await page.getByRole("textbox", { name: "Search conversations" }).click();
+    await page.evaluate(() => globalThis.appendPrompt("Appended draft focus still works"));
+    await expect(editor).toBeFocused();
+    await expect(editor).toContainText("Appended draft focus still works");
+    await editor.fill("");
+    await page.evaluate(() => globalThis.setHostActive(false));
+    await expect(frame.locator('[data-agent-gui-active="false"]')).toHaveCount(1);
+    await page.getByRole("textbox", { name: "Search conversations" }).click();
+    await page.evaluate(() => {
+      globalThis.document.getElementById("search").blur();
+      globalThis.setHostActive(true);
+    });
+    await expect(editor).toBeFocused();
+    console.log(`PASS: round ${round} preserves parent search focus across host activation and honors explicit draft focus`);
   }
   assert.deepEqual(errors, []);
   console.log("PASS: packaged file-origin handshake, RPC, rendered view, reload and unrelated-frame rejection");
 } catch (error) {
+  console.error(error);
   if (page) {
     console.error(await page.evaluate(() => ({ evidence: globalThis.evidence, child: globalThis.document.querySelector("#gui")?.contentDocument?.body.innerText.slice(0, 1200) })).catch(() => null));
   }
   throw error;
 } finally {
+  // Draft guards must not keep this isolated test application alive.
+  await application?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
   await application?.close();
   await rm(temporary, { recursive: true, force: true });
 }

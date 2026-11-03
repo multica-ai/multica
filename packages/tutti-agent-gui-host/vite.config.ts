@@ -387,16 +387,6 @@ import { useOptionalAgentHostApi } from "../../../agentActivityHost";`,
     replacement: '  useAgentRichTextEditorHandle({\n    onBeforeOpenMentionPalette: () => mentionSuggestionSuppression.setRestoredValue(""),\n    availableCapabilitiesRef,',
   },
   {
-    path: "/composer/useComposerFocusAndDrop.ts",
-    original: 'composerFocusRequestSequence === null ||',
-    replacement: '!isActive || inputDisabled || composerFocusRequestSequence === null ||',
-  },
-  {
-    path: "/composer/useComposerFocusAndDrop.ts",
-    original: '[composerFocusRequestSequence, scheduleComposerFocus]',
-    replacement: '[composerFocusRequestSequence, scheduleComposerFocus, isActive, inputDisabled]',
-  },
-  {
     path: "/agentGuiNode/AgentMentionSearchController.ts",
     original: 'this.currentFilter = DEFAULT_AGENT_MENTION_FILTER;',
     replacement: '// Retain the last reference category within this composer lifetime.',

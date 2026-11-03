@@ -1,4 +1,10 @@
-import { useCallback, useEffect, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type RefObject
+} from "react";
 import type {
   AgentRichTextEditorHandle,
   AgentRichTextPastedImage
@@ -21,6 +27,36 @@ interface Input {
   onPromptImagesUnsupported?: () => void;
 }
 
+function canRestoreComposerFocus(composer: HTMLFormElement): boolean {
+  let owner: Element = composer;
+  let ownerDocument = composer.ownerDocument;
+  // The host's search lives outside the editor document. Walk the frame chain
+  // rather than treating an unfocused iframe body as permission to take focus.
+  while (true) {
+    const focused = ownerDocument.activeElement;
+    if (
+      focused &&
+      focused !== ownerDocument.body &&
+      focused !== ownerDocument.documentElement &&
+      focused !== owner &&
+      !owner.contains(focused)
+    ) {
+      return false;
+    }
+    try {
+      const frame = ownerDocument.defaultView?.frameElement;
+      if (!frame) {
+        return ownerDocument.defaultView?.parent === ownerDocument.defaultView;
+      }
+      owner = frame;
+      ownerDocument = frame.ownerDocument;
+    } catch {
+      // A cross-origin host cannot grant automatic focus restoration here.
+      return false;
+    }
+  }
+}
+
 export function useComposerFocusAndDrop(input: Input) {
   const {
     composerControlsHardDisabled,
@@ -37,22 +73,48 @@ export function useComposerFocusAndDrop(input: Input) {
     addDraftFiles,
     onPromptImagesUnsupported
   } = input;
+  const pendingFocusFrameRef = useRef<number | null>(null);
+  const canFocusRef = useRef(false);
+  const cancelComposerFocus = useCallback(() => {
+    if (pendingFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingFocusFrameRef.current);
+      pendingFocusFrameRef.current = null;
+    }
+  }, []);
+  useLayoutEffect(() => {
+    canFocusRef.current =
+      isActive && !inputDisabled && !composerControlsHardDisabled;
+    return () => {
+      canFocusRef.current = false;
+      cancelComposerFocus();
+    };
+  }, [isActive, inputDisabled, composerControlsHardDisabled, cancelComposerFocus]);
   const handleMentionPaletteButton = useCallback((): void => {
     if (composerControlsHardDisabled || inputDisabled) {
       return;
     }
     editorHandleRef.current?.openMentionPalette();
-  }, [composerControlsHardDisabled, inputDisabled]);
-  const scheduleComposerFocus = useCallback(() => {
-    if (inputDisabled) {
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        editorHandleRef.current?.focusAtEnd();
+  }, [composerControlsHardDisabled, inputDisabled, editorHandleRef]);
+  const scheduleComposerFocus = useCallback(
+    (intent: "restore" | "explicit" = "explicit") => {
+      cancelComposerFocus();
+      if (!canFocusRef.current) {
+        return;
+      }
+      pendingFocusFrameRef.current = window.requestAnimationFrame(() => {
+        pendingFocusFrameRef.current = window.requestAnimationFrame(() => {
+          pendingFocusFrameRef.current = null;
+          if (!canFocusRef.current) return;
+          if (intent === "restore") {
+            const composer = composerRef.current;
+            if (!composer || !canRestoreComposerFocus(composer)) return;
+          }
+          editorHandleRef.current?.focusAtEnd();
+        });
       });
-    });
-  }, [inputDisabled]);
+    },
+    [cancelComposerFocus, composerRef, editorHandleRef]
+  );
   const handlePastedImages = useCallback(
     (images: AgentRichTextPastedImage[]): void => {
       addDraftImages(images);
@@ -77,12 +139,15 @@ export function useComposerFocusAndDrop(input: Input) {
       return;
     }
     if (!wasActiveRef.current) {
-      scheduleComposerFocus();
+      scheduleComposerFocus("restore");
     }
     wasActiveRef.current = true;
-  }, [isActive, scheduleComposerFocus]);
+  }, [isActive, scheduleComposerFocus, wasActiveRef]);
   useEffect(() => {
     if (
+      !isActive ||
+      inputDisabled ||
+      composerControlsHardDisabled ||
       composerFocusRequestSequence === null ||
       composerFocusRequestSequence === lastComposerFocusRequestRef.current
     ) {
@@ -90,7 +155,14 @@ export function useComposerFocusAndDrop(input: Input) {
     }
     lastComposerFocusRequestRef.current = composerFocusRequestSequence;
     scheduleComposerFocus();
-  }, [composerFocusRequestSequence, scheduleComposerFocus]);
+  }, [
+    isActive,
+    inputDisabled,
+    composerControlsHardDisabled,
+    composerFocusRequestSequence,
+    scheduleComposerFocus,
+    lastComposerFocusRequestRef
+  ]);
 
   return {
     fileDropOverlayActive,
