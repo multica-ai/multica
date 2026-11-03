@@ -37,6 +37,7 @@ import (
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
 //   - memories/     link to the agent's persistent store, isolated from the host
+//   - installs/     locally committed PM dependencies, preserved across turns
 //   - marker below  records that legacy shared SQLite state was detached
 //
 // The state.db SQLite family is classified dynamically by
@@ -66,6 +67,7 @@ var hermesOverriddenEntries = map[string]struct{}{
 	"skills":                   {},
 	"config.yaml":              {},
 	"memories":                 {},
+	"installs":                 {},
 	"active_profile":           {},
 	"profiles":                 {},
 	".env":                     {},
@@ -364,6 +366,15 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	// and the derived config below can hold inline api_key secrets.
 	if err := os.Chmod(hermesHome, 0o700); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("chmod hermes-home dir: %w", err)
+	}
+	// PM initializes installs locally; old links must not reuse another home's records.
+	installs := filepath.Join(hermesHome, "installs")
+	if fi, err := os.Lstat(installs); err == nil {
+		if !fi.IsDir() {
+			return hermesSessionMount{}, fmt.Errorf("hermes installs must be a task-local directory, not a symlink or file: %s", installs)
+		}
+	} else if !os.IsNotExist(err) {
+		return hermesSessionMount{}, fmt.Errorf("stat hermes installs: %w", err)
 	}
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("prepare task-local state: %w", err)
