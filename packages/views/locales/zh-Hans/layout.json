@@ -87,6 +87,7 @@
     "work": {
       "my_agents": "我的智能体在做",
       "all_issues": "全部任务",
+      "unread": "未读",
       "views": "视图",
       "new_project": "新建项目",
       "new_issue_in_project": "在 {{name}} 中新建任务",

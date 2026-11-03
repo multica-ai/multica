@@ -1727,7 +1727,8 @@
     "builtin": {
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク"
+      "all_issues": "すべてのタスク",
+      "unread": "未読"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",

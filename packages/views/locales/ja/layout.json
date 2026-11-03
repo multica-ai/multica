@@ -87,6 +87,7 @@
     "work": {
       "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
+      "unread": "未読",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",

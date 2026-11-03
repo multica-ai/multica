@@ -52,6 +52,7 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
+import { isUnreadView } from "@multica/core/issue-views/unread-view";
 import {
   isIssueViewModified,
   issueViewDefinitionFromState,
@@ -86,6 +87,7 @@ import type { IssueSurfaceController } from "../issues/surface/use-issue-surface
 import { useT } from "../i18n";
 import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
+import { UnreadViewIcon } from "./unread-view-icon";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
 
@@ -184,7 +186,15 @@ export function IssueViewHeader({
     ? modified!.filters || modified!.display
     : controller.hasActiveFilters;
   const canManage = activeView ? actions.canManage(activeView) : false;
-  const starId = activeView ? savedViewItemId(activeView.id) : builtinKey ? builtinViewItemId(builtinKey) : null;
+  const unreadView = isUnreadView(activeView);
+  const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
+  const starId = unreadView
+    ? null
+    : activeView
+      ? savedViewItemId(activeView.id)
+      : builtinKey
+        ? builtinViewItemId(builtinKey)
+        : null;
   const starred = starId ? actions.sidebar.isStarred(starId) : false;
   const renaming =
     !!activeView && renameTarget?.surface === "header" && renameTarget.viewId === activeView.id;
@@ -314,9 +324,9 @@ export function IssueViewHeader({
   const title = (
     <>
       <RefreshablePageIcon refreshing={controller.isRefreshing}>
-        {activeView ? <Layers className="size-4" /> : baseIcon}
+        {unreadView ? <UnreadViewIcon /> : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
-      <span className="min-w-0 truncate">{activeView ? activeView.name : baseName}</span>
+      <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
     </>
   );
 
@@ -359,7 +369,9 @@ export function IssueViewHeader({
                         {t(($) => $.views.rename)}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={() => actions.duplicate(activeView, "header")}>
+                    <DropdownMenuItem
+                      onClick={() => actions.duplicate({ ...activeView, name: activeViewName ?? "" }, "header")}
+                    >
                       <Copy className="size-3.5" />
                       {t(($) => $.views.duplicate)}
                     </DropdownMenuItem>
@@ -395,7 +407,9 @@ export function IssueViewHeader({
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <StarItem starred={starred} onToggle={() => starId && (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
+                    {starId && (
+                      <StarItem starred={starred} onToggle={() => (starred ? actions.sidebar.unstar(starId) : actions.sidebar.star(starId))} />
+                    )}
                     <DropdownMenuItem onClick={() => setActive(null)}>
                       <ArrowLeft className="size-3.5" />
                       {t(($) => $.views.back_to, { name: baseName })}
@@ -470,7 +484,7 @@ export function IssueViewHeader({
           showRelation={showRelation}
           hiddenFields={base.kind === "project" ? PROJECT_HIDDEN_FIELDS : undefined}
           modifiedKeys={modifiedKeys}
-          summaryTitle={activeView?.name ?? baseName}
+          summaryTitle={activeViewName ?? baseName}
           scopedIssues={controller.surfaceIssues}
           facetCountsExact={controller.facetCountsExact}
           tableFacetCounts={controller.tableFacetCounts}

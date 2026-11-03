@@ -87,6 +87,7 @@
     "work": {
       "my_agents": "我的 AI 代理在做",
       "all_issues": "全部任務",
+      "unread": "未讀",
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",

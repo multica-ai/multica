@@ -1727,7 +1727,8 @@
     "builtin": {
       "my_issues": "我的任務",
       "my_agents": "我的 AI 代理在做",
-      "all_issues": "全部任務"
+      "all_issues": "全部任務",
+      "unread": "未讀"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",

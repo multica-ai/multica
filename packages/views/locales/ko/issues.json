@@ -1727,7 +1727,8 @@
     "builtin": {
       "my_issues": "내 태스크",
       "my_agents": "내 에이전트의 작업",
-      "all_issues": "전체 태스크"
+      "all_issues": "전체 태스크",
+      "unread": "읽지 않음"
     },
     "untitled": "제목 없는 뷰",
     "copy_name": "{{name}} (사본)",

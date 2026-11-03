@@ -1795,7 +1795,8 @@
     "builtin": {
       "my_issues": "My Issues",
       "my_agents": "My agents' work",
-      "all_issues": "All issues"
+      "all_issues": "All issues",
+      "unread": "Unread"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

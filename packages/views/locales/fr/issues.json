@@ -1795,7 +1795,8 @@
     "builtin": {
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches"
+      "all_issues": "Toutes les tâches",
+      "unread": "Non lues"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

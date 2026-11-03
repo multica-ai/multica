@@ -6,6 +6,8 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { viewSidebarSource } from "@multica/core/issues/sidebar-list";
+import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
@@ -60,7 +62,7 @@ const adapter: NavigationAdapter = {
 
 const UNREAD_VIEW = {
   id: "v1",
-  name: "Unread",
+  name: "Mine unread",
   scope_type: "workspace",
   scope_id: null,
   scope_variant: null,
@@ -98,7 +100,13 @@ beforeEach(() => {
     group_key: null,
     parent_id: null,
   }));
-  setApiInstance({ listIssueUnread, listIssueTableRows } as unknown as ApiClient);
+  setApiInstance({
+    listIssueUnread,
+    listIssueTableRows,
+    listIssueViews: vi.fn(async () => []),
+    getIssueViewPreference: vi.fn(() => new Promise(() => {})),
+  } as unknown as ApiClient);
+  useActiveIssueViewStore.setState({ active: {} });
   actions.sidebar.items = [{ id: "view:v1", kind: "view", view: UNREAD_VIEW }];
   useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [viewSidebarSource("v1")] });
 });
@@ -128,5 +136,51 @@ describe("ViewsSection saved view with the unread filter", () => {
         }),
       ),
     );
+  });
+});
+
+const mark = (issueId: string) => ({
+  issue_id: issueId,
+  outcome: "completed",
+  agent_id: null,
+  created_at: "2026-01-01T00:00:00Z",
+});
+
+describe("ViewsSection built-in Unread view", () => {
+  beforeEach(() => {
+    actions.sidebar.items = [
+      { id: "builtin:all_issues", kind: "builtin", key: "all_issues" },
+      { id: "view:v1", kind: "view", view: UNREAD_VIEW },
+    ];
+    useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [] });
+  });
+
+  it("is hidden while nothing is unread", async () => {
+    listIssueUnread.mockResolvedValue([]);
+    renderSection();
+    await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
+    await screen.findByRole("link", { name: "All issues" });
+    expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull();
+  });
+
+  it("appears right after All issues with the unread count", async () => {
+    listIssueUnread.mockResolvedValue([mark("a"), mark("b")]);
+    renderSection();
+    const link = await screen.findByRole("link", { name: /^Unread/ });
+    expect(link).toHaveAttribute("href", "/acme/issues?view=unread");
+    expect(link.closest("li")).toHaveTextContent("Unread2");
+    const names = screen.getAllByRole("link").map((l) => l.textContent);
+    expect(names.slice(0, 3)).toEqual(["All issues", "Unread", "Mine unread"]);
+  });
+
+  it("stays while its page is open, even once everything is read", async () => {
+    listIssueUnread.mockResolvedValue([]);
+    useActiveIssueViewStore
+      .getState()
+      .setActive(issueViewContainerKey("ws-1", { scope_type: "workspace" }), UNREAD_VIEW_ID);
+    renderSection();
+    const link = await screen.findByRole("link", { name: /^Unread/ });
+    expect(link).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^All issues/ })).not.toHaveAttribute("aria-current");
   });
 });

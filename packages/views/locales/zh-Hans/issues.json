@@ -1727,7 +1727,8 @@
     "builtin": {
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
-      "all_issues": "全部任务"
+      "all_issues": "全部任务",
+      "unread": "未读"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

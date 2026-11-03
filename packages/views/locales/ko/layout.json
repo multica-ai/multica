@@ -87,6 +87,7 @@
     "work": {
       "my_agents": "내 에이전트의 작업",
       "all_issues": "전체 태스크",
+      "unread": "읽지 않음",
       "views": "뷰",
       "new_project": "새 프로젝트",
       "new_issue_in_project": "{{name}}에 새 태스크",
