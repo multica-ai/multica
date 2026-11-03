@@ -2802,6 +2802,31 @@ func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskRespon
 	resp.PriorSessionResumeUnavailable = true
 }
 
+// loadClaimParentIssue reads a sub-issue's parent for the claim payload. The
+// parent is context, not a precondition, so a failed read only drops it.
+func (h *Handler) loadClaimParentIssue(ctx context.Context, task *db.AgentTaskQueue, issue db.Issue) (*ClaimParentIssue, int32) {
+	parent, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          issue.ParentIssueID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("task claim: failed to load parent issue",
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+				"parent_issue_id", uuidToString(issue.ParentIssueID),
+				"error", err,
+			)
+		}
+		return nil, 0
+	}
+	return &ClaimParentIssue{
+		ID:     uuidToString(parent.ID),
+		Title:  parent.Title,
+		Status: parent.Status,
+	}, parent.Number
+}
+
 func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
@@ -2830,7 +2855,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.DispatchedAt = &generation
 		resp.StartClaimSupported = true
 	}
-	var issueNumber int32
+	var issueNumber, parentIssueNumber int32
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -3109,6 +3134,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		if issue.AssigneeID.Valid {
 			resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
+		}
+		if issue.ParentIssueID.Valid {
+			resp.ParentIssue, parentIssueNumber = h.loadClaimParentIssue(r.Context(), task, issue)
 		}
 		// This claim's own snapshot, recorded by FinalizeTaskClaim so a LATER
 		// run that resumes this one's session can compare against what THIS run
@@ -4063,6 +4091,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+		}
+		if resp.ParentIssue != nil && parentIssueNumber > 0 {
+			resp.ParentIssue.Identifier = service.IssueIdentifier(ws.IssuePrefix, parentIssueNumber)
 		}
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
