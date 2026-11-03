@@ -1,4 +1,4 @@
-// Package servicepreview serves explicitly shared loopback services over authenticated device streams.
+// Package servicepreview serves explicitly shared IP and localhost services over authenticated device streams.
 package servicepreview
 
 import (
@@ -205,19 +205,29 @@ func Loopback(host string) (string, bool) {
 		return "localhost", true
 	}
 	if host == "0.0.0.0" {
-		return "127.0.0.1", true
+		return host, true
 	}
 	ip, err := netip.ParseAddr(host)
 	if err == nil && ip.Unmap().IsLoopback() {
-		return ip.Unmap().String(), true
+		return ip.String(), true
 	}
 	return "", false
+}
+
+// serviceHost accepts literal IP targets without rewriting them to loopback.
+// Domains use the viewer's network and never enter the device service tunnel.
+func serviceHost(host string) (string, bool) {
+	normalized := strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if ip, err := netip.ParseAddr(normalized); err == nil && ip.Zone() == "" {
+		return ip.String(), true
+	}
+	return Loopback(host)
 }
 func (m *Manager) Create(ctx context.Context, peer string, scope int64, cmd Create) (Result, error) {
 	if peer == "" || scope < 1 {
 		return Result{}, fail("forbidden", 403)
 	}
-	host, ok := Loopback(cmd.Target.Host)
+	host, ok := serviceHost(cmd.Target.Host)
 	if cmd.Version != 1 || !ok || cmd.RequestID == "" || len(cmd.RequestID) > 160 || cmd.ConversationID == "" || len(cmd.ConversationID) > 160 || cmd.Target.Port < 1 || cmd.Target.Port > 65535 {
 		return Result{}, fail("invalid_request", 400)
 	}

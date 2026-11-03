@@ -87,3 +87,12 @@ it("renews open preview grants independently of window focus and stops after the
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(client.request.mock.calls.filter(([, , path]) => path.endsWith("/renew"))).toHaveLength(count);
 });
+
+it.each(["192.168.1.10", "8.8.8.8", "0.0.0.0", "[2001:db8::10]"])("opens an IP service on the source device without rewriting %s", async (host) => {
+  const { network, client, ses } = setup();
+  const url = `http://${host}:3000/path`;
+  await network.acquire(owner, target, url, ses, () => {});
+  expect(client.request).toHaveBeenCalledWith(expect.anything(), "POST", "/preview/services", expect.objectContaining({ target: { host: host.replace(/^\[|\]$/g, ""), port: 3000 } }), "peer");
+  const stream = await fake.proxies[0]!.options.connect({ host: host.replace(/^\[|\]$/g, ""), port: 3000, url }, new AbortController().signal);
+  expect(client.previewTunnel).toHaveBeenCalledOnce(); stream.destroy();
+});

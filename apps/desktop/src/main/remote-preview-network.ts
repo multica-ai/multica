@@ -5,7 +5,7 @@ import { z } from "zod";
 import { parseWithFallback } from "@multica/core/api/schema";
 import type { LocalConversationScope } from "@multica/core/local-conversation/protocol";
 import type { WebPreviewTarget, WebPreviewPhase } from "../shared/resource-preview";
-import { previewLoopbackHost } from "../shared/loopback-url";
+import { previewServiceHost } from "../shared/service-preview-url";
 import { LocalV2Client, LocalV2Error } from "./local-conversation-v2";
 import { createPreviewProxy, type PreviewDialTarget } from "./preview-proxy";
 import { connectPreviewEgress } from "./preview-egress";
@@ -41,7 +41,7 @@ export class RemotePreviewNetwork {
       if (!value.capabilities.includes("remote-service-preview-v1")) throw new Error("preview_unsupported: Update the other device to enable service preview");
     }).catch((error) => { ctx.supported = undefined; throw error; });
     await ctx.supported; this.assert(ctx);
-    const host = previewLoopbackHost(target.url); if (!host) throw new Error("preview_destination_denied: Not a remote loopback address");
+    const host = previewServiceHost(target.url); if (!host) throw new Error("preview_destination_denied: Expected an IP or localhost service address");
     const key = `${host}:${target.port}`; const existing = ctx.leases.get(key); if (existing) { const value = await existing; if (Date.parse(value.expires_at) > Date.now()) return value; ctx.leases.delete(key); }
     const pending = this.client.request(ctx.scope, "POST", "/preview/services", { version: 1, request_id: randomUUID(), conversation_id: ctx.target.conversationId, target: { host, port: target.port } }, ctx.target.deviceId).then((raw) => {
       const value = this.parse(raw);
@@ -53,13 +53,13 @@ export class RemotePreviewNetwork {
   private async dial(ctx: Context, target: PreviewDialTarget, signal: AbortSignal): Promise<Duplex> {
     this.assert(ctx);
     try {
-      if (!previewLoopbackHost(target.url)) { const socket = await connectPreviewEgress(target, signal, (url) => this.egress.resolveProxy(url)); ctx.error = undefined; return socket; }
+      if (!previewServiceHost(target.url)) { const socket = await connectPreviewEgress(target, signal, (url) => this.egress.resolveProxy(url)); ctx.error = undefined; return socket; }
       for (let attempt = 0; ; attempt++) {
         const lease = await this.lease(ctx, target); this.assert(ctx);
         try { const socket = await this.client.previewTunnel(ctx.scope, ctx.target.deviceId, lease.service_id, lease.capability, signal); ctx.error = undefined; return socket; }
         catch (error) {
           // A failed handshake has sent no webpage bytes, so an expired grant may be replaced once.
-          if (attempt === 0 && !signal.aborted && error instanceof Error && error.message.startsWith("service_expired:")) { ctx.leases.delete(`${previewLoopbackHost(target.url)}:${target.port}`); continue; }
+          if (attempt === 0 && !signal.aborted && error instanceof Error && error.message.startsWith("service_expired:")) { ctx.leases.delete(`${previewServiceHost(target.url)}:${target.port}`); continue; }
           throw error;
         }
       }
@@ -89,7 +89,7 @@ export class RemotePreviewNetwork {
       })();
       await current.ready; this.assert(current); phase("connecting_service");
       const parsed = new URL(url);
-      if (previewLoopbackHost(url)) await this.lease(current, { host: parsed.hostname.replace(/^\[|\]$/g, ""), port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)), url });
+      if (previewServiceHost(url)) await this.lease(current, { host: parsed.hostname.replace(/^\[|\]$/g, ""), port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)), url });
       this.assert(current); phase("loading");
     } catch (error) { this.release(current); if (error instanceof LocalV2Error) throw new Error(`${error.kind}: ${error.message}`); throw error; }
     let released = false; return () => { if (!released) { released = true; this.release(current); } };

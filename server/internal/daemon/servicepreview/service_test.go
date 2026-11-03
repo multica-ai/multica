@@ -43,7 +43,7 @@ func connect(t *testing.T, m *Manager, peer string, result Result) net.Conn {
 }
 func TestPreviewScopePolicyAndReceipts(t *testing.T) {
 	m, cmd := fixture(t)
-	for _, change := range []func(*Create){func(c *Create) { c.Target.Host = "192.168.1.1" }, func(c *Create) { c.Target.Port = 0 }, func(c *Create) { c.Target.Port++ }, func(c *Create) { c.ConversationID = "foreign" }} {
+	for _, change := range []func(*Create){func(c *Create) { c.Target.Host = "example.com" }, func(c *Create) { c.Target.Port = 0 }, func(c *Create) { c.Target.Port++ }, func(c *Create) { c.ConversationID = "foreign" }} {
 		other := cmd
 		change(&other)
 		if _, err := m.Create(context.Background(), "peer", 1, other); err == nil {
@@ -167,5 +167,77 @@ func TestPreviewRenewsAndLimitsStreamsPerPeerScope(t *testing.T) {
 	}
 	if _, err := m.change("peer", 1, result.ID, true); err == nil {
 		t.Fatal("removed port retained its grant")
+	}
+}
+
+func TestPreviewIPTargetsRetainAddressAndRequireSharedPort(t *testing.T) {
+	m, cmd := fixture(t)
+	for i, host := range []string{"192.168.1.10", "8.8.8.8", "169.254.169.254", "0.0.0.0", "::", "2001:db8::10", "::ffff:192.168.1.10"} {
+		cmd.RequestID = fmt.Sprintf("ip-%d", i)
+		cmd.Target.Host = host
+		result, err := m.Create(context.Background(), "peer", 1, cmd)
+		if err != nil {
+			t.Fatalf("IP target rejected: %s: %v", host, err)
+		}
+		if got := m.grants[result.ID].target.Host; got != host {
+			t.Fatalf("address rewritten: %s -> %s", host, got)
+		}
+	}
+	if err := m.SetPolicy(Policy{Enabled: true, Ports: []int{}}); err != nil {
+		t.Fatal(err)
+	}
+	cmd.RequestID = "unshared-ip"
+	if _, err := m.Create(context.Background(), "peer", 1, cmd); err == nil {
+		t.Fatal("unshared IP port accepted")
+	}
+}
+
+func TestPreviewDialsOriginalNonLoopbackIP(t *testing.T) {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host string
+	for _, address := range addresses {
+		network, ok := address.(*net.IPNet)
+		if ok && network.IP.To4() != nil && !network.IP.IsLoopback() {
+			host = network.IP.String()
+			break
+		}
+	}
+	if host == "" {
+		t.Skip("no non-loopback IPv4 interface available")
+	}
+	listener, err := net.Listen("tcp4", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, r.Host+r.URL.Path) }))
+	server.Listener.Close()
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	m, cmd := fixture(t)
+	cmd.Target.Host = host
+	cmd.Target.Port = listener.Addr().(*net.TCPAddr).Port
+	if err := m.SetPolicy(Policy{Enabled: true, Ports: []int{cmd.Target.Port}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.Create(context.Background(), "peer", 1, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := connect(t, m, "peer", result)
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	authority := net.JoinHostPort(host, strconv.Itoa(cmd.Target.Port))
+	_, _ = fmt.Fprintf(conn, "GET /original HTTP/1.1\r\nHost: %s\r\n\r\n", authority)
+	reply, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reply.Body.Close()
+	body, err := io.ReadAll(reply.Body)
+	if err != nil || string(body) != authority+"/original" {
+		t.Fatalf("wrong original address: %q: %v", body, err)
 	}
 }
