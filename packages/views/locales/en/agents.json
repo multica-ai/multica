@@ -2,6 +2,7 @@
   "page": {
     "title": "Agents",
     "new_agent": "New agent",
+    "search": "Search agents",
     "show_archived": "Show archived ({{count}}) →",
     "of_total": "{{visible}} of {{total}}",
     "list_load_failed": "Couldn't load agents",
@@ -46,11 +47,22 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent, then assign it issues."
+    "description": "An agent picks up the issues assigned to it and works through them on your runtime.",
+    "setup": {
+      "label": "Setup steps",
+      "runtime": "Connect a runtime",
+      "agent": "Create an agent",
+      "issue": "Assign it an issue",
+      "done": "(done)",
+      "connect_runtime": "Connect"
+    }
   },
   "no_matches": {
     "title": "No matches",
+    "search_active": "No agents match \"{{query}}\".",
+    "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
     "no_archived": "No archived agents yet.",
+    "search_archived": "No archived agents match \"{{query}}\".",
     "no_filter_match": "No agents match this filter.",
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
@@ -163,7 +175,7 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "advanced_settings": "Advanced settings",
+    "settings": "Settings",
     "copy_link": "Copy link",
     "copy_id": "Copy agent ID",
     "link_copied_toast": "Link copied",
@@ -221,7 +233,8 @@
   "panel": {
     "status": "Status",
     "runs_7d": "Runs (7d)",
-    "edit_access_aria": "Access: {{value}}. Change access"
+    "edit_access_aria": "Access: {{value}}. Change access",
+    "all_settings": "All settings"
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",
@@ -349,6 +362,7 @@
       "switch_runtime_failed": "Could not switch runtime. The conversation is still running on the previous one.",
       "switch_runtime_pending": "Stop the current reply to switch runtime.",
       "switch_runtime_success": "Runtime switched. Your draft is kept and the conversation continues on the new runtime with a fresh model session.",
+      "conversation_tab": "Conversation",
       "chat_title": "Agent Builder",
       "runtime_online": "Runtime online",
       "runtime_offline": "Runtime offline",
@@ -716,6 +730,7 @@
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
       "empty_link_to_settings": "Connect one in Settings → Integrations",
+      "open_settings": "Open settings",
       "connected": "Connected",
       "toggle_aria": "Allow {{toolkit}} for this agent",
       "saving": "Saving…",

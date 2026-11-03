@@ -10,11 +10,13 @@ import {
   Layers,
   Link2,
   ListTodo,
+  Plus,
   Star,
   Trash2,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -42,6 +44,7 @@ import { ActorAvatar } from "../common/actor-avatar";
 import {
   CollectionCreateButton,
   CollectionPageHeader,
+  CollectionPageState,
   CollectionScopeItems,
 } from "../layout/collection-page";
 import {
@@ -301,7 +304,19 @@ export function AllViewsPage() {
             </CollectionRowMenu>
           );
         }}
-        empty={t(($) => $.views.directory.no_matches)}
+        empty={
+          <CollectionPageState
+            icon={Layers}
+            title={t(($) => $.views.directory.empty_title)}
+            description={t(($) => $.views.directory.empty_description)}
+            actions={
+              <Button type="button" size="sm" onClick={newView}>
+                <Plus aria-hidden="true" />
+                {t(($) => $.views.directory.new_view)}
+              </Button>
+            }
+          />
+        }
       />
       <DeleteViewDialog
         view={deleteTarget}

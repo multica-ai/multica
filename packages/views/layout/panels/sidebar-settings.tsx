@@ -86,9 +86,11 @@ function SortSelect<T extends string>({
       }}
     >
       <SelectTrigger size="sm" className={className} aria-label={label}>
-        <SelectValue>{options.find((o) => o.value === value)?.label}</SelectValue>
+        <SelectValue>
+          <span className="truncate">{options.find((o) => o.value === value)?.label}</span>
+        </SelectValue>
       </SelectTrigger>
-      <SelectContent align="end">
+      <SelectContent align="end" className="w-auto min-w-(--anchor-width)">
         <SelectGroup>
           {options.map((o) => (
             <SelectItem key={o.value} value={o.value}>
@@ -184,6 +186,7 @@ function ProjectIssuesGroup({
     { value: "anyone", label: t(($) => $.panels.work.assignee_anyone) },
     { value: "me", label: t(($) => $.panels.work.assignee_me) },
     { value: "my_agents", label: t(($) => $.panels.work.assignee_my_agents) },
+    { value: "me_and_my_agents", label: t(($) => $.panels.work.assignee_me_and_my_agents) },
   ];
 
   return (
@@ -231,7 +234,7 @@ function ProjectIssuesGroup({
           value={settings.assignee}
           options={assigneeOptions}
           onChange={(assignee) => update({ assignee })}
-          className="w-36"
+          className="w-44"
         />
       </Field>
       <SwitchField

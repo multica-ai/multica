@@ -10,7 +10,10 @@ const navigation = vi.hoisted(() => ({ pathname: "/acme/issues" }));
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ pathname: navigation.pathname }),
 }));
-vi.mock("./panels/work-panel", () => ({ WorkPanel: () => <div data-testid="work-panel" /> }));
+vi.mock("./panels/work-panel", () => ({
+  WorkPanel: () => <div data-testid="work-panel" />,
+  KeptRowsRelease: () => null,
+}));
 vi.mock("./panels/team-panel", () => ({ TeamPanel: () => <div data-testid="team-panel" /> }));
 vi.mock("./panels/autopilots-panel", () => ({
   AutopilotsPanel: () => <div data-testid="autopilots-panel" />,

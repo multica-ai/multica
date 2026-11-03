@@ -6,7 +6,8 @@
  * the title a user sees in the mobile inbox MUST match what they see on
  * web for the same item. When the web version changes, sync this file.
  */
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, InboxSection } from "@multica/core/types";
+import { inboxItemSection } from "@multica/core/inbox/section";
 import { i18n } from "@/lib/i18n/singleton";
 
 function formatResetAt(value: string | undefined): string {
@@ -135,7 +136,30 @@ export function getInboxNavigationTarget(
  *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
+  return groupInboxItemsByIssue(items.filter((i) => !i.archived));
+}
+
+/**
+ * Active items split into the two Inbox sections, each grouped one entry per
+ * issue. Mirrors packages/core/inbox/queries.ts groupInboxItemsBySection: an
+ * issue with both kinds appears in both sections, and activity never moves
+ * its action entry.
+ */
+export function groupInboxItemsBySection(
+  items: InboxItem[],
+): Record<InboxSection, InboxItem[]> {
   const active = items.filter((i) => !i.archived);
+  return {
+    action: groupInboxItemsByIssue(
+      active.filter((i) => inboxItemSection(i) === "action"),
+    ),
+    activity: groupInboxItemsByIssue(
+      active.filter((i) => inboxItemSection(i) === "activity"),
+    ),
+  };
+}
+
+function groupInboxItemsByIssue(active: InboxItem[]): InboxItem[] {
   const groups = new Map<string, InboxItem[]>();
   for (const item of active) {
     const key = item.issue_id ?? item.id;

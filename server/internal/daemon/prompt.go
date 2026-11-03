@@ -72,6 +72,37 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	b.WriteString(buildProjectWorkflowBlock(task))
+	b.WriteString(buildParentIssueBlock(task))
+	return b.String()
+}
+
+// buildParentIssueBlock points a sub-issue's run at its parent. The sub-issue's
+// description is only what its author handed down; the decisions behind it stay
+// on the parent. A resumed session may already have read the parent, so it gets
+// the pointer without the full instruction. It still names the commands,
+// because a session resumed from before this block existed never saw them.
+func buildParentIssueBlock(task Task) string {
+	p := task.ParentIssue
+	if p == nil || p.ID == "" || task.IssueID == "" || task.ChatSessionID != "" {
+		return ""
+	}
+	name := p.ID
+	if p.Identifier != "" {
+		name = p.Identifier
+	}
+	getCmd := fmt.Sprintf("`multica issue get %s --output json`", p.ID)
+	scanCmd := fmt.Sprintf("`multica issue comment list %s --roots-only --summary --compact --output json`", p.ID)
+
+	var b strings.Builder
+	b.WriteString("[Parent issue]\n")
+	fmt.Fprintf(&b, "This issue is a sub-issue of %s \"%s\" (status: %s).", name, p.Title, p.Status)
+	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
+		fmt.Fprintf(&b, " If you have not read the parent in this session, read it before starting work: %s, then %s.\n\n", getCmd, scanCmd)
+		return b.String()
+	}
+	b.WriteString(" The discussion that produced this sub-issue — decisions, trade-offs, mockups — lives on the parent; this issue's description is only the part handed to you.\n")
+	fmt.Fprintf(&b, "Before starting work, read the parent: %s, then scan its threads with %s and expand the ones that shaped this sub-issue. `multica issue children %s --output json` shows what your sibling sub-issues cover.\n", getCmd, scanCmd, p.ID)
+	b.WriteString("This issue's description defines your scope; the parent is context. If they conflict, ask on this issue instead of picking one.\n\n")
 	return b.String()
 }
 
@@ -379,31 +410,11 @@ func buildQuickCreatePrompt(task Task) string {
 
 	// assignee
 	b.WriteString("- **assignee**:\n")
-	b.WriteString("    - When the user names someone (\"assign to X\" / \"@X\"), call `multica workspace member list --output json`, `multica agent list --output json`, and `multica squad list --output json` and find the matching entity by display name. Squads are first-class assignees too — a squad name (e.g. \"Super Human\") routes work to the squad leader, who then delegates. On a clean unambiguous match, prefer `--assignee-id <uuid>` using the `user_id` (member) or `id` (agent or squad) from that JSON — UUID matching is exact and robust to name collisions in workspaces with overlapping names. `--assignee <name>` (fuzzy) is acceptable as a fallback when names are unambiguous. On no match or ambiguous match, do NOT pass either flag — instead append a final line to the description: `Unrecognized assignee: X`.\n")
+	b.WriteString("    - When the user names someone (\"assign to X\" / \"@X\"), call `multica workspace member list --output json`, `multica agent list --output json`, and `multica squad list --output json` and find the matching entity by display name. Squads are first-class assignees too — a squad name (e.g. \"Super Human\") routes work to the squad leader, who then delegates. On a clean unambiguous match, prefer `--assignee-id <uuid>` using the `user_id` (member) or `id` (agent or squad) from that JSON — UUID matching is exact and robust to name collisions in workspaces with overlapping names. `--assignee <name>` (fuzzy) is acceptable as a fallback when names are unambiguous. On no match or ambiguous match, do NOT pass `--assignee`, `--assignee-id`, or `--assignee-picker` — instead append a final line to the description: `Unrecognized assignee: X`.\n")
 	b.WriteString("    - Treat bare @-routing as an assignee directive even when the user did not write the English word \"assign\". This includes Chinese imperatives like `让 @独立团 review 这个 PR`, `给 @X 处理`, or `交给 @X`; strip the leading `@`/`＠` before matching display names. Do not keep that routing wrapper or `@Name` in the description unless it is a true CC-style notification rather than ownership. If the matched entity is a squad, pass the squad's `id` as `--assignee-id`, not the leader agent's id.\n")
-	agentID := ""
-	agentName := ""
-	if task.Agent != nil {
-		agentID = task.Agent.ID
-		agentName = task.Agent.Name
-	}
-	switch {
-	case task.SquadID != "":
-		// The user opened quick-create with a SQUAD selected. The task
-		// runs on the squad's leader agent, but the squad is the expected
-		// owner — assigning to the leader would mask the squad's
-		// delegation flow. Always point the default at the squad UUID.
-		if task.SquadName != "" {
-			fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to the picker SQUAD %q: pass `--assignee-id %q` (the squad's UUID). The user opened quick-create with the squad selected; you (the leader agent) are running on the squad's behalf, so the squad — not you — is the expected owner. Never leave the issue unassigned, and do not assign it to your own agent UUID.\n\n", task.SquadName, task.SquadID)
-		} else {
-			fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to the picker SQUAD: pass `--assignee-id %q` (the squad's UUID). The user opened quick-create with the squad selected; you (the leader agent) are running on the squad's behalf, so the squad — not you — is the expected owner. Never leave the issue unassigned, and do not assign it to your own agent UUID.\n\n", task.SquadID)
-		}
-	case agentID != "":
-		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee-id %q` (your agent UUID). The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned. Use the UUID flag, not `--assignee <name>`, so the assignment is unambiguous even when other agents share part of your name.\n\n", agentID)
-	case agentName != "":
-		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned.\n\n", agentName)
-	default:
-		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee-id <your agent UUID>` (preferred) or `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
+	b.WriteString("    - When the user did NOT name an assignee, pass `--assignee-picker`. The CLI assigns the issue to the agent or squad selected in the quick-create modal using task context. Do not pass `--assignee` or `--assignee-id` for this default, and do not copy any picker UUID into the command. Never leave the issue unassigned in this case.\n\n")
+	if task.SquadID != "" {
+		b.WriteString("    - You are the leader agent running on behalf of the selected squad. For default assignment, use `--assignee-picker` to preserve squad ownership; do not substitute your own agent identity.\n\n")
 	}
 
 	if task.QuickCreateDueDate != "" {

@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "Aucun skill pour l'instant",
-      "description": "Créez ou importez un skill."
+      "description": "Un skill est une méthode de travail réutilisable par vos agents. Créez-en un, ou importez-le depuis un runtime."
     },
     "no_matches": {
       "title": "Aucune correspondance",

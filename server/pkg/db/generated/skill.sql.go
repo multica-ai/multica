@@ -688,6 +688,38 @@ func (q *Queries) SetAgentSkillEnabled(ctx context.Context, arg SetAgentSkillEna
 	return result.RowsAffected(), nil
 }
 
+const touchSkill = `-- name: TouchSkill :one
+UPDATE skill SET updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
+`
+
+type TouchSkillParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Supporting-file writes change the skill as a whole, so they bump the parent's
+// updated_at in the same transaction. Updating the row also takes its lock,
+// which serializes concurrent file writes on one skill with UpdateSkill.
+func (q *Queries) TouchSkill(ctx context.Context, arg TouchSkillParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, touchSkill, arg.ID, arg.WorkspaceID)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
+}
+
 const updateSkill = `-- name: UpdateSkill :one
 UPDATE skill SET
     name = COALESCE($2, name),

@@ -119,6 +119,9 @@
     "breadcrumb_title": "Tâches",
     "breadcrumb_workspace_fallback": "Espace de travail",
     "empty_title": "Aucune tâche pour l'instant",
+    "empty_description": "Une tâche est un travail concret confié à un membre ou à un agent. Assignée à un agent, elle démarre seule sur votre runtime.",
+    "break_down_with_chat": "Découper avec le chat",
+    "break_down_prompt": "Voici ce que je veux accomplir. Posez-moi les questions nécessaires, puis découpez-le en tâches dans cet espace de travail :\n\n",
     "move_failed": "Échec du déplacement de la tâche"
   },
   "status": {
@@ -258,8 +261,7 @@
     "advanced_group_match_trailing": "de ces conditions",
     "advanced_group_hint": "Les conditions de ce groupe sont reliées par « {{word}} »",
     "advanced_add_to_group": "Ajouter au groupe",
-    "advanced_turn_into_group": "Transformer en groupe",
-    "advanced_summary": "Affiche les tâches où {{summary}}"
+    "advanced_turn_into_group": "Transformer en groupe"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -414,7 +416,7 @@
       }
     },
     "search_placeholder": "Rechercher des tâches...",
-    "search_empty": "Aucune tâche ne correspond à votre recherche."
+    "search_empty": "Aucune tâche ne correspond à votre recherche"
   },
   "list": {
     "empty_status": "Aucune tâche",
@@ -454,6 +456,7 @@
     "metadata_description": "Données clé-valeur enregistrées par les agents et les intégrations pour poursuivre le workflow.",
     "section_load_failed_retry": "Échec du chargement. Réessayer",
     "not_found": "Cette tâche n'existe pas ou a été supprimée dans cet espace de travail.",
+    "not_found_title": "Tâche introuvable",
     "breadcrumb_project_unknown": "Projet inconnu",
     "back": "Retour",
     "title_placeholder": "Titre de la tâche",
@@ -769,6 +772,9 @@
     "hover_header_queued_other": "{{count}} agents en attente",
     "status_running": "Au travail",
     "status_queued": "En file d'attente",
+    "unread_completed": "{{agent}} a terminé · {{time}}",
+    "unread_failed": "L'exécution de {{agent}} a échoué · {{time}}",
+    "unread_manual": "Marqué comme non lu",
     "empty_hover": "Aucun agent au travail pour l'instant",
     "unknown_hover": "Agents au travail : pas encore chargé",
     "filter_active_label": "Affichage des tâches avec des agents au travail",
@@ -968,6 +974,8 @@
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
     "pin_to_sidebar": "Épingler à la barre latérale",
     "unpin_from_sidebar": "Détacher de la barre latérale",
+    "mark_read": "Marquer comme lu",
+    "mark_unread": "Marquer comme non lu",
     "copy_link": "Copier le lien",
     "copy_workdir_path": "Copier le chemin du répertoire de travail local",
     "copy_project_directory_path": "Copier le chemin du répertoire du projet",
@@ -1970,7 +1978,8 @@
       "star": "Ajouter {{name}} à la barre latérale",
       "unstar": "Retirer {{name}} de la barre latérale",
       "row_actions": "Actions pour {{name}}",
-      "no_matches": "Aucune vue ne correspond"
+      "empty_title": "Aucune vue enregistrée pour l'instant",
+      "empty_description": "Réglez les filtres et l'affichage d'une liste de tâches, puis enregistrez-les comme vue."
     }
   }
 }

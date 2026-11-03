@@ -76,7 +76,7 @@
     "header_rate": "Rate",
     "other_agents": "Other agents",
     "low_sample": "Fewer than {{count}} runs in this window — this rate is not meaningful.",
-    "no_data": "No failed runs in this window.",
+    "no_data": "No failed runs in this window",
     "show_reasons": "Show error codes",
     "hide_reasons": "Hide error codes",
     "show_all": "Show all {{count}}",
@@ -105,7 +105,7 @@
   },
   "empty": {
     "title": "No usage yet",
-    "body": "Run agents to see token usage and run time."
+    "body": "Once agents start running, token usage, cost, and failure rate show up here."
   },
   "duration": {
     "less_than_minute": "<1m"

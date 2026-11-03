@@ -176,3 +176,67 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+// TestPatchNotificationPreferencesRoutes covers the per-kind Inbox routing
+// keys: they take a section or "muted", while older groups keep all/muted.
+func TestPatchNotificationPreferencesRoutes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	reset := func() {
+		_, _ = testPool.Exec(ctx, `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	}
+	reset()
+	t.Cleanup(reset)
+
+	recorder := httptest.NewRecorder()
+	testHandler.PatchNotificationPreferences(
+		recorder,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"status_changes": "action",
+			"mentions":       "activity",
+			"agent_comments": "muted",
+			"assigned":       "all",
+			"comments":       "muted",
+		}),
+	)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Preferences map[string]string `json:"preferences"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := map[string]string{
+		"status_changes": "action",
+		"mentions":       "activity",
+		"agent_comments": "muted",
+		"comments":       "muted",
+	}
+	for key, value := range want {
+		if response.Preferences[key] != value {
+			t.Errorf("%s = %q, want %q (all: %#v)", key, response.Preferences[key], value, response.Preferences)
+		}
+	}
+
+	for _, invalid := range []map[string]string{
+		{"status_changes": "loud"},
+		{"comments": "action"},
+		{"system_notifications": "activity"},
+	} {
+		recorder := httptest.NewRecorder()
+		testHandler.PatchNotificationPreferences(recorder,
+			notificationPreferenceRequest(t, http.MethodPatch, invalid))
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("%v: status=%d, want 400", invalid, recorder.Code)
+		}
+	}
+}

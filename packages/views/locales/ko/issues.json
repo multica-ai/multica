@@ -117,6 +117,9 @@
     "breadcrumb_title": "태스크",
     "breadcrumb_workspace_fallback": "워크스페이스",
     "empty_title": "아직 태스크가 없습니다",
+    "empty_description": "태스크는 멤버나 에이전트에게 맡기는 구체적인 작업입니다. 에이전트에게 할당하면 런타임에서 바로 시작됩니다.",
+    "break_down_with_chat": "채팅으로 나누기",
+    "break_down_prompt": "다음 일을 하고 싶습니다. 필요한 것을 먼저 물어본 뒤 이 워크스페이스의 태스크로 나눠 주세요:\n\n",
     "move_failed": "태스크를 이동하지 못했습니다"
   },
   "status": {
@@ -252,8 +255,7 @@
     "advanced_group_match_trailing": "충족",
     "advanced_group_hint": "이 그룹의 조건은 '{{word}}'(으)로 연결됩니다",
     "advanced_add_to_group": "그룹에 추가",
-    "advanced_turn_into_group": "그룹으로 전환",
-    "advanced_summary": "조건: {{summary}}"
+    "advanced_turn_into_group": "그룹으로 전환"
   },
   "display": {
     "tooltip": "보기 설정",
@@ -408,7 +410,7 @@
       }
     },
     "search_placeholder": "태스크 검색...",
-    "search_empty": "검색 결과와 일치하는 태스크가 없습니다."
+    "search_empty": "검색 결과와 일치하는 태스크가 없습니다"
   },
   "list": {
     "empty_status": "태스크 없음",
@@ -448,6 +450,7 @@
     "metadata_description": "에이전트와 연동 기능이 작업 흐름을 이어가기 위해 기록하는 키와 값 데이터입니다.",
     "section_load_failed_retry": "불러오지 못했습니다. 다시 시도",
     "not_found": "이 워크스페이스에 해당 태스크가 없거나 삭제되었습니다.",
+    "not_found_title": "태스크를 찾을 수 없습니다",
     "breadcrumb_project_unknown": "알 수 없는 프로젝트",
     "back": "뒤로",
     "title_placeholder": "태스크 제목",
@@ -743,6 +746,9 @@
     "hover_header_queued_other": "대기 중인 에이전트 {{count}}개",
     "status_running": "작업 중",
     "status_queued": "대기 중",
+    "unread_completed": "{{agent}} 실행 완료 · {{time}}",
+    "unread_failed": "{{agent}} 실행 실패 · {{time}}",
+    "unread_manual": "읽지 않음으로 표시됨",
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
     "unknown_hover": "작업 중인 에이전트: 아직 불러오지 않았습니다",
     "filter_active_label": "에이전트가 작업 중인 태스크만 보는 중",
@@ -923,6 +929,8 @@
     "open_in_new_tab": "새 탭에서 열기",
     "pin_to_sidebar": "사이드바에 고정",
     "unpin_from_sidebar": "사이드바 고정 해제",
+    "mark_read": "읽음으로 표시",
+    "mark_unread": "읽지 않음으로 표시",
     "copy_link": "링크 복사",
     "copy_workdir_path": "로컬 작업 디렉터리 경로 복사",
     "copy_project_directory_path": "프로젝트 디렉터리 경로 복사",
@@ -1899,7 +1907,8 @@
       "star": "{{name}}을(를) 사이드바에 추가",
       "unstar": "{{name}}을(를) 사이드바에서 제거",
       "row_actions": "{{name}} 작업",
-      "no_matches": "일치하는 뷰가 없습니다"
+      "empty_title": "아직 저장된 뷰가 없습니다",
+      "empty_description": "태스크 목록에서 필터와 표시 방식을 맞춘 뒤 뷰로 저장하세요."
     }
   }
 }

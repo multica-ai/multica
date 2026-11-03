@@ -11,6 +11,7 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
+  Bot,
   ChevronRight,
   File,
   FileText,
@@ -81,6 +82,7 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { RichContent } from "../../rich-content";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
@@ -279,9 +281,7 @@ function SupportingFileList({
   const { t } = useT("skills");
   if (paths.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed px-3 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.files.supporting_empty)}
-      </div>
+      <ObjectSectionEmpty icon={File} description={t(($) => $.detail.files.supporting_empty)} />
     );
   }
   return (
@@ -314,9 +314,7 @@ function UsedByList({ agents }: { agents: Agent[] }) {
   const { t } = useT("skills");
   if (agents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed px-3 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.overview.used_by_empty)}
-      </div>
+      <ObjectSectionEmpty icon={Bot} description={t(($) => $.detail.overview.used_by_empty)} />
     );
   }
   return (

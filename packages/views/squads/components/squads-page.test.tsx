@@ -157,7 +157,7 @@ describe("SquadsPage header", () => {
     mocks.squads = [];
     renderPage();
 
-    expect(screen.getByText("No squads yet.")).toBeInTheDocument();
+    expect(screen.getByText("No squads yet")).toBeInTheDocument();
     const buttons = screen.getAllByRole("button", { name: "New squad" });
     await user.click(buttons[buttons.length - 1]!);
     expect(mocks.openModal).toHaveBeenCalledWith("create-squad");
