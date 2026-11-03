@@ -27,6 +27,7 @@ import type {
   CreateProjectResourceRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  MarkIssueInboxReadResult,
   Issue,
   IssueLabelsResponse,
   Label,
@@ -99,6 +100,7 @@ import {
   EMPTY_COMMENT,
   EMPTY_INBOX_LIST,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   EMPTY_ISSUE_FALLBACK,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
@@ -115,6 +117,7 @@ import {
   EMPTY_WORKSPACE_LIST,
   InboxListSchema,
   InboxUnreadSummarySchema,
+  MarkIssueInboxReadResultSchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
@@ -537,6 +540,20 @@ class ApiClient {
   // markInboxRead above and the project write endpoints): a malformed
   // archive response should surface naturally so the optimistic patch
   // rolls back.
+  // Marks every active notification on the issue read; called when an issue
+  // is opened so reading it anywhere settles the inbox too.
+  async markIssueInboxRead(issueId: string): Promise<MarkIssueInboxReadResult> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, {
+      method: "POST",
+    });
+    return parseWithFallback(
+      raw,
+      MarkIssueInboxReadResultSchema,
+      UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+      { endpoint: "POST /api/inbox/issues/:id/read" },
+    );
+  }
+
   async archiveInbox(id: string): Promise<InboxItem> {
     return this.fetch<InboxItem>(`/api/inbox/${id}/archive`, { method: "POST" });
   }

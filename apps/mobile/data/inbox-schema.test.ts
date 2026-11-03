@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
+import { parseWithFallback } from "@/lib/parse-response";
+import {
+  InboxListSchema,
+  InboxUnreadSummarySchema,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+} from "./schemas";
 
 /**
  * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox.
@@ -46,6 +52,29 @@ describe("inbox list schema", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data[0]?.type).toBe("status_changed");
     expect(parsed.success && parsed.data[0]?.details?.to).toBe("in_review");
+  });
+
+  it("keeps the inbox section and tolerates a missing or unknown one", () => {
+    const row = (section?: unknown) => ({
+      id: "inbox-s",
+      recipient_type: "member",
+      type: "status_changed",
+      ...(section === undefined ? {} : { section }),
+    });
+
+    const parsed = InboxListSchema.safeParse([
+      row("activity"),
+      row("action"),
+      row(),
+      row("someday"),
+    ]);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.map((i) => i.section)).toEqual([
+      "activity",
+      "action",
+      undefined,
+      undefined,
+    ]);
   });
 
   it("rejects a numeric details value", () => {
@@ -141,5 +170,25 @@ describe("inbox unread summary schema", () => {
     expect(
       InboxUnreadSummarySchema.safeParse([{ count: 3 }]).success,
     ).toBe(false);
+  });
+});
+
+describe("mark issue inbox read result schema", () => {
+  const parse = (raw: unknown) =>
+    parseWithFallback(
+      raw,
+      MarkIssueInboxReadResultSchema,
+      UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
+      { endpoint: "POST /api/inbox/issues/:id/read" },
+    );
+
+  it("keeps the server's count", () => {
+    expect(parse({ count: 2 })).toEqual({ count: 2 });
+  });
+
+  it("reports an unknown count for a malformed reply, so the caller refreshes", () => {
+    for (const raw of [null, "<html>", { count: "2" }, {}]) {
+      expect(parse(raw)).toEqual({ count: null });
+    }
   });
 });

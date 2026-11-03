@@ -45,6 +45,8 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -77,6 +79,24 @@ import {
 } from "./schemas";
 import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("MarkIssueInboxReadResultSchema", () => {
+  const endpoint = { endpoint: "POST /api/inbox/issues/:id/read" };
+
+  it("keeps the server's count", () => {
+    expect(
+      parseWithFallback({ count: 3 }, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
+    ).toEqual({ count: 3 });
+  });
+
+  it("reports an unknown count for a malformed reply", () => {
+    for (const raw of [null, "<html>", { count: "3" }, {}]) {
+      expect(
+        parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
+      ).toEqual({ count: null });
+    }
+  });
+});
 
 describe("IssueUnreadPageSchema", () => {
   const endpoint = "GET /api/issues/unread";

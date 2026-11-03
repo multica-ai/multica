@@ -816,6 +816,24 @@ describe("handleInboxNew", () => {
     });
   });
 
+  it("keeps activity quiet: no banner and no unread summary refresh", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    qc.setQueryData(inboxKeys.unreadSummary(), []);
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", actor_type: "agent", section: "activity" }),
+    );
+
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(qc.getQueryState(inboxKeys.unreadSummary())?.isInvalidated).toBe(false);
+  });
+
   it("invalidates the ITEM's workspace inbox cache and resolves its slug, not the active workspace's", async () => {
     const qc = createQueryClient();
     qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
