@@ -2513,6 +2513,24 @@ describe("IssueDetail (shared)", () => {
       expect(hasHighlightedCommentBackground(reply)).toBe(false);
     });
 
+    it("lands on a run that left no comment by its task id", async () => {
+      const taskId = "7c1f3a9e-2b4d-4e8a-9f60-0a1b2c3d4e5f";
+      const task: AgentTask = {
+        id: taskId, agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "failed", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: "2026-01-18T00:00:01Z", dispatched_at: "2026-01-18T00:00:01Z",
+        completed_at: "2026-01-18T00:05:00Z", result: null, error: "go test timed out",
+        delivered_comment_ids: [],
+      };
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+
+      renderIssueDetailWithHighlight(taskId);
+
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById(`comment-${taskId}`))).toBe(true);
+      });
+    });
+
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
       // Reproduces the inbox-click race: timeline data is in the cache
       // before the issue resolves. While loading is true, IssueDetail

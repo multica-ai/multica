@@ -3087,11 +3087,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Shared row renderer for both timeline render modes (flat / virtualized).
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
-  // a native `<a href="#comment-...">` anchor.
+  // a native `<a href="#comment-...">` anchor. A run that left no comment is
+  // addressed by its task id, which the sidebar's unread link lands on.
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
     if (item.kind === "run") {
       const reply = item.entry;
-      return <div className="pb-3" id={reply ? `comment-${reply.id}` : undefined}>
+      return <div className="pb-3" id={`comment-${item.id}`}>
         {reply?.resolved_at && !expandedResolved.has(reply.id) ? <ResolvedThreadBar
           entry={reply} replies={timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES}
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
