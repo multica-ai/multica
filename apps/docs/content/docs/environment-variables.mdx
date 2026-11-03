@@ -74,6 +74,14 @@ When the frontend and API run on different hosts and the browser talks to the AP
 Self-hosted deployments must set `FRONTEND_ORIGIN`. Without it, invitation links, cookie security attributes, and WebSocket origin checks can all disagree with your actual domain.
 </Callout>
 
+## Skill registry imports
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_SKILL_REGISTRY_HOSTS` | empty | Comma-separated exact registry hostnames (optionally `:port`) allowed as additional ClawHub-compatible skill import and refresh sources, e.g. `registry.example.com`. Set this on the API process. |
+
+Import from URL accepts `https://registry.example.com/skill` or `https://registry.example.com/owner/skill`; the last path segment is the skill slug (including slugs containing `--`). The URL scheme is preserved: HTTPS is the default when omitted, and HTTP requires explicitly entering `http://` (for trusted private-network registries only). The server probes `/.well-known/clawhub.json` for a same-origin relative `apiBase`, falling back to `/api/v1` if discovery fails. If a registry does not support per-file reads, it can serve `/download?slug=...` as a ZIP archive; redirects must remain on the registry origin. Existing ClawHub, Skills.sh, and GitHub imports are unchanged. Only list registry hosts you trust: importing a skill executes its instructions in agent workflows.
+
 ## Email and sign-in
 
 ### Resend
