@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -702,3 +703,96 @@ func TestSquadCharterBriefingDropsUnreadableCharter(t *testing.T) {
 
 // Avoid "imported and not used: pgtype" if helpers above are the only users.
 var _ pgtype.UUID
+
+// TestSquadInitiativesBriefing: the block names each initiative with the stage
+// the squad works now, in the order given, and a squad with none gets no block.
+func TestSquadInitiativesBriefing(t *testing.T) {
+	if got := squadInitiativesBriefing(nil); got != "" {
+		t.Fatalf("a squad with no initiative must get no block, got:\n%s", got)
+	}
+
+	out := squadInitiativesBriefing([]squadInitiative{
+		{Seq: 12, Title: "Invoicing tool", Stage: "define"},
+		{Seq: 3, Title: "  Pricing page ", Stage: "build"},
+	})
+	for _, want := range []string{
+		"## Initiatives your squad owns",
+		"- INI-12 Invoicing tool, stage define",
+		"- INI-3 Pricing page, stage build",
+		"multica initiative show INI-<seq> --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the initiatives block to contain %q\n--- block ---\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "INI-12") > strings.Index(out, "INI-3") {
+		t.Errorf("initiatives must keep the order they were given\n--- block ---\n%s", out)
+	}
+	if strings.HasSuffix(out, "\n") {
+		t.Errorf("the block must not end with a newline; the caller adds the separator")
+	}
+}
+
+// TestBuildSquadLeaderBriefing_InitiativesBlock: the leader lists the active and
+// operating initiatives whose current stage the squad owns, with the stage's
+// name from the pipeline and the days the initiative has spent in that stage.
+// Shelved and closed initiatives, and initiatives owned by another squad, are
+// left out.
+func TestBuildSquadLeaderBriefing_InitiativesBlock(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Initiative Owner Squad", "")
+	other := seedSquadForBriefing(t, leaderID, "Initiative Other Squad", "")
+
+	stages := fmt.Sprintf(`[{"key":"define","name":"Define","owner_squad_id":"%s"},{"key":"build","name":"Build","owner_squad_id":"%s"}]`,
+		util.UUIDToString(squad.ID), util.UUIDToString(other.ID))
+	var pipelineID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO pipeline (workspace_id, name, workflow_id, project_id, stages)
+		VALUES ($1, 'Briefing pipeline', gen_random_uuid(), gen_random_uuid(), $2::jsonb)
+		RETURNING id
+	`, testWorkspaceID, stages).Scan(&pipelineID); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM pipeline WHERE id = $1`, pipelineID)
+	})
+
+	insertInitiative := func(seq int, status, stageKey string, owner db.Squad, enteredAgo string) {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO initiative (workspace_id, pipeline_id, seq, title, stage_key, owner_squad_id,
+				status, issue_id, stage_entered_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, gen_random_uuid(), now() - $8::interval)
+			RETURNING id
+		`, testWorkspaceID, pipelineID, seq, fmt.Sprintf("Briefing initiative %d", seq), stageKey,
+			owner.ID, status, enteredAgo).Scan(&id); err != nil {
+			t.Fatalf("create initiative %d: %v", seq, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM initiative WHERE id = $1`, id)
+		})
+	}
+	insertInitiative(9101, "active", "define", squad, "3 days 2 hours")
+	insertInitiative(9102, "operating", "build", squad, "1 day")
+	insertInitiative(9103, "shelved", "define", squad, "1 day")
+	insertInitiative(9104, "closed", "define", squad, "1 day")
+	insertInitiative(9105, "active", "build", other, "1 day")
+
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, false, leaderNoWorkflow, false)
+	for _, want := range []string{
+		"## Initiatives your squad owns",
+		"- INI-9101 Briefing initiative 9101, stage Define, 3 days in stage",
+		"- INI-9102 Briefing initiative 9102, stage Build, 1 day in stage",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the briefing to contain %q\n--- briefing ---\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"INI-9103", "INI-9104", "INI-9105"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("the briefing must not list %s\n--- briefing ---\n%s", unwanted, out)
+		}
+	}
+}

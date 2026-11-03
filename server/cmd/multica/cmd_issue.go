@@ -684,6 +684,7 @@ func init() {
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
+	issueCreateCmd.Flags().String("assignee-squad", "", "Squad (id) to assign the issue to. With --parent it is a request to that squad, tagged squad_request so the digest can track its response time")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
@@ -1592,6 +1593,17 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if hasAssignee {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
+	}
+	if squadRef, _ := cmd.Flags().GetString("assignee-squad"); squadRef != "" {
+		if hasAssignee {
+			return fmt.Errorf("--assignee-squad cannot be combined with --assignee or --assignee-id")
+		}
+		squadID, err := resolveSquadRef(ctx, client, squadRef)
+		if err != nil {
+			return fmt.Errorf("resolve --assignee-squad: %w", err)
+		}
+		body["assignee_type"] = "squad"
+		body["assignee_id"] = squadID
 	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID

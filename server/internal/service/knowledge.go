@@ -51,6 +51,7 @@ var defaultKnowledgeBases = []struct{ Key, Name, Description string }{
 	{"product", "Product", "PRDs, specs, roadmap, analyses, user research."},
 	{"engineering", "Engineering", "Architecture decisions, runbooks, post-mortems."},
 	{"decisions", "Decisions", "Every proposal decision with its note, and the archive of briefs."},
+	{KnowledgeVentureBaseKey, "Ventures", "Every initiative's documents, one folder per initiative."},
 }
 
 // knowledgeDB is the part of *pgxpool.Pool the service needs: a transaction
@@ -74,6 +75,28 @@ type KnowledgeService struct {
 	UIURL string
 	// PingTimeout bounds the reachability check Status makes. Default 2s.
 	PingTimeout time.Duration
+	// Governance records automatic publishes. Nil means NoopGovernance until
+	// phase 4 (11.4) wires the governance log.
+	Governance GovernanceRecorder
+	// LLM is the chat, rerank and vision endpoint WeKnora uses. Nil or empty
+	// means no model is registered and Wiki and summaries stay off.
+	LLM *KnowledgeLLM
+	// UploadMaxBytes caps one uploaded file. Zero means DefaultKnowledgeUploadMaxBytes.
+	UploadMaxBytes int64
+	// Initiatives takes a published document into its initiative's checklist.
+	// Nil leaves initiatives out of knowledge writes.
+	Initiatives InitiativeArtifacts
+	// Issues files the Librarian's review requests. The freshness review needs it.
+	Issues *IssueService
+	// RepoDocs reads a repository's docs directory for the repo-docs sync. Nil
+	// means the git client in knowledge_repo_sync.go.
+	RepoDocs RepoDocsSource
+}
+
+// InitiativeArtifacts is what a published document reaches when it names an
+// initiative. The initiative service implements it.
+type InitiativeArtifacts interface {
+	LinkArtifact(ctx context.Context, ws, initiativeID, linkID pgtype.UUID, kind string, actor InitiativeActor) (bool, error)
 }
 
 // KnowledgeBaseView is one knowledge base as the API reports it.
@@ -83,6 +106,9 @@ type KnowledgeBaseView struct {
 	Name       string `json:"name"`
 	Visibility string `json:"visibility"`
 	Position   int32  `json:"position"`
+	// WikiEnabled and SummariesEnabled are the LLM-backed switches (plan 10.11).
+	WikiEnabled      bool `json:"wiki_enabled"`
+	SummariesEnabled bool `json:"summaries_enabled"`
 }
 
 // KnowledgeStatus is a workspace's knowledge state.
@@ -138,6 +164,7 @@ func (s *KnowledgeService) Status(ctx context.Context, workspaceID pgtype.UUID) 
 	for _, b := range bases {
 		out.KnowledgeBases = append(out.KnowledgeBases, KnowledgeBaseView{
 			ID: util.UUIDToString(b.ID), Key: b.Key, Name: b.Name, Visibility: b.Visibility, Position: b.Position,
+			WikiEnabled: b.WikiEnabled, SummariesEnabled: b.SummariesEnabled,
 		})
 	}
 
@@ -179,6 +206,11 @@ func (s *KnowledgeService) Enable(ctx context.Context, workspaceID, actorID pgty
 		s.markFailed(workspaceID)
 		return KnowledgeStatus{}, err
 	}
+	if err := s.SeedKnowledgeKinds(ctx, workspaceID); err != nil {
+		s.markFailed(workspaceID)
+		return KnowledgeStatus{}, err
+	}
+	s.ensureOwnerAccountLogged(ctx, workspaceID, actorID)
 	if _, err := s.Queries.SetWorkspaceKnowledgeState(ctx, db.SetWorkspaceKnowledgeStateParams{WorkspaceID: workspaceID, State: KnowledgeStateReady}); err != nil {
 		return KnowledgeStatus{}, fmt.Errorf("mark knowledge ready: %w", err)
 	}
@@ -277,6 +309,11 @@ func (s *KnowledgeService) provision(ctx context.Context, workspaceID, actorID p
 	}
 	if err := s.ensureKnowledgeBases(ctx, workspaceID, ws, model.ID); err != nil {
 		return err
+	}
+	// Degradable: a model that will not register leaves knowledge ready without
+	// summaries or Wiki, and the connection test says why.
+	if err := s.provisionLLM(ctx, workspaceID, ws); err != nil {
+		slog.Warn("knowledge: models not fully registered", "workspace_id", util.UUIDToString(workspaceID), "error", err)
 	}
 	serverID, err := s.ensureMCPServer(ctx, workspaceID, actorID, ws)
 	if err != nil {
@@ -387,18 +424,25 @@ func (s *KnowledgeService) ensureMCPServer(ctx context.Context, workspaceID, act
 	if len(kbIDs) == 0 {
 		return pgtype.UUID{}, errors.New("no workspace-visible knowledge bases to publish")
 	}
+	return s.ensureReadEndpoint(ctx, workspaceID, actorID, ws, KnowledgeMCPServerName, "Read-only company knowledge for Multica agents", kbIDs)
+}
+
+// ensureReadEndpoint makes sure a read-only endpoint over kbIDs exists in WeKnora
+// and in the workspace MCP library under name, and returns the library entry's
+// id. It serves the company-read endpoint and one endpoint per restricted base.
+func (s *KnowledgeService) ensureReadEndpoint(ctx context.Context, workspaceID, actorID pgtype.UUID, ws knowledge.Workspace, name, description string, kbIDs []string) (pgtype.UUID, error) {
 	endpoints, err := ws.ListMCPEndpoints(ctx)
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("list mcp endpoints: %w", err)
 	}
 	var endpoint *knowledge.MCPEndpoint
 	for i := range endpoints {
-		if endpoints[i].Name == KnowledgeMCPServerName {
+		if endpoints[i].Name == name {
 			endpoint = &endpoints[i]
 			break
 		}
 	}
-	entry, entryErr := s.Queries.GetWorkspaceMcpServerByName(ctx, db.GetWorkspaceMcpServerByNameParams{WorkspaceID: workspaceID, Name: KnowledgeMCPServerName})
+	entry, entryErr := s.Queries.GetWorkspaceMcpServerByName(ctx, db.GetWorkspaceMcpServerByNameParams{WorkspaceID: workspaceID, Name: name})
 	if entryErr != nil && !errors.Is(entryErr, pgx.ErrNoRows) {
 		return pgtype.UUID{}, fmt.Errorf("load mcp library entry: %w", entryErr)
 	}
@@ -408,8 +452,8 @@ func (s *KnowledgeService) ensureMCPServer(ctx context.Context, workspaceID, act
 	switch {
 	case endpoint == nil:
 		created, err := ws.CreateMCPEndpoint(ctx, knowledge.MCPEndpointSpec{
-			Name:             KnowledgeMCPServerName,
-			Description:      "Read-only company knowledge for Multica agents",
+			Name:             name,
+			Description:      description,
 			KnowledgeBaseIDs: kbIDs,
 			Tools:            knowledge.ReadOnlyMCPTools,
 		})
@@ -438,11 +482,11 @@ func (s *KnowledgeService) ensureMCPServer(ctx context.Context, workspaceID, act
 		return pgtype.UUID{}, fmt.Errorf("encode mcp library entry: %w", err)
 	}
 	created, err := s.Queries.CreateWorkspaceMcpServer(ctx, db.CreateWorkspaceMcpServerParams{
-		WorkspaceID: workspaceID, Name: KnowledgeMCPServerName, Config: cfg, CreatedBy: actorID,
+		WorkspaceID: workspaceID, Name: name, Config: cfg, CreatedBy: actorID,
 	})
 	if isUniqueViolation(err) {
 		// Someone created the library entry by hand meanwhile; keep theirs.
-		existing, getErr := s.Queries.GetWorkspaceMcpServerByName(ctx, db.GetWorkspaceMcpServerByNameParams{WorkspaceID: workspaceID, Name: KnowledgeMCPServerName})
+		existing, getErr := s.Queries.GetWorkspaceMcpServerByName(ctx, db.GetWorkspaceMcpServerByNameParams{WorkspaceID: workspaceID, Name: name})
 		if getErr != nil {
 			return pgtype.UUID{}, fmt.Errorf("load mcp library entry: %w", getErr)
 		}

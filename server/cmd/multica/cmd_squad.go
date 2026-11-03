@@ -564,4 +564,5 @@ func init() {
 	squadCmd.AddCommand(squadDeleteCmd)
 	squadCmd.AddCommand(squadMemberCmd)
 	squadCmd.AddCommand(squadActivityCmd)
+	squadCmd.AddCommand(squadDirectoryCmd)
 }

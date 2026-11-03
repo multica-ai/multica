@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -1293,6 +1294,15 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			// The WeKnora tenant is not removed here: it is queued and removed
+			// after its hold (plan 10.14). Runs before the final statement that
+			// deletes the knowledge registry the queue reads.
+			name: "queue knowledge teardown",
+			run: func() error {
+				return service.QueueKnowledgeTeardown(ctx, qtx, requester.WorkspaceID, time.Now())
+			},
+		},
+		{
 			name: "delete leaf data",
 			run:  func() error { return qtx.DeleteWorkspaceLeafData(ctx, requester.WorkspaceID) },
 		},
@@ -1429,6 +1439,23 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete proposals",
 			run:  func() error { return qtx.DeleteWorkspaceProposals(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Initiatives hold references to their backing issues and pipelines;
+			// the timeline and checklists go first, then the rows they belong to.
+			name: "delete initiatives",
+			run: func() error {
+				if err := qtx.DeleteWorkspaceInitiativeArtifacts(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceInitiativeStageEvents(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceInitiatives(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspacePipelines(ctx, requester.WorkspaceID)
+			},
 		},
 		{
 			name: "delete plugin data",

@@ -110,6 +110,10 @@ const (
 	// expired a proposal. Both change the proposal's state or body without a
 	// decision by the boss, so they get their own event.
 	EventProposalUpdated = "proposal:updated"
+	// EventInitiativeUpdated: an initiative moved, was waived, attested, shelved,
+	// resumed or closed, or its gate was decided. The payload carries the
+	// initiative as the API returns it.
+	EventInitiativeUpdated = "initiative:updated"
 
 	// A brief was published; the payload carries the whole brief. The inbox
 	// listener turns it into one brief_ready item per workspace owner.

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,6 +33,16 @@ type CreateKnowledgeDocumentRequest struct {
 	SourceID       *string `json:"source_id"`
 	IdempotencyKey string  `json:"idempotency_key"`
 	Publish        bool    `json:"publish"`
+
+	// Taxonomy. Every field is optional; see service.KnowledgeDocumentInput.
+	Kind             string   `json:"kind"`
+	InitiativeID     *string  `json:"initiative_id"`
+	InitiativeFolder string   `json:"initiative_folder"`
+	StageKey         string   `json:"stage_key"`
+	Confidence       string   `json:"confidence"`
+	ValidUntil       string   `json:"valid_until"`
+	SupersedesID     *string  `json:"supersedes_id"`
+	Tags             []string `json:"tags"`
 }
 
 // knowledgeStateBody is a response that carries a knowledge state next to its
@@ -42,6 +53,9 @@ type knowledgeStateBody struct {
 }
 
 func writeKnowledgeError(w http.ResponseWriter, r *http.Request, workspaceID string, err error) {
+	if writeTaxonomyError(w, err) {
+		return
+	}
 	var (
 		notReady *service.KnowledgeNotReadyError
 		invalid  *service.KnowledgeInvalidError
@@ -89,7 +103,7 @@ func knowledgeNotReadyState(err error) (string, bool) {
 // the workspace's knowledge state. Any member may read it.
 func (h *Handler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	view, err := h.Knowledge.Bases(r.Context(), parseUUID(workspaceID))
+	view, err := h.Knowledge.BasesFor(r.Context(), parseUUID(workspaceID), h.knowledgeReadActor(r, workspaceID))
 	if err != nil {
 		writeKnowledgeError(w, r, workspaceID, err)
 		return
@@ -100,7 +114,7 @@ func (h *Handler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
 // ListKnowledgeDocuments (GET /api/knowledge/documents?kb=&state=).
 func (h *Handler) ListKnowledgeDocuments(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	list, err := h.Knowledge.ListDocuments(r.Context(), parseUUID(workspaceID), r.URL.Query().Get("kb"), r.URL.Query().Get("state"))
+	list, err := h.Knowledge.ListDocumentsFor(r.Context(), parseUUID(workspaceID), h.knowledgeReadActor(r, workspaceID), r.URL.Query().Get("kb"), r.URL.Query().Get("state"))
 	if state, ok := knowledgeNotReadyState(err); ok {
 		list.State = state
 		err = nil
@@ -119,7 +133,7 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	result, err := h.Knowledge.Search(r.Context(), parseUUID(workspaceID), q.Get("q"), q.Get("kb"), limit)
+	result, err := h.Knowledge.SearchKindFor(r.Context(), parseUUID(workspaceID), h.knowledgeReadActor(r, workspaceID), q.Get("q"), q.Get("kb"), q.Get("kind"), limit)
 	if state, ok := knowledgeNotReadyState(err); ok {
 		result.State = state
 		err = nil
@@ -157,15 +171,35 @@ func (h *Handler) CreateKnowledgeDocument(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	// Publishing is a curator's decision: an agent's publish flag is ignored,
-	// whatever it sends (the service enforces the same).
+	in := service.KnowledgeDocumentInput{
+		KB: req.KB, Title: req.Title, Content: req.Content, URL: req.URL,
+		SourceType: req.SourceType, SourceID: sourceID, IdempotencyKey: req.IdempotencyKey,
+		// Publishing is a curator's decision: an agent's publish flag is ignored,
+		// whatever it sends (the service enforces the same).
+		Publish: req.Publish && actorType == "member",
+		Kind:    req.Kind, InitiativeFolder: req.InitiativeFolder, StageKey: req.StageKey,
+		Confidence: req.Confidence, Tags: req.Tags,
+	}
+	if req.InitiativeID != nil && *req.InitiativeID != "" {
+		if in.InitiativeID, ok = parseUUIDOrBadRequest(w, *req.InitiativeID, "initiative_id"); !ok {
+			return
+		}
+	}
+	if req.SupersedesID != nil && *req.SupersedesID != "" {
+		if in.SupersedesLinkID, ok = parseUUIDOrBadRequest(w, *req.SupersedesID, "supersedes_id"); !ok {
+			return
+		}
+	}
+	if req.ValidUntil != "" {
+		day, err := time.Parse("2006-01-02", req.ValidUntil)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "valid_until must be a date such as 2027-01-31")
+			return
+		}
+		in.ValidUntil = pgtype.Date{Time: day, Valid: true}
+	}
 	view, created, err := h.Knowledge.CreateDocument(r.Context(), parseUUID(workspaceID),
-		service.KnowledgeActor{Type: actorType, ID: actorUUID},
-		service.KnowledgeDocumentInput{
-			KB: req.KB, Title: req.Title, Content: req.Content, URL: req.URL,
-			SourceType: req.SourceType, SourceID: sourceID, IdempotencyKey: req.IdempotencyKey,
-			Publish: req.Publish && actorType == "member",
-		})
+		service.KnowledgeActor{Type: actorType, ID: actorUUID, Curator: h.knowledgeCurator(r, actorType)}, in)
 	if err != nil {
 		writeKnowledgeError(w, r, workspaceID, err)
 		return
@@ -194,7 +228,7 @@ func (h *Handler) PublishKnowledgeDocument(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	view, err := h.Knowledge.PublishDocument(r.Context(), parseUUID(workspaceID), id)
+	view, err := h.Knowledge.PublishDocument(r.Context(), parseUUID(workspaceID), id, h.knowledgeReadActor(r, workspaceID))
 	if err != nil {
 		writeKnowledgeError(w, r, workspaceID, err)
 		return

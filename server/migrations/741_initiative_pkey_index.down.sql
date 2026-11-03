@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS initiative_id_uidx;

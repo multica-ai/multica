@@ -1,0 +1,14 @@
+{
+  "user": {
+    "avatar": "",
+    "can_access_all_tenants": false,
+    "created_at": "2026-11-02T09:00:00.000000+08:00",
+    "email": "owner@example.test",
+    "id": "a1d6c2e0-3f0b-4c1e-9a55-0d7f2b9e8c11",
+    "is_active": true,
+    "is_system_admin": false,
+    "tenant_id": 10000,
+    "updated_at": "2026-11-02T09:00:00.000000+08:00",
+    "username": "mul-owner"
+  }
+}

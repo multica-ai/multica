@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	proposalkinds "github.com/multica-ai/multica/server/internal/service/proposal_kinds"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -73,6 +74,12 @@ const (
 // proposal; the issue's origin_id is the proposal id.
 const ProposalOriginType = "proposal"
 
+// ProposalPayloadError reports that the proposal kind refused the filing's
+// payload. Message names the problem for the filing agent.
+type ProposalPayloadError struct{ Message string }
+
+func (e *ProposalPayloadError) Error() string { return e.Message }
+
 // ProposalLimitError reports that an attention limit stopped a new proposal.
 // Message is written for the filing agent: it names the limit and what to do.
 type ProposalLimitError struct{ Message string }
@@ -106,6 +113,8 @@ var (
 	// ErrProposalSnoozeOutOfRange: the snooze date is not later than now, or is
 	// further away than ProposalMaxSnooze.
 	ErrProposalSnoozeOutOfRange = errors.New("until must be later than now and at most 30 days away")
+	// ErrProposalKindNotFilable: the kind is filed by the system, not by a squad.
+	ErrProposalKindNotFilable = errors.New("this kind of proposal is filed by the system, not by a squad")
 )
 
 // ProposalContent is the proposal body the squad writes. The service renders
@@ -151,6 +160,9 @@ func proposalExpiryInterval() pgtype.Interval {
 // ProposalService creates, decides and expires proposals.
 type ProposalService struct {
 	Issues *IssueService
+	// Kinds dispatches a filing and its decision to the kind's handler. Nil
+	// means the decision kind alone, which is what phase 1 and 2 callers get.
+	Kinds *proposalkinds.Registry
 	// Knowledge, when set, receives a record of each decision after it
 	// commits. A failure to record never fails the decision.
 	Knowledge DecisionRecorder
@@ -161,8 +173,19 @@ type ProposalService struct {
 	AppURL string
 }
 
-func NewProposalService(issues *IssueService) *ProposalService {
-	return &ProposalService{Issues: issues}
+// NewProposalService builds the proposal service. initiatives serves the kinds
+// that act on initiatives; it may be nil when no such kind is filed.
+func NewProposalService(issues *IssueService, initiatives proposalkinds.Initiatives) *ProposalService {
+	return &ProposalService{Issues: issues, Kinds: proposalkinds.NewRegistry(initiatives)}
+}
+
+// registry returns the kind registry, building the decision-only one when the
+// service was built without it.
+func (s *ProposalService) registry() *proposalkinds.Registry {
+	if s.Kinds == nil {
+		s.Kinds = proposalkinds.NewRegistry(nil)
+	}
+	return s.Kinds
 }
 
 // ProposalCreateParams are the already-authorized inputs to Create. The caller
@@ -176,6 +199,13 @@ type ProposalCreateParams struct {
 	UrgentReason   string
 	CreatorType    string // "agent" or "member"
 	CreatorID      pgtype.UUID
+	// Kind selects the proposal kind; empty is a decision. Payload is the
+	// kind's fields, checked by the kind's Validate.
+	Kind    string
+	Payload []byte
+	// SystemFiled marks a filing the system makes (a stage gate). Only those
+	// may file a kind the squads may not.
+	SystemFiled bool
 }
 
 // ProposalCreateResult carries the new rows. Events are the caller's to
@@ -199,6 +229,17 @@ type ProposalCreateResult struct {
 // IssueService.Create: that method owns its own transaction, and the proposal
 // and its issue must commit together.
 func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (ProposalCreateResult, error) {
+	kind, err := s.registry().Lookup(p.Kind)
+	if err != nil {
+		return ProposalCreateResult{}, err
+	}
+	if !kind.FiledByAgents() && !p.SystemFiled {
+		return ProposalCreateResult{}, ErrProposalKindNotFilable
+	}
+	payload, err := kind.Validate(ctx, proposalkinds.Env{Q: s.Issues.Queries, WorkspaceID: p.WorkspaceID, SquadID: p.SquadID}, p.Payload)
+	if err != nil {
+		return ProposalCreateResult{}, &ProposalPayloadError{Message: err.Error()}
+	}
 	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Issues.Entitlements, p.WorkspaceID)
 
 	tx, err := s.Issues.TxStarter.Begin(ctx)
@@ -293,6 +334,8 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 		CreatedByType:  p.CreatorType,
 		CreatedByID:    p.CreatorID,
 		ExpiryWindow:   proposalExpiryInterval(),
+		Kind:           kind.Key(),
+		Payload:        payload,
 	})
 	if err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("create proposal: %w", err)
@@ -422,6 +465,9 @@ type ProposalDecideParams struct {
 	Note string
 	// Until is the snooze end. Only used by ProposalDecisionSnooze.
 	Until time.Time
+	// Outcome is the boss's choice at an operate-stage review gate: continue,
+	// scale or sunset. Only a stage_gate approval takes one.
+	Outcome string
 	// Kickoff is passed through to IssueService.Create for the handoff
 	// kickoff issue, so the handler can supply its issue:created payload.
 	Kickoff IssueCreateOpts
@@ -514,23 +560,20 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 		state, issueStatus = ProposalStateRejected, "cancelled"
 	}
 
-	if p.Decision == ProposalDecisionApprove && current.HandoffSquadID.Valid {
-		if _, err := liveSquad(ctx, qtx, p.WorkspaceID, current.HandoffSquadID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ProposalDecideResult{}, ErrProposalHandoffSquadNotFound
-			}
-			return ProposalDecideResult{}, err
-		}
-		project, err := qtx.CreateProject(ctx, db.CreateProjectParams{
-			WorkspaceID: p.WorkspaceID,
-			Title:       issue.Title,
-			Status:      "planned",
-			Priority:    "none",
-		})
+	kind, err := s.registry().Lookup(current.Kind)
+	if err != nil {
+		return ProposalDecideResult{}, err
+	}
+	decision := proposalkinds.Decision{
+		Tx: tx, WorkspaceID: p.WorkspaceID, Proposal: current, Issue: issue,
+		DeciderID: p.DeciderID, Note: p.Note, Outcome: p.Outcome,
+	}
+	if p.Decision == ProposalDecisionApprove {
+		effect, err := kind.Apply(ctx, qtx, decision)
 		if err != nil {
-			return ProposalDecideResult{}, fmt.Errorf("create handoff project: %w", err)
+			return ProposalDecideResult{}, mapKindError(err)
 		}
-		result.Project = &project
+		result.Project = effect.Project
 	}
 
 	decided, err := qtx.DecideProposal(ctx, db.DecideProposalParams{
@@ -563,6 +606,9 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 			return ProposalDecideResult{}, err
 		}
 		result.Comment = &comment
+		if err := kind.Reject(ctx, qtx, decision); err != nil {
+			return ProposalDecideResult{}, mapKindError(err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -639,6 +685,15 @@ func (s *ProposalService) askForChanges(ctx context.Context, p ProposalDecidePar
 		return ProposalDecideResult{}, fmt.Errorf("commit: %w", err)
 	}
 	return ProposalDecideResult{Proposal: decided, Issue: updated, PrevIssueStatus: issue.Status, Comment: &comment}, nil
+}
+
+// mapKindError turns a kind's refusal into the proposal service's error, so the
+// handler answers a stale handoff squad the same way for every kind.
+func mapKindError(err error) error {
+	if errors.Is(err, proposalkinds.ErrSquadNotLive) {
+		return ErrProposalHandoffSquadNotFound
+	}
+	return err
 }
 
 // reassignIssueParams changes only the assignee of an issue. Fields that the

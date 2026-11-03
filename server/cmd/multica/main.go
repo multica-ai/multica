@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(proposalCmd)
+	rootCmd.AddCommand(initiativeCmd)
 	rootCmd.AddCommand(briefCmd)
 	rootCmd.AddCommand(knowledgeCmd)
 	rootCmd.AddCommand(chatCmd)

@@ -1,0 +1,1 @@
+ALTER TABLE initiative_stage_event DROP CONSTRAINT IF EXISTS initiative_stage_event_pkey;

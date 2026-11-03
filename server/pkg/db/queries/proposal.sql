@@ -9,9 +9,10 @@ SELECT pg_advisory_xact_lock(hashtext('proposal'), hashtext(sqlc.arg('workspace_
 -- service passes ProposalExpiryAfter so the SQL and the Go constant cannot drift.
 INSERT INTO proposal (
     id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason,
-    created_by_type, created_by_id, expires_at
+    created_by_type, created_by_id, expires_at, kind, payload
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, now() + sqlc.arg('expiry_window')::interval
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, now() + sqlc.arg('expiry_window')::interval,
+    sqlc.arg('kind')::text, sqlc.arg('payload')::jsonb
 ) RETURNING *;
 
 -- name: GetProposalInWorkspace :one

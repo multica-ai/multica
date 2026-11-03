@@ -1,0 +1,38 @@
+[
+  {
+    "id": "c9a1e2f3-4b5d-4e6f-8a7b-9c0d1e2f3a4b",
+    "tenant_id": 10002,
+    "knowledge_base_id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+    "name": "Engineering handbook",
+    "type": "notion",
+    "sync_schedule": "0 */6 * * *",
+    "sync_mode": "incremental",
+    "status": "error",
+    "conflict_strategy": "overwrite",
+    "sync_deletions": true,
+    "last_sync_at": "2026-11-02T03:00:00Z",
+    "error_message": "401 from Notion: integration token expired",
+    "sync_log_retention_days": 30,
+    "total_items_synced": 42,
+    "created_at": "2026-10-20T08:00:00Z",
+    "updated_at": "2026-11-02T03:00:00Z"
+  },
+  {
+    "id": "d0b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "tenant_id": 10002,
+    "knowledge_base_id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+    "name": "Status feed",
+    "type": "rss",
+    "sync_schedule": "",
+    "sync_mode": "incremental",
+    "status": "active",
+    "conflict_strategy": "overwrite",
+    "sync_deletions": false,
+    "last_sync_at": null,
+    "error_message": "",
+    "sync_log_retention_days": 30,
+    "total_items_synced": 0,
+    "created_at": "2026-10-21T08:00:00Z",
+    "updated_at": "2026-10-21T08:00:00Z"
+  }
+]

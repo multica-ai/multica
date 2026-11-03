@@ -1,0 +1,1 @@
+ALTER TABLE pipeline DROP CONSTRAINT IF EXISTS pipeline_pkey;

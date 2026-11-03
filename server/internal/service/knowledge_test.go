@@ -59,6 +59,7 @@ func newKnowledgeEnv(t *testing.T) *knowledgeEnv {
 		Queries: env.q, DB: pool, Client: fake, Box: box,
 		Embedding: knowledge.EmbeddingModelSpec{Name: "bge-m3", Provider: "ollama", BaseURL: "http://ollama.test", Dimension: 1024},
 		UIURL:     "http://ui.test",
+		Issues:    NewIssueService(env.q, pool, nil, nil, nil),
 	}
 	// These tables have no foreign keys, so nothing removes them with the
 	// workspace. Registered last, this runs before the fixture teardown.
@@ -68,7 +69,15 @@ func newKnowledgeEnv(t *testing.T) *knowledgeEnv {
 			`DELETE FROM agent_mcp_server WHERE server_id IN (SELECT id FROM workspace_mcp_server WHERE workspace_id = $1)`,
 			`DELETE FROM workspace_mcp_server WHERE workspace_id = $1`,
 			`DELETE FROM knowledge_link WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_eval_case WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_eval_run WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_health_run WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_publish_policy WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_kind WHERE workspace_id = $1`,
 			`DELETE FROM knowledge_base WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_repo_file WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_repo_sync WHERE workspace_id = $1`,
+			`DELETE FROM initiative WHERE workspace_id = $1`,
 			`DELETE FROM workspace_knowledge WHERE workspace_id = $1`,
 		} {
 			if _, err := pool.Exec(ctx, stmt, wsID); err != nil {
@@ -117,7 +126,7 @@ func TestKnowledgeEnableProvisionsEverything(t *testing.T) {
 	for _, kb := range status.KnowledgeBases {
 		keys = append(keys, kb.Key)
 	}
-	if strings.Join(keys, ",") != "company,market,product,engineering,decisions" {
+	if strings.Join(keys, ",") != "company,market,product,engineering,decisions,ventures" {
 		t.Fatalf("knowledge bases = %v", keys)
 	}
 
@@ -139,7 +148,7 @@ func TestKnowledgeEnableProvisionsEverything(t *testing.T) {
 	}
 
 	// The embedding model was ensured exactly once, before the bases.
-	if e.fake.Calls(knowledge.OpEnsureModel) != 1 || e.fake.Calls(knowledge.OpCreateKB) != 5 {
+	if e.fake.Calls(knowledge.OpEnsureModel) != 1 || e.fake.Calls(knowledge.OpCreateKB) != 6 {
 		t.Fatalf("model calls = %d, kb creates = %d", e.fake.Calls(knowledge.OpEnsureModel), e.fake.Calls(knowledge.OpCreateKB))
 	}
 
@@ -155,7 +164,7 @@ func TestKnowledgeEnableProvisionsEverything(t *testing.T) {
 	}
 	ws := e.fake.Workspace(string(plain))
 	endpoints, _ := ws.ListMCPEndpoints(context.Background())
-	if len(endpoints) != 1 || endpoints[0].Name != "company-read" || len(endpoints[0].KnowledgeBaseIDs) != 5 || len(endpoints[0].Tools) != 8 {
+	if len(endpoints) != 1 || endpoints[0].Name != "company-read" || len(endpoints[0].KnowledgeBaseIDs) != 6 || len(endpoints[0].Tools) != 8 {
 		t.Fatalf("endpoints = %+v", endpoints)
 	}
 	for _, tool := range endpoints[0].Tools {
@@ -180,11 +189,11 @@ func TestKnowledgeEnableIsIdempotent(t *testing.T) {
 	}
 	before := e.libraryEntry()
 	status, err := e.enable()
-	if err != nil || status.State != KnowledgeStateReady || len(status.KnowledgeBases) != 5 {
+	if err != nil || status.State != KnowledgeStateReady || len(status.KnowledgeBases) != 6 {
 		t.Fatalf("second Enable = %+v, %v", status, err)
 	}
 	for op, want := range map[string]int{
-		knowledge.OpEnsureTenant: 1, knowledge.OpCreateWorkspaceKey: 1, knowledge.OpCreateKB: 5,
+		knowledge.OpEnsureTenant: 1, knowledge.OpCreateWorkspaceKey: 1, knowledge.OpCreateKB: 6,
 		knowledge.OpCreateMCPEndpoint: 1, knowledge.OpRotateMCPToken: 0,
 	} {
 		if got := e.fake.Calls(op); got != want {
@@ -214,7 +223,7 @@ func TestKnowledgeEnableResumesAfterFailureAtEachStep(t *testing.T) {
 				t.Fatalf("state after failure = %q, want failed", row.State)
 			}
 			status, err := e.enable()
-			if err != nil || status.State != KnowledgeStateReady || len(status.KnowledgeBases) != 5 {
+			if err != nil || status.State != KnowledgeStateReady || len(status.KnowledgeBases) != 6 {
 				t.Fatalf("retry = %+v, %v", status, err)
 			}
 			// Nothing was created twice.
@@ -225,7 +234,7 @@ func TestKnowledgeEnableResumesAfterFailureAtEachStep(t *testing.T) {
 				t.Fatalf("endpoint creates = %d", got)
 			}
 			ws := e.fake.Workspace(e.openKey())
-			if kbs, _ := ws.ListKnowledgeBases(context.Background()); len(kbs) != 5 {
+			if kbs, _ := ws.ListKnowledgeBases(context.Background()); len(kbs) != 6 {
 				t.Fatalf("remote knowledge bases = %d", len(kbs))
 			}
 			if eps, _ := ws.ListMCPEndpoints(context.Background()); len(eps) != 1 {
@@ -269,10 +278,10 @@ func TestKnowledgeEnableAdoptsWhatACrashLeftBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := e.enable()
-	if err != nil || len(status.KnowledgeBases) != 5 {
+	if err != nil || len(status.KnowledgeBases) != 6 {
 		t.Fatalf("Enable = %+v, %v", status, err)
 	}
-	if got := e.fake.Calls(knowledge.OpCreateKB); got != 5 {
+	if got := e.fake.Calls(knowledge.OpCreateKB); got != 6 {
 		t.Fatalf("knowledge base creates = %d, want the lost base adopted, not recreated", got)
 	}
 	if got := e.fake.Calls(knowledge.OpCreateMCPEndpoint); got != 1 {
@@ -298,7 +307,7 @@ func TestKnowledgeRestrictedBasesStayOutOfCompanyRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	eps, _ := e.fake.Workspace(e.openKey()).ListMCPEndpoints(context.Background())
-	if len(eps) != 1 || len(eps[0].KnowledgeBaseIDs) != 4 {
+	if len(eps) != 1 || len(eps[0].KnowledgeBaseIDs) != 5 {
 		t.Fatalf("endpoint bases = %+v", eps)
 	}
 }
@@ -327,7 +336,7 @@ func TestKnowledgeUnavailableSidecarDegrades(t *testing.T) {
 	}
 	e.fake.SetUnavailable(true)
 	status, err = e.svc.Status(context.Background(), e.ws)
-	if err != nil || !status.Enabled || status.State != KnowledgeStateOffline || len(status.KnowledgeBases) != 5 {
+	if err != nil || !status.Enabled || status.State != KnowledgeStateOffline || len(status.KnowledgeBases) != 6 {
 		t.Fatalf("offline status = %+v, %v", status, err)
 	}
 }

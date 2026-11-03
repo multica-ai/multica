@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "data": {
+    "id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+    "name": "Company",
+    "description": "Charter, policies, brand voice, org and roles, glossary, standing rules.",
+    "type": "document",
+    "tenant_id": 10002,
+    "embedding_model_id": "69969a78-e405-4a6b-907e-60091b70ba8c",
+    "summary_model_id": "",
+    "indexing_strategy": {
+      "vector_enabled": true,
+      "keyword_enabled": true,
+      "wiki_enabled": false,
+      "graph_enabled": false
+    },
+    "knowledge_count": 3,
+    "wiki_config": null
+  }
+}

@@ -3438,6 +3438,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A request from one squad to another (spec 3.5): an issue assigned to a squad
+	// under a parent issue is tagged squad_request, so the digest can measure how
+	// long the receiving squad takes to answer. The origin_id is the parent issue.
+	if req.OriginType == nil && assigneeType.Valid && assigneeType.String == "squad" && parentIssueID.Valid {
+		originType = pgtype.Text{String: "squad_request", Valid: true}
+		originID = parentIssueID
+	}
+
 	// Prefix is workspace-level; pre-compute once so both the broadcast
 	// payload builder and the HTTP response share the same value.
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)

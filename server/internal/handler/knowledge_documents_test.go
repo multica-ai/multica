@@ -142,7 +142,7 @@ func TestKnowledgeBasesForMembers(t *testing.T) {
 	fx := newKnowledgeFixture(t)
 	var view service.KnowledgeBasesView
 	testutil.Call(t, testHandler.ListKnowledgeBases, asUser(newRequest("GET", "/api/knowledge/bases", nil), fx.member)).Want(http.StatusOK).JSON(&view)
-	if !view.Offered || view.State != "ready" || len(view.KnowledgeBases) != 5 || view.KnowledgeBases[0].Key != "company" {
+	if !view.Offered || view.State != "ready" || len(view.KnowledgeBases) != 6 || view.KnowledgeBases[0].Key != "company" {
 		t.Fatalf("bases = %+v", view)
 	}
 }
@@ -169,7 +169,7 @@ func TestKnowledgeOfflineIsAStateNeverA500(t *testing.T) {
 	}
 	var view service.KnowledgeBasesView
 	testutil.Call(t, testHandler.ListKnowledgeBases, newRequest("GET", "/api/knowledge/bases", nil)).Want(http.StatusOK).JSON(&view)
-	if view.State != "offline" || len(view.KnowledgeBases) != 5 {
+	if view.State != "offline" || len(view.KnowledgeBases) != 6 {
 		t.Fatalf("offline bases = %+v", view)
 	}
 }

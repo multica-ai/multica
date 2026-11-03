@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -84,4 +87,53 @@ func OperatingReviewDescription(charter db.SquadCharter) (string, error) {
 	b.WriteString("4. File it as a proposal (the attention limits apply) or record `no action` with the reason. Padding is a failure; an honest `no action` is a success.\n")
 	b.WriteString("5. Draft updates for stale knowledge-base documents (drafts only).\n")
 	return b.String(), nil
+}
+
+// routineDefaultGraceHours is the grace period a routine gets when a request
+// does not name one. It matches the handler's default.
+const routineDefaultGraceHours = 24
+
+// CreateOperatingReview makes a squad's weekly operating review and its routine.
+// The first charter save calls it (the handler and the starter company both
+// reach it), so the review is created the same way on both paths. It starts
+// paused when the charter's switch is off. The caller runs it in its transaction.
+func CreateOperatingReview(ctx context.Context, q *db.Queries, squad db.Squad, charter db.SquadCharter, actorUserID pgtype.UUID, timezone string) (db.Autopilot, error) {
+	nextRun, err := ComputeNextRun(OperatingReviewCadence, timezone)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	description, err := OperatingReviewDescription(charter)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	status := "active"
+	if !charter.OperatingReviewEnabled {
+		status = "paused"
+	}
+	ap, err := CreateSquadScheduledAutopilot(ctx, q, SquadScheduledAutopilot{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     squad.ID,
+		ActorUserID: actorUserID,
+		Title:       OperatingReviewTitle,
+		Description: pgtype.Text{String: description, Valid: true},
+		Status:      status,
+		Cron:        OperatingReviewCadence,
+		Timezone:    timezone,
+		NextRun:     nextRun,
+	})
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	if _, err := q.InsertSquadRoutine(ctx, db.InsertSquadRoutineParams{
+		AutopilotID:    ap.ID,
+		WorkspaceID:    squad.WorkspaceID,
+		SquadID:        squad.ID,
+		Purpose:        OperatingReviewPurpose,
+		ExpectedOutput: "report",
+		Required:       true,
+		GraceHours:     routineDefaultGraceHours,
+	}); err != nil {
+		return db.Autopilot{}, err
+	}
+	return ap, nil
 }
