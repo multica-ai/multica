@@ -54,11 +54,13 @@ func assertIssueViewJSON(t *testing.T, name string, got any, want string) {
 
 const issueViewTestToday = "2026-03-11"
 
+var issueViewTestActiveProperties = map[string]bool{"p1": true, "p2": true}
+
 func TestIssueViewTableQueryCarriesFiltersVariantAndOrdering(t *testing.T) {
 	spec, err := issueViewTableQuery(issueViewForQueryTest(t, "workspace", "agents", "",
 		map[string]any{"statusFilters": []string{"todo"}, "labelFilters": []string{"l1"}, "priorityFilters": []string{"bogus"}},
 		map[string]any{"sortBy": "due_date", "sortDirection": "desc", "showSubIssues": false},
-	), issueViewTestToday)
+	), issueViewTestToday, issueViewTestActiveProperties)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func TestIssueViewTableQueryCarriesFiltersVariantAndOrdering(t *testing.T) {
 func TestIssueViewTableQueryKeepsEveryViewCondition(t *testing.T) {
 	filters := func(query map[string]any) issueTableFiltersRequest {
 		t.Helper()
-		spec, err := issueViewTableQuery(issueViewForQueryTest(t, "workspace", "", "", query, map[string]any{}), issueViewTestToday)
+		spec, err := issueViewTableQuery(issueViewForQueryTest(t, "workspace", "", "", query, map[string]any{}), issueViewTestToday, issueViewTestActiveProperties)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +142,7 @@ func TestIssueViewTableQueryKeepsEveryViewCondition(t *testing.T) {
 
 func TestIssueViewTableQueryScopesLikeTheViewPage(t *testing.T) {
 	scope := func(scopeType, variant, scopeID string) (issueTableScope, error) {
-		spec, err := issueViewTableQuery(issueViewForQueryTest(t, scopeType, variant, scopeID, map[string]any{}, map[string]any{}), issueViewTestToday)
+		spec, err := issueViewTableQuery(issueViewForQueryTest(t, scopeType, variant, scopeID, map[string]any{}, map[string]any{}), issueViewTestToday, issueViewTestActiveProperties)
 		return spec.Scope, err
 	}
 	projectID := "11111111-1111-1111-1111-111111111111"
@@ -169,23 +171,70 @@ func TestIssueViewTableQueryScopesLikeTheViewPage(t *testing.T) {
 func TestIssueViewTableQueryDropsTheDimensionTheScopeFixes(t *testing.T) {
 	project, err := issueViewTableQuery(issueViewForQueryTest(t, "project", "", "11111111-1111-1111-1111-111111111111",
 		map[string]any{"projectFilters": []string{"p2"}, "includeNoProject": true, "negatedFilters": []string{"project"}}, map[string]any{},
-	), issueViewTestToday)
+	), issueViewTestToday, issueViewTestActiveProperties)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertIssueViewJSON(t, "project view", project.Filters, `{"include_sub_issues": true}`)
 	mine, err := issueViewTableQuery(issueViewForQueryTest(t, "my", "assigned", "",
 		map[string]any{"relationFilters": []string{"created"}, "negatedFilters": []string{"relation"}}, map[string]any{},
-	), issueViewTestToday)
+	), issueViewTestToday, issueViewTestActiveProperties)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertIssueViewJSON(t, "my view", mine.Filters, `{"include_sub_issues": true}`)
+
+	advanced := func(field string) map[string]any {
+		return map[string]any{"advancedFilter": map[string]any{"type": "group", "match": "all", "children": []any{
+			map[string]any{"type": "condition", "field": field, "values": []string{"x"}},
+			map[string]any{"type": "condition", "field": "label", "values": []string{"l1"}},
+		}}}
+	}
+	project, err = issueViewTableQuery(issueViewForQueryTest(t, "project", "", "11111111-1111-1111-1111-111111111111",
+		advanced("project"), map[string]any{}), issueViewTestToday, issueViewTestActiveProperties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueViewJSON(t, "project view tree", project.Filters,
+		`{"advanced": {"match": "all", "children": [{"field": "label_ids", "values": ["l1"]}]}, "include_sub_issues": true}`)
+	mine, err = issueViewTableQuery(issueViewForQueryTest(t, "my", "assigned", "",
+		advanced("relation"), map[string]any{}), issueViewTestToday, issueViewTestActiveProperties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueViewJSON(t, "my view tree", mine.Filters,
+		`{"advanced": {"match": "all", "children": [{"field": "label_ids", "values": ["l1"]}]}, "include_sub_issues": true}`)
+}
+
+func TestIssueViewTableQueryDropsInactiveProperties(t *testing.T) {
+	view := issueViewForQueryTest(t, "workspace", "", "", map[string]any{
+		"propertyFilters": map[string]any{"p1": []string{"a"}, "gone": []string{"b"}},
+		"advancedFilter": map[string]any{"type": "group", "match": "any", "children": []any{
+			map[string]any{"type": "condition", "field": "property:gone", "values": []string{"c"}},
+			map[string]any{"type": "group", "match": "all", "children": []any{
+				map[string]any{"type": "condition", "field": "property:gone", "values": []string{"d"}},
+			}},
+			map[string]any{"type": "condition", "field": "property:p1", "values": []string{"e"}},
+		}},
+	}, map[string]any{"sortBy": "property:gone", "sortDirection": "desc"})
+	if got := issueViewReferencedPropertyIDs(view); len(got) != 2 {
+		t.Fatalf("referenced properties = %v, want p1 and gone", got)
+	}
+	spec, err := issueViewTableQuery(view, issueViewTestToday, issueViewTestActiveProperties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueViewJSON(t, "filters", spec.Filters, `{
+		"properties": {"p1": ["a"]},
+		"advanced": {"match": "any", "children": [{"field": "property:p1", "values": ["e"]}]},
+		"include_sub_issues": true
+	}`)
+	assertIssueViewJSON(t, "sort", spec.Sort, `{"field": "position", "direction": "desc"}`)
 }
 
 func TestIssueViewTableQuerySort(t *testing.T) {
 	sort := func(display map[string]any) issueTableSortRequest {
-		spec, err := issueViewTableQuery(issueViewForQueryTest(t, "workspace", "", "", map[string]any{}, display), issueViewTestToday)
+		spec, err := issueViewTableQuery(issueViewForQueryTest(t, "workspace", "", "", map[string]any{}, display), issueViewTestToday, issueViewTestActiveProperties)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,6 +329,50 @@ func TestListIssueViewIssues(t *testing.T) {
 	listIssueViewIssuesForTest(t, testUserID, urgent, "today=03/11/2026").Want(http.StatusBadRequest)
 	listIssueViewIssuesForTest(t, testUserID, urgent, "limit=0").Want(http.StatusBadRequest)
 	listIssueViewIssuesForTest(t, testUserID, urgent, "limit=101").Want(http.StatusBadRequest)
+}
+
+func TestListIssueViewIssuesDropsArchivedPropertyConditions(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		name := "flat"
+		if advanced {
+			name = "advanced"
+		}
+		t.Run(name, func(t *testing.T) {
+			suffix := time.Now().UnixNano()
+			project := dbfx.Project(t, fmt.Sprintf("view archived property %s %d", name, suffix))
+			property := createTestProperty(t, map[string]any{"name": fmt.Sprintf("Sev %s %d", name, suffix%1e9), "type": "text"})
+			critical := dbfx.Issue(t, "view property critical", testutil.Cols{"project_id": project})
+			dbfx.Issue(t, "view property unset", testutil.Cols{"project_id": project})
+			if w := setIssuePropertyRaw(t, critical, property.ID, "critical"); w.Code != http.StatusOK {
+				t.Fatalf("set property: %d %s", w.Code, w.Body.String())
+			}
+			query := map[string]any{"propertyFilters": map[string]any{property.ID: []string{"critical"}}}
+			if advanced {
+				query = map[string]any{"advancedFilter": map[string]any{"type": "group", "match": "all", "children": []any{
+					map[string]any{"type": "condition", "field": "property:" + property.ID, "values": []string{"critical"}},
+				}}}
+			}
+			view, code, body := createIssueViewForTest(t, map[string]any{
+				"name": fmt.Sprintf("view archived property %s %d", name, suffix), "scope_type": "project", "scope_id": project,
+				"query": query, "display": map[string]any{"sortBy": "property:" + property.ID},
+			})
+			if code != http.StatusCreated {
+				t.Fatalf("create view: %d %s", code, body)
+			}
+
+			var before, after issueViewIssuesResponse
+			listIssueViewIssuesForTest(t, testUserID, view.ID, "").Want(http.StatusOK).JSON(&before)
+			if len(before.Issues) != 1 {
+				t.Fatalf("active property: got %v, want only the critical issue", issueViewIssueTitles(before))
+			}
+			req := withURLParam(newRequest(http.MethodPatch, "/api/properties/"+property.ID, map[string]any{"archived": true}), "id", property.ID)
+			testutil.Call(t, testHandler.UpdateProperty, req).Want(http.StatusOK)
+			listIssueViewIssuesForTest(t, testUserID, view.ID, "").Want(http.StatusOK).JSON(&after)
+			if len(after.Issues) != 2 {
+				t.Fatalf("archived property: got %v, want both issues", issueViewIssueTitles(after))
+			}
+		})
+	}
 }
 
 func TestListIssueViewIssuesHidesOtherMembersPrivateViews(t *testing.T) {

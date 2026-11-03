@@ -4,20 +4,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // A saved view's `query` is written by the web client. The translation below
 // mirrors viewSidebarRequest in packages/core/issues/sidebar-list.ts (with the
-// sanitizing of baselineFromQuery and sanitizeAdvancedFilter), so a view lists
-// the same issues here as its sidebar entry does. Values the client would drop
-// are dropped here too; values the client would send but the table query
-// rejects are left for the table query to reject.
+// sanitizing of baselineFromQuery and sanitizeAdvancedFilter), plus what the
+// opened view drops on top of it (use-issue-surface-controller.ts): conditions
+// on a scope-fixed field or on a property that is no longer active, and a sort
+// on such a property. Values the client would drop are dropped here too;
+// values the client would send but the table query rejects are left for the
+// table query to reject.
 
 // issueViewFilterDimensions are the client's negatable dimensions in its
 // canonical order, with their table query field.
@@ -158,10 +164,13 @@ func issueViewPropertyMember(raw json.RawMessage, allowEmpty bool) (json.RawMess
 	return encoded, op + "\x00" + value, true
 }
 
-func issueViewPropertyFilters(raw json.RawMessage) map[string][]json.RawMessage {
+func issueViewPropertyFilters(raw json.RawMessage, activeProperties map[string]bool) map[string][]json.RawMessage {
 	object := decodeIssueViewObject(raw)
 	result := make(map[string][]json.RawMessage, len(object))
 	for propertyID, membersRaw := range object {
+		if !activeProperties[propertyID] {
+			continue
+		}
 		var members []json.RawMessage
 		for _, member := range issueViewArray(membersRaw) {
 			if encoded, _, ok := issueViewPropertyMember(member, true); ok {
@@ -213,9 +222,10 @@ func issueViewKeep(values []string, keep func(string) bool) []string {
 
 // issueViewAdvancedNode sanitizes, prunes and converts one advanced filter
 // node: the root group is depth 0 and may hold groups, a nested group holds
-// conditions only. Nodes the client would drop, conditions without values and
-// groups left empty return ok=false.
-func issueViewAdvancedNode(raw json.RawMessage, depth int) (issueTableFilterNode, bool) {
+// conditions only. Nodes the client would drop, conditions on a field drop
+// reports (by its client field name), conditions without values and groups
+// left empty return ok=false.
+func issueViewAdvancedNode(raw json.RawMessage, depth int, drop func(field string) bool) (issueTableFilterNode, bool) {
 	object := decodeIssueViewObject(raw)
 	if object == nil {
 		return issueTableFilterNode{}, false
@@ -233,7 +243,7 @@ func issueViewAdvancedNode(raw json.RawMessage, depth int) (issueTableFilterNode
 		}
 		group := issueTableFilterNode{Match: match}
 		for _, child := range children {
-			if node, ok := issueViewAdvancedNode(child, depth+1); ok {
+			if node, ok := issueViewAdvancedNode(child, depth+1, drop); ok {
 				group.Children = append(group.Children, node)
 			}
 		}
@@ -241,6 +251,9 @@ func issueViewAdvancedNode(raw json.RawMessage, depth int) (issueTableFilterNode
 	case "condition":
 		negate := issueViewBool(object["negated"])
 		field, _ := issueViewString(object["field"])
+		if drop(field) {
+			return issueTableFilterNode{}, false
+		}
 		if len(field) > len(issueTableFilterPropertyPrefix) && strings.HasPrefix(field, issueTableFilterPropertyPrefix) {
 			seen := map[string]struct{}{}
 			var values []json.RawMessage
@@ -313,9 +326,50 @@ func issueViewTableScope(view db.IssueView) (issueTableScope, error) {
 	return issueTableScope{}, errIssueViewScopeUnlistable
 }
 
+func issueViewPropertyIDOfField(field string) (string, bool) {
+	if len(field) > len(issueTableFilterPropertyPrefix) && strings.HasPrefix(field, issueTableFilterPropertyPrefix) {
+		return field[len(issueTableFilterPropertyPrefix):], true
+	}
+	return "", false
+}
+
+// issueViewReferencedPropertyIDs lists the properties a view's filters and
+// sort name, for resolving which of them are still active.
+func issueViewReferencedPropertyIDs(view db.IssueView) []string {
+	query := decodeIssueViewObject(view.Query)
+	var ids []string
+	for propertyID := range decodeIssueViewObject(query["propertyFilters"]) {
+		ids = append(ids, propertyID)
+	}
+	// Same depth bound as issueViewAdvancedNode: conditions sit at most two
+	// levels below the root group.
+	var walk func(raw json.RawMessage, depth int)
+	walk = func(raw json.RawMessage, depth int) {
+		object := decodeIssueViewObject(raw)
+		if object == nil || depth > 2 {
+			return
+		}
+		field, _ := issueViewString(object["field"])
+		if id, ok := issueViewPropertyIDOfField(field); ok {
+			ids = append(ids, id)
+		}
+		for _, child := range issueViewArray(object["children"]) {
+			walk(child, depth+1)
+		}
+	}
+	walk(query["advancedFilter"], 0)
+	sortBy, _ := issueViewString(decodeIssueViewObject(view.Display)["sortBy"])
+	if id, ok := issueViewPropertyIDOfField(sortBy); ok {
+		ids = append(ids, id)
+	}
+	return issueViewUniqueStrings(ids)
+}
+
 // issueViewTableQuery is the table query listing what a saved view shows.
 // today is the viewer's calendar day, used only by due-date conditions.
-func issueViewTableQuery(view db.IssueView, today string) (issueTableQuerySpec, error) {
+// activeProperties holds the ids of the workspace's active properties the
+// view references; filters and sorts on any other property are dropped.
+func issueViewTableQuery(view db.IssueView, today string, activeProperties map[string]bool) (issueTableQuerySpec, error) {
 	scope, err := issueViewTableScope(view)
 	if err != nil {
 		return issueTableQuerySpec{}, err
@@ -340,11 +394,20 @@ func issueViewTableQuery(view db.IssueView, today string) (issueTableQuerySpec, 
 	})
 	// Same as the page the view opens: a project view drops the project
 	// dimension, a "my" view the viewer-relation one.
+	fixedField := ""
 	switch scope.Kind {
 	case "project":
 		projectIDs, includeNoProject = nil, false
+		fixedField = "project"
 	case "my":
 		relations = nil
+		fixedField = "relation"
+	}
+	dropCondition := func(field string) bool {
+		if id, ok := issueViewPropertyIDOfField(field); ok {
+			return !activeProperties[id]
+		}
+		return field == fixedField
 	}
 
 	hasSelection := map[string]bool{
@@ -384,14 +447,14 @@ func issueViewTableQuery(view db.IssueView, today string) (issueTableQuerySpec, 
 		filters.Assignees = assignees
 	}
 	usesDueDates := len(dueDates) > 0
-	if advanced, ok := issueViewAdvancedNode(query["advancedFilter"], 0); ok && advanced.isGroup() {
+	if advanced, ok := issueViewAdvancedNode(query["advancedFilter"], 0, dropCondition); ok && advanced.isGroup() {
 		filters.Advanced = &advanced
 		usesDueDates = usesDueDates || issueViewAdvancedUsesField(advanced, "due_dates")
 	}
 	if usesDueDates {
 		filters.Today = today
 	}
-	if properties := issueViewPropertyFilters(query["propertyFilters"]); len(properties) > 0 {
+	if properties := issueViewPropertyFilters(query["propertyFilters"], activeProperties); len(properties) > 0 {
 		filters.Properties = properties
 	}
 	showSubIssues := true
@@ -404,9 +467,14 @@ func issueViewTableQuery(view db.IssueView, today string) (issueTableQuerySpec, 
 	filters.IncludeSubIssues = &showSubIssues
 
 	sort := issueTableSortRequest{Field: "position", Direction: "asc"}
-	if field, ok := issueViewString(display["sortBy"]); ok &&
-		(issueTableContainsString(issueViewSorts, field) || strings.HasPrefix(field, issueTableFilterPropertyPrefix)) {
-		sort.Field = field
+	if field, ok := issueViewString(display["sortBy"]); ok {
+		if id, isProperty := issueViewPropertyIDOfField(field); isProperty {
+			if activeProperties[id] {
+				sort.Field = field
+			}
+		} else if issueTableContainsString(issueViewSorts, field) {
+			sort.Field = field
+		}
 	}
 	if direction, _ := issueViewString(display["sortDirection"]); direction == "desc" {
 		sort.Direction = "desc"
@@ -421,6 +489,34 @@ type issueViewIssuesResponse struct {
 	Total      *int64  `json:"total,omitempty"`
 	NextCursor *string `json:"next_cursor"`
 	HasMore    bool    `json:"has_more"`
+}
+
+// activeIssueViewProperties resolves which properties the view references
+// still exist, unarchived, in the view's workspace.
+func (h *Handler) activeIssueViewProperties(w http.ResponseWriter, r *http.Request, view db.IssueView) (map[string]bool, bool) {
+	active := map[string]bool{}
+	for _, id := range issueViewReferencedPropertyIDs(view) {
+		propertyUUID, err := util.ParseUUID(id)
+		if err != nil {
+			continue
+		}
+		property, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{
+			ID:          propertyUUID,
+			WorkspaceID: view.WorkspaceID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			slog.Warn("resolve view property failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve view properties")
+			return nil, false
+		}
+		if !property.ArchivedAt.Valid {
+			active[id] = true
+		}
+	}
+	return active, true
 }
 
 // ListIssueViewIssues lists the issues a saved view shows, in the view's
@@ -463,7 +559,11 @@ func (h *Handler) ListIssueViewIssues(w http.ResponseWriter, r *http.Request) {
 		page.Cursor = &raw
 	}
 
-	spec, err := issueViewTableQuery(view, today)
+	activeProperties, ok := h.activeIssueViewProperties(w, r, view)
+	if !ok {
+		return
+	}
+	spec, err := issueViewTableQuery(view, today, activeProperties)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
