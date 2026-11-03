@@ -229,6 +229,8 @@ export function InboxPage() {
   // leaves; opening an already-empty inbox shows it at rest. Archived and
   // filtered views are not inbox zero, so they never arm it.
   const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : visibleItems.length;
+  const activityWaiting =
+    inboxZeroCount === 0 && section === "action" ? sections.activity.length : 0;
   const [prevInboxZeroCount, setPrevInboxZeroCount] = useState(inboxZeroCount);
   const [inboxZeroRises, setInboxZeroRises] = useState(false);
   if (inboxZeroCount !== prevInboxZeroCount) {
@@ -1142,6 +1144,16 @@ export function InboxPage() {
                       : t(($) => $.sections.action_empty)
                     : t(($) => $.detail.empty)}
             </p>
+            {activityWaiting > 0 ? (
+              <div className="relative mt-1 flex flex-col items-center gap-3">
+                <p className="text-label">
+                  {t(($) => $.sections.activity_waiting, { count: activityWaiting })}
+                </p>
+                <Button variant="outline" size="sm" onClick={() => setSection("activity")}>
+                  {t(($) => $.sections.open_activity)}
+                </Button>
+              </div>
+            ) : null}
           </div>
           </>
         )}

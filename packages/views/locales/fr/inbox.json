@@ -6,8 +6,11 @@
   "sections": {
     "action": "À traiter",
     "activity": "Activité",
-    "action_empty": "Rien ne requiert votre attention",
-    "activity_empty": "Aucune activité récente"
+    "action_empty": "Vous êtes à jour",
+    "activity_empty": "Aucune activité récente",
+    "activity_waiting_other": "{{count}} mises à jour vous attendent dans Activité.",
+    "open_activity": "Voir l'activité",
+    "activity_waiting_one": "{{count}} mise à jour vous attend dans Activité."
   },
   "menu": {
     "mark_all_read": "Tout marquer comme lu",

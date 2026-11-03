@@ -117,6 +117,9 @@
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
     "empty_title": "まだタスクがありません",
+    "empty_description": "タスクはメンバーやエージェントに任せる具体的な作業です。エージェントに割り当てると、ランタイム上で自動的に始まります。",
+    "break_down_with_chat": "チャットで分解する",
+    "break_down_prompt": "次のことを進めたいです。必要なことを質問してから、このワークスペースのタスクに分解してください：\n\n",
     "move_failed": "タスクを移動できませんでした"
   },
   "status": {
@@ -406,7 +409,7 @@
       }
     },
     "search_placeholder": "タスクを検索...",
-    "search_empty": "検索条件に一致するタスクがありません。"
+    "search_empty": "検索条件に一致するタスクがありません"
   },
   "list": {
     "empty_status": "タスクなし",
@@ -446,6 +449,7 @@
     "metadata_description": "エージェントや連携機能がワークフローを引き継ぐために記録するキーと値のデータ。",
     "section_load_failed_retry": "読み込めませんでした。再試行",
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
+    "not_found_title": "タスクが見つかりません",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
     "title_placeholder": "タスクのタイトル",
@@ -1772,7 +1776,8 @@
       "star": "{{name}} をサイドバーに追加",
       "unstar": "{{name}} をサイドバーから削除",
       "row_actions": "{{name}} の操作",
-      "no_matches": "一致するビューはありません"
+      "empty_title": "保存したビューはまだありません",
+      "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
     }
   }
 }

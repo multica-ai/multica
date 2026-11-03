@@ -6,8 +6,10 @@
   "sections": {
     "action": "처리 필요",
     "activity": "활동",
-    "action_empty": "처리할 항목이 없습니다",
-    "activity_empty": "최근 활동이 없습니다"
+    "action_empty": "처리할 항목을 모두 처리했습니다",
+    "activity_empty": "최근 활동이 없습니다",
+    "activity_waiting_other": "활동에 업데이트 {{count}}개가 있습니다.",
+    "open_activity": "활동 보기"
   },
   "menu": {
     "mark_all_read": "모두 읽음으로 표시",

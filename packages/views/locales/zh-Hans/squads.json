@@ -2,7 +2,8 @@
   "page": {
     "title": "小队",
     "new_button": "新建小队",
-    "empty_no_squads": "暂无小队。",
+    "empty_no_squads": "还没有小队",
+    "empty_description": "把智能体和成员编成小队，任务可以直接交给整个小队。",
     "empty_no_match": "没有匹配筛选条件的小队。",
     "table": {
       "name": "小队",
@@ -64,6 +65,8 @@
   "members_tab": {
     "section_title": "成员",
     "add_member_button": "添加成员",
+    "empty_title": "还没有成员",
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。",
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",
@@ -82,6 +85,8 @@
     "copy_link": "复制链接",
     "link_copied": "已复制链接",
     "not_found": "未找到该小队",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部小队",
     "instructions": "指引",
     "edit": "编辑",
     "cancel": "取消",

@@ -8,6 +8,7 @@ import {
   HardDrive,
   Lock,
   Pencil,
+  Plus,
 } from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
@@ -38,6 +39,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { rowLinkInteractiveProps, useNavigation } from "../../navigation";
 import {
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -236,13 +238,25 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
 
 // Empty state
 
-function EmptyState() {
+function EmptyState({ onCreate }: { onCreate: (method: CreateSkillMethod) => void }) {
   const { t } = useT("skills");
   return (
     <CollectionPageState
       icon={SkillIcon}
       title={t(($) => $.page.empty.title)}
       description={t(($) => $.page.empty.description)}
+      actions={
+        <>
+          <Button type="button" size="sm" onClick={() => onCreate("manual")}>
+            <Plus aria-hidden="true" />
+            {t(($) => $.page.new_skill)}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => onCreate("runtime")}>
+            <HardDrive aria-hidden="true" />
+            {t(($) => $.create.method.runtime.title)}
+          </Button>
+        </>
+      }
     />
   );
 }
@@ -550,7 +564,7 @@ export default function SkillsPage() {
 
       {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState />
+          <EmptyState onCreate={setCreateMethod} />
         </div>
       ) : (
         <CollectionList
@@ -565,7 +579,14 @@ export default function SkillsPage() {
           rowMenu={(row) => <SkillRowActions row={row} ctx={actionsCtx} />}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={t(($) => $.page.no_matches.title)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches.title)}
+              description={narrowed ? t(($) => $.page.no_matches.filter_only) : undefined}
+              onReset={clearFilters}
+              hasFilters={narrowed}
+            />
+          }
         />
       )}
 

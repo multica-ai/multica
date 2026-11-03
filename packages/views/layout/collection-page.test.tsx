@@ -7,6 +7,7 @@ import { renderWithI18n } from "../test/i18n";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionScopeItems,
@@ -82,6 +83,30 @@ describe("CollectionPageState", () => {
       screen.getByRole("heading", { name: "Could not load teams", level: 2 }),
     ).toBeInTheDocument();
     expect(screen.getByText("Try again.").tagName).toBe("P");
+  });
+});
+
+describe("CollectionNoMatches", () => {
+  it("names the reset after what is narrowing the list", async () => {
+    const user = userEvent.setup();
+    const onReset = vi.fn();
+    const { rerender } = renderWithI18n(
+      <CollectionNoMatches title="No teams match" onReset={onReset} hasFilters hasSearch />,
+    );
+    await user.click(screen.getByRole("button", { name: "Clear filters and search" }));
+    expect(onReset).toHaveBeenCalledOnce();
+
+    rerender(<CollectionNoMatches title="No teams match" onReset={onReset} hasSearch />);
+    expect(screen.getByRole("button", { name: "Clear search" })).toBeInTheDocument();
+
+    rerender(<CollectionNoMatches title="No teams match" onReset={onReset} hasFilters />);
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("offers no reset when nothing is narrowing the list", () => {
+    renderWithI18n(<CollectionNoMatches title="No teams match" onReset={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "No teams match" })).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
 
