@@ -40,8 +40,9 @@ const (
 	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
 	EventTaskProgress              = "task:progress"
 	EventTaskUsage                 = "task:usage"
-	EventTaskCompleted             = "task:completed" // running → completed
-	EventTaskFailed                = "task:failed"    // running → failed
+	EventTaskToolConfirmation      = "task:tool_confirmation" // a run's pending tool approvals changed
+	EventTaskCompleted             = "task:completed"         // running → completed
+	EventTaskFailed                = "task:failed"            // running → failed
 	EventTaskMessage               = "task:message"
 	EventTaskCancelled             = "task:cancelled" // * → cancelled
 

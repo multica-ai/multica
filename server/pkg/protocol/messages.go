@@ -210,6 +210,12 @@ type TaskUsageUpdatedPayload struct {
 	TaskID string `json:"task_id"`
 }
 
+// TaskToolConfirmationPayload invalidates a run's pending tool approvals.
+type TaskToolConfirmationPayload struct {
+	TaskID  string `json:"task_id"`
+	IssueID string `json:"issue_id,omitempty"`
+}
+
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
