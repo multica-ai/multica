@@ -123,15 +123,24 @@ function MergeForm({
   const [body, setBody] = useState<string | null>(null);
   const [deleteBranch, setDeleteBranch] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expectedHeadSHA, setExpectedHeadSHA] = useState<string | null>(null);
+  const [rejectedHead, setRejectedHead] = useState(false);
 
   const loadFailure = options.error ? classifyGitHubActionError(options.error) : null;
   useEffect(() => {
-    if (loadFailure && onFailure(loadFailure)) onDone();
+    if (loadFailure) onFailure(loadFailure);
     // Only the first classification of each error matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options.error]);
 
   const data = options.data && options.data.head_sha ? options.data : null;
+  // A realtime invalidation may refresh the options while this form is open.
+  // Only reopening the confirmation can authorize a different commit.
+  useEffect(() => {
+    if (data && expectedHeadSHA === null) setExpectedHeadSHA(data.head_sha);
+  }, [data, expectedHeadSHA]);
+  const headChanged = rejectedHead || (!!expectedHeadSHA && !!data && data.head_sha !== expectedHeadSHA);
+  const displayedError = headChanged ? t(($) => $.pr_actions.toast.head_changed, { pr: prLabel }) : error;
   const chosen = method ?? data?.default_method ?? data?.allowed_methods[0] ?? null;
   const defaults = chosen ? data?.commit_messages[chosen] : undefined;
   const hasMessage = chosen === "squash" || chosen === "merge";
@@ -139,10 +148,10 @@ function MergeForm({
   const bodyValue = body ?? defaults?.body ?? "";
   const canDeleteBranch = !!data && !data.head_is_fork && !!pr.branch;
   const deleteValue = deleteBranch ?? data?.delete_branch_on_merge ?? false;
-  const canSubmit = !!data && !!chosen && !merge.isPending;
+  const canSubmit = !!data && !!chosen && !!expectedHeadSHA && !headChanged && !merge.isPending;
 
   const submit = () => {
-    if (!data || !chosen || merge.isPending) return;
+    if (!data || !chosen || !expectedHeadSHA || headChanged || merge.isPending) return;
     setError(null);
     merge.mutate(
       {
@@ -151,7 +160,7 @@ function MergeForm({
           method: chosen,
           ...(hasMessage ? { commit_title: titleValue.trim() || undefined, commit_message: bodyValue } : {}),
           delete_branch: canDeleteBranch && deleteValue,
-          expected_head_sha: data.head_sha,
+          expected_head_sha: expectedHeadSHA,
         },
       },
       {
@@ -162,14 +171,11 @@ function MergeForm({
         onError: (err) => {
           const failure = classifyGitHubActionError(err);
           if (failure.kind === "head_changed") {
-            setError(t(($) => $.pr_actions.toast.head_changed, { pr: prLabel }));
+            setRejectedHead(true);
             void options.refetch();
             return;
           }
-          if (onFailure(failure)) {
-            onDone();
-            return;
-          }
+          if (onFailure(failure)) return;
           setError(gitHubFailureMessage(failure, t, prLabel));
         },
       },
@@ -281,9 +287,9 @@ function MergeForm({
         </>
       )}
 
-      {error ? (
+      {displayedError ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {displayedError}
         </p>
       ) : null}
 

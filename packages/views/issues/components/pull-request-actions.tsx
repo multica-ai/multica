@@ -136,6 +136,8 @@ export function usePullRequestActions({
   const mutation = usePullRequestAction(issueId, pr.id);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [autoMergePending, setAutoMergePending] = useState(false);
+  const [closeError, setCloseError] = useState<GitHubActionFailure | null>(null);
+  const closing = mutation.isPending && mutation.variables?.kind === "close";
 
   const isGitHub = !pr.provider || pr.provider === "github";
   const githubEnabled = isGitHub && account.data?.configured === true;
@@ -180,12 +182,17 @@ export function usePullRequestActions({
   const run = (action: PullRequestAction) =>
     mutation.mutate(action, {
       onSuccess: (result) => {
+        if (result.kind === "close") setDialog(null);
         const message = successMessage(result, t, prLabel);
         if (!message) return;
         if (message.error) toast.warning(message.text);
         else toast.success(message.text);
       },
-      onError: fail,
+      onError: (err) => {
+        if (action.kind !== "close") return fail(err);
+        const failure = classifyGitHubActionError(err);
+        if (!route(failure)) setCloseError(failure);
+      },
     });
 
   const enableAutoMerge = async () => {
@@ -230,6 +237,7 @@ export function usePullRequestActions({
       case "request_review":
         return setDialog({ kind: "request_review" });
       case "close":
+        setCloseError(null);
         return setDialog({ kind: "close" });
       case "enable_auto_merge":
         return void enableAutoMerge();
@@ -276,21 +284,27 @@ export function usePullRequestActions({
         }
         pending={mutation.isPending && mutation.variables?.kind === "request_review"}
       />
-      <AlertDialog open={dialog?.kind === "close"} onOpenChange={(open) => !open && close()}>
+      <AlertDialog open={dialog?.kind === "close"} onOpenChange={(open) => !open && !closing && close()}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t(($) => $.pr_actions.close_dialog.title, { pr: prLabel })}</AlertDialogTitle>
             <AlertDialogDescription>{t(($) => $.pr_actions.close_dialog.description)}</AlertDialogDescription>
           </AlertDialogHeader>
+          {closeError ? (
+            <p role="alert" className="text-sm text-destructive">{gitHubFailureMessage(closeError, t, prLabel)}</p>
+          ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.pr_actions.cancel)}</AlertDialogCancel>
+            <AlertDialogCancel disabled={closing}>{t(($) => $.pr_actions.cancel)}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
+              disabled={closing}
+              aria-busy={closing || undefined}
               onClick={() => {
-                close();
+                setCloseError(null);
                 run({ kind: "close" });
               }}
             >
+              {closing ? <Spinner /> : null}
               {t(($) => $.pr_actions.close_dialog.confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>

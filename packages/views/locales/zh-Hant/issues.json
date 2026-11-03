@@ -1473,7 +1473,7 @@
       "failed": "無法在 GitHub 上完成此操作。",
       "github_said": "GitHub：{{message}}",
       "not_configured": "此伺服器尚未設定 GitHub 操作。",
-      "head_changed": "{{pr}} 有新的提交，請確認後再合併。",
+      "head_changed": "{{pr}} 有新的提交，請審閱後重新開啟此視窗合併。",
       "own_pr": "GitHub 不允許核准自己的 PR。",
       "auto_merge_not_allowed": "此儲存庫在 GitHub 上關閉了自動合併。",
       "no_merge_method": "此儲存庫沒有允許的合併方式。",

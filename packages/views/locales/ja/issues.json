@@ -1473,7 +1473,7 @@
       "failed": "GitHub で操作を完了できませんでした。",
       "github_said": "GitHub：{{message}}",
       "not_configured": "このサーバーでは GitHub の操作が設定されていません。",
-      "head_changed": "{{pr}} に新しいコミットがあります。確認してからマージしてください。",
+      "head_changed": "{{pr}} に新しいコミットがあります。内容を確認し、このダイアログを開き直してマージしてください。",
       "own_pr": "GitHub では自分のプルリクエストを承認できません。",
       "auto_merge_not_allowed": "このリポジトリでは GitHub の自動マージがオフになっています。",
       "no_merge_method": "このリポジトリで使えるマージ方法がありません。",

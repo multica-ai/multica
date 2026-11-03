@@ -1473,7 +1473,7 @@
       "failed": "无法在 GitHub 上完成此操作。",
       "github_said": "GitHub：{{message}}",
       "not_configured": "此服务器尚未配置 GitHub 操作。",
-      "head_changed": "{{pr}} 有新的提交，请确认后再合并。",
+      "head_changed": "{{pr}} 有新的提交，请审阅后重新打开此弹窗合并。",
       "own_pr": "GitHub 不允许批准自己的 PR。",
       "auto_merge_not_allowed": "此仓库在 GitHub 上关闭了自动合并。",
       "no_merge_method": "此仓库没有允许的合并方式。",

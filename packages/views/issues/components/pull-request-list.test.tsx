@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
+import type { GitHubMergeOptions, GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -32,6 +33,7 @@ const apiMock = vi.hoisted(() => ({
   listAgents: vi.fn(),
   getPullRequestMergeOptions: vi.fn(),
   mergePullRequest: vi.fn(),
+  runPullRequestAction: vi.fn(),
   createComment: vi.fn(),
 }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
@@ -96,13 +98,14 @@ function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
 
 function renderList() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
         <PullRequestList issueId="issue-1" identifier="MUL-1" />
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { ...rendered, qc };
 }
 
 async function waitForRender() {
@@ -503,6 +506,20 @@ describe("PullRequestList auto-complete", () => {
 });
 
 describe("PullRequestList actions", () => {
+  const mergeOptions: GitHubMergeOptions = {
+    viewer: { login: "jiayuan", did_author: false, can_update_branch: true, can_enable_auto_merge: true },
+    allowed_methods: ["squash"],
+    default_method: "squash",
+    commit_messages: { squash: { title: "Fix x (#12)", body: "body" } },
+    delete_branch_on_merge: false,
+    head_is_fork: false,
+    auto_merge_allowed: true,
+    auto_merge: null,
+    review_decision: "approved",
+    merge_state_status: "clean",
+    mergeable: "mergeable",
+    head_sha: "head-A",
+  };
   const waiting = (ids: string[]): PRAutoComplete => ({
     state: "waiting",
     pull_request_ids: ids,
@@ -517,8 +534,10 @@ describe("PullRequestList actions", () => {
     mockAutoComplete = waiting(["a"]);
     apiMock.getPullRequestMergeOptions.mockReset();
     apiMock.mergePullRequest.mockReset();
+    apiMock.runPullRequestAction.mockReset();
     apiMock.createComment.mockReset();
     toastMock.success.mockReset();
+    toastMock.error.mockReset();
   });
 
   it("offers no GitHub actions when the server can't act on GitHub", async () => {
@@ -602,5 +621,110 @@ describe("PullRequestList actions", () => {
     renderList();
     await waitForRender();
     expect(screen.getByTestId("pull-request-verdict")).toHaveTextContent("Awaiting approval");
+  });
+
+  it("requires a new confirmation when a realtime refresh changes the head", async () => {
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    apiMock.getPullRequestMergeOptions.mockResolvedValue(mergeOptions);
+    apiMock.mergePullRequest.mockResolvedValue({ merged: true, sha: "merged", branch_deleted: false });
+    mockPRs = [readyPR()];
+    const { qc } = renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    await screen.findByText("Merges on GitHub as @jiayuan");
+    fireEvent.change(screen.getByLabelText("Commit title"), { target: { value: "My merge title" } });
+
+    apiMock.getPullRequestMergeOptions.mockResolvedValue({ ...mergeOptions, head_sha: "head-B" });
+    // Match the invalidation sent by the PR realtime handler.
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
+    });
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("New commits were pushed to #12");
+    expect(within(dialog).getByRole("button", { name: /^Merge/ })).toBeDisabled();
+    expect(screen.getByLabelText("Commit title")).toHaveValue("My merge title");
+    fireEvent.keyDown(screen.getByLabelText("Commit title"), { key: "Enter", metaKey: true });
+    expect(apiMock.mergePullRequest).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    const nextDialog = await screen.findByRole("dialog");
+    const mergeButton = within(nextDialog).getByRole("button", { name: /^Merge/ });
+    await waitFor(() => expect(mergeButton).toBeEnabled());
+    fireEvent.click(mergeButton);
+    await waitFor(() => expect(apiMock.mergePullRequest).toHaveBeenCalledWith(
+      "issue-1", "a", expect.objectContaining({ expected_head_sha: "head-B" }),
+    ));
+  });
+
+  it("keeps a rejected head blocked while preserving edits", async () => {
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    apiMock.getPullRequestMergeOptions.mockResolvedValue(mergeOptions);
+    apiMock.mergePullRequest.mockRejectedValue(new ApiError(
+      "Head changed", 409, "Conflict", { code: "github_head_changed" },
+    ));
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    await screen.findByText("Merges on GitHub as @jiayuan");
+    fireEvent.change(screen.getByLabelText("Commit title"), { target: { value: "My merge title" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Merge/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("New commits were pushed to #12");
+    expect(screen.getByLabelText("Commit title")).toHaveValue("My merge title");
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: /^Merge/ })).toBeDisabled();
+  });
+
+  it.each([
+    ["github_account_not_connected", enIssues.pr_actions.connect.title],
+    ["github_reauth_required", enIssues.pr_actions.connect.reconnect_title],
+    ["github_app_permission_missing", enIssues.pr_actions.permission.title],
+  ])("keeps the %s recovery dialog open after a merge-options error", async (code, title) => {
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    apiMock.getPullRequestMergeOptions.mockRejectedValue(new ApiError("GitHub denied access", 409, "Conflict", { code }));
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    await waitFor(() => expect(screen.getByRole(code === "github_app_permission_missing" ? "alertdialog" : "dialog", { name: title })).toBeInTheDocument());
+  });
+
+  it.each([
+    ["github_account_not_connected", enIssues.pr_actions.connect.title],
+    ["github_reauth_required", enIssues.pr_actions.connect.reconnect_title],
+    ["github_app_permission_missing", enIssues.pr_actions.permission.title],
+  ])("keeps the %s recovery dialog open after a merge error", async (code, title) => {
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    apiMock.getPullRequestMergeOptions.mockResolvedValue(mergeOptions);
+    apiMock.mergePullRequest.mockRejectedValue(new ApiError("GitHub denied access", 409, "Conflict", { code }));
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    await screen.findByText("Merges on GitHub as @jiayuan");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Merge/ }));
+    await waitFor(() => expect(screen.getByRole(code === "github_app_permission_missing" ? "alertdialog" : "dialog", { name: title })).toBeInTheDocument());
+  });
+
+  it("keeps the close confirmation pending, preserves it on failure and allows retry", async () => {
+    let rejectClose!: (reason: Error) => void;
+    apiMock.runPullRequestAction.mockReturnValueOnce(new Promise<void>((_, reject) => { rejectClose = reject; }));
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Pull request actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Close pull request" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Close #12?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close pull request" }));
+    await waitFor(() => expect(apiMock.runPullRequestAction).toHaveBeenCalledWith("issue-1", "a", "close"));
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Close pull request$/ })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    await act(async () => { rejectClose(new Error("Network unavailable")); });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(enIssues.pr_actions.toast.failed);
+    expect(dialog).toBeInTheDocument();
+    apiMock.runPullRequestAction.mockResolvedValueOnce(undefined);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close pull request" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(apiMock.runPullRequestAction).toHaveBeenCalledTimes(2);
+    expect(toastMock.success).toHaveBeenCalledWith("Closed #12");
   });
 });

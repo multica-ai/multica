@@ -1524,7 +1524,7 @@
       "failed": "Couldn’t complete this on GitHub.",
       "github_said": "GitHub: {{message}}",
       "not_configured": "GitHub actions aren’t set up on this server.",
-      "head_changed": "New commits were pushed to {{pr}}. Review them before merging.",
+      "head_changed": "New commits were pushed to {{pr}}. Review them and reopen this dialog to merge.",
       "own_pr": "GitHub doesn’t let you approve your own pull request.",
       "auto_merge_not_allowed": "Auto-merge is turned off for this repository on GitHub.",
       "no_merge_method": "This repository doesn’t allow any merge method.",

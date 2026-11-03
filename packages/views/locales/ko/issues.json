@@ -1473,7 +1473,7 @@
       "failed": "GitHub에서 작업을 완료하지 못했습니다.",
       "github_said": "GitHub: {{message}}",
       "not_configured": "이 서버에는 GitHub 작업이 설정되어 있지 않습니다.",
-      "head_changed": "{{pr}}에 새 커밋이 있습니다. 확인한 뒤 병합하세요.",
+      "head_changed": "{{pr}}에 새 커밋이 있습니다. 내용을 검토한 뒤 이 대화 상자를 다시 열어 병합하세요.",
       "own_pr": "GitHub에서는 자신의 풀 리퀘스트를 승인할 수 없습니다.",
       "auto_merge_not_allowed": "이 저장소는 GitHub에서 자동 병합이 꺼져 있습니다.",
       "no_merge_method": "이 저장소에서 허용된 병합 방법이 없습니다.",

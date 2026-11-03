@@ -1524,7 +1524,7 @@
       "failed": "Impossible de terminer cette action sur GitHub.",
       "github_said": "GitHub : {{message}}",
       "not_configured": "Les actions GitHub ne sont pas configurées sur ce serveur.",
-      "head_changed": "De nouveaux commits ont été poussés sur {{pr}}. Vérifiez-les avant de fusionner.",
+      "head_changed": "De nouveaux commits ont été poussés sur {{pr}}. Vérifiez-les et rouvrez cette fenêtre pour fusionner.",
       "own_pr": "GitHub ne permet pas d’approuver sa propre pull request.",
       "auto_merge_not_allowed": "La fusion automatique est désactivée pour ce dépôt sur GitHub.",
       "no_merge_method": "Ce dépôt n’autorise aucune méthode de fusion.",
