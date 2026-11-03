@@ -6,7 +6,7 @@
     "scope_active": "Projets actifs",
     "scope_closed": "Projets clos",
     "empty": "Aucun projet pour l'instant",
-    "create_first": "Créez votre premier projet",
+    "empty_description": "Regroupez les tâches liées dans un projet pour suivre l'avancement et les responsables.",
     "view_compact": "Compact",
     "view_comfortable": "Confortable",
     "no_search_results": "Aucun résultat ne correspond à votre recherche",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "Projet introuvable",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les projets",
     "breadcrumb_fallback": "Projets",
     "title_placeholder": "Titre du projet",
     "icon_tooltip": "Changer d'icône",

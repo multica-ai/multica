@@ -103,7 +103,7 @@
   },
   "empty": {
     "title": "暫無消耗資料",
-    "body": "執行 AI 代理後可檢視 token 用量和耗時。"
+    "body": "AI 代理開始執行後，這裡會顯示 token、費用和失敗率。"
   },
   "duration": {
     "less_than_minute": "<1分鐘"

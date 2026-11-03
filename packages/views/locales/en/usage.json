@@ -105,7 +105,7 @@
   },
   "empty": {
     "title": "No usage yet",
-    "body": "Run agents to see token usage and run time."
+    "body": "Once agents start running, token usage, cost, and failure rate show up here."
   },
   "duration": {
     "less_than_minute": "<1m"

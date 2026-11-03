@@ -6,7 +6,7 @@
     "scope_active": "進行中的專案",
     "scope_closed": "已結束的專案",
     "empty": "還沒有專案",
-    "create_first": "建立第一個專案",
+    "empty_description": "用專案把相關任務歸到一起，追蹤進度和負責人。",
     "view_compact": "緊湊檢視",
     "view_comfortable": "舒適檢視",
     "no_search_results": "未找到匹配的專案",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "未找到該專案",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部專案",
     "breadcrumb_fallback": "專案",
     "title_placeholder": "專案標題",
     "icon_tooltip": "更換圖示",

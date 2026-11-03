@@ -103,7 +103,7 @@
   },
   "empty": {
     "title": "暂无消耗数据",
-    "body": "运行智能体后可查看 token 用量和耗时。"
+    "body": "智能体开始运行后，这里会显示 token、费用和失败率。"
   },
   "duration": {
     "less_than_minute": "<1分钟"

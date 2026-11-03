@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "还没有 skill",
-      "description": "创建或导入一个 skill。"
+      "description": "skill 是智能体可复用的做事方法。创建一个，或从运行时导入。"
     },
     "no_matches": {
       "title": "无匹配",

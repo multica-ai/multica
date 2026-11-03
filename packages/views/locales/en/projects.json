@@ -6,7 +6,7 @@
     "scope_active": "Active projects",
     "scope_closed": "Closed projects",
     "empty": "No projects yet",
-    "create_first": "Create your first project",
+    "empty_description": "Group related issues into a project to track progress and owners.",
     "view_compact": "Compact",
     "view_comfortable": "Comfortable",
     "no_search_results": "No results match your search",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "Project not found",
+    "not_found_description": "It may have been deleted or you may not have access.",
+    "back_to_list": "All projects",
     "breadcrumb_fallback": "Projects",
     "title_placeholder": "Project title",
     "icon_tooltip": "Change icon",

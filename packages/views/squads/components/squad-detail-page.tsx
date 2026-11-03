@@ -29,6 +29,7 @@ import {
   Bot,
   ChevronDown,
   Crown,
+  FileQuestion,
   Globe,
   Link2,
   Loader2,
@@ -38,9 +39,8 @@ import {
   Save,
   Trash2,
   UserPlus,
-  Users,
 } from "@multica/ui/icons";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -237,8 +237,28 @@ export function SquadDetailPage() {
   if (!squad) {
     if (squadError) {
       return (
-        <ObjectPage layoutId={layoutId} segments={segments} leaf={null}>
-          <CollectionPageState icon={Users} title={t(($) => $.detail.not_found)} />
+        <ObjectPage
+          layoutId={layoutId}
+          segments={segments}
+          leaf={
+            <span className="truncate text-muted-foreground">
+              {t(($) => $.detail.not_found)}
+            </span>
+          }
+        >
+          <CollectionPageState
+            icon={FileQuestion}
+            title={t(($) => $.detail.not_found)}
+            description={t(($) => $.detail.not_found_description)}
+            actions={
+              <AppLink
+                href={p.squads()}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                {t(($) => $.detail.back_to_list)}
+              </AppLink>
+            }
+          />
         </ObjectPage>
       );
     }

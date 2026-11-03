@@ -6,7 +6,7 @@
     "scope_active": "进行中的项目",
     "scope_closed": "已结束的项目",
     "empty": "还没有项目",
-    "create_first": "创建第一个项目",
+    "empty_description": "用项目把相关任务归到一起，跟踪进度和负责人。",
     "view_compact": "紧凑视图",
     "view_comfortable": "舒适视图",
     "no_search_results": "未找到匹配的项目",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "未找到该项目",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部项目",
     "breadcrumb_fallback": "项目",
     "title_placeholder": "项目标题",
     "icon_tooltip": "更换图标",

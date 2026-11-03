@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server,
+  Webhook, RotateCw, Server, FileQuestion,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -25,7 +25,7 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import { useNavigation, AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
@@ -99,6 +99,7 @@ import {
   ObjectSectionAction,
   ObjectSectionCard,
 } from "../../layout/object-page";
+import { CollectionPageState } from "../../layout/collection-page";
 import { useT } from "../../i18n";
 
 const LAYOUT_ID = "multica_autopilot_detail_layout";
@@ -1032,9 +1033,19 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   if (!data) {
     return shell(
       <span className="min-w-0 truncate text-muted-foreground">{t(($) => $.detail.not_found)}</span>,
-      <div className="flex h-full items-center justify-center text-body text-muted-foreground">
-        {t(($) => $.detail.not_found)}
-      </div>,
+      <CollectionPageState
+        icon={FileQuestion}
+        title={t(($) => $.detail.not_found)}
+        description={t(($) => $.detail.not_found_description)}
+        actions={
+          <AppLink
+            href={wsPaths.autopilots()}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            {t(($) => $.detail.back_to_list)}
+          </AppLink>
+        }
+      />,
     );
   }
 

@@ -51,6 +51,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -562,7 +563,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     if (countActiveFilterDimensions(filters) > 0) {
       return t(($) => $.no_matches.no_filter_match);
     }
-    return t(($) => $.no_matches.title);
+    return null;
   }, [filters, scope, search, t]);
 
   // Straight to the manual form: a duplicate already has every field decided,
@@ -777,7 +778,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
           )}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={noMatchText}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.no_matches.title)}
+              description={noMatchText}
+              onReset={resetNarrowing}
+              hasFilters={countActiveFilterDimensions(filters) > 0}
+              hasSearch={search.trim() !== ""}
+            />
+          }
         />
       )}
 

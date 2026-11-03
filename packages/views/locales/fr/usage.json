@@ -105,7 +105,7 @@
   },
   "empty": {
     "title": "Aucune consommation pour l'instant",
-    "body": "Lancez des agents pour voir leur consommation de tokens et leur durée d’exécution."
+    "body": "Dès que les agents tournent, leur consommation de tokens, leur coût et leur taux d'échec s'affichent ici."
   },
   "duration": {
     "less_than_minute": "<1 min"

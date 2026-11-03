@@ -2,7 +2,8 @@
   "page": {
     "title": "小隊",
     "new_button": "新建小隊",
-    "empty_no_squads": "暫無小隊。",
+    "empty_no_squads": "還沒有小隊",
+    "empty_description": "把 AI 代理和成員編成小隊，任務可以直接交給整個小隊。",
     "empty_no_match": "沒有匹配篩選條件的小隊。",
     "table": {
       "name": "小隊",
@@ -82,6 +83,8 @@
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
     "not_found": "找不到該小隊",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部小隊",
     "instructions": "指引",
     "edit": "編輯",
     "cancel": "取消",

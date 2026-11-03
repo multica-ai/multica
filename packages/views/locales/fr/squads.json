@@ -2,7 +2,8 @@
   "page": {
     "title": "Squads",
     "new_button": "Nouveau squad",
-    "empty_no_squads": "Aucun squad pour l’instant.",
+    "empty_no_squads": "Aucun squad pour l'instant",
+    "empty_description": "Réunissez agents et membres dans un squad pour lui confier des tâches directement.",
     "empty_no_match": "Aucun squad ne correspond à vos filtres.",
     "table": {
       "name": "Squad",
@@ -82,6 +83,8 @@
     "copy_link": "Copier le lien",
     "link_copied": "Lien copié",
     "not_found": "Squad introuvable",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les squads",
     "instructions": "Instructions",
     "edit": "Modifier",
     "cancel": "Annuler",

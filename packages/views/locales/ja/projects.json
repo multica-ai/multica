@@ -6,7 +6,7 @@
     "scope_active": "進行中のプロジェクト",
     "scope_closed": "終了したプロジェクト",
     "empty": "プロジェクトはまだありません",
-    "create_first": "最初のプロジェクトを作成",
+    "empty_description": "関連するタスクをプロジェクトにまとめ、進捗と担当者を追跡します。",
     "view_compact": "コンパクト",
     "view_comfortable": "ゆったり",
     "no_search_results": "検索条件に一致する結果はありません",
@@ -56,6 +56,8 @@
   },
   "detail": {
     "not_found": "プロジェクトが見つかりません",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのプロジェクト",
     "breadcrumb_fallback": "プロジェクト",
     "title_placeholder": "プロジェクトのタイトル",
     "icon_tooltip": "アイコンを変更",

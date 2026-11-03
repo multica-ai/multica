@@ -2,7 +2,8 @@
   "page": {
     "title": "Squads",
     "new_button": "New squad",
-    "empty_no_squads": "No squads yet.",
+    "empty_no_squads": "No squads yet",
+    "empty_description": "Group agents and members into a squad so issues can go to the whole squad.",
     "empty_no_match": "No squads match your filters.",
     "table": {
       "name": "Squad",
@@ -82,6 +83,8 @@
     "copy_link": "Copy link",
     "link_copied": "Link copied",
     "not_found": "Squad not found",
+    "not_found_description": "It may have been deleted or you may not have access.",
+    "back_to_list": "All squads",
     "instructions": "Instructions",
     "edit": "Edit",
     "cancel": "Cancel",
