@@ -975,6 +975,8 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return sourceClawHub, normalized, nil
 	case host == "github.com" || host == "www.github.com":
 		return sourceGitHub, normalized, nil
+	case (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.User == nil && registryHostAllowed(parsed.Host):
+		return sourceClawHub, normalized, nil
 	default:
 		// If no host (bare slug), default to clawhub
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
@@ -1084,6 +1086,13 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 	}
 
 	apiBase := clawHubAPIBase
+	customRegistry := false
+	if parsed, err := url.Parse(rawURL); err == nil && registryHostAllowed(parsed.Host) &&
+		parsed.Hostname() != "clawhub.ai" && parsed.Hostname() != "www.clawhub.ai" {
+		customRegistry = true
+		httpClient = registryHTTPClient(httpClient, parsed)
+		apiBase = registryAPIBase(ctx, httpClient, parsed)
+	}
 
 	// 1. Fetch skill metadata
 	skillReq, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+"/skills/"+url.PathEscape(slug), nil)
@@ -1152,6 +1161,14 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 		result.name = slug
 	}
 
+	if customRegistry && len(filePaths) == 0 {
+		archive, err := fetchRegistryArchive(ctx, httpClient, apiBase, slug)
+		if err != nil {
+			return nil, err
+		}
+		archive.origin = result.origin
+		return archive, nil
+	}
 	for _, fp := range filePaths {
 		if skillpkg.IsLikelyBinaryFilePath(fp) {
 			continue
@@ -1162,6 +1179,14 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 		}
 		body, err := fetchRawFile(ctx, httpClient, fileURL)
 		if err != nil {
+			if customRegistry && strings.HasPrefix(err.Error(), "HTTP 4") {
+				archive, archiveErr := fetchRegistryArchive(ctx, httpClient, apiBase, slug)
+				if archiveErr != nil {
+					return nil, archiveErr
+				}
+				archive.origin = result.origin
+				return archive, nil
+			}
 			return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 		}
 		if fp == "SKILL.md" {
