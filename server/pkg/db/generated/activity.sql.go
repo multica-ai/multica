@@ -99,6 +99,65 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 	return i, err
 }
 
+const createGitHubPRActivity = `-- name: CreateGitHubPRActivity :one
+INSERT INTO activity_log (id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+SELECT $1::uuid, i.workspace_id, i.id,
+       $2::text, $3::uuid,
+       $4::text, $5::jsonb, $6::timestamptz
+FROM issue i
+JOIN issue_pull_request ipr ON ipr.issue_id = i.id
+JOIN github_pull_request pr ON pr.id = ipr.pull_request_id AND pr.workspace_id = i.workspace_id
+WHERE i.id = $7::uuid
+  AND i.workspace_id = $8::uuid
+  AND pr.id = $9::uuid
+  AND NOT EXISTS (
+      SELECT 1 FROM issue_pull_request_exclusion x
+      WHERE x.issue_id = i.id AND x.pull_request_id = pr.id
+  )
+ON CONFLICT (id) DO NOTHING
+RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
+`
+
+type CreateGitHubPRActivityParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Action        string             `json:"action"`
+	Details       []byte             `json:"details"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	PullRequestID pgtype.UUID        `json:"pull_request_id"`
+}
+
+// A stable event id makes concurrent webhook redeliveries idempotent. Recheck
+// the live link and workspace at insertion, including explicit exclusions.
+func (q *Queries) CreateGitHubPRActivity(ctx context.Context, arg CreateGitHubPRActivityParams) (ActivityLog, error) {
+	row := q.db.QueryRow(ctx, createGitHubPRActivity,
+		arg.ID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Action,
+		arg.Details,
+		arg.CreatedAt,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.PullRequestID,
+	)
+	var i ActivityLog
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Action,
+		&i.Details,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getActivity = `-- name: GetActivity :one
 SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
 WHERE id = $1

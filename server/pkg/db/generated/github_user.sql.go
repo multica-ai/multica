@@ -20,6 +20,49 @@ func (q *Queries) DeleteGitHubUserConnection(ctx context.Context, userID pgtype.
 	return err
 }
 
+const findGitHubActivityMembers = `-- name: FindGitHubActivityMembers :many
+SELECT u.id, u.name, u.avatar_url
+FROM member m
+JOIN github_user_connection c ON c.user_id = m.user_id
+JOIN "user" u ON u.id = m.user_id
+WHERE m.workspace_id = $1 AND c.github_user_id = $2
+ORDER BY u.id
+LIMIT 2
+`
+
+type FindGitHubActivityMembersParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	GithubUserID int64       `json:"github_user_id"`
+}
+
+type FindGitHubActivityMembersRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Name      string      `json:"name"`
+	AvatarUrl pgtype.Text `json:"avatar_url"`
+}
+
+// Only attribute a GitHub actor to a member of this workspace. Two matches
+// mean the GitHub account is shared by multiple Multica users, not a unique actor.
+func (q *Queries) FindGitHubActivityMembers(ctx context.Context, arg FindGitHubActivityMembersParams) ([]FindGitHubActivityMembersRow, error) {
+	rows, err := q.db.Query(ctx, findGitHubActivityMembers, arg.WorkspaceID, arg.GithubUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindGitHubActivityMembersRow{}
+	for rows.Next() {
+		var i FindGitHubActivityMembersRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.AvatarUrl); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getGitHubUserConnection = `-- name: GetGitHubUserConnection :one
 
 SELECT user_id, github_user_id, login, avatar_url, access_token_encrypted, access_token_expires_at, refresh_token_encrypted, refresh_token_expires_at, created_at, updated_at FROM github_user_connection WHERE user_id = $1

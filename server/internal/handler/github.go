@@ -1265,21 +1265,22 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 type ghPullRequestPayload struct {
 	Action      string `json:"action"`
 	PullRequest struct {
-		Number         int32  `json:"number"`
-		HTMLURL        string `json:"html_url"`
-		Title          string `json:"title"`
-		Body           string `json:"body"`
-		State          string `json:"state"`
-		Draft          bool   `json:"draft"`
-		Merged         bool   `json:"merged"`
-		MergedAt       string `json:"merged_at"`
-		ClosedAt       string `json:"closed_at"`
-		CreatedAt      string `json:"created_at"`
-		UpdatedAt      string `json:"updated_at"`
-		MergeableState string `json:"mergeable_state"`
-		Additions      int32  `json:"additions"`
-		Deletions      int32  `json:"deletions"`
-		ChangedFiles   int32  `json:"changed_files"`
+		Number         int32     `json:"number"`
+		HTMLURL        string    `json:"html_url"`
+		Title          string    `json:"title"`
+		Body           string    `json:"body"`
+		State          string    `json:"state"`
+		Draft          bool      `json:"draft"`
+		Merged         bool      `json:"merged"`
+		MergedBy       ghPRActor `json:"merged_by"`
+		MergedAt       string    `json:"merged_at"`
+		ClosedAt       string    `json:"closed_at"`
+		CreatedAt      string    `json:"created_at"`
+		UpdatedAt      string    `json:"updated_at"`
+		MergeableState string    `json:"mergeable_state"`
+		Additions      int32     `json:"additions"`
+		Deletions      int32     `json:"deletions"`
+		ChangedFiles   int32     `json:"changed_files"`
 		Head           struct {
 			Ref string `json:"ref"`
 			SHA string `json:"sha"`
@@ -1290,6 +1291,7 @@ type ghPullRequestPayload struct {
 		} `json:"user"`
 	} `json:"pull_request"`
 	Changes    *ghPRChanges `json:"changes"`
+	Sender     ghPRActor    `json:"sender"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -1576,6 +1578,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	// happens — and not again on a later edit/label event of a merged PR (that
 	// would re-complete an issue someone reopened on purpose).
 	prevState := ""
+	var previousPR db.GithubPullRequest
 	if prev, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
 		WorkspaceID: wsID,
 		RepoOwner:   p.Repository.Owner.Login,
@@ -1583,6 +1586,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		PrNumber:    p.PullRequest.Number,
 	}); err == nil {
 		prevState = prev.State
+		previousPR = prev
 	}
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
 		WorkspaceID:         wsID,
@@ -1611,6 +1615,11 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// A stale redelivery: the stored row is newer, and the newer event
 		// already linked and published. Acting on this one would roll links
 		// and merge detection back.
+		// The close event can arrive after a newer metadata event. Preserve
+		// that history without replaying its obsolete mirror/link changes.
+		if previousPR.ID.Valid {
+			h.recordGitHubPRWebhookActivity(ctx, previousPR, p)
+		}
 		return
 	}
 	if err != nil {
@@ -1663,6 +1672,8 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 			h.maybeAutoCompleteIssue(ctx, wsID, issueID, resolver)
 		}
 	}
+
+	h.recordGitHubPRWebhookActivity(ctx, pr, p)
 
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.

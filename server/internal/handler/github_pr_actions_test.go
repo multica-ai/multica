@@ -585,12 +585,18 @@ func TestGitHubPRMerge(t *testing.T) {
 	}
 	expectUserToken(t, f.api.apiCalls())
 
-	acts := activityActions(t, f.issueID)
-	if len(acts) != 1 || acts[0]["action"] != "pull_request_merged" || acts[0]["actor_type"] != "member" || acts[0]["actor_id"] != testUserID {
+	if acts := activityActions(t, f.issueID); len(acts) != 0 {
+		t.Fatalf("action endpoint must leave timeline recording to the webhook: %+v", acts)
+	}
+	payload := githubPRActivityPayload(f.installationID, f.repo, "merged", time.Now().UTC().Add(time.Second))
+	deliverGitHubPRActivity(t, payload)
+	deliverGitHubPRActivity(t, payload)
+	acts := githubPRTimelineActivities(t, testWorkspaceID, f.issueID)
+	if len(acts) != 1 || *acts[0].Action != "pull_request_merged" || acts[0].ActorType != "member" || acts[0].ActorID != testUserID {
 		t.Fatalf("activity = %+v", acts)
 	}
-	details := acts[0]["details"].(map[string]any)
-	if details["pr_number"] != float64(7) || details["merge_method"] != "squash" || details["pull_request_id"] != f.prID {
+	details := decodeBody(t, acts[0].Details)
+	if details["pr_number"] != float64(7) || details["source"] != "github" || details["pull_request_id"] != f.prID {
 		t.Fatalf("activity details = %v", details)
 	}
 }
@@ -940,11 +946,17 @@ func TestGitHubPRClose(t *testing.T) {
 		t.Fatalf("calls = %+v", calls)
 	}
 	expectUserToken(t, calls)
-	acts := activityActions(t, f.issueID)
-	if len(acts) != 1 || acts[0]["action"] != "pull_request_closed" || acts[0]["actor_id"] != testUserID {
+	if acts := activityActions(t, f.issueID); len(acts) != 0 {
+		t.Fatalf("action endpoint must leave timeline recording to the webhook: %+v", acts)
+	}
+	payload := githubPRActivityPayload(f.installationID, f.repo, "closed", time.Now().UTC().Add(time.Second))
+	deliverGitHubPRActivity(t, payload)
+	deliverGitHubPRActivity(t, payload)
+	acts := githubPRTimelineActivities(t, testWorkspaceID, f.issueID)
+	if len(acts) != 1 || *acts[0].Action != "pull_request_closed" || acts[0].ActorID != testUserID {
 		t.Fatalf("activity = %+v", acts)
 	}
-	if details := acts[0]["details"].(map[string]any); details["pr_number"] != float64(7) {
+	if details := decodeBody(t, acts[0].Details); details["pr_number"] != float64(7) {
 		t.Fatalf("details = %v", details)
 	}
 }

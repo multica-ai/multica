@@ -8,6 +8,17 @@
 -- name: GetGitHubUserConnection :one
 SELECT * FROM github_user_connection WHERE user_id = $1;
 
+-- name: FindGitHubActivityMembers :many
+-- Only attribute a GitHub actor to a member of this workspace. Two matches
+-- mean the GitHub account is shared by multiple Multica users, not a unique actor.
+SELECT u.id, u.name, u.avatar_url
+FROM member m
+JOIN github_user_connection c ON c.user_id = m.user_id
+JOIN "user" u ON u.id = m.user_id
+WHERE m.workspace_id = $1 AND c.github_user_id = $2
+ORDER BY u.id
+LIMIT 2;
+
 -- name: LockGitHubUserConnection :one
 -- GitHub rotates the refresh token on every use, so two refreshes racing on
 -- the same token would leave one of them holding a revoked token. Refreshes

@@ -23,7 +23,8 @@ type TimelineEntry struct {
 	CreatedAt string `json:"created_at"`
 	// Display-only identity is hydrated from the global user row for member
 	// actors. It remains available after the member leaves this workspace;
-	// actor_type + actor_id stay the durable attribution keys.
+	// actor_type + actor_id stay the durable attribution keys. External GitHub
+	// PR actors use the login stored with the activity instead.
 	ActorName      string `json:"actor_name,omitempty"`
 	ActorAvatarURL string `json:"actor_avatar_url,omitempty"`
 
@@ -335,7 +336,7 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 	if a.ActorType.Valid {
 		actorType = a.ActorType.String
 	}
-	return TimelineEntry{
+	entry := TimelineEntry{
 		Type:      "activity",
 		ID:        uuidToString(a.ID),
 		ActorType: actorType,
@@ -344,6 +345,15 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
 	}
+	if actorType == "system" && (a.Action == githubPRActivityMerged || a.Action == githubPRActivityClosed) {
+		var details struct {
+			GitHubLogin string `json:"github_login"`
+		}
+		if json.Unmarshal(a.Details, &details) == nil && details.GitHubLogin != "" {
+			entry.ActorName = "@" + details.GitHubLogin + " (GitHub)"
+		}
+	}
+	return entry
 }
 
 // hydrateTimelineMemberActors adds display identity for member-authored rows

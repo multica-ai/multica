@@ -32,6 +32,26 @@ INSERT INTO activity_log (
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
+-- name: CreateGitHubPRActivity :one
+-- A stable event id makes concurrent webhook redeliveries idempotent. Recheck
+-- the live link and workspace at insertion, including explicit exclusions.
+INSERT INTO activity_log (id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+SELECT sqlc.arg('id')::uuid, i.workspace_id, i.id,
+       sqlc.narg('actor_type')::text, sqlc.narg('actor_id')::uuid,
+       sqlc.arg('action')::text, sqlc.arg('details')::jsonb, sqlc.arg('created_at')::timestamptz
+FROM issue i
+JOIN issue_pull_request ipr ON ipr.issue_id = i.id
+JOIN github_pull_request pr ON pr.id = ipr.pull_request_id AND pr.workspace_id = i.workspace_id
+WHERE i.id = sqlc.arg('issue_id')::uuid
+  AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND pr.id = sqlc.arg('pull_request_id')::uuid
+  AND NOT EXISTS (
+      SELECT 1 FROM issue_pull_request_exclusion x
+      WHERE x.issue_id = i.id AND x.pull_request_id = pr.id
+  )
+ON CONFLICT (id) DO NOTHING
+RETURNING *;
+
 -- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (
   SELECT 1

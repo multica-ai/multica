@@ -23,8 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghuser"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // PR write operations on an issue's linked GitHub pull requests (MUL-8433),
@@ -40,8 +38,6 @@ const (
 	reviewerCandidatePages    = 3
 	githubActionsAppSlug      = "github-actions"
 	githubPRActionBodyLimit   = 64 << 10
-	githubPRActivityMerged    = "pull_request_merged"
-	githubPRActivityClosed    = "pull_request_closed"
 	githubReauthMessage       = "Your GitHub authorization has expired. Reconnect your GitHub account to continue."
 	githubNotConnectedMessage = "Connect your GitHub account to do this from Multica."
 )
@@ -230,50 +226,6 @@ func (h *Handler) afterGitHubPRWrite(t githubPRTarget) {
 
 func writeGitHubPROK(w http.ResponseWriter) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// recordGitHubPRActivity writes the issue timeline entry for a merge or close
-// performed from Multica, attributed to the member who did it.
-func (h *Handler) recordGitHubPRActivity(ctx context.Context, t githubPRTarget, action string, extra map[string]any) {
-	ctx = context.WithoutCancel(ctx)
-	detailMap := map[string]any{
-		"pull_request_id": uuidToString(t.pr.ID),
-		"pr_number":       t.pr.PrNumber,
-		"pr_title":        t.pr.Title,
-		"pr_url":          t.pr.HtmlUrl,
-		"repo_owner":      t.pr.RepoOwner,
-		"repo_name":       t.pr.RepoName,
-	}
-	for k, v := range extra {
-		detailMap[k] = v
-	}
-	details, _ := json.Marshal(detailMap)
-	actorID := uuidToString(t.userID)
-	activity, err := h.Queries.CreateActivity(ctx, db.CreateActivityParams{
-		ID:          dbid.NewV7(),
-		WorkspaceID: t.issue.WorkspaceID,
-		IssueID:     t.issue.ID,
-		ActorType:   strToText("member"),
-		ActorID:     t.userID,
-		Action:      action,
-		Details:     details,
-	})
-	if err != nil {
-		slog.Warn("github pr action: record activity failed", "action", action, "err", err)
-		return
-	}
-	h.publish(protocol.EventActivityCreated, uuidToString(t.issue.WorkspaceID), "member", actorID, map[string]any{
-		"issue_id": uuidToString(t.issue.ID),
-		"entry": map[string]any{
-			"type":       "activity",
-			"id":         uuidToString(activity.ID),
-			"actor_type": "member",
-			"actor_id":   actorID,
-			"action":     activity.Action,
-			"details":    json.RawMessage(details),
-			"created_at": timestampToString(activity.CreatedAt),
-		},
-	})
 }
 
 // --- merge-options ---------------------------------------------------------
@@ -535,7 +487,6 @@ func (h *Handler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 		branchDeleted = h.deleteMergedBranch(ctx, t, pull)
 	}
 	h.afterGitHubPRWrite(t)
-	h.recordGitHubPRActivity(ctx, t, githubPRActivityMerged, map[string]any{"merge_method": req.Method})
 	writeJSON(w, http.StatusOK, MergePullRequestResponse{Merged: true, SHA: merged.SHA, BranchDeleted: branchDeleted})
 }
 
@@ -1017,6 +968,5 @@ func (h *Handler) ClosePullRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.afterGitHubPRWrite(t)
-	h.recordGitHubPRActivity(ctx, t, githubPRActivityClosed, nil)
 	writeGitHubPROK(w)
 }
