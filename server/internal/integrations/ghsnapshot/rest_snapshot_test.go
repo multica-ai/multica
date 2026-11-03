@@ -409,8 +409,6 @@ func TestFetchPRSnapshotRESTSupersededSuites(t *testing.T) {
 				switch r.URL.Path {
 				case "/repos/o/r/pulls/5":
 					writeTestPR(w, "sha1", true, "clean")
-				case "/repos/o/r/pulls/5/reviews":
-					_, _ = w.Write([]byte(`[]`))
 				case "/repos/o/r/commits/sha1/check-runs":
 					_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(tc.runs), "check_runs": tc.runs})
 				case "/repos/o/r/commits/sha1/status":
