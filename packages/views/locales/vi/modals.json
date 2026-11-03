@@ -244,7 +244,8 @@
       "error_agent_unavailable_fallback": "Agent không khả dụng. Hãy chọn agent khác.",
       "error_daemon_version": "CLI của daemon của agent này ({{current}}) thấp hơn mức yêu cầu {{min}}. Hãy nâng cấp daemon để dùng Tạo bằng agent.",
       "error_unknown": "Không gửi được. Hãy thử lại.",
-      "sub_issue_of": "Công việc con của {{identifier}}"
+      "sub_issue_of": "Công việc con của {{identifier}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents không đọc được tệp đính kèm. Hãy gỡ chúng hoặc chọn agent khác."
     }
   },
   "mark_duplicate": {
@@ -264,5 +265,11 @@
     "title_required": "Hãy nhập tiêu đề",
     "toast_renamed": "Đã đổi tên công việc",
     "toast_failed": "Đổi tên công việc thất bại"
+  },
+  "add_project_issue": {
+    "title": "Thêm công việc có sẵn",
+    "description": "Tìm một công việc để chuyển vào dự án này",
+    "toast_success": "Đã chuyển {{identifier}} vào dự án",
+    "toast_failed": "Không chuyển được công việc"
   }
 }

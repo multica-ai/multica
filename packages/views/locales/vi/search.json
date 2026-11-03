@@ -96,7 +96,8 @@
     "assign_issue": "Giao một công việc cho {{name}}...",
     "new_issue": "Công việc mới cho {{name}}",
     "pin_in_chat": "Ghim trong trò chuyện",
-    "unpin_in_chat": "Bỏ ghim trong trò chuyện"
+    "unpin_in_chat": "Bỏ ghim trong trò chuyện",
+    "settings": "Mở cài đặt agent"
   },
   "autopilot": {
     "run_now": "Chạy một lần ngay",

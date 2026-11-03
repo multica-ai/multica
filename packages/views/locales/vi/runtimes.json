@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtime",
-    "learn_more": "Tìm hiểu thêm →",
     "connect_remote": "Thêm máy",
-    "search_placeholder": "Tìm…",
     "scope_mine": "Của tôi",
     "scope_all": "Tất cả",
     "live": "Trực tiếp",
@@ -25,7 +23,7 @@
       "title": "Đang khởi động runtime cục bộ…",
       "hint": "Đang kết nối tới không gian làm việc..."
     },
-    "add": "Thêm",
+    "add": "Thêm runtime",
     "add_menu": {
       "machines": "Máy",
       "this_computer": "Máy tính này",
@@ -67,7 +65,7 @@
       "no_matches": "Không có máy hay dịch vụ đám mây nào khớp"
     },
     "filters": {
-      "all": "Tất cả",
+      "all": "Tất cả runtime",
       "online": "Trực tuyến",
       "offline": "Ngoại tuyến"
     }
@@ -93,7 +91,6 @@
     "this_machine": "Thiết bị này",
     "local_badge": "Cục bộ · máy này",
     "pending_custom_runtimes": "Runtime tùy chỉnh đang chờ",
-    "runtime_count_other": "{{count}} runtime",
     "busy_count_other": "{{count}} đang bận",
     "no_matches_title": "Không có máy nào",
     "no_matches_hint": "Không có máy nào khớp với tìm kiếm hoặc bộ lọc hiện tại.",
@@ -129,7 +126,8 @@
       "toast_saved": "Đã đổi tên máy",
       "toast_cleared": "Đã xóa tên máy",
       "toast_failed": "Không đổi tên được máy"
-    }
+    },
+    "daemon_title": "Daemon"
   },
   "health": {
     "online": {
@@ -158,13 +156,9 @@
     "fact_owner": "Chủ sở hữu",
     "fact_device": "Thiết bị",
     "fact_runtime": "Runtime",
-    "technical_details": "Chi tiết kỹ thuật",
     "fact_daemon_cli": "CLI của daemon",
     "fact_daemon_id": "ID của daemon",
-    "serving_title": "Đang phục vụ",
-    "serving_count_other": "{{count}} agent",
     "no_agents": "Chưa có agent nào được gắn với runtime này.",
-    "diagnostics_title": "Chẩn đoán",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Khả năng hiển thị",
     "visibility_label": {
@@ -249,7 +243,12 @@
     "toast_deleted": "Đã xóa runtime",
     "toast_delete_failed": "Không xóa được runtime",
     "running_chip_other": "· {{count}} đang chạy",
-    "queued_chip_other": "· {{count}} đang chờ"
+    "queued_chip_other": "· {{count}} đang chờ",
+    "usage_title": "Mức sử dụng",
+    "concurrency_title": "Đồng thời",
+    "concurrency_none": "Không giới hạn",
+    "concurrency_hint": "Số lần chạy tối đa cùng lúc trên mọi agent của runtime này ({{min}}–{{max}}). Để trống nếu không giới hạn.",
+    "toast_concurrency_failed": "Không cập nhật được giới hạn đồng thời"
   },
   "detail_page": {
     "not_found_title": "Không tìm thấy runtime",

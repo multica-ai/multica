@@ -3,10 +3,8 @@
     "title": "Dự án",
     "new_project": "Dự án mới",
     "empty": "Chưa có dự án nào",
-    "create_first": "Tạo dự án đầu tiên của bạn",
     "view_compact": "Gọn",
     "view_comfortable": "Thoải mái",
-    "search_placeholder": "Tìm kiếm dự án...",
     "no_search_results": "Không có kết quả nào khớp với tìm kiếm của bạn",
     "view_table": "Bảng",
     "view_cards": "Thẻ",
@@ -15,8 +13,10 @@
     "unpin": "Bỏ ghim",
     "delete": "Xóa",
     "no_matches": "Không có dự án nào khớp",
-    "selected_other": "{{count}} đã chọn",
-    "clear_selection": "Xóa lựa chọn"
+    "scope_all": "Tất cả dự án",
+    "scope_active": "Dự án đang mở",
+    "scope_closed": "Dự án đã đóng",
+    "empty_description": "Gom các công việc liên quan thành một dự án để theo dõi tiến độ và người phụ trách."
   },
   "table": {
     "name": "Tên",
@@ -73,13 +73,16 @@
     "no_due_date": "Không có ngày đến hạn",
     "description_placeholder": "Thêm mô tả...",
     "description_hint": "Được chia sẻ với agent làm ngữ cảnh cho mọi lần chạy trong dự án này.",
-    "empty_issues_title": "Chưa liên kết công việc nào",
-    "empty_issues_hint": "Bạn cũng có thể thêm các công việc hiện có vào dự án này.",
+    "empty_issues_title": "Chưa có công việc nào trong dự án này",
+    "empty_issues_hint": "Tạo một công việc, hoặc chuyển một công việc có sẵn vào đây.",
     "empty_issues_new_button": "Công việc mới",
     "no_issues_yet": "Chưa có công việc nào",
     "toast_link_copied": "Đã sao chép liên kết",
     "toast_project_deleted": "Đã xóa dự án",
-    "toast_move_issue_failed": "Không di chuyển được công việc"
+    "toast_move_issue_failed": "Không di chuyển được công việc",
+    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
+    "back_to_list": "Tất cả dự án",
+    "empty_issues_add_existing": "Thêm công việc có sẵn"
   },
   "resources": {
     "section_header": "Tài nguyên",
@@ -167,18 +170,9 @@
     "fallback_label": "Dự án"
   },
   "toolbar": {
-    "result_count_title": "Dự án khớp / tất cả dự án",
-    "filter_label": "Bộ lọc",
-    "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc",
     "section_status": "Trạng thái",
     "section_priority": "Mức ưu tiên",
     "section_lead": "Phụ trách",
-    "display": "Hiển thị",
-    "sort_by": "Sắp xếp theo",
-    "direction_asc": "Tăng dần",
-    "direction_desc": "Giảm dần",
-    "section_columns": "Cột",
     "view": "Chế độ xem"
   }
 }

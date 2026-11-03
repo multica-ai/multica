@@ -76,7 +76,7 @@
     "header_rate": "Tỷ lệ",
     "other_agents": "Agent khác",
     "low_sample": "Ít hơn {{count}} lần chạy trong khoảng này — tỷ lệ này không có ý nghĩa.",
-    "no_data": "Không có lần chạy thất bại nào trong khoảng này.",
+    "no_data": "Không có lần chạy thất bại nào trong khoảng này",
     "show_reasons": "Hiện mã lỗi",
     "hide_reasons": "Ẩn mã lỗi",
     "show_all": "Hiện tất cả {{count}}",
@@ -103,7 +103,7 @@
   },
   "empty": {
     "title": "Chưa có mức sử dụng",
-    "body": "Chạy agent để xem mức sử dụng token và thời gian chạy."
+    "body": "Khi các agent bắt đầu chạy, mức sử dụng token, chi phí và tỉ lệ thất bại sẽ hiện ở đây."
   },
   "duration": {
     "less_than_minute": "<1 phút"

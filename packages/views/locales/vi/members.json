@@ -11,10 +11,13 @@
     "more_agents_other": "và {{count}} agent khác"
   },
   "detail": {
-    "workspace_fallback": "Không gian làm việc",
     "members_breadcrumb": "Thành viên",
     "breadcrumb_fallback": "Thành viên",
     "not_found_title": "Không tìm thấy thành viên",
-    "not_found_description": "Thành viên này có thể đã rời khỏi không gian làm việc."
+    "not_found_description": "Thành viên này có thể đã rời khỏi không gian làm việc.",
+    "role": "Vai trò",
+    "email": "Email",
+    "joined": "Đã tham gia",
+    "relation": "Quan hệ"
   }
 }

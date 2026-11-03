@@ -117,7 +117,10 @@
     "breadcrumb_title": "Công việc",
     "breadcrumb_workspace_fallback": "Không gian làm việc",
     "empty_title": "Chưa có công việc nào",
-    "move_failed": "Di chuyển công việc thất bại"
+    "move_failed": "Di chuyển công việc thất bại",
+    "empty_description": "Một công việc là một phần việc cụ thể cho một thành viên hoặc một agent. Giao nó cho một agent và nó sẽ bắt đầu trên runtime của bạn.",
+    "break_down_with_chat": "Tách nhỏ bằng trò chuyện",
+    "break_down_prompt": "Tôi muốn hoàn thành việc sau. Hãy hỏi tôi những gì bạn cần biết, rồi tách nó thành các công việc trong không gian làm việc này:\n\n"
   },
   "status": {
     "backlog": "Tồn đọng",
@@ -194,7 +197,65 @@
     "active_count_other": "{{count}} bộ lọc",
     "in_view": "Đã có trong chế độ xem này",
     "chip_edit": "Chỉnh sửa",
-    "chip_save_as": "Lưu thành"
+    "chip_save_as": "Lưu thành",
+    "active_section": "Đang bật",
+    "section_relation": "Quan hệ với tôi",
+    "relation_assigned": "Được giao cho tôi",
+    "relation_created": "Do tôi tạo",
+    "relation_my_agents": "Giao cho các agent của tôi",
+    "section_agent_status": "Trạng thái agent",
+    "agent_status_running": "Đang chạy",
+    "operator_label": "Khớp",
+    "operator_is": "là",
+    "operator_is_not": "không phải là",
+    "modified_hint": "Đã đổi so với chế độ xem đã lưu",
+    "unsaved_changes_other": "{{count}} thay đổi chưa lưu",
+    "section_due_date": "Ngày đến hạn",
+    "due_overdue": "Quá hạn",
+    "due_today": "Hạn hôm nay",
+    "due_this_week": "Hạn trong tuần này",
+    "due_next_7_days": "Hạn trong 7 ngày tới",
+    "due_none": "Không có hạn",
+    "search_placeholder": "Lọc theo trường hoặc giá trị…",
+    "search_fields": "Trường",
+    "search_values": "Giá trị",
+    "advanced_switch": "Chuyển sang bộ lọc nâng cao",
+    "advanced_title": "Bộ lọc nâng cao",
+    "advanced_match_leading": "Khớp",
+    "advanced_match_trailing": "trong các điều kiện",
+    "match_all": "tất cả",
+    "match_any": "bất kỳ",
+    "advanced_where": "Trong đó",
+    "advanced_and": "và",
+    "advanced_or": "hoặc",
+    "advanced_add_condition": "Thêm điều kiện",
+    "advanced_add_group": "Thêm nhóm điều kiện",
+    "advanced_unknown_property": "Thuộc tính đã xóa",
+    "advanced_values_placeholder": "Chọn giá trị…",
+    "advanced_field_label": "Trường",
+    "advanced_values_label": "Giá trị",
+    "advanced_actions": "Hành động của điều kiện",
+    "advanced_duplicate": "Nhân bản",
+    "advanced_delete": "Xóa",
+    "advanced_delete_group": "Xóa nhóm",
+    "advanced_to_simple": "Chuyển sang bộ lọc đơn giản",
+    "advanced_to_simple_blocked": "Bộ lọc đơn giản không thể hiện nhóm, “bất kỳ”, hay một trường dùng hai lần",
+    "advanced_clear": "Xóa tất cả",
+    "advanced_empty": "Chưa có điều kiện nào. Thêm một điều kiện để bắt đầu lọc.",
+    "advanced_conditions_other": "{{count}} điều kiện",
+    "operator_has_any": "bao gồm bất kỳ",
+    "operator_has_none": "không bao gồm",
+    "operator_contains": "chứa",
+    "operator_not_contains": "không chứa",
+    "operator_before": "trước",
+    "operator_after": "sau",
+    "operator_empty": "trống",
+    "operator_not_empty": "không trống",
+    "advanced_group_match_leading": "Khớp",
+    "advanced_group_match_trailing": "trong số này",
+    "advanced_group_hint": "Các điều kiện trong nhóm này được nối bằng “{{word}}”",
+    "advanced_add_to_group": "Thêm vào nhóm",
+    "advanced_turn_into_group": "Chuyển thành nhóm"
   },
   "display": {
     "tooltip": "Cài đặt hiển thị",
@@ -236,7 +297,9 @@
     "card_project": "Dự án",
     "card_labels": "Nhãn",
     "card_child_progress": "Tiến độ công việc con",
-    "show_sub_issues": "Hiện công việc con"
+    "show_sub_issues": "Hiện công việc con",
+    "columns_shown": "Đã hiện {{count}}",
+    "layout_options": "Tùy chọn {{layout}}"
   },
   "view": {
     "tooltip_board": "Dạng bảng",
@@ -346,7 +409,7 @@
       }
     },
     "search_placeholder": "Tìm kiếm công việc...",
-    "search_empty": "Không có công việc nào khớp với tìm kiếm của bạn."
+    "search_empty": "Không có công việc nào khớp với tìm kiếm của bạn"
   },
   "list": {
     "empty_status": "Không có công việc",
@@ -493,7 +556,8 @@
     "quick_jump_label": "Điều hướng nhanh",
     "description_nav_label": "Mô tả công việc",
     "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}",
-    "restore_to_inbox_tooltip": "Khôi phục vào hộp thư đến"
+    "restore_to_inbox_tooltip": "Khôi phục vào hộp thư đến",
+    "not_found_title": "Không tìm thấy công việc"
   },
   "timeline": {
     "loading": "Đang tải...",
@@ -684,7 +748,10 @@
     "tasks_count_other": "{{count}} lần chạy",
     "chip_agents_working_other": "{{count}} agent đang làm việc",
     "issues_count_other": "{{count}} công việc",
-    "chip_agents_working_unknown": "Agent đang làm việc: —"
+    "chip_agents_working_unknown": "Agent đang làm việc: —",
+    "unread_completed": "{{agent}} đã hoàn thành · {{time}}",
+    "unread_failed": "Lần chạy của {{agent}} thất bại · {{time}}",
+    "unread_manual": "Đã đánh dấu chưa đọc"
   },
   "filtered_empty": {
     "title": "Không có công việc nào khớp với các bộ lọc này",
@@ -810,7 +877,8 @@
     "detail_cache": "Trúng bộ nhớ đệm",
     "cache_hit_value": "{{percent}} · tiết kiệm {{amount}}",
     "detail_time": "Thời gian",
-    "detail_branch": "Nhánh"
+    "detail_branch": "Nhánh",
+    "credits_count": "{{credits}} credit {{provider}}"
   },
   "terminate_dialog": {
     "title": "Dừng lần chạy này?",
@@ -868,7 +936,12 @@
     "remove_parent_issue_success": "Đã xóa công việc cha",
     "add_sub_issue": "Thêm công việc con...",
     "delete_issue": "Xóa công việc",
-    "mark_duplicate": "Đánh dấu trùng lặp..."
+    "mark_duplicate": "Đánh dấu trùng lặp...",
+    "mark_read": "Đánh dấu đã đọc",
+    "mark_unread": "Đánh dấu chưa đọc",
+    "copy_identifier": "Sao chép định danh",
+    "identifier_copied": "Đã sao chép {{identifier}}",
+    "stop_agent_run": "Dừng lần chạy của {{name}}"
   },
   "pickers": {
     "custom_property": {
@@ -956,38 +1029,6 @@
     "row_todo_hint": "khởi động agent"
   },
   "save_view": {
-    "title": "Lưu thành chế độ xem",
-    "hint_workspace": "Dựa trên mọi công việc của không gian làm việc",
-    "hint_my_any": "Dựa trên Công việc của tôi · Tất cả",
-    "hint_my_assigned": "Dựa trên Công việc của tôi · Đã được giao",
-    "hint_my_created": "Dựa trên Công việc của tôi · Đã tạo",
-    "hint_my_involved": "Dựa trên Công việc của tôi · Liên quan",
-    "hint_project": "Dựa trên dự án “{{title}}”, chỉ khả dụng trên trang của dự án đó",
-    "hint_project_agents": "Dựa trên các công việc của dự án “{{title}}” được giao cho agent, chỉ khả dụng trên trang của dự án đó",
-    "hint_project_members": "Dựa trên các công việc của dự án “{{title}}” được giao cho thành viên, chỉ khả dụng trên trang của dự án đó",
-    "my_private_note": "Chế độ xem Công việc của tôi chỉ hiển thị với bạn",
-    "name_label": "Tên",
-    "visibility_label": "Khả năng hiển thị",
-    "visibility_private": "Chỉ hiển thị với tôi",
-    "visibility_workspace": "Hiển thị với thành viên không gian làm việc",
-    "filters_label": "Bộ lọc",
-    "custom_property": "Thuộc tính tùy chỉnh",
-    "create": "Tạo chế độ xem",
-    "layout_label": "Bố cục",
-    "display_defaults": "Hiển thị mặc định",
-    "default_hint": "Cách thành viên nhìn thấy chế độ xem này lần đầu; sau đó mỗi người có thể tự điều chỉnh",
-    "add_filter": "Thêm bộ lọc",
-    "name_placeholder": "ví dụ: Cần duyệt",
-    "cancel": "Hủy",
-    "name_required": "Nhập tên chế độ xem",
-    "toast_created": "Đã tạo chế độ xem",
-    "toast_failed": "Tạo chế độ xem thất bại",
-    "edit_title": "Chỉnh sửa chế độ xem",
-    "update": "Lưu thay đổi",
-    "toast_updated": "Đã cập nhật chế độ xem",
-    "toast_conflict": "Người khác đã chỉnh sửa chế độ xem này — hãy mở lại và thử lại",
-    "hint_workspace_members": "Dựa trên các công việc của không gian làm việc được giao cho thành viên",
-    "hint_workspace_agents": "Dựa trên các công việc của không gian làm việc được giao cho agent",
     "scope_label_workspace": "Loại người được giao",
     "scope_label_my": "Quan hệ với tôi",
     "variant_all": "Bất kỳ người được giao nào",
@@ -998,36 +1039,8 @@
     "variant_my_created": "Do tôi tạo",
     "variant_my_involved": "Liên quan"
   },
-  "view_selector": {
-    "trigger": "Chế độ xem",
-    "empty": "Chưa có chế độ xem nào được lưu",
-    "private_group": "Riêng tư",
-    "shared_group": "Chia sẻ với không gian làm việc",
-    "exit": "Thoát chế độ xem",
-    "unavailable": "Chế độ xem này không còn khả dụng",
-    "edit": "Chỉnh sửa chế độ xem"
-  },
-  "view_bar": {
-    "menu_label": "Chế độ xem",
-    "menu_new": "Chế độ xem mới",
-    "builtin_tag": "Có sẵn",
-    "drag_handle": "Kéo để sắp xếp lại",
-    "delete": "Xóa",
-    "delete_title": "Xóa chế độ xem?",
-    "delete_description": "“{{name}}” sẽ bị xóa đối với mọi người có thể xem nó",
-    "toast_deleted": "Đã xóa chế độ xem",
-    "context_edit": "Chỉnh sửa chế độ xem",
-    "context_pin": "Ghim vào thanh bên",
-    "context_unpin": "Bỏ ghim khỏi thanh bên",
-    "row_menu": "Thao tác khác",
-    "row_hide": "Ẩn khỏi thanh",
-    "row_show": "Hiện trên thanh",
-    "menu_manage": "Quản lý chế độ xem",
-    "manage_title": "Quản lý chế độ xem",
-    "manage_hint": "Thứ tự và khả năng hiển thị chỉ ảnh hưởng tới bạn",
-    "visible_toggle": "Hiện trong thanh chế độ xem",
-    "more_label": "Thêm chế độ xem"
-  },
+  "view_selector": {},
+  "view_bar": {},
   "plugins": {
     "panels": "Plugin",
     "surface_failed": "{{name}} không thể tải giao diện của nó.",
@@ -1589,8 +1602,6 @@
       "picker_more": "Tạo thêm quy trình trong Cài đặt → Quy trình."
     },
     "picker": {
-      "header": "{{workflow}} · từ dự án “{{project}}”",
-      "header_no_project": "Trạng thái của {{workflow}} · không thuộc dự án",
       "footer": "Chỉ các trạng thái trong quy trình của công việc này được hiển thị. Phía bên phải là người mà việc vào trạng thái đó sẽ bàn giao tới."
     },
     "confirm": {
@@ -1708,5 +1719,68 @@
   },
   "hover_card": {
     "created_updated": "đã tạo {{created}} · đã cập nhật {{updated}}"
+  },
+  "views": {
+    "builtin": {
+      "my_issues": "Công việc của tôi",
+      "my_agents": "Việc của các agent của tôi",
+      "all_issues": "Tất cả công việc"
+    },
+    "untitled": "Chế độ xem chưa đặt tên",
+    "copy_name": "{{name}} (bản sao)",
+    "rename": "Đổi tên",
+    "duplicate": "Nhân bản",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "visible_to": "Hiển thị cho",
+    "only_me": "Chỉ tôi",
+    "workspace_members": "Thành viên không gian làm việc",
+    "add_to_sidebar": "Thêm vào thanh bên",
+    "remove_from_sidebar": "Xóa khỏi thanh bên",
+    "back_to": "Quay lại {{name}}",
+    "delete": "Xóa chế độ xem",
+    "delete_title": "Xóa chế độ xem?",
+    "delete_description": "“{{name}}” sẽ bị xóa. Không thể hoàn tác.",
+    "delete_description_shared": "“{{name}}” được chia sẻ với không gian làm việc và sẽ bị xóa cho mọi người.",
+    "cancel": "Hủy",
+    "toast_deleted": "Đã xóa chế độ xem",
+    "toast_delete_failed": "Không xóa được chế độ xem",
+    "filter": "Bộ lọc",
+    "filter_count_other": "{{count}} bộ lọc",
+    "reset": "Đặt lại",
+    "save": "Lưu",
+    "save_options": "Thêm tùy chọn lưu",
+    "save_to": "Lưu vào “{{name}}”",
+    "save_to_hint_shared": "Cập nhật chế độ xem cho mọi người trong không gian làm việc",
+    "save_to_hint_private": "Cập nhật chế độ xem của bạn",
+    "save_as_new": "Lưu thành chế độ xem mới",
+    "save_as_new_hint": "Giữ nguyên “{{name}}”",
+    "save_as_view": "Lưu thành chế độ xem",
+    "set_by_view": "Đặt bởi chế độ xem này",
+    "new_issue": "Công việc mới",
+    "unavailable": "Chế độ xem này không còn khả dụng",
+    "toast_saved": "Đã lưu chế độ xem",
+    "toast_conflict": "Người khác đã thay đổi chế độ xem này — hãy tải lại và thử lại",
+    "toast_create_failed": "Không tạo được chế độ xem",
+    "toast_save_failed": "Không lưu được chế độ xem",
+    "directory": {
+      "new_view": "Chế độ xem mới",
+      "scope_all": "Tất cả chế độ xem",
+      "scope_builtin": "Có sẵn",
+      "scope_mine": "Do tôi tạo",
+      "scope_shared": "Đã chia sẻ",
+      "col_name": "Tên",
+      "col_location": "Vị trí",
+      "col_filters": "Bộ lọc",
+      "col_visibility": "Hiển thị",
+      "col_owner": "Người sở hữu",
+      "owner_builtin": "Có sẵn",
+      "location_project": "Dự án",
+      "star": "Thêm {{name}} vào thanh bên",
+      "unstar": "Xóa {{name}} khỏi thanh bên",
+      "row_actions": "Hành động cho {{name}}",
+      "empty_title": "Chưa có chế độ xem đã lưu nào",
+      "empty_description": "Thiết lập bộ lọc và tùy chọn hiển thị trong danh sách công việc, rồi lưu chúng thành một chế độ xem."
+    }
   }
 }

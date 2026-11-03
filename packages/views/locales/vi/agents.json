@@ -1,19 +1,22 @@
 {
   "page": {
     "title": "Agent",
-    "learn_more": "Tìm hiểu thêm →",
     "new_agent": "Agent mới",
-    "search_placeholder": "Tìm kiếm agent…",
     "show_archived": "Hiện đã lưu trữ ({{count}}) →",
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "Không tải được agent",
     "list_load_failed_default": "Đã xảy ra lỗi khi lấy danh sách agent.",
-    "try_again": "Thử lại"
+    "try_again": "Thử lại",
+    "search": "Tìm kiếm agent",
+    "scope_title": {
+      "mine": "Agent của tôi",
+      "all": "Tất cả agent",
+      "archived": "Agent đã lưu trữ"
+    }
   },
   "scope": {
     "mine": "Của tôi",
-    "all": "Tất cả",
-    "archived": "Đã lưu trữ"
+    "all": "Tất cả"
   },
   "sort": {
     "label_recent": "Hoạt động gần đây",
@@ -43,7 +46,15 @@
   },
   "empty": {
     "title": "Chưa có agent nào",
-    "description": "Tạo một agent, rồi giao công việc cho nó."
+    "description": "Một agent nhận các công việc được giao cho nó và làm lần lượt trên runtime của bạn.",
+    "setup": {
+      "label": "Các bước thiết lập",
+      "runtime": "Kết nối một runtime",
+      "agent": "Tạo một agent",
+      "issue": "Giao cho nó một công việc",
+      "done": "(xong)",
+      "connect_runtime": "Kết nối"
+    }
   },
   "no_matches": {
     "title": "Không có kết quả phù hợp",
@@ -127,7 +138,6 @@
     "archive_dialog_confirm": "Lưu trữ"
   },
   "detail": {
-    "back_to_agents": "Agent",
     "back_to_agents_full": "Quay lại danh sách agent",
     "not_found_title": "Không tìm thấy agent",
     "not_found_default": "Agent này có thể đã được lưu trữ hoặc xóa.",
@@ -156,7 +166,11 @@
     "runtime_required_toast": "Hãy gắn runtime trước khi chạy agent này.",
     "assign_work": "Giao việc",
     "more_actions_aria": "Thao tác với agent",
-    "updated": "Đã cập nhật {{when}}"
+    "settings": "Cài đặt",
+    "copy_link": "Sao chép liên kết",
+    "copy_id": "Sao chép ID agent",
+    "link_copied_toast": "Đã sao chép liên kết",
+    "id_copied_toast": "Đã sao chép ID agent"
   },
   "inspector": {
     "section_profile": "Hồ sơ",
@@ -166,7 +180,6 @@
     "section_properties": "Thuộc tính",
     "section_details": "Chi tiết",
     "section_details_hint": "Thông tin chỉ đọc về quyền sở hữu và vòng đời.",
-    "section_skills": "Skills",
     "section_integrations": "Tích hợp",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
@@ -177,7 +190,6 @@
     "prop_owner": "Chủ sở hữu",
     "prop_created": "Ngày tạo",
     "prop_updated": "Ngày cập nhật",
-    "no_description_placeholder": "Không có mô tả",
     "avatar_label": "Ảnh đại diện",
     "name_label": "Tên",
     "description_label": "Mô tả",
@@ -193,8 +205,6 @@
     "cancel": "Hủy"
   },
   "overview": {
-    "agent_context": "Agent",
-    "access": "Quyền truy cập",
     "attention_title": "Các lượt chạy cần chú ý",
     "attention_queued_other": "{{count}} lượt chạy đang chờ trong khi runtime không khả dụng."
   },
@@ -251,13 +261,11 @@
     "clear_full": "Xóa lựa chọn (dùng mặc định của nhà cung cấp)"
   },
   "tabs": {
-    "overview": "Tổng quan",
     "work": "Công việc",
     "capabilities": "Năng lực",
     "settings": "Cài đặt",
     "general": "Chung",
     "access": "Quyền truy cập",
-    "page_navigation_aria": "Trang agent",
     "section_navigation_aria": "Mục agent",
     "activity": "Hoạt động",
     "tasks": "Lượt chạy",
@@ -279,7 +287,6 @@
     "title": "Tạo agent",
     "squad_title": "Tạo agent cho squad này",
     "duplicate_title": "Nhân bản {{name}}",
-    "back": "Quay lại",
     "step_ai": "Xây dựng qua trò chuyện",
     "modes": {
       "template": {
@@ -337,7 +344,8 @@
       "prompt_assistant": "Giúp nhóm của chúng tôi lên kế hoạch và viết dự án",
       "thinking": "Đang cập nhật bản nháp…",
       "placeholder": "Mô tả agent bạn cần…",
-      "send": "Gửi tin nhắn"
+      "send": "Gửi tin nhắn",
+      "conversation_tab": "Trò chuyện"
     },
     "live_draft": "Cấu hình agent",
     "live_draft_hint": "Bạn có thể chỉnh sửa trực tiếp bản nháp.",
@@ -363,7 +371,8 @@
       "runtime": "Chọn runtime",
       "configure": "Cấu hình",
       "done": "Hoàn tất",
-      "aria": "Các bước tạo agent"
+      "aria": "Các bước tạo agent",
+      "progress": "Bước {{current}} / {{total}}"
     },
     "configure_title": "Cấu hình agent",
     "ask_ai": "Để AI viết giúp",
@@ -693,7 +702,8 @@
       "redacted_title": "Đã cấu hình — ẩn khỏi tầm nhìn của bạn",
       "redacted_hint": "Chỉ người tạo agent mới xem hoặc thay đổi được những ứng dụng nó được phép dùng.",
       "shared_warning": "Agent này được chia sẻ. Những người có thể chạy agent này có thể dùng các ứng dụng Composio bạn bật ở đây. Hãy dùng Riêng tư hoặc thu hẹp danh sách truy cập nếu các ứng dụng này để lộ dữ liệu nhạy cảm.",
-      "workspace_warning": "Công khai với không gian làm việc: mọi thành viên đều có thể dùng các ứng dụng Composio này thông qua agent này."
+      "workspace_warning": "Công khai với không gian làm việc: mọi thành viên đều có thể dùng các ứng dụng Composio này thông qua agent này.",
+      "open_settings": "Mở cài đặt"
     },
     "runtime_config": {
       "mode_label": "Chế độ định tuyến",
@@ -775,12 +785,6 @@
       "section_now": "Hiện tại",
       "section_last_30d": "30 ngày qua",
       "section_recent": "Công việc gần đây",
-      "subtitle_no_active": "Không có công việc đang chạy",
-      "subtitle_active_other": "{{count}} lượt chạy đang hoạt động",
-      "subtitle_performance": "Hiệu suất",
-      "subtitle_no_recent": "Chưa có gì hoàn thành",
-      "subtitle_recent_progress": "{{shown}} / {{total}} lượt chạy",
-      "subtitle_recent_latest": "{{count}} lượt chạy gần nhất",
       "empty_now": "Agent này hiện không chạy gì cả.",
       "empty_30d": "Không có lượt hoàn thành nào trong 30 ngày qua.",
       "empty_recent": "Agent này chưa hoàn thành việc gì.",
@@ -791,9 +795,7 @@
       "success_hint": "Số lượt hoàn thành chia cho tổng số lượt hoàn thành và thất bại. Lượt đã hủy không được tính.",
       "success_unavailable": "Không có lượt hoàn thành hay thất bại nào trong giai đoạn này, nên không có tỷ lệ thành công để hiển thị.",
       "cancelled_count": "Đã hủy {{count}}",
-      "avg_duration": "trung bình {{value}}",
       "avg_duration_label": "thời lượng trung bình",
-      "failed_count": "{{count}} thất bại",
       "failed_label": "thất bại",
       "source_issue": "Công việc",
       "source_chat": "Trò chuyện",
@@ -1017,23 +1019,27 @@
     "none": "Không có hoạt động (30 ngày)"
   },
   "toolbar": {
-    "result_count_title": "Agent phù hợp / agent trong phạm vi",
-    "filter_label": "Bộ lọc",
-    "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc",
     "section_availability": "Tính khả dụng",
     "section_access": "Quyền truy cập",
     "section_runtime": "Runtime",
-    "display": "Hiển thị",
-    "sort_by": "Sắp xếp theo",
-    "direction_asc": "Tăng dần",
-    "direction_desc": "Giảm dần",
-    "section_columns": "Cột",
     "section_owner": "Chủ sở hữu",
     "section_model": "Model"
   },
-  "actions": {
-    "selected_other": "{{count}} đã chọn",
-    "clear_selection": "Xóa lựa chọn"
+  "actions": {},
+  "sections": {
+    "runs_count_other": "{{count}} lần chạy",
+    "recent_this_week_other": "{{count}} trong tuần này",
+    "view_all": "Xem tất cả",
+    "open": "Mở",
+    "edit": "Sửa",
+    "add": "Thêm",
+    "manage": "Quản lý",
+    "instructions_empty": "Chưa có hướng dẫn nào."
+  },
+  "panel": {
+    "status": "Trạng thái",
+    "runs_7d": "Lần chạy (7 ngày)",
+    "edit_access_aria": "Quyền truy cập: {{value}}. Đổi quyền truy cập",
+    "all_settings": "Tất cả cài đặt"
   }
 }

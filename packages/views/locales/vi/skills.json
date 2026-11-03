@@ -1,12 +1,10 @@
 {
   "page": {
     "title": "Skills",
-    "learn_more": "Tìm hiểu thêm →",
     "new_skill": "Skill mới",
-    "search_placeholder": "Tìm kiếm skill…",
     "scopes": {
       "all": {
-        "label": "Tất cả",
+        "label": "Tất cả skill",
         "description": "Tất cả skill trong không gian làm việc này"
       },
       "used": {
@@ -18,13 +16,13 @@
         "description": "Skill chưa được gán cho agent nào"
       },
       "mine": {
-        "label": "Do tôi tạo",
+        "label": "Skill của tôi",
         "description": "Skill do bạn tạo"
       }
     },
     "empty": {
       "title": "Chưa có skill nào",
-      "description": "Hãy tạo hoặc nhập một skill."
+      "description": "Skill là cách làm việc có thể tái dùng cho các agent của bạn. Hãy tạo một skill, hoặc nhập từ một runtime."
     },
     "no_matches": {
       "title": "Không có kết quả phù hợp",
@@ -76,8 +74,6 @@
     "added_toast": "Đã thêm vào {{name}}",
     "add_failed_toast": "Không thêm được skill",
     "delete": "Xóa",
-    "selected": "Đã chọn {{count}}",
-    "clear_selection": "Bỏ chọn",
     "delete_no_permission": "Danh sách chọn có skill mà chỉ người tạo hoặc quản trị viên mới có thể xóa",
     "delete_dialog_title_other": "Xóa {{count}} skill?",
     "delete_dialog_desc_other": "Thao tác này sẽ xóa vĩnh viễn {{count}} skill đã chọn và loại bỏ chúng khỏi mọi agent.",
@@ -98,28 +94,16 @@
     "added_multi_toast_other": "Đã thêm vào {{count}} agent"
   },
   "toolbar": {
-    "result_count_title": "Skill khớp / tất cả skill",
-    "filter_label": "Bộ lọc",
-    "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc",
     "section_usage": "Mức sử dụng",
     "section_labels": "Nhãn",
     "filter_search_placeholder": "Lọc...",
     "no_labels": "Chưa có nhãn nào",
     "no_results": "Không có kết quả",
-    "display": "Hiển thị",
-    "sort_by": "Sắp xếp theo",
-    "direction_asc": "Tăng dần",
-    "direction_desc": "Giảm dần",
-    "section_columns": "Cột",
     "manage_labels": "Quản lý nhãn...",
     "manage_labels_title": "Nhãn skill"
   },
   "detail": {
-    "all_skills": "Tất cả skill",
     "read_only": "Chỉ đọc",
-    "delete_aria": "Xóa skill",
-    "delete_tooltip": "Xóa skill",
     "supporting_data_warning": "Một số dữ liệu của không gian làm việc không tải được. Thông tin người tạo, tên runtime hoặc quyền chỉnh sửa có thể hiển thị không đầy đủ cho đến lần làm mới tiếp theo.",
     "delete_file": "Xóa tệp",
     "name_placeholder": "skill-name",
@@ -154,8 +138,6 @@
     "toast_deleted": "Đã xóa skill",
     "toast_delete_failed": "Không xóa được skill",
     "refresh": {
-      "button": "Cập nhật",
-      "tooltip": "Tải lại skill này từ nguồn của nó",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -194,29 +176,19 @@
       }
     },
     "header": {
-      "files_other": "{{count}} tệp",
-      "used_by_other": "{{count}} agent",
-      "updated": "Đã cập nhật {{when}}",
-      "updated_by": "Đã cập nhật {{when}} bởi {{name}}"
+      "files_other": "{{count}} tệp"
     },
-    "tabs": {
-      "aria": "Các mục của skill",
-      "overview": "Tổng quan",
-      "files_other": "Tệp {{count}}"
-    },
+    "tabs": {},
     "overview": {
       "properties": "Thuộc tính",
-      "properties_hint": "Các trường này luôn đồng bộ với frontmatter trong SKILL.md.",
       "name": "Tên",
       "description": "Mô tả",
       "description_hint": "Agent dựa vào mô tả này để quyết định khi nào tải skill.",
       "labels": "Nhãn",
-      "used_by_other": "Được {{count}} agent sử dụng",
       "used_by_empty": "Chưa được gán cho agent nào. Mở tab Skills của một agent để gán.",
       "permissions_owner": "Bạn có thể chỉnh sửa và xóa skill này. Thay đổi sẽ có hiệu lực ở lần chạy tiếp theo của agent.",
       "permissions_locked_creator": "Chỉ người tạo ({{name}}) hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
       "permissions_locked": "Chỉ người tạo hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
-      "properties_help": "Giới thiệu về thuộc tính skill",
       "character_count": "{{count}} ký tự"
     },
     "files": {
@@ -229,6 +201,21 @@
       "mode_preview": "Xem trước",
       "mode_edit": "Chỉnh sửa",
       "mode_raw": "Văn bản thuần"
+    },
+    "sections": {
+      "content": "Nội dung",
+      "files": "Tệp",
+      "edit": "Sửa",
+      "open": "Mở",
+      "add": "Thêm"
+    },
+    "menu": {
+      "copy_link": "Sao chép liên kết",
+      "link_copied": "Đã sao chép liên kết",
+      "delete": "Xóa skill"
+    },
+    "panel": {
+      "add_description": "Thêm mô tả"
     }
   },
   "create": {

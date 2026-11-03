@@ -11,7 +11,8 @@
     "usage": "Phân tích",
     "runtimes": "Runtime",
     "skills": "Skills",
-    "settings": "Cài đặt"
+    "settings": "Cài đặt",
+    "views": "Chế độ xem"
   },
   "tab": {
     "issue": "Công việc",
@@ -25,7 +26,8 @@
     "runtime": "Runtime",
     "attachment": "Tệp đính kèm",
     "create_agent": "Tạo Agent",
-    "unknown": "Trang không xác định"
+    "unknown": "Trang không xác định",
+    "my_agents": "Việc của các agent của tôi"
   },
   "help": {
     "trigger": "Trợ giúp",
@@ -57,16 +59,124 @@
     "invitation_decline": "Từ chối",
     "log_out": "Đăng xuất",
     "new_issue": "Công việc mới",
-    "new_issue_shortcut": "C",
     "pinned_label": "Đã ghim",
-    "work_group": "Công việc",
-    "ai_team_group": "Nhóm AI",
     "show_more_pins": "Hiển thị thêm {{count}}…",
     "show_fewer_pins": "Hiển thị ít hơn",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "Tham gia Discord của chúng tôi",
-      "dismiss": "Bỏ qua"
+    "discord_card": {}
+  },
+  "spaces": {
+    "work": "Công việc",
+    "team": "Nhóm"
+  },
+  "rail": {
+    "label": "Điều hướng ứng dụng",
+    "sheet_description": "Chuyển đổi không gian và không gian làm việc.",
+    "inbox": "Hộp thư đến",
+    "work": "Công việc",
+    "team": "Nhóm",
+    "chat": "Trò chuyện",
+    "autopilots": "Auto",
+    "switch_workspace": "Chuyển không gian làm việc",
+    "invitation_from": "{{name}} đã mời bạn",
+    "open_in_new_window": "Mở trong cửa sổ mới",
+    "open_in_new_window_click": "Nhấp",
+    "open_in_other_window": "Đã mở trong cửa sổ khác",
+    "in_other_window": "Cửa sổ khác",
+    "all_workspaces_open": "Mọi không gian làm việc đã được mở trong cửa sổ"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "Việc của các agent của tôi",
+      "all_issues": "Tất cả công việc",
+      "views": "Chế độ xem",
+      "new_project": "Dự án mới",
+      "new_issue_in_project": "Công việc mới trong {{name}}",
+      "all_projects_other": "Tất cả {{count}} dự án",
+      "project_issues": "Công việc trong {{name}}",
+      "project_issues_empty": "Không có công việc",
+      "project_issues_error": "Không tải được công việc",
+      "project_issues_settings": "Công việc trong dự án",
+      "settings_status": "Trạng thái",
+      "settings_assignee": "Người được giao",
+      "assignee_anyone": "Bất kỳ ai",
+      "assignee_me": "Tôi",
+      "assignee_my_agents": "Các agent của tôi",
+      "assignee_me_and_my_agents": "Tôi và các agent của tôi",
+      "reset": "Đặt lại",
+      "load_more": "Tải thêm",
+      "show_less": "Hiện ít hơn",
+      "projects_settings": "Hiển thị dự án",
+      "projects_ordering": "Thứ tự",
+      "projects_order_manual": "Thủ công",
+      "projects_order_name": "Tên",
+      "projects_order_updated": "Cập nhật gần nhất",
+      "projects_order_created": "Tạo gần nhất",
+      "projects_show": "Hiện",
+      "projects_only_mine": "Chỉ dự án tôi phụ trách",
+      "projects_show_count": "Số công việc đang mở",
+      "new_view": "Chế độ xem mới",
+      "all_views": "Tất cả chế độ xem",
+      "view_actions": "Hành động cho {{name}}",
+      "view_copy_link": "Sao chép liên kết",
+      "view_remove": "Xóa khỏi thanh bên",
+      "view_rename": "Đổi tên",
+      "view_duplicate": "Nhân bản",
+      "view_delete": "Xóa chế độ xem"
+    },
+    "team": {
+      "new_agent": "Agent mới",
+      "needs_attention": "Cần chú ý",
+      "stuck_other": "{{count}} tác vụ đang chờ runtime ngoại tuyến",
+      "working_now": "Đang làm việc",
+      "running_tasks_other": "{{count}} tác vụ đang chạy",
+      "all_agents": "Tất cả agent",
+      "my_agents": "Agent của tôi",
+      "squads_and_members": "Squad và thành viên",
+      "members_other": "{{count}} thành viên",
+      "resources": "Tài nguyên",
+      "runtimes_offline_other": "{{count}} ngoại tuyến",
+      "invite_member": "Mời thành viên"
+    },
+    "autopilots": {
+      "all": "Tất cả autopilot",
+      "list": "Autopilot",
+      "templates": "Từ mẫu"
     }
+  },
+  "account": {
+    "trigger": "Tài khoản",
+    "profile": "Hồ sơ",
+    "theme": "Giao diện",
+    "themes": {
+      "light": "Sáng",
+      "dark": "Tối",
+      "system": "Hệ thống"
+    },
+    "language": "Ngôn ngữ",
+    "shortcuts": "Phím tắt"
+  },
+  "collection": {
+    "filter": "Bộ lọc",
+    "filter_count_other": "{{count}} bộ lọc",
+    "reset": "Đặt lại",
+    "clear_search": "Xóa tìm kiếm",
+    "clear_filters": "Xóa bộ lọc",
+    "clear_filters_and_search": "Xóa bộ lọc và tìm kiếm",
+    "display": "Cài đặt hiển thị",
+    "selected_other": "{{count}} đã chọn",
+    "clear_selection": "Xóa lựa chọn",
+    "select_all": "Chọn tất cả",
+    "select_row": "Chọn hàng",
+    "row_actions": "Hành động của hàng",
+    "sort_by": "Sắp xếp theo",
+    "direction_asc": "Tăng dần",
+    "direction_desc": "Giảm dần",
+    "section_columns": "Cột",
+    "load_more": "Tải thêm",
+    "loading_more": "Đang tải…"
+  },
+  "object_page": {
+    "toggle_panel": "Bật/tắt thanh bên phải",
+    "properties": "Thuộc tính"
   }
 }

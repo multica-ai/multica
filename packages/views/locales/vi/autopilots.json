@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "Autopilot",
     "new_autopilot": "Autopilot mới",
     "start_blank": "Bắt đầu từ đầu",
     "table": {
@@ -20,7 +19,6 @@
       "title": "Chưa có autopilot nào",
       "hint": "Lên lịch công việc định kỳ cho các agent AI của bạn. Chọn một mẫu hoặc bắt đầu từ đầu."
     },
-    "scope_all": "Tất cả",
     "no_matches": "Không có autopilot nào khớp",
     "retry": "Thử lại"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "Không kích hoạt — đã đạt giới hạn số lần chạy trong kỳ này",
     "run_blocked_issue_limit_reached": "Không kích hoạt — không gian làm việc đã đạt giới hạn số công việc",
     "run_blocked_generic": "Không kích hoạt — lần chạy đã bị chặn",
-    "section_properties": "Thuộc tính",
     "section_triggers": "Trigger",
     "section_run_history": "Lịch sử chạy",
-    "section_danger": "Vùng nguy hiểm",
     "field_agent": "Agent",
     "field_created_by": "Người tạo",
     "field_output_mode": "Chế độ đầu ra",
@@ -112,6 +108,18 @@
       "cancel": "Hủy",
       "confirm": "Xóa",
       "deleting": "Đang xóa..."
+    },
+    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
+    "back_to_list": "Tất cả autopilot",
+    "no_prompt": "Chưa có prompt nào.",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "link_copy_failed": "Không sao chép được liên kết",
+    "open_project": "Mở dự án",
+    "summary": {
+      "create_issue": "{{agent}} tạo một công việc mỗi lần chạy",
+      "run_only": "{{agent}} chỉ chạy mà không tạo công việc",
+      "with_trigger": "{{trigger}} · {{action}}"
     }
   },
   "access": {
@@ -441,27 +449,16 @@
     "search_placeholder": "Tìm múi giờ..."
   },
   "toolbar": {
-    "result_count_title": "Autopilot khớp / tất cả autopilot",
-    "filter_label": "Bộ lọc",
-    "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc",
     "section_assignee": "Người được giao",
     "section_mode": "Chế độ",
     "section_trigger": "Trigger",
-    "section_creator": "Người tạo",
-    "display": "Hiển thị",
-    "sort_by": "Sắp xếp theo",
-    "direction_asc": "Tăng dần",
-    "direction_desc": "Giảm dần",
-    "section_columns": "Cột"
+    "section_creator": "Người tạo"
   },
   "actions": {
     "row_menu": "Thao tác autopilot",
     "pause": "Tạm dừng",
     "resume": "Tiếp tục",
     "delete": "Xóa",
-    "selected_other": "Đã chọn {{count}}",
-    "clear_selection": "Bỏ chọn",
     "delete_dialog": {
       "title": "Xóa autopilot?",
       "description_other": "Thao tác này sẽ xóa vĩnh viễn {{count}} autopilot và lịch sử chạy của chúng.",
@@ -473,7 +470,6 @@
   },
   "wakeups": {
     "title": "Các lần đánh thức công việc",
-    "scope": "Phạm vi",
     "issue": "Công việc",
     "trigger": "Trigger",
     "enabled": "Đã bật",
@@ -482,22 +478,16 @@
     "at": "Một lần",
     "recurring": "Lặp lại",
     "all_agents": "Tất cả agent",
-    "search": "Tìm công việc hoặc agent",
     "running": "Đang chạy",
     "active_runs": "{{count}} lần chạy đang hoạt động",
     "issue_closed": "Công việc đã đóng",
     "read_only": "Chỉ người tạo hoặc quản trị viên của không gian làm việc mới quản lý được lần đánh thức này",
     "select_row": "Chọn {{issue}}, {{agent}}",
-    "select_page": "Chọn các lần đánh thức đang bật trên trang này",
+    "select_page": "Chọn tất cả wakeup đang bật",
     "load_error": "Không tải được các lần đánh thức",
     "loading": "Đang tải các lần đánh thức…",
     "empty": "Chưa có quy tắc đánh thức nào",
-    "selected": "Đã chọn {{count}}",
     "disable_selected": "Tắt mục đã chọn",
-    "clear": "Bỏ chọn",
-    "results": "Trang {{page}} · {{count}} kết quả",
-    "previous": "Trước",
-    "next_page": "Tiếp theo",
     "confirm_title": "Tắt {{count}} lần đánh thức?",
     "confirm_body": "Các lần đánh thức trong tương lai sẽ dừng. Các lần chạy vẫn đang chờ và chưa được giao cho agent sẽ bị rút lại. Các lần chạy đã giao sẽ tiếp tục; hãy dừng chúng từ nhật ký thực thi.",
     "cancel": "Hủy",
@@ -506,19 +496,18 @@
     "batch_result": "Đã tắt: {{succeeded}}. Thất bại: {{failed}}.",
     "scopes": {
       "active": "Đang chờ hoặc đang thực thi",
-      "all": "Tất cả",
+      "all": "Tất cả wakeup",
       "disabled": "Đã tắt",
       "ended": "Đã kết thúc",
       "paused": "Đã tạm dừng"
     },
     "target_agent": "Agent được đánh thức",
     "empty_filtered": "Không có lần đánh thức nào khớp",
-    "clear_filters": "Xóa bộ lọc",
     "batch_success": "Đã tắt {{count}} quy tắc đánh thức",
     "batch_partial": "Đã tắt {{succeeded}}; {{failed}} thất bại. Các mục thất bại vẫn được chọn để thử lại.",
     "source": "Nguồn",
     "sources": {
-      "all": "Nguồn: Tất cả",
+      "all": "Tất cả nguồn",
       "member": "Thành viên",
       "agent": "Agent",
       "system": "Hệ thống"
@@ -533,6 +522,7 @@
     "banner_view": "Xem",
     "create": "Lần đánh thức mới",
     "create_pick_issue": "Chọn công việc để thêm lần đánh thức",
-    "create_pick_issue_description": "Lần đánh thức thuộc về công việc này và kết thúc cùng với nó."
+    "create_pick_issue_description": "Lần đánh thức thuộc về công việc này và kết thúc cùng với nó.",
+    "empty_description": "Lịch trình, chờ PR và chờ trả lời mà các agent đặt trên công việc sẽ hiện ở đây."
   }
 }

@@ -2,7 +2,10 @@
   "page": {
     "title": "Trò chuyện",
     "select_prompt": "Chọn một cuộc trò chuyện, hoặc bắt đầu cuộc mới bằng nút +",
-    "agent_link_no_access": "Bạn không có quyền trò chuyện với agent này."
+    "agent_link_no_access": "Bạn không có quyền trò chuyện với agent này.",
+    "no_agent_title": "Chưa có agent nào để trò chuyện",
+    "no_agent_description": "Tạo một agent, rồi trao đổi yêu cầu tại đây và để nó biến yêu cầu thành công việc.",
+    "no_agent_action": "Agent mới"
   },
   "fab": {
     "running": "Multica đang làm việc...",
@@ -243,10 +246,10 @@
     "row_actions_aria": "Thao tác trò chuyện"
   },
   "header": {
-    "view_profile": "Xem hồ sơ agent",
     "rename": "Đổi tên cuộc trò chuyện",
     "archive": "Lưu trữ cuộc trò chuyện",
     "unarchive": "Bỏ lưu trữ cuộc trò chuyện",
-    "delete": "Xóa cuộc trò chuyện"
+    "delete": "Xóa cuộc trò chuyện",
+    "agent_settings": "Cài đặt agent"
   }
 }

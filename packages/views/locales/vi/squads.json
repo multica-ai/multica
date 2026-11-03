@@ -2,7 +2,7 @@
   "page": {
     "title": "Squad",
     "new_button": "Squad mới",
-    "empty_no_squads": "Chưa có squad nào.",
+    "empty_no_squads": "Chưa có squad nào",
     "empty_no_match": "Không có squad nào khớp với bộ lọc của bạn.",
     "table": {
       "name": "Squad",
@@ -13,12 +13,10 @@
     },
     "no_matches": "Không có squad nào khớp",
     "row_menu": "Thao tác với squad",
-    "archive_action": "Lưu trữ"
+    "archive_action": "Lưu trữ",
+    "empty_description": "Gom agent và thành viên thành một squad để công việc có thể giao cho cả squad."
   },
-  "inspector": {
-    "details_section": "Chi tiết",
-    "archive_button": "Lưu trữ"
-  },
+  "inspector": {},
   "member_type": {
     "agent": "Agent",
     "member": "Thành viên"
@@ -65,15 +63,9 @@
     "responsibility_placeholder": "Squad này chịu trách nhiệm về việc gì?",
     "save": "Lưu"
   },
-  "discard_changes_dialog": {
-    "title": "Hủy các thay đổi chưa lưu?",
-    "description": "Bạn có thay đổi chưa lưu trên tab này. Chuyển tab sẽ hủy các thay đổi đó.",
-    "keep_editing": "Tiếp tục chỉnh sửa",
-    "discard_button": "Hủy bỏ"
-  },
+  "discard_changes_dialog": {},
   "members_tab": {
     "section_title": "Thành viên",
-    "section_count_other": "{{count}} thành viên trong squad này",
     "add_member_button": "Thêm thành viên",
     "create_agent_button": "Tạo Agent",
     "leader_chip": "Trưởng nhóm",
@@ -87,18 +79,18 @@
     "status_archived": "Đã lưu trữ",
     "issue_status_blocked": "bị chặn",
     "active_issue_more": "và {{count}} công việc nữa",
-    "last_active_label": "hoạt động lần cuối {{time}}"
+    "empty_title": "Chưa có thành viên nào",
+    "empty_description": "Thêm agent hoặc thành viên, và công việc giao cho squad này sẽ tới họ."
   },
-  "detail_tabs": {
-    "members": "Thành viên",
-    "instructions": "Hướng dẫn"
-  },
+  "detail_tabs": {},
   "details": {
     "leader": "Trưởng nhóm",
     "members": "Thành viên",
     "created_by": "Người tạo",
     "created": "Ngày tạo",
-    "updated": "Ngày cập nhật"
+    "updated": "Ngày cập nhật",
+    "visibility": "Hiển thị",
+    "visibility_workspace": "Không gian làm việc"
   },
   "toasts": {
     "member_added": "Đã thêm thành viên",
@@ -127,18 +119,23 @@
     "placeholder": "ví dụ: Luôn bắt đầu bằng cách viết một test đang lỗi. Ưu tiên các commit nhỏ, độc lập."
   },
   "scope": {
-    "mine": "Của tôi",
-    "all": "Tất cả"
+    "mine": "Squad của tôi",
+    "all": "Tất cả squad"
   },
-  "toolbar": {
-    "display": "Hiển thị",
-    "sort_by": "Sắp xếp theo",
-    "direction_asc": "Tăng dần",
-    "direction_desc": "Giảm dần",
-    "section_columns": "Cột",
-    "result_count_title": "Squad khớp / tất cả squad",
-    "filter_label": "Bộ lọc",
-    "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc"
+  "toolbar": {},
+  "detail": {
+    "assign_work": "Giao việc",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "not_found": "Không tìm thấy squad",
+    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
+    "back_to_list": "Tất cả squad",
+    "instructions": "Hướng dẫn",
+    "edit": "Sửa",
+    "cancel": "Hủy",
+    "recent_work": "Việc gần đây",
+    "recent_work_empty": "Chưa có công việc nào được giao cho squad này.",
+    "member_menu": "Hành động cho {{name}}",
+    "working_on": "Đang làm"
   }
 }
