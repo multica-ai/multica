@@ -8,7 +8,7 @@ import { renderWithI18n } from "../../test/i18n";
 const rerunIssue = vi.fn(async () => ({ id: "new-task" }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { rerunIssue: (...args: unknown[]) => rerunIssue(...args) },
+  api: { rerunIssue: (...args: [string, string, boolean]) => rerunIssue(...args) },
   dispatchReasonCode: () => undefined,
 }));
 
@@ -27,9 +27,11 @@ function task(failureReason: string): AgentTask {
   } as AgentTask;
 }
 
-async function openMenu() {
+async function openMenu(): Promise<[HTMLElement, HTMLElement]> {
   fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
-  return screen.findAllByRole("menuitem");
+  const items = await screen.findAllByRole("menuitem");
+  expect(items).toHaveLength(2);
+  return [items[0], items[1]];
 }
 
 describe("RetryRunButton", () => {
