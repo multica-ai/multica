@@ -483,6 +483,28 @@ docker compose -f docker-compose.selfhost.yml up -d backend   # pick up the new 
 
 Optionally set `KNOWLEDGE_DISABLE_REGISTRATION=true` afterwards to close WeKnora self-registration. In Multica, a workspace owner or admin then enables knowledge for the workspace; Multica creates the workspace, five default knowledge bases and a read-only `company-read` MCP server that every agent receives.
 
+### Models, Wiki and summaries (optional)
+
+Summaries, Wiki pages and reranking need a language model. Point Multica at an OpenAI-compatible endpoint and it registers the models in WeKnora when knowledge is enabled:
+
+| Variable | Purpose |
+|---|---|
+| `KNOWLEDGE_LLM_BASE_URL` | The endpoint, for example `https://llm.example.com/v1`. Unset means no model is registered. |
+| `KNOWLEDGE_LLM_API_KEY` | The endpoint's key. Stored by WeKnora, never shown back. |
+| `KNOWLEDGE_LLM_MODEL` | The chat model. Summaries and Wiki need it. |
+| `KNOWLEDGE_RERANK_MODEL` | The reranking model, optional. |
+| `KNOWLEDGE_VISION_MODEL` | The vision model, optional. It is registered but not tested at setup. |
+
+When a chat model exists, Wiki is turned on for `company`, `ventures` and `decisions` at WeKnora's `focused` setting, and every base gets summaries. Owners and admins change either per base on the Knowledge page, under Setup. Wiki is limited to three bases. Multica does not meter the model calls WeKnora makes; the cost is bounded by the focused setting, the three-base limit and the summaries switch, so turn summaries off on a base that is high-volume. Setup > Models runs each configured model once and names any that failed and why.
+
+If the endpoint is on a private address, add its host to `KNOWLEDGE_SSRF_WHITELIST_EXTRA` as described above. A model that fails to register does not stop knowledge from becoming ready; the failure is shown by the models test.
+
+`KNOWLEDGE_UPLOAD_MAX_MB` caps one uploaded file. The default is 50, WeKnora's own default; set it no higher than WeKnora's `MAX_FILE_SIZE_MB`.
+
+Each owner who enables knowledge also gets a WeKnora login, which is an admin of the workspace's WeKnora tenant, so they can use WeKnora's own interface. WeKnora creates those logins only for a system administrator, so the service user (`KNOWLEDGE_SERVICE_EMAIL`) must be one; bootstrap it with `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`. The owner's password is shown once from Setup and cannot be shown again.
+
+When a workspace is deleted, its WeKnora tenant is kept for seven days and then removed. The removal is retried if WeKnora is down. To keep a tenant, delete its `knowledge_tenant_deprovision` row while it is still held, by a direct database command run by an operator.
+
 ### 3. Make it reachable by agents
 
 Agents run on your daemons, usually outside Docker, and talk to WeKnora's MCP endpoint (`<KNOWLEDGE_PUBLIC_URL>/mcp/<id>`) with a bearer token. Set `KNOWLEDGE_PUBLIC_URL` to an address those machines can open and put a TLS reverse proxy in front of the loopback port (`KNOWLEDGE_API_PORT`, default `8090`). If you skip it, the MCP URL falls back to `KNOWLEDGE_URL`, which works only for daemons on the compose network. Set `KNOWLEDGE_UI_URL` to the proxied WeKnora UI (`KNOWLEDGE_UI_PORT`, default `8085`) for the "Open in WeKnora" link.
