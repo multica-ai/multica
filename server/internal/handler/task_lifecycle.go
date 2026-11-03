@@ -150,6 +150,11 @@ type RerunIssueRequest struct {
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
 	TaskID string `json:"task_id,omitempty"`
+	// Fresh starts a new session and working directory instead of resuming the
+	// source run's session. A stuck run's session only contains its spinning
+	// history, and resuming it reproduces the spin, so the client offers a
+	// fresh start for those.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // RerunIssue preserves the issue-scoped API used by installed clients. A
@@ -179,7 +184,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		sourceTaskID = parsed
 	}
-	h.rerunIssue(w, r, issue, sourceTaskID, false)
+	h.rerunIssue(w, r, issue, sourceTaskID, req.Fresh)
 }
 
 // RerunTaskByUser repeats an issue-linked run without requiring its issue ID.

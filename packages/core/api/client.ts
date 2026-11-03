@@ -2913,10 +2913,15 @@ export class ApiClient {
     return task;
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string, fresh?: boolean): Promise<AgentTask> {
+    const body: { task_id?: string; fresh?: boolean } = {};
+    if (taskId) body.task_id = taskId;
+    // A stuck run's session holds only its spinning history, and resuming it
+    // reproduces the spin. Callers pass fresh to start a new session instead.
+    if (fresh) body.fresh = true;
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+      body: JSON.stringify(body),
     });
   }
 

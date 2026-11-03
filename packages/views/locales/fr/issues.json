@@ -801,6 +801,8 @@
     "cancel_task_aria": "Annuler l'exécution",
     "retry_task_tooltip": "Relancer l'exécution",
     "retry_task_aria": "Relancer l'exécution",
+    "retry_resume": "Reprendre la session précédente",
+    "retry_fresh": "Recommencer à zéro",
     "retry_failed": "Échec de la relance de l'exécution",
     "retry_blocked": "Non relancée — vous n'avez pas la permission d'utiliser cet agent",
     "transcript_tooltip": "Voir la transcription",
