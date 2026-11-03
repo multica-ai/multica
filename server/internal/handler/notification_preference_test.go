@@ -198,11 +198,12 @@ func TestPatchNotificationPreferencesRoutes(t *testing.T) {
 	testHandler.PatchNotificationPreferences(
 		recorder,
 		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
-			"status_changes": "action",
-			"mentions":       "activity",
-			"agent_comments": "muted",
-			"assigned":       "all",
-			"comments":       "muted",
+			"status_changes":             "action",
+			"mentions":                   "activity",
+			"comments_mentioning_others": "muted",
+			"comments_without_mentions":  "activity",
+			"assigned":                   "all",
+			"comments":                   "muted",
 		}),
 	)
 	if recorder.Code != http.StatusOK {
@@ -216,10 +217,11 @@ func TestPatchNotificationPreferencesRoutes(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	want := map[string]string{
-		"status_changes": "action",
-		"mentions":       "activity",
-		"agent_comments": "muted",
-		"comments":       "muted",
+		"status_changes":             "action",
+		"mentions":                   "activity",
+		"comments_mentioning_others": "muted",
+		"comments_without_mentions":  "activity",
+		"comments":                   "muted",
 	}
 	for key, value := range want {
 		if response.Preferences[key] != value {
@@ -231,6 +233,9 @@ func TestPatchNotificationPreferencesRoutes(t *testing.T) {
 		{"status_changes": "loud"},
 		{"comments": "action"},
 		{"system_notifications": "activity"},
+		// The author-based comment keys were replaced by audience-based ones.
+		{"member_comments": "action"},
+		{"agent_comments": "muted"},
 	} {
 		recorder := httptest.NewRecorder()
 		testHandler.PatchNotificationPreferences(recorder,

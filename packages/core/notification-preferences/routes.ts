@@ -16,16 +16,20 @@ export interface NotificationRouteKind {
  * Routable kinds in settings order. Mirrors `RouteKinds` in
  * server/internal/inbox/routing.go, which applies them when notifications are
  * created; keep the two in step.
+ *
+ * Comments route by who they are written to, not who wrote them: one that
+ * @mentions nobody, or one that @mentions others but not the recipient. A
+ * comment that @mentions the recipient follows `mentions`.
  */
 export const NOTIFICATION_ROUTE_KINDS: readonly NotificationRouteKind[] = [
   { key: "assigned", default: "action", legacy: "assignments" },
   { key: "mentions", default: "action" },
-  { key: "member_comments", default: "action", legacy: "comments" },
+  { key: "comments_without_mentions", default: "action", legacy: "comments" },
   { key: "agent_failures", default: "action", legacy: "agent_activity" },
   { key: "status_changes", default: "activity" },
   { key: "assignee_changes", default: "activity", legacy: "assignments" },
   { key: "updates", default: "activity" },
-  { key: "agent_comments", default: "activity", legacy: "comments" },
+  { key: "comments_mentioning_others", default: "activity", legacy: "comments" },
 ];
 
 function isRoute(value: unknown): value is NotificationRoute {

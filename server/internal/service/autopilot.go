@@ -944,7 +944,7 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 					"recipient_id":   util.UUIDToString(item.RecipientID),
 					"type":           item.Type,
 					"severity":       item.Severity,
-					"section":        inbox.ItemSection(item.Section, item.Type, item.ActorType),
+					"section":        inbox.ItemSection(item.Section, item.Type),
 					"issue_id":       util.UUIDToPtr(item.IssueID),
 					"issue_status":   issue.Status,
 					"title":          item.Title,

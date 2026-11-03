@@ -674,9 +674,9 @@
         "label": "メンション",
         "description": "誰かがあなたを @ したとき（@all と @squad を含む）"
       },
-      "member_comments": {
-        "label": "メンバーのコメント",
-        "description": "フォロー中の課題にメンバーがコメントしたとき"
+      "comments_without_mentions": {
+        "label": "メンションなしのコメント",
+        "description": "フォロー中の課題に、誰も @ していないコメントが付いたとき"
       },
       "agent_failures": {
         "label": "エージェントのエラー",
@@ -694,9 +694,9 @@
         "label": "優先度と日付",
         "description": "優先度、開始日、期日が変わったとき"
       },
-      "agent_comments": {
-        "label": "エージェントのコメント",
-        "description": "フォロー中の課題でエージェントが返信したとき"
+      "comments_mentioning_others": {
+        "label": "他の人をメンションしたコメント",
+        "description": "フォロー中の課題のコメントが、あなたではなく他の人やエージェントを @ したとき"
       }
     },
     "system": {

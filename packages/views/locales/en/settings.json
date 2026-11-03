@@ -679,9 +679,9 @@
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"
       },
-      "member_comments": {
-        "label": "Member comments",
-        "description": "When a member comments on an issue you follow"
+      "comments_without_mentions": {
+        "label": "Comments without mentions",
+        "description": "When someone comments on an issue you follow without @mentioning anyone"
       },
       "agent_failures": {
         "label": "Agent errors",
@@ -699,9 +699,9 @@
         "label": "Priority and dates",
         "description": "When priority, start date, or due date changes"
       },
-      "agent_comments": {
-        "label": "Agent comments",
-        "description": "When an agent replies on an issue you follow"
+      "comments_mentioning_others": {
+        "label": "Comments mentioning others",
+        "description": "When a comment on an issue you follow @mentions other people or agents, but not you"
       }
     },
     "system": {

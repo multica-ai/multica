@@ -68,8 +68,8 @@ func TestRecoveryExhaustionHonorsAgentFailureRoute(t *testing.T) {
 				if route == "muted" {
 					t.Errorf("agent_failures=muted still creates task_failed notification")
 				}
-				if route == "activity" && inbox.ItemSection(item.Section, item.Type, item.ActorType) != "activity" {
-					t.Errorf("agent_failures=activity produced section %q", inbox.ItemSection(item.Section, item.Type, item.ActorType))
+				if route == "activity" && inbox.ItemSection(item.Section, item.Type) != "activity" {
+					t.Errorf("agent_failures=activity produced section %q", inbox.ItemSection(item.Section, item.Type))
 				}
 			}
 			if route == "activity" && failures != 1 {
