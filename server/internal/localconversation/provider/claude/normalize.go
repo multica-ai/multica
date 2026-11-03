@@ -71,6 +71,9 @@ type Normalizer struct {
 	toolNames map[string]string
 	skipped   map[string]bool
 	tasks     map[string]*backgroundTask
+
+	compactionID   string
+	compactionSeen map[string]bool
 }
 
 // NewNormalizer returns a normalizer. contextMCPName is the Context MCP
@@ -86,6 +89,8 @@ func NewNormalizer(contextMCPName string) *Normalizer {
 		toolNames:    map[string]string{},
 		skipped:      map[string]bool{},
 		tasks:        map[string]*backgroundTask{},
+
+		compactionSeen: map[string]bool{},
 	}
 }
 
@@ -113,6 +118,9 @@ type sdkMessage struct {
 	Description     string          `json:"description"`
 	Summary         *string         `json:"summary"`
 	Status          string          `json:"status"`
+	UUID            string          `json:"uuid"`
+	CompactResult   string          `json:"compact_result"`
+	CompactError    string          `json:"compact_error"`
 	LastToolName    string          `json:"last_tool_name"`
 	Usage           json.RawMessage `json:"usage"`
 	Patch           map[string]any  `json:"patch"`
@@ -318,6 +326,8 @@ func (n *Normalizer) user(msg *apiMessage) []Event {
 
 func (n *Normalizer) system(m sdkMessage) []Event {
 	switch m.Subtype {
+	case "status", "compact_boundary":
+		return n.compaction(m)
 	case "task_started":
 		if m.TaskID == "" || n.tasks[m.TaskID] != nil {
 			return nil
@@ -402,6 +412,8 @@ func (n *Normalizer) Close(status string) []Event {
 		}
 		state := map[string]any{"kind": item.kind, "status": status}
 		switch item.kind {
+		case "compaction":
+			// Compaction has no streamed content to retain.
 		case "assistant_text", "reasoning":
 			state["text"] = string(item.text)
 		default:
@@ -419,6 +431,7 @@ func (n *Normalizer) Close(status string) []Event {
 	}
 	n.blocks = map[string][]*streamBlock{}
 	n.byIndex = map[int]*streamBlock{}
+	n.compactionID = ""
 	return events
 }
 

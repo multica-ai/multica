@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "type": "conversation.events",
+  "conversation_id": "conv-1",
+  "from_seq": 1,
+  "to_seq": 2,
+  "events": [
+    {
+      "seq": 1,
+      "turn_id": "turn-1",
+      "turn_seq": 1,
+      "item_id": "compact-1",
+      "type": "item.started",
+      "final": false,
+      "created_at": "2026-10-29T12:00:00Z",
+      "payload": {
+        "kind": "compaction"
+      }
+    },
+    {
+      "seq": 2,
+      "turn_id": "turn-1",
+      "turn_seq": 2,
+      "item_id": "compact-1",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-10-29T12:00:01Z",
+      "payload": {
+        "kind": "compaction",
+        "status": "completed"
+      }
+    }
+  ]
+}

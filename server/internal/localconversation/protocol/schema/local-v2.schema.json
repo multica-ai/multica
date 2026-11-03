@@ -94,7 +94,7 @@
     },
 
     "item_kind": {
-      "enum": ["assistant_text", "reasoning", "command", "file_change", "tool_call", "image", "background_task", "error"]
+      "enum": ["assistant_text", "reasoning", "command", "file_change", "tool_call", "image", "background_task", "compaction", "error"]
     },
     "item_status": { "enum": ["in_progress", "completed", "failed", "cancelled"] },
     "item_started": {

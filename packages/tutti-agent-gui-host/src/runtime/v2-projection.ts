@@ -111,6 +111,15 @@ function projectItem(item: V2Item, turn: V2Turn, finalText: boolean, locale: "en
       return { messageId: item.id, kind: "reasoning", payload: { content: text(state.text) } };
     case "error":
       return { messageId: item.id, kind: "error", payload: { content: errorMessage(state.error) } };
+    case "compaction": {
+      const commandStatus = item.status === "in_progress" ? "running" : item.status === "completed" ? "completed" : item.status === "cancelled" ? "canceled" : "failed";
+      const detail = errorMessage(state.error) || (item.status === "failed" ? turn.error?.message ?? "" : "");
+      return {
+        messageId: item.id, kind: "text", status: commandStatus,
+        payload: { kind: "agent_system_notice", noticeKind: "system_notice", ...(detail ? { detail } : {}) },
+        semantics: { noticeCommand: "compact", noticeCommandStatus: commandStatus, userVisibleAssistantResponse: false, turnSettling: false },
+      };
+    }
     case "command":
       return toolCall(item.id, status, "Bash", { command: text(state.command) }, text(state.output));
     case "file_change":

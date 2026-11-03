@@ -77,6 +77,30 @@ GUI 请求切换会话时，先记录选择顺序和宿主当前导航意图，�
 
 本机 CLI 的 `status` 事件在 GUI 协议中单独保留。重连提示映射到已有的 `transport_retry` 系统通知，原始错误放在详情中；其他状态映射为普通系统通知。这些事件不拼入助手正文，也不结束运行。运行结束后不再显示临时重连提示，原始事件仍保留在执行记录中。重试次数、传输方式和最终成功/失败仍由原生 CLI 决定，界面不自动重发用户请求。
 
+### 上下文压缩分割线（Go V2）
+
+本机 Codex 和 Claude 的压缩生命周期统一保存为 V2 `compaction` item。`item.started` 显示压缩中的分割线；同一 item 的 `item.completed` 将其替换为完成、失败或取消分割线。压缩 item 不结束当前轮次，也不生成助手正文。GUI 复用已有 `noticeCommand=compact` 展示，在压缩期间用专用进度替代普通处理提示，完成后停止该节点的计时。
+
+| 运行器 | 开始信号 | 完成信号 | 失败与取消 |
+| --- | --- | --- | --- |
+| Codex app-server | `item/started`，类型为 `contextCompaction` | 同 ID 的 `item/completed` | 已开始但未完成的 item 随轮次终态结算 |
+| Claude Agent SDK | `system/status`，`status=compacting` | `system/compact_boundary` | `compact_result=failed` 保存错误；未完成的 item 随轮次终态结算 |
+
+Codex 使用原生 item ID；Claude 将开始与边界信号关联到同一 ID，并按消息 UUID 去重。只收到完成信号时仍记录完成分割线，不补造开始时间。Claude 的普通 status 重置不代表压缩成功。只处理主会话的压缩信号，子智能体的信号不放入主会话流；不根据上下文占用百分比或等待时间推断压缩。
+
+事件继续使用现有 SQLite 存储和 V2 快照回放，无表结构迁移。刷新后保留 item 的首次事件时间，重复事件不增加分割线；旧历史不补造压缩节点。新类型是 V2 的增量扩展，旧客户端按既有规则跳过不认识的 item。
+
+实现入口：`server/internal/localconversation/provider/{codex,claude}/`、`server/internal/localconversation/protocol/schema/local-v2.schema.json` 和 `packages/tutti-agent-gui-host/src/runtime/v2-projection.ts`。原生信号依据为 [Codex app-server 协议](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)及锁定版本 Claude SDK 的 `SDKStatusMessage` / `SDKCompactBoundaryMessage` 类型。
+
+回归使用假运行器，覆盖两种 provider 的解析、开始与终态、失败/取消、自动压缩不结算轮次、持久化、刷新及去重：
+
+```sh
+cd server
+go test ./internal/localconversation/provider/codex ./internal/localconversation/provider/claude ./internal/localconversation/protocol ./internal/localconversation/service
+cd ..
+pnpm --filter @multica/tutti-agent-gui-host exec vitest run src/runtime/v2-compaction.test.ts src/runtime/v2-conversation.test.ts
+```
+
 Codex 的独立助手消息聚合到同一轮正文时，补齐上一条消息末尾的两个换行以保留 Markdown 段落边界；消息内部的增量、列表和代码块原样保留。一次性 CLI 与普通会话的 app-server 路径使用同一分隔规则，实时 text 事件拼接结果与最终保存正文一致。空消息不新增分隔，重复完成事件不重复输出。该规则只影响新执行，不改写已保存的历史，也不改变 IPC 或持久化格式。回归见 `local-provider-runner.test.ts`、`local-codex-stream.test.ts` 和 `local-conversation-service.test.ts`，覆盖流式输出、完成与重开会话。
 
 - `packages/tutti-agent-gui-host/src/protocol.ts`：执行目标与云端智能体分离，未改 vendored Tutti 源码。

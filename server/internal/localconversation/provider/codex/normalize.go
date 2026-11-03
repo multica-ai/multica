@@ -135,6 +135,8 @@ func (n *Normalizer) started(id string, item map[string]any) []Event {
 	}
 	var start map[string]any
 	switch item["type"] {
+	case "contextCompaction":
+		start = map[string]any{"kind": "compaction"}
 	case "commandExecution":
 		start = map[string]any{"kind": "command", "command": str(item, "command")}
 		if cwd := str(item, "cwd"); cwd != "" {
@@ -162,6 +164,8 @@ func (n *Normalizer) started(id string, item map[string]any) []Event {
 func (n *Normalizer) complete(id string, item map[string]any) []Event {
 	status := itemStatus(str(item, "status"))
 	switch item["type"] {
+	case "contextCompaction":
+		return []Event{n.final(id, map[string]any{"kind": "compaction", "status": status})}
 	case "agentMessage":
 		state := map[string]any{"kind": "assistant_text", "status": "completed", "text": str(item, "text")}
 		if phase := str(item, "phase"); phase != "" {
