@@ -80,10 +80,13 @@ func TestDiscoverDevinModelsRejectsEmptyAndUnrecognizedCatalogs(t *testing.T) {
 		name, result, want string
 	}{
 		{"no credentials", `{"configOptions":[{"id":"model","options":[]}]}`, "WINDSURF_API_KEY"},
+		{"missing options", `{"configOptions":[{"id":"model"}]}`, "WINDSURF_API_KEY"},
+		{"null options", `{"configOptions":[{"id":"model","options":null}]}`, "WINDSURF_API_KEY"},
 		{"empty overrides legacy", `{"configOptions":[{"id":"model","options":[]}],"models":{"availableModels":[{"modelId":"forbidden"}]}}`, "model allowlist"},
+		{"missing options overrides legacy", `{"configOptions":[{"id":"model"}],"models":{"availableModels":[{"modelId":"forbidden"}]}}`, "model allowlist"},
 		{"legacy only", `{"models":{"availableModels":[{"modelId":"legacy"}]}}`, "unrecognized Devin model catalog"},
 		{"missing model", `{"configOptions":[{"id":"mode","options":[]}]}`, "unrecognized Devin model catalog"},
-		{"missing options", `{"configOptions":[{"id":"model"}]}`, "unrecognized Devin model catalog"},
+		{"missing model id", `{"configOptions":[{"category":"model","options":[]}]}`, "unrecognized Devin model catalog"},
 		{"malformed model", `{"configOptions":[{"id":"model","options":"bad"}]}`, "unrecognized Devin model catalog"},
 		{"malformed choice", `{"configOptions":[{"id":"model","options":[{}]}]}`, "unrecognized Devin model catalog"},
 		{"malformed response", `[]`, "unrecognized Devin model catalog"},

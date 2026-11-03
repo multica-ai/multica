@@ -61,8 +61,8 @@ func parseDevinSessionModels(raw json.RawMessage) ([]Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	if option.ID == "" || option.Options == nil {
-		return nil, fmt.Errorf("unrecognized Devin model catalog: missing model option id or options")
+	if option.ID == "" {
+		return nil, fmt.Errorf("unrecognized Devin model catalog: missing model option id")
 	}
 	models := make([]Model, 0, len(option.Options))
 	seen := make(map[string]bool)
