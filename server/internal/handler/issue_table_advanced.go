@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,15 +61,94 @@ func canonicalIssueTableFilterNode(node *issueTableFilterNode) *issueTableFilter
 		Match:  node.Match,
 		Field:  node.Field,
 		Negate: node.Negate,
-		Values: sortedUniqueRawJSON(node.Values),
+		Values: canonicalIssueTableValues(node.Values),
 	}
+	// A condition whose values canonicalize to nothing cannot constrain the
+	// query (the compiler drops it), so it is dropped here too — otherwise two
+	// spellings of one query keep different children arrays and fingerprint
+	// differently. A group whose children all dropped goes with them.
 	if len(node.Children) > 0 {
-		out.Children = make([]issueTableFilterNode, len(node.Children))
+		out.Children = make([]issueTableFilterNode, 0, len(node.Children))
 		for i := range node.Children {
-			out.Children[i] = *canonicalIssueTableFilterNode(&node.Children[i])
+			child := canonicalIssueTableFilterNode(&node.Children[i])
+			if isDroppedIssueTableFilterNode(child) {
+				continue
+			}
+			out.Children = append(out.Children, *child)
+		}
+		if len(out.Children) == 0 {
+			out.Children = nil
 		}
 	}
 	return &out
+}
+
+// isDroppedIssueTableFilterNode reports whether the compiler treats this
+// canonicalized node as constraining nothing.
+func isDroppedIssueTableFilterNode(node *issueTableFilterNode) bool {
+	if node == nil {
+		return true
+	}
+	// Conditions arrive here with canonicalized values and groups with
+	// canonicalized children, so "nothing left" is the drop-out test the
+	// compiler applies.
+	return len(node.Children) == 0 && len(node.Values) == 0
+}
+
+// canonicalIssueTableValues canonicalizes an advanced condition's values the
+// same way the compile path reads them, so two spellings of one query share a
+// fingerprint. Condition values are JSON strings; they go through the same
+// TrimSpace/empty-drop/sort/dedupe that sortedUniqueStrings applies before
+// compiling (a value that trims to nothing cannot constrain the query, so it
+// must not distinguish fingerprints either — otherwise a cursor captured
+// under one spelling is rejected with cursor_query_mismatch when the same
+// query arrives under another). Property conditions carry non-string values;
+// those keep the raw-byte canonicalization, which is all the property
+// compiler does with them.
+func canonicalIssueTableValues(values []json.RawMessage) []json.RawMessage {
+	if len(values) == 0 {
+		return nil
+	}
+	decoded := make([]string, 0, len(values))
+	nonStrings := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		var s string
+		if err := json.Unmarshal(value, &s); err != nil {
+			nonStrings[string(value)] = struct{}{}
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		decoded = append(decoded, s)
+	}
+	sort.Strings(decoded)
+	result := make([]json.RawMessage, 0, len(values))
+	var prev string
+	for i, s := range decoded {
+		if i > 0 && s == prev {
+			continue
+		}
+		prev = s
+		encoded, err := json.Marshal(s)
+		if err != nil {
+			continue
+		}
+		result = append(result, encoded)
+	}
+	keys := make([]string, 0, len(nonStrings))
+	for key := range nonStrings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, json.RawMessage(key))
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func parseIssueTableToday(raw string) (time.Time, bool) {
