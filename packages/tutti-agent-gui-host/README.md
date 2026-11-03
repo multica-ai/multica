@@ -63,6 +63,15 @@ The application passes a stable hidden-category array through that public
 setting to preserve the source search controller across composer updates.
 This category policy does not disable the separate attachment upload control.
 
+The scroll-to-bottom affordance uses the actual timeline end position, with
+one CSS pixel of rounding tolerance, independently of automatic follow mode.
+The host measures the scroll container's DOM geometry for both ordinary and
+virtual transcripts, including the virtual list's total-size spacer, because
+the virtual controller's cached end state can lag behind content resizes.
+Scroll, content and viewport resizes refresh the affordance without resuming
+follow mode or moving a detached reader.
+This is also a guarded presentation adaptation; the vendor snapshot stays intact.
+
 Build caching includes host source, shared Multica token styles, the vendored package closure, root lockfile,
 dependency manifests, and upstream attribution. Concurrent Web/desktop startup
 shares a build lock. The distribution contains Tutti's LICENSE and NOTICE,

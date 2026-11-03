@@ -8,6 +8,16 @@ import tailwindcss from "@tailwindcss/vite";
 
 const hostPresentationAdaptations = [
   {
+    path: "/view/useAgentGUIDetailScroll.ts",
+    original: 'const AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX = 240;',
+    replacement: 'import { useTimelineEndPosition } from "@multica-timeline-end-position";\n\nconst AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX = 240;',
+  },
+  {
+    path: "/view/useAgentGUIDetailScroll.ts",
+    original: '  return {\n    followEndMode,\n    isTimelineScrolledToBottom: followEndMode === "following",',
+    replacement: '  const isTimelineScrolledToBottom = useTimelineEndPosition(input, virtualScrollControllerRevision);\n  return {\n    followEndMode,\n    isTimelineScrolledToBottom,',
+  },
+  {
     path: "/controller/useAgentGUISubmitInteractionActions.ts",
     original: 'import { translate } from "../../../i18n/index";',
     replacement: 'import { getActiveUiLanguage, translate } from "../../../i18n/index";\nimport { promptHasAgentMention, promptSubmissionError } from "@multica-prompt-submission-policy";',
@@ -573,6 +583,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      "@multica-timeline-end-position": fileURLToPath(new URL("./src/timeline-end-position.ts", import.meta.url)),
       "@multica-prompt-submission-policy": fileURLToPath(new URL("./src/runtime/prompt-submission-policy.ts", import.meta.url)),
       "@multica-invoked-agent-reply": fileURLToPath(new URL("./src/invoked-agent-reply.tsx", import.meta.url)),
       "@multica-composer-drafts": fileURLToPath(new URL("./src/composer-drafts.tsx", import.meta.url)),
