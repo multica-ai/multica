@@ -482,7 +482,10 @@ function TextishPropertyEditor({
             step={property.type === "number" ? "any" : undefined}
             inputMode={property.type === "number" ? "decimal" : undefined}
             value={draft}
-            onChange={(event) => setSession({ ...session, draft: event.target.value })}
+            onChange={(event) => {
+              const draft = event.target.value;
+              setSession((current) => ({ ...current, draft }));
+            }}
             placeholder={placeholder}
             className="h-8"
           />

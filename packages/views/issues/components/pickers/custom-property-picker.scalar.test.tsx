@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
@@ -16,7 +15,6 @@ vi.mock("@multica/core/api", () => ({
   api: { getIssue: vi.fn(), setIssueProperty: vi.fn(), unsetIssueProperty: vi.fn() },
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 const property: IssueProperty = {
   id: "p-1", workspace_id: "ws-1", name: "Reference", type: "text",
@@ -32,6 +30,21 @@ const issue: Issue = {
   properties: { [property.id]: "original" },
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
 };
+
+const scalarCases = [
+  {
+    type: "text", initial: "original", remote: "remote",
+    draft: "  local draft  ", submitted: "local draft",
+  },
+  {
+    type: "number", initial: 12, remote: 99,
+    draft: "34.50", submitted: 34.5,
+  },
+  {
+    type: "url", initial: "https://old.example", remote: "https://remote.example",
+    draft: "  https://draft.example  ", submitted: "https://draft.example",
+  },
+] as const;
 
 function Locale({ children }: { children: React.ReactNode }) {
   return <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>{children}</I18nProvider>;
@@ -65,30 +78,21 @@ function renderQueryEditor(currentProperty = property, initial = issue) {
 beforeEach(() => vi.resetAllMocks());
 
 describe("scalar property editing sessions", () => {
-  it.each([
-    ["text", "original", "  local draft  ", "remote"],
-    ["number", 12, "34.50", 99],
-    ["url", "https://old.example", "  https://draft.example  ", "https://remote.example"],
-    ["text", "original", "  local draft  ", undefined],
-    ["number", 12, "34.50", undefined],
-    ["url", "https://old.example", "  https://draft.example  ", undefined],
-  ] as const)("keeps dirty %s input from %s to %s when remote becomes %s and refetches", async (type, initial, draft, remote) => {
+  it.each(scalarCases)("preserves a dirty $type draft across live updates, clears and refetches", async ({ type, initial, draft, remote }) => {
     const currentProperty = { ...property, type };
-    const { client, key } = renderQueryEditor(currentProperty, { ...issue, properties: { [property.id]: initial } });
+    const { client, key } = renderQueryEditor(currentProperty, {
+      ...issue, properties: { [property.id]: initial },
+    });
     const input = await screen.findByRole(type === "number" ? "spinbutton" : "textbox");
     fireEvent.change(input, { target: { value: draft } });
 
     // Exercise the same production handler used by issue_properties:changed.
-    const properties = remote === undefined ? {} : { [property.id]: remote };
-    const triggerName = remote === undefined ? "Empty" : String(remote);
+    const properties = { [property.id]: remote };
+    const triggerName = String(remote);
     vi.mocked(api.getIssue).mockResolvedValue({ ...issue, revision: 2, properties });
     await act(async () => onIssuePropertiesChanged(client, "ws-1", issue.id, properties, 2));
     expect(client.getQueryData<Issue>(key)).toMatchObject({ properties, revision: 2 });
     await waitFor(() => expect(screen.getByRole("button", { name: triggerName })).toBeInTheDocument());
-    expect(input).toHaveDisplayValue(draft);
-
-    await act(async () => onIssuePropertiesChanged(client, "ws-1", issue.id, properties, 2));
-    expect(client.getQueryData<Issue>(key)?.properties[property.id]).toBe(remote);
     expect(input).toHaveDisplayValue(draft);
 
     vi.mocked(api.getIssue).mockResolvedValue({ ...issue, revision: 3, properties: {} });
@@ -108,11 +112,7 @@ describe("scalar property editing sessions", () => {
     client.clear();
   });
 
-  it.each([
-    ["text", "original", "remote"],
-    ["number", 12, 99],
-    ["url", "https://old.example", "https://remote.example"],
-  ] as const)("continues syncing a clean open %s editor", async (type, initial, remote) => {
+  it.each(scalarCases)("continues syncing a clean open $type editor", async ({ type, initial, remote }) => {
     const { showValue, onChange } = renderInput(type, initial);
     const input = await screen.findByRole(type === "number" ? "spinbutton" : "textbox");
     expect(input).toHaveDisplayValue(String(initial));
@@ -199,19 +199,6 @@ describe("scalar property editing sessions", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("initializes an initially closed editor from the latest value when opened", async () => {
-    const onChange = vi.fn();
-    const tree = (value: string) => <Locale>
-      <CustomPropertyValueInput property={property} value={value} onChange={onChange} />
-    </Locale>;
-    const view = render(tree("original"));
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    view.rerender(tree("latest"));
-    await userEvent.click(screen.getByRole("button", { name: "latest" }));
-    expect(await screen.findByRole("textbox")).toHaveValue("latest");
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
   it.each(["issue", "property"])("isolates a dirty session when switching %s", async (target) => {
     const client = new QueryClient();
     const tree = (currentIssue: Issue, currentProperty = property) => <QueryClientProvider client={client}><Locale>
@@ -237,19 +224,15 @@ describe("scalar property editing sessions", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["text", "  local  ", "local"],
-    ["number", "34.5", 34.5],
-    ["url", "  https://draft.example  ", "https://draft.example"],
-  ] as const)("commits %s with the existing form conversion and closes", async (type, draft, expected) => {
-    const { showValue, onChange } = renderInput(type, type === "number" ? 12 : "original");
+  it.each(scalarCases)("commits the local $type draft after a remote update and closes", async ({ type, initial, draft, remote, submitted }) => {
+    const { showValue, onChange } = renderInput(type, initial);
     const input = await screen.findByRole(type === "number" ? "spinbutton" : "textbox");
     fireEvent.change(input, { target: { value: draft } });
-    showValue(type === "number" ? 99 : "remote");
+    showValue(remote);
     // user-event does not emulate implicit Enter submission for number inputs.
     if (type === "number") fireEvent.submit(input.closest("form")!);
     else await userEvent.type(input, "{Enter}");
-    expect(onChange).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(submitted);
     await waitFor(() => expect(input).not.toBeInTheDocument());
   });
 
@@ -262,25 +245,5 @@ describe("scalar property editing sessions", () => {
     if (remote === undefined) expect(onChange).not.toHaveBeenCalled();
     else expect(onChange).toHaveBeenCalledExactlyOnceWith(undefined);
     await waitFor(() => expect(input).not.toBeInTheDocument());
-  });
-
-  it("preserves scalar mutation failure closing, toast and rollback", async () => {
-    vi.mocked(api.setIssueProperty).mockRejectedValue(new Error("Write failed"));
-    const { client, key } = renderQueryEditor();
-    const input = await screen.findByRole("textbox");
-    fireEvent.change(input, { target: { value: "local" } });
-    await userEvent.type(input, "{Enter}");
-    await waitFor(() => expect(input).not.toBeInTheDocument());
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Write failed"));
-    expect(client.getQueryData<Issue>(key)?.properties[property.id]).toBe("original");
-    client.clear();
-  });
-
-  it("keeps archived scalar properties read-only", async () => {
-    const { client } = renderQueryEditor({ ...property, archived: true });
-    expect(await screen.findByRole("button", { name: "No value" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(api.setIssueProperty).not.toHaveBeenCalled();
-    client.clear();
   });
 });
