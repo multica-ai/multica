@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -389,5 +392,63 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 
 	if !isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
+	}
+}
+
+// Mention targets that are not members or agents (an issue, squad or @all
+// mention) cannot hold an issue_subscriber row: user_type only admits
+// ('member','agent'). They must be skipped, not attempted; each attempt fails
+// the CHECK and logs "failed to add issue subscriber" (seen on the Playwright
+// office run with user_type=issue). A real member mention in the same
+// description must still subscribe.
+func TestSubscriberIssueCreated_NonSubscriberMentionsAreSkipped(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	mentionedEmail := "subscriber-mention-test@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	description := "[MUL-9](mention://issue/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) " +
+		"[@Squad](mention://squad/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb) " +
+		"[@all](mention://all/all) " +
+		"[@Tester](mention://member/" + mentionedID + ")"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &description,
+			},
+		},
+	})
+
+	if strings.Contains(logs.String(), "failed to add issue subscriber") {
+		t.Fatalf("non-subscriber mention targets were sent to issue_subscriber:\n%s", logs.String())
+	}
+	if !isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("expected member mention to be subscribed")
+	}
+	if count := subscriberCount(t, queries, issueID); count != 2 {
+		t.Fatalf("expected creator and mentioned member only, got %d subscribers", count)
 	}
 }
