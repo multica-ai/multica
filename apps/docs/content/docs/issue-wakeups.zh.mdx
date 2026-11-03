@@ -56,11 +56,11 @@ import { WakeupDemo } from "@/components/demos/wakeup-demo";
 | 协作 | 字段变为某个值 | 任务的状态、负责人、标签或自定义属性变成指定的值。 |
 | 运行与子任务 | 智能体的运行结束 | 这条任务上某个智能体（或任意智能体）的运行成功、失败或被取消。 |
 | 运行与子任务 | 子任务完成 | 全部子任务结束（`done` 或 `cancelled`），或某个阶段及之前的阶段全部结束。没有子任务时不会触发。 |
-| 关联 | 关联 PR 的 CI 结束 | 也可以选 PR 合并、出现合并冲突。只看直接关联到这条任务的 PR，有多个时任意一个满足即可。CI 结束和合并冲突只支持 GitHub 上的 PR。 |
+| 关联 | 关联 PR 的 CI 结束 | 也可以选 PR 合并、出现合并冲突、收到人工批准或修改请求。只看直接关联到这条任务的 PR，有多个时任意一个满足即可。合并冲突和评审只支持 GitHub 上的 PR。 |
 | 关联 | 其他任务的状态变化 | 另一条任务完成、完成或取消，或进入审核中。 |
 | | 自定义事件 | 从 25 种原始事件里勾选，例如表态、附件、评论被编辑或讨论被解决。 |
 
-字段、子任务、PR 和其他任务这几类条件由平台自己去查：条件在创建时已经成立的，下一次检查（约 30 秒内）就会唤醒；"CI 结束"例外，它只认创建之后才出结果的检查。
+字段、子任务、PR 和其他任务这几类条件由平台自己去查：条件在创建时已经成立的，下一次检查（约 30 秒内）就会唤醒。CI 和评审只认创建后的新结果。评审不计机器人、PR 作者本人、仅评论的评审和已撤销的决定；重新启用后忽略之前的评审，推送新提交不会重复触发。收到批准不代表已满足合并所需的全部审批。
 
 时间以外的条件都是"等某件事发生"，还有三项设置：
 
@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "检�
 
 - **时间**：`--kind at` 配 `--after 10m` 或 `--at <RFC3339 时间>`；`--kind every --every 1h` 按固定间隔，最短 1 分钟；`--kind cron --cron "<5 段表达式>"` 配 `--timezone`，时区默认 UTC。
 - **事件**：`--event` 后面写事件名，多个用逗号分隔，`multica issue wakeup events` 列出全部事件和过滤参数。`--mode continuous` 改成重复唤醒。
-- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任务> --until-issue-state done|ended|in_review|blocked`。一条唤醒只能用一个 `--until-*`，不能和 `--event` 同时用。
+- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts|reviewed|approved|changes_requested`、`--until-issue <任务> --until-issue-state done|ended|in_review|blocked`。一条唤醒只能用一个 `--until-*`，不能和 `--event` 同时用。
 - **结束方式**：CLI 不会自动给等待加期限，用 `--expires-in 72h` 或 `--expires-at <RFC3339 时间>` 设结束时间；`--on-timeout wake` 让事件规则在超时时再唤醒一次。`--max-fires N`（1–1000）限制重复规则最多运行几次。
 - **结果放在哪**：`--parent <评论 ID>` 让唤醒后的回复留在原来的评论串里。
 

@@ -88,6 +88,9 @@ describe("platform conditions", () => {
     expect(input({ condition: "children", stage: null })).toMatchObject({ input: { condition: { type: "children_done" } } });
     expect(input({ condition: "pull_request", prEvent: "merged" })).toMatchObject({ input: { condition: { type: "pull_request", event: "merged" } } });
     expect(input({ condition: "pull_request", prEvent: "conflicts" })).toMatchObject({ input: { condition: { type: "pull_request", event: "conflicts" } } });
+    expect(input({ condition: "pull_request", prEvent: "reviewed" })).toMatchObject({ input: { condition: { type: "pull_request", event: "reviewed" } } });
+    expect(input({ condition: "pull_request", prEvent: "approved" })).toMatchObject({ input: { condition: { type: "pull_request", event: "approved" } } });
+    expect(input({ condition: "pull_request", prEvent: "changes_requested" })).toMatchObject({ input: { condition: { type: "pull_request", event: "changes_requested" } } });
     expect(input({ condition: "other_issue", otherIssue: { id: "i2", identifier: "MUL-2" }, otherState: "ended" })).toMatchObject({
       input: { condition: { type: "other_issue", issue_id: "i2", state: "ended" } },
     });

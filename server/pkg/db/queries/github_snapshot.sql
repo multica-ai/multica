@@ -1,7 +1,7 @@
 -- =====================
 -- GitHub API snapshot (MUL-5265, Plan C)
 --
--- These queries back the API-snapshot refresh pipeline. The GitHub GraphQL
+-- These queries back the API-snapshot refresh pipeline. The GitHub API
 -- response is the single source of truth; each successful fetch is written as
 -- one atomic batch replace (guarded update of the PR row + full replace of the
 -- per-check rows) inside a single transaction.
@@ -26,6 +26,7 @@ UPDATE github_pull_request
 SET api_mergeable          = sqlc.narg('api_mergeable'),
     api_merge_state_status = sqlc.narg('api_merge_state_status'),
     checks_rollup_state    = sqlc.narg('checks_rollup_state'),
+    review_snapshot        = sqlc.narg('review_snapshot'),
     snapshot_head_sha      = sqlc.arg('head_sha'),
     snapshot_fetched_at    = sqlc.arg('fetched_at'),
     updated_at             = now()
@@ -83,8 +84,8 @@ installation_id, repo_owner, repo_name, pr_number
 LIMIT sqlc.arg('max_rows');
 
 -- name: ListStaleConflictWatchedGitHubPRs :many
--- Second sweep source: open/draft PRs linked to an issue with an enabled
--- "wake on merge conflict" rule. A decided snapshot leaves the undecided sweep,
+-- Second sweep source: open/draft PRs linked to an enabled conflict or review
+-- condition. A decided snapshot leaves the undecided sweep,
 -- but a base-branch move can turn it conflicting without any event for this
 -- PR, so watched PRs are re-fetched on the TTL regardless. The candidate set
 -- comes from the enabled rules, whose count is capped. Like the undecided
@@ -101,7 +102,7 @@ WITH candidates AS (
           JOIN issue_pull_request AS ipr ON ipr.issue_id = w.issue_id
           WHERE w.enabled
             AND w.condition->>'type' = 'pull_request'
-            AND w.condition->>'event' = 'conflicts'
+            AND w.condition->>'event' IN ('conflicts', 'reviewed', 'approved', 'changes_requested')
       )
     GROUP BY pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
 )
