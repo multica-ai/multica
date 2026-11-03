@@ -126,7 +126,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children 
     />
   );
 
-  const body = <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>;
+  const body = <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
 
   if (!panel) {
     return (
