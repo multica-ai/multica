@@ -14,6 +14,10 @@ import (
 type QueueItem struct {
 	RequestID string
 	Item      json.RawMessage
+	// OriginPeerID and OriginClientKind name the device that queued it: a turn runs
+	// later, when no request is left to say so.
+	OriginPeerID     string
+	OriginClientKind string
 }
 
 // QueueState is a conversation's prompt queue.
@@ -53,7 +57,7 @@ func (s *Store) Queue(ctx context.Context, conversationID string) (QueueState, e
 		return state, err
 	}
 	for _, row := range rows {
-		state.Items = append(state.Items, QueueItem{RequestID: row.RequestID, Item: json.RawMessage(row.Item)})
+		state.Items = append(state.Items, QueueItem{RequestID: row.RequestID, Item: json.RawMessage(row.Item), OriginPeerID: row.OriginPeerID, OriginClientKind: row.OriginClientKind})
 	}
 	return state, nil
 }
@@ -76,7 +80,7 @@ func applyQueue(ctx context.Context, q *sqlitedb.Queries, conversationID string,
 	}
 	if c.Append != nil {
 		err := q.InsertPromptQueueItem(ctx, sqlitedb.InsertPromptQueueItemParams{
-			ConversationID: conversationID, RequestID: c.Append.RequestID, Position: bounds.LastPosition + 1, Item: string(c.Append.Item),
+			ConversationID: conversationID, RequestID: c.Append.RequestID, Position: bounds.LastPosition + 1, Item: string(c.Append.Item), OriginPeerID: c.Append.OriginPeerID, OriginClientKind: c.Append.OriginClientKind,
 		})
 		if err != nil {
 			return err

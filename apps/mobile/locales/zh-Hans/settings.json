@@ -40,6 +40,13 @@
     "status_changes": "状态变更",
     "saved": "通知设置已保存"
   },
+  "diagnostics": {
+    "title": "诊断",
+    "remote_read": "允许电脑读取日志",
+    "remote_read_description": "登录此账号的电脑上的智能体可直接读取此 App 的日志，无需确认。日志未脱敏，可能包含私密信息。",
+    "export": "导出日志",
+    "export_failed": "无法导出日志"
+  },
   "workspace": {
     "switch": "切换工作区",
     "select": "选择工作区",

@@ -585,7 +585,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 			return
 		}
 		if len(body.Agents) > 0 {
-			result, err := v.svc.SendToAgents(r.Context(), service.SendCommand{ScopeID: scopeID, ConversationID: id, RequestID: body.RequestID, Text: body.Text, Prompt: body.Prompt, AttachmentIDs: body.AttachmentIDs}, body.Agents)
+			result, err := v.svc.SendToAgents(r.Context(), service.SendCommand{ScopeID: scopeID, ConversationID: id, RequestID: body.RequestID, Origin: callerOf(r.Context()).origin(), Text: body.Text, Prompt: body.Prompt, AttachmentIDs: body.AttachmentIDs}, body.Agents)
 			if err != nil {
 				writeV2Error(w, err)
 				return
@@ -595,7 +595,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		}
 		// Marked before the turn starts, so an instant turn end still clears it.
 		v.startedRun(scopeID, id, callerOf(r.Context()), true)
-		result, err := v.svc.Send(r.Context(), service.SendCommand{ScopeID: scopeID, ConversationID: id, RequestID: body.RequestID, Text: body.Text, Prompt: body.Prompt, AttachmentIDs: body.AttachmentIDs, References: body.References})
+		result, err := v.svc.Send(r.Context(), service.SendCommand{ScopeID: scopeID, ConversationID: id, RequestID: body.RequestID, Origin: callerOf(r.Context()).origin(), Text: body.Text, Prompt: body.Prompt, AttachmentIDs: body.AttachmentIDs, References: body.References})
 		if err != nil || result.Replayed {
 			v.startedRun(scopeID, id, callerOf(r.Context()), false)
 		}
@@ -668,7 +668,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"revision": revision})
 	case "create_side":
-		conv, err := v.svc.CreateSide(r.Context(), service.SideCommand{ScopeID: scopeID, SourceID: id, TurnID: body.TurnID, Quote: body.Quote, RequestID: body.RequestID, QueuedItem: body.Item})
+		conv, err := v.svc.CreateSide(r.Context(), service.SideCommand{ScopeID: scopeID, SourceID: id, TurnID: body.TurnID, Quote: body.Quote, RequestID: body.RequestID, QueuedItem: body.Item, QueuedOrigin: callerOf(r.Context()).origin()})
 		if err != nil {
 			writeV2Error(w, err)
 			return
@@ -689,7 +689,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		}
 		writeJSON(w, http.StatusCreated, summaryDTO(conv))
 	case "queue_enqueue":
-		queue, err := v.svc.Enqueue(r.Context(), scopeID, id, body.Item, body.Paused)
+		queue, err := v.svc.Enqueue(r.Context(), scopeID, id, body.Item, body.Paused, callerOf(r.Context()).origin())
 		if err != nil {
 			writeV2Error(w, err)
 			return

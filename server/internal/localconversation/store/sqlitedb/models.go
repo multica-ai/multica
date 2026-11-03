@@ -121,10 +121,12 @@ type PromptQueue struct {
 }
 
 type PromptQueueItem struct {
-	ConversationID string
-	RequestID      string
-	Position       int64
-	Item           string
+	ConversationID   string
+	RequestID        string
+	Position         int64
+	Item             string
+	OriginPeerID     string
+	OriginClientKind string
 }
 
 type Scope struct {
@@ -141,17 +143,19 @@ type StoreMetum struct {
 }
 
 type Turn struct {
-	ID             string
-	ConversationID string
-	TurnIndex      int64
-	RequestID      string
-	ProviderTurnID string
-	Remote         string
-	Status         string
-	ErrorKind      string
-	Error          string
-	Reconciled     int64
-	LastTurnSeq    int64
-	StartedAt      string
-	CompletedAt    sql.NullString
+	ID               string
+	ConversationID   string
+	TurnIndex        int64
+	RequestID        string
+	ProviderTurnID   string
+	Remote           string
+	Status           string
+	ErrorKind        string
+	Error            string
+	Reconciled       int64
+	LastTurnSeq      int64
+	StartedAt        string
+	CompletedAt      sql.NullString
+	OriginPeerID     string
+	OriginClientKind string
 }

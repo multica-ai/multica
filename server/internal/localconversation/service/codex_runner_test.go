@@ -948,7 +948,7 @@ func TestCodexQueuedSettingsChangeRestartsTheProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := json.RawMessage(`{"requestId":"r2","content":"second","permissionMode":"auto","display":{"id":"r2","createdAtUnixMs":1,"content":[{"type":"text","text":"second"}]}}`)
-	if _, err := svc.Enqueue(ctx, scopeID, "conv-c", item, false); err != nil {
+	if _, err := svc.Enqueue(ctx, scopeID, "conv-c", item, false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	// The dispatch that finds the turn running applies the settings first.

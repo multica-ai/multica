@@ -53,6 +53,7 @@ type ClaudeSession struct {
 type SendRequest struct {
 	TurnID    string
 	RequestID string
+	Origin    TurnOrigin
 	// Fingerprint identifies the request content for idempotent retries.
 	Fingerprint string
 	MessageID   string

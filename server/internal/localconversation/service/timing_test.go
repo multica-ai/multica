@@ -263,14 +263,14 @@ func TestTimingKeepsTheCallerOfAQueuedTurn(t *testing.T) {
 
 	// Nothing is running: the queue is only how this send travelled.
 	f.svc.NoteRequest("conv-1", "first", time.Now(), localCaller)
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("first", "first"), false); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("first", "first"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "the first turn to send", func() bool { return len(f.sends(t)) == 1 })
 
 	// This one waits behind the running turn.
 	f.svc.NoteRequest("conv-1", "waiting", time.Now(), phone)
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("waiting", "second"), false); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("waiting", "second"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	f.allAdapters()[0].emit(t, turnDone)
@@ -302,7 +302,7 @@ func TestTimingCallerIsUnknownForAQueueLeftByARestart(t *testing.T) {
 	ctx := context.Background()
 	f.create(t, "conv-1", "claude")
 	f.svc.NoteRequest("conv-1", "r1", time.Now(), localCaller)
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("r1", "later"), true); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("r1", "later"), true, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.Close(ctx); err != nil {

@@ -40,6 +40,13 @@
     "status_changes": "狀態變更",
     "saved": "通知設定已儲存"
   },
+  "diagnostics": {
+    "title": "診斷",
+    "remote_read": "允許電腦讀取日誌",
+    "remote_read_description": "登入此帳號的電腦上的智慧體可直接讀取此 App 的日誌，無需確認。日誌未脫敏，可能包含私密資訊。",
+    "export": "匯出日誌",
+    "export_failed": "無法匯出日誌"
+  },
   "workspace": {
     "switch": "切換工作區",
     "select": "選擇工作區",

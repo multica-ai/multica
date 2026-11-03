@@ -143,7 +143,7 @@ func (s *Service) queueView(conversationID string, state store.QueueState) Queue
 // Enqueue queues a message. Re-enqueuing the same item, or one already
 // sent, is a no-op; a different item under the same request id is
 // rejected. paused queues it without dispatching.
-func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID string, raw json.RawMessage, paused bool) (QueueView, error) {
+func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID string, raw json.RawMessage, paused bool, origin TurnOrigin) (QueueView, error) {
 	conv, err := s.scopedConversation(ctx, scopeID, conversationID)
 	if err != nil {
 		return QueueView{}, err
@@ -178,7 +178,7 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 		unlock()
 		return QueueView{}, ErrQueueFull
 	}
-	change := store.QueueChange{Revision: state.Revision + 1, Paused: paused, Append: &store.QueueItem{RequestID: item.RequestID, Item: raw}}
+	change := store.QueueChange{Revision: state.Revision + 1, Paused: paused, Append: &store.QueueItem{RequestID: item.RequestID, Item: raw, OriginPeerID: origin.PeerID, OriginClientKind: origin.ClientKind}}
 	if !paused {
 		change.Error = ""
 	} else {
@@ -349,7 +349,7 @@ func (s *Service) dispatchQueue(conversationID string) {
 		trace = s.traces.dispatching(conv, item)
 		dispatched = trace.Now()
 		s.queues.setDispatching(conversationID, first.RequestID)
-		err = s.sendQueued(ctx, conv, item)
+		err = s.sendQueued(ctx, conv, item, TurnOrigin{PeerID: first.OriginPeerID, ClientKind: first.OriginClientKind})
 		s.queues.setDispatching(conversationID, "")
 	}
 	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused}
@@ -373,7 +373,7 @@ func (s *Service) dispatchQueue(conversationID string) {
 	}
 }
 
-func (s *Service) sendQueued(ctx context.Context, conv sqlitedb.Conversation, item queueItem) error {
+func (s *Service) sendQueued(ctx context.Context, conv sqlitedb.Conversation, item queueItem, origin TurnOrigin) error {
 	update := SettingsUpdate{PermissionMode: item.PermissionMode}
 	var err error
 	if update.Model, update.ClearModel, err = rawOptionalString(item.Model); err != nil {
@@ -387,7 +387,7 @@ func (s *Service) sendQueued(ctx context.Context, conv sqlitedb.Conversation, it
 			return err
 		}
 	}
-	cmd := SendCommand{ScopeID: conv.ScopeID, ConversationID: conv.ID, RequestID: item.RequestID, Text: item.Content, AttachmentIDs: item.AttachmentIDs, References: item.References}
+	cmd := SendCommand{ScopeID: conv.ScopeID, Origin: origin, ConversationID: conv.ID, RequestID: item.RequestID, Text: item.Content, AttachmentIDs: item.AttachmentIDs, References: item.References}
 	if item.Prompt != nil {
 		cmd.Prompt = *item.Prompt
 	}

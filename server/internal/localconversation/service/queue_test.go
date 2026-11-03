@@ -58,18 +58,18 @@ func TestQueueRunsAfterTheCurrentTurn(t *testing.T) {
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
 		t.Fatal(err)
 	}
-	view, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false)
+	view, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false, TurnOrigin{})
 	if err != nil || len(view.Items) != 1 {
 		t.Fatalf("enqueue = %+v, %v", view, err)
 	}
 	// The same item again is a no-op; another item under its id is not.
-	if again, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false); err != nil || len(again.Items) != 1 {
+	if again, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false, TurnOrigin{}); err != nil || len(again.Items) != 1 {
 		t.Fatalf("repeat = %+v, %v", again, err)
 	}
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "other"), false); !errors.Is(err, ErrRequestConflict) {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "other"), false, TurnOrigin{}); !errors.Is(err, ErrRequestConflict) {
 		t.Fatalf("conflict = %v", err)
 	}
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q2", "third"), false); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q2", "third"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	conv, _ := f.svc.Store().Conversation(ctx, "conv-1")
@@ -87,7 +87,7 @@ func TestQueueRunsAfterTheCurrentTurn(t *testing.T) {
 		return len(view.Items) == 0 && conv.QueueCount == 0
 	})
 	// A message that was already sent is not queued again.
-	if view, _ := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false); len(view.Items) != 0 {
+	if view, _ := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false, TurnOrigin{}); len(view.Items) != 0 {
 		t.Fatalf("re-enqueued a sent message: %+v", view)
 	}
 }
@@ -102,7 +102,7 @@ func TestQueueActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), id == "a"); err != nil {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), id == "a", TurnOrigin{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,7 +159,7 @@ func TestQueueRejectsInvalidItems(t *testing.T) {
 		`{"requestId":"a","content":"x","display":{"id":"a"},"agents":[{"id":"g","name":"G"}]}`,
 		`{"requestId":"a","content":"x","display":{"id":"a"},"permissionMode":"yolo"}`,
 	} {
-		if _, err := f.svc.Enqueue(context.Background(), f.scopeID, "conv-1", json.RawMessage(raw), false); err == nil {
+		if _, err := f.svc.Enqueue(context.Background(), f.scopeID, "conv-1", json.RawMessage(raw), false, TurnOrigin{}); err == nil {
 			t.Errorf("accepted %s", raw)
 		}
 	}
@@ -175,15 +175,15 @@ func TestQueueRejectsAnItemPastCapacity(t *testing.T) {
 		return json.RawMessage(fmt.Sprintf(`{"requestId":%q,"content":"x","display":{"id":%q}}`, id, id))
 	}
 	for i := 0; i < maxQueueItems; i++ {
-		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item(fmt.Sprintf("q%d", i)), true); err != nil {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item(fmt.Sprintf("q%d", i)), true, TurnOrigin{}); err != nil {
 			t.Fatalf("item %d: %v", i, err)
 		}
 	}
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item("over"), true); !errors.Is(err, ErrQueueFull) {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item("over"), true, TurnOrigin{}); !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("over capacity = %v", err)
 	}
 	// A retry of a queued item is not a new item.
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item("q0"), true); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item("q0"), true, TurnOrigin{}); err != nil {
 		t.Fatalf("retry of a queued item = %v", err)
 	}
 	view, err := f.svc.Queue(ctx, f.scopeID, "conv-1")
@@ -202,7 +202,7 @@ func TestQueueWaitsForTheUserAfterRestart(t *testing.T) {
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "after restart"), false); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "after restart"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.Close(ctx); err != nil {

@@ -6,6 +6,7 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { CardPressable } from "@/components/ui/card";
 import { workspaceListOptions } from "@/data/queries/workspaces";
+import { signOutOfThisDevice } from "@/data/ai-sessions/provider";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useT } from "@/lib/i18n";
@@ -82,7 +83,7 @@ export default function SelectWorkspace() {
         </View>
 
         <View className="pt-4 border-t border-border">
-          <Button variant="outline" onPress={() => logout()}>
+          <Button variant="outline" onPress={() => void signOutOfThisDevice(logout)}>
             <Text>{t("actions.sign_out")}</Text>
           </Button>
         </View>

@@ -12,7 +12,8 @@
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
-import { Alert, ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { useState } from "react";
+import { Alert, ActivityIndicator, Pressable, ScrollView, Share, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -20,8 +21,16 @@ import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { signOutOfThisDevice } from "@/data/ai-sessions/provider";
+import {
+  clearLogExports,
+  exportLogsToFile,
+  remoteLogReadAllowed,
+  setRemoteLogReadAllowed,
+} from "@/data/diagnostics/runtime";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -34,6 +43,7 @@ import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
+const EXPORT_MINUTES = 24 * 60;
 const LANGUAGE_OPTIONS: LocalePreference[] = [
   "system",
   "en",
@@ -67,6 +77,8 @@ export default function SettingsPage() {
   const { t } = useT("settings");
   const { t: tCommon } = useT();
   const mutedFg = THEME[colorScheme].mutedForeground;
+  const [remoteRead, setRemoteRead] = useState(remoteLogReadAllowed);
+  const [exporting, setExporting] = useState(false);
   const localeLabels = {
     system: t("language.system"),
     en: t("language.english"),
@@ -91,11 +103,29 @@ export default function SettingsPage() {
           style: "destructive",
           onPress: async () => {
             await clearWorkspace();
-            await logout();
+            await signOutOfThisDevice(logout);
           },
         },
       ],
     );
+  };
+
+  const onToggleRemoteRead = (allowed: boolean) => {
+    setRemoteLogReadAllowed(allowed);
+    setRemoteRead(remoteLogReadAllowed());
+  };
+
+  const onExportLogs = async () => {
+    setExporting(true);
+    try {
+      const path = await exportLogsToFile(EXPORT_MINUTES);
+      await Share.share({ url: `file://${encodeURI(path)}` });
+    } catch {
+      Alert.alert(t("diagnostics.export_failed"));
+    } finally {
+      clearLogExports();
+      setExporting(false);
+    }
   };
 
   const goProfile = () => router.push(`/${currentSlug}/more/settings/profile`);
@@ -223,6 +253,37 @@ export default function SettingsPage() {
             );
           })}
         </RadioGroup>
+      </SectionGroup>
+
+      <SectionGroup title={t("diagnostics.title")}>
+        <View className="flex-row items-center px-4 py-3.5 gap-3">
+          <View className="flex-1">
+            <Text className="text-base font-medium text-foreground">
+              {t("diagnostics.remote_read")}
+            </Text>
+            <Text className="text-sm text-muted-foreground mt-0.5">
+              {t("diagnostics.remote_read_description")}
+            </Text>
+          </View>
+          <Switch checked={remoteRead} onCheckedChange={onToggleRemoteRead} />
+        </View>
+        <Separator />
+        <Pressable
+          onPress={() => void onExportLogs()}
+          disabled={exporting}
+          accessibilityRole="button"
+          accessibilityState={{ busy: exporting }}
+          className="flex-row items-center px-4 py-3.5 active:bg-secondary gap-3"
+        >
+          <Text className="flex-1 text-base font-medium text-foreground">
+            {t("diagnostics.export")}
+          </Text>
+          {exporting ? (
+            <ActivityIndicator />
+          ) : (
+            <Ionicons name="share-outline" size={18} color={mutedFg} />
+          )}
+        </Pressable>
       </SectionGroup>
 
       <View className="pt-2">

@@ -61,6 +61,7 @@ func (d *Daemon) openLocalConversations(ctx context.Context, sidecar localhost.S
 	d.localV2.SetServerOrigin(d.cfg.ServerBaseURL)
 	d.reportsTiming = timing.Open(filepath.Join(d.cfg.ProfileDir, "local-conversations", "diagnostics", reportsTimingFile), timing.Options{})
 	d.localV2.SetTiming(timing.NewMarks(d.openDeviceTiming(), timing.SourceDaemon), d.reportsTiming)
+	svc.SetMobileLogs(d.newMobileLogs())
 	d.deviceLink = newDeviceLink(d.cfg.ProfileDir, d.localV2, d.cfg.LocalAPIToken, d.logger.With("component", "device-link"))
 	return nil
 }

@@ -87,8 +87,9 @@ export class EmbeddedDaemonManager {
         this.publish({ status: "ready", endpoint, error: null });
         this.backoff = 1000;
         this.health();
-      } catch {
+      } catch (error) {
         if (revision !== this.revision) return;
+        console.warn("[device-link] start failed", error);
         await this.native.stop().catch(() => {});
         this.publish({ status: "failed", endpoint: null, error: "connection_failed" });
         this.timer = setTimeout(() => { if (revision === this.revision) void this.apply(this.desired); }, this.backoff);

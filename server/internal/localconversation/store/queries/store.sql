@@ -55,8 +55,8 @@ ORDER BY summary_seq
 LIMIT sqlc.arg(row_limit);
 
 -- name: InsertTurn :exec
-INSERT INTO turn (id, conversation_id, turn_index, request_id, remote, status, started_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO turn (id, conversation_id, turn_index, request_id, remote, origin_peer_id, origin_client_kind, status, started_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetTurn :one
 SELECT * FROM turn WHERE id = ?;
@@ -237,7 +237,7 @@ ON CONFLICT (conversation_id) DO UPDATE SET revision = excluded.revision, paused
 SELECT * FROM prompt_queue_item WHERE conversation_id = ? ORDER BY position, request_id;
 
 -- name: InsertPromptQueueItem :exec
-INSERT INTO prompt_queue_item (conversation_id, request_id, position, item) VALUES (?, ?, ?, ?);
+INSERT INTO prompt_queue_item (conversation_id, request_id, position, item, origin_peer_id, origin_client_kind) VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: DeletePromptQueueItem :exec
 DELETE FROM prompt_queue_item WHERE conversation_id = ? AND request_id = ?;

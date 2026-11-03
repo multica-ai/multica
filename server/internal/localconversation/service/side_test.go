@@ -56,7 +56,7 @@ func TestQueuedMessageMovesToASide(t *testing.T) {
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "busy"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "do this aside"), false); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "do this aside"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	side, err := f.svc.QueueToSide(ctx, f.scopeID, "conv-1", "q1")

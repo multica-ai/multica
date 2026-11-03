@@ -30,8 +30,11 @@ type NewTurn struct {
 	ID        string
 	RequestID string
 	// Remote, for a cloud agent's turn, is its execution state as JSON.
-	Remote    string
-	StartedAt time.Time
+	Remote string
+	// OriginPeerID and OriginClientKind name the device that asked for this turn.
+	OriginPeerID     string
+	OriginClientKind string
+	StartedAt        time.Time
 }
 
 // TurnRemote replaces a cloud agent turn's execution state.
@@ -338,7 +341,7 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 	for i, t := range started {
 		err := q.InsertTurn(ctx, sqlitedb.InsertTurnParams{
 			ID: t.ID, ConversationID: conv.ID, TurnIndex: conv.TurnCount + int64(i), RequestID: t.RequestID,
-			Remote: t.Remote, Status: "running", StartedAt: formatTime(t.StartedAt),
+			Remote: t.Remote, OriginPeerID: t.OriginPeerID, OriginClientKind: t.OriginClientKind, Status: "running", StartedAt: formatTime(t.StartedAt),
 		})
 		if err != nil {
 			return Committed{}, fmt.Errorf("start turn %s: %w", t.ID, err)

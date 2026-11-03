@@ -158,7 +158,7 @@ func (s *Service) SendToAgents(ctx context.Context, cmd SendCommand, agents []Re
 	for i, a := range agents {
 		state, _ := json.Marshal(remoteState{AgentID: a.ID, AgentName: a.Name})
 		id := fmt.Sprintf("turn-%s-%d", cmd.RequestID, i+1)
-		turns = append(turns, store.NewTurn{ID: id, RequestID: cmd.RequestID, Remote: string(state), StartedAt: now})
+		turns = append(turns, store.NewTurn{ID: id, RequestID: cmd.RequestID, Remote: string(state), OriginPeerID: cmd.Origin.PeerID, OriginClientKind: cmd.Origin.ClientKind, StartedAt: now})
 		result.TurnIDs = append(result.TurnIDs, id)
 	}
 	receipt, _ := json.Marshal(result)

@@ -1,3 +1,5 @@
+// First import, so what later modules log as they load is captured.
+import "@/data/diagnostics/install";
 import "../global.css";
 import { AIDeviceProvider } from "@/data/ai-sessions/provider";
 

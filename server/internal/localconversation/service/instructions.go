@@ -45,6 +45,7 @@ func systemPrompt(workspaceID string, cloud bool) string {
 		ComputerInstructions,
 		ServicePreviewInstructions,
 		DeveloperLogInstructions,
+		MobileLogInstructions,
 		"Use upload_agent_avatar to upload a local image and set a defined agent's avatar when the user requests it. Supply the absolute file_path within this conversation's working directory or explicitly selected files/folders; copy generated images into the working directory first when needed. The desktop reads the image and authenticates the upload without exposing credentials. Reuse request_id with identical arguments on retries. Upload/update receipts survive turns; an unknown upload is never automatically repeated. This tool changes avatars; it does not edit image content or grant arbitrary filesystem access.",
 		protocol.HTMLPreviewInstructions,
 		imageInstructions,

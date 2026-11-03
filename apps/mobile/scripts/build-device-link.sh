@@ -9,7 +9,7 @@ if ! xcrun --find swiftc >/dev/null 2>&1 || ! xcrun --sdk iphoneos --show-sdk-pa
   exit 1
 fi
 cd "$root/server"
-current=$(shasum go.mod go.sum mobilelink/*.go internal/daemon/p2p/*.go "$root/apps/mobile/scripts/build-device-link.sh" | shasum | cut -d ' ' -f 1)
+current=$(shasum go.mod go.sum mobilelink/*.go internal/daemon/mobilediag/*.go internal/daemon/p2p/*.go "$root/apps/mobile/scripts/build-device-link.sh" | shasum | cut -d ' ' -f 1)
 if [ -d "$output" ] && [ -f "$fingerprint" ] && [ "$(cat "$fingerprint")" = "$current" ]; then
   exit 0
 fi

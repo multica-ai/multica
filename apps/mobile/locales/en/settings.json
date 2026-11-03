@@ -40,6 +40,13 @@
     "status_changes": "Status changes",
     "saved": "Notification settings saved"
   },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "remote_read": "Allow computers to read logs",
+    "remote_read_description": "Agents on computers signed in to this account can read this app's logs without asking. Logs aren't redacted and may contain private details.",
+    "export": "Export logs",
+    "export_failed": "Couldn't export logs"
+  },
   "workspace": {
     "switch": "Switch workspace",
     "select": "Select workspace",

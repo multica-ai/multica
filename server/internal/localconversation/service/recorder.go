@@ -45,7 +45,7 @@ func (t *turnRecorder) startBatch(req SendRequest) store.Batch {
 	if req.Hidden {
 		batch := store.Batch{
 			ConversationID: t.conversationID,
-			StartTurn:      &store.NewTurn{ID: req.TurnID, RequestID: req.RequestID, StartedAt: now},
+			StartTurn:      &store.NewTurn{ID: req.TurnID, RequestID: req.RequestID, OriginPeerID: req.Origin.PeerID, OriginClientKind: req.Origin.ClientKind, StartedAt: now},
 			Events:         []store.NewEvent{t.event(req.TurnID, "", "turn.started", false, map[string]any{"request_id": req.RequestID}, now)},
 			Summary:        &store.SummaryPatch{Status: &running, UpdatedAt: now},
 		}
@@ -58,7 +58,7 @@ func (t *turnRecorder) startBatch(req SendRequest) store.Batch {
 	return store.Batch{
 		ConversationID: t.conversationID,
 		Receipt:        &store.CommandReceipt{ScopeID: t.scopeID, RequestID: req.RequestID, Fingerprint: req.Fingerprint, Result: req.TurnID, CreatedAt: now},
-		StartTurn:      &store.NewTurn{ID: req.TurnID, RequestID: req.RequestID, StartedAt: now},
+		StartTurn:      &store.NewTurn{ID: req.TurnID, RequestID: req.RequestID, OriginPeerID: req.Origin.PeerID, OriginClientKind: req.Origin.ClientKind, StartedAt: now},
 		Events: []store.NewEvent{
 			t.event(req.TurnID, "", "user.message", true, userMessagePayload(req), now),
 			t.event(req.TurnID, "", "turn.started", false, map[string]any{"request_id": req.RequestID, "input_message_id": req.MessageID}, now),

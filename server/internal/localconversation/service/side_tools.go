@@ -534,7 +534,8 @@ func (t *sideTools) send(ctx context.Context, target, content, requestID string)
 			}
 		}
 	}
-	result, err := t.s.Send(ctx, SendCommand{ScopeID: t.conv.ScopeID, ConversationID: target, RequestID: submission, Text: content})
+	// A side conversation has no device of its own: the one that asked here asked there.
+	result, err := t.s.Send(ctx, SendCommand{ScopeID: t.conv.ScopeID, ConversationID: target, RequestID: submission, Text: content, Origin: t.s.currentOrigin(ctx, t.conv.ID, t.current)})
 	if err == nil {
 		return map[string]any{"mode": "new_run", "turn_id": result.TurnID, "request_id": submission}, nil
 	}
@@ -547,7 +548,7 @@ func (t *sideTools) send(ctx context.Context, target, content, requestID string)
 		return nil, err
 	}
 	item, _ := json.Marshal(map[string]any{"requestId": submission, "content": content, "display": map[string]any{"id": submission, "createdAtUnixMs": t.s.opts.Now().UnixMilli()}})
-	if _, err := t.s.Enqueue(ctx, t.conv.ScopeID, target, item, false); err != nil {
+	if _, err := t.s.Enqueue(ctx, t.conv.ScopeID, target, item, false, t.s.currentOrigin(ctx, t.conv.ID, t.current)); err != nil {
 		return nil, err
 	}
 	return map[string]any{"mode": "queued", "turn_id": nil, "request_id": submission}, nil

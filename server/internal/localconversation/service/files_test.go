@@ -204,7 +204,7 @@ func TestAbandonedUploadsExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 	item, _ := json.Marshal(map[string]any{"requestId": "q1", "content": "later", "attachmentIds": []string{queued}, "display": map[string]any{"id": "q1"}})
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item, true); err != nil {
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item, true, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := f.svc.Store().RemoveAbandonedUploads(ctx, time.Hour, time.Now().Add(-2*time.Hour))

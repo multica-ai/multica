@@ -33,6 +33,8 @@ export class MobileTimingBuffer {
   private settled = 0;
   private userId?: string;
   private pending?: { batch: TimingBatch; entries: Set<Entry>; deviceId: string; workspaceId: string; dropped: number };
+  /** Keeps a copy of the marks made here, since this buffer forgets each once an executor has it. Go keeps its own. */
+  retain?: (record: LocalTimingRecord) => void;
 
   constructor(private size = BUFFER_SIZE) {}
 
@@ -48,6 +50,7 @@ export class MobileTimingBuffer {
     try {
       const record = parseLocalTiming({ version: 2, source: "mobile", clientKind: "mobile", origin: "p2p", at: new Date().toISOString(), event: "mark", elapsedMs: 0, ...value });
       if (!record) return;
+      if (native === undefined) this.retain?.(record);
       this.entries.push({ record, ...(record.conversationId && workspaceId ? { workspaceId } : {}), ...(native === undefined ? {} : { native }) });
       if (this.entries.length > this.size) { this.entries.shift(); this.dropped++; }
     } catch { /* Diagnostics must not change delivery. */ }

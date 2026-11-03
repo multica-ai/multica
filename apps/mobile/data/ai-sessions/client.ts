@@ -246,7 +246,10 @@ export class AISessionClient {
         if (openedAt !== undefined && Date.now() - openedAt >= STABLE_SOCKET_MS) { this.backoff = 500; this.retryImmediately = true; }
         this.linkLost();
       };
-    } catch { this.linkLost(); }
+    } catch (error) {
+      console.warn("[ai-session] connect failed", { device: this.scope.deviceId, error });
+      this.linkLost();
+    }
     finally { this.connecting = false; }
   }
   private linkLost() {

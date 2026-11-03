@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 func rendererHeaders(origin string) http.Header {
@@ -201,5 +203,17 @@ func TestV2RendererCredentialsMatchDesktop(t *testing.T) {
 	}
 	if got := FileKey("t1"); got != "64bde9d6264771573838ef0ad3a2d3a1f80f25f6a9fda3220160d0e854cdd843" {
 		t.Errorf("file key = %s", got)
+	}
+}
+
+func TestOnlyAnotherDeviceIsATurnsOrigin(t *testing.T) {
+	remote := caller{kind: callerRemote, peer: "phone-peer", clientKind: timing.ClientMobile}
+	if got := remote.origin(); got.PeerID != "phone-peer" || got.ClientKind != timing.ClientMobile {
+		t.Fatalf("remote origin = %+v", got)
+	}
+	for _, kind := range []callerKind{callerMain, callerRenderer} {
+		if got := (caller{kind: kind, peer: "ignored"}).origin(); got.PeerID != "" || got.ClientKind != "" {
+			t.Fatalf("local caller %d has origin %+v", kind, got)
+		}
 	}
 }

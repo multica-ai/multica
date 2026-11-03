@@ -123,19 +123,20 @@ type Service struct {
 	computers computerUse
 
 	// metaMu serializes metadata read-modify-write updates.
-	metaMu    sync.Mutex
-	mu        sync.Mutex
-	closing   bool
-	draining  bool
-	forking   map[string]bool
-	runners   map[string]runner
-	questions interactions
-	queues    queues
-	titles    titleRuns
-	delivery  deliveries
-	host      Host
-	localHost Host
-	preview   PreviewServices
+	metaMu     sync.Mutex
+	mu         sync.Mutex
+	closing    bool
+	draining   bool
+	forking    map[string]bool
+	runners    map[string]runner
+	questions  interactions
+	queues     queues
+	titles     titleRuns
+	delivery   deliveries
+	host       Host
+	localHost  Host
+	mobileLogs MobileLogs
+	preview    PreviewServices
 	// turnEnd learns that a conversation's turn ended; see OnTurnEnd.
 	turnEnd func(conversationID string)
 	side    sideWorkspaces
@@ -377,6 +378,9 @@ type SendCommand struct {
 	// References are the message's @ references, reported by
 	// current_context while its turn runs.
 	References []Reference
+	// Origin is the device asking; it is not part of the request's identity, so a
+	// retry from another device is still the same request.
+	Origin TurnOrigin
 }
 
 // Reference is an @ reference: a local conversation, task or agent.
@@ -469,7 +473,7 @@ func (s *Service) Send(ctx context.Context, cmd SendCommand) (SendResult, error)
 	if err != nil {
 		return SendResult{}, err
 	}
-	err = runner.Send(ctx, SendRequest{TurnID: turnID, RequestID: cmd.RequestID, Fingerprint: fingerprint, MessageID: "msg-" + cmd.RequestID, Text: cmd.Text, Prompt: prompt, AttachmentIDs: cmd.AttachmentIDs, References: readableReferences(cmd.References), CreateTask: len(readableReferences(cmd.References)) < len(cmd.References),
+	err = runner.Send(ctx, SendRequest{TurnID: turnID, RequestID: cmd.RequestID, Origin: cmd.Origin, Fingerprint: fingerprint, MessageID: "msg-" + cmd.RequestID, Text: cmd.Text, Prompt: prompt, AttachmentIDs: cmd.AttachmentIDs, References: readableReferences(cmd.References), CreateTask: len(readableReferences(cmd.References)) < len(cmd.References),
 		Title: firstTitle(conv.TurnCount, conv.TitleMode, conv.Title, cmd.Text), Trace: trace})
 	switch {
 	case errors.Is(err, store.ErrDuplicateRequest):
@@ -797,6 +801,9 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 		withWorkspace := func() map[string]any {
 			c := current()
 			c["workspace_id"] = scope.WorkspaceID
+			if origin := s.currentOrigin(context.Background(), conv.ID, current); origin != (TurnOrigin{}) {
+				c["origin_peer_id"], c["origin_client_kind"] = origin.PeerID, origin.ClientKind
+			}
 			return c
 		}
 		runs := filepath.Join(filepath.Dir(s.opts.Path), "runs")
@@ -820,6 +827,12 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 		}
 		tools = append(tools, s.sideToolsFor(conv, current, readContext)...)
 		tools = append(tools, s.developerLogTool(conv))
+		s.mu.Lock()
+		mobileLogs := s.mobileLogs
+		s.mu.Unlock()
+		if mobileLogs != nil {
+			tools = append(tools, s.mobileLogTool(conv.ID, current, mobileLogs))
+		}
 		tools = append(tools, s.computerToolsFor(conv, current)...)
 		if agents, ok := cloud.(cloudAgents); ok && agents != nil {
 			tools = append(tools, s.avatarTool(conv, agents))

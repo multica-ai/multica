@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/localconversation/service"
 	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
@@ -63,6 +64,15 @@ func (c caller) timing() timing.Caller {
 		return timing.Caller{Origin: timing.OriginLocal, ClientKind: timing.ClientDesktop, Connection: timing.ConnectionLoopback}
 	}
 	return timing.Caller{Origin: timing.OriginP2P, ClientKind: c.clientKind, Connection: c.connection}
+}
+
+// origin is the device behind this caller, for the turn it asks for. Only another
+// device has one: its peer ID was proven by its stream.
+func (c caller) origin() service.TurnOrigin {
+	if c.kind != callerRemote {
+		return service.TurnOrigin{}
+	}
+	return service.TurnOrigin{PeerID: c.peer, ClientKind: c.clientKind}
 }
 
 func clientKey(prefix string, h http.Header) string {

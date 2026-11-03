@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multica-ai/multica/server/internal/daemon/mobilediag"
 	"github.com/multica-ai/multica/server/internal/daemon/p2p"
 	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
@@ -36,8 +38,9 @@ const deviceProtocol = "/multica/local-api/1"
 const headerClientKind = "X-Multica-Client-Kind"
 
 const (
-	diagnosticsPage = 500
-	diagnosticsFile = ".timing.json"
+	unregisterTimeout = 3 * time.Second
+	diagnosticsPage   = 500
+	diagnosticsFile   = ".timing.json"
 )
 
 type configuration struct {
@@ -73,6 +76,11 @@ type Client struct {
 	// stopped link through its file, since iOS stops the link while the app sleeps.
 	ring  *timing.Ring
 	marks *timing.Marks
+	// logger writes to the phone's log, which other devices can read.
+	logger *slog.Logger
+	// logReads answers those reads; nil when the log could not open.
+	logReads     *http.Server
+	logReadsStop func()
 
 	// peersRead closes after the first device list attempt has settled, so requests
 	// made right after Start do not report an empty account while it is in flight.
@@ -123,11 +131,19 @@ func Start(configJSON string) (*Client, error) {
 	// Partitioned by account like the key: another user must not report these.
 	ring := timing.OpenRing(filepath.Join(cfg.StoragePath, hex.EncodeToString([]byte(cfg.UserID))+diagnosticsFile), 0)
 	c := &Client{cfg: cfg, ctx: ctx, cancel: cancel, token: hex.EncodeToString(secret), endpoint: "http://" + ln.Addr().String(),
-		tunnels: map[peer.ID]*p2p.Tunnel{}, peersRead: make(chan struct{}), ring: ring, marks: timing.NewMarks(ring, timing.SourceMobile)}
+		tunnels: map[peer.ID]*p2p.Tunnel{}, peersRead: make(chan struct{}), ring: ring, marks: timing.NewMarks(ring, timing.SourceMobile), logger: slog.Default()}
+	// Marks and logs only ever add to the phone's log, so a log that cannot open
+	// costs its diagnostics and nothing else.
+	logs, logsErr := openStore(cfg.StoragePath)
+	if logsErr == nil {
+		logs.SetAccount(cfg.UserID)
+		c.marks = timing.NewMarks(logs.RetainMarks(ring), timing.SourceMobile)
+		c.logger = logs.Logger()
+	}
 	c.registry = &registry{url: strings.TrimRight(cfg.RegistryURL, "/"), login: cfg.Token, http: &http.Client{Timeout: 30 * time.Second}}
 	changed := make(chan struct{}, 1)
 	c.svc, err = p2p.Start(ctx, p2p.Config{Key: key, Fetch: c.fetchPeers, Relay: c.registry.relay,
-		RefreshInterval: 15 * time.Second, Marks: c.marks, OnPeersRead: c.peersSettled, OnAddrsChanged: func() {
+		RefreshInterval: 15 * time.Second, Marks: c.marks, Logger: c.logger, OnPeersRead: c.peersSettled, OnAddrsChanged: func() {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -141,8 +157,20 @@ func Start(configJSON string) (*Client, error) {
 	c.svc.OnDirect(c.moveToDirect)
 	c.server = &http.Server{Handler: http.HandlerFunc(c.serve), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = c.server.Serve(ln) }()
+	if logsErr == nil {
+		c.serveLogReads(logs)
+	}
 	go c.keepRegistered(publicKey, changed)
 	return c, nil
+}
+
+// serveLogReads answers this account's computers for as long as the link runs,
+// whatever the app has on screen.
+func (c *Client) serveLogReads(logs *mobilediag.Store) {
+	listener, stop := c.svc.Listen(mobilediag.Protocol)
+	c.logReadsStop = stop
+	c.logReads = &http.Server{Handler: logs.Handler(c.cfg.UserID), ReadHeaderTimeout: 10 * time.Second}
+	go func(s *http.Server) { _ = s.Serve(listener) }(c.logReads)
 }
 
 // fetchPeers leaves other phones off the allowlist: they serve no conversations,
@@ -181,7 +209,12 @@ func (c *Client) keepRegistered(publicKey []byte, changed <-chan struct{}) {
 	defer tick.Stop()
 	registered := false
 	for {
-		for c.register(publicKey) != nil {
+		for {
+			err := c.register(publicKey)
+			if err == nil {
+				break
+			}
+			c.logger.Warn("mobilelink: registration failed; retrying", "error", err)
 			select {
 			case <-c.ctx.Done():
 				return
@@ -247,6 +280,18 @@ func (c *Client) register(publicKey []byte) error {
 	}, nil)
 }
 
+// Unregister takes this phone off the account's device list when its user signs out,
+// so it stops being offered as a phone to read. Devices age out of the list anyway,
+// so a failure here costs only that delay.
+func (c *Client) Unregister() {
+	ctx, cancel := context.WithTimeout(c.ctx, unregisterTimeout)
+	defer cancel()
+	query := url.Values{"daemon_id": {"ios-" + c.svc.ID().String()}, "profile": {"mobile"}}
+	if err := c.registry.call(ctx, http.MethodDelete, "/v1/devices?"+query.Encode(), nil, nil); err != nil {
+		c.logger.Warn("mobilelink: unregister failed", "error", err)
+	}
+}
+
 // Endpoint returns a private loopback credential, never the Multica login token.
 func (c *Client) Endpoint() string {
 	data, _ := json.Marshal(map[string]string{"url": c.endpoint, "token": c.token})
@@ -258,6 +303,10 @@ func (c *Client) Close() {
 	c.once.Do(func() {
 		c.cancel()
 		_ = c.server.Close()
+		if c.logReads != nil {
+			c.logReadsStop()
+			_ = c.logReads.Close()
+		}
 		c.mu.Lock()
 		tunnels := make([]*p2p.Tunnel, 0, len(c.tunnels))
 		for _, tunnel := range c.tunnels {
@@ -354,6 +403,7 @@ func (c *Client) serve(w http.ResponseWriter, r *http.Request) {
 				writeError(w, errRelayLimit.Error(), http.StatusRequestEntityTooLarge)
 				return
 			}
+			c.logger.Warn("mobilelink: device request failed", "peer_id", peerID.String(), "path", r.URL.Path, "error", err)
 			writeError(w, "device_unreachable", http.StatusBadGateway)
 		}}
 	proxy.ServeHTTP(w, r)

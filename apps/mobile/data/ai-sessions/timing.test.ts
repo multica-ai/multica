@@ -181,3 +181,14 @@ describe("model catalog from the executor", () => {
     expect(modelsSchema.safeParse({ models: [{ id: "a", label: "A", isDefault: "yes" }] }).success).toBe(false);
   });
 });
+
+describe("MobileTimingBuffer.retain", () => {
+  it("copies marks made here and leaves the link's own to Go", () => {
+    const buffer = new MobileTimingBuffer();
+    const retained: string[] = [];
+    buffer.retain = (record) => { retained.push(record.stage); };
+    buffer.write({ stage: "ws.open" });
+    buffer.write({ stage: "ws.closed" }, undefined, 1);
+    expect(retained).toEqual(["ws.open"]);
+  });
+});

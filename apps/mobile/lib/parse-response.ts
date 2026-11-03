@@ -25,7 +25,6 @@ export function parseWithFallback<T>(
   if (result.success) return result.data as T;
   console.warn(`[api] schema validation failed: ${opts.endpoint}`, {
     issues: result.error.issues,
-    received: data,
   });
   return fallback;
 }

@@ -43,6 +43,8 @@ type SideCommand struct {
 	RequestID string
 	// QueuedItem, when set, is queued in the new conversation at once.
 	QueuedItem json.RawMessage
+	// QueuedOrigin is the device that asked for QueuedItem.
+	QueuedOrigin TurnOrigin
 }
 
 func sideOf(c sqlitedb.Conversation) *SideContext {
@@ -137,7 +139,7 @@ func (s *Service) CreateSide(ctx context.Context, cmd SideCommand) (sqlitedb.Con
 		return source, err
 	}
 	if len(cmd.QueuedItem) > 0 {
-		if _, err := s.Enqueue(ctx, cmd.ScopeID, id, cmd.QueuedItem, false); err != nil {
+		if _, err := s.Enqueue(ctx, cmd.ScopeID, id, cmd.QueuedItem, false, cmd.QueuedOrigin); err != nil {
 			return source, err
 		}
 	}
@@ -165,9 +167,11 @@ func (s *Service) QueueToSide(ctx context.Context, scopeID int64, conversationID
 		return sqlitedb.Conversation{}, err
 	}
 	var item json.RawMessage
+	var origin TurnOrigin
 	for _, it := range state.Items {
 		if it.RequestID == requestID {
 			item = it.Item
+			origin = TurnOrigin{PeerID: it.OriginPeerID, ClientKind: it.OriginClientKind}
 		}
 	}
 	if item == nil {
@@ -184,7 +188,7 @@ func (s *Service) QueueToSide(ctx context.Context, scopeID int64, conversationID
 	fields["display"] = display
 	moved, _ := json.Marshal(fields)
 
-	conv, err := s.CreateSide(ctx, SideCommand{ScopeID: scopeID, SourceID: conversationID, RequestID: sideRequest, QueuedItem: moved})
+	conv, err := s.CreateSide(ctx, SideCommand{ScopeID: scopeID, SourceID: conversationID, RequestID: sideRequest, QueuedItem: moved, QueuedOrigin: origin})
 	if err != nil {
 		return conv, err
 	}
