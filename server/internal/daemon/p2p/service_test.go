@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 // testAccount is a mutable server-side device list.
@@ -347,14 +348,136 @@ func TestNetworkChangeRebuildsPathsWithoutWaitingForHeartbeat(t *testing.T) {
 		t.Fatal("not connected")
 	}
 	old := a.host.Network().ConnsToPeer(idB)
+	a.localIPs = func() (map[string]bool, error) { return map[string]bool{}, nil }
 	a.NetworkChanged()
 	for _, conn := range old {
-		if !conn.IsClosed() {
-			t.Fatal("old network path retained")
+		if !conn.IsClosed() && !localAddrIsWildcard(conn) {
+			t.Fatal("path on a vanished address retained")
 		}
 	}
 	if !waitFor(t, 2*time.Second, func() bool { return peerStatus(a, idB).Connected }) {
 		t.Fatal("did not reconnect promptly after a local network change")
+	}
+}
+
+func localAddrIsWildcard(conn network.Conn) bool {
+	ip, err := manet.ToIP(conn.LocalMultiaddr())
+	return err == nil && ip.IsUnspecified()
+}
+
+func TestNetworkChangeKeepsHealthyPathsAndItsStreams(t *testing.T) {
+	keyA, idA := newKey(t)
+	keyB, idB := newKey(t)
+	acct := &testAccount{}
+	acct.set(Peer{ID: idA}, Peer{ID: idB})
+	a := startDevice(t, keyA, acct, "", "/ip4/127.0.0.1/tcp/0")
+	b := startDevice(t, keyB, acct, "", "/ip4/127.0.0.1/tcp/0")
+	introduce(a, b)
+	if !waitFor(t, 5*time.Second, func() bool { return peerStatus(a, idB).Connected }) {
+		t.Fatal("not connected")
+	}
+	const echo = "/multica/test-echo/1"
+	b.Handle(echo, func(st network.Stream) { defer st.Close(); io.Copy(st, st) })
+	st, err := a.Open(context.Background(), idB, echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	a.NetworkChanged()
+	// Longer than the one-second probe it starts.
+	time.Sleep(1500 * time.Millisecond)
+	if _, err := st.Write([]byte("x")); err != nil {
+		t.Fatalf("stream did not survive a network change on a healthy path: %v", err)
+	}
+	buf := make([]byte, 1)
+	_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(st, buf); err != nil {
+		t.Fatalf("stream did not survive a network change on a healthy path: %v", err)
+	}
+}
+
+func TestNetworkChangeClosesAPathThatStoppedResponding(t *testing.T) {
+	keyA, idA := newKey(t)
+	keyB, idB := newKey(t)
+	acct := &testAccount{}
+	acct.set(Peer{ID: idA}, Peer{ID: idB})
+	a := startDevice(t, keyA, acct, "", "/ip4/127.0.0.1/tcp/0")
+	b := startDevice(t, keyB, acct, "", "/ip4/127.0.0.1/tcp/0")
+	introduce(a, b)
+	if !waitFor(t, 5*time.Second, func() bool { return peerStatus(a, idB).Connected }) {
+		t.Fatal("not connected")
+	}
+	old := a.host.Network().ConnsToPeer(idB)
+	// Accepts a ping and never answers, like a path whose route has gone.
+	b.host.SetStreamHandler(ping.ID, func(st network.Stream) { defer st.Close(); _, _ = io.Copy(io.Discard, st) })
+	a.NetworkChanged()
+	if !waitFor(t, 3*time.Second, func() bool {
+		for _, conn := range old {
+			if !conn.IsClosed() {
+				return false
+			}
+		}
+		return true
+	}) {
+		t.Fatal("unresponsive path retained after a network change")
+	}
+}
+
+func TestLocalAddrVanished(t *testing.T) {
+	ips := map[string]bool{"192.168.1.5": true}
+	for addr, want := range map[string]bool{
+		"/ip4/192.168.1.5/tcp/4001":     false,
+		"/ip4/192.168.1.6/tcp/4001":     true,
+		"/ip4/0.0.0.0/udp/4001/quic-v1": false,
+		"/ip6/::/udp/4001/quic-v1":      false,
+	} {
+		if got := localAddrVanished(ma.StringCast(addr), ips); got != want {
+			t.Errorf("%s vanished = %v", addr, got)
+		}
+	}
+}
+
+func TestDirectRetriesBackOffAndResetOnChange(t *testing.T) {
+	var r directRetries
+	_, id := newKey(t)
+	now := time.Now()
+	first, due := r.begin(id, now)
+	if !first || !due {
+		t.Fatalf("first attempt = %v %v", first, due)
+	}
+	if _, due := r.begin(id, now); due {
+		t.Fatal("a second dial started during the first")
+	}
+	r.finish(id, false, now)
+	if _, due := r.begin(id, now.Add(directRetryMin-time.Second)); due {
+		t.Fatal("retried before the delay")
+	}
+	first, due = r.begin(id, now.Add(directRetryMin))
+	if first || !due {
+		t.Fatalf("retry = %v %v", first, due)
+	}
+	for range 16 {
+		r.finish(id, false, now)
+		r.state[id].dialing = true
+	}
+	if delay := r.state[id].delay; delay != directRetryMax {
+		t.Fatalf("delay = %v", delay)
+	}
+	r.state[id].dialing = false
+	r.reset(id)
+	if first, due := r.begin(id, now); !first || !due {
+		t.Fatalf("after reset = %v %v", first, due)
+	}
+	// A reset during a dial must not be undone by the dial finishing.
+	r.reset(id)
+	r.finish(id, false, now)
+	if _, due := r.begin(id, now); !due {
+		t.Fatal("reset lost to a dial in flight")
+	}
+	r.finish(id, true, now)
+	if len(r.state) != 0 {
+		t.Fatalf("state after success = %v", r.state)
 	}
 }
 

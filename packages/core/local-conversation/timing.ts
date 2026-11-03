@@ -115,6 +115,8 @@ export const LOCAL_TIMING_ROLES = ["initiator", "receiver", "executor"] as const
 export type LocalTimingRole = typeof LOCAL_TIMING_ROLES[number];
 export const LOCAL_TIMING_ADDR_TYPES = ["loopback", "lan", "public", "relay", "unknown"] as const;
 export type LocalTimingAddrType = typeof LOCAL_TIMING_ADDR_TYPES[number];
+export const LOCAL_TIMING_TRANSPORTS = ["quic", "tcp", "relay", "unknown"] as const;
+export type LocalTimingTransport = typeof LOCAL_TIMING_TRANSPORTS[number];
 
 export interface LocalTimingDimensions {
   provider?: LocalTimingProvider;
@@ -155,6 +157,7 @@ export interface LocalTimingRecord extends LocalTimingIdentity {
   peer?: string;
   role?: LocalTimingRole;
   addrType?: LocalTimingAddrType;
+  transport?: LocalTimingTransport;
   reused?: boolean;
   /** Stamped by the executor on a report, on its own clock: the sender's clock can be wrong. */
   reporter?: string;
@@ -222,6 +225,8 @@ export function parseLocalTiming(value: unknown): LocalTimingRecord | null {
   if (role) result.role = role;
   const addrType = member(LOCAL_TIMING_ADDR_TYPES, raw.addrType);
   if (addrType) result.addrType = addrType;
+  const transport = member(LOCAL_TIMING_TRANSPORTS, raw.transport);
+  if (transport) result.transport = transport;
   if (raw.reused === true) result.reused = true;
   if (isIdentifier(raw.reporter)) result.reporter = raw.reporter;
   if (typeof raw.receivedAt === "string" && AT.test(raw.receivedAt) && Number.isFinite(Date.parse(raw.receivedAt))) result.receivedAt = raw.receivedAt;
@@ -231,8 +236,8 @@ export function parseLocalTiming(value: unknown): LocalTimingRecord | null {
 /** A failure's closed category; the error text itself never goes on a record. */
 export function localTimingFailure(error: unknown): LocalTimingFailure {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  if (/429|rate.?limit|insufficient|quota|余额不足/i.test(message)) return "rate_limit";
-  if (/401|403|unauthorized|authentication|not signed in/i.test(message)) return "authentication";
+  if (/(?:^|[^0-9a-z])429(?:[^0-9a-z]|$)|rate.?limit|insufficient|quota|余额不足/i.test(message)) return "rate_limit";
+  if (/(?:^|[^0-9a-z])40[13](?:[^0-9a-z]|$)|unauthorized|authentication|not signed in/i.test(message)) return "authentication";
   if (/abort|cancel/i.test(message)) return "cancelled";
   if (/websocket|disconnect|ECONN|ETIMEDOUT|fetch failed|timeout|timed out/i.test(message)) return "transport";
   return "other";

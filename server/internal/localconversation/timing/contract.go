@@ -158,6 +158,14 @@ const (
 	ClientUnknown = "unknown"
 )
 
+// Transport values: what carries a direct connection.
+const (
+	TransportQUIC    = "quic"
+	TransportTCP     = "tcp"
+	TransportRelay   = "relay"
+	TransportUnknown = "unknown"
+)
+
 // Connection values: the stream's own connection, never device-level state.
 const (
 	ConnectionLoopback = "loopback"
@@ -291,6 +299,7 @@ var (
 	addrTypes    = setOf(AddrLoopback, AddrLAN, AddrPublic, AddrRelay, AddrUnknown)
 	origins      = setOf(OriginLocal, OriginP2P, OriginUnknown)
 	clientKinds  = setOf(ClientDesktop, ClientMobile, ClientUnknown)
+	transports   = setOf(TransportQUIC, TransportTCP, TransportRelay, TransportUnknown)
 	connections  = setOf(ConnectionLoopback, ConnectionDirect, ConnectionRelayed, ConnectionUnknown)
 	providers    = setOf("codex", "claude")
 	prepareKinds = setOf(PrepareHot, PreparePreheated, PrepareSpare, PrepareCold)
@@ -314,8 +323,8 @@ var (
 	identifier = regexp.MustCompile(`^[\w:.-]{1,160}$`)
 	atPattern  = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`)
 
-	rateLimited   = regexp.MustCompile(`(?i)429|rate.?limit|insufficient|quota|余额不足`)
-	unauthorized  = regexp.MustCompile(`(?i)401|403|unauthorized|authentication|not signed in`)
+	rateLimited   = regexp.MustCompile(`(?i)(?:^|[^0-9a-z])429(?:[^0-9a-z]|$)|rate.?limit|insufficient|quota|余额不足`)
+	unauthorized  = regexp.MustCompile(`(?i)(?:^|[^0-9a-z])40[13](?:[^0-9a-z]|$)|unauthorized|authentication|not signed in`)
 	cancelledText = regexp.MustCompile(`(?i)abort|cancel`)
 	transportText = regexp.MustCompile(`(?i)websocket|disconnect|ECONN|ETIMEDOUT|fetch failed|timeout|timed out|deadline exceeded`)
 )
@@ -359,10 +368,11 @@ type Record struct {
 	Bytes    *int64 `json:"bytes,omitempty"`
 	MaxGapMs *int64 `json:"maxGapMs,omitempty"`
 	// Peer is the other device, hashed at export.
-	Peer     string `json:"peer,omitempty"`
-	Role     string `json:"role,omitempty"`
-	AddrType string `json:"addrType,omitempty"`
-	Reused   bool   `json:"reused,omitempty"`
+	Peer      string `json:"peer,omitempty"`
+	Role      string `json:"role,omitempty"`
+	AddrType  string `json:"addrType,omitempty"`
+	Transport string `json:"transport,omitempty"`
+	Reused    bool   `json:"reused,omitempty"`
 	// Reporter and ReceivedAt are stamped by the executor on a phone's report:
 	// who sent it, on the executor's clock, because the phone's own can be wrong.
 	Reporter   string `json:"reporter,omitempty"`
@@ -401,6 +411,7 @@ func Sanitize(r Record) (Record, bool) {
 	r.MaxGapMs = nonNegative(r.MaxGapMs)
 	r.Role = closed(roles, r.Role)
 	r.AddrType = closed(addrTypes, r.AddrType)
+	r.Transport = closed(transports, r.Transport)
 	if r.Peer != "" && !identifier.MatchString(r.Peer) {
 		r.Peer = ""
 	}

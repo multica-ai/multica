@@ -226,7 +226,7 @@ presence 只在内存中，不写入 SQLite，不占用 `summary_seq`。
 ## 优先直连
 
 - 直连顺序：局域网 mDNS → 登记的直连地址（含 NAT 端口映射和观察到的公网地址）→ 中继，随后 DCUtR 打洞。
-- 建立隧道前：如果到该设备只有中继连接，`p2p.Dial` 最多等待 5 秒，等打洞得到直连后再开流；超时才使用中继。
+- 建立隧道时：`p2p.Dial` 直接使用现有路径，不等打洞。打洞和直连重试在后台进行，直连出现后再迁移。
 - 打洞成功后：守护进程订阅连接事件，出现非 circuit 连接时，关闭 HTTP 连接池里的空闲连接和走中继的已升级 WebSocket，进行中的 HTTP 请求继续在中继上完成；transport 立即在直连上重建 WebSocket。libp2p 新开流时优先选择直连。
 - 仍然只有中继时：会话读写照常；单个文件读取或上传超过 5 MB 时返回 `relay_transfer_limited`。
 - `/local/devices` 返回 `connection`，并写入诊断日志，便于统计中继占比。侧边栏不显示连接类型。
@@ -312,7 +312,7 @@ func (s *Service) OnDirect(fn func(peer.ID))            // 出现到某设备的
 ```
 
 - 不使用 `gostream`：它的 `Listen` 直接调用 `SetStreamHandler`，绕过 allowlist。`Close` 需要处理半关闭（先 `CloseWrite`，读到 EOF 再关闭，参考 gostream 的 `IgnoreEOF`）。
-- `Dial`：到该设备的连接全是 circuit 时，订阅 `event.EvtPeerConnectednessChanged`，最多等 5 秒非 circuit 连接，超时才在中继上开流。
+- `Dial`：直接在现有连接上开流。
 - `OnDirect` 复用 `addrsLoop` 所在的事件订阅。设备名和连接类型复用 `Peers()` 的 `PeerStatus{DeviceName, Connection}`。
 
 #### 分层：入口 → 策略 → 能力（`daemon/localhost/`）
@@ -456,7 +456,7 @@ func (v *V2) serve(w, r, c caller) // allowed(c.kind, route) → 现有路由
    - Desktop 主进程：`choose-remote` 拒绝本机 deviceId、设置确认不使用转来的 `apply`。
    - 渲染进程：使用中标识、侧边栏两种状态和选中规则、远端 tab、key 隔离、远端目录选择、回环地址提示、Side 控制按设备分流。
    - 未做：两台真实设备（同网和跨网）的手动验证与截图。
-   - 手动：先用同一台机器的两个 profile，再用两台不同网络的机器验证打洞（5 秒等待是否够用）和中继回退，记录 `connection` 的直连占比；与中继服务端确认 `Limit=nil` 和带宽成本。浅色和深色主题截图保存在 `.tmp/device-link/`。
+   - 手动：先用同一台机器的两个 profile，再用两台不同网络的机器验证打洞和中继回退，记录 `connection` 的直连占比；与中继服务端确认 `Limit=nil` 和带宽成本。浅色和深色主题截图保存在 `.tmp/device-link/`。
 
 ## 第二期
 

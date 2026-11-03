@@ -42,6 +42,32 @@ func addrType(a ma.Multiaddr) string {
 	return timing.AddrUnknown
 }
 
+// transportOf says what carries a connection at a.
+func transportOf(a ma.Multiaddr) string {
+	if isCircuit(a) {
+		return timing.TransportRelay
+	}
+	for _, c := range a {
+		switch c.Code() {
+		case ma.P_QUIC_V1:
+			return timing.TransportQUIC
+		case ma.P_TCP:
+			return timing.TransportTCP
+		}
+	}
+	return timing.TransportUnknown
+}
+
+// connectedTransport is the direct connection's transport, the one streams prefer.
+func (s *Service) connectedTransport(id peer.ID) string {
+	for _, c := range s.host.Network().ConnsToPeer(id) {
+		if !isCircuit(c.RemoteMultiaddr()) {
+			return transportOf(c.RemoteMultiaddr())
+		}
+	}
+	return timing.TransportUnknown
+}
+
 // bestAddrType is the most direct kind among addrs. A connect that starts with
 // lan and ends on relay is what a refused local network permission looks like.
 func bestAddrType(addrs []ma.Multiaddr) string {
@@ -86,14 +112,14 @@ func (s *Service) noteConnection(c network.Conn, connected bool) {
 	if !changed {
 		return
 	}
-	stage, kind := timing.StageConnectionLost, ""
+	stage, kind, transport := timing.StageConnectionLost, "", ""
 	switch state {
 	case ConnectionDirect:
-		stage, kind = timing.StageConnectionDirect, s.connectedAddrType(id)
+		stage, kind, transport = timing.StageConnectionDirect, s.connectedAddrType(id), s.connectedTransport(id)
 	case ConnectionRelayed:
-		stage, kind = timing.StageConnectionRelay, timing.AddrRelay
+		stage, kind, transport = timing.StageConnectionRelay, timing.AddrRelay, timing.TransportRelay
 	}
-	s.marks.Write(timing.Record{Stage: stage, Peer: id.String(), AddrType: kind})
+	s.marks.Write(timing.Record{Stage: stage, Peer: id.String(), AddrType: kind, Transport: transport})
 }
 
 // fetchState keeps a registry that stays down to one record, not one per refresh.
@@ -181,7 +207,7 @@ func (h *holePunchMarks) HolePunchFinished(side string, attempts int, _ []ma.Mul
 	h.mu.Unlock()
 	record := timing.Record{Stage: timing.StageHolepunchFailed, Event: timing.EventEnd, Peer: remote.String(), Role: side, Count: timing.N(int64(attempts)), DurationMs: timing.Ms(took), Outcome: "failed", Failure: timing.Classify(text)}
 	if direct != nil {
-		record.Stage, record.Outcome, record.Failure, record.AddrType = timing.StageHolepunchSuccess, "completed", "", addrType(direct.RemoteMultiaddr())
+		record.Stage, record.Outcome, record.Failure, record.AddrType, record.Transport = timing.StageHolepunchSuccess, "completed", "", addrType(direct.RemoteMultiaddr()), transportOf(direct.RemoteMultiaddr())
 	}
 	h.marks.Write(record)
 }

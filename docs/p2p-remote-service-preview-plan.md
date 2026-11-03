@@ -23,7 +23,7 @@ V1 不包含任意内网 IP 转发、通用 VPN、UDP、WebRTC 媒体转发或�
 | 证据 | 当前行为 | 对方案的影响 |
 | --- | --- | --- |
 | [device_link.go](../server/internal/daemon/device_link.go) | `/local/devices/{peer}/local/v2/` 经 `/multica/local-api/1` 转发到对端的 Multica API | 复用现有通道做控制请求，新增协议承载服务 TCP 数据 |
-| [p2p/stream.go](../server/internal/daemon/p2p/stream.go) | P2P 流可作为 `net.Conn` 使用；仅中继可达时，会短暂等待打洞再打开流 | 复用同一套直连和中继路径，不新增中继基础设施 |
+| [p2p/stream.go](../server/internal/daemon/p2p/stream.go) | P2P 流可作为 `net.Conn` 使用；仅中继可达时，直接在中继上开流，打洞在后台进行 | 复用同一套直连和中继路径，不新增中继基础设施 |
 | [resource-web-preview.ts](../apps/desktop/src/main/resource-web-preview.ts) | 网页运行于无应用 preload 的沙盒 WebContentsView；当前分区只按 owner 隔离 | 保留浏览器沙盒，分区键增加设备身份 |
 | [local-resource-preview.tsx](../apps/desktop/src/renderer/src/pages/local-resource-preview.tsx)、[side-workspace-control.ts](../apps/desktop/src/main/side-workspace-control.ts) | 明确拦截远端回环 URL | 仅在能力协商、授权与代理就绪后启用远端服务预览 |
 | [device_link.go](../server/internal/daemon/device_link.go)、[relay.go](../server/internal/p2pserver/relay.go) | 文件 API 中继传输有 5 MiB 限制；中继节点本身未设置每条连接的数据量/时长上限，仍有并发限制 | 新流协议独立计量；不能把文件接口的单响应限制机械用于长连接，也不能无限占用连接 |

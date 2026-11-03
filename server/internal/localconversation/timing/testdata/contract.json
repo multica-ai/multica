@@ -83,6 +83,16 @@
       "expected": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "peer.connect", "event": "end", "elapsedMs": 0, "durationMs": 9, "peer": "12D3KooWExample", "role": "initiator", "reused": true, "bytes": 12, "maxGapMs": 3, "reporter": "12D3KooWPhone", "receivedAt": "2026-11-02T10:00:01.000Z" }
     },
     {
+      "name": "connection record keeps a known transport",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "connection.direct", "event": "mark", "elapsedMs": 0, "peer": "12D3KooWExample", "addrType": "lan", "transport": "quic" },
+      "expected": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "connection.direct", "event": "mark", "elapsedMs": 0, "peer": "12D3KooWExample", "addrType": "lan", "transport": "quic" }
+    },
+    {
+      "name": "transport holding an address is dropped, not the record",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "connection.direct", "event": "mark", "elapsedMs": 0, "peer": "12D3KooWExample", "addrType": "lan", "transport": "/ip4/10.0.0.1/tcp/1" },
+      "expected": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "connection.direct", "event": "mark", "elapsedMs": 0, "peer": "12D3KooWExample", "addrType": "lan" }
+    },
+    {
       "name": "free text in a device field is dropped, not the record",
       "input": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "relay.refused", "event": "mark", "elapsedMs": 0, "peer": "/ip4/10.0.0.1", "reporter": "a b", "role": "boss", "bytes": -1, "maxGapMs": -1, "receivedAt": "yesterday", "reason": "dial tcp 10.0.0.1" },
       "expected": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "relay.refused", "event": "mark", "elapsedMs": 0 }

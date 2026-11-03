@@ -12,6 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/sec"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
+	"github.com/libp2p/go-libp2p/p2p/host/observedaddrs"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
@@ -141,14 +142,24 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 		return fail(err)
 	}
 
+	// Behind NAT without port mapping, the address the relay observes is this
+	// host's only public address, and the hole punching service stays off until
+	// it has one.
+	observed, err := observedaddrs.NewManager(bus, sw)
+	if err != nil {
+		return fail(err)
+	}
+	cleanup = append(cleanup, observed.Close)
+
 	h, err := basichost.NewHost(sw, &basichost.HostOpts{
-		EventBus:            bus,
-		ConnManager:         cm,
-		EnablePing:          true,
-		AddrsFactory:        addrs,
-		NATManager:          basichost.NewNATManager,
-		EnableHolePunching:  true,
-		HolePunchingOptions: holePunching,
+		EventBus:             bus,
+		ConnManager:          cm,
+		EnablePing:           true,
+		AddrsFactory:         addrs,
+		NATManager:           basichost.NewNATManager,
+		ObservedAddrsManager: observed,
+		EnableHolePunching:   true,
+		HolePunchingOptions:  holePunching,
 	})
 	if err != nil {
 		return fail(err)
@@ -158,13 +169,14 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 		h.Close()
 		return fail(err)
 	}
+	observed.Start(sw)
 	if err := sw.Listen(listenAddrs...); err != nil {
 		h.Close()
 		return fail(err)
 	}
 	h.Start()
 	// The host closes the swarm; the remaining components are ours.
-	return &ownedHost{BasicHost: h, closers: []func() error{quicConns.Close, cm.Close, rm.Close, ps.Close}}, nil
+	return &ownedHost{BasicHost: h, closers: []func() error{observed.Close, quicConns.Close, cm.Close, rm.Close, ps.Close}}, nil
 }
 
 // ownedHost closes the components newHost created alongside the host.

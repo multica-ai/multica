@@ -32,6 +32,22 @@ func findMark(records []timing.Record, stage string) (timing.Record, bool) {
 	return timing.Record{}, false
 }
 
+func TestTransportOfNamesWhatCarriesAConnection(t *testing.T) {
+	t.Parallel()
+
+	for addr, want := range map[string]string{
+		"/ip4/192.168.1.2/udp/1/quic-v1":         timing.TransportQUIC,
+		"/ip6/fd7a::1/tcp/1":                     timing.TransportTCP,
+		"/ip4/8.8.8.8/tcp/1/p2p-circuit":         timing.TransportRelay,
+		"/ip4/8.8.8.8/udp/1/quic-v1/p2p-circuit": timing.TransportRelay,
+		"/ip4/8.8.8.8/udp/1":                     timing.TransportUnknown,
+	} {
+		if got := transportOf(ma.StringCast(addr)); got != want {
+			t.Errorf("transportOf(%s) = %q, want %q", addr, got, want)
+		}
+	}
+}
+
 func TestAddrTypeNamesAKindAndNeverAnAddress(t *testing.T) {
 	t.Parallel()
 

@@ -191,6 +191,109 @@ func TestDevicesWithoutDirectRouteConnectThroughRelay(t *testing.T) {
 	}
 }
 
+// circuitOnlyPair connects two devices through the relay only: the registry lists
+// no direct address for either.
+func circuitOnlyPair(t *testing.T) (a, b *Service, idA peer.ID) {
+	t.Helper()
+	keyA, idA := newKey(t)
+	keyB, idB := newKey(t)
+	relay, _ := startRelay(t, idA, idB)
+	acct := &relayAccount{only: func(addr string) bool { return strings.Contains(addr, "/p2p-circuit") }}
+	start := func(key crypto.PrivKey) *Service {
+		svc, err := Start(context.Background(), Config{Key: key, Fetch: acct.fetch, ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"}, RefreshInterval: time.Hour, Relay: relayFunc(relay), Logger: testLogger})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { svc.Close() })
+		return svc
+	}
+	a, b = start(keyA), start(keyB)
+	acct.mu.Lock()
+	acct.svcs = []*Service{a, b}
+	acct.mu.Unlock()
+	reserved := func(s *Service) bool { st := s.Status().Relay; return st != nil && st.Reserved }
+	if !waitFor(t, 15*time.Second, func() bool { return reserved(a) && reserved(b) }) {
+		t.Fatal("no reservations")
+	}
+	if !waitFor(t, 15*time.Second, func() bool {
+		_ = a.Refresh(context.Background())
+		_ = b.Refresh(context.Background())
+		return peerStatus(b, idA).Connection == ConnectionRelayed
+	}) {
+		t.Fatalf("not relayed: %+v", peerStatus(b, idA))
+	}
+	return a, b, idA
+}
+
+func TestRelayedDeviceMovesToDirectOnRetryAndReleasesTheCircuit(t *testing.T) {
+	a, b, idA := circuitOnlyPair(t)
+	b.AddAddrs(peer.AddrInfo{ID: idA, Addrs: a.host.Addrs()})
+	if !waitFor(t, 10*time.Second, func() bool { return peerStatus(b, idA).Connection == ConnectionDirect }) {
+		t.Fatalf("a nearby device stayed relayed: %+v", peerStatus(b, idA))
+	}
+
+	circuits := func() int {
+		n := 0
+		for _, c := range b.host.Network().ConnsToPeer(idA) {
+			if isCircuit(c.RemoteMultiaddr()) {
+				n++
+			}
+		}
+		return n
+	}
+	if !waitFor(t, 5*time.Second, func() bool {
+		b.closeIdleCircuits()
+		return circuits() == 0
+	}) {
+		t.Fatalf("circuit retained after moving to direct: %d", circuits())
+	}
+	if peerStatus(b, idA).Connection != ConnectionDirect {
+		t.Fatalf("connection = %+v", peerStatus(b, idA))
+	}
+	if st := b.Status().Relay; st == nil || !st.Reserved {
+		t.Fatalf("reservation lost with the circuit: %+v", st)
+	}
+}
+
+func TestPeriodicRetryUpgradesARelayedDeviceWithUnchangedAddresses(t *testing.T) {
+	a, b, idA := circuitOnlyPair(t)
+	b.discoveredMu.Lock()
+	b.discovered[idA] = peer.AddrInfo{ID: idA, Addrs: a.host.Addrs()}
+	b.discoveredMu.Unlock()
+	b.retryRelayed(time.Now())
+	if !waitFor(t, 10*time.Second, func() bool { return peerStatus(b, idA).Connection == ConnectionDirect }) {
+		t.Fatalf("retry left the device relayed: %+v", peerStatus(b, idA))
+	}
+}
+
+func TestIdleCircuitStaysWhileItCarriesAStream(t *testing.T) {
+	a, b, idA := circuitOnlyPair(t)
+	const held = "/multica/held/1"
+	done := make(chan struct{})
+	defer close(done)
+	a.Handle(held, func(st network.Stream) { defer st.Close(); <-done })
+	st, err := b.Open(context.Background(), idA, held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	circuit := st.Conn()
+	if !isCircuit(circuit.RemoteMultiaddr()) {
+		t.Fatalf("stream is not on the relay: %s", circuit.RemoteMultiaddr())
+	}
+	b.AddAddrs(peer.AddrInfo{ID: idA, Addrs: a.host.Addrs()})
+	if !waitFor(t, 10*time.Second, func() bool { return peerStatus(b, idA).Connection == ConnectionDirect }) {
+		t.Fatal("did not move to direct")
+	}
+	b.closeIdleCircuits()
+	if circuit.IsClosed() {
+		t.Fatal("a circuit carrying a stream was closed")
+	}
+}
+
 func TestRelayNodeCannotOpenDeviceStreams(t *testing.T) {
 	keyA, idA := newKey(t)
 	relay, _ := startRelay(t, idA)

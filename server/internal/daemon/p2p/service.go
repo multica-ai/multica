@@ -125,6 +125,10 @@ type Service struct {
 	discoveredMu sync.Mutex
 	discovered   map[peer.ID]peer.AddrInfo
 
+	directRetries directRetries
+	// localIPs lists this device's addresses; tests replace it.
+	localIPs func() (map[string]bool, error)
+
 	relayFetch RelayFunc
 	onAddrs    func()
 	onPeers    func(error)
@@ -177,6 +181,7 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		kick:       make(chan struct{}, 1),
 		dialing:    map[peer.ID]*peerDial{},
 		discovered: map[peer.ID]peer.AddrInfo{},
+		localIPs:   interfaceIPs,
 		relayFetch: cfg.Relay,
 		onAddrs:    cfg.OnAddrsChanged,
 		onPeers:    cfg.OnPeersRead,
@@ -326,9 +331,17 @@ func (s *Service) addDiscovered(info peer.AddrInfo) {
 	s.discoveredMu.Lock()
 	s.discovered[info.ID] = info
 	s.discoveredMu.Unlock()
-	if s.allow.allowed(info.ID) {
-		s.connect(info)
+	p, allowed := s.allow.get(info.ID)
+	if !allowed {
+		return
 	}
+	// connect treats a relayed device as connected, so a nearby one needs this.
+	if s.Connection(info.ID) == ConnectionRelayed {
+		s.directRetries.reset(info.ID)
+		s.dialDirect(p)
+		return
+	}
+	s.connect(info)
 }
 
 func (s *Service) connect(info peer.AddrInfo) {
@@ -444,25 +457,31 @@ func (s *Service) checkPeersLoop() {
 		case <-s.probePeers:
 			timeout = time.Second
 		}
-		s.relayMu.Lock()
-		var relayID peer.ID
-		if s.relayInfo != nil {
-			relayID = s.relayInfo.ID
-		}
-		s.relayMu.Unlock()
-		var probes sync.WaitGroup
-		probe := func(id peer.ID) {
-			probes.Add(1)
-			go func() { defer probes.Done(); s.checkPeerWithin(id, timeout) }()
-		}
-		if relayID != "" {
-			probe(relayID)
-		}
-		for _, p := range s.allow.list() {
-			probe(p.ID)
-		}
-		probes.Wait()
+		s.closeIdleCircuits()
+		s.retryRelayed(time.Now())
+		s.probeAll(timeout)
 	}
+}
+
+func (s *Service) probeAll(timeout time.Duration) {
+	s.relayMu.Lock()
+	var relayID peer.ID
+	if s.relayInfo != nil {
+		relayID = s.relayInfo.ID
+	}
+	s.relayMu.Unlock()
+	var probes sync.WaitGroup
+	probe := func(id peer.ID) {
+		probes.Add(1)
+		go func() { defer probes.Done(); s.checkPeerWithin(id, timeout) }()
+	}
+	if relayID != "" {
+		probe(relayID)
+	}
+	for _, p := range s.allow.list() {
+		probe(p.ID)
+	}
+	probes.Wait()
 }
 
 func (s *Service) checkPeer(id peer.ID) { s.checkPeerWithin(id, peerProbeTimeout) }
@@ -540,19 +559,19 @@ func (s *Service) wakeDials(ids ...peer.ID) {
 }
 
 // NetworkChanged is called when local interfaces or routes change, rather than
-// waiting for the old TCP/QUIC paths to time out. New incoming paths are retained.
+// waiting for old TCP/QUIC paths to time out. Paths on a vanished address close
+// now. The rest may be unaffected, as a VPN or default route change often leaves
+// them, so they stay unless a short probe fails.
 func (s *Service) NetworkChanged() {
 	s.marks.Write(timing.Record{Stage: timing.StageNetworkChanged})
-	conns := s.host.Network().Conns()
 	s.relayMu.Lock()
 	if s.relayCancel != nil {
 		s.relayCancel()
 	}
 	s.relayMu.Unlock()
-	s.logger.Info("p2p: local network changed; rebuilding paths")
-	for _, conn := range conns {
-		_ = conn.Close()
-	}
+	s.logger.Info("p2p: local network changed; checking paths")
+	s.closeConnsOnVanishedAddrs()
+	s.directRetries.clear()
 	s.wakeDials()
 	select {
 	case s.relayLost <- struct{}{}:
@@ -562,6 +581,51 @@ func (s *Service) NetworkChanged() {
 	if s.onAddrs != nil {
 		s.onAddrs()
 	}
+	// A periodic probe of a dead path can hold the loop for its full timeout.
+	s.dialMu.Lock()
+	if s.ctx.Err() != nil {
+		s.dialMu.Unlock()
+		return
+	}
+	s.wg.Add(1)
+	s.dialMu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		s.probeAll(time.Second)
+	}()
+}
+
+func (s *Service) closeConnsOnVanishedAddrs() {
+	ips, err := s.localIPs()
+	for _, conn := range s.host.Network().Conns() {
+		if err != nil || localAddrVanished(conn.LocalMultiaddr(), ips) {
+			_ = conn.Close()
+		}
+	}
+}
+
+// localAddrVanished is false for a wildcard address, which QUIC connections
+// sharing a socket report: only the probe can tell for those.
+func localAddrVanished(local ma.Multiaddr, ips map[string]bool) bool {
+	ip, err := manet.ToIP(local)
+	if err != nil || ip.IsUnspecified() {
+		return false
+	}
+	return !ips[ip.String()]
+}
+
+func interfaceIPs() (map[string]bool, error) {
+	addrs, err := manet.InterfaceMultiaddrs()
+	if err != nil {
+		return nil, err
+	}
+	ips := make(map[string]bool, len(addrs))
+	for _, a := range addrs {
+		if ip, err := manet.ToIP(a); err == nil {
+			ips[ip.String()] = true
+		}
+	}
+	return ips, nil
 }
 
 func (s *Service) requestRefresh() {
@@ -625,6 +689,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 		if previous, ok := s.allow.get(p.ID); ok && !slices.EqualFunc(previous.RegisteredAddrs, p.RegisteredAddrs, func(a, b ma.Multiaddr) bool { return a.Equal(b) }) {
 			changed = append(changed, p.ID)
 			if s.Connection(p.ID) == ConnectionRelayed {
+				s.directRetries.reset(p.ID)
 				s.dialDirect(p)
 			}
 		}
@@ -663,32 +728,144 @@ func (s *Service) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// dialDirect tries a relayed device's newly registered direct addresses once.
+// dialDirect tries a relayed device's direct addresses when its retry is due.
 // connect treats a relayed device as connected, and hole punching ignores
-// private addresses, so nothing else would reach a LAN address registered late.
+// private addresses, so nothing else would reach a LAN address.
 func (s *Service) dialDirect(p Peer) {
-	addrs := slices.DeleteFunc(slices.Clone(p.RegisteredAddrs), isCircuit)
+	s.discoveredMu.Lock()
+	addrs := append(slices.Clone(p.RegisteredAddrs), s.discovered[p.ID].Addrs...)
+	s.discoveredMu.Unlock()
+	addrs = slices.DeleteFunc(addrs, isCircuit)
 	if len(addrs) == 0 {
+		return
+	}
+	first, due := s.directRetries.begin(p.ID, time.Now())
+	if !due {
 		return
 	}
 	s.dialMu.Lock()
 	if s.ctx.Err() != nil {
 		s.dialMu.Unlock()
+		s.directRetries.finish(p.ID, false, time.Now())
 		return
 	}
 	s.wg.Add(1)
 	s.dialMu.Unlock()
 	go func() {
 		defer s.wg.Done()
-		ctx, cancel := context.WithTimeout(network.WithForceDirectDial(s.ctx, "multica-registered-direct"), connectTimeout)
+		// A failure the swarm remembers must not hide a path that just opened.
+		if sw, ok := s.host.Network().(*swarm.Swarm); ok {
+			sw.Backoff().Clear(p.ID)
+		}
+		ctx, cancel := context.WithTimeout(network.WithForceDirectDial(s.ctx, "multica-relayed-direct"), connectTimeout)
 		defer cancel()
 		began := s.marks.Now()
 		err := s.host.Connect(ctx, peer.AddrInfo{ID: p.ID, Addrs: addrs})
-		s.marks.Since(timing.Record{Stage: timing.StagePeerConnect, Peer: p.ID.String(), AddrType: bestAddrType(addrs), Reason: timing.ReasonLateDirect}, began, err)
+		s.directRetries.finish(p.ID, err == nil, time.Now())
+		// Only the first of a run: retries would tick while the device stays relayed.
+		if first || err == nil {
+			s.marks.Since(timing.Record{Stage: timing.StagePeerConnect, Peer: p.ID.String(), AddrType: bestAddrType(addrs), Reason: timing.ReasonLateDirect}, began, err)
+		}
 		if err != nil {
 			s.logger.Debug("p2p: direct dial failed; staying on the relay", "peer_id", p.ID.String(), "error", err)
 		}
 	}()
+}
+
+// retryRelayed tries direct paths again for relayed devices: a path can open
+// without any address changing, as when a firewall rule or VPN route appears.
+func (s *Service) retryRelayed(now time.Time) {
+	for _, p := range s.allow.list() {
+		if s.Connection(p.ID) == ConnectionRelayed {
+			s.dialDirect(p)
+		} else {
+			s.directRetries.reset(p.ID)
+		}
+	}
+}
+
+// closeIdleCircuits releases relayed connections a direct one has replaced, which
+// the account's circuit limit counts. The relay reservation is separate, so the
+// device stays reachable through the relay if the direct path later fails.
+func (s *Service) closeIdleCircuits() {
+	for _, p := range s.allow.list() {
+		if s.Connection(p.ID) != ConnectionDirect {
+			continue
+		}
+		for _, conn := range s.host.Network().ConnsToPeer(p.ID) {
+			if isCircuit(conn.RemoteMultiaddr()) && len(conn.GetStreams()) == 0 {
+				_ = conn.Close()
+			}
+		}
+	}
+}
+
+const (
+	directRetryMin = 15 * time.Second
+	directRetryMax = 5 * time.Minute
+)
+
+// directRetries paces direct dials to relayed devices. Two devices behind NATs
+// may never reach each other, so failures back off.
+type directRetries struct {
+	mu    sync.Mutex
+	state map[peer.ID]*directRetry
+}
+
+type directRetry struct {
+	delay   time.Duration
+	next    time.Time
+	dialing bool
+}
+
+// begin claims a dial if one is due. first is whether it starts a run of attempts.
+func (r *directRetries) begin(id peer.ID, now time.Time) (first, due bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == nil {
+		r.state = map[peer.ID]*directRetry{}
+	}
+	entry := r.state[id]
+	if entry == nil {
+		entry = &directRetry{}
+		r.state[id] = entry
+		first = true
+	}
+	if entry.dialing || now.Before(entry.next) {
+		return false, false
+	}
+	entry.dialing = true
+	return first, true
+}
+
+func (r *directRetries) finish(id peer.ID, succeeded bool, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry := r.state[id]
+	if entry == nil {
+		// A reset during the dial: the next attempt is due now.
+		return
+	}
+	if succeeded {
+		delete(r.state, id)
+		return
+	}
+	entry.dialing = false
+	entry.delay = min(max(entry.delay*2, directRetryMin), directRetryMax)
+	entry.next = now.Add(entry.delay)
+}
+
+// reset makes a device's next dial due now, because something about its paths changed.
+func (r *directRetries) reset(id peer.ID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.state, id)
+}
+
+func (r *directRetries) clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state = nil
 }
 
 // AdvertisedAddrs are the addresses to register for other devices: listen,

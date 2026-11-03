@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { canonicalLocalTimingStage, isLocalTimingModelOutput, localTimingCloseReason, localTimingRequestId, localTimingTime, LOCAL_TIMING_DIMENSIONS, LOCAL_TIMING_LEGACY_MAPPING, LOCAL_TIMING_LEGACY_STAGES, LOCAL_TIMING_MARKS, LOCAL_TIMING_REASONS, parseLocalTiming } from "./timing";
+import { canonicalLocalTimingStage, isLocalTimingModelOutput, localTimingCloseReason, localTimingFailure, localTimingRequestId, localTimingTime, LOCAL_TIMING_DIMENSIONS, LOCAL_TIMING_LEGACY_MAPPING, LOCAL_TIMING_LEGACY_STAGES, LOCAL_TIMING_MARKS, LOCAL_TIMING_REASONS, parseLocalTiming } from "./timing";
 
 const contract = JSON.parse(readFileSync(join(__dirname, "../../../server/internal/localconversation/timing/testdata/contract.json"), "utf8")) as {
   legacyStages: string[]; marks: string[]; legacyMapping: Record<string, string>; dimensions: Record<string, string[]>; reasons: string[];
@@ -65,5 +65,19 @@ describe("local timing contract", () => {
     for (const [type, kind] of [["user.message", undefined], ["turn.started", undefined], ["item.completed", "error"], ["item.started", "background_task"], ["item.delta", undefined]] as const) {
       expect(isLocalTimingModelOutput(type, kind)).toBe(false);
     }
+  });
+});
+
+describe("localTimingFailure", () => {
+  it.each([
+    ["request failed: 429 Too Many Requests", "rate_limit"],
+    ["http_429: The local daemon refused the request", "rate_limit"],
+    ["http_401: The local daemon refused the request", "authentication"],
+    ["status 403", "authentication"],
+    ["failed to dial 12D3KooWa429b: no good addresses", "other"],
+    ["dial /ip4/10.0.0.1/tcp/54290: connection refused", "other"],
+    ["dial 12D3KooW401x: timeout", "transport"],
+  ])("classifies %s without reading codes inside addresses", (message, failure) => {
+    expect(localTimingFailure(new Error(message))).toBe(failure);
   });
 });
