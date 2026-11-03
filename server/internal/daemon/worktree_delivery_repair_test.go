@@ -75,7 +75,7 @@ func TestBuildWorktreeDeliveryRepairPrompt(t *testing.T) {
 		want          []string
 	}{
 		{name: "no commits of its own", want: []string{"keeps every file exactly as it is now", "git add -A"}},
-		{name: "committed this turn", committedOnly: true, want: []string{"exactly what your commits contain", "puts back what you had staged", "saved aside rather than delivered", "git read-tree fff000", "git read-tree 4b825dc"}},
+		{name: "committed this turn", committedOnly: true, want: []string{"exactly what your commits contain", "stages everything you left uncommitted", "saved aside rather than delivered", "git read-tree fff000", "git read-tree 4b825dc"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			problem := &execenv.DeliveryProblem{
@@ -86,7 +86,7 @@ func TestBuildWorktreeDeliveryRepairPrompt(t *testing.T) {
 				CommittedOnly: tc.committedOnly,
 			}
 			if tc.committedOnly {
-				problem.IndexTree = "4b825dc"
+				problem.LeftoverTree = "4b825dc"
 			}
 			checkWorktreeDeliveryRepairPrompt(t, problem, tc.want)
 		})

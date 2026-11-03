@@ -140,50 +140,99 @@ func TestCheckDeliveryRepairOfASquashKeepsLeftoversOffTheBranch(t *testing.T) {
 }
 
 // #9870 review: the committed-only repair loads Tip's tree into the index to
-// commit it, which used to discard what the agent had staged. A file staged
-// past the repository's ignore rules (`git add -f`) then became an ignored
-// untracked file again, Finalize found the worktree clean, and the file was
-// deleted with it. The repair's last step now puts the agent's index back, so
-// the staged files — ignored or not — are saved aside exactly as a turn
-// without the repair would save them.
-func TestCheckDeliveryRepairKeepsWhatTheAgentStaged(t *testing.T) {
+// commit it, which discards the agent's index. Anything only the index made
+// visible to `git add -A` — a file staged past the ignore rules with `git add
+// -f`, or registered with `git add -N -f` — then turned back into an ignored
+// untracked file, Finalize found nothing to save, and the file was deleted
+// with the worktree. The repair's last step now stages exactly what Finalize
+// would have saved without the repair, so for every shape of leftover the
+// saved ref is the same whether or not the turn needed repairing.
+func TestCheckDeliveryRepairSavesTheSameLeftoversAsNoRepair(t *testing.T) {
 	t.Parallel()
-	repo := newTestRepo(t)
-	writeFile(t, filepath.Join(repo, ".gitignore"), "fixtures/*.bin\n")
-	gitRun(t, repo, "add", ".gitignore")
-	gitRun(t, repo, "commit", "-m", "ignore generated fixtures")
-	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
-
-	gitRun(t, wt.Path, "checkout", "--quiet", "-b", "feature/x")
-	writeFile(t, filepath.Join(wt.WorkDir, "doc.md"), "delivered documentation\n")
-	gitRun(t, wt.Path, "add", "doc.md")
-	gitRun(t, wt.Path, "commit", "-m", "docs")
-	writeFile(t, filepath.Join(wt.WorkDir, "fixtures", "sample.bin"), "staged past the ignore rule\n")
-	gitRun(t, wt.Path, "add", "-f", "fixtures/sample.bin")
-	writeFile(t, filepath.Join(wt.WorkDir, "notes.txt"), "staged, not ignored\n")
-	gitRun(t, wt.Path, "add", "notes.txt")
-	staged := gitRun(t, wt.Path, "diff", "--cached", "--name-only")
-
-	problem := wt.CheckDelivery()
-	if problem == nil || !problem.CommittedOnly || problem.IndexTree == "" {
-		t.Fatalf("CheckDelivery = %+v, want a committed-only repair carrying the agent's index", problem)
+	shapes := map[string]func(t *testing.T, dir string){
+		"forced add of an ignored file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "fixtures", "sample.bin"), "staged past the ignore rule\n")
+			gitRun(t, dir, "add", "-f", "fixtures/sample.bin")
+		},
+		"intent to add an ignored file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "fixtures", "sample.bin"), "registered past the ignore rule\n")
+			gitRun(t, dir, "add", "-N", "-f", "fixtures/sample.bin")
+		},
+		"intent to add a file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "notes.txt"), "registered\n")
+			gitRun(t, dir, "add", "-N", "notes.txt")
+		},
+		"staged file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "notes.txt"), "staged\n")
+			gitRun(t, dir, "add", "notes.txt")
+		},
+		"partly staged edit": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "staged version\n")
+			gitRun(t, dir, "add", "tracked.txt")
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "newer version on disk\n")
+		},
+		"unstaged edit, untracked file and deletions": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "edited\n")
+			writeFile(t, filepath.Join(dir, "scratch.log"), "untracked\n")
+			gitRun(t, dir, "rm", "-q", "keep.txt")
+			if err := os.Remove(filepath.Join(dir, ".gitignore")); err != nil {
+				t.Fatal(err)
+			}
+		},
 	}
-	applyRepairSteps(t, wt, problem)
-	if got := gitRun(t, wt.Path, "diff", "--cached", "--name-only"); got != staged {
-		t.Fatalf("staged files after the repair = %q, want what the agent had staged: %q", got, staged)
+	for name, leaveBehind := range shapes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			turn := func(t *testing.T, repair bool) (string, LocalWorktreeOutcome, *LocalWorktree) {
+				t.Helper()
+				repo := newTestRepo(t)
+				writeFile(t, filepath.Join(repo, ".gitignore"), "fixtures/*.bin\n")
+				gitRun(t, repo, "add", ".gitignore")
+				gitRun(t, repo, "commit", "-m", "ignore generated fixtures")
+				wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
+				if repair {
+					gitRun(t, wt.Path, "checkout", "--quiet", "-b", "feature/x")
+				}
+				writeFile(t, filepath.Join(wt.WorkDir, "doc.md"), "delivered documentation\n")
+				gitRun(t, wt.Path, "add", "doc.md")
+				gitRun(t, wt.Path, "commit", "-m", "docs")
+				leaveBehind(t, wt.WorkDir)
+				if repair {
+					problem := wt.CheckDelivery()
+					if problem == nil || !problem.CommittedOnly || problem.LeftoverTree == "" {
+						t.Fatalf("CheckDelivery = %+v, want a committed-only repair carrying the leftovers", problem)
+					}
+					applyRepairSteps(t, wt, problem)
+					if again := wt.CheckDelivery(); again != nil {
+						t.Fatalf("the repair steps did not fix the delivery: %s", again.Reason)
+					}
+				} else if problem := wt.CheckDelivery(); problem != nil {
+					t.Fatalf("a turn on its own branch was sent to repair: %s", problem.Reason)
+				}
+				outcome := finalizeOK(t, wt)
+				if outcome.LeftoverRef == "" {
+					t.Fatal("no leftovers saved")
+				}
+				if files := gitRun(t, repo, "diff", "--name-only", wt.BaseCommit, wt.Branch); files != "doc.md" {
+					t.Errorf("the branch gained %q, want just the committed doc.md", files)
+				}
+				if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+					t.Errorf("worktree still present after Finalize: %v", err)
+				}
+				return repo, outcome, wt
+			}
+			plainRepo, plain, _ := turn(t, false)
+			repairedRepo, repaired, _ := turn(t, true)
+			// Both repos hold the same content, so equal leftovers are equal
+			// tree ids.
+			want := gitRun(t, plainRepo, "rev-parse", plain.LeftoverRef+"^{tree}")
+			if got := gitRun(t, repairedRepo, "rev-parse", repaired.LeftoverRef+"^{tree}"); got != want {
+				t.Errorf("leftovers after the repair differ from leftovers without it:\nwithout repair:\n%s\nafter repair:\n%s",
+					gitRun(t, plainRepo, "show", "--stat", "--format=", plain.LeftoverRef),
+					gitRun(t, repairedRepo, "show", "--stat", "--format=", repaired.LeftoverRef))
+			}
+		})
 	}
-	if again := wt.CheckDelivery(); again != nil {
-		t.Fatalf("the repair steps did not fix the delivery: %s", again.Reason)
-	}
-
-	outcome := finalizeOK(t, wt)
-	if files := gitRun(t, repo, "diff", "--name-only", wt.BaseCommit, wt.Branch); files != "doc.md" {
-		t.Errorf("the branch gained %q, want just the committed doc.md", files)
-	}
-	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{
-		"fixtures/sample.bin": "staged past the ignore rule",
-		"notes.txt":           "staged, not ignored",
-	})
 }
 
 // Uncommitted changes on a detached HEAD would be auto-committed onto the

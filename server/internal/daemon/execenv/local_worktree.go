@@ -1904,13 +1904,16 @@ type DeliveryProblem struct {
 	// Tip's tree on the branch and leaves the uncommitted changes where they
 	// are, for Finalize to save aside like any other turn's leftovers.
 	CommittedOnly bool
-	// IndexTree is the agent's index as a tree, captured when CommittedOnly
-	// is set. The repair has to load Tip's tree into the index to commit it,
-	// and that discards what the agent had staged; the last step loads this
-	// tree back. Without it a staged file the repository ignores (`git add
-	// -f`) would turn back into an ignored untracked file, and Finalize, which
-	// saves what `git add -A` would stage, would not see it at all.
-	IndexTree string
+	// LeftoverTree is the tree `git add -A` would stage in the worktree,
+	// captured when CommittedOnly is set: exactly what Finalize would save
+	// aside if this turn needed no repair. The repair has to load Tip's tree
+	// into the index to commit it, which discards the agent's index; the last
+	// step loads this tree in its place, so Finalize's own `git add -A` still
+	// finds every leftover. Restoring the agent's index as such is not enough:
+	// a tree cannot hold an intent-to-add entry (`git add -N`), and one for a
+	// file the repository ignores would turn back into an ignored untracked
+	// file that `git add -A` skips (#9870 review).
+	LeftoverTree string
 }
 
 // RepairCommitMessage is the commit message RepairSteps uses for the one
@@ -1928,11 +1931,11 @@ const RepairCommitMessage = "chore(agent): put this turn's work back on its task
 // agent that made no commit delivers everything it left, so the sequence
 // stages it all (`add -A`). One that did delivers its commits, so the sequence
 // loads Tip's tree into the index (`read-tree`, which leaves the files alone),
-// commits it, and then loads IndexTree back, so the index is what the agent
-// left and the uncommitted changes — staged ones included — are still there
-// for Finalize to save aside. --allow-empty there covers a turn whose commits
-// add up to nothing: the sequence must still end on the branch rather than
-// fail halfway through.
+// commits it, and then loads LeftoverTree, so everything the agent left
+// uncommitted ends up staged — untouched on disk, still off the branch — for
+// Finalize to save aside exactly as it would have without the repair.
+// --allow-empty there covers a turn whose commits add up to nothing: the
+// sequence must still end on the branch rather than fail halfway through.
 //
 // Each step is a git argv (without the leading "git"). Rendered into the
 // repair prompt and executed verbatim by the tests, so the instruction the
@@ -1944,7 +1947,7 @@ func (p *DeliveryProblem) RepairSteps() [][]string {
 			{"symbolic-ref", "HEAD", "refs/heads/" + p.Branch},
 			{"reset", "--soft", p.BaseCommit},
 			{"commit", "--allow-empty", "-m", RepairCommitMessage},
-			{"read-tree", p.IndexTree},
+			{"read-tree", p.LeftoverTree},
 		}
 	}
 	return [][]string{
@@ -2023,36 +2026,17 @@ func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 		}
 		problem := &DeliveryProblem{Branch: w.Branch, BaseCommit: w.BaseCommit, Tip: tip, Reason: verifyErr.Error(), CommittedOnly: committedOnly}
 		if committedOnly {
-			// No index to give back means no repair that keeps the agent's
-			// staged files: offer none, and Finalize keeps the whole worktree.
-			indexTree, err := worktreeIndexTree(w.Path)
+			// Nothing to hand to Finalize means no repair that keeps the
+			// leftovers: offer none, and Finalize keeps the whole worktree.
+			leftoverTree, err := stagedWorktreeTree(w.Path)
 			if err != nil {
 				return nil
 			}
-			problem.IndexTree = indexTree
+			problem.LeftoverTree = leftoverTree
 		}
 		return problem
 	}
 	return nil
-}
-
-// worktreeIndexTree writes dir's index out as a tree, from a private copy so
-// the agent's index file is not touched, and returns the tree. Like
-// stagedWorktreeTree it adds tree objects to the repository, nothing else.
-// Intent-to-add entries are left out, as `git write-tree` always does; they
-// are untracked files again after a read-tree of the result, which `git add
-// -A` still picks up.
-func worktreeIndexTree(dir string) (string, error) {
-	tmp, err := os.MkdirTemp("", "multica-repair-index-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tmp)
-	index := filepath.Join(tmp, "index")
-	if !seedSnapshotIndex(dir, index) {
-		return "", errors.New("execenv: cannot copy the worktree index")
-	}
-	return runGitTrimmedEnv(dir, []string{"GIT_INDEX_FILE=" + index}, "write-tree")
 }
 
 // repairWouldRevertBase reports whether re-committing the worktree's current

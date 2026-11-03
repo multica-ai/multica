@@ -228,7 +228,7 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 	fmt.Fprintf(&b, "Problem: %s.\n\n", problem.Reason)
 	fmt.Fprintf(&b, "The work has to end on branch `%s`, in commits on top of `%s` (the commit this turn started from), with HEAD on that branch. Your files are intact; only where they are committed is wrong.\n\n", problem.Branch, problem.BaseCommit)
 	if problem.CommittedOnly {
-		b.WriteString("Fix it in this worktree. This sequence puts exactly what your commits contain on the branch as one commit, and leaves your files as they are; its last line puts back what you had staged. Anything you have not committed stays uncommitted, and like any change left uncommitted after you commit, it is saved aside rather than delivered:\n\n```sh\n")
+		b.WriteString("Fix it in this worktree. This sequence puts exactly what your commits contain on the branch as one commit, and leaves your files as they are; its last line stages everything you left uncommitted, so none of it is lost. Uncommitted changes still do not reach the branch: like any change left uncommitted after you commit, they are saved aside rather than delivered:\n\n```sh\n")
 	} else {
 		b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
 	}
