@@ -43,7 +43,7 @@ describe("wakeup timeline entries", () => {
       "当关联 PR 出现合并冲突时，唤醒了 Emacs",
     );
     expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "reviewed" } } }))).toBe(
-      "当关联 PR 收到人工批准或修改请求时，唤醒了 Emacs",
+      "当关联 PR 收到人工评审决定时，唤醒了 Emacs",
     );
     expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "approved" } } }))).toBe(
       "当关联 PR 收到人工批准时，唤醒了 Emacs",
