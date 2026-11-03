@@ -1,4 +1,4 @@
-// Package ghsnapshot fetches a GitHub pull request's CI, reviews and mergeability
+// Package ghsnapshot fetches a GitHub pull request's CI + mergeability state
 // from the GitHub API and treats that response as the single source of truth
 // for the PR card (MUL-5265, Plan C). Webhooks and page visits only trigger a
 // refresh; nothing here infers state incrementally from webhook payloads.
@@ -6,7 +6,7 @@
 // The package has three layers:
 //   - Client (this file): GitHub App auth — App JWT → installation access
 //     token (cached per installation, refreshed early) → REST calls.
-//   - snapshot.go and reviews.go: PR / Checks / Statuses / Reviews queries, pagination, and
+//   - snapshot.go: PR / Checks / Statuses queries, pagination, and
 //     normalization into a flat per-check snapshot.
 //   - refresh.go: the outbound work queue (dedup, single in-flight per PR,
 //     bounded concurrency, Retry-After backoff), the head-SHA-guarded atomic
