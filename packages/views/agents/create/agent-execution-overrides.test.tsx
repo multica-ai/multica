@@ -122,6 +122,25 @@ describe("AgentExecutionOverrides", () => {
 
   afterEach(cleanup);
 
+  it("prefills ZCode's advertised reasoning level without changing other providers", async () => {
+    const model: RuntimeModel = {
+      id: "desktop/glm", label: "GLM",
+      thinking: {
+        default_level: "max",
+        supported_levels: [{ value: "high", label: "High" }, { value: "max", label: "Max" }],
+      },
+    };
+    mockInitiateListModels.mockResolvedValue(listResult([model]));
+    mockGetListModelsResult.mockResolvedValue(listResult([model]));
+    const { onChange } = renderOverrides({
+      runtime: { ...ONLINE_RUNTIME, provider: "zcode" },
+      draft: { ...baseDraft, model: model.id },
+    });
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ model: model.id, thinkingLevel: "max" }),
+    ));
+  });
+
   it("offers Speed for a model whose catalog advertises a tier", async () => {
     const { onChange } = renderOverrides();
 
