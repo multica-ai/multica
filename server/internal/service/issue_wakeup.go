@@ -1020,11 +1020,16 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		return tx.Commit(ctx)
 	}
 	authErr := s.authorize(ctx, q, w.WorkspaceID, w.CreatedBy, agent)
-	if w.DisabledAt.Valid || !active || authErr != nil {
+	retiredReview := retiredPRReviewCondition(w.Condition)
+	if w.DisabledAt.Valid || !active || authErr != nil || retiredReview {
 		if authErr != nil && !errors.Is(authErr, ErrWakeupForbidden) {
 			return authErr
 		}
-		_, err = tx.Exec(ctx, "UPDATE issue_wakeup SET enabled=false,disabled_at=COALESCE(disabled_at,now()),last_error=$2 WHERE id=$1", w.ID, "Wakeup disabled: issue closed or permission unavailable")
+		reason := "Wakeup disabled: issue closed or permission unavailable"
+		if retiredReview {
+			reason = "Wakeup disabled: PR review conditions are no longer supported"
+		}
+		_, err = tx.Exec(ctx, "UPDATE issue_wakeup SET enabled=false,disabled_at=COALESCE(disabled_at,now()),last_error=$2 WHERE id=$1", w.ID, reason)
 		if err != nil {
 			return err
 		}
@@ -1469,6 +1474,9 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 	}
 	if err != nil {
 		return err
+	}
+	if retiredPRReviewCondition(w.Condition) {
+		return ErrWakeupForbidden
 	}
 	if w.SystemRule.Valid {
 		// A system rule's run targets the assignee resolved when it fired; it

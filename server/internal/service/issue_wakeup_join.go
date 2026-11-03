@@ -224,10 +224,11 @@ func (s *IssueWakeupService) JoinWaitingWakeups(ctx context.Context, task db.Age
 		w, err := q.TryLockIssueWakeup(ctx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Busy: keep what an earlier claim reserved. Deleted: nothing left.
-			if _, err = q.LocklessWakeup(ctx, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return task.Context, err
+			current, readErr := q.LocklessWakeup(ctx, id)
+			if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
+				return task.Context, readErr
 			}
-			if had && err == nil {
+			if had && readErr == nil && !retiredPRReviewCondition(current.Condition) {
 				joined = append(joined, prev)
 			} else if had {
 				changed = true
@@ -309,7 +310,7 @@ func (s *IssueWakeupService) reserveForRun(ctx context.Context, q *db.Queries, i
 		}
 		return nil, nil, q.ReleaseWakeupReceipts(ctx, held)
 	}
-	if len(receipts) == 0 || !active || w.DisabledAt.Valid || w.IssueID != task.IssueID {
+	if len(receipts) == 0 || !active || w.DisabledAt.Valid || w.IssueID != task.IssueID || retiredPRReviewCondition(w.Condition) {
 		return release()
 	}
 	if _, err := q.FindPendingWakeupTask(ctx, util.UUIDToString(w.ID)); err == nil || !errors.Is(err, pgx.ErrNoRows) {
