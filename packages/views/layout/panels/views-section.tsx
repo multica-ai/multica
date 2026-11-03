@@ -118,13 +118,14 @@ export function ViewsSection({
           size="icon-xs"
           className="text-muted-foreground"
           onClick={() => {
-            // The new view is named inline in this list, so it has to be open.
+            // The new view lands in this list, so it has to be open. It is
+            // named in the page header, next to where its filters are set.
             setCollapsed(false);
             actions.create({
               scope: WORKSPACE_SCOPE,
               scopeVariant: null,
               definition: issueViewSeedDefinition({ query: {}, display: {} }),
-              renameIn: "sidebar",
+              renameIn: "header",
             });
           }}
         >
