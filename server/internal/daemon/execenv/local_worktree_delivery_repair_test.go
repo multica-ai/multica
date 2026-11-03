@@ -20,7 +20,7 @@ func applyRepairSteps(t *testing.T, wt *LocalWorktree, problem *DeliveryProblem)
 // requireRepairable asserts CheckDelivery predicts the refusal Finalize would
 // make, then repairs it and checks Finalize records the delivery with the
 // agent's files intact.
-func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason string, wantFiles map[string]string) {
+func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason string, wantFiles map[string]string) LocalWorktreeOutcome {
 	t.Helper()
 	problem := wt.CheckDelivery()
 	if problem == nil {
@@ -50,6 +50,7 @@ func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason 
 			t.Errorf("%s on the branch = %q, want %q", name, got, strings.TrimSpace(want))
 		}
 	}
+	return outcome
 }
 
 // #9404 shape one: the agent squashes its commits and drops the empty baseline
@@ -86,7 +87,10 @@ func TestCheckDeliveryRepairsWorkCommittedOffTheBranch(t *testing.T) {
 }
 
 // The common #8541 shape: the agent checked out a feature branch for its PR.
-// Its own commits there extend the task branch; only HEAD is elsewhere.
+// Its own commits there extend the task branch; only HEAD is elsewhere. What
+// it left uncommitted stays off the branch, exactly as it would have on the
+// task branch itself (#9788): the repair delivers the commits, and Finalize
+// saves the leftover edit aside.
 func TestCheckDeliveryRepairsWorkOnAFeatureBranch(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
@@ -99,10 +103,40 @@ func TestCheckDeliveryRepairsWorkOnAFeatureBranch(t *testing.T) {
 	// And some leftovers it never committed.
 	writeFile(t, filepath.Join(wt.WorkDir, "tracked.txt"), "edited\n")
 
-	requireRepairable(t, repo, wt, "HEAD is not on branch", map[string]string{
+	problem := wt.CheckDelivery()
+	if problem == nil || !problem.CommittedOnly {
+		t.Fatalf("CheckDelivery = %+v, want a repair that delivers only the agent's commits", problem)
+	}
+	outcome := requireRepairable(t, repo, wt, "did not deliver onto its own branch", map[string]string{
 		"agent.txt":   "feature",
-		"tracked.txt": "edited",
+		"tracked.txt": "original",
 	})
+	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{"tracked.txt": "edited"})
+}
+
+// #9404 shape one again, with leftovers: the agent committed, squashed past
+// the baseline, and also left a generated file behind. The repair restores the
+// ancestry and delivers the squashed commit's content, and the generated file
+// is saved aside instead of riding along in the repair commit.
+func TestCheckDeliveryRepairOfASquashKeepsLeftoversOffTheBranch(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
+
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "turn one\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "work")
+	gitRun(t, wt.Path, "reset", "--soft", wt.BaseCommit+"^")
+	gitRun(t, wt.Path, "commit", "-m", "squashed")
+	writeFile(t, filepath.Join(wt.WorkDir, "artifacts", "render.bin"), "generated\n")
+	// Staged is not committed: it stays a leftover too.
+	gitRun(t, wt.Path, "add", "artifacts/render.bin")
+
+	outcome := requireRepairable(t, repo, wt, "no longer contains", map[string]string{"agent.txt": "turn one"})
+	if _, err := gitTry(t, repo, "cat-file", "-e", wt.Branch+":artifacts/render.bin"); err == nil {
+		t.Error("the generated file the agent never committed reached the branch through the repair")
+	}
+	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{"artifacts/render.bin": "generated"})
 }
 
 // Uncommitted changes on a detached HEAD would be auto-committed onto the

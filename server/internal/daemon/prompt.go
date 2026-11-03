@@ -180,6 +180,10 @@ func WithWorktreeBranch(branch, base string) PromptOption {
 }
 
 // buildWorktreeBranchBlock states the delivery contract of a worktree turn.
+// That includes what happens to uncommitted files: Finalize commits them for
+// an agent that made no commit and keeps them off the branch for one that did
+// (#9788), and an agent that is not told so cannot choose which side it lands
+// on — it leaves scratch output behind assuming it will not be delivered.
 // Branch names come from the daemon's own sanitised naming and the base is a
 // hex object id, so both are safe to render in code spans.
 func buildWorktreeBranchBlock(branch, base string) string {
@@ -191,6 +195,8 @@ func buildWorktreeBranchBlock(branch, base string) string {
 	fmt.Fprintf(&b, "This run works in a private git worktree on branch `%s`, starting from commit `%s`. What that branch holds when you finish is what gets delivered, and the next turn continues from it.\n\n", branch, base)
 	fmt.Fprintf(&b, "- Keep HEAD on `%s` and only add commits on top of `%s`. Do not squash, amend, rebase or reset past `%s`, and do not check out another branch or a detached HEAD to do the work.\n", branch, base, base)
 	b.WriteString("- To publish the work under another name (for a pull request), push it without switching: `git push origin HEAD:<name>`.\n")
+	b.WriteString("- If you commit, only your commits are delivered. Whatever you leave uncommitted after committing — generated output, scratch files, edits you did not commit — is saved aside for the user and does not reach the branch, so commit everything that belongs to the work.\n")
+	b.WriteString("- If you make no commit, everything you leave that is not gitignored is committed onto the branch for you when the run ends, without running the repository's commit hooks. Delete scratch files and generated output you do not want delivered before you finish.\n")
 	b.WriteString("- A delivery that is not on this branch, or no longer contains its starting commit, cannot be recorded: the task fails even though the work is done.\n\n")
 	return b.String()
 }
@@ -204,7 +210,11 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 	b.WriteString("Your previous turn in this git worktree finished, but its work cannot be delivered yet.\n\n")
 	fmt.Fprintf(&b, "Problem: %s.\n\n", problem.Reason)
 	fmt.Fprintf(&b, "The work has to end on branch `%s`, in commits on top of `%s` (the commit this turn started from), with HEAD on that branch. Your files are intact; only where they are committed is wrong.\n\n", problem.Branch, problem.BaseCommit)
-	b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
+	if problem.CommittedOnly {
+		b.WriteString("Fix it in this worktree. This sequence puts exactly what your commits contain on the branch as one commit, and leaves your files as they are. Anything you have not committed stays uncommitted, and like any change left uncommitted after you commit, it is saved aside rather than delivered:\n\n```sh\n")
+	} else {
+		b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
+	}
 	for _, step := range problem.RepairSteps() {
 		b.WriteString("git")
 		for _, arg := range step {

@@ -33,6 +33,12 @@ func TestWorktreeBranchBlock(t *testing.T) {
 		"`abc123def`",
 		"Do not squash, amend, rebase or reset past `abc123def`",
 		"git push origin HEAD:<name>",
+		// #9788: the agent is told what happens to what it leaves uncommitted,
+		// on both sides of the rule.
+		"If you commit, only your commits are delivered",
+		"does not reach the branch",
+		"If you make no commit, everything you leave that is not gitignored is committed onto the branch for you",
+		"without running the repository's commit hooks",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prompt missing %q:\n%s", want, out)
@@ -42,16 +48,34 @@ func TestWorktreeBranchBlock(t *testing.T) {
 
 // The repair prompt renders exactly execenv's RepairSteps (which the execenv
 // tests run against real repositories), and quotes them so a shell receives the
-// same argv — the commit message carries an apostrophe.
+// same argv — the commit message carries an apostrophe. Both shapes of the
+// sequence are checked: a turn that made commits of its own gets the one that
+// delivers only those commits (#9788).
 func TestBuildWorktreeDeliveryRepairPrompt(t *testing.T) {
-	problem := &execenv.DeliveryProblem{
-		Branch:     "agent/j/mul-9404",
-		BaseCommit: "abc123def",
-		Tip:        "fff000",
-		Reason:     "the delivered commit fff000 no longer contains abc123de, the commit this turn started from",
+	for _, tc := range []struct {
+		name          string
+		committedOnly bool
+		want          []string
+	}{
+		{name: "no commits of its own", want: []string{"keeps every file exactly as it is now", "git add -A"}},
+		{name: "committed this turn", committedOnly: true, want: []string{"exactly what your commits contain", "saved aside rather than delivered", "git read-tree fff000"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkWorktreeDeliveryRepairPrompt(t, &execenv.DeliveryProblem{
+				Branch:        "agent/j/mul-9404",
+				BaseCommit:    "abc123def",
+				Tip:           "fff000",
+				Reason:        "the delivered commit fff000 no longer contains abc123de, the commit this turn started from",
+				CommittedOnly: tc.committedOnly,
+			}, tc.want)
+		})
 	}
+}
+
+func checkWorktreeDeliveryRepairPrompt(t *testing.T, problem *execenv.DeliveryProblem, extra []string) {
+	t.Helper()
 	out := BuildWorktreeDeliveryRepairPrompt(problem)
-	for _, want := range []string{problem.Reason, "`agent/j/mul-9404`", "git diff --cached abc123def", "no new comments or status updates"} {
+	for _, want := range append([]string{problem.Reason, "`agent/j/mul-9404`", "git diff --cached abc123def", "no new comments or status updates"}, extra...) {
 		if !strings.Contains(out, want) {
 			t.Errorf("repair prompt missing %q:\n%s", want, out)
 		}
