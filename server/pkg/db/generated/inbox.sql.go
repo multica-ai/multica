@@ -347,10 +347,25 @@ INSERT INTO inbox_item (
     actor_type, actor_id, details, id, section
 )
 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()), $13::text
-WHERE ($2::text = 'member' AND EXISTS (
+WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
+)))
+AND NOT ($2::text = 'member' AND EXISTS (
+    SELECT 1 FROM issue private_issue
+    JOIN project private_project ON private_project.id = private_issue.project_id
+    WHERE private_issue.id = $6
+      AND private_project.visibility = 'private'
+      AND NOT EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = private_project.id AND pm.user_id = $3
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM member manager
+          WHERE manager.workspace_id = $1 AND manager.user_id = $3
+            AND manager.role IN ('owner', 'admin')
+      )
 ))
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section
 `
@@ -373,6 +388,8 @@ type CreateInboxItemParams struct {
 
 // A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
 // Check the insertion snapshot without adding recipient row locks.
+// MUL-8472: a member outside a private project gets no notification about its
+// issues. Owners/admins and project members do.
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, createInboxItem,
 		arg.WorkspaceID,
@@ -622,13 +639,15 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+  AND ($4::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY($4::uuid[])))
 ORDER BY i.created_at DESC
 `
 
 type ListInboxItemsParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientType string      `json:"recipient_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	RecipientType    string        `json:"recipient_type"`
+	RecipientID      pgtype.UUID   `json:"recipient_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 type ListInboxItemsRow struct {
@@ -653,7 +672,12 @@ type ListInboxItemsRow struct {
 }
 
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
-	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	rows, err := q.db.Query(ctx, listInboxItems,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.HiddenProjectIds,
+	)
 	if err != nil {
 		return nil, err
 	}

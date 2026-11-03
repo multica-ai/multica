@@ -12,24 +12,31 @@ import (
 )
 
 const listIssueUnread = `-- name: ListIssueUnread :many
-SELECT issue_id, outcome, agent_id, created_at
-FROM issue_unread
-WHERE workspace_id = $1
-  AND user_id = $2
+SELECT u.issue_id, u.outcome, u.agent_id, u.created_at
+FROM issue_unread u
+WHERE u.workspace_id = $1
+  AND u.user_id = $2
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($3::uuid[] IS NULL OR NOT EXISTS (
+    SELECT 1 FROM issue hidden_issue
+    WHERE hidden_issue.id = u.issue_id
+      AND hidden_issue.project_id = ANY($3::uuid[])
+  ))
   AND (
-    $3::timestamptz IS NULL
-    OR (created_at, issue_id) < ($3::timestamptz, $4::uuid)
+    $4::timestamptz IS NULL
+    OR (u.created_at, u.issue_id) < ($4::timestamptz, $5::uuid)
   )
-ORDER BY created_at DESC, issue_id DESC
-LIMIT $5
+ORDER BY u.created_at DESC, u.issue_id DESC
+LIMIT $6
 `
 
 type ListIssueUnreadParams struct {
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	UserID          pgtype.UUID        `json:"user_id"`
-	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
-	BeforeIssueID   pgtype.UUID        `json:"before_issue_id"`
-	PageLimit       int32              `json:"page_limit"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	BeforeCreatedAt  pgtype.Timestamptz `json:"before_created_at"`
+	BeforeIssueID    pgtype.UUID        `json:"before_issue_id"`
+	PageLimit        int32              `json:"page_limit"`
 }
 
 type ListIssueUnreadRow struct {
@@ -46,6 +53,7 @@ func (q *Queries) ListIssueUnread(ctx context.Context, arg ListIssueUnreadParams
 	rows, err := q.db.Query(ctx, listIssueUnread,
 		arg.WorkspaceID,
 		arg.UserID,
+		arg.HiddenProjectIds,
 		arg.BeforeCreatedAt,
 		arg.BeforeIssueID,
 		arg.PageLimit,
