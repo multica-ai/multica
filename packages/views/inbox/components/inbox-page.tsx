@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { MulticaBleedMark } from "@multica/ui/components/common/multica-graphics";
 import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
@@ -214,6 +215,17 @@ export function InboxPage() {
     ]);
   }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
   const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
+
+  // Inbox zero: the bleeding m rises once, at the moment the last notification
+  // leaves; opening an already-empty inbox shows it at rest. Archived and
+  // filtered views are not inbox zero, so they never arm it.
+  const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : visibleItems.length;
+  const [prevInboxZeroCount, setPrevInboxZeroCount] = useState(inboxZeroCount);
+  const [inboxZeroRises, setInboxZeroRises] = useState(false);
+  if (inboxZeroCount !== prevInboxZeroCount) {
+    setPrevInboxZeroCount(inboxZeroCount);
+    setInboxZeroRises(prevInboxZeroCount > 0 && inboxZeroCount === 0);
+  }
   const selected = selectionItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const selectedInView = selectedOnPage ?? (isArchivedView ? lookupItems.find((i) => (i.issue_id ?? i.id) === selectedKey) : null);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
@@ -1055,9 +1067,17 @@ export function InboxPage() {
               <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
             </PageHeader>
           )}
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            <p className="text-body">
+          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+            {inboxZeroCount === 0 ? (
+              <MulticaBleedMark
+                key={inboxZeroRises ? "rise" : "rest"}
+                riseDelay={inboxZeroRises ? 0.2 : undefined}
+                className="pointer-events-none absolute -right-[8%] -bottom-[32%] w-[min(560px,58%)] text-muted"
+              />
+            ) : (
+              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+            )}
+            <p className="relative text-body">
               {visibleItems.length > 0
                 ? t(($) => $.detail.select_prompt)
                 : isArchivedView
