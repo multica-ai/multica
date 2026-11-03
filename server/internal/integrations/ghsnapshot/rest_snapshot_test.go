@@ -15,13 +15,18 @@ import (
 // Fork PRs deliberately have a head repository outside the installation.
 func snapshotServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
+	return snapshotServerWithPermissions(t, map[string]string{"pull_requests": "read", "checks": "read", "statuses": "read"}, handler)
+}
+
+func snapshotServerWithPermissions(t *testing.T, permissions map[string]string, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/app/installations/1/access_tokens" {
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"token": "ghs_secret", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
-				"permissions": map[string]string{"pull_requests": "read", "checks": "read", "statuses": "read"},
+				"permissions": permissions,
 			})
 			return
 		}
@@ -237,117 +242,180 @@ func TestFetchPRSnapshotRESTRejectsPartialResults(t *testing.T) {
 }
 
 // A second workflow run on the same head is a separate check suite that
-// `filter=latest` keeps. Only a cancelled suite that a newer suite of the same
-// app replaced (sharing a check name) may leave the rollup.
+// `filter=latest` keeps. Only a cancelled run that a newer run of the same
+// workflow and event replaced may leave the rollup, and only when the Actions
+// API can confirm that.
 func TestFetchPRSnapshotRESTSupersededSuites(t *testing.T) {
-	const actions, otherApp = 15, 99
-	run := func(id, suite, app int, name, status, conclusion string) map[string]any {
+	check := func(id, suite int, name, status, conclusion string) map[string]any {
 		r := map[string]any{"id": id, "head_sha": "sha1", "name": name, "status": status,
-			"check_suite": map[string]any{"id": suite}, "app": map[string]any{"id": app}}
+			"check_suite": map[string]any{"id": suite}, "app": map[string]any{"slug": "github-actions"}}
 		if conclusion != "" {
 			r["conclusion"] = conclusion
 		}
 		return r
 	}
-	done := func(id, suite, app int, name, conclusion string) map[string]any {
-		return run(id, suite, app, name, "completed", conclusion)
+	done := func(id, suite int, name, conclusion string) map[string]any {
+		return check(id, suite, name, "completed", conclusion)
 	}
-	suite := func(id int, conclusion string) map[string]any {
-		return map[string]any{"id": id, "head_sha": "sha1", "status": "completed", "conclusion": conclusion}
+	otherApp := func(r map[string]any) map[string]any {
+		r["app"] = map[string]any{"slug": "other-ci"}
+		return r
+	}
+	workflowRun := func(id, workflow int, event string, suite int, status, conclusion string) map[string]any {
+		r := map[string]any{"id": id, "head_sha": "sha1", "workflow_id": workflow, "event": event,
+			"check_suite_id": suite, "status": status, "conclusion": nil}
+		if conclusion != "" {
+			r["conclusion"] = conclusion
+		}
+		return r
+	}
+	const ci, docs = 1, 2
+	// The case from #9830: run 1 is cancelled and its always() gate fails,
+	// run 2 of the same workflow passes.
+	replacedByGreenRun := []map[string]any{
+		done(1, 10, "test", "cancelled"), done(2, 10, "gate", "failure"),
+		done(3, 20, "test", "success"), done(4, 20, "gate", "success"),
 	}
 	cases := []struct {
-		name       string
-		runs       []map[string]any
-		suites     []map[string]any
-		suiteFails bool
-		want       string
-		wantNames  []string
-		wantFetch  bool
-		wantErr    bool
+		name         string
+		runs         []map[string]any
+		workflowRuns []map[string]any
+		noActions    bool
+		runsFail     bool
+		want         string
+		wantNames    []string
+		wantFetch    bool
+		wantErr      bool
 	}{
 		{
-			name: "cancelled run replaced by a green run",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"), done(2, 10, actions, "gate", "failure"),
-				done(3, 20, actions, "test", "success"), done(4, 20, actions, "gate", "success"),
+			name: "cancelled run replaced by a green run of the same workflow",
+			runs: replacedByGreenRun,
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "completed", "success"),
 			},
-			suites: []map[string]any{suite(10, "cancelled"), suite(20, "success")},
-			want:   "SUCCESS", wantNames: []string{"test", "gate"}, wantFetch: true,
+			want: "SUCCESS", wantNames: []string{"test", "gate"}, wantFetch: true,
+		},
+		{
+			name: "independent workflow with the same check name",
+			runs: []map[string]any{
+				done(1, 10, "test", "cancelled"), done(2, 10, "gate", "failure"),
+				done(3, 20, "test", "success"),
+			},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, docs, "pull_request", 20, "completed", "success"),
+			},
+			want: "FAILURE", wantNames: []string{"test", "gate", "test"}, wantFetch: true,
+		},
+		{
+			name: "same workflow for another event",
+			runs: []map[string]any{done(1, 10, "test", "cancelled"), done(2, 20, "test", "success")},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "push", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "completed", "success"),
+			},
+			want: "FAILURE", wantNames: []string{"test", "test"}, wantFetch: true,
 		},
 		{
 			name: "matrix cancelled before expansion",
 			runs: []map[string]any{
-				done(1, 10, actions, "changes", "cancelled"), done(2, 10, actions, "build (${{ matrix.os }})", "cancelled"),
-				done(3, 20, actions, "changes", "success"), done(4, 20, actions, "build (ubuntu)", "success"),
+				done(1, 10, "changes", "cancelled"), done(2, 10, "build (${{ matrix.os }})", "cancelled"),
+				done(3, 20, "changes", "success"), done(4, 20, "build (ubuntu)", "success"),
 			},
-			suites: []map[string]any{suite(10, "cancelled"), suite(20, "success")},
-			want:   "SUCCESS", wantNames: []string{"changes", "build (ubuntu)"}, wantFetch: true,
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "completed", "success"),
+			},
+			want: "SUCCESS", wantNames: []string{"changes", "build (ubuntu)"}, wantFetch: true,
 		},
 		{
 			name: "replacement still running",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"),
-				run(2, 20, actions, "test", "in_progress", ""),
+			runs: []map[string]any{done(1, 10, "test", "cancelled"), check(2, 20, "test", "in_progress", "")},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "in_progress", ""),
 			},
-			suites: []map[string]any{suite(10, "cancelled"), {"id": 20, "head_sha": "sha1", "status": "in_progress", "conclusion": nil}},
-			want:   "PENDING", wantNames: []string{"test"}, wantFetch: true,
+			want: "PENDING", wantNames: []string{"test"}, wantFetch: true,
+		},
+		{
+			name: "replacement has not reported checks yet",
+			runs: []map[string]any{done(1, 10, "test", "cancelled"), done(2, 30, "lint", "success")},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "queued", ""),
+				workflowRun(300, docs, "pull_request", 30, "completed", "success"),
+			},
+			want: "FAILURE", wantNames: []string{"test", "lint"}, wantFetch: true,
+		},
+		{
+			name: "replacement between jobs",
+			runs: []map[string]any{done(1, 10, "test", "cancelled"), done(2, 20, "test", "success")},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "cancelled"),
+				workflowRun(200, ci, "pull_request", 20, "in_progress", ""),
+			},
+			want: "FAILURE", wantNames: []string{"test", "test"}, wantFetch: true,
 		},
 		{
 			name: "failed run is never dropped",
 			runs: []map[string]any{
-				done(1, 10, actions, "test (a)", "failure"), done(2, 10, actions, "test (b)", "cancelled"),
-				done(3, 20, actions, "test (a)", "success"), done(4, 20, actions, "test (b)", "success"),
+				done(1, 10, "test (a)", "failure"), done(2, 10, "test (b)", "cancelled"),
+				done(3, 20, "test (a)", "success"), done(4, 20, "test (b)", "success"),
 			},
-			suites: []map[string]any{suite(10, "failure"), suite(20, "success")},
-			want:   "FAILURE", wantNames: []string{"test (a)", "test (b)", "test (a)", "test (b)"}, wantFetch: true,
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "failure"),
+				workflowRun(200, ci, "pull_request", 20, "completed", "success"),
+			},
+			want: "FAILURE", wantNames: []string{"test (a)", "test (b)", "test (a)", "test (b)"}, wantFetch: true,
 		},
 		{
 			name: "newest run cancelled",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "success"),
-				done(2, 20, actions, "test", "cancelled"),
+			runs: []map[string]any{done(1, 10, "test", "success"), done(2, 20, "test", "cancelled")},
+			workflowRuns: []map[string]any{
+				workflowRun(100, ci, "pull_request", 10, "completed", "success"),
+				workflowRun(200, ci, "pull_request", 20, "completed", "cancelled"),
 			},
-			suites: []map[string]any{suite(10, "success"), suite(20, "cancelled")},
-			want:   "FAILURE", wantNames: []string{"test", "test"}, wantFetch: true,
+			want: "FAILURE", wantNames: []string{"test", "test"}, wantFetch: true,
 		},
 		{
-			name: "cancellation without a replacement",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"),
-				done(2, 20, actions, "lint", "success"),
-			},
-			want: "FAILURE", wantNames: []string{"test", "lint"},
+			name: "without Actions permission",
+			runs: replacedByGreenRun, noActions: true,
+			want: "FAILURE", wantNames: []string{"test", "gate", "test", "gate"},
 		},
 		{
-			name: "another app does not replace",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"),
-				done(2, 20, otherApp, "test", "success"),
-			},
+			name: "passing checks make no extra request",
+			runs: []map[string]any{done(1, 10, "test", "success"), done(2, 20, "lint", "success")},
+			want: "SUCCESS", wantNames: []string{"test", "lint"},
+		},
+		{
+			name: "checks from another app make no extra request",
+			runs: []map[string]any{otherApp(done(1, 10, "test", "cancelled")), otherApp(done(2, 20, "test", "success"))},
 			want: "FAILURE", wantNames: []string{"test", "test"},
 		},
 		{
-			name: "suites page failed",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"),
-				done(2, 20, actions, "test", "success"),
-			},
-			suiteFails: true, wantFetch: true, wantErr: true,
+			name: "workflow runs page failed",
+			runs: replacedByGreenRun, runsFail: true,
+			wantFetch: true, wantErr: true,
 		},
 		{
-			name: "suite on another head",
-			runs: []map[string]any{
-				done(1, 10, actions, "test", "cancelled"),
-				done(2, 20, actions, "test", "success"),
+			name: "workflow run on another head",
+			runs: replacedByGreenRun,
+			workflowRuns: []map[string]any{
+				{"id": 100, "head_sha": "sha2", "workflow_id": ci, "event": "pull_request", "check_suite_id": 10, "status": "completed", "conclusion": "cancelled"},
+				workflowRun(200, ci, "pull_request", 20, "completed", "success"),
 			},
-			suites:    []map[string]any{{"id": 10, "head_sha": "sha2", "conclusion": "cancelled"}, suite(20, "success")},
 			wantFetch: true, wantErr: true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			suiteCalls := 0
-			srv := snapshotServer(t, func(w http.ResponseWriter, r *http.Request) {
+			permissions := map[string]string{"pull_requests": "read", "checks": "read", "statuses": "read", "actions": "read"}
+			if tc.noActions {
+				delete(permissions, "actions")
+			}
+			workflowCalls := 0
+			srv := snapshotServerWithPermissions(t, permissions, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/repos/o/r/pulls/5":
 					writeTestPR(w, "sha1", true, "clean")
@@ -357,13 +425,16 @@ func TestFetchPRSnapshotRESTSupersededSuites(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(tc.runs), "check_runs": tc.runs})
 				case "/repos/o/r/commits/sha1/status":
 					_, _ = w.Write([]byte(`{"total_count":0,"statuses":[]}`))
-				case "/repos/o/r/commits/sha1/check-suites":
-					suiteCalls++
-					if tc.suiteFails {
+				case "/repos/o/r/actions/runs":
+					workflowCalls++
+					if q := r.URL.Query(); q.Get("head_sha") != "sha1" || q.Get("exclude_pull_requests") != "true" {
+						t.Errorf("workflow runs query = %s", r.URL.RawQuery)
+					}
+					if tc.runsFail {
 						w.WriteHeader(http.StatusInternalServerError)
 						return
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(tc.suites), "check_suites": tc.suites})
+					_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(tc.workflowRuns), "workflow_runs": tc.workflowRuns})
 				default:
 					t.Errorf("unexpected request: %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -387,10 +458,11 @@ func TestFetchPRSnapshotRESTSupersededSuites(t *testing.T) {
 					t.Fatalf("rollup = %q contexts = %q, want %q %q", snap.RollupState, names, tc.want, tc.wantNames)
 				}
 			}
-			// The suites list costs a request, so it is read only when a
-			// check name repeats across suites of one app.
-			if (suiteCalls > 0) != tc.wantFetch {
-				t.Fatalf("check-suites calls = %d, want fetch %v", suiteCalls, tc.wantFetch)
+			// The workflow runs list costs a request and needs the optional
+			// Actions permission, so it is read only when it can change the
+			// result.
+			if (workflowCalls > 0) != tc.wantFetch {
+				t.Fatalf("workflow runs calls = %d, want fetch %v", workflowCalls, tc.wantFetch)
 			}
 		})
 	}

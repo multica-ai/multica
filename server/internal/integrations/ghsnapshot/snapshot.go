@@ -98,14 +98,20 @@ type restCheckRun struct {
 		ID int64 `json:"id"`
 	} `json:"check_suite"`
 	App struct {
-		ID int64 `json:"id"`
+		Slug string `json:"slug"`
 	} `json:"app"`
 }
 
-type restCheckSuite struct {
-	ID         int64  `json:"id"`
-	HeadSHA    string `json:"head_sha"`
-	Conclusion string `json:"conclusion"`
+// restWorkflowRun is one GitHub Actions workflow run; each run owns exactly one
+// check suite.
+type restWorkflowRun struct {
+	ID           int64  `json:"id"`
+	HeadSHA      string `json:"head_sha"`
+	WorkflowID   int64  `json:"workflow_id"`
+	Event        string `json:"event"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+	CheckSuiteID int64  `json:"check_suite_id"`
 }
 
 type restStatusContext struct {
@@ -152,7 +158,7 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 		}
 		seenRuns[run.ID] = struct{}{}
 	}
-	superseded, err := fetchSupersededSuites(ctx, c, installationID, commitPath, snap.HeadSHA, runs)
+	superseded, err := fetchSupersededSuites(ctx, c, installationID, base, snap.HeadSHA, runs)
 	if err != nil {
 		return nil, err
 	}
@@ -210,56 +216,83 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 	return snap, nil
 }
 
+// actionsAppSlug identifies GitHub Actions check runs; only Actions exposes
+// which workflow and trigger a check suite belongs to.
+const actionsAppSlug = "github-actions"
+
 // fetchSupersededSuites returns the check suites on this head that a newer run
-// has replaced, so their check runs stay out of the rollup. `filter=latest`
-// only drops older attempts inside one suite; a second workflow run on the same
-// head (cancel-in-progress, a manual re-run of the workflow) is a separate
-// suite, and its cancelled predecessor would otherwise fail the rollup forever.
+// of the same workflow has replaced, so their check runs stay out of the
+// rollup. `filter=latest` only drops older attempts inside one suite; a second
+// workflow run on the same head (cancel-in-progress, a re-trigger on `edited`)
+// is a separate suite, and its cancelled predecessor would otherwise keep the
+// rollup at FAILURE after the newer run goes green.
 //
-// A suite is superseded only when GitHub concluded the whole suite as cancelled
-// and a newer suite from the same app reports at least one check with the same
-// name. A suite that failed is never dropped, and a cancellation with no
-// replacement still fails. The suites list is fetched only when some check name
-// repeats across suites of one app, which is the only case a drop can apply.
-func fetchSupersededSuites(ctx context.Context, c *Client, installationID int64, commitPath, headSHA string, runs []restCheckRun) (map[int64]struct{}, error) {
-	type appCheck struct {
-		app  int64
-		name string
-	}
-	newestSuite := make(map[appCheck]int64, len(runs))
+// A suite is dropped only when its workflow run concluded cancelled and a newer
+// run of the same workflow for the same event exists on this head. That newer
+// run must already have check runs in this snapshot, and must be finished or
+// still have one running, so the rollup reads PENDING rather than passing
+// before the replacement has reported. A failed run is never dropped.
+//
+// Workflow identity is only available through the Actions API. Without the
+// optional Actions read permission nothing is dropped and the cancelled run
+// still fails the rollup: no Checks-only signal (check name, app, suite order)
+// proves two suites come from the same workflow. The lookup also runs only
+// when a failing Actions check sits beside another Actions suite.
+func fetchSupersededSuites(ctx context.Context, c *Client, installationID int64, base, headSHA string, runs []restCheckRun) (map[int64]struct{}, error) {
+	shown := make(map[int64]struct{})
+	running := make(map[int64]struct{})
+	failing := false
 	for _, run := range runs {
-		if run.App.ID <= 0 || run.CheckSuite.ID <= 0 {
+		if run.App.Slug != actionsAppSlug || run.CheckSuite.ID <= 0 {
 			continue
 		}
-		key := appCheck{run.App.ID, run.Name}
-		newestSuite[key] = max(newestSuite[key], run.CheckSuite.ID)
-	}
-	replaced := make(map[int64]struct{})
-	for _, run := range runs {
-		if run.App.ID > 0 && run.CheckSuite.ID > 0 && newestSuite[appCheck{run.App.ID, run.Name}] > run.CheckSuite.ID {
-			replaced[run.CheckSuite.ID] = struct{}{}
+		shown[run.CheckSuite.ID] = struct{}{}
+		if normalizeRunStatus(run.Status) != "completed" {
+			running[run.CheckSuite.ID] = struct{}{}
+		} else if rollupConclusion(strings.ToLower(run.Conclusion)) == "FAILURE" {
+			failing = true
 		}
 	}
-	if len(replaced) == 0 {
+	if len(shown) < 2 || !failing || !c.tokenCanRead(installationID, "actions") {
 		return nil, nil
 	}
-	suites, err := fetchSnapshotPages[restCheckSuite](ctx, c, installationID, commitPath+"/check-suites", "check_suites")
+	workflowRuns, err := fetchSnapshotPages[restWorkflowRun](ctx, c, installationID,
+		base+"/actions/runs?exclude_pull_requests=true&head_sha="+url.QueryEscape(headSHA), "workflow_runs")
 	if err != nil {
 		return nil, err
 	}
-	superseded := make(map[int64]struct{}, len(replaced))
-	seenSuites := make(map[int64]struct{}, len(suites))
-	for _, suite := range suites {
-		if suite.ID <= 0 || suite.HeadSHA != headSHA {
-			return nil, errors.New("ghsnapshot: invalid check suite or mismatched head")
+	type trigger struct {
+		workflow int64
+		event    string
+	}
+	newest := make(map[trigger]restWorkflowRun, len(workflowRuns))
+	seen := make(map[int64]struct{}, len(workflowRuns))
+	for _, wr := range workflowRuns {
+		if wr.ID <= 0 || wr.WorkflowID <= 0 || wr.CheckSuiteID <= 0 || wr.HeadSHA != headSHA {
+			return nil, errors.New("ghsnapshot: invalid workflow run or mismatched head")
 		}
-		if _, seen := seenSuites[suite.ID]; seen {
-			return nil, errors.New("ghsnapshot: duplicate check suite during pagination")
+		if _, dup := seen[wr.ID]; dup {
+			return nil, errors.New("ghsnapshot: duplicate workflow run during pagination")
 		}
-		seenSuites[suite.ID] = struct{}{}
-		if _, ok := replaced[suite.ID]; ok && strings.EqualFold(suite.Conclusion, "cancelled") {
-			superseded[suite.ID] = struct{}{}
+		seen[wr.ID] = struct{}{}
+		key := trigger{wr.WorkflowID, wr.Event}
+		if cur, ok := newest[key]; !ok || wr.ID > cur.ID {
+			newest[key] = wr
 		}
+	}
+	superseded := make(map[int64]struct{})
+	for _, wr := range workflowRuns {
+		latest := newest[trigger{wr.WorkflowID, wr.Event}]
+		if latest.ID == wr.ID || !strings.EqualFold(wr.Conclusion, "cancelled") {
+			continue
+		}
+		if _, ok := shown[latest.CheckSuiteID]; !ok {
+			continue
+		}
+		if _, ok := running[latest.CheckSuiteID]; !ok && !strings.EqualFold(latest.Status, "completed") {
+			continue
+		}
+		superseded[wr.CheckSuiteID] = struct{}{}
 	}
 	return superseded, nil
 }

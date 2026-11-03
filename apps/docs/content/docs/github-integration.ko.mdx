@@ -150,6 +150,7 @@ Repository permissions:
 | Pull requests | Read-only |
 | Checks | Read-only. CI 상태 표시에 사용 |
 | Commit statuses | Read-only. legacy status 형식의 CI 집계에 사용 |
+| Actions | 선택 사항. Read-only. 같은 커밋에서 같은 워크플로의 새 실행으로 대체된, 취소된 실행을 CI 상태에서 제외하는 데 사용 |
 
 다음 이벤트를 구독합니다.
 
@@ -157,7 +158,7 @@ Repository permissions:
 - 리뷰에 따른 깨우기에 사용할 **Pull request review**
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
-PR snapshot은 Pull requests, Checks 및 Commit statuses REST API로 가져옵니다. Contents 권한은 필요하지 않습니다.
+PR snapshot은 Pull requests, Checks 및 Commit statuses REST API로 가져옵니다. Contents 권한은 필요하지 않습니다. 선택 사항인 Actions 권한을 부여하면 해당 커밋의 워크플로 실행도 읽습니다. 부여하지 않으면 같은 워크플로의 새 실행이 통과해도 취소된 이전 실행은 실패로 계산됩니다.
 
 <Callout type="warning">
 여기에는 OAuth Client secret이 아니라 **Webhook secret**이 필요합니다. 양쪽에 입력한 Webhook secret이 다르면 GitHub delivery가 `401 invalid signature`를 반환합니다.

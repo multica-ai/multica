@@ -150,6 +150,7 @@ Repository permissions:
 | Pull requests | Read-only |
 | Checks | Read-only。CI の状態表示に使用 |
 | Commit statuses | Read-only。legacy status 形式の CI 集計に使用 |
+| Actions | 任意。Read-only。同じコミットで同じワークフローの新しい実行に置き換えられた、キャンセル済みの実行を CI 状態から除外するために使用 |
 
 次のイベントを購読します。
 
@@ -157,7 +158,7 @@ Repository permissions:
 - **Pull request review**。レビューによる起動に使用します。
 - **Check suite**、**Check run**、**Status**。CI とマージ可能性を更新するために使用します。
 
-PR スナップショットは Pull requests、Checks、Commit statuses の REST API から取得します。Contents 権限は不要です。
+PR スナップショットは Pull requests、Checks、Commit statuses の REST API から取得します。Contents 権限は不要です。任意の Actions 権限を付与すると、そのコミットのワークフロー実行も読み取ります。付与しない場合、同じワークフローの新しい実行が成功しても、キャンセルされた古い実行は失敗として数えられます。
 
 <Callout type="warning">
 必要なのは **Webhook secret** であり、OAuth Client secret ではありません。GitHub と Multica に入力した Webhook secret が異なる場合、GitHub delivery は `401 invalid signature` を返します。
