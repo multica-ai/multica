@@ -1844,11 +1844,46 @@ func TestCreateWorktreeReplacesCheckoutWhoseRegistrationWasReused(t *testing.T) 
 	if err != nil || len(moved) != 1 {
 		t.Fatalf("orphaned tree not moved aside: %v, %v", moved, err)
 	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git")); !os.IsNotExist(err) {
+		t.Errorf("moved-aside tree still has a .git file pointing at the reused registration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git.orphaned")); err != nil {
+		t.Errorf("moved-aside tree lost its .git contents: %v", err)
+	}
 }
 
-// A `git worktree add` killed partway through leaves a half-written tree.
-// The failed call created that path, so it must remove it together with its
-// registration; the next checkout then starts clean.
+// Two repos with the same basename have separate bare caches and locks, so a
+// checkout from one can land on the path the other just failed to create.
+// Cleanup for one cache must not delete a tree registered in the other.
+func TestRemovePartialWorktreeKeepsCheckoutOfAnotherCache(t *testing.T) {
+	t.Parallel()
+	repoA, repoB := createTestRepo(t), createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: repoA}, {URL: repoB}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	other, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     repoB,
+		WorkDir:     t.TempDir(),
+		AgentName:   "agent",
+		TaskID:      "e5555555-0000-0000-0000-00000000000e",
+	})
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	removePartialWorktree(cache.Lookup("ws-1", repoA), other.Path)
+
+	if got := currentBranchName(t, other.Path); got != other.BranchName {
+		t.Errorf("other cache's checkout is on %q, want %q", got, other.BranchName)
+	}
+}
+
+// A `git worktree add` cancelled before it returns must not leave its tree or
+// registration behind; the next checkout then starts clean. The slow
+// post-checkout hook runs after git has written both, so this covers cleanup
+// after a cancelled add rather than a half-written tree.
 func TestCreateWorktreeContextRemovesPartialCheckoutWhenCancelled(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)

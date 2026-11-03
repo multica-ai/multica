@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -1515,18 +1516,27 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 		err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
 	}
 	if err != nil {
-		// The pre-check above proved the path did not exist, so whatever is
-		// there now is this call's partial checkout. A cancelled git is killed
-		// before it can clean up, and the leftover tree would otherwise be
-		// reused by every later checkout of this workdir.
-		removePartialWorktree(gitRoot, worktreePath)
+		// A cancelled git is killed before it can clean up, and the leftover
+		// tree would otherwise be reused by every later checkout of this
+		// workdir. Any other failure leaves the path alone: the pre-check only
+		// holds under this repo's lock, and a repo from another cache with the
+		// same basename may have created the path since (see
+		// createIsolatedCheckoutContext).
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			removePartialWorktree(gitRoot, worktreePath)
+		}
 		return "", err
 	}
 	return branchName, nil
 }
 
+// removePartialWorktree removes a checkout a cancelled `git worktree add` left
+// behind, with its registration in gitRoot. A tree whose .git file points into
+// another bare cache belongs to someone else and is kept.
 func removePartialWorktree(gitRoot, worktreePath string) {
-	_ = os.RemoveAll(worktreePath)
+	if adminDir, ok := worktreeAdminDir(worktreePath); !ok || samePath(filepath.Dir(adminDir), filepath.Join(gitRoot, "worktrees")) {
+		_ = os.RemoveAll(worktreePath)
+	}
 	adminDirs, _ := filepath.Glob(filepath.Join(gitRoot, "worktrees", "*"))
 	for _, adminDir := range adminDirs {
 		if owner, ok := worktreeRegistrationOwner(adminDir); ok && samePath(owner, worktreePath) {
@@ -1542,15 +1552,10 @@ func removePartialWorktree(gitRoot, worktreePath string) {
 // to the next checkout with the same basename. Git commands in the orphan
 // then read, and can rewrite, that other checkout's index and HEAD.
 func orphanedWorktreeReason(worktreePath string) string {
-	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
-	if err != nil {
-		return ""
-	}
-	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	adminDir, ok := worktreeAdminDir(worktreePath)
 	if !ok {
 		return ""
 	}
-	adminDir := resolveGitPath(worktreePath, strings.TrimSpace(gitdir))
 	owner, ok := worktreeRegistrationOwner(adminDir)
 	if !ok {
 		return "registration " + adminDir + " is missing"
@@ -1559,6 +1564,20 @@ func orphanedWorktreeReason(worktreePath string) string {
 		return "registration " + adminDir + " belongs to " + owner
 	}
 	return ""
+}
+
+// worktreeAdminDir returns the registration a linked worktree's .git file
+// points at.
+func worktreeAdminDir(worktreePath string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return "", false
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return "", false
+	}
+	return resolveGitPath(worktreePath, strings.TrimSpace(gitdir)), true
 }
 
 // worktreeRegistrationOwner returns the worktree directory a registration in
@@ -1580,28 +1599,30 @@ func resolveGitPath(base, path string) string {
 	return filepath.Join(base, path)
 }
 
+// samePath compares paths after resolving symlinks (git records /private/var
+// for macOS's /var) and Windows junctions, including paths that no longer
+// exist.
 func samePath(a, b string) bool {
-	return canonicalPath(a) == canonicalPath(b)
-}
-
-// canonicalPath resolves symlinks (git records /private/var for macOS's /var)
-// through the parent when path itself no longer exists.
-func canonicalPath(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+	canonical := func(path string) string {
+		if resolved, err := util.ResolveSymlinksBestEffort(path); err == nil {
+			return resolved
+		}
+		return filepath.Clean(path)
 	}
-	if parent, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
-		return filepath.Join(parent, filepath.Base(path))
-	}
-	return filepath.Clean(path)
+	return canonical(a) == canonical(b)
 }
 
 // moveAside renames path to a sibling instead of deleting it: an orphaned tree
-// can still hold files an agent wrote.
+// can still hold files an agent wrote. Its .git file still points at a
+// registration another checkout may now own, so it is renamed too, and git
+// run in the moved tree cannot touch that checkout.
 func moveAside(path string) (string, error) {
 	dest := fmt.Sprintf("%s.orphaned-%d", path, time.Now().UnixNano())
 	if err := os.Rename(path, dest); err != nil {
 		return "", err
+	}
+	if err := os.Rename(filepath.Join(dest, ".git"), filepath.Join(dest, ".git.orphaned")); err != nil {
+		return "", fmt.Errorf("moved to %s but could not disable its .git file: %w", dest, err)
 	}
 	return dest, nil
 }
