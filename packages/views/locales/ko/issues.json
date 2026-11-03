@@ -2026,7 +2026,120 @@
     "attention_pin_clear": "고정 해제",
     "attention_pin_saved": "한도를 고정했습니다",
     "attention_pin_cleared": "고정을 해제했습니다",
-    "attention_pin_failed": "한도를 변경하지 못했습니다"
+    "attention_pin_failed": "한도를 변경하지 못했습니다",
+    "company_entry": "회사 만들기",
+    "company_title": "회사 만들기",
+    "company_intro": "스타터 회사를 설치합니다: 스쿼드, 에이전트, 루틴, 파이프라인, 지식 베이스. 다시 실행해도 기존 항목은 그대로 유지됩니다.",
+    "company_loading": "불러오는 중…",
+    "company_model": "모델(선택)",
+    "company_model_placeholder": "런타임 기본값",
+    "company_squads": "스쿼드",
+    "company_select_all": "모두 선택",
+    "company_clear": "지우기",
+    "company_squad_existing": "이미 있음",
+    "company_no_squad": "스쿼드를 하나 이상 선택하세요.",
+    "company_unowned": "담당 스쿼드가 없는 단계: {{stages}}. 담당 스쿼드를 선택하기 전까지는 담당자가 없습니다.",
+    "company_estimate": "주당 약 {{runs}}회 실행, 주당 약 {{cost}}.",
+    "company_estimate_default": "이 워크스페이스의 실측 평균이 생기기 전까지 실행당 {{rate}}의 기본값으로 계산합니다.",
+    "company_estimate_none": "이 선택으로는 정기 실행이 없습니다.",
+    "company_start": "루틴을 시작할 시점",
+    "company_start_all": "모든 루틴 시작",
+    "company_start_all_hint": "선택한 스쿼드의 모든 루틴이 일정에 따라 실행됩니다.",
+    "company_start_per_floor": "층별로 시작",
+    "company_start_per_floor_hint": "각 층은 대표 루틴을 시작하고 나머지는 일시 중지 상태로 둡니다.",
+    "company_start_leave_paused": "일시 중지 상태로 두기",
+    "company_start_leave_paused_hint": "비서의 일일 브리프와 시장 스캔만 실행됩니다.",
+    "company_submit": "회사 만들기",
+    "company_applying": "회사를 만드는 중…",
+    "company_cancel": "취소",
+    "company_close": "닫기",
+    "company_retry": "다시 실행",
+    "company_done_title": "회사 설정이 완료되었습니다",
+    "company_failed_title": "문제가 있는 채로 완료되었습니다",
+    "company_failed_message": "일부 단계가 완료되지 않았습니다. 다시 실행하면 빠진 부분을 채우고 기존 항목은 유지합니다.",
+    "company_unconfirmed": "서버 응답을 읽을 수 없어 아무 것도 확인되지 않았습니다. 다시 실행해도 안전합니다.",
+    "company_errored": "회사를 만들지 못했습니다. 확인된 항목은 없으며 다시 실행해도 안전합니다.",
+    "company_done_toast": "회사 설정 완료",
+    "company_error_toast": "회사를 만들 수 없습니다",
+    "company_step_created": "생성됨",
+    "company_step_reused": "이미 있음",
+    "company_step_failed": "실패",
+    "company_steps": "단계",
+    "company_floors": {
+      "executive": "임원",
+      "research": "리서치",
+      "product": "프로덕트",
+      "build": "빌드",
+      "launch": "런치",
+      "governance": "거버넌스"
+    },
+    "company_stages": {
+      "validate": "검증",
+      "define": "정의",
+      "plan": "계획",
+      "build": "빌드",
+      "launch": "런치",
+      "operate": "운영",
+      "learn": "회고"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "임원 오피스",
+        "description": "비서와 사서가 회사 전체를 운영하며, 브리프와 지식 베이스를 관리합니다."
+      },
+      "market_research": {
+        "name": "시장 조사",
+        "description": "매주 시장을 살피고, 근거가 뒷받침하는 제안만 올립니다."
+      },
+      "opportunity_lab": {
+        "name": "기회 연구소",
+        "description": "매주 제품 기회를 발굴하고 규모를 추정합니다."
+      },
+      "competitor_intelligence": {
+        "name": "경쟁사 인텔리전스",
+        "description": "경쟁사를 매주 살피고 각 사의 출처 있는 프로필을 유지합니다."
+      },
+      "customer_voice": {
+        "name": "고객의 목소리",
+        "description": "지원 요청과 피드백을 고객 인사이트로 정리합니다."
+      },
+      "product_discovery": {
+        "name": "프로덕트 디스커버리",
+        "description": "기회를 검증하고 제품으로 만들 가치가 있는 것을 권고합니다."
+      },
+      "product_analysis": {
+        "name": "프로덕트 분석",
+        "description": "제품 브리프, 경제성·실현 가능성 분석, 리스크 레지스터를 작성합니다."
+      },
+      "planning": {
+        "name": "기획",
+        "description": "PRD, 로드맵, 런치 개요, 예산 요청서를 작성합니다."
+      },
+      "build": {
+        "name": "빌드",
+        "description": "SDLC 워크플로로 제품을 만들고 검증하며, 회고를 진행합니다."
+      },
+      "release_ops": {
+        "name": "릴리스 & 운영",
+        "description": "런치 체크리스트와 릴리스 노트를 관리하고, 보스의 출시 결정을 준비합니다."
+      },
+      "growth_gtm": {
+        "name": "그로스 & GTM",
+        "description": "시장 출시 계획을 세우고, 출시된 각 이니셔티브의 성장 지표를 매주 보고합니다."
+      },
+      "support": {
+        "name": "지원",
+        "description": "출시 후 고객에게 답하고, 버그는 개발 쪽으로 넘기며, 답변을 지식 베이스에 다시 기록합니다."
+      },
+      "finance_risk": {
+        "name": "재무 & 리스크",
+        "description": "지출 제안을 검토하고 리스크 레지스터를 최신 상태로 유지합니다."
+      },
+      "people_performance": {
+        "name": "인재 & 성과",
+        "description": "각 스쿼드의 실적을 헌장과 비교해 매주 검토하고, 지연되거나 침묵하는 항목을 보고합니다."
+      }
+    }
   },
   "views": {
     "builtin": {

@@ -43,7 +43,8 @@ export function OfficeProposalDecision({
   const [snoozing, setSnoozing] = useState(false);
   const [until, setUntil] = useState("");
 
-  if (!canDecide || proposal.state !== "pending") return null;
+  // An unknown kind is read-only: this client cannot tell what its approval would apply.
+  if (!canDecide || proposal.state !== "pending" || proposal.kind === "unknown") return null;
 
   const bounds = snoozeDateBounds(new Date());
   const untilValid = until >= bounds.min && until <= bounds.max;

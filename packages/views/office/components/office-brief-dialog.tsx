@@ -32,7 +32,13 @@ import { useNavigation } from "../../navigation";
 import { OfficeBriefDelivery } from "./office-brief-delivery";
 import { OfficeBriefFeedback } from "./office-brief-feedback";
 import { OfficeProposalDecision } from "./office-proposal-decision";
-import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
+import {
+  OfficeProposalHistory,
+  OfficeProposalKindLabel,
+  OfficeProposalKindSummary,
+  OfficeProposalRelated,
+  OfficeProposalStatus,
+} from "./office-proposal-details";
 
 /** The knowledge base a brief is saved into. */
 const DECISIONS_BASE = "decisions";
@@ -301,10 +307,14 @@ function BriefBody({
                 <li key={proposal.id} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
                   <div className="flex flex-col gap-2 px-4 py-3">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>
+                      <span className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
+                        {proposal.issue_identifier}
+                        <OfficeProposalKindLabel kind={proposal.kind} />
+                      </span>
                       <span className="text-body font-medium">{proposal.title}</span>
                     </div>
                     <OfficeProposalStatus proposal={proposal} squadName={squadName} />
+                    <OfficeProposalKindSummary proposal={proposal} />
                     {proposal.state === "pending" && !canManage ? (
                       <span className="text-caption text-muted-foreground">{t(($) => $.office.squad_proposals)}</span>
                     ) : null}

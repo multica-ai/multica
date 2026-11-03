@@ -11,7 +11,7 @@ export const knowledgeKeys = {
   documentList: (wsId: string, params: ListKnowledgeDocumentsParams = {}) =>
     [...knowledgeKeys.documents(wsId), params.kb ?? "", params.state ?? ""] as const,
   search: (wsId: string, params: SearchKnowledgeParams) =>
-    [...knowledgeKeys.all(wsId), "search", params.kb ?? "", params.limit ?? 0, params.q] as const,
+    [...knowledgeKeys.all(wsId), "search", params.kb ?? "", params.kind ?? "", params.limit ?? 0, params.q] as const,
 };
 
 /** Owners and admins only: the state with the knowledge service's web UI link. */

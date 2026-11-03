@@ -2,7 +2,9 @@
   "title": "ナレッジ",
   "tabs": {
     "library": "ライブラリ",
-    "drafts": "下書き"
+    "drafts": "下書き",
+    "governance": "ガバナンス",
+    "setup": "設定"
   },
   "state": {
     "ready": "利用可能",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "秘書に質問",
     "prompt": "次のナレッジの検索結果をもとに、私の質問に答えてください。使用したドキュメントはタイトルとリンクを挙げて引用し、結果から答えられない場合はその旨を伝えてください。\n\n質問: {{question}}\n\n検索結果:\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "種類",
+      "all": "すべての種類"
+    },
+    "policy": {
+      "title": "公開ポリシー",
+      "description": "エージェントの下書きの公開方法。種類のポリシーはナレッジベースのポリシーより優先されます。ポリシーがなければ、下書きは人が確認するまで待機します。",
+      "scope_base": "ナレッジベース",
+      "scope_kind": "種類",
+      "inherited": "既定",
+      "reset": "リセット",
+      "load_error": "公開ポリシーを読み込めませんでした",
+      "aria_mode": "{{name}} の公開モード",
+      "toast_failed": "公開ポリシーを変更できませんでした",
+      "toast_reset": "公開ポリシーをリセットしました",
+      "mode": {
+        "manual": "手動：人が公開する",
+        "auto_after_review": "批評担当のレビュー後",
+        "auto": "自動",
+        "unknown": "不明なモード"
+      }
+    },
+    "add_eval": {
+      "button": "評価ケースに追加",
+      "title": "評価ケースに追加",
+      "description": "この質問では検索がこの文書を返すべきです。次回の評価で確認されます。",
+      "question": "質問",
+      "document": "期待する文書",
+      "submit": "ケースを追加",
+      "toast_added": "評価ケースを追加しました",
+      "toast_failed": "評価ケースを追加できませんでした"
+    },
+    "retrieval": {
+      "title": "検索の品質",
+      "run": "評価を実行",
+      "last_run": "ヒット率 {{rate}}%（{{total}} 件中 {{hits}} 件）",
+      "no_runs": "評価はまだ実行されていません。検索結果からケースを追加してください。",
+      "ran": "評価を記録しました：ヒット率 {{rate}}%",
+      "offline": "記録されませんでした：ナレッジサービスがオフラインです",
+      "run_failed": "評価を実行できませんでした"
+    },
+    "routines": {
+      "title": "ライブラリアンの定期処理",
+      "empty": "まだ実行された処理はありません。",
+      "load_error": "定期処理を読み込めませんでした",
+      "nothing": "報告はありません",
+      "count": "{{label}}：{{count}}",
+      "triage": "下書きの仕分け",
+      "freshness": "鮮度の確認",
+      "audit": "分類の監査",
+      "eval": "検索の評価",
+      "backfill": "セットアップの補完",
+      "counts": {
+        "review_due": "見直し期限",
+        "duplicate": "重複したタイトル",
+        "missing_sections": "見出しの不足",
+        "missing_kind": "種類なし",
+        "orphaned": "WeKnora に存在しない",
+        "repaired": "修復済み",
+        "new_drafts": "新しい下書き"
+      }
+    }
+  },
+  "upload": {
+    "title": "ファイルを追加",
+    "drop_hint": "ファイルをここにドロップするか、選択してください。追加すると直ちに公開されます。",
+    "choose": "ファイルを選択",
+    "base_label": "ナレッジベース",
+    "kind_label": "種類",
+    "kind_hint": "英小文字、数字、アンダースコアを使います（例: market_report）。",
+    "submit": "アップロード",
+    "toast": {
+      "uploaded": "{{name}} をナレッジベースに追加しました",
+      "failed": "ファイルをアップロードできませんでした"
+    }
+  },
+  "import": {
+    "title": "Webページを取り込む",
+    "url_label": "ページのアドレス",
+    "title_label": "タイトル（任意）",
+    "submit": "取り込む",
+    "toast": {
+      "imported": "ページをナレッジベースに追加しました",
+      "failed": "ページを取り込めませんでした"
+    }
+  },
+  "sources": {
+    "title": "ソース",
+    "description": "WeKnora がナレッジベースに同期する接続です。失敗はここに表示されます。修正は WeKnora で行ってください。",
+    "load_error": "ソースを読み込めませんでした",
+    "offline": "ナレッジサービスがオフラインのため、ソースを読み取れません。",
+    "empty": "接続されたソースはありません。",
+    "create": "WeKnora でソースを追加",
+    "never_synced": "未同期",
+    "last_sync": "最終同期 {{when}}",
+    "items": "{{count}} 件",
+    "status": {
+      "active": "有効",
+      "paused": "一時停止",
+      "error": "失敗",
+      "unknown": "不明"
+    }
+  },
+  "bases": {
+    "title": "ナレッジベース",
+    "description": "指定したチーム、フロア、エージェントだけに制限できます。Wiki は3つのベースまでです。要約はモデル呼び出しを伴います。",
+    "restricted": "制限",
+    "wiki": "Wiki",
+    "summaries": "要約",
+    "access": "アクセス",
+    "toast": {
+      "failed": "変更を保存できませんでした"
+    }
+  },
+  "access": {
+    "loading": "アクセスを読み込み中",
+    "load_error": "アクセス一覧を読み込めませんでした",
+    "empty": "このベースを見られるのはオーナーと管理者だけです。",
+    "remove": "アクセスを削除",
+    "level": {
+      "read": "読み取り",
+      "write": "書き込み"
+    },
+    "subject": {
+      "squad": "チーム",
+      "floor": "フロア",
+      "agent": "エージェント",
+      "unknown": "不明"
+    },
+    "add": {
+      "subject_type": "付与先",
+      "subject": "対象",
+      "subject_placeholder": "選択",
+      "level": "アクセス",
+      "submit": "アクセスを付与"
+    },
+    "toast": {
+      "failed": "アクセスを変更できませんでした"
+    }
+  },
+  "models": {
+    "title": "モデル",
+    "description": "設定されたチャット、再ランク、ビジョンの各モデルを一度ずつ実行し、失敗したものとその理由を表示します。",
+    "test": "モデルをテスト",
+    "not_configured": "このサーバーにはモデルが設定されていないため、要約と Wiki は無効です。",
+    "ok": "動作中",
+    "failed": "失敗",
+    "role": {
+      "chat": "チャット",
+      "rerank": "再ランク",
+      "vision": "ビジョン",
+      "unknown": "モデル"
+    }
+  },
+  "owner_login": {
+    "title": "WeKnora のログイン",
+    "description": "詳細設定のために WeKnora の画面にサインインできます。パスワードは一度だけ表示されます。",
+    "show": "パスワードを表示",
+    "email": "メール: {{email}}",
+    "once": "今すぐコピーしてください。再度表示されることはありません。",
+    "open": "WeKnora を開く",
+    "failed": "パスワードを表示できませんでした"
   }
 }

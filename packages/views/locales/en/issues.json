@@ -2100,7 +2100,120 @@
     "attention_pin_clear": "Clear pin",
     "attention_pin_saved": "Limits pinned",
     "attention_pin_cleared": "Pin cleared",
-    "attention_pin_failed": "Could not change the limits"
+    "attention_pin_failed": "Could not change the limits",
+    "company_entry": "Build your company",
+    "company_title": "Build your company",
+    "company_intro": "Installs the starter company: squads, agents, routines, the pipeline, and the knowledge base. Running it again keeps what already exists.",
+    "company_loading": "Loading…",
+    "company_model": "Model (optional)",
+    "company_model_placeholder": "Runtime default",
+    "company_squads": "Squads",
+    "company_select_all": "Select all",
+    "company_clear": "Clear",
+    "company_squad_existing": "Already there",
+    "company_no_squad": "Choose at least one squad.",
+    "company_unowned": "Stages without an owner: {{stages}}. They stay unowned until a squad that owns them is selected.",
+    "company_estimate": "About {{runs}} runs a week, about {{cost}} a week.",
+    "company_estimate_default": "Cost uses a default of {{rate}} per run until this workspace has a measured average.",
+    "company_estimate_none": "No routine runs for this choice.",
+    "company_start": "When to start the routines",
+    "company_start_all": "Start all routines",
+    "company_start_all_hint": "Every routine of the chosen squads runs on its schedule.",
+    "company_start_per_floor": "Start per floor",
+    "company_start_per_floor_hint": "Each floor starts its lead routine. The others stay paused.",
+    "company_start_leave_paused": "Leave paused",
+    "company_start_leave_paused_hint": "Only the Secretary's daily brief and the market scan run.",
+    "company_submit": "Build company",
+    "company_applying": "Building your company…",
+    "company_cancel": "Cancel",
+    "company_close": "Close",
+    "company_retry": "Run again",
+    "company_done_title": "Your company is set up",
+    "company_failed_title": "Finished with problems",
+    "company_failed_message": "Some steps did not finish. Running again finishes what is missing and keeps what exists.",
+    "company_unconfirmed": "The server's answer could not be read, so nothing is confirmed. Running again is safe.",
+    "company_errored": "The company could not be built. Nothing is confirmed; running again is safe.",
+    "company_done_toast": "Company set up",
+    "company_error_toast": "Could not build the company",
+    "company_step_created": "Created",
+    "company_step_reused": "Already there",
+    "company_step_failed": "Failed",
+    "company_steps": "Steps",
+    "company_floors": {
+      "executive": "Executive",
+      "research": "Research",
+      "product": "Product",
+      "build": "Build",
+      "launch": "Launch",
+      "governance": "Governance"
+    },
+    "company_stages": {
+      "validate": "Validate",
+      "define": "Define",
+      "plan": "Plan",
+      "build": "Build",
+      "launch": "Launch",
+      "operate": "Operate",
+      "learn": "Learn"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "Executive Office",
+        "description": "The Secretary and the Librarian run the company as a whole: the brief and the knowledge base."
+      },
+      "market_research": {
+        "name": "Market Research",
+        "description": "Scans the market each week and files only the proposals the evidence supports."
+      },
+      "opportunity_lab": {
+        "name": "Opportunity Lab",
+        "description": "Generates and sizes product opportunities each week."
+      },
+      "competitor_intelligence": {
+        "name": "Competitor Intelligence",
+        "description": "Watches competitors each week and keeps a sourced profile of each."
+      },
+      "customer_voice": {
+        "name": "Customer Voice",
+        "description": "Turns support requests and feedback into customer insight."
+      },
+      "product_discovery": {
+        "name": "Product Discovery",
+        "description": "Validates opportunities and recommends which are worth a product."
+      },
+      "product_analysis": {
+        "name": "Product Analysis",
+        "description": "Writes the product brief, the economics and feasibility, and the risk register."
+      },
+      "planning": {
+        "name": "Planning",
+        "description": "Writes the PRD, the roadmap, the launch outline, and the budget request."
+      },
+      "build": {
+        "name": "Build",
+        "description": "Builds and verifies the product through the SDLC workflow, and runs the retrospective."
+      },
+      "release_ops": {
+        "name": "Release & Ops",
+        "description": "Keeps the launch checklist and release notes, and readies each release for the boss's go-live decision."
+      },
+      "growth_gtm": {
+        "name": "Growth & GTM",
+        "description": "Plans the go-to-market and reports the weekly growth metrics for each launched initiative."
+      },
+      "support": {
+        "name": "Support",
+        "description": "Answers customers after launch, escalates bugs, and writes answers back into the knowledge base."
+      },
+      "finance_risk": {
+        "name": "Finance & Risk",
+        "description": "Reviews spending proposals and keeps the risk register current."
+      },
+      "people_performance": {
+        "name": "People & Performance",
+        "description": "Reviews each squad's record against its charter each week, and reports what is late or silent."
+      }
+    }
   },
   "views": {
     "builtin": {

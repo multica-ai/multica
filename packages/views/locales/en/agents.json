@@ -462,6 +462,74 @@
         "ux_designer": {
           "name": "UX Designer",
           "description": "Designs screens, states, and the design system from requirements, reusing existing components first."
+        },
+        "knowledge_curator": {
+          "name": "Librarian",
+          "description": "Triages drafts each day, and checks the freshness, retrieval, and taxonomy of the knowledge base."
+        },
+        "opportunity_lead": {
+          "name": "Opportunity Lead",
+          "description": "Sets the week's question for opportunity generation, and files only the opportunities the evidence supports."
+        },
+        "opportunity_analyst": {
+          "name": "Opportunity Analyst",
+          "description": "Sizes a candidate as a range, with its assumptions and the evidence against it."
+        },
+        "competitor_lead": {
+          "name": "Competitor Lead",
+          "description": "Runs the weekly competitor watch and the monthly profiles, with a source for each claim."
+        },
+        "customer_lead": {
+          "name": "Customer Lead",
+          "description": "Scans the week's support signals by theme, and writes the monthly customer insight."
+        },
+        "discovery_lead": {
+          "name": "Discovery Lead",
+          "description": "Validates an opportunity with evidence, and recommends go or no-go to the boss."
+        },
+        "validation_analyst": {
+          "name": "Validation Analyst",
+          "description": "Tests each part of an opportunity's thesis against customer and market evidence."
+        },
+        "product_analysis_lead": {
+          "name": "Product Analysis Lead",
+          "description": "Writes the product brief, and checks every number in the analysis against its assumption."
+        },
+        "feasibility_analyst": {
+          "name": "Feasibility Analyst",
+          "description": "Works out cost, return, and feasibility, with each assumption and its source stated."
+        },
+        "planning_lead": {
+          "name": "Planning Lead",
+          "description": "Writes the roadmap, the launch outline, and the budget request for the boss to approve with the plan."
+        },
+        "prd_writer": {
+          "name": "PRD Writer",
+          "description": "Writes each requirement with an acceptance criterion a tester can check."
+        },
+        "release_lead": {
+          "name": "Release Lead",
+          "description": "Keeps the launch checklist and the release notes, and readies each release for the boss's go-live decision."
+        },
+        "growth_lead": {
+          "name": "Growth Lead",
+          "description": "Writes the go-to-market plan, and each week the metrics report for launched initiatives."
+        },
+        "support_lead": {
+          "name": "Support Lead",
+          "description": "Triages customer requests each day, escalates bugs with steps to reproduce, and writes answers back to the knowledge base."
+        },
+        "support_agent": {
+          "name": "Support Agent",
+          "description": "Answers customer requests from the company's knowledge, and escalates what it cannot answer."
+        },
+        "finance_lead": {
+          "name": "Finance Lead",
+          "description": "Reviews the spending proposals the boss asks about, and keeps the risk register current. Approves nothing."
+        },
+        "people_performance": {
+          "name": "People Lead",
+          "description": "Reviews each squad's record against its charter and reports what is late or silent. Sets no targets."
         }
       }
     },

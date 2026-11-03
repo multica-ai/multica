@@ -38,6 +38,12 @@ describe("paths.workspace(slug)", () => {
     expect(ws.attachmentPreview("att_42")).toBe("/acme/attachments/att_42/preview");
   });
 
+  it("builds the pipeline board and its squad filter", () => {
+    expect(ws.pipeline()).toBe("/acme/pipeline");
+    expect(ws.pipelineForSquad("sq-1")).toBe("/acme/pipeline?squad=sq-1");
+    expect(ws.pipelineForSquad("sq 1")).toBe("/acme/pipeline?squad=sq%201");
+  });
+
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
   });

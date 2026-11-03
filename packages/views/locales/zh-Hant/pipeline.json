@@ -1,0 +1,217 @@
+{
+  "title": "管線",
+  "toolbar": {
+    "squad": "負責小隊",
+    "squad_all": "全部小隊",
+    "status": "狀態",
+    "status_option": {
+      "open": "進行中",
+      "active": "活躍",
+      "operating": "營運中",
+      "shelved": "已擱置",
+      "closed": "已關閉"
+    }
+  },
+  "board": {
+    "no_pipeline": "此工作區尚未設定管線。",
+    "no_initiatives": "沒有符合這些篩選條件的專案。",
+    "column_empty": "此階段暫無專案",
+    "unknown_stage": "未知階段",
+    "load_failed": "無法載入專案。"
+  },
+  "card": {
+    "days_in_stage_other": "已在此階段 {{count}} 天",
+    "artifacts": "產出 {{present}}/{{required}}",
+    "stalled": "停滯",
+    "no_owner": "無負責人"
+  },
+  "status": {
+    "active": "活躍",
+    "operating": "營運中",
+    "shelved": "已擱置",
+    "closed": "已關閉",
+    "unknown": "未知"
+  },
+  "stage_sla": {
+    "ok": "在階段時限內",
+    "stalled": "已超出階段時限"
+  },
+  "panel": {
+    "loading": "正在載入專案…",
+    "unavailable": "無法載入此專案。",
+    "overview": "概覽",
+    "stage": "階段",
+    "owner": "負責小隊",
+    "status": "狀態",
+    "days_in_stage": "在此階段的天數",
+    "exit": "出口",
+    "exit_mode": {
+      "auto": "必需產出發布後自動推進",
+      "attest": "負責小隊確認階段已完成",
+      "gate": "由老闆決定",
+      "unknown": "無法識別的出口規則"
+    },
+    "open_issue": "開啟關聯任務",
+    "artifacts": "產出",
+    "gates": "閘門",
+    "timeline": "階段時間軸",
+    "force": "強制移動",
+    "sla": "階段時限",
+    "actions": "操作",
+    "thread": "關聯議題討論"
+  },
+  "artifact": {
+    "required": "必需",
+    "optional": "可選",
+    "published": "已發布",
+    "missing": "缺失",
+    "waived": "已豁免",
+    "open_knowledge": "在知識庫中開啟",
+    "waive": "豁免",
+    "waive_note": "豁免原因",
+    "waive_note_required": "豁免產出需要填寫說明。",
+    "waive_submit": "豁免產出",
+    "none": "此階段沒有產出要求。"
+  },
+  "gate": {
+    "state": {
+      "pending": "等待決定",
+      "approved": "已批准",
+      "rejected": "已駁回",
+      "revising": "已退回修改",
+      "expired": "已過期",
+      "unknown": "未知"
+    },
+    "approve": "批准",
+    "outcome": {
+      "continue": "繼續",
+      "scale": "擴大",
+      "sunset": "終止"
+    },
+    "outcome_hint": "繼續則保持營運。擴大會在「定義」階段啟動一個後續專案。終止則關閉該專案。",
+    "reject": "駁回",
+    "reject_note": "駁回原因",
+    "reject_note_required": "駁回閘門需要填寫說明。",
+    "reject_submit": "駁回閘門",
+    "cancel": "取消",
+    "none": "此專案沒有閘門。"
+  },
+  "event": {
+    "created": "已建立",
+    "advanced": "已推進",
+    "sent_back": "已退回",
+    "shelved": "已擱置",
+    "resumed": "已恢復",
+    "closed": "已關閉",
+    "forced": "已強制移動",
+    "attested": "已確認",
+    "artifact_waived": "已豁免產出",
+    "unknown": "已更新",
+    "move": "{{from}} → {{to}}",
+    "none": "暫無紀錄。"
+  },
+  "force": {
+    "to_stage": "移動到階段",
+    "reason": "原因",
+    "reason_required": "強制移動需要填寫原因。",
+    "submit": "強制移動"
+  },
+  "toast": {
+    "waived": "已豁免產出。",
+    "waive_failed": "無法豁免產出。",
+    "approved": "閘門已批准。",
+    "rejected": "閘門已駁回。",
+    "decide_failed": "無法記錄決定。",
+    "forced": "已移動到{{stage}}。",
+    "force_failed": "無法移動此專案。",
+    "created": "已建立專案。",
+    "advanced": "已推進專案。",
+    "attested": "已確認階段完成。",
+    "sent_back": "已退回專案。",
+    "shelved": "已擱置專案。",
+    "resumed": "已恢復專案。",
+    "closed": "已關閉專案。"
+  },
+  "kind": {
+    "label": {
+      "decision": "決定",
+      "opportunity": "機會",
+      "stage_gate": "階段閘門",
+      "org_change": "組織變更",
+      "budget": "預算",
+      "standing_approval": "常規審批",
+      "unknown": "其他"
+    }
+  },
+  "opportunity": {
+    "thesis": "論點",
+    "market": "市場",
+    "evidence": "依據",
+    "evidence_item": "文件 {{index}}",
+    "no_evidence": "未附依據。",
+    "target_stage": "從{{stage}}開始"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "產出清單",
+    "checklist_empty": "此階段沒有產出要求。",
+    "attestation": "負責人確認",
+    "attested_by": "{{name}}確認，{{time}}",
+    "not_attested": "尚未確認。",
+    "unavailable": "無法載入此專案。"
+  },
+  "badge": {
+    "label_other": "負責 {{count}} 個專案",
+    "open": "開啟管線"
+  },
+  "create": {
+    "button": "新增專案",
+    "title": "新增專案",
+    "title_label": "標題",
+    "title_required": "請填寫標題。",
+    "title_too_long": "標題不能超過 200 個字元。",
+    "thesis_label": "論點",
+    "thesis_required": "請填寫論點：說明為什麼值得做。",
+    "thesis_too_long": "論點太長了。",
+    "pipeline_label": "管線",
+    "no_pipeline": "此工作區沒有可用於啟動專案的管線。",
+    "failed": "無法建立專案。",
+    "submit": "建立專案",
+    "cancel": "取消"
+  },
+  "actions": {
+    "advance": "推進",
+    "attest": "確認階段完成",
+    "send_back": "退回",
+    "send_back_note": "給負責人的備註",
+    "send_back_note_required": "退回專案需要填寫備註。",
+    "send_back_submit": "退回",
+    "resume": "恢復",
+    "shelve": "擱置",
+    "shelve_title": "擱置此專案？",
+    "shelve_description": "恢復之前，階段計時會暫停。",
+    "shelve_note": "備註（可選）",
+    "shelve_submit": "擱置專案",
+    "close": "關閉",
+    "close_title": "關閉此專案？",
+    "close_description": "關聯的議題將標記為完成，專案將退出管線。",
+    "close_reason": "原因",
+    "close_reason_required": "關閉專案需要填寫原因。",
+    "close_submit": "關閉專案",
+    "cancel": "取消"
+  },
+  "action_error": {
+    "generic": "無法變更專案。",
+    "stage_not_ready": "此階段仍缺少必需的產出物。",
+    "needs_attest": "負責小組需要先確認此階段完成。",
+    "stage_is_gate": "此階段由閘門決定。",
+    "not_attest_stage": "此階段不需要確認。",
+    "initiative_closed": "專案已關閉。",
+    "initiative_shelved": "專案已擱置，請先恢復。",
+    "initiative_not_shelved": "專案未處於擱置狀態。",
+    "no_previous_stage": "沒有可退回的前一階段。",
+    "note_required": "此變更需要填寫備註。",
+    "stage_unowned": "此階段沒有負責小組。",
+    "build_squad_not_sdlc": "建置階段需要具備軟體工作流程的小組。"
+  }
+}

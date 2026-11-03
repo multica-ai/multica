@@ -2,7 +2,9 @@
   "title": "Connaissances",
   "tabs": {
     "library": "Bibliothèque",
-    "drafts": "Brouillons"
+    "drafts": "Brouillons",
+    "governance": "Gouvernance",
+    "setup": "Configuration"
   },
   "state": {
     "ready": "Prête",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "Demander au Secrétaire",
     "prompt": "Réponds à ma question à partir de ces résultats de la base de connaissances. Cite chaque document que tu utilises par son titre et son lien, et indique si les résultats ne permettent pas d'y répondre.\n\nQuestion : {{question}}\n\nRésultats :\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "Type",
+      "all": "Tous les types"
+    },
+    "policy": {
+      "title": "Politique de publication",
+      "description": "Comment le brouillon d'un agent est publié. La politique d'un type remplace celle de sa base. Sans politique, les brouillons attendent une personne.",
+      "scope_base": "Base de connaissances",
+      "scope_kind": "Type",
+      "inherited": "par défaut",
+      "reset": "Réinitialiser",
+      "load_error": "Impossible de charger les politiques de publication",
+      "aria_mode": "Mode de publication pour {{name}}",
+      "toast_failed": "Impossible de modifier la politique de publication",
+      "toast_reset": "Politique de publication réinitialisée",
+      "mode": {
+        "manual": "Manuel : une personne publie",
+        "auto_after_review": "Après revue d'un critique",
+        "auto": "Automatique",
+        "unknown": "Mode inconnu"
+      }
+    },
+    "add_eval": {
+      "button": "Ajouter comme cas d'évaluation",
+      "title": "Ajouter comme cas d'évaluation",
+      "description": "La recherche devrait renvoyer ce document pour la question. La prochaine évaluation le vérifie.",
+      "question": "Question",
+      "document": "Document attendu",
+      "submit": "Ajouter le cas",
+      "toast_added": "Cas d'évaluation ajouté",
+      "toast_failed": "Impossible d'ajouter le cas d'évaluation"
+    },
+    "retrieval": {
+      "title": "Qualité de la recherche",
+      "run": "Lancer l'évaluation",
+      "last_run": "Taux de réussite {{rate}} % ({{hits}} sur {{total}} cas)",
+      "no_runs": "Aucune évaluation pour l'instant. Ajoutez un cas depuis un résultat de recherche.",
+      "ran": "Évaluation enregistrée : taux de réussite {{rate}} %",
+      "offline": "Rien d'enregistré : le service de connaissances est hors ligne",
+      "run_failed": "Impossible de lancer l'évaluation"
+    },
+    "routines": {
+      "title": "Routines du bibliothécaire",
+      "empty": "Aucune routine n'a encore tourné.",
+      "load_error": "Impossible de charger les routines",
+      "nothing": "Rien à signaler",
+      "count": "{{label}} : {{count}}",
+      "triage": "Tri des brouillons",
+      "freshness": "Revue de fraîcheur",
+      "audit": "Audit de taxonomie",
+      "eval": "Évaluation de la recherche",
+      "backfill": "Rattrapage de l'installation",
+      "counts": {
+        "review_due": "à réviser",
+        "duplicate": "titres en double",
+        "missing_sections": "titres manquants",
+        "missing_kind": "sans type",
+        "orphaned": "absents de WeKnora",
+        "repaired": "réparés",
+        "new_drafts": "nouveaux brouillons"
+      }
+    }
+  },
+  "upload": {
+    "title": "Ajouter un fichier",
+    "drop_hint": "Déposez un fichier ici, ou choisissez-en un. Il est publié dès son ajout.",
+    "choose": "Choisir un fichier",
+    "base_label": "Base de connaissances",
+    "kind_label": "Type",
+    "kind_hint": "Utilisez des lettres minuscules, des chiffres et des tirets bas, par exemple market_report.",
+    "submit": "Importer",
+    "toast": {
+      "uploaded": "{{name}} est dans la base de connaissances",
+      "failed": "Impossible d'importer le fichier"
+    }
+  },
+  "import": {
+    "title": "Importer une page web",
+    "url_label": "Adresse de la page",
+    "title_label": "Titre (facultatif)",
+    "submit": "Importer",
+    "toast": {
+      "imported": "La page est dans la base de connaissances",
+      "failed": "Impossible d'importer la page"
+    }
+  },
+  "sources": {
+    "title": "Sources",
+    "description": "Connexions que WeKnora synchronise dans les bases de connaissances. Les échecs sont affichés ici ; corrigez-les dans WeKnora.",
+    "load_error": "Impossible de charger les sources",
+    "offline": "Le service de connaissances est hors ligne, les sources ne peuvent pas être lues.",
+    "empty": "Aucune source n'est connectée.",
+    "create": "Ajouter une source dans WeKnora",
+    "never_synced": "Jamais synchronisée",
+    "last_sync": "Dernière synchronisation {{when}}",
+    "items": "{{count}} éléments",
+    "status": {
+      "active": "Active",
+      "paused": "En pause",
+      "error": "En échec",
+      "unknown": "Inconnue"
+    }
+  },
+  "bases": {
+    "title": "Bases de connaissances",
+    "description": "Limitez une base aux équipes, étages ou agents désignés. Le Wiki est limité à trois bases ; les résumés coûtent des appels de modèle.",
+    "restricted": "Restreinte",
+    "wiki": "Wiki",
+    "summaries": "Résumés",
+    "access": "Accès",
+    "toast": {
+      "failed": "La modification n'a pas été enregistrée"
+    }
+  },
+  "access": {
+    "loading": "Chargement des accès",
+    "load_error": "Impossible de charger la liste des accès",
+    "empty": "Seuls les propriétaires et administrateurs voient cette base.",
+    "remove": "Retirer l'accès",
+    "level": {
+      "read": "Lecture",
+      "write": "Écriture"
+    },
+    "subject": {
+      "squad": "Équipe",
+      "floor": "Étage",
+      "agent": "Agent",
+      "unknown": "Inconnu"
+    },
+    "add": {
+      "subject_type": "Accordé à",
+      "subject": "Qui",
+      "subject_placeholder": "Choisir",
+      "level": "Accès",
+      "submit": "Accorder l'accès"
+    },
+    "toast": {
+      "failed": "L'accès n'a pas été modifié"
+    }
+  },
+  "models": {
+    "title": "Modèles",
+    "description": "Exécute une fois chaque modèle de chat, de reclassement et de vision configuré, et indique lesquels ont échoué et pourquoi.",
+    "test": "Tester les modèles",
+    "not_configured": "Aucun modèle n'est configuré sur ce serveur : les résumés et le Wiki sont désactivés.",
+    "ok": "Fonctionne",
+    "failed": "Échec",
+    "role": {
+      "chat": "Chat",
+      "rerank": "Reclassement",
+      "vision": "Vision",
+      "unknown": "Modèle"
+    }
+  },
+  "owner_login": {
+    "title": "Votre connexion WeKnora",
+    "description": "Connectez-vous à l'interface WeKnora pour les réglages avancés. Le mot de passe n'est affiché qu'une fois.",
+    "show": "Afficher mon mot de passe",
+    "email": "E-mail : {{email}}",
+    "once": "Copiez-le maintenant. Il ne sera plus affiché.",
+    "open": "Ouvrir WeKnora",
+    "failed": "Impossible d'afficher le mot de passe"
   }
 }

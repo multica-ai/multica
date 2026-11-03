@@ -125,6 +125,37 @@ export interface DigestInquiry {
   answer_excerpt: string | null;
 }
 
+/** One active or operating initiative's place in its pipeline (spec 3.7). */
+export interface DigestPipelineInitiative {
+  id: string;
+  identifier: string;
+  title: string;
+  stage_key: string;
+  stage_name: string;
+  owner_squad_id: string | null;
+  status: string;
+  days_in_stage: number;
+  sla_days: number;
+  /** Past the stage's SLA. A flag for the brief, not an automatic move. */
+  stalled: boolean;
+  artifacts_required: number;
+  artifacts_present: number;
+  /** What the initiative waits for, in words. */
+  blockers: string[];
+  /** The stage's exit criteria when the stage is left by a gate, else empty. */
+  next_gate: string;
+  pending_gate_proposal_id: string | null;
+}
+
+/** A squad request its receiving squad has not answered in time. */
+export interface DigestOverdueRequest {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  squad_id: string;
+  hours_overdue: number;
+}
+
 export interface Digest {
   since: string;
   until: string;
@@ -137,6 +168,8 @@ export interface Digest {
   knowledge: DigestKnowledge;
   /** The Secretary's questions asked today or yesterday, newest first. */
   inquiries: DigestInquiry[];
+  pipeline: DigestPipelineInitiative[];
+  overdue_requests: DigestOverdueRequest[];
 }
 
 export interface DigestParams {
@@ -287,6 +320,49 @@ const DigestKnowledgeSchema = z
   .loose()
   .default(emptyDigestKnowledge);
 
+// An unreadable initiative is dropped alone; the others and the digest still load.
+const DigestPipelineInitiativeSchema = z
+  .object({
+    id: z.string().default(""),
+    identifier: z.string().default(""),
+    title: z.string().default(""),
+    stage_key: z.string().default(""),
+    stage_name: z.string().default(""),
+    owner_squad_id: z.string().nullable().catch(null).default(null),
+    status: z.string().default(""),
+    days_in_stage: num,
+    sla_days: num,
+    stalled: z.boolean().catch(false).default(false),
+    artifacts_required: num,
+    artifacts_present: num,
+    blockers: z.array(z.string()).nullable().catch([]).default([]).transform((v) => v ?? []),
+    next_gate: z.string().catch("").default(""),
+    pending_gate_proposal_id: z.string().nullable().catch(null).default(null),
+  })
+  .loose();
+
+const DigestOverdueRequestSchema = z
+  .object({
+    issue_id: z.string().default(""),
+    identifier: z.string().default(""),
+    title: z.string().default(""),
+    squad_id: z.string().default(""),
+    hours_overdue: num,
+  })
+  .loose();
+
+/** Reads a list item by item: a missing or non-list value is none, a bad item is dropped. */
+function listOfItems<T>(schema: z.ZodType<T>) {
+  return z.unknown().transform((value) =>
+    Array.isArray(value)
+      ? value.flatMap((item) => {
+          const parsed = schema.safeParse(item);
+          return parsed.success ? [parsed.data] : [];
+        })
+      : [],
+  );
+}
+
 export const DigestSchema = z
   .object({
     since: z.string().default(""),
@@ -303,14 +379,10 @@ export const DigestSchema = z
       .default({ count: 0, squads: [] }),
     knowledge: DigestKnowledgeSchema,
     // Not a list (or missing) reads as none; the rest of the digest still loads.
-    inquiries: z.unknown().transform((value) =>
-      Array.isArray(value)
-        ? value.flatMap((item) => {
-            const parsed = DigestInquirySchema.safeParse(item);
-            return parsed.success ? [parsed.data] : [];
-          })
-        : [],
-    ),
+    inquiries: listOfItems(DigestInquirySchema),
+    // An older server sends neither list; both read as none.
+    pipeline: listOfItems(DigestPipelineInitiativeSchema),
+    overdue_requests: listOfItems(DigestOverdueRequestSchema),
   })
   .loose();
 
@@ -324,4 +396,6 @@ export const FALLBACK_DIGEST: Digest = {
   quiet: { count: 0, squads: [] },
   knowledge: EMPTY_DIGEST_KNOWLEDGE,
   inquiries: [],
+  pipeline: [],
+  overdue_requests: [],
 };

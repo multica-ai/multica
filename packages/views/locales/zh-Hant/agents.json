@@ -450,6 +450,74 @@
         "ux_designer": {
           "name": "UX 設計師",
           "description": "依據需求設計頁面、狀態與設計系統，優先重用既有元件。"
+        },
+        "knowledge_curator": {
+          "name": "圖書管理員",
+          "description": "每天整理草稿，並檢查知識庫的時效、檢索與分類。"
+        },
+        "opportunity_lead": {
+          "name": "機會負責人",
+          "description": "設定每週的機會探索問題，只提交有證據支持的機會。"
+        },
+        "opportunity_analyst": {
+          "name": "機會分析師",
+          "description": "以區間形式評估候選機會，並列出假設與反面證據。"
+        },
+        "competitor_lead": {
+          "name": "競品負責人",
+          "description": "負責每週競品監控與每月檔案，每項論斷都附來源。"
+        },
+        "customer_lead": {
+          "name": "客戶負責人",
+          "description": "每週依主題整理支援訊號，並撰寫每月客戶洞察。"
+        },
+        "discovery_lead": {
+          "name": "探索負責人",
+          "description": "用證據驗證機會，並向老闆建議繼續或停止。"
+        },
+        "validation_analyst": {
+          "name": "驗證分析師",
+          "description": "用客戶與市場證據逐項檢驗機會的論點。"
+        },
+        "product_analysis_lead": {
+          "name": "產品分析負責人",
+          "description": "撰寫產品簡報，並把分析中的每個數字與其假設逐一核對。"
+        },
+        "feasibility_analyst": {
+          "name": "可行性分析師",
+          "description": "估算成本、回報與可行性，並寫明每個假設及其來源。"
+        },
+        "planning_lead": {
+          "name": "規劃負責人",
+          "description": "撰寫路線圖、發布大綱與預算申請，供老闆與計畫一併批准。"
+        },
+        "prd_writer": {
+          "name": "PRD 撰寫者",
+          "description": "撰寫每項需求，並附上測試人員可核對的驗收標準。"
+        },
+        "release_lead": {
+          "name": "發布負責人",
+          "description": "維護上線清單與發布說明，並為老闆的上線決定做好準備。"
+        },
+        "growth_lead": {
+          "name": "成長負責人",
+          "description": "撰寫市場推廣計畫，並每週撰寫上線專案的指標報告。"
+        },
+        "support_lead": {
+          "name": "客戶支援負責人",
+          "description": "每天分揀客戶請求，把附帶重現步驟的缺陷升級處理，並把答案寫回知識庫。"
+        },
+        "support_agent": {
+          "name": "客戶支援專員",
+          "description": "依據公司知識回覆客戶請求，無法回答的部分則升級處理。"
+        },
+        "finance_lead": {
+          "name": "財務負責人",
+          "description": "審查老闆詢問的支出提案，並維持風險登記冊的時效。不做任何批准。"
+        },
+        "people_performance": {
+          "name": "人員負責人",
+          "description": "對照章程審查各小組的紀錄，並回報延誤或沉默的事項。不設定目標。"
         }
       }
     },

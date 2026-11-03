@@ -1,0 +1,219 @@
+{
+  "title": "Pipeline",
+  "toolbar": {
+    "squad": "Squad responsable",
+    "squad_all": "Tous les squads",
+    "status": "Statut",
+    "status_option": {
+      "open": "En cours",
+      "active": "Actives",
+      "operating": "En exploitation",
+      "shelved": "Mises de côté",
+      "closed": "Clôturées"
+    }
+  },
+  "board": {
+    "no_pipeline": "Aucun pipeline n’est configuré pour cet espace de travail.",
+    "no_initiatives": "Aucune initiative ne correspond à ces filtres.",
+    "column_empty": "Rien à cette étape",
+    "unknown_stage": "Étape inconnue",
+    "load_failed": "Impossible de charger les initiatives."
+  },
+  "card": {
+    "days_in_stage_one": "{{count}} jour à cette étape",
+    "days_in_stage_other": "{{count}} jours à cette étape",
+    "artifacts": "{{present}}/{{required}} livrables",
+    "stalled": "Bloquée",
+    "no_owner": "Sans responsable"
+  },
+  "status": {
+    "active": "Active",
+    "operating": "En exploitation",
+    "shelved": "Mise de côté",
+    "closed": "Clôturée",
+    "unknown": "Inconnu"
+  },
+  "stage_sla": {
+    "ok": "Dans le délai de l’étape",
+    "stalled": "Délai de l’étape dépassé"
+  },
+  "panel": {
+    "loading": "Chargement de l’initiative…",
+    "unavailable": "Cette initiative n’a pas pu être chargée.",
+    "overview": "Vue d’ensemble",
+    "stage": "Étape",
+    "owner": "Squad responsable",
+    "status": "Statut",
+    "days_in_stage": "Jours à cette étape",
+    "exit": "Sortie",
+    "exit_mode": {
+      "auto": "Avance dès que les livrables requis sont publiés",
+      "attest": "Le squad responsable atteste que l’étape est terminée",
+      "gate": "Le patron décide",
+      "unknown": "Règle de sortie non reconnue"
+    },
+    "open_issue": "Ouvrir la tâche associée",
+    "artifacts": "Livrables",
+    "gates": "Portes",
+    "timeline": "Historique des étapes",
+    "force": "Forcer le déplacement",
+    "sla": "Délai de l’étape",
+    "actions": "Actions",
+    "thread": "Fil du ticket associé"
+  },
+  "artifact": {
+    "required": "Requis",
+    "optional": "Facultatif",
+    "published": "Publié",
+    "missing": "Manquant",
+    "waived": "Dispensé",
+    "open_knowledge": "Ouvrir dans les connaissances",
+    "waive": "Dispenser",
+    "waive_note": "Motif de la dispense",
+    "waive_note_required": "Une note est requise pour dispenser un livrable.",
+    "waive_submit": "Dispenser le livrable",
+    "none": "Aucun livrable pour cette étape."
+  },
+  "gate": {
+    "state": {
+      "pending": "En attente d’une décision",
+      "approved": "Approuvée",
+      "rejected": "Refusée",
+      "revising": "Renvoyée pour modifications",
+      "expired": "Expirée",
+      "unknown": "Inconnu"
+    },
+    "approve": "Approuver",
+    "outcome": {
+      "continue": "Continuer",
+      "scale": "Étendre",
+      "sunset": "Arrêter"
+    },
+    "outcome_hint": "Continuer laisse l'initiative en exploitation. Étendre lance une suite à la phase Définir. Arrêter la clôture.",
+    "reject": "Refuser",
+    "reject_note": "Motif du refus",
+    "reject_note_required": "Une note est requise pour refuser une porte.",
+    "reject_submit": "Refuser la porte",
+    "cancel": "Annuler",
+    "none": "Aucune porte pour cette initiative."
+  },
+  "event": {
+    "created": "Créée",
+    "advanced": "Avancée",
+    "sent_back": "Renvoyée",
+    "shelved": "Mise de côté",
+    "resumed": "Reprise",
+    "closed": "Clôturée",
+    "forced": "Forcée",
+    "attested": "Attestée",
+    "artifact_waived": "Livrable dispensé",
+    "unknown": "Mise à jour",
+    "move": "{{from}} → {{to}}",
+    "none": "Aucun événement pour l’instant."
+  },
+  "force": {
+    "to_stage": "Déplacer vers l’étape",
+    "reason": "Motif",
+    "reason_required": "Un motif est requis pour forcer un déplacement.",
+    "submit": "Forcer le déplacement"
+  },
+  "toast": {
+    "waived": "Livrable dispensé.",
+    "waive_failed": "Impossible de dispenser le livrable.",
+    "approved": "Porte approuvée.",
+    "rejected": "Porte refusée.",
+    "decide_failed": "Impossible d’enregistrer la décision.",
+    "forced": "Déplacée vers {{stage}}.",
+    "force_failed": "Impossible de déplacer l’initiative.",
+    "created": "Initiative créée.",
+    "advanced": "Initiative avancée.",
+    "attested": "Étape attestée.",
+    "sent_back": "Initiative renvoyée.",
+    "shelved": "Initiative mise en attente.",
+    "resumed": "Initiative reprise.",
+    "closed": "Initiative clôturée."
+  },
+  "kind": {
+    "label": {
+      "decision": "Décision",
+      "opportunity": "Opportunité",
+      "stage_gate": "Porte d’étape",
+      "org_change": "Changement d’organisation",
+      "budget": "Budget",
+      "standing_approval": "Approbation permanente",
+      "unknown": "Autre"
+    }
+  },
+  "opportunity": {
+    "thesis": "Thèse",
+    "market": "Marché",
+    "evidence": "Preuves",
+    "evidence_item": "Document {{index}}",
+    "no_evidence": "Aucune preuve jointe.",
+    "target_stage": "Démarre à {{stage}}"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "Liste des livrables",
+    "checklist_empty": "Aucun livrable pour cette étape.",
+    "attestation": "Attestation du responsable",
+    "attested_by": "Attestée par {{name}}, {{time}}",
+    "not_attested": "Pas encore attestée.",
+    "unavailable": "L’initiative n’a pas pu être chargée."
+  },
+  "badge": {
+    "label_one": "{{count}} initiative dont le squad est responsable",
+    "label_other": "{{count}} initiatives dont le squad est responsable",
+    "open": "Ouvrir le pipeline"
+  },
+  "create": {
+    "button": "Nouvelle initiative",
+    "title": "Nouvelle initiative",
+    "title_label": "Titre",
+    "title_required": "Un titre est requis.",
+    "title_too_long": "Le titre ne doit pas dépasser 200 caractères.",
+    "thesis_label": "Thèse",
+    "thesis_required": "Une thèse est requise : dites pourquoi cela vaut la peine.",
+    "thesis_too_long": "La thèse est trop longue.",
+    "pipeline_label": "Pipeline",
+    "no_pipeline": "Cet espace de travail n’a pas de pipeline où démarrer une initiative.",
+    "failed": "Impossible de créer l’initiative.",
+    "submit": "Créer l’initiative",
+    "cancel": "Annuler"
+  },
+  "actions": {
+    "advance": "Faire avancer",
+    "attest": "Attester l’étape",
+    "send_back": "Renvoyer",
+    "send_back_note": "Note pour le responsable",
+    "send_back_note_required": "Une note est requise pour renvoyer une initiative.",
+    "send_back_submit": "Renvoyer",
+    "resume": "Reprendre",
+    "shelve": "Mettre en attente",
+    "shelve_title": "Mettre cette initiative en attente ?",
+    "shelve_description": "Le chronomètre de l’étape s’arrête jusqu’à sa reprise.",
+    "shelve_note": "Note (facultative)",
+    "shelve_submit": "Mettre en attente",
+    "close": "Clôturer",
+    "close_title": "Clôturer cette initiative ?",
+    "close_description": "Le ticket associé est marqué comme terminé, et l’initiative quitte le pipeline.",
+    "close_reason": "Motif",
+    "close_reason_required": "Un motif est requis pour clôturer une initiative.",
+    "close_submit": "Clôturer l’initiative",
+    "cancel": "Annuler"
+  },
+  "action_error": {
+    "generic": "Impossible de modifier l’initiative.",
+    "stage_not_ready": "L’étape attend encore ses livrables requis.",
+    "needs_attest": "L’escouade responsable doit d’abord attester l’étape.",
+    "stage_is_gate": "Une porte décide de cette étape.",
+    "not_attest_stage": "Cette étape ne se valide pas par une attestation.",
+    "initiative_closed": "L’initiative est clôturée.",
+    "initiative_shelved": "L’initiative est en attente. Reprenez-la d’abord.",
+    "initiative_not_shelved": "L’initiative n’est pas en attente.",
+    "no_previous_stage": "Il n’y a pas d’étape précédente.",
+    "note_required": "Une note est requise pour ce changement.",
+    "stage_unowned": "Cette étape n’a pas d’escouade responsable.",
+    "build_squad_not_sdlc": "L’étape Build demande une escouade avec le flux logiciel."
+  }
+}

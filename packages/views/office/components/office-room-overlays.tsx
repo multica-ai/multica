@@ -8,27 +8,34 @@ import type { OfficeStage } from "./office-canvas";
 /**
  * Controls pinned over the rooms the engine reports, by slot: "Create squad" in
  * an empty room, the `+N` chip of a room whose squad has more agents than
- * desks, and a count of the proposals waiting in it. Each sits at its room's
- * own rectangle, in the stage's layout units.
+ * desks, a count of the proposals waiting in it, and a count of the open
+ * initiatives its squad owns, which opens the pipeline filtered to the squad.
+ * Each sits at its room's own rectangle, in the stage's layout units.
  */
 export function OfficeRoomOverlays({
   stage,
   rooms,
   pendingBySlot,
+  initiativesBySlot,
   onCreateSquad,
   onOpenSquad,
   onOpenDecisions,
+  onOpenPipeline,
 }: {
   stage: OfficeStage;
   /** The floor's rooms, indexed by slot; the stage's rooms are in the same order. */
   rooms: readonly FloorRoom[];
   /** Pending proposals per slot. */
   pendingBySlot: readonly number[];
+  /** Open initiatives owned by the room's squad, per slot. */
+  initiativesBySlot: readonly number[];
   onCreateSquad: () => void;
   onOpenSquad: (slot: number) => void;
   onOpenDecisions: () => void;
+  onOpenPipeline: (squadId: string) => void;
 }) {
   const { t } = useT("issues");
+  const { t: tPipeline } = useT("pipeline");
   const { units } = stage;
   return (
     <>
@@ -42,8 +49,20 @@ export function OfficeRoomOverlays({
           height: `${(rect.h / units.h) * 100}%`,
         };
         const pending = pendingBySlot[index] ?? 0;
+        const initiatives = initiativesBySlot[index] ?? 0;
         return (
           <div key={index} className="absolute" style={box}>
+            {initiatives > 0 && room.squad ? (
+              <button
+                type="button"
+                aria-label={tPipeline(($) => $.badge.label, { count: initiatives })}
+                title={tPipeline(($) => $.badge.open)}
+                onClick={() => onOpenPipeline(room.squad?.id ?? "")}
+                className="pointer-events-auto absolute bottom-0 left-0 cursor-pointer rounded-[3px] bg-[#2c2418]/90 px-1.5 py-0.5 text-micro font-semibold text-[#fff8ea] shadow hover:bg-[#1d5fd6]"
+              >
+                {initiatives}
+              </button>
+            ) : null}
             {pending > 0 ? (
               <button
                 type="button"

@@ -2,7 +2,9 @@
   "title": "知識庫",
   "tabs": {
     "library": "資料",
-    "drafts": "草稿"
+    "drafts": "草稿",
+    "governance": "治理",
+    "setup": "設定"
   },
   "state": {
     "ready": "就緒",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "詢問秘書",
     "prompt": "請根據以下公司知識庫檢索結果回答我的問題。引用你使用的每份文件時，寫明它的標題和連結；如果檢索結果無法回答，請直接說明。\n\n問題：{{question}}\n\n檢索結果：\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "類型",
+      "all": "全部類型"
+    },
+    "policy": {
+      "title": "發布策略",
+      "description": "智慧代理草稿的發布方式。類型的策略優先於知識庫的策略。沒有策略時，草稿等待人工發布。",
+      "scope_base": "知識庫",
+      "scope_kind": "類型",
+      "inherited": "預設",
+      "reset": "重設",
+      "load_error": "無法載入發布策略",
+      "aria_mode": "{{name}} 的發布模式",
+      "toast_failed": "無法變更發布策略",
+      "toast_reset": "已重設發布策略",
+      "mode": {
+        "manual": "手動：由人發布",
+        "auto_after_review": "審查通過後自動發布",
+        "auto": "自動發布",
+        "unknown": "未知模式"
+      }
+    },
+    "add_eval": {
+      "button": "新增為評估案例",
+      "title": "新增為評估案例",
+      "description": "針對此問題，搜尋應回傳這份文件。下一次評估執行時會檢查。",
+      "question": "問題",
+      "document": "預期文件",
+      "submit": "新增案例",
+      "toast_added": "已新增評估案例",
+      "toast_failed": "無法新增評估案例"
+    },
+    "retrieval": {
+      "title": "檢索品質",
+      "run": "執行評估",
+      "last_run": "命中率 {{rate}}%（{{total}} 個案例中命中 {{hits}} 個）",
+      "no_runs": "尚未執行評估。從搜尋結果新增案例即可開始。",
+      "ran": "評估已記錄：命中率 {{rate}}%",
+      "offline": "未記錄：知識服務離線",
+      "run_failed": "無法執行評估"
+    },
+    "routines": {
+      "title": "圖書館員例行工作",
+      "empty": "尚無例行工作執行。",
+      "load_error": "無法載入例行工作",
+      "nothing": "無需回報",
+      "count": "{{label}}：{{count}}",
+      "triage": "草稿分流",
+      "freshness": "時效性檢查",
+      "audit": "分類稽核",
+      "eval": "檢索評估",
+      "backfill": "設定補齊",
+      "counts": {
+        "review_due": "待複核",
+        "duplicate": "重複標題",
+        "missing_sections": "缺少標題",
+        "missing_kind": "缺少類型",
+        "orphaned": "WeKnora 中已不存在",
+        "repaired": "已修復",
+        "new_drafts": "新草稿"
+      }
+    }
+  },
+  "upload": {
+    "title": "新增檔案",
+    "drop_hint": "將檔案拖曳到這裡，或選擇檔案。新增後會立即發布。",
+    "choose": "選擇檔案",
+    "base_label": "知識庫",
+    "kind_label": "類型",
+    "kind_hint": "使用小寫字母、數字與底線，例如 market_report。",
+    "submit": "上傳",
+    "toast": {
+      "uploaded": "{{name}} 已加入知識庫",
+      "failed": "無法上傳檔案"
+    }
+  },
+  "import": {
+    "title": "匯入網頁",
+    "url_label": "頁面位址",
+    "title_label": "標題（選填）",
+    "submit": "匯入",
+    "toast": {
+      "imported": "頁面已加入知識庫",
+      "failed": "無法匯入頁面"
+    }
+  },
+  "sources": {
+    "title": "資料來源",
+    "description": "WeKnora 同步到知識庫的連線。失敗會顯示在這裡，請在 WeKnora 中修復。",
+    "load_error": "無法載入資料來源",
+    "offline": "知識服務離線，無法讀取資料來源。",
+    "empty": "尚未連接任何資料來源。",
+    "create": "在 WeKnora 中新增資料來源",
+    "never_synced": "從未同步",
+    "last_sync": "上次同步 {{when}}",
+    "items": "{{count}} 項",
+    "status": {
+      "active": "正常",
+      "paused": "已暫停",
+      "error": "失敗",
+      "unknown": "未知"
+    }
+  },
+  "bases": {
+    "title": "知識庫",
+    "description": "可將知識庫限定給指定的小組、樓層或智慧代理。Wiki 最多開啟三個知識庫；摘要會產生模型呼叫費用。",
+    "restricted": "受限",
+    "wiki": "Wiki",
+    "summaries": "摘要",
+    "access": "權限",
+    "toast": {
+      "failed": "未能儲存變更"
+    }
+  },
+  "access": {
+    "loading": "正在載入權限",
+    "load_error": "無法載入權限清單",
+    "empty": "只有擁有者與管理員可以查看此知識庫。",
+    "remove": "移除權限",
+    "level": {
+      "read": "讀取",
+      "write": "寫入"
+    },
+    "subject": {
+      "squad": "小組",
+      "floor": "樓層",
+      "agent": "智慧代理",
+      "unknown": "未知"
+    },
+    "add": {
+      "subject_type": "授予",
+      "subject": "對象",
+      "subject_placeholder": "選擇",
+      "level": "權限",
+      "submit": "授予權限"
+    },
+    "toast": {
+      "failed": "未能變更權限"
+    }
+  },
+  "models": {
+    "title": "模型",
+    "description": "各已設定的對話、重新排序與視覺模型各執行一次，並顯示失敗的模型及原因。",
+    "test": "測試模型",
+    "not_configured": "此伺服器未設定模型，因此摘要與 Wiki 已關閉。",
+    "ok": "正常",
+    "failed": "失敗",
+    "role": {
+      "chat": "對話",
+      "rerank": "重新排序",
+      "vision": "視覺",
+      "unknown": "模型"
+    }
+  },
+  "owner_login": {
+    "title": "你的 WeKnora 登入資訊",
+    "description": "可登入 WeKnora 本身的介面進行進階設定。密碼只顯示一次。",
+    "show": "顯示我的密碼",
+    "email": "電子郵件：{{email}}",
+    "once": "請立即複製，之後不會再次顯示。",
+    "open": "開啟 WeKnora",
+    "failed": "無法顯示密碼"
   }
 }

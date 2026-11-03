@@ -1,0 +1,217 @@
+{
+  "title": "파이프라인",
+  "toolbar": {
+    "squad": "담당 스쿼드",
+    "squad_all": "모든 스쿼드",
+    "status": "상태",
+    "status_option": {
+      "open": "진행 중",
+      "active": "활성",
+      "operating": "운영 중",
+      "shelved": "보류됨",
+      "closed": "종료됨"
+    }
+  },
+  "board": {
+    "no_pipeline": "이 워크스페이스에는 아직 파이프라인이 없습니다.",
+    "no_initiatives": "필터와 일치하는 이니셔티브가 없습니다.",
+    "column_empty": "이 단계에는 항목이 없습니다",
+    "unknown_stage": "알 수 없는 단계",
+    "load_failed": "이니셔티브를 불러오지 못했습니다."
+  },
+  "card": {
+    "days_in_stage_other": "이 단계에서 {{count}}일",
+    "artifacts": "산출물 {{present}}/{{required}}",
+    "stalled": "정체",
+    "no_owner": "담당 없음"
+  },
+  "status": {
+    "active": "활성",
+    "operating": "운영 중",
+    "shelved": "보류됨",
+    "closed": "종료됨",
+    "unknown": "알 수 없음"
+  },
+  "stage_sla": {
+    "ok": "단계 SLA 이내",
+    "stalled": "단계 SLA 초과"
+  },
+  "panel": {
+    "loading": "이니셔티브 불러오는 중…",
+    "unavailable": "이 이니셔티브를 불러올 수 없습니다.",
+    "overview": "개요",
+    "stage": "단계",
+    "owner": "담당 스쿼드",
+    "status": "상태",
+    "days_in_stage": "단계 체류 일수",
+    "exit": "종료 조건",
+    "exit_mode": {
+      "auto": "필수 산출물이 게시되면 진행합니다",
+      "attest": "담당 스쿼드가 단계 완료를 승인합니다",
+      "gate": "보스가 결정합니다",
+      "unknown": "인식할 수 없는 종료 규칙"
+    },
+    "open_issue": "연결된 이슈 열기",
+    "artifacts": "산출물",
+    "gates": "게이트",
+    "timeline": "단계 타임라인",
+    "force": "강제 이동",
+    "sla": "단계 SLA",
+    "actions": "작업",
+    "thread": "연결된 이슈 스레드"
+  },
+  "artifact": {
+    "required": "필수",
+    "optional": "선택",
+    "published": "게시됨",
+    "missing": "누락",
+    "waived": "면제됨",
+    "open_knowledge": "지식 베이스에서 열기",
+    "waive": "면제",
+    "waive_note": "면제 사유",
+    "waive_note_required": "산출물을 면제하려면 사유를 입력해야 합니다.",
+    "waive_submit": "산출물 면제",
+    "none": "이 단계의 산출물이 없습니다."
+  },
+  "gate": {
+    "state": {
+      "pending": "결정 대기 중",
+      "approved": "승인됨",
+      "rejected": "반려됨",
+      "revising": "수정을 위해 반려됨",
+      "expired": "만료됨",
+      "unknown": "알 수 없음"
+    },
+    "approve": "승인",
+    "outcome": {
+      "continue": "계속",
+      "scale": "확대",
+      "sunset": "종료"
+    },
+    "outcome_hint": "계속은 이니셔티브 운영을 유지합니다. 확대는 정의 단계에 후속 이니셔티브를 시작합니다. 종료는 이니셔티브를 닫습니다.",
+    "reject": "반려",
+    "reject_note": "반려 사유",
+    "reject_note_required": "게이트를 반려하려면 사유를 입력해야 합니다.",
+    "reject_submit": "게이트 반려",
+    "cancel": "취소",
+    "none": "이 이니셔티브의 게이트가 없습니다."
+  },
+  "event": {
+    "created": "생성",
+    "advanced": "진행",
+    "sent_back": "반려",
+    "shelved": "보류",
+    "resumed": "재개",
+    "closed": "종료",
+    "forced": "강제 이동",
+    "attested": "승인",
+    "artifact_waived": "산출물 면제",
+    "unknown": "업데이트",
+    "move": "{{from}} → {{to}}",
+    "none": "아직 이벤트가 없습니다."
+  },
+  "force": {
+    "to_stage": "이동할 단계",
+    "reason": "사유",
+    "reason_required": "강제 이동하려면 사유를 입력해야 합니다.",
+    "submit": "강제 이동"
+  },
+  "toast": {
+    "waived": "산출물을 면제했습니다.",
+    "waive_failed": "산출물을 면제하지 못했습니다.",
+    "approved": "게이트를 승인했습니다.",
+    "rejected": "게이트를 반려했습니다.",
+    "decide_failed": "결정을 기록하지 못했습니다.",
+    "forced": "{{stage}}(으)로 이동했습니다.",
+    "force_failed": "이니셔티브를 이동하지 못했습니다.",
+    "created": "이니셔티브를 만들었습니다.",
+    "advanced": "이니셔티브를 진행했습니다.",
+    "attested": "단계를 승인했습니다.",
+    "sent_back": "이니셔티브를 되돌렸습니다.",
+    "shelved": "이니셔티브를 보류했습니다.",
+    "resumed": "이니셔티브를 재개했습니다.",
+    "closed": "이니셔티브를 종료했습니다."
+  },
+  "kind": {
+    "label": {
+      "decision": "결정",
+      "opportunity": "기회",
+      "stage_gate": "단계 게이트",
+      "org_change": "조직 변경",
+      "budget": "예산",
+      "standing_approval": "상시 승인",
+      "unknown": "기타"
+    }
+  },
+  "opportunity": {
+    "thesis": "가설",
+    "market": "시장",
+    "evidence": "근거",
+    "evidence_item": "문서 {{index}}",
+    "no_evidence": "첨부된 근거가 없습니다.",
+    "target_stage": "{{stage}}에서 시작"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "산출물 체크리스트",
+    "checklist_empty": "이 단계의 산출물이 없습니다.",
+    "attestation": "리더의 승인",
+    "attested_by": "{{name}} 승인, {{time}}",
+    "not_attested": "아직 승인되지 않았습니다.",
+    "unavailable": "이니셔티브를 불러올 수 없습니다."
+  },
+  "badge": {
+    "label_other": "담당 이니셔티브 {{count}}개",
+    "open": "파이프라인 열기"
+  },
+  "create": {
+    "button": "새 이니셔티브",
+    "title": "새 이니셔티브",
+    "title_label": "제목",
+    "title_required": "제목을 입력해야 합니다.",
+    "title_too_long": "제목은 200자 이하여야 합니다.",
+    "thesis_label": "가설",
+    "thesis_required": "가설을 입력해야 합니다. 왜 가치가 있는지 적어 주세요.",
+    "thesis_too_long": "가설이 너무 깁니다.",
+    "pipeline_label": "파이프라인",
+    "no_pipeline": "이 워크스페이스에는 이니셔티브를 시작할 파이프라인이 없습니다.",
+    "failed": "이니셔티브를 만들지 못했습니다.",
+    "submit": "이니셔티브 만들기",
+    "cancel": "취소"
+  },
+  "actions": {
+    "advance": "진행",
+    "attest": "단계 승인",
+    "send_back": "되돌리기",
+    "send_back_note": "담당자에게 남길 메모",
+    "send_back_note_required": "이니셔티브를 되돌리려면 메모가 필요합니다.",
+    "send_back_submit": "되돌리기",
+    "resume": "재개",
+    "shelve": "보류",
+    "shelve_title": "이 이니셔티브를 보류할까요?",
+    "shelve_description": "다시 재개할 때까지 단계 타이머가 멈춥니다.",
+    "shelve_note": "메모(선택)",
+    "shelve_submit": "이니셔티브 보류",
+    "close": "종료",
+    "close_title": "이 이니셔티브를 종료할까요?",
+    "close_description": "연결된 이슈는 완료로 표시되고, 이니셔티브는 파이프라인에서 빠집니다.",
+    "close_reason": "사유",
+    "close_reason_required": "이니셔티브를 종료하려면 사유가 필요합니다.",
+    "close_submit": "이니셔티브 종료",
+    "cancel": "취소"
+  },
+  "action_error": {
+    "generic": "이니셔티브를 변경하지 못했습니다.",
+    "stage_not_ready": "이 단계에 필요한 산출물이 아직 부족합니다.",
+    "needs_attest": "담당 스쿼드가 먼저 이 단계를 승인해야 합니다.",
+    "stage_is_gate": "이 단계는 게이트에서 결정합니다.",
+    "not_attest_stage": "이 단계는 승인이 필요하지 않습니다.",
+    "initiative_closed": "이니셔티브가 종료되었습니다.",
+    "initiative_shelved": "이니셔티브가 보류 중입니다. 먼저 재개하세요.",
+    "initiative_not_shelved": "이니셔티브는 보류 상태가 아닙니다.",
+    "no_previous_stage": "되돌아갈 이전 단계가 없습니다.",
+    "note_required": "이 변경에는 메모가 필요합니다.",
+    "stage_unowned": "이 단계에는 담당 스쿼드가 없습니다.",
+    "build_squad_not_sdlc": "Build 단계에는 소프트웨어 워크플로가 있는 스쿼드가 필요합니다."
+  }
+}

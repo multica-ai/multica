@@ -1,0 +1,217 @@
+{
+  "title": "管线",
+  "toolbar": {
+    "squad": "负责小队",
+    "squad_all": "全部小队",
+    "status": "状态",
+    "status_option": {
+      "open": "进行中",
+      "active": "活跃",
+      "operating": "运营中",
+      "shelved": "已搁置",
+      "closed": "已关闭"
+    }
+  },
+  "board": {
+    "no_pipeline": "此工作区尚未设置管线。",
+    "no_initiatives": "没有符合这些筛选条件的专项。",
+    "column_empty": "此阶段暂无专项",
+    "unknown_stage": "未知阶段",
+    "load_failed": "无法加载专项。"
+  },
+  "card": {
+    "days_in_stage_other": "已在本阶段 {{count}} 天",
+    "artifacts": "产出 {{present}}/{{required}}",
+    "stalled": "停滞",
+    "no_owner": "无负责人"
+  },
+  "status": {
+    "active": "活跃",
+    "operating": "运营中",
+    "shelved": "已搁置",
+    "closed": "已关闭",
+    "unknown": "未知"
+  },
+  "stage_sla": {
+    "ok": "在阶段时限内",
+    "stalled": "已超出阶段时限"
+  },
+  "panel": {
+    "loading": "正在加载专项…",
+    "unavailable": "无法加载此专项。",
+    "overview": "概览",
+    "stage": "阶段",
+    "owner": "负责小队",
+    "status": "状态",
+    "days_in_stage": "在本阶段的天数",
+    "exit": "出口",
+    "exit_mode": {
+      "auto": "必需产出发布后自动推进",
+      "attest": "负责小队确认阶段已完成",
+      "gate": "由老板决定",
+      "unknown": "无法识别的出口规则"
+    },
+    "open_issue": "打开关联任务",
+    "artifacts": "产出",
+    "gates": "闸门",
+    "timeline": "阶段时间线",
+    "force": "强制移动",
+    "sla": "阶段时限",
+    "actions": "操作",
+    "thread": "关联议题讨论"
+  },
+  "artifact": {
+    "required": "必需",
+    "optional": "可选",
+    "published": "已发布",
+    "missing": "缺失",
+    "waived": "已豁免",
+    "open_knowledge": "在知识库中打开",
+    "waive": "豁免",
+    "waive_note": "豁免原因",
+    "waive_note_required": "豁免产出需要填写说明。",
+    "waive_submit": "豁免产出",
+    "none": "此阶段没有产出要求。"
+  },
+  "gate": {
+    "state": {
+      "pending": "等待决定",
+      "approved": "已批准",
+      "rejected": "已驳回",
+      "revising": "已退回修改",
+      "expired": "已过期",
+      "unknown": "未知"
+    },
+    "approve": "批准",
+    "outcome": {
+      "continue": "继续",
+      "scale": "扩大",
+      "sunset": "终止"
+    },
+    "outcome_hint": "继续则保持运营。扩大会在“定义”阶段启动一个后续项目。终止则关闭该项目。",
+    "reject": "驳回",
+    "reject_note": "驳回原因",
+    "reject_note_required": "驳回闸门需要填写说明。",
+    "reject_submit": "驳回闸门",
+    "cancel": "取消",
+    "none": "此专项没有闸门。"
+  },
+  "event": {
+    "created": "已创建",
+    "advanced": "已推进",
+    "sent_back": "已退回",
+    "shelved": "已搁置",
+    "resumed": "已恢复",
+    "closed": "已关闭",
+    "forced": "已强制移动",
+    "attested": "已确认",
+    "artifact_waived": "已豁免产出",
+    "unknown": "已更新",
+    "move": "{{from}} → {{to}}",
+    "none": "暂无记录。"
+  },
+  "force": {
+    "to_stage": "移动到阶段",
+    "reason": "原因",
+    "reason_required": "强制移动需要填写原因。",
+    "submit": "强制移动"
+  },
+  "toast": {
+    "waived": "已豁免产出。",
+    "waive_failed": "无法豁免产出。",
+    "approved": "闸门已批准。",
+    "rejected": "闸门已驳回。",
+    "decide_failed": "无法记录决定。",
+    "forced": "已移动到{{stage}}。",
+    "force_failed": "无法移动该专项。",
+    "created": "已创建专项。",
+    "advanced": "已推进专项。",
+    "attested": "已确认阶段完成。",
+    "sent_back": "已退回专项。",
+    "shelved": "已搁置专项。",
+    "resumed": "已恢复专项。",
+    "closed": "已关闭专项。"
+  },
+  "kind": {
+    "label": {
+      "decision": "决定",
+      "opportunity": "机会",
+      "stage_gate": "阶段闸门",
+      "org_change": "组织变更",
+      "budget": "预算",
+      "standing_approval": "常规审批",
+      "unknown": "其他"
+    }
+  },
+  "opportunity": {
+    "thesis": "论点",
+    "market": "市场",
+    "evidence": "依据",
+    "evidence_item": "文档 {{index}}",
+    "no_evidence": "未附依据。",
+    "target_stage": "从{{stage}}开始"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "产出清单",
+    "checklist_empty": "此阶段没有产出要求。",
+    "attestation": "负责人确认",
+    "attested_by": "{{name}}确认，{{time}}",
+    "not_attested": "尚未确认。",
+    "unavailable": "无法加载该专项。"
+  },
+  "badge": {
+    "label_other": "负责 {{count}} 个专项",
+    "open": "打开管线"
+  },
+  "create": {
+    "button": "新建专项",
+    "title": "新建专项",
+    "title_label": "标题",
+    "title_required": "请填写标题。",
+    "title_too_long": "标题不能超过 200 个字符。",
+    "thesis_label": "论点",
+    "thesis_required": "请填写论点：说明为什么值得做。",
+    "thesis_too_long": "论点太长了。",
+    "pipeline_label": "管线",
+    "no_pipeline": "此工作区没有可用于启动专项的管线。",
+    "failed": "无法创建专项。",
+    "submit": "创建专项",
+    "cancel": "取消"
+  },
+  "actions": {
+    "advance": "推进",
+    "attest": "确认阶段完成",
+    "send_back": "退回",
+    "send_back_note": "给负责人的备注",
+    "send_back_note_required": "退回专项需要填写备注。",
+    "send_back_submit": "退回",
+    "resume": "恢复",
+    "shelve": "搁置",
+    "shelve_title": "搁置此专项？",
+    "shelve_description": "恢复之前，阶段计时会暂停。",
+    "shelve_note": "备注（可选）",
+    "shelve_submit": "搁置专项",
+    "close": "关闭",
+    "close_title": "关闭此专项？",
+    "close_description": "关联的议题将标记为完成，专项将退出管线。",
+    "close_reason": "原因",
+    "close_reason_required": "关闭专项需要填写原因。",
+    "close_submit": "关闭专项",
+    "cancel": "取消"
+  },
+  "action_error": {
+    "generic": "无法变更专项。",
+    "stage_not_ready": "此阶段仍缺少必需的产出物。",
+    "needs_attest": "负责小队需要先确认此阶段完成。",
+    "stage_is_gate": "此阶段由闸门决定。",
+    "not_attest_stage": "此阶段不需要确认。",
+    "initiative_closed": "专项已关闭。",
+    "initiative_shelved": "专项已搁置，请先恢复。",
+    "initiative_not_shelved": "专项未处于搁置状态。",
+    "no_previous_stage": "没有可退回的前一阶段。",
+    "note_required": "此变更需要填写备注。",
+    "stage_unowned": "此阶段没有负责小队。",
+    "build_squad_not_sdlc": "构建阶段需要具备软件工作流的小队。"
+  }
+}

@@ -31,6 +31,7 @@ const SPACE_BY_SEGMENT: Record<string, AppSpaceId> = {
   "my-issues": "work",
   issues: "work",
   office: "work",
+  pipeline: "work",
   projects: "work",
   views: "work",
   agents: "team",

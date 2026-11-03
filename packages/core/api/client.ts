@@ -327,6 +327,14 @@ import {
   type OfficeSetupRequest,
 } from "../office/setup-schema";
 import {
+  CompanyTemplateApplyResultSchema,
+  FALLBACK_COMPANY_TEMPLATE_RESULT,
+} from "../office/company-template-schema";
+import type {
+  CompanyTemplateApplyRequest,
+  CompanyTemplateApplyResult,
+} from "../office/company-template-types";
+import {
   FALLBACK_KNOWLEDGE_BASES,
   FALLBACK_KNOWLEDGE_DOCUMENT,
   FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
@@ -338,6 +346,63 @@ import {
   KnowledgeSearchResultSchema,
   KnowledgeStatusSchema,
 } from "../knowledge/schemas";
+import {
+  FALLBACK_KNOWLEDGE_ACCESS,
+  FALLBACK_KNOWLEDGE_BASE_SETTINGS,
+  FALLBACK_KNOWLEDGE_MODEL_CHECKS,
+  FALLBACK_KNOWLEDGE_OWNER_LOGIN,
+  FALLBACK_KNOWLEDGE_SOURCES,
+  KnowledgeAccessSchema,
+  KnowledgeBaseSettingsSchema,
+  KnowledgeModelChecksSchema,
+  KnowledgeOwnerLoginSchema,
+  KnowledgeSourcesSchema,
+} from "../knowledge/platform-schemas";
+import type {
+  KnowledgeAccess,
+  KnowledgeBaseSettings,
+  KnowledgeBaseSettingsPatch,
+  KnowledgeModelChecks,
+  KnowledgeOwnerLogin,
+  KnowledgeSources,
+  KnowledgeSubjectType,
+  UploadKnowledgeDocumentParams,
+} from "../knowledge/platform-types";
+import {
+  FALLBACK_KNOWLEDGE_EVAL_CASE,
+  FALLBACK_KNOWLEDGE_EVAL_CASES,
+  FALLBACK_KNOWLEDGE_EVAL_RUN,
+  FALLBACK_KNOWLEDGE_EVAL_RUNS,
+  FALLBACK_KNOWLEDGE_HEALTH,
+  FALLBACK_KNOWLEDGE_KIND,
+  FALLBACK_KNOWLEDGE_KINDS,
+  FALLBACK_KNOWLEDGE_POLICIES,
+  FALLBACK_KNOWLEDGE_POLICY,
+  KnowledgeEvalCaseSchema,
+  KnowledgeEvalCasesSchema,
+  KnowledgeEvalRunSchema,
+  KnowledgeEvalRunsSchema,
+  KnowledgeHealthSchema,
+  KnowledgeKindSchema,
+  KnowledgeKindsSchema,
+  KnowledgePublishPoliciesSchema,
+  KnowledgePublishPolicySchema,
+} from "../knowledge/taxonomy";
+import type {
+  CreateKnowledgeEvalCaseRequest,
+  KnowledgeEvalCase,
+  KnowledgeEvalCases,
+  KnowledgeEvalRun,
+  KnowledgeEvalRuns,
+  KnowledgeHealth,
+  KnowledgeKind,
+  KnowledgeKinds,
+  KnowledgePublishPolicies,
+  KnowledgePublishPolicy,
+  ReviewKnowledgeDocumentRequest,
+  SetKnowledgePolicyRequest,
+  UpdateKnowledgeKindRequest,
+} from "../knowledge/taxonomy-types";
 import type {
   CreateKnowledgeDocumentRequest,
   KnowledgeBases,
@@ -348,6 +413,24 @@ import type {
   ListKnowledgeDocumentsParams,
   SearchKnowledgeParams,
 } from "../knowledge/types";
+import {
+  EMPTY_INITIATIVES,
+  EMPTY_PIPELINES,
+  FALLBACK_INITIATIVE,
+  FALLBACK_INITIATIVE_DETAIL,
+  InitiativeDetailSchema,
+  InitiativeSchema,
+  InitiativesResponseSchema,
+  PipelinesResponseSchema,
+} from "../pipeline/schemas";
+import type {
+  CreateInitiativeRequest,
+  Initiative,
+  InitiativeDetail,
+  ListInitiativesParams,
+  Pipeline,
+  ForceInitiativeRequest,
+} from "../pipeline/types";
 import {
   FALLBACK_PROPOSAL,
   ProposalListSchema,
@@ -5819,6 +5902,17 @@ export class ApiClient {
     });
   }
 
+  // The starter company (owner or admin). Idempotent; a step that failed is reported in the result.
+  async applyCompanyTemplate(data: CompanyTemplateApplyRequest): Promise<CompanyTemplateApplyResult> {
+    const raw = await this.fetch<unknown>("/api/office/company-template/apply", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CompanyTemplateApplyResultSchema, FALLBACK_COMPANY_TEMPLATE_RESULT, {
+      endpoint: "POST /api/office/company-template/apply",
+    });
+  }
+
   async listBriefs(params?: ListBriefsParams): Promise<Brief[]> {
     const search = new URLSearchParams();
     if (params?.kind) search.set("kind", params.kind);
@@ -5885,6 +5979,7 @@ export class ApiClient {
   async searchKnowledge(params: SearchKnowledgeParams): Promise<KnowledgeSearchResult> {
     const search = new URLSearchParams({ q: params.q });
     if (params.kb) search.set("kb", params.kb);
+    if (params.kind) search.set("kind", params.kind);
     if (params.limit) search.set("limit", String(params.limit));
     const raw = await this.fetch<unknown>(`/api/knowledge/search?${search.toString()}`);
     return parseWithFallback(raw, KnowledgeSearchResultSchema, FALLBACK_KNOWLEDGE_SEARCH, {
@@ -5915,6 +6010,205 @@ export class ApiClient {
 
   async deleteKnowledgeDocument(id: string): Promise<void> {
     await this.fetch(`/api/knowledge/documents/${id}`, { method: "DELETE" });
+  }
+
+  // Company knowledge, platform side (plan 10.11 to 10.13). Upload is multipart,
+  // so the browser sets the boundary itself, as uploadFile and
+  // publishPluginPackage do.
+  async uploadKnowledgeDocument(params: UploadKnowledgeDocumentParams): Promise<KnowledgeDocument> {
+    const formData = new FormData();
+    formData.append("file", params.file);
+    formData.append("kb", params.kb);
+    formData.append("kind", params.kind);
+    if (params.idempotencyKey) formData.append("idempotency_key", params.idempotencyKey);
+
+    const credentialUsed = this.getToken();
+    const res = await fetch(`${this.baseUrl}/api/knowledge/documents/upload`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: formData,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized(credentialUsed);
+      throw new Error(await this.parseErrorMessage(res, `Upload failed: ${res.status}`));
+    }
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents/upload",
+    });
+  }
+
+  async listKnowledgeSources(): Promise<KnowledgeSources> {
+    const raw = await this.fetch<unknown>("/api/knowledge/sources");
+    return parseWithFallback(raw, KnowledgeSourcesSchema, FALLBACK_KNOWLEDGE_SOURCES, {
+      endpoint: "GET /api/knowledge/sources",
+    });
+  }
+
+  async getKnowledgeBaseAccess(key: string): Promise<KnowledgeAccess> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/bases/${encodeURIComponent(key)}/access`);
+    return parseWithFallback(raw, KnowledgeAccessSchema, FALLBACK_KNOWLEDGE_ACCESS, {
+      endpoint: "GET /api/knowledge/bases/:key/access",
+    });
+  }
+
+  async setKnowledgeVisibility(key: string, visibility: string): Promise<KnowledgeAccess> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/bases/${encodeURIComponent(key)}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify({ visibility }),
+    });
+    return parseWithFallback(raw, KnowledgeAccessSchema, FALLBACK_KNOWLEDGE_ACCESS, {
+      endpoint: "PUT /api/knowledge/bases/:key/visibility",
+    });
+  }
+
+  async putKnowledgeGrant(
+    key: string,
+    subjectType: KnowledgeSubjectType,
+    subjectId: string,
+    access: "read" | "write",
+  ): Promise<KnowledgeAccess> {
+    const raw = await this.fetch<unknown>(
+      `/api/knowledge/bases/${encodeURIComponent(key)}/access/${subjectType}/${encodeURIComponent(subjectId)}`,
+      { method: "PUT", body: JSON.stringify({ access }) },
+    );
+    return parseWithFallback(raw, KnowledgeAccessSchema, FALLBACK_KNOWLEDGE_ACCESS, {
+      endpoint: "PUT /api/knowledge/bases/:key/access/:type/:id",
+    });
+  }
+
+  async deleteKnowledgeGrant(
+    key: string,
+    subjectType: KnowledgeSubjectType,
+    subjectId: string,
+  ): Promise<KnowledgeAccess> {
+    const raw = await this.fetch<unknown>(
+      `/api/knowledge/bases/${encodeURIComponent(key)}/access/${subjectType}/${encodeURIComponent(subjectId)}`,
+      { method: "DELETE" },
+    );
+    return parseWithFallback(raw, KnowledgeAccessSchema, FALLBACK_KNOWLEDGE_ACCESS, {
+      endpoint: "DELETE /api/knowledge/bases/:key/access/:type/:id",
+    });
+  }
+
+  async updateKnowledgeBaseSettings(
+    key: string,
+    patch: KnowledgeBaseSettingsPatch,
+  ): Promise<KnowledgeBaseSettings> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/bases/${encodeURIComponent(key)}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    return parseWithFallback(raw, KnowledgeBaseSettingsSchema, FALLBACK_KNOWLEDGE_BASE_SETTINGS, {
+      endpoint: "PATCH /api/knowledge/bases/:key/settings",
+    });
+  }
+
+  async testKnowledgeModels(): Promise<KnowledgeModelChecks> {
+    const raw = await this.fetch<unknown>("/api/knowledge/models/test", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeModelChecksSchema, FALLBACK_KNOWLEDGE_MODEL_CHECKS, {
+      endpoint: "POST /api/knowledge/models/test",
+    });
+  }
+
+  async revealKnowledgeOwnerPassword(): Promise<KnowledgeOwnerLogin> {
+    const raw = await this.fetch<unknown>("/api/knowledge/owner-account/reveal", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeOwnerLoginSchema, FALLBACK_KNOWLEDGE_OWNER_LOGIN, {
+      endpoint: "POST /api/knowledge/owner-account/reveal",
+    });
+  }
+
+  // Knowledge taxonomy: kinds, publish policies, the Librarian's health, eval.
+  async listKnowledgeKinds(): Promise<KnowledgeKinds> {
+    const raw = await this.fetch<unknown>("/api/knowledge/kinds");
+    return parseWithFallback(raw, KnowledgeKindsSchema, FALLBACK_KNOWLEDGE_KINDS, {
+      endpoint: "GET /api/knowledge/kinds",
+    });
+  }
+
+  async updateKnowledgeKind(key: string, patch: UpdateKnowledgeKindRequest): Promise<KnowledgeKind> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/kinds/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    return parseWithFallback(raw, KnowledgeKindSchema, FALLBACK_KNOWLEDGE_KIND, {
+      endpoint: "PATCH /api/knowledge/kinds/:key",
+    });
+  }
+
+  async getKnowledgeHealth(): Promise<KnowledgeHealth> {
+    const raw = await this.fetch<unknown>("/api/knowledge/health");
+    return parseWithFallback(raw, KnowledgeHealthSchema, FALLBACK_KNOWLEDGE_HEALTH, {
+      endpoint: "GET /api/knowledge/health",
+    });
+  }
+
+  async listKnowledgePolicies(): Promise<KnowledgePublishPolicies> {
+    const raw = await this.fetch<unknown>("/api/knowledge/policies");
+    return parseWithFallback(raw, KnowledgePublishPoliciesSchema, FALLBACK_KNOWLEDGE_POLICIES, {
+      endpoint: "GET /api/knowledge/policies",
+    });
+  }
+
+  async setKnowledgePolicy(req: SetKnowledgePolicyRequest): Promise<KnowledgePublishPolicy> {
+    const raw = await this.fetch<unknown>("/api/knowledge/policies", {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+    return parseWithFallback(raw, KnowledgePublishPolicySchema, FALLBACK_KNOWLEDGE_POLICY, {
+      endpoint: "PUT /api/knowledge/policies",
+    });
+  }
+
+  async deleteKnowledgePolicy(scope: "base" | "kind", key: string): Promise<void> {
+    const qs = new URLSearchParams({ scope, key }).toString();
+    await this.fetch(`/api/knowledge/policies?${qs}`, { method: "DELETE" });
+  }
+
+  async reviewKnowledgeDocument(id: string, req: ReviewKnowledgeDocumentRequest): Promise<KnowledgeDocument> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/documents/${encodeURIComponent(id)}/review`, {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents/:id/review",
+    });
+  }
+
+  async listKnowledgeEvalCases(): Promise<KnowledgeEvalCases> {
+    const raw = await this.fetch<unknown>("/api/knowledge/eval-cases");
+    return parseWithFallback(raw, KnowledgeEvalCasesSchema, FALLBACK_KNOWLEDGE_EVAL_CASES, {
+      endpoint: "GET /api/knowledge/eval-cases",
+    });
+  }
+
+  async createKnowledgeEvalCase(req: CreateKnowledgeEvalCaseRequest): Promise<KnowledgeEvalCase> {
+    const raw = await this.fetch<unknown>("/api/knowledge/eval-cases", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+    return parseWithFallback(raw, KnowledgeEvalCaseSchema, FALLBACK_KNOWLEDGE_EVAL_CASE, {
+      endpoint: "POST /api/knowledge/eval-cases",
+    });
+  }
+
+  async deleteKnowledgeEvalCase(id: string): Promise<void> {
+    await this.fetch(`/api/knowledge/eval-cases/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listKnowledgeEvalRuns(): Promise<KnowledgeEvalRuns> {
+    const raw = await this.fetch<unknown>("/api/knowledge/eval/runs");
+    return parseWithFallback(raw, KnowledgeEvalRunsSchema, FALLBACK_KNOWLEDGE_EVAL_RUNS, {
+      endpoint: "GET /api/knowledge/eval/runs",
+    });
+  }
+
+  async runKnowledgeEval(): Promise<KnowledgeEvalRun> {
+    const raw = await this.fetch<unknown>("/api/knowledge/eval/runs", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeEvalRunSchema, FALLBACK_KNOWLEDGE_EVAL_RUN, {
+      endpoint: "POST /api/knowledge/eval/runs",
+    });
   }
 
   // Proposals (squad requests for a decision by the boss)
@@ -5960,6 +6254,106 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/proposals/${id}/revisions`);
     return parseWithFallback<ProposalRevision[]>(raw, ProposalRevisionListSchema, [], {
       endpoint: "GET /api/proposals/:id/revisions",
+    });
+  }
+
+  // Pipeline and initiatives (phase 3). Force and waive return nothing the UI
+  // reads; their callers refetch the initiatives instead.
+  async listPipelines(): Promise<Pipeline[]> {
+    const raw = await this.fetch<unknown>("/api/pipelines");
+    return parseWithFallback<Pipeline[]>(raw, PipelinesResponseSchema, EMPTY_PIPELINES, {
+      endpoint: "GET /api/pipelines",
+    });
+  }
+
+  async listInitiatives(params: ListInitiativesParams = {}): Promise<Initiative[]> {
+    const search = new URLSearchParams();
+    if (params.pipeline_id) search.set("pipeline_id", params.pipeline_id);
+    if (params.status) search.set("status", params.status);
+    if (params.owner_squad_id) search.set("owner_squad_id", params.owner_squad_id);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/initiatives${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Initiative[]>(raw, InitiativesResponseSchema, EMPTY_INITIATIVES, {
+      endpoint: "GET /api/initiatives",
+    });
+  }
+
+  async getInitiative(id: string): Promise<InitiativeDetail> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}`);
+    return parseWithFallback<InitiativeDetail>(raw, InitiativeDetailSchema, FALLBACK_INITIATIVE_DETAIL, {
+      endpoint: "GET /api/initiatives/:id",
+    });
+  }
+
+  async forceInitiative(id: string, data: ForceInitiativeRequest): Promise<void> {
+    await this.fetch(`/api/initiatives/${id}/force`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async waiveInitiativeArtifact(id: string, kind: string, note: string): Promise<void> {
+    await this.fetch(`/api/initiatives/${id}/artifacts/${encodeURIComponent(kind)}/waive`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  // The transitions below return the initiative they changed, read with the
+  // same schema as the board. An unreadable body degrades to the id-less
+  // fallback, and the callers refetch the board rather than read it.
+  async createInitiative(data: CreateInitiativeRequest): Promise<Initiative> {
+    const raw = await this.fetch<unknown>("/api/initiatives", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives",
+    });
+  }
+
+  async advanceInitiative(id: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/advance`, { method: "POST" });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/advance",
+    });
+  }
+
+  async attestInitiative(id: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/attest`, { method: "POST" });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/attest",
+    });
+  }
+
+  async sendBackInitiative(id: string, note: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/send-back`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/send-back",
+    });
+  }
+
+  async shelveInitiative(id: string, note: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/shelve`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/shelve",
+    });
+  }
+
+  async resumeInitiative(id: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/resume`, { method: "POST" });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/resume",
+    });
+  }
+
+  async closeInitiative(id: string, reason: string): Promise<Initiative> {
+    const raw = await this.fetch<unknown>(`/api/initiatives/${id}/close`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    return parseWithFallback<Initiative>(raw, InitiativeSchema, FALLBACK_INITIATIVE, {
+      endpoint: "POST /api/initiatives/:id/close",
     });
   }
 }

@@ -44,6 +44,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   agents: ["agents", "bots", "ai", "智能体"],
   squads: ["squads", "teams", "小队", "团队"],
   knowledge: ["knowledge", "wiki", "documents", "drafts", "知识库", "文档", "草稿"],
+  pipeline: ["pipeline", "initiatives", "stages", "board", "管线", "专项", "看板"],
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
   skills: ["skills", "library", "技能"],

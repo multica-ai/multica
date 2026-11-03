@@ -29,6 +29,7 @@
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:attachment-text-preview": "node scripts/generate-attachment-text-preview.mjs",
+    "generate:company-template": "node scripts/generate-company-template.mjs",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
   "engines": {

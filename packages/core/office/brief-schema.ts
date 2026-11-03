@@ -17,7 +17,11 @@ export interface Brief {
   period_start: string;
   period_end: string;
   title: string;
-  /** Markdown with the six H2 sections: Headline, Needs your decision, Progress, Blockers and risks, Watch, FYI. */
+  /**
+   * Markdown with the H2 sections in spec 3.7 order: Headline, Needs your decision, Progress,
+   * Pipeline, Goals, Budget, Blockers and risks, Watch, People, FYI. The first three, Blockers
+   * and risks and FYI are required; the rest appear when there is data.
+   */
   body: string;
   /** Proposals the brief raises, to render with Approve and Reject beneath the text. */
   proposal_ids: string[];
