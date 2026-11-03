@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { performance } from 'node:perf_hooks'
 import { findCodeRanges, findFencedCodeRanges, preprocessLinks } from './linkify'
 
 describe('fenced code boundaries used by preprocessing and chunked loading', () => {
@@ -62,6 +63,8 @@ it.each([
   ['> - ', '>   '],
   ['- > - ', '  >   '],
   ['> - > ', '>   > '],
+  ['1. > ', '   > '],
+  ['> 12) > ', '>     > '],
 ])('protects mixed container fences starting with %j', (opening, continuation) => {
   const source = `${opening}\`\`\`text\n${continuation}https://example.com\n${continuation}\`\`\``
   expect(preprocessLinks(source)).toBe(source)
@@ -84,4 +87,13 @@ it('does not extend inline code across a fenced block', () => {
   expect(preprocessLinks(source)).toBe(
     'before `unmatched [https://outside.example](https://outside.example)\n~~~text\n`literal\n~~~',
   )
+})
+
+it.each(['x', ''])('scans repeated list prefixes without backtracking (%j)', (suffix) => {
+  const source = '-  '.repeat(25) + suffix + '\n\nhttps://example.com'
+  const start = performance.now()
+  expect(preprocessLinks(source)).toBe(
+    '-  '.repeat(25) + suffix + '\n\n[https://example.com](https://example.com)',
+  )
+  expect(performance.now() - start).toBeLessThan(250)
 })

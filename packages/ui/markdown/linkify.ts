@@ -73,6 +73,59 @@ export function shouldAutoLink(value: string): boolean {
   )
 }
 
+interface FenceLine {
+  marker: string
+  length: number
+  suffix: string
+  quoteDepth: number
+  hasListMarker: boolean
+}
+
+function isSpace(char: string | undefined): boolean {
+  return char === ' ' || char === '\t'
+}
+
+function isDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= '0' && char <= '9'
+}
+
+function parseFenceLine(line: string): FenceLine | undefined {
+  let cursor = 0
+  let quoteDepth = 0
+  let hasListMarker = false
+
+  // Consume each space and container marker once; ambiguous whitespace must
+  // never be redistributed between nested quantifiers on a non-fence line.
+  while (cursor < line.length) {
+    while (isSpace(line[cursor])) cursor += 1
+    const char = line[cursor]
+    if (char === '>') {
+      quoteDepth += 1
+      cursor += 1
+    } else if ((char === '-' || char === '+' || char === '*') && isSpace(line[cursor + 1])) {
+      hasListMarker = true
+      cursor += 1
+    } else if (isDigit(char)) {
+      while (isDigit(line[cursor])) cursor += 1
+      if ((line[cursor] !== '.' && line[cursor] !== ')') || !isSpace(line[cursor + 1])) {
+        return undefined
+      }
+      hasListMarker = true
+      cursor += 1
+    } else {
+      break
+    }
+  }
+
+  const marker = line[cursor]
+  if (marker !== '`' && marker !== '~') return undefined
+  const start = cursor
+  while (line[cursor] === marker) cursor += 1
+  const length = cursor - start
+  if (length < 3) return undefined
+  return { marker, length, suffix: line.slice(cursor), quoteDepth, hasListMarker }
+}
+
 /** Find complete fenced blocks, retaining the opening marker and its length. */
 export function findFencedCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
@@ -80,24 +133,19 @@ export function findFencedCodeRanges(text: string): CodeRange[] {
   let offset = 0
 
   for (const line of text.split('\n')) {
-    // Include fences nested in blockquotes or list items in the protected range.
-    const match = line.match(/^((?:(?:[ \t]*>[ \t]?)|(?:[ \t]*(?:[-+*]|\d+[.)])[ \t]+))*[ \t]*)(`{3,}|~{3,})(.*)$/)
-    if (match) {
-      const quoteDepth = (match[1]!.match(/>/g) ?? []).length
-      const hasListMarker = /(?:^|[ \t>])(?:[-+*]|\d+[.)])[ \t]/.test(match[1]!)
-      const fence = match[2]!
-      const suffix = match[3]!
+    const fence = parseFenceLine(line)
+    if (fence) {
       if (!opening) {
         // Backtick fence info strings cannot themselves contain backticks.
-        if (fence[0] === '~' || !suffix.includes('`')) {
-          opening = { start: offset, marker: fence[0]!, length: fence.length, quoteDepth }
+        if (fence.marker === '~' || !fence.suffix.includes('`')) {
+          opening = { start: offset, marker: fence.marker, length: fence.length, quoteDepth: fence.quoteDepth }
         }
       } else if (
-        !hasListMarker &&
-        quoteDepth === opening.quoteDepth &&
-        fence[0] === opening.marker &&
+        !fence.hasListMarker &&
+        fence.quoteDepth === opening.quoteDepth &&
+        fence.marker === opening.marker &&
         fence.length >= opening.length &&
-        suffix.trim() === ''
+        fence.suffix.trim() === ''
       ) {
         ranges.push({ start: opening.start, end: offset + line.length })
         opening = undefined
