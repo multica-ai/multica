@@ -4,12 +4,6 @@
     "title": "已處理全部通知",
     "body": "通知和 AI 代理更新會顯示在這裡。"
   },
-  "sections": {
-    "action": "需要處理",
-    "activity": "動態",
-    "activity_empty": "暫無動態",
-    "activity_empty_body": "你的任務上的狀態變更和智能體回覆會顯示在這裡。"
-  },
   "actions": {
     "mark_read": "標記已讀",
     "mark_unread": "標記未讀",

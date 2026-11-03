@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/inbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -97,7 +96,6 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	p := db.ListArchivedInboxPageParams{
 		WorkspaceID: filters.WorkspaceID, RecipientID: filters.RecipientID,
 		Statuses: filters.Statuses, Priorities: filters.Priorities, Actors: filters.Actors, UnreadOnly: filters.UnreadOnly,
-		ActivityTypes: inbox.ActivityTypes,
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -186,9 +184,6 @@ func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	// Set after parsing, not inside it: the parsed filters also key the page
-	// cursor scope, which must not change when the section rule does.
-	p.ActivityTypes = inbox.ActivityTypes
 	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(p.WorkspaceID))
 	if !ok {
 		return

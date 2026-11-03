@@ -6751,9 +6751,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		// Exhaustion deliberately does not @mention the coordinator agent: doing
 		// so would enqueue a fourth recovery run and defeat the attempt bound.
 		// Instead, create one durable action-required inbox item for the human
-		// who originated (or is accountable for) the delegated work, routed by
-		// their agent-failure preference like every other task_failed. The
-		// system comment above explains the outcome either way.
+		// who originated (or is accountable for) the delegated work.
 		_, recipient := delegatedFailureRecoveryAttribution(target)
 		if recipient.Valid {
 			_, err = qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
@@ -6765,22 +6763,6 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			}
 			if err != nil {
 				return fmt.Errorf("validate delegated failure exhaustion recipient: %w", err)
-			}
-
-			var prefs map[string]string
-			pref, err := qtx.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
-				WorkspaceID: target.issue.WorkspaceID,
-				UserID:      recipient,
-			})
-			if err == nil {
-				_ = json.Unmarshal(pref.Preferences, &prefs)
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("load delegated failure exhaustion recipient preferences: %w", err)
-			}
-			actorType := pgtype.Text{String: "system", Valid: true}
-			section, routed := inbox.Route(prefs, "task_failed")
-			if !routed {
-				return nil
 			}
 
 			details, err := json.Marshal(map[string]any{
@@ -6802,10 +6784,9 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				IssueID:       target.issue.ID,
 				Title:         target.issue.Title,
 				Body:          pgtype.Text{String: exhaustedComment.Content, Valid: true},
-				ActorType:     actorType,
+				ActorType:     pgtype.Text{String: "system", Valid: true},
 				ActorID:       pgtype.UUID{},
 				Details:       details,
-				Section:       inbox.SectionText(section),
 			})
 			if err != nil {
 				return fmt.Errorf("create delegated failure exhaustion inbox item: %w", err)
@@ -6842,7 +6823,6 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"recipient_id":   util.UUIDToString(exhaustedInbox.RecipientID),
 				"type":           exhaustedInbox.Type,
 				"severity":       exhaustedInbox.Severity,
-				"section":        inbox.ItemSection(exhaustedInbox.Section, exhaustedInbox.Type),
 				"issue_id":       util.UUIDToPtr(exhaustedInbox.IssueID),
 				"title":          exhaustedInbox.Title,
 				"body":           util.TextToPtr(exhaustedInbox.Body),
@@ -8389,7 +8369,6 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
-		"section":        inbox.ItemSection(item.Section, item.Type),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

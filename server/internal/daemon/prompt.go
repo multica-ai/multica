@@ -64,7 +64,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
-	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
+	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase, opts.worktreeCommitsAllLeftovers))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -138,10 +138,11 @@ func buildJoinedWakeupsBlock(notes string) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
-	sharedLocalDirectory    bool
-	worktreeReplayConflicts []string
-	worktreeBranch          string
-	worktreeBase            string
+	sharedLocalDirectory        bool
+	worktreeReplayConflicts     []string
+	worktreeBranch              string
+	worktreeBase                string
+	worktreeCommitsAllLeftovers bool
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -179,10 +180,26 @@ func WithWorktreeBranch(branch, base string) PromptOption {
 	}
 }
 
+// WithWorktreeCommitsAllLeftovers marks a worktree turn whose uncommitted
+// files will all be committed onto the branch at the end, even after the
+// agent's own commits — execenv.LocalWorktree.CommitsAllLeftovers. The task
+// branch block then states that instead of the usual rule, so the agent knows
+// to clear out what it does not want delivered (#9788 review).
+func WithWorktreeCommitsAllLeftovers() PromptOption {
+	return func(o *promptOpts) { o.worktreeCommitsAllLeftovers = true }
+}
+
 // buildWorktreeBranchBlock states the delivery contract of a worktree turn.
+// That includes what happens to uncommitted files: Finalize commits them for
+// an agent that made no commit and keeps them off the branch for one that did
+// (#9788), and an agent that is not told so cannot choose which side it lands
+// on — it leaves scratch output behind assuming it will not be delivered. A
+// turn that started on an unresolved merge of the user's edits is the
+// exception (commitsAllLeftovers): there everything is committed either way,
+// and the block says so rather than promising what Finalize will not do.
 // Branch names come from the daemon's own sanitised naming and the base is a
 // hex object id, so both are safe to render in code spans.
-func buildWorktreeBranchBlock(branch, base string) string {
+func buildWorktreeBranchBlock(branch, base string, commitsAllLeftovers bool) string {
 	if branch == "" || base == "" {
 		return ""
 	}
@@ -191,6 +208,12 @@ func buildWorktreeBranchBlock(branch, base string) string {
 	fmt.Fprintf(&b, "This run works in a private git worktree on branch `%s`, starting from commit `%s`. What that branch holds when you finish is what gets delivered, and the next turn continues from it.\n\n", branch, base)
 	fmt.Fprintf(&b, "- Keep HEAD on `%s` and only add commits on top of `%s`. Do not squash, amend, rebase or reset past `%s`, and do not check out another branch or a detached HEAD to do the work.\n", branch, base, base)
 	b.WriteString("- To publish the work under another name (for a pull request), push it without switching: `git push origin HEAD:<name>`.\n")
+	if commitsAllLeftovers {
+		b.WriteString("- This run starts by finishing a merge of the user's edits, so when it ends everything you leave that is not gitignored is committed onto the branch for you — even if you have made commits of your own — without running the repository's commit hooks. That keeps the user's edits from being dropped. Delete scratch files and generated output you do not want delivered before you finish.\n")
+	} else {
+		b.WriteString("- If you commit, only your commits are delivered. Whatever you leave uncommitted after committing — generated output, scratch files, edits you did not commit — is saved aside for the user and does not reach the branch, so commit everything that belongs to the work.\n")
+		b.WriteString("- If you make no commit, everything you leave that is not gitignored is committed onto the branch for you when the run ends, without running the repository's commit hooks. Delete scratch files and generated output you do not want delivered before you finish.\n")
+	}
 	b.WriteString("- A delivery that is not on this branch, or no longer contains its starting commit, cannot be recorded: the task fails even though the work is done.\n\n")
 	return b.String()
 }
@@ -204,7 +227,11 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 	b.WriteString("Your previous turn in this git worktree finished, but its work cannot be delivered yet.\n\n")
 	fmt.Fprintf(&b, "Problem: %s.\n\n", problem.Reason)
 	fmt.Fprintf(&b, "The work has to end on branch `%s`, in commits on top of `%s` (the commit this turn started from), with HEAD on that branch. Your files are intact; only where they are committed is wrong.\n\n", problem.Branch, problem.BaseCommit)
-	b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
+	if problem.CommittedOnly {
+		b.WriteString("Fix it in this worktree. This sequence puts exactly what your commits contain on the branch as one commit, and leaves your files as they are; its last line stages everything you left uncommitted, so none of it is lost. Uncommitted changes still do not reach the branch: like any change left uncommitted after you commit, they are saved aside rather than delivered:\n\n```sh\n")
+	} else {
+		b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
+	}
 	for _, step := range problem.RepairSteps() {
 		b.WriteString("git")
 		for _, arg := range step {
@@ -216,7 +243,7 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 		b.WriteString("\n")
 	}
 	b.WriteString("```\n\n")
-	fmt.Fprintf(&b, "Before the final commit, check `git diff --cached %s`: it should show only the changes you meant to make. If it undoes something `%s` contains that you did not intend to remove, restore it first. You may keep separate commits instead (for example by rebasing them onto `%s`), as long as the end state is the same.\n\n", problem.BaseCommit, problem.BaseCommit, problem.BaseCommit)
+	fmt.Fprintf(&b, "Before the `git commit` line, check `git diff --cached %s`: it should show only the changes you meant to make. If it undoes something `%s` contains that you did not intend to remove, restore it first. You may keep separate commits instead (for example by rebasing them onto `%s`), as long as the end state is the same.\n\n", problem.BaseCommit, problem.BaseCommit, problem.BaseCommit)
 	b.WriteString("Do only this — no other changes, no new comments or status updates. Reply with one line saying what you did.\n")
 	return b.String()
 }

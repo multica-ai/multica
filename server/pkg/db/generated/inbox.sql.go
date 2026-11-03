@@ -30,50 +30,42 @@ func (q *Queries) ArchiveAllInbox(ctx context.Context, arg ArchiveAllInboxParams
 }
 
 const archiveAllReadInbox = `-- name: ArchiveAllReadInbox :execrows
-WITH active AS (
-    SELECT i.id,
+WITH newest_groups AS (
+    SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
            COALESCE(i.issue_id, i.id) AS group_id,
-           i.created_at,
-           i.read,
-           COALESCE(i.section = 'activity', i.type = ANY($1::text[])) AS is_activity
+           i.read
     FROM inbox_item i
-    WHERE i.workspace_id = $2
+    WHERE i.workspace_id = $1
       AND i.recipient_type = 'member'
-      AND i.recipient_id = $3
+      AND i.recipient_id = $2
       AND i.archived = false
-), newest_groups AS (
-    SELECT DISTINCT ON (group_id, is_activity)
-           group_id,
-           is_activity,
-           read
-    FROM active
-    ORDER BY group_id, is_activity, created_at DESC, id DESC
+    ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), read_groups AS (
-    SELECT group_id, is_activity
+    SELECT group_id
     FROM newest_groups
-    WHERE read = true OR is_activity
+    WHERE read = true
 )
 UPDATE inbox_item i SET archived = true
-FROM active a
-JOIN read_groups selected USING (group_id, is_activity)
-WHERE i.id = a.id
+FROM read_groups selected
+WHERE i.workspace_id = $1
+  AND i.recipient_type = 'member'
+  AND i.recipient_id = $2
+  AND i.archived = false
+  AND COALESCE(i.issue_id, i.id) = selected.group_id
 `
 
 type ArchiveAllReadInboxParams struct {
-	ActivityTypes []string    `json:"activity_types"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
 }
 
-// "Read" is the state of the one row the inbox renders per issue and section:
-// the newest active notification in that group. Action and activity group
-// separately (MUL-8483), and an activity group always counts as read. Archive
-// every row in qualifying groups and leave an unread action group wholly
-// untouched. Updating raw read rows instead makes an older unread sibling
-// reappear after the newest row is archived (and can archive an older read
-// sibling under an unread row).
+// "Read" is the state of the one issue row the inbox renders: the newest
+// active notification in that issue group. Archive every row in groups whose
+// newest row is read, and leave an unread group wholly untouched. Updating raw
+// read rows instead makes an older unread sibling reappear after the newest
+// row is archived (and can archive an older read sibling under an unread row).
 func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInboxParams) (int64, error) {
-	result, err := q.db.Exec(ctx, archiveAllReadInbox, arg.ActivityTypes, arg.WorkspaceID, arg.RecipientID)
+	result, err := q.db.Exec(ctx, archiveAllReadInbox, arg.WorkspaceID, arg.RecipientID)
 	if err != nil {
 		return 0, err
 	}
@@ -98,43 +90,6 @@ type ArchiveCompletedInboxParams struct {
 
 func (q *Queries) ArchiveCompletedInbox(ctx context.Context, arg ArchiveCompletedInboxParams) (int64, error) {
 	result, err := q.db.Exec(ctx, archiveCompletedInbox, arg.WorkspaceID, arg.RecipientID, arg.TerminalStatusKeys)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const archiveInboxActivityByIssue = `-- name: ArchiveInboxActivityByIssue :execrows
-UPDATE inbox_item i SET archived = true
-WHERE i.workspace_id = $1
-  AND i.recipient_type = $2
-  AND i.recipient_id = $3
-  AND i.issue_id = $4
-  AND i.archived = false
-  AND COALESCE(i.section = 'activity', i.type = ANY($5::text[]))
-`
-
-type ArchiveInboxActivityByIssueParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientType string      `json:"recipient_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-	IssueID       pgtype.UUID `json:"issue_id"`
-	ActivityTypes []string    `json:"activity_types"`
-}
-
-// Section-scoped counterpart of ArchiveInboxByIssue, used when the archived row
-// is activity: clearing routine progress must not take an unread action item
-// on the same issue (a mention, a failed run) with it. The activity predicate
-// mirrors inbox.ItemSection: a stored section wins, otherwise the type rule
-// the caller passes as inbox.ActivityTypes.
-func (q *Queries) ArchiveInboxActivityByIssue(ctx context.Context, arg ArchiveInboxActivityByIssueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, archiveInboxActivityByIssue,
-		arg.WorkspaceID,
-		arg.RecipientType,
-		arg.RecipientID,
-		arg.IssueID,
-		arg.ActivityTypes,
-	)
 	if err != nil {
 		return 0, err
 	}
@@ -240,12 +195,11 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.read = false
   AND i.archived = false
-  AND NOT COALESCE(i.section = 'activity', i.type = ANY($4::text[]))
   -- MUL-8472: private projects the caller cannot see.
-  AND ($5::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+  AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
       SELECT 1 FROM issue hidden_issue
       WHERE hidden_issue.id = i.issue_id
-        AND hidden_issue.project_id = ANY($5::uuid[])
+        AND hidden_issue.project_id = ANY($4::uuid[])
   ))
 `
 
@@ -253,18 +207,14 @@ type CountUnreadInboxParams struct {
 	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
 	RecipientType    string        `json:"recipient_type"`
 	RecipientID      pgtype.UUID   `json:"recipient_id"`
-	ActivityTypes    []string      `json:"activity_types"`
 	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
-// Activity rows never count as unread, whatever their stored `read` flag; see
-// inbox.ItemSection for the rule the predicate mirrors.
 func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnreadInbox,
 		arg.WorkspaceID,
 		arg.RecipientType,
 		arg.RecipientID,
-		arg.ActivityTypes,
 		arg.HiddenProjectIds,
 	)
 	var count int64
@@ -282,7 +232,6 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
-      AND NOT COALESCE(i.section = 'activity', i.type = ANY($2::text[]))
       -- MUL-8472: issues in private projects the recipient is outside of
       -- (neither a project member nor a workspace owner/admin) do not count.
       AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
@@ -301,11 +250,6 @@ WHERE newest.read = false
 GROUP BY newest.workspace_id
 `
 
-type CountUnreadInboxByWorkspaceParams struct {
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-	ActivityTypes []string    `json:"activity_types"`
-}
-
 type CountUnreadInboxByWorkspaceRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Count       int64       `json:"count"`
@@ -321,12 +265,8 @@ type CountUnreadInboxByWorkspaceRow struct {
 // member join keeps counts scoped to workspaces the user still belongs to,
 // so a stale item left behind in a workspace the user has since left cannot
 // light the dot.
-//
-// Only action rows take part (MUL-8483): activity is never unread, and it does
-// not decide a group's state either, so a routine status change landing after
-// an unread mention leaves the mention counted.
-func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, arg CountUnreadInboxByWorkspaceParams) ([]CountUnreadInboxByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, arg.RecipientID, arg.ActivityTypes)
+func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,9 +289,9 @@ const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details, id, section
+    actor_type, actor_id, details, id
 )
-SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()), $13::text
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid())
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
@@ -388,7 +328,6 @@ type CreateInboxItemParams struct {
 	ActorID       pgtype.UUID `json:"actor_id"`
 	Details       []byte      `json:"details"`
 	ID            pgtype.UUID `json:"id"`
-	Section       pgtype.Text `json:"section"`
 }
 
 // A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
@@ -409,7 +348,6 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.ActorID,
 		arg.Details,
 		arg.ID,
-		arg.Section,
 	)
 	var i InboxItem
 	err := row.Scan(
@@ -780,49 +718,20 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 	return i, err
 }
 
-const markInboxReadByIssue = `-- name: MarkInboxReadByIssue :execrows
-UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND issue_id = $3
-  AND archived = false AND read = false
-`
-
-type MarkInboxReadByIssueParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	RecipientID pgtype.UUID `json:"recipient_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
-}
-
-// Opening an issue anywhere (Work sidebar, search, a link) settles its inbox
-// notifications, so the same event is never cleared twice. Every active row is
-// marked, not just the newest, so no older sibling resurfaces as unread.
-func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markInboxReadByIssue, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const markInboxUnread = `-- name: MarkInboxUnread :one
-UPDATE inbox_item SET read = false, section = COALESCE($1::text, section)
-WHERE id = $2
+UPDATE inbox_item SET read = false
+WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section
 `
 
-type MarkInboxUnreadParams struct {
-	Section pgtype.Text `json:"section"`
-	ID      pgtype.UUID `json:"id"`
-}
-
-// Item-level: the inbox renders one row per issue and section carrying that
-// group's NEWEST item, and the group's read state is that item's read state.
-// Flipping the whole group unread would resurrect older siblings the user
-// already dealt with and inflate CountUnreadInbox (which counts raw rows),
-// while changing nothing the UI shows. (Marking read, by contrast, also
-// settles the item's siblings; see the MarkInboxRead handler.)
-// A non-null section re-files the item; see the MarkInboxUnread handler.
-func (q *Queries) MarkInboxUnread(ctx context.Context, arg MarkInboxUnreadParams) (InboxItem, error) {
-	row := q.db.QueryRow(ctx, markInboxUnread, arg.Section, arg.ID)
+// Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+// the inbox renders one row per issue carrying that group's NEWEST item, and
+// the group's read state is that item's read state. Flipping the whole group
+// unread would resurrect older siblings the user already dealt with and
+// inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+// UI shows.
+func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, markInboxUnread, id)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

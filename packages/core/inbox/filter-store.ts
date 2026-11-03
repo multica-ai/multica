@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { InboxItem, IssuePriority, IssueStatus } from "../types";
-import { isInboxItemUnread } from "./section";
 
 export interface InboxFilters {
   readonly statuses: readonly IssueStatus[];
@@ -237,8 +236,7 @@ export function inboxFiltersForArchive(filters: InboxFilters): InboxFilters {
  * touched") than the one the row then displays, so selecting Alice would fill
  * the list with Bob. What you filter by is what you see.
  *
- * `unreadOnly` likewise reads whether the rendered row is unread, which an
- * activity row never is. The unread badge
+ * `unreadOnly` likewise reads the rendered row's `read`. The unread badge
  * (`useInboxUnreadCount`) counts the same thing from the server's summary
  * endpoint, which applies that newest-per-issue rule in SQL — so "only unread"
  * and the number next to Inbox still cannot disagree.
@@ -284,7 +282,7 @@ export function filterInboxItems(
     const key = item.issue_id ?? item.id;
     const matchesUnread =
       !filters.unreadOnly ||
-      isInboxItemUnread(item) ||
+      item.read !== true ||
       (pinnedUnreadKey != null && key === pinnedUnreadKey);
     const matchesIdle =
       !filters.idleOnly ||
