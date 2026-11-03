@@ -76,10 +76,14 @@ JOIN issue i ON i.id = c.issue_id
 WHERE c.id = $1;
 
 -- name: TouchProjectSearchIndexEntries :exec
--- Re-announce a project's issues and comments to local search sync after its
--- access changed, so clients that lost access receive them as deletions and
--- clients that gained it receive them as upserts.
+-- Re-announce a project, its issues and their comments to local search sync
+-- after its access changed, so clients that lost access receive them as
+-- deletions and clients that gained it receive them as upserts.
 INSERT INTO search_index_change (entity_type, entity_id, workspace_id, change_xid, changed_at)
+SELECT 'project', p.id, p.workspace_id, pg_current_xact_id(), now()
+FROM project p
+WHERE p.id = sqlc.arg('project_id') AND p.workspace_id = sqlc.arg('workspace_id')
+UNION ALL
 SELECT 'issue', i.id, i.workspace_id, pg_current_xact_id(), now()
 FROM issue i
 WHERE i.project_id = sqlc.arg('project_id') AND i.workspace_id = sqlc.arg('workspace_id')

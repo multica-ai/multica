@@ -134,6 +134,37 @@ func (h *Handler) requireIssueIDVisible(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
+// commentInHiddenProject reports whether a comment sits on an issue in a
+// private project the request cannot see. A missing comment is not hidden;
+// the caller's own lookup answers for it.
+func (h *Handler) commentInHiddenProject(r *http.Request, workspaceID string, commentID pgtype.UUID) (bool, error) {
+	hidden, err := h.hiddenProjects(r, workspaceID)
+	if err != nil || hidden.Empty() {
+		return false, err
+	}
+	projectID, err := h.Queries.GetCommentIssueProjectID(r.Context(), commentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !hidden.CanSeeProject(projectID), nil
+}
+
+// sourceContextProjectVisible answers a hidden target project of a comment
+// sub-issue exactly like a missing one.
+func (h *Handler) sourceContextProjectVisible(r *http.Request, workspaceID, projectID pgtype.UUID) error {
+	hidden, err := h.hiddenProjects(r, uuidToString(workspaceID))
+	if err != nil {
+		return err
+	}
+	if !hidden.CanSeeProject(projectID) {
+		return sourceContextBadRequest("project not found")
+	}
+	return nil
+}
+
 // requireAssigneeCanAccessProject refuses handing an issue in a private
 // project to an agent (or a squad, through its leader) whose owner cannot
 // see that project (MUL-8472). Enqueue enforces the same rule

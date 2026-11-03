@@ -74,8 +74,25 @@ func audienceInvalidatingEvent(eventType string) bool {
 	return strings.HasPrefix(eventType, "project:") || strings.HasPrefix(eventType, "member:")
 }
 
+// workspaceVisibleTaskEvents carry only ids and status (task:failed has its
+// error stripped by projectOutbound), and every member's agent presence,
+// workload and run-history views refresh on them, so they keep workspace
+// fanout for runs on private issues too. task:message and task:progress
+// carry run content and stay narrowed.
+var workspaceVisibleTaskEvents = map[string]bool{
+	protocol.EventTaskQueued:                true,
+	protocol.EventTaskCoalesced:             true,
+	protocol.EventTaskDispatch:              true,
+	protocol.EventTaskRunning:               true,
+	protocol.EventTaskWaitingLocalDirectory: true,
+	protocol.EventTaskUsage:                 true,
+	protocol.EventTaskCompleted:             true,
+	protocol.EventTaskFailed:                true,
+	protocol.EventTaskCancelled:             true,
+}
+
 func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event) ([]string, bool, error) {
-	if e.WorkspaceID == "" {
+	if e.WorkspaceID == "" || workspaceVisibleTaskEvents[e.Type] {
 		return nil, false, nil
 	}
 	if audienceInvalidatingEvent(e.Type) {

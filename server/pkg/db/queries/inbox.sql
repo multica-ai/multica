@@ -40,6 +40,12 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_type = $2
       AND i.recipient_id = $3
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active
@@ -200,7 +206,13 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
   AND i.recipient_id = sqlc.arg('recipient_id')
   AND i.read = false
   AND i.archived = false
-  AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]));
+  AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]))
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM issue hidden_issue
+      WHERE hidden_issue.id = i.issue_id
+        AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+  ));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -227,6 +239,18 @@ FROM (
       AND i.recipient_id = sqlc.arg('recipient_id')
       AND i.archived = false
       AND NOT COALESCE(i.section = 'activity', i.type = ANY(sqlc.arg('activity_types')::text[]))
+      -- MUL-8472: issues in private projects the recipient is outside of
+      -- (neither a project member nor a workspace owner/admin) do not count.
+      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+          SELECT 1 FROM issue private_issue
+          JOIN project private_project ON private_project.id = private_issue.project_id
+          WHERE private_issue.id = i.issue_id
+            AND private_project.visibility = 'private'
+            AND NOT EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
+            )
+      ))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false

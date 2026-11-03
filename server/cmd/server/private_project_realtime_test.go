@@ -144,3 +144,28 @@ func TestRegisterListeners_PrivateProjectAudienceFailureDropsEvent(t *testing.T)
 		t.Fatalf("an unresolved audience must drop the event, got workspace=%d scoped=%v", len(fb.workspaceCalls), privateAudienceScopes(fb))
 	}
 }
+
+func TestRegisterListeners_PrivateTaskLifecycleKeepsWorkspaceFanout(t *testing.T) {
+	for _, eventType := range []string{
+		protocol.EventTaskQueued, protocol.EventTaskDispatch, protocol.EventTaskRunning,
+		protocol.EventTaskCompleted, protocol.EventTaskFailed, protocol.EventTaskCancelled,
+	} {
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+		bus.Publish(events.Event{Type: eventType, WorkspaceID: ppWorkspace, TaskID: ppSecretTask,
+			Payload: map[string]any{"task_id": ppSecretTask, "issue_id": ppSecretIssue, "agent_id": "agent", "status": "x"}})
+		if len(fb.workspaceCalls) != 1 || len(privateAudienceScopes(fb)) != 0 {
+			t.Errorf("%s: workspace=%d scoped=%v; lifecycle events must reach every member", eventType, len(fb.workspaceCalls), privateAudienceScopes(fb))
+		}
+	}
+	// Run content stays with the project audience.
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+	bus.Publish(events.Event{Type: protocol.EventTaskProgress, WorkspaceID: ppWorkspace, TaskID: ppSecretTask,
+		Payload: protocol.TaskProgressPayload{TaskID: ppSecretTask, Summary: "secret step"}})
+	if len(fb.workspaceCalls) != 0 || len(privateAudienceScopes(fb)) != 2 {
+		t.Errorf("task:progress: workspace=%d scoped=%v; want only the project audience", len(fb.workspaceCalls), privateAudienceScopes(fb))
+	}
+}

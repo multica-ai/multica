@@ -401,3 +401,149 @@ func TestPrivateProjectInboxSkipsOutsiders(t *testing.T) {
 		t.Fatalf("owner notification: %v", err)
 	}
 }
+
+func removeProjectMemberAsOwner(t *testing.T, f privateProjectFixture, userID string) {
+	t.Helper()
+	req := testutil.WithURLParams(newRequest(http.MethodDelete, "/api/projects/"+f.projectID+"/members/"+userID, nil), "id", f.projectID, "userId", userID)
+	testutil.Call(t, testHandler.RemoveProjectMember, req).Want(http.StatusNoContent)
+}
+
+func TestPrivateProjectArchivedInboxAndUnreadAfterRevocation(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": f.insider,
+		"type": "mentioned", "severity": "info", "title": f.marker + " archived secret", "issue_id": f.secretIssue,
+		"archived": true,
+	})
+	unreadID := dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": f.insider,
+		"type": "mentioned", "severity": "info", "title": f.marker + " unread secret", "issue_id": f.secretIssue,
+	})
+	countUnread := func() int64 {
+		req := asUser(newRequest(http.MethodGet, "/api/inbox/unread-count", nil), f.insider)
+		var resp struct {
+			Count int64 `json:"count"`
+		}
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.CountUnreadInbox), req).Want(http.StatusOK).JSON(&resp)
+		return resp.Count
+	}
+	if got := countUnread(); got < 1 {
+		t.Fatalf("member unread count before removal = %d, want the private notification counted", got)
+	}
+	before := countUnread()
+
+	removeProjectMemberAsOwner(t, f, f.insider)
+
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"archived list", testHandler.ListArchivedInbox},
+		{"archived page", testHandler.ListArchivedInboxPage},
+		{"archived facets", testHandler.GetArchivedInboxFacets},
+	} {
+		req := asUser(newRequest(http.MethodGet, "/api/inbox/archived", nil), f.insider)
+		body := testutil.Call(t, inboxWorkspaceHandler(tc.handler), req).Want(http.StatusOK).Text()
+		if strings.Contains(body, f.secretIssue) || strings.Contains(body, f.marker) {
+			t.Errorf("%s still returns the private notification after removal: %s", tc.name, body)
+		}
+	}
+	if got := countUnread(); got != before-1 {
+		t.Errorf("unread count after removal = %d, want %d (notification %s no longer counted)", got, before-1, unreadID)
+	}
+}
+
+func TestPrivateProjectLeadChangeCannotGrantAccess(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	isMember := func(userID string) bool {
+		var ok bool
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT EXISTS(SELECT 1 FROM project_member WHERE project_id = $1 AND user_id = $2)`, f.projectID, userID,
+		).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1 AND user_id = $2`, f.projectID, f.outsider)
+	})
+	setLead := func(req *http.Request) *testutil.Response {
+		return testutil.Call(t, testHandler.UpdateProject, withURLParam(req, "id", f.projectID))
+	}
+	body := map[string]any{"lead_type": "member", "lead_id": f.outsider}
+
+	// An agent run of a project member cannot hand the project to an outsider.
+	agent := dbfx.Agent(t, f.marker+" insider agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
+	task := dbfx.Task(t, agent, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": f.secretIssue, "status": "running",
+		"originator_user_id": f.insider, "accountable_user_id": f.insider})
+	req := asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agent)
+	req.Header.Set("X-Task-ID", task)
+	setLead(req).Want(http.StatusForbidden)
+	if isMember(f.outsider) {
+		t.Fatal("agent lead change granted the outsider project membership")
+	}
+	var lead *string
+	testPool.QueryRow(context.Background(), `SELECT lead_id::text FROM project WHERE id = $1`, f.projectID).Scan(&lead)
+	if lead != nil {
+		t.Fatalf("refused update still wrote lead_id = %s", *lead)
+	}
+
+	// A human project member may, and the new lead becomes a member.
+	setLead(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider)).Want(http.StatusOK)
+	if !isMember(f.outsider) {
+		t.Fatal("a member lead of a private project must be a project member")
+	}
+}
+
+func TestPrivateProjectRevocationDeletesProjectFromSearchIndex(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	cursor := searchIndexManifest(t, testWorkspaceID).Cursor
+	removeProjectMemberAsOwner(t, f, f.insider)
+	req := asUser(searchIndexRequest(http.MethodPost, "/api/search-index/changes", testWorkspaceID, map[string]any{"cursor": cursor, "limit": 1000}), f.insider)
+	var changes SearchIndexChangesResponse
+	testutil.Call(t, testHandler.ListSearchIndexChanges, req).Want(http.StatusOK).JSON(&changes)
+	for _, id := range changes.Deleted.Projects {
+		if id == f.projectID {
+			return
+		}
+	}
+	t.Errorf("revoked project missing from search deletions; projects=%v issues=%v comments=%v",
+		changes.Deleted.Projects, changes.Deleted.Issues, changes.Deleted.Comments)
+}
+
+func TestPrivateProjectQuickCreateNeedsAgentOwnerAccess(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	runtime := dbfx.Runtime(t, f.marker+" runtime", testutil.Cols{"owner_id": f.outsider, "metadata": testutil.Raw(`'{"cli_version":"99.0.0"}'::jsonb`)})
+	agent := dbfx.Agent(t, f.marker+" outsider agent", runtime, testutil.Cols{"owner_id": f.outsider, "permission_mode": "public_to", "visibility": "workspace"})
+	dbfx.Insert(t, "agent_invocation_target", testutil.Cols{"agent_id": agent, "target_type": "workspace", "target_id": testWorkspaceID})
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, agent) })
+	for _, body := range []map[string]any{
+		{"prompt": "Create a task in this project", "agent_id": agent, "project_id": f.projectID},
+		{"prompt": "Create a sub-issue", "agent_id": agent, "parent_issue_id": f.secretIssue},
+	} {
+		rec := httptest.NewRecorder()
+		testHandler.QuickCreateIssue(rec, newRequest(http.MethodPost, "/api/issues/quick-create", body))
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), string(ReasonProjectAccessBlocked)) {
+			t.Errorf("quick-create %v = %d %s, want 403 %s", body, rec.Code, rec.Body.String(), ReasonProjectAccessBlocked)
+		}
+	}
+	var queued int
+	testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`, agent).Scan(&queued)
+	if queued != 0 {
+		t.Fatalf("refused quick-create queued %d task(s)", queued)
+	}
+}
+
+func TestPrivateProjectCommentSubIssuePreviewHidden(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	preview := func(userID string) *testutil.Response {
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/comments/"+f.secretComment+"/sub-issue/preview", nil), userID), "commentId", f.secretComment)
+		return testutil.Call(t, testHandler.PreviewCommentSubIssue, req)
+	}
+	if body := preview(f.outsider).Text(); strings.Contains(body, f.marker) {
+		t.Fatalf("outsider preview leaks the private thread: %s", body)
+	}
+	preview(f.insider).Want(http.StatusOK)
+}

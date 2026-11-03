@@ -43,12 +43,14 @@ type AddProjectMembersRequest struct {
 	UserIDs []string `json:"user_ids"`
 }
 
-// projectVisibilityChange is a validated, not yet applied, visibility switch.
-type projectVisibilityChange struct {
-	changed   bool
-	target    string
-	memberIDs []pgtype.UUID
+// projectAccessUpdate is the validated, not yet written, access side of a
+// project update: a visibility switch and the member rows it needs.
+type projectAccessUpdate struct {
+	visibility string // target visibility; "" leaves it unchanged
+	addIDs     []pgtype.UUID
 }
+
+func (u projectAccessUpdate) empty() bool { return u.visibility == "" && len(u.addIDs) == 0 }
 
 func (h *Handler) requireHumanProjectAccessActor(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
 	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
@@ -83,63 +85,103 @@ func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([
 	return ids, true
 }
 
-// prepareProjectVisibilityChange validates a requested visibility (nil = not
-// requested) against permissions and the rollout flag without writing.
-func (h *Handler) prepareProjectVisibilityChange(w http.ResponseWriter, r *http.Request, project db.Project, visibility *string, rawMemberIDs []string) (projectVisibilityChange, bool) {
-	if visibility == nil || *visibility == projectVisibilityOrDefault(project.Visibility) {
-		return projectVisibilityChange{}, true
-	}
-	target := *visibility
-	if !projectaccess.ValidVisibility(target) {
-		writeError(w, http.StatusBadRequest, "invalid visibility: must be one of workspace, private")
-		return projectVisibilityChange{}, false
-	}
+// prepareProjectAccessUpdate validates the access side of a project update
+// before anything is written. Two things change who can see a project:
+//
+//   - a visibility switch (requested = nil leaves it alone), which takes a
+//     human workspace admin or the member lead;
+//   - on a private project, a new member lead who is not yet a project member.
+//     A member lead must be a project member, so the update adds them, which
+//     is granting access: it takes a human who could add members directly.
+//     Agents never grant access, here or anywhere else.
+//
+// newLeadType / newLeadID are the lead the project will have after the update.
+func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Request, project db.Project, requested *string, rawMemberIDs []string, newLeadType pgtype.Text, newLeadID pgtype.UUID, leadChanged bool) (projectAccessUpdate, bool) {
 	workspaceID := uuidToString(project.WorkspaceID)
-	if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
-		return projectVisibilityChange{}, false
+	current := projectVisibilityOrDefault(project.Visibility)
+	memberLead := newLeadType.Valid && newLeadType.String == "member" && newLeadID.Valid
+
+	if requested != nil && *requested != current {
+		target := *requested
+		if !projectaccess.ValidVisibility(target) {
+			writeError(w, http.StatusBadRequest, "invalid visibility: must be one of workspace, private")
+			return projectAccessUpdate{}, false
+		}
+		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
+			return projectAccessUpdate{}, false
+		}
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok {
+			return projectAccessUpdate{}, false
+		}
+		if !canManageProjectAccess(member, project) {
+			writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change project visibility")
+			return projectAccessUpdate{}, false
+		}
+		if target == projectaccess.VisibilityPrivate && !featureflags.PrivateProjectsV1Enabled(r.Context(), h.FeatureFlags) {
+			writeFeatureDisabled(w, "private_projects_disabled", "private projects are not enabled")
+			return projectAccessUpdate{}, false
+		}
+		update := projectAccessUpdate{visibility: target}
+		if target == projectaccess.VisibilityPrivate {
+			ids, ok := parseProjectMemberIDs(w, rawMemberIDs, "member_ids")
+			if !ok {
+				return projectAccessUpdate{}, false
+			}
+			// The caller and a member lead always keep access to a project
+			// they make private.
+			ids = append(ids, member.UserID)
+			if memberLead {
+				ids = append(ids, newLeadID)
+			}
+			update.addIDs = ids
+		}
+		return update, true
+	}
+
+	if current != projectaccess.VisibilityPrivate || !leadChanged || !memberLead {
+		return projectAccessUpdate{}, true
+	}
+	isMember, err := h.isProjectMember(r, project, newLeadID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check project membership")
+		return projectAccessUpdate{}, false
+	}
+	if isMember {
+		return projectAccessUpdate{}, true
+	}
+	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents cannot change project access; the lead of a private project must already be a project member")
+		return projectAccessUpdate{}, false
 	}
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
-		return projectVisibilityChange{}, false
+		return projectAccessUpdate{}, false
 	}
 	if !canManageProjectAccess(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change project visibility")
-		return projectVisibilityChange{}, false
-	}
-	if target == projectaccess.VisibilityPrivate && !featureflags.PrivateProjectsV1Enabled(r.Context(), h.FeatureFlags) {
-		writeFeatureDisabled(w, "private_projects_disabled", "private projects are not enabled")
-		return projectVisibilityChange{}, false
-	}
-	change := projectVisibilityChange{changed: true, target: target}
-	if target == projectaccess.VisibilityPrivate {
-		ids, ok := parseProjectMemberIDs(w, rawMemberIDs, "member_ids")
-		if !ok {
-			return projectVisibilityChange{}, false
+		callerIsMember, err := h.isProjectMember(r, project, member.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check project membership")
+			return projectAccessUpdate{}, false
 		}
-		// The caller and a member lead always keep access to a project they
-		// make private.
-		ids = append(ids, member.UserID)
-		if project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID.Valid {
-			ids = append(ids, project.LeadID)
+		if !callerIsMember {
+			writeError(w, http.StatusForbidden, "only project members can add members")
+			return projectAccessUpdate{}, false
 		}
-		change.memberIDs = ids
 	}
-	return change, true
+	return projectAccessUpdate{addIDs: []pgtype.UUID{newLeadID}}, true
 }
 
-// applyProjectAccessUpdate writes a prepared visibility change, and keeps a
-// private project's member lead in its member list. It returns the project as
-// stored afterwards.
-func (h *Handler) applyProjectAccessUpdate(w http.ResponseWriter, r *http.Request, project db.Project, change projectVisibilityChange, actorUserID string) (db.Project, bool) {
+// writeProjectUpdate stores params and, in the same transaction, a prepared
+// access update, so a rejected member list leaves the project untouched.
+func (h *Handler) writeProjectUpdate(w http.ResponseWriter, r *http.Request, params db.UpdateProjectParams, access projectAccessUpdate, actorUserID string) (db.Project, bool) {
 	ctx := r.Context()
-	var addIDs []pgtype.UUID
-	if change.changed && change.target == projectaccess.VisibilityPrivate {
-		addIDs = change.memberIDs
-	} else if !change.changed && project.Visibility == projectaccess.VisibilityPrivate &&
-		project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID.Valid {
-		addIDs = []pgtype.UUID{project.LeadID}
-	}
-	if !change.changed && len(addIDs) == 0 {
+	if access.empty() {
+		project, err := h.Queries.UpdateProject(ctx, params)
+		if err != nil {
+			h.writeProjectWriteError(w, r, err, "update")
+			return db.Project{}, false
+		}
 		return project, true
 	}
 	tx, err := h.TxStarter.Begin(ctx)
@@ -149,43 +191,51 @@ func (h *Handler) applyProjectAccessUpdate(w http.ResponseWriter, r *http.Reques
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
-	if len(addIDs) > 0 {
+	project, err := qtx.UpdateProject(ctx, params)
+	if err != nil {
+		h.writeProjectWriteError(w, r, err, "update")
+		return db.Project{}, false
+	}
+	if len(access.addIDs) > 0 {
 		inserted, err := qtx.AddProjectMembers(ctx, db.AddProjectMembersParams{
 			ProjectID:   project.ID,
 			WorkspaceID: project.WorkspaceID,
-			UserIds:     addIDs,
+			UserIds:     access.addIDs,
 			AddedBy:     parseUUIDOrInvalid(actorUserID),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add project members")
 			return db.Project{}, false
 		}
-		if change.changed && !h.allProjectMembersExist(w, r, qtx, project, addIDs, inserted) {
+		if !h.allProjectMembersExist(w, r, qtx, project, access.addIDs, inserted) {
 			return db.Project{}, false
 		}
 	}
-	if change.changed {
+	if access.visibility != "" {
 		project, err = qtx.UpdateProjectVisibility(ctx, db.UpdateProjectVisibilityParams{
 			ID:          project.ID,
 			WorkspaceID: project.WorkspaceID,
-			Visibility:  change.target,
+			Visibility:  access.visibility,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update project visibility")
 			return db.Project{}, false
 		}
-		if err := touchProjectSearchIndex(r, qtx, project); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update search index")
-			return db.Project{}, false
-		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit project access")
+	if err := touchProjectSearchIndex(r, qtx, project); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update search index")
 		return db.Project{}, false
 	}
-	if change.changed {
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project update")
+		return db.Project{}, false
+	}
+	if access.visibility != "" {
 		slog.Info("project visibility changed", append(logger.RequestAttrs(r),
 			"project_id", uuidToString(project.ID), "visibility", project.Visibility)...)
+	}
+	if len(access.addIDs) > 0 {
+		h.publishProjectMembersChanged(project, parseUUIDOrInvalid(actorUserID))
 	}
 	return project, true
 }

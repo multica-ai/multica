@@ -13,6 +13,12 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
       AND (sqlc.narg(group_id)::uuid IS NULL OR i.issue_id = sqlc.narg(group_id)::uuid
            OR (i.issue_id IS NULL AND i.id = sqlc.narg(group_id)::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
@@ -74,6 +80,12 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id

@@ -353,6 +353,10 @@ func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembers
 
 const touchProjectSearchIndexEntries = `-- name: TouchProjectSearchIndexEntries :exec
 INSERT INTO search_index_change (entity_type, entity_id, workspace_id, change_xid, changed_at)
+SELECT 'project', p.id, p.workspace_id, pg_current_xact_id(), now()
+FROM project p
+WHERE p.id = $1 AND p.workspace_id = $2
+UNION ALL
 SELECT 'issue', i.id, i.workspace_id, pg_current_xact_id(), now()
 FROM issue i
 WHERE i.project_id = $1 AND i.workspace_id = $2
@@ -372,9 +376,9 @@ type TouchProjectSearchIndexEntriesParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Re-announce a project's issues and comments to local search sync after its
-// access changed, so clients that lost access receive them as deletions and
-// clients that gained it receive them as upserts.
+// Re-announce a project, its issues and their comments to local search sync
+// after its access changed, so clients that lost access receive them as
+// deletions and clients that gained it receive them as upserts.
 func (q *Queries) TouchProjectSearchIndexEntries(ctx context.Context, arg TouchProjectSearchIndexEntriesParams) error {
 	_, err := q.db.Exec(ctx, touchProjectSearchIndexEntries, arg.ProjectID, arg.WorkspaceID)
 	return err

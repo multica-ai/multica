@@ -241,13 +241,20 @@ WHERE i.workspace_id = $1
   AND i.read = false
   AND i.archived = false
   AND NOT COALESCE(i.section = 'activity', i.type = ANY($4::text[]))
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($5::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM issue hidden_issue
+      WHERE hidden_issue.id = i.issue_id
+        AND hidden_issue.project_id = ANY($5::uuid[])
+  ))
 `
 
 type CountUnreadInboxParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientType string      `json:"recipient_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-	ActivityTypes []string    `json:"activity_types"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	RecipientType    string        `json:"recipient_type"`
+	RecipientID      pgtype.UUID   `json:"recipient_id"`
+	ActivityTypes    []string      `json:"activity_types"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 // Activity rows never count as unread, whatever their stored `read` flag; see
@@ -258,6 +265,7 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 		arg.RecipientType,
 		arg.RecipientID,
 		arg.ActivityTypes,
+		arg.HiddenProjectIds,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -275,6 +283,18 @@ FROM (
       AND i.recipient_id = $1
       AND i.archived = false
       AND NOT COALESCE(i.section = 'activity', i.type = ANY($2::text[]))
+      -- MUL-8472: issues in private projects the recipient is outside of
+      -- (neither a project member nor a workspace owner/admin) do not count.
+      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+          SELECT 1 FROM issue private_issue
+          JOIN project private_project ON private_project.id = private_issue.project_id
+          WHERE private_issue.id = i.issue_id
+            AND private_project.visibility = 'private'
+            AND NOT EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
+            )
+      ))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -487,6 +507,12 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_type = $2
       AND i.recipient_id = $3
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY($4::uuid[])
+      ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active
@@ -531,9 +557,10 @@ ORDER BY i.created_at DESC, i.id DESC
 `
 
 type ListArchivedInboxItemsParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	RecipientType string      `json:"recipient_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	RecipientType    string        `json:"recipient_type"`
+	RecipientID      pgtype.UUID   `json:"recipient_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 type ListArchivedInboxItemsRow struct {
@@ -579,7 +606,12 @@ type ListArchivedInboxItemsRow struct {
 // Keep the materialized working set narrow: full row data is joined only for
 // the final selected ids, not copied for every archived notification scanned.
 func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedInboxItemsParams) ([]ListArchivedInboxItemsRow, error) {
-	rows, err := q.db.Query(ctx, listArchivedInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	rows, err := q.db.Query(ctx, listArchivedInboxItems,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.HiddenProjectIds,
+	)
 	if err != nil {
 		return nil, err
 	}

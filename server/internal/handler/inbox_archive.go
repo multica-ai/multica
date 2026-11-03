@@ -138,6 +138,14 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		p.BeforeTime = pgtype.Timestamptz{Time: before, Valid: true}
 	}
 	p.PageLimit = int32(limit + 1)
+	// Filtered inside the query, before grouping and paging, so a hidden
+	// notification neither shows up nor shortens a page. Not part of the
+	// cursor scope: access can change between pages.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(filters.WorkspaceID))
+	if !ok {
+		return
+	}
+	p.HiddenProjectIds = hidden.Param()
 	rows, err := h.Queries.ListArchivedInboxPage(r.Context(), p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load archived inbox page")
@@ -181,6 +189,11 @@ func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request)
 	// Set after parsing, not inside it: the parsed filters also key the page
 	// cursor scope, which must not change when the section rule does.
 	p.ActivityTypes = inbox.ActivityTypes
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(p.WorkspaceID))
+	if !ok {
+		return
+	}
+	p.HiddenProjectIds = hidden.Param()
 	rows, err := h.Queries.ArchivedInboxFacets(r.Context(), p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load archived inbox filters")

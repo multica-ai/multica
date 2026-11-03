@@ -706,16 +706,20 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
-	visibilityChange, ok := h.prepareProjectVisibilityChange(w, r, prevProject, req.Visibility, req.MemberIDs)
+	newLeadType, newLeadID := prevProject.LeadType, prevProject.LeadID
+	if params.LeadTypeSet {
+		newLeadType = params.LeadType
+	}
+	if params.LeadIDSet {
+		newLeadID = params.LeadID
+	}
+	leadChanged := newLeadType != prevProject.LeadType || newLeadID != prevProject.LeadID
+	access, ok := h.prepareProjectAccessUpdate(w, r, prevProject, req.Visibility, req.MemberIDs, newLeadType, newLeadID, leadChanged)
 	if !ok {
 		return
 	}
-	project, err := h.Queries.UpdateProject(r.Context(), params)
-	if err != nil {
-		h.writeProjectWriteError(w, r, err, "update")
-		return
-	}
-	if project, ok = h.applyProjectAccessUpdate(w, r, project, visibilityChange, userID); !ok {
+	project, ok := h.writeProjectUpdate(w, r, params, access, userID)
+	if !ok {
 		return
 	}
 	resp := projectToResponse(project)
