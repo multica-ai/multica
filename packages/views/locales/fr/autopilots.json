@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "Nouvelle automatisation",
-    "start_blank": "Partir de zéro",
     "table": {
       "name": "Nom",
       "agent": "Agent",
@@ -15,10 +14,6 @@
       "created": "Création"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "Aucune automatisation pour l'instant",
-      "hint": "Planifiez du travail récurrent pour vos agents IA. Choisissez un modèle ou partez de zéro."
-    },
     "no_matches": "Aucune automatisation correspondante",
     "retry": "Réessayer"
   },
@@ -524,5 +519,11 @@
     "create": "Nouveau réveil",
     "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
     "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
+  },
+  "intro": {
+    "label": "Automatisation",
+    "title": "Laissez vos agents se mettre au travail tout seuls",
+    "description": "Définissez une planification ou un webhook. À chaque déclenchement, Multica crée une tâche pour un agent, ou lance directement l'agent. Choisissez un modèle et adaptez-le.",
+    "templates": "Partir d'un modèle"
   }
 }

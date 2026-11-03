@@ -6,7 +6,6 @@ import {
   Clock,
   Code,
   Pause,
-  Plus,
   Webhook,
   Zap,
 } from "@multica/ui/icons";
@@ -55,6 +54,7 @@ import {
 } from "./autopilot-list-actions";
 import { AUTOPILOT_TEMPLATES, type AutopilotTemplate } from "./autopilot-templates";
 import { isWakeupsTab } from "./wakeups-tab";
+import { AutopilotsIntro } from "./autopilots-intro";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 
 // Cells
@@ -513,47 +513,7 @@ function AutopilotList() {
           }
         />
       ) : showEmpty ? (
-        <div className="flex flex-col items-center px-5 py-16">
-          <Zap className="mb-3 h-10 w-10 text-faint-foreground" />
-          <p className="text-body text-muted-foreground">
-            {t(($) => $.page.empty.title)}
-          </p>
-          <p className="mb-6 mt-1 text-caption text-muted-foreground">
-            {t(($) => $.page.empty.hint)}
-          </p>
-          <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {AUTOPILOT_TEMPLATES.map((tpl) => {
-              const Icon = tpl.icon;
-              return (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
-                  onClick={() => openCreate(tpl)}
-                >
-                  <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="text-body font-medium">
-                      {t(($) => $.templates[tpl.id].title)}
-                    </div>
-                    <div className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">
-                      {t(($) => $.templates[tpl.id].summary)}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-4"
-            onClick={() => openCreate()}
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.page.start_blank)}
-          </Button>
-        </div>
+        <AutopilotsIntro onCreate={openCreate} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}

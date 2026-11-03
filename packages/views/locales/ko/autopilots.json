@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "새 오토파일럿",
-    "start_blank": "처음부터 시작",
     "table": {
       "name": "이름",
       "agent": "에이전트",
@@ -15,10 +14,6 @@
       "created": "생성일"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "아직 오토파일럿이 없습니다",
-      "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
-    },
     "no_matches": "일치하는 자동화가 없습니다",
     "retry": "다시 시도"
   },
@@ -522,5 +517,11 @@
     "create": "깨우기 추가",
     "create_pick_issue": "깨우기를 추가할 태스크 선택",
     "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
+  },
+  "intro": {
+    "label": "오토파일럿",
+    "title": "에이전트가 제때 알아서 일을 시작하게 하세요",
+    "description": "일정이나 Webhook을 설정하면 실행될 때마다 태스크를 만들어 에이전트에게 맡기거나 에이전트를 바로 실행합니다. 템플릿을 골라 조금만 고치면 됩니다.",
+    "templates": "템플릿으로 시작"
   }
 }

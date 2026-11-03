@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "新建自動化",
-    "start_blank": "從空白開始",
     "table": {
       "name": "名稱",
       "agent": "AI 代理",
@@ -15,10 +14,6 @@
       "created": "建立時間"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "還沒有自動化",
-      "hint": "為你的 AI 代理安排週期性工作。從模板選一個，或從空白開始。"
-    },
     "no_matches": "沒有匹配的自動化",
     "retry": "重試"
   },
@@ -522,5 +517,11 @@
     "create": "新建喚醒",
     "create_pick_issue": "選擇要新增喚醒的任務",
     "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。"
+  },
+  "intro": {
+    "label": "自動化",
+    "title": "讓 AI 代理按時自己開工",
+    "description": "設好排程或 Webhook，每次觸發都會自動建立任務交給 AI 代理，也可以直接執行。挑一個模板，改一改就能用。",
+    "templates": "從模板開始"
   }
 }

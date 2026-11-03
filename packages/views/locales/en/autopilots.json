@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "New autopilot",
-    "start_blank": "Start from scratch",
     "table": {
       "name": "Name",
       "agent": "Agent",
@@ -15,10 +14,6 @@
       "created": "Created"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "No autopilots yet",
-      "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
-    },
     "no_matches": "No automations match",
     "retry": "Retry"
   },
@@ -524,5 +519,11 @@
     "create": "New wakeup",
     "create_pick_issue": "Choose the issue to add a wakeup to",
     "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
+  },
+  "intro": {
+    "label": "Autopilot",
+    "title": "Let agents start work on their own",
+    "description": "Set a schedule or a webhook. Each time it fires, Multica creates an issue for an agent, or runs the agent directly. Pick a template and adjust it.",
+    "templates": "Start from a template"
   }
 }

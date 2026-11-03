@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "新建自动化",
-    "start_blank": "从空白开始",
     "table": {
       "name": "名称",
       "agent": "智能体",
@@ -15,10 +14,6 @@
       "created": "创建时间"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "还没有自动化",
-      "hint": "为你的智能体安排周期性工作。从模板选一个，或从空白开始。"
-    },
     "no_matches": "没有匹配的自动化",
     "retry": "重试"
   },
@@ -522,5 +517,11 @@
     "create": "新建唤醒",
     "create_pick_issue": "选择要添加唤醒的任务",
     "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。"
+  },
+  "intro": {
+    "label": "自动化",
+    "title": "让智能体按时自己开工",
+    "description": "设好时间表或 Webhook，每次触发都会自动建任务交给智能体，也可以直接运行。挑一个模板，改改就能用。",
+    "templates": "从模板开始"
   }
 }
