@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -39,12 +38,12 @@ import (
 
 func exampleRepoDir(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate this test file")
+	// server/internal/handler -> repo root, relative to the package directory
+	// go test runs in; runtime.Caller would return a module path under -trimpath.
+	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "examples", "plugins", "deploy-sentinel"))
+	if err != nil {
+		t.Fatalf("resolve the example plugin dir: %v", err)
 	}
-	// server/internal/handler -> repo root
-	dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "examples", "plugins", "deploy-sentinel")
 	if _, err := os.Stat(filepath.Join(dir, plugincontract.ManifestFilename)); err != nil {
 		t.Fatalf("the example plugin is missing: %v", err)
 	}

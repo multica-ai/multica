@@ -57,6 +57,7 @@ import { useIntentNavigate } from "../../navigation";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionResetButton,
   CollectionScopeItems,
@@ -624,7 +625,14 @@ export function SquadsPage() {
               : undefined
           }
           sort={sort}
-          empty={t(($) => $.page.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              description={hasActiveFilters ? t(($) => $.page.empty_no_match) : undefined}
+              onReset={clearFilters}
+              hasFilters={hasActiveFilters}
+            />
+          }
         />
       )}
     </div>

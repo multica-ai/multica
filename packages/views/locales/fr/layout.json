@@ -165,6 +165,8 @@
     "filter_count_other": "{{count}} filtres",
     "reset": "Réinitialiser",
     "clear_search": "Effacer la recherche",
+    "clear_filters": "Effacer les filtres",
+    "clear_filters_and_search": "Effacer les filtres et la recherche",
     "display": "Affichage",
     "selected_one": "{{count}} sélectionné",
     "selected_other": "{{count}} sélectionnés",

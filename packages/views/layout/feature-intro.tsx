@@ -40,6 +40,8 @@ interface FeatureIntroProps {
   docs: FeatureDocsSlug;
   /** Takes the docs link's place when the page has a more useful next step. */
   secondaryAction?: ReactNode;
+  /** Extra guidance under the actions, such as a setup checklist. */
+  footer?: ReactNode;
   /** Column labels for the faded list behind the intro. */
   columns: string[];
   /** Wide asides fit a grid of choices instead of a single card. */
@@ -60,6 +62,7 @@ export function FeatureIntro({
   action,
   docs,
   secondaryAction,
+  footer,
   columns,
   aside = "card",
   children,
@@ -111,6 +114,7 @@ export function FeatureIntro({
                 </a>
               )}
             </div>
+            {footer && <div className="mt-6 w-full">{footer}</div>}
           </div>
           <div className="min-w-0">{children}</div>
         </div>

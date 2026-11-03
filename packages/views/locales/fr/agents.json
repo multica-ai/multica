@@ -45,6 +45,16 @@
     "active_link": "Agents actifs",
     "title": "Agents archivés"
   },
+  "empty": {
+    "setup": {
+      "label": "Étapes de configuration",
+      "runtime": "Connecter un runtime",
+      "agent": "Créer un agent",
+      "issue": "Lui assigner une tâche",
+      "done": "(fait)",
+      "connect_runtime": "Connecter"
+    }
+  },
   "no_matches": {
     "title": "Aucune correspondance",
     "search_active": "Aucun agent ne correspond à « {{query}} ».",
@@ -718,6 +728,7 @@
       "load_failed": "Impossible de charger vos applications connectées. Réessayez dans un instant.",
       "empty_title": "Aucune application connectée pour l'instant",
       "empty_link_to_settings": "Connectez-en un dans Paramètres → Intégrations",
+      "open_settings": "Ouvrir les paramètres",
       "connected": "Connecté",
       "toggle_aria": "Autoriser {{toolkit}} pour cet agent",
       "saving": "Enregistrement…",

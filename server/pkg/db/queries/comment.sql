@@ -104,16 +104,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListRootCommentsSinceForIssue :many
@@ -150,16 +164,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListThreadCommentsForIssuePaged :many

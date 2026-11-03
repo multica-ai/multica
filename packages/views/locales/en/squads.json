@@ -63,6 +63,8 @@
   "members_tab": {
     "section_title": "Members",
     "add_member_button": "Add member",
+    "empty_title": "No members yet",
+    "empty_description": "Add agents or members, and issues assigned to this squad go to them.",
     "create_agent_button": "Create Agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
@@ -81,6 +83,8 @@
     "copy_link": "Copy link",
     "link_copied": "Link copied",
     "not_found": "Squad not found",
+    "not_found_description": "It may have been deleted or you may not have access.",
+    "back_to_list": "All squads",
     "instructions": "Instructions",
     "edit": "Edit",
     "cancel": "Cancel",

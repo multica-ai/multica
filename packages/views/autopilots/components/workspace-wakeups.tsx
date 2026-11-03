@@ -43,6 +43,7 @@ import { useLocale, useT } from "../../i18n";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -502,20 +503,14 @@ export function WorkspaceWakeups() {
   } else if (!rows.length) {
     const hasAny = (page?.counts.all ?? 0) > 0;
     body = (
-      <CollectionPageState
-        icon={Bell}
+      <CollectionNoMatches
         title={t(($) => $.wakeups.empty_filtered)}
-        actions={
-          filtered && hasAny ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => change({ scope: "all", kind: "all", source: "", agent_id: "" })}
-            >
-              {t(($) => $.wakeups.clear_filters)}
-            </Button>
-          ) : undefined
+        onReset={
+          hasAny
+            ? () => change({ scope: "all", kind: "all", source: "", agent_id: "" })
+            : undefined
         }
+        hasFilters={filtered}
       />
     );
   } else {

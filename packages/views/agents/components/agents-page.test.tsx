@@ -68,7 +68,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
     }
-    return { data: [], isLoading: false, isPending: false };
+    return { data: [], isLoading: false, isPending: false, isSuccess: true };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -132,6 +132,7 @@ vi.mock("@multica/core/paths", () => ({
     newAgent: () => "/test-workspace/agents/new",
     newAgentManual: () => "/test-workspace/agents/new/manual",
     agentDetail: (id: string) => `/test-workspace/agents/${id}`,
+    runtimes: () => "/test-workspace/runtimes",
   }),
 }));
 
@@ -363,6 +364,11 @@ describe("AgentsPage listReady gate", () => {
     expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
       "href",
       "https://multica.ai/docs/agents",
+    );
+    const steps = within(intro).getByRole("list", { name: "Setup steps" });
+    expect(within(steps).getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/test-workspace/runtimes",
     );
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });

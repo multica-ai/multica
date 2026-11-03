@@ -61,6 +61,8 @@
   },
   "detail": {
     "not_found": "未找到该自动化",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部自动化",
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
     "paused_runtime_required": "由于执行智能体失去运行时，自动化已暂停。绑定运行时后请重新启用。",
@@ -495,7 +497,6 @@
     },
     "target_agent": "唤醒对象",
     "empty_filtered": "没有匹配的唤醒",
-    "clear_filters": "清除筛选",
     "batch_success": "已关闭 {{count}} 条唤醒",
     "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。",
     "source": "来源",
@@ -526,7 +527,7 @@
         },
         "time": {
           "title": "或者定个时间",
-          "description": "单次定时适合“明天下午再看看”，周期适合每天的例行检查。"
+          "description": "单次定时适合\"明天下午再看看\"，周期适合每天的例行检查。"
         },
         "ends": {
           "title": "任务结束就停",
@@ -537,7 +538,7 @@
         "issue_inbox": "收件箱分组的空状态",
         "issue_board": "看板列宽可拖拽",
         "issue_paste": "评论支持粘贴图片",
-        "reply": "“PR 已合并，开始更新文档并关闭任务。”",
+        "reply": "\"PR 已合并，开始更新文档并关闭任务。\"",
         "event_examples": "PR 合并、有新评论"
       }
     }

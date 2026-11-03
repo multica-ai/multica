@@ -44,6 +44,16 @@
     "active_link": "活跃智能体",
     "title": "已归档智能体"
   },
+  "empty": {
+    "setup": {
+      "label": "配置步骤",
+      "runtime": "接入运行时",
+      "agent": "创建智能体",
+      "issue": "给它分配一个任务",
+      "done": "（已完成）",
+      "connect_runtime": "去接入"
+    }
+  },
   "no_matches": {
     "title": "无匹配项",
     "search_active": "没有智能体匹配\"{{query}}\"。",
@@ -699,6 +709,7 @@
       "load_failed": "无法加载你已连接的应用，请稍后重试。",
       "empty_title": "还没有已连接的应用",
       "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
+      "open_settings": "打开设置",
       "connected": "已连接",
       "toggle_aria": "允许该智能体使用 {{toolkit}}",
       "saving": "正在保存…",

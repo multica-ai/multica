@@ -61,6 +61,8 @@
   },
   "detail": {
     "not_found": "Automatisation introuvable",
+    "not_found_description": "Elle a peut-être été supprimée, ou vous n'y avez pas accès.",
+    "back_to_list": "Toutes les automatisations",
     "pause_aria": "Mettre l'automatisation en pause",
     "activate_aria": "Activer l'automatisation",
     "paused_runtime_required": "En pause car l'assigné a perdu son runtime. Associez un runtime, puis réactivez cette automatisation.",
@@ -496,7 +498,6 @@
     },
     "target_agent": "Agent à réveiller",
     "empty_filtered": "Aucun réveil correspondant",
-    "clear_filters": "Effacer les filtres",
     "batch_success": "{{count}} règles désactivées",
     "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer.",
     "source": "Source",

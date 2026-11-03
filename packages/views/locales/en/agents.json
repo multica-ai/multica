@@ -45,6 +45,16 @@
     "active_link": "Active agents",
     "title": "Archived agents"
   },
+  "empty": {
+    "setup": {
+      "label": "Setup steps",
+      "runtime": "Connect a runtime",
+      "agent": "Create an agent",
+      "issue": "Assign it an issue",
+      "done": "(done)",
+      "connect_runtime": "Connect"
+    }
+  },
   "no_matches": {
     "title": "No matches",
     "search_active": "No agents match \"{{query}}\".",
@@ -718,6 +728,7 @@
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
       "empty_link_to_settings": "Connect one in Settings → Integrations",
+      "open_settings": "Open settings",
       "connected": "Connected",
       "toggle_aria": "Allow {{toolkit}} for this agent",
       "saving": "Saving…",

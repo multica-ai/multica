@@ -159,6 +159,8 @@
     "filter_count_other": "{{count}} 個篩選",
     "reset": "重設",
     "clear_search": "清除搜尋",
+    "clear_filters": "清除篩選",
+    "clear_filters_and_search": "清除篩選和搜尋",
     "display": "顯示設定",
     "selected_other": "已選 {{count}} 項",
     "clear_selection": "清除選擇",

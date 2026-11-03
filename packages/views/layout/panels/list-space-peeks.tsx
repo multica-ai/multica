@@ -14,7 +14,7 @@ import {
 } from "@multica/core/inbox/filter-store";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
 import {
-  groupInboxItemsBySection,
+  deduplicateInboxItems,
   inboxListOptions,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
@@ -33,9 +33,8 @@ const EMPTY_SESSIONS: ChatSession[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
 /**
- * Inbox previewed from another space: the list the Inbox page opens on (its
- * "needs action" section), under the same saved filters. Opening a row lands
- * on it in the Inbox.
+ * Inbox previewed from another space: the list the Inbox page shows, under
+ * the same saved filters. Opening a row lands on it in the Inbox.
  */
 export function InboxPeek() {
   const { t } = useT("inbox");
@@ -50,7 +49,7 @@ export function InboxPeek() {
 
   const items = useMemo(() => {
     const effective = inboxFiltersForPrioritySupport(filters, inboxPriorityFilterSupport(rawItems));
-    return filterInboxItems(groupInboxItemsBySection(rawItems).action, effective, {
+    return filterInboxItems(deduplicateInboxItems(rawItems), effective, {
       activeIssueIds: effective.idleOnly ? new Set(activityByIssueId.keys()) : undefined,
     });
   }, [rawItems, filters, activityByIssueId]);

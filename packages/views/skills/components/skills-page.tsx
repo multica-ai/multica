@@ -38,6 +38,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { rowLinkInteractiveProps, useNavigation } from "../../navigation";
 import {
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -551,7 +552,14 @@ export default function SkillsPage() {
           rowMenu={(row) => <SkillRowActions row={row} ctx={actionsCtx} />}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={t(($) => $.page.no_matches.title)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches.title)}
+              description={narrowed ? t(($) => $.page.no_matches.filter_only) : undefined}
+              onReset={clearFilters}
+              hasFilters={narrowed}
+            />
+          }
         />
       )}
 

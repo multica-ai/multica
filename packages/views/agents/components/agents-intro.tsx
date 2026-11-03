@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Bot, ChevronRight, GitPullRequest, Laptop, Plus, Search } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -26,11 +27,18 @@ const PR_TITLE = "#284 fix(pricing): mobile layout";
 const SOURCE_FILE = "pricing-card.tsx";
 const TEST_RUN = "pnpm test pricing ✓ 12 passed";
 
-export function AgentsIntro({ onCreate }: { onCreate: () => void }) {
+export function AgentsIntro({
+  onCreate,
+  checklist,
+}: {
+  onCreate: () => void;
+  checklist?: ReactNode;
+}) {
   const { t } = useT("agents");
 
   return (
     <FeatureIntro
+      footer={checklist}
       icon={Bot}
       label={t(($) => $.page.title)}
       title={t(($) => $.intro.title)}

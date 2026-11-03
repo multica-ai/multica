@@ -29,6 +29,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -527,7 +528,13 @@ function AutopilotList() {
           rowMenu={(a) => <AutopilotRowActions row={a} />}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={t(($) => $.page.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              onReset={clearFilters}
+              hasFilters={narrowed}
+            />
+          }
         />
       )}
 

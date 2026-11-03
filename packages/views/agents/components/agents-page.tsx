@@ -50,6 +50,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -67,6 +68,7 @@ import {
 } from "../../layout/collection-list";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
+import { AgentSetupChecklist } from "./agent-setup-checklist";
 import {
   AgentListFilterMenu,
   countActiveFilterDimensions,
@@ -383,7 +385,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [] } = useQuery(
+  const { data: runtimes = [], isSuccess: runtimesLoaded } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -545,7 +547,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     if (countActiveFilterDimensions(filters) > 0) {
       return t(($) => $.no_matches.no_filter_match);
     }
-    return t(($) => $.no_matches.title);
+    return null;
   }, [filters, scope, search, t]);
 
   // Straight to the manual form: a duplicate already has every field decided,
@@ -737,7 +739,17 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       {listError ? (
         <ListError listError={listError} onRetry={() => refetchList()} />
       ) : showEmpty ? (
-        <AgentsIntro onCreate={openCreate} />
+        <AgentsIntro
+          onCreate={openCreate}
+          checklist={
+            runtimesLoaded ? (
+              <AgentSetupChecklist
+                hasRuntime={runtimes.length > 0}
+                runtimesHref={paths.runtimes()}
+              />
+            ) : null
+          }
+        />
       ) : (
         <CollectionList
           label={scopeTitles[scope]}
@@ -758,7 +770,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
           )}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={noMatchText}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.no_matches.title)}
+              description={noMatchText}
+              onReset={resetNarrowing}
+              hasFilters={countActiveFilterDimensions(filters) > 0}
+              hasSearch={search.trim() !== ""}
+            />
+          }
         />
       )}
 

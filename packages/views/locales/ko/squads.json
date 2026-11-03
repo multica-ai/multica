@@ -63,6 +63,8 @@
   "members_tab": {
     "section_title": "멤버",
     "add_member_button": "멤버 추가",
+    "empty_title": "아직 멤버가 없습니다",
+    "empty_description": "에이전트나 멤버를 추가하면 이 스쿼드에 할당된 태스크를 맡게 됩니다.",
     "create_agent_button": "에이전트 만들기",
     "leader_chip": "리더",
     "view_agent_tooltip": "에이전트 상세 열기",
@@ -81,6 +83,8 @@
     "copy_link": "링크 복사",
     "link_copied": "링크를 복사했습니다",
     "not_found": "스쿼드를 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 스쿼드",
     "instructions": "지침",
     "edit": "편집",
     "cancel": "취소",

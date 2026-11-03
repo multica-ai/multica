@@ -61,6 +61,8 @@
   },
   "detail": {
     "not_found": "Autopilot not found",
+    "not_found_description": "It may have been deleted or you may not have access.",
+    "back_to_list": "All autopilots",
     "pause_aria": "Pause autopilot",
     "activate_aria": "Activate autopilot",
     "paused_runtime_required": "Paused because the assignee lost its runtime. Bind a runtime, then reactivate this autopilot.",
@@ -496,7 +498,6 @@
     },
     "target_agent": "Wake agent",
     "empty_filtered": "No matching wakeups",
-    "clear_filters": "Clear filters",
     "batch_success": "Turned off {{count}} wakeup rules",
     "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry.",
     "source": "Source",
@@ -528,7 +529,7 @@
         },
         "time": {
           "title": "Or pick a time",
-          "description": "A one-time wakeup suits “check again tomorrow afternoon”; a recurring one suits a daily check."
+          "description": "A one-time wakeup suits \"check again tomorrow afternoon\"; a recurring one suits a daily check."
         },
         "ends": {
           "title": "Stops when the issue ends",
@@ -539,7 +540,7 @@
         "issue_inbox": "Empty state for inbox groups",
         "issue_board": "Resizable board columns",
         "issue_paste": "Paste images into comments",
-        "reply": "“The PR is merged. Updating the docs and closing the issue.”",
+        "reply": "\"The PR is merged. Updating the docs and closing the issue.\"",
         "event_examples": "PR merged, new comment"
       }
     }

@@ -63,6 +63,8 @@
   "members_tab": {
     "section_title": "Membres",
     "add_member_button": "Ajouter un membre",
+    "empty_title": "Aucun membre pour l'instant",
+    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront.",
     "create_agent_button": "Créer un agent",
     "leader_chip": "Chef",
     "view_agent_tooltip": "Ouvrir le détail de l'agent",
@@ -81,6 +83,8 @@
     "copy_link": "Copier le lien",
     "link_copied": "Lien copié",
     "not_found": "Squad introuvable",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les squads",
     "instructions": "Instructions",
     "edit": "Modifier",
     "cancel": "Annuler",

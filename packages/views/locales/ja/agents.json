@@ -44,6 +44,16 @@
     "active_link": "アクティブなエージェント",
     "title": "アーカイブ済みエージェント"
   },
+  "empty": {
+    "setup": {
+      "label": "セットアップ手順",
+      "runtime": "ランタイムを接続する",
+      "agent": "エージェントを作成する",
+      "issue": "タスクを割り当てる",
+      "done": "（完了）",
+      "connect_runtime": "接続"
+    }
+  },
   "no_matches": {
     "title": "一致する結果なし",
     "search_active": "\"{{query}}\" に一致するエージェントがありません。",
@@ -541,6 +551,7 @@
       "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
       "empty_title": "接続済みのアプリがありません",
       "empty_link_to_settings": "設定 → 連携 で接続する",
+      "open_settings": "設定を開く",
       "connected": "接続済み",
       "toggle_aria": "この agent に {{toolkit}} を許可",
       "saving": "保存中…",

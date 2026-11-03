@@ -61,6 +61,8 @@
   },
   "detail": {
     "not_found": "オートパイロットが見つかりません",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのオートパイロット",
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
     "paused_runtime_required": "担当エージェントのランタイムが失われたため一時停止しました。ランタイムを設定してから再度有効にしてください。",
@@ -495,7 +497,6 @@
     },
     "target_agent": "起動するエージェント",
     "empty_filtered": "一致するルールがありません",
-    "clear_filters": "フィルターを解除",
     "batch_success": "{{count}} 件のルールを無効化しました",
     "batch_partial": "{{succeeded}} 件を無効化、{{failed}} 件が失敗しました。失敗した項目を選択したまま再試行できます。",
     "source": "作成元",

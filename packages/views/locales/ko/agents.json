@@ -44,6 +44,16 @@
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
   },
+  "empty": {
+    "setup": {
+      "label": "설정 단계",
+      "runtime": "런타임 연결하기",
+      "agent": "에이전트 만들기",
+      "issue": "태스크 할당하기",
+      "done": "(완료)",
+      "connect_runtime": "연결"
+    }
+  },
   "no_matches": {
     "title": "일치하는 결과 없음",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
@@ -549,6 +559,7 @@
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
+      "open_settings": "설정 열기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
       "saving": "저장 중…",

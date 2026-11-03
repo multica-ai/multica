@@ -61,6 +61,12 @@
     "toast_failed": "新增子任務失敗",
     "toast_success": "已新增 {{identifier}} 為子任務"
   },
+  "add_project_issue": {
+    "title": "加入既有任務",
+    "description": "搜尋要移入這個專案的任務",
+    "toast_success": "已把 {{identifier}} 移入專案",
+    "toast_failed": "移動任務失敗"
+  },
   "run_confirm": {
     "title_assign": "確認指派？",
     "assign_single": "將這個任務指派給 {{name}}；符合執行條件時會立即開始處理。",
