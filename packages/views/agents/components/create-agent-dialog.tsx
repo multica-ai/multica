@@ -6,7 +6,7 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker } from "./runtime-picker";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
-import { Globe, Lock, Users } from "lucide-react";
+import { Globe, Lock, Users } from "@multica/ui/icons";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { api } from "@multica/core/api";
