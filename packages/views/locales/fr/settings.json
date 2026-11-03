@@ -1231,6 +1231,11 @@
     "actions_aria": "Actions pour {{url}}"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "Préparer les conversations à l'ouverture",
+      "description": "Ouvrir une conversation existante, y compris depuis un autre appareil, démarre son agent à l'avance et exécute les hooks SessionStart du projet.",
+      "failed": "Impossible de modifier ce réglage. Réessayez."
+    },
     "device_link": {
       "title": "Liaison d'appareils",
       "allow": "Autoriser les autres appareils à utiliser les conversations de cet appareil",

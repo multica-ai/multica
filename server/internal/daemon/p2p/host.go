@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-libp2p/p2p/net/upgrader"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
+	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
@@ -36,7 +37,7 @@ import (
 // the circuit relay v2 client, DCUtR hole punching and UPnP/NAT-PMP port
 // mapping. addrs, when set, rewrites the advertised addresses (the service
 // appends its relay circuit address).
-func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater, addrs basichost.AddrsFactory) (host.Host, error) {
+func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater, addrs basichost.AddrsFactory, holePunching ...holepunch.Option) (host.Host, error) {
 	self, err := peer.IDFromPrivateKey(key)
 	if err != nil {
 		return nil, err
@@ -141,12 +142,13 @@ func newHost(key crypto.PrivKey, listen []string, gater connmgr.ConnectionGater,
 	}
 
 	h, err := basichost.NewHost(sw, &basichost.HostOpts{
-		EventBus:           bus,
-		ConnManager:        cm,
-		EnablePing:         true,
-		AddrsFactory:       addrs,
-		NATManager:         basichost.NewNATManager,
-		EnableHolePunching: true,
+		EventBus:            bus,
+		ConnManager:         cm,
+		EnablePing:          true,
+		AddrsFactory:        addrs,
+		NATManager:          basichost.NewNATManager,
+		EnableHolePunching:  true,
+		HolePunchingOptions: holePunching,
 	})
 	if err != nil {
 		return fail(err)

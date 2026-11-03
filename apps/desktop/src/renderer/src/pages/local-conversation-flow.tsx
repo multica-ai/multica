@@ -41,6 +41,7 @@ import { LocalDeviceProvider, useLocalDevice, type LocalDevice } from "../platfo
 import { deviceName, useLinkedDevices } from "../platform/linked-devices";
 import { pickRemoteFolder, RemoteFolderPicker } from "./remote-folder-picker";
 import { useDocumentTitle } from "../hooks/use-document-title";
+import { useConversationFocus } from "../platform/use-conversation-focus";
 
 const EMPTY_PROJECT_IDS: string[] = [];
 function folderProject(project: { id: string; title: string; path: string; created_at: string }): LocalFolderProject {
@@ -180,6 +181,7 @@ function LocalConversationFlow() {
   const selectedRef = useRef(selectedId); selectedRef.current = selectedId;
   const provider = selected?.provider ?? (searchParams.get("provider") === "claude" ? "claude" : "codex");
   const active = pathname === flowPath && getCurrentSlug() === slug;
+  useConversationFocus(v2, selectedId, active);
   const intent = `${userId}:${workspace?.id}:${selectedId}:${provider}`;
   const currentIntent = useRef(intent);
   currentIntent.current = intent;

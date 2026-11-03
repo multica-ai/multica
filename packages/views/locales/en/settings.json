@@ -1231,6 +1231,11 @@
     "actions_aria": "Actions for {{url}}"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "Get conversations ready when opened",
+      "description": "Opening an existing conversation, including from another device, starts its agent early. This runs the project's SessionStart hooks.",
+      "failed": "Could not change this setting. Try again."
+    },
     "device_link": {
       "title": "Device link",
       "allow": "Allow other devices to use conversations on this device",

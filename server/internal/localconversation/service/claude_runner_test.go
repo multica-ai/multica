@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,17 +24,22 @@ type fakeAdapter struct {
 	requests []string
 	fields   []map[string]any
 	reply    func(typ string) (json.RawMessage, error)
-	done     chan struct{}
-	err      error
-	closed   bool
+	// intercept, when set, sees each request's context.
+	intercept func(ctx context.Context, typ string)
+	done      chan struct{}
+	err       error
+	closed    bool
 }
 
-func (a *fakeAdapter) Request(_ context.Context, typ string, fields map[string]any) (json.RawMessage, error) {
+func (a *fakeAdapter) Request(ctx context.Context, typ string, fields map[string]any) (json.RawMessage, error) {
 	a.mu.Lock()
 	a.requests = append(a.requests, typ)
 	a.fields = append(a.fields, fields)
-	reply := a.reply
+	reply, intercept := a.reply, a.intercept
 	a.mu.Unlock()
+	if intercept != nil {
+		intercept(ctx, typ)
+	}
 	if reply != nil {
 		return reply(typ)
 	}
@@ -80,7 +86,9 @@ type runnerFixture struct {
 	limiter  *Limiter
 	runner   *ClaudeRunner
 	adapters []*fakeAdapter
-	mu       sync.Mutex
+	// intercept is given to each adapter the fixture starts.
+	intercept func(ctx context.Context, typ string)
+	mu        sync.Mutex
 }
 
 func newRunnerFixture(t *testing.T, limiter *Limiter, reply func(string) (json.RawMessage, error)) *runnerFixture {
@@ -110,6 +118,7 @@ func newRunnerFixture(t *testing.T, limiter *Limiter, reply func(string) (json.R
 		Start: func(_ context.Context, handler claude.Handler) (ClaudeAdapter, error) {
 			a := &fakeAdapter{handler: handler, reply: reply, done: make(chan struct{})}
 			f.mu.Lock()
+			a.intercept = f.intercept
 			f.adapters = append(f.adapters, a)
 			f.mu.Unlock()
 			return a, nil
@@ -409,5 +418,175 @@ func TestClaudeRunnerReportsUnknownOutcomes(t *testing.T) {
 	err := f.runner.Send(context.Background(), SendRequest{TurnID: "t1", RequestID: "r", MessageID: "m", Text: "x"})
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("Send = %v, want ErrOutcomeUnknown", err)
+	}
+}
+
+func TestClaudeRunnerSendOutlivesTheCaller(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+	seen := map[string]error{}
+	f.intercept = func(reqCtx context.Context, typ string) {
+		if typ == "start" {
+			cancel()
+		}
+		if _, bounded := reqCtx.Deadline(); !bounded {
+			t.Errorf("%s has no deadline", typ)
+		}
+		seen[typ] = reqCtx.Err()
+	}
+	if err := f.runner.Send(ctx, SendRequest{TurnID: "t1", RequestID: "req-t1", MessageID: "msg-t1", Text: "hi"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	for _, typ := range []string{"start", "send"} {
+		if err, ok := seen[typ]; !ok || err != nil {
+			t.Fatalf("%s: reached=%v err=%v", typ, ok, err)
+		}
+	}
+}
+
+func TestClaudeRunnerRejectsACallerGoneBeforeTheInputIsStored(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+	if err := f.runner.Send(ctx, SendRequest{TurnID: "t1", RequestID: "req-t1", MessageID: "msg-t1", Text: "hi"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send = %v", err)
+	}
+	if len(f.adapters) != 0 {
+		t.Fatalf("started %d adapters", len(f.adapters))
+	}
+	if f.limiter.Running() != 0 {
+		t.Fatal("limiter slot leaked")
+	}
+}
+
+// After the Query ends the adapter process lives on but cannot serve a turn,
+// so every later send would fail until the daemon restarted.
+func TestClaudeRunnerColdStartsAfterTheQueryEnds(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{"query_ended", "sdk_error"} {
+		for _, running := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s running=%v", code, running), func(t *testing.T) {
+				t.Parallel()
+				f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+				var releases atomic.Int32
+				f.runner.bindContext = func(context.Context, string, func() map[string]any) (BoundContext, func(), error) {
+					return BoundContext{}, func() { releases.Add(1) }, nil
+				}
+				send(t, f, "t1")
+				first := f.adapter(0)
+				first.emit(t, `{"type":"system","subtype":"init","session_id":"native-1"}`)
+				if !running {
+					first.emit(t, `{"type":"result","subtype":"success","is_error":false,"result":""}`)
+					f.turnEvents(t, "t1")
+				}
+				first.handler(claude.Output{Type: "error", Error: &claude.AdapterError{Code: code, Message: "Claude Code ended the session"}})
+				if got := f.turnEvents(t, "t1"); running && got[len(got)-1] != "turn.completed  failed" {
+					t.Fatalf("events = %v", got)
+				}
+				select {
+				case <-first.Done():
+				case <-time.After(3 * time.Second):
+					t.Fatal("adapter was not closed")
+				}
+				eventually(t, "context release", func() bool { return releases.Load() == 1 })
+
+				send(t, f, "t2")
+				f.mu.Lock()
+				started := len(f.adapters)
+				f.mu.Unlock()
+				if started != 2 {
+					t.Fatalf("adapters started = %d, want 2", started)
+				}
+				second := f.adapter(1)
+				if got := fmt.Sprint(second.sent()); got != "[start send]" {
+					t.Fatalf("second adapter requests = %s", got)
+				}
+				if second.fields[0]["resume"] != "native-1" {
+					t.Fatalf("second start fields = %v", second.fields[0])
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeRunnerIgnoresEndOfARetiredAdapter(t *testing.T) {
+	t.Parallel()
+
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+	send(t, f, "t1")
+	first := f.adapter(0)
+	first.emit(t, `{"type":"result","subtype":"success","is_error":false,"result":""}`)
+	f.turnEvents(t, "t1")
+	ended := claude.Output{Type: "error", Error: &claude.AdapterError{Code: "query_ended", Message: "ended"}}
+	first.handler(ended)
+	// A late frame also arrives while the next send starts its adapter.
+	f.intercept = func(_ context.Context, typ string) {
+		if typ == "start" {
+			first.handler(ended)
+		}
+	}
+	send(t, f, "t2")
+
+	first.handler(ended)
+	if !f.runner.Running() {
+		t.Fatal("a late frame from the retired adapter ended the new turn")
+	}
+	select {
+	case <-f.adapter(1).Done():
+		t.Fatal("a late frame from the retired adapter closed its successor")
+	default:
+	}
+}
+
+// A malformed-frame error from the host says nothing about the Query.
+func TestClaudeRunnerKeepsTheAdapterOnOtherUnsolicitedErrors(t *testing.T) {
+	t.Parallel()
+
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+	send(t, f, "t1")
+	first := f.adapter(0)
+	first.emit(t, `{"type":"result","subtype":"success","is_error":false,"result":""}`)
+	f.turnEvents(t, "t1")
+	first.handler(claude.Output{Type: "error", Error: &claude.AdapterError{Code: "invalid_json", Message: "daemon frame is not JSON"}})
+	send(t, f, "t2")
+	if got := fmt.Sprint(first.sent()); got != "[start send send]" {
+		t.Fatalf("requests = %s", got)
+	}
+}
+
+// Stopping while the adapter starts must not spend tokens on the prompt.
+func TestClaudeRunnerDoesNotDispatchATurnStoppedDuringPreparation(t *testing.T) {
+	t.Parallel()
+
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), nil)
+	f.intercept = func(ctx context.Context, typ string) {
+		if typ == "start" {
+			if err := f.runner.Interrupt(ctx); err != nil {
+				t.Errorf("Interrupt: %v", err)
+			}
+		}
+	}
+	send(t, f, "t1")
+	if got := f.turnEvents(t, "t1"); got[len(got)-1] != "turn.completed  cancelled" {
+		t.Fatalf("events = %v", got)
+	}
+	a := f.adapter(0)
+	if got := fmt.Sprint(a.sent()); got != "[start]" {
+		t.Fatalf("requests = %s", got)
+	}
+	if f.limiter.Running() != 0 {
+		t.Fatal("limiter slot leaked")
+	}
+
+	// The prepared adapter serves the next turn.
+	send(t, f, "t2")
+	if got := fmt.Sprint(a.sent()); got != "[start send]" {
+		t.Fatalf("requests after the next send = %s", got)
 	}
 }

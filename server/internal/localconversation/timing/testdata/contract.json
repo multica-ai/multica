@@ -1,0 +1,113 @@
+{
+  "legacyStages": [
+    "gui.submit", "gui.first_output_applied", "gui.terminal_applied", "renderer.request", "renderer.first_output_received", "main.request",
+    "queue.context", "turn.execute", "turn.result", "attachments.resolve",
+    "context.prepare", "context.credentials", "context.mcp", "provider.lookup",
+    "provider.sdk_ready", "provider.refresh", "provider.input_written", "provider.input_yielded",
+    "provider.pool_admission", "provider.pool_wait", "provider.pool_create", "provider.pool_reused", "provider.bridge",
+    "provider.thread_wait", "provider.thread_ready", "provider.thread_unload",
+    "provider.first_stdout", "provider.first_stderr", "provider.first_event",
+    "provider.first_output", "provider.tool", "provider.result", "provider.failure", "provider.retry",
+    "title.generate", "title.persist", "user.question", "images.save", "context.dispose", "images.recover", "turn.save"
+  ],
+  "marks": [
+    "client.send", "client.pending_shown", "client.request",
+    "daemon.request_received", "queue.dispatch", "turn.persist",
+    "runner.create", "runner.limiter", "prepare.wait",
+    "batcher.first_output_commit", "hub.first_output_publish", "ws.first_output_write",
+    "client.first_event_received", "client.first_event_applied", "client.first_commit",
+    "turn.finished", "client.terminal_applied",
+    "provider.spawn", "provider.handshake", "provider.config", "context.bind", "model.resolve", "thread.prepare",
+    "provider.turn_start", "provider.first_frame", "provider.first_reasoning", "provider.first_text", "provider.first_tool", "provider.exit",
+    "adapter.spawn", "adapter.ready", "sdk.load", "query.init", "spare.claim", "mcp.set",
+    "provider.input_queued", "provider.first_message", "provider.session_ready", "provider.first_thinking",
+    "focus.changed", "preheat.requested", "preheat.cancelled", "preheat.started", "preheat.finished", "preheat.failed",
+    "spare.created", "spare.claimed", "spare.rejected", "spare.discarded", "runner.evicted",
+    "link.start", "link.ready", "link.registered", "link.stop",
+    "registry.fetch", "peer.known", "peer.mdns_found",
+    "peer.connect", "relay.reserve", "relay.connected", "relay.refused",
+    "holepunch.start", "holepunch.success", "holepunch.failed",
+    "connection.direct", "connection.relayed", "connection.lost", "network.changed",
+    "tunnel.conn", "tunnel.stream_open", "proxy.request", "proxy.first_byte",
+    "ws.ticket", "ws.hello", "ws.open", "ws.subscribe", "ws.subscribed", "ws.catch_up",
+    "migrate.start", "migrate.stream_closed", "migrate.reconnected", "migrate.resubscribed",
+    "ws.closed", "ws.retry", "ws.resubscribed",
+    "link.request_sent", "link.request_received", "link.response_sent", "link.response_received", "link.event_sent", "link.event_received",
+    "snapshot.request", "snapshot.server_read", "snapshot.first_byte", "snapshot.received", "snapshot.parsed", "snapshot.rendered",
+    "turn.output_summary",
+    "timing.dropped"
+  ],
+  "legacyMapping": {
+    "gui.submit": "client.request",
+    "gui.first_output_applied": "client.first_event_applied",
+    "gui.terminal_applied": "client.terminal_applied",
+    "renderer.request": "client.request",
+    "renderer.first_output_received": "client.first_event_received",
+    "main.request": "daemon.request_received",
+    "context.prepare": "context.bind",
+    "provider.sdk_ready": "query.init",
+    "provider.input_written": "provider.input_queued",
+    "provider.input_yielded": "provider.input_queued",
+    "provider.pool_admission": "prepare.wait",
+    "provider.thread_ready": "thread.prepare",
+    "provider.first_event": "provider.first_message"
+  },
+  "dimensions": {
+    "origin": ["local", "p2p", "unknown"],
+    "clientKind": ["desktop", "mobile", "unknown"],
+    "connection": ["loopback", "direct", "relayed", "unknown"],
+    "provider": ["codex", "claude"],
+    "prepareKind": ["hot", "preheated", "spare", "cold"],
+    "turnKind": ["user", "queued", "steer", "background", "native", "agent"]
+  },
+  "reasons": ["start", "resume", "skipped", "live", "catch_up", "concurrency_limit", "provider_unavailable", "provider_error", "provider_exited", "outcome_unknown", "storage_limit", "compaction_failed", "interrupt_unconfirmed", "remote_failed", "focused", "unfocused", "connection_lost", "not_focused", "draining", "disabled", "no_session", "archived", "claim_refused", "option_not_applied", "settings_not_applied", "mcp_failed", "bind_failed", "unsupported", "max_age", "config_changed", "cli_changed", "environment_changed", "no_clients", "exited", "stopped", "idle_preheated", "idle_sent", "over_limit", "explicit", "config", "catalog", "catalog_cached", "native_default", "background", "slow", "late_direct", "reservation_refused", "resource_limit", "permission_denied", "connection_failed", "ws_normal", "ws_going_away", "ws_abnormal", "ws_protocol", "ws_handshake_timeout"],
+  "records": [
+    {
+      "name": "daemon mark with every dimension",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.123Z", "stage": "thread.prepare", "event": "end", "elapsedMs": 40, "durationMs": 3, "outcome": "completed", "reason": "resume", "conversationId": "conv-1", "requestId": "req-1", "turnId": "turn-req-1", "provider": "codex", "origin": "p2p", "clientKind": "mobile", "connection": "relayed", "prepareKind": "hot", "turnKind": "queued", "turnIndex": 4, "attempt": 2, "prepareId": "prep-1" },
+      "expected": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.123Z", "stage": "thread.prepare", "event": "end", "elapsedMs": 40, "durationMs": 3, "outcome": "completed", "reason": "resume", "conversationId": "conv-1", "requestId": "req-1", "turnId": "turn-req-1", "provider": "codex", "origin": "p2p", "clientKind": "mobile", "connection": "relayed", "prepareKind": "hot", "turnKind": "queued", "turnIndex": 4, "attempt": 2, "prepareId": "prep-1" }
+    },
+    {
+      "name": "device-level record has no conversation",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "timing.dropped", "event": "mark", "elapsedMs": 0, "count": 12 },
+      "expected": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "timing.dropped", "event": "mark", "elapsedMs": 0, "count": 12 }
+    },
+    {
+      "name": "unknown dimension values and free text are dropped, not the record",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "provider.first_text", "event": "mark", "elapsedMs": 5, "conversationId": "conv-1", "origin": "/Users/me/secret", "clientKind": "watch", "connection": "10.0.0.1:443", "provider": "gemini", "prepareKind": "warm", "turnKind": "robot", "reason": "dial tcp 10.0.0.1: refused", "failure": "boom", "outcome": "exploded", "turnIndex": -1, "attempt": -2, "prepareId": "/tmp/x y", "count": -3, "durationMs": -1, "prompt": "SECRET", "cwd": "/SECRET" },
+      "expected": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "provider.first_text", "event": "mark", "elapsedMs": 5, "conversationId": "conv-1" }
+    },
+    {
+      "name": "connection record keeps its closed fields and drops an address",
+      "input": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "peer.connect", "event": "end", "elapsedMs": 0, "durationMs": 9, "peer": "12D3KooWExample", "role": "initiator", "addrType": "/ip4/10.0.0.1/tcp/1", "reused": true, "bytes": 12, "maxGapMs": 3, "reporter": "12D3KooWPhone", "receivedAt": "2026-11-02T10:00:01.000Z" },
+      "expected": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "peer.connect", "event": "end", "elapsedMs": 0, "durationMs": 9, "peer": "12D3KooWExample", "role": "initiator", "reused": true, "bytes": 12, "maxGapMs": 3, "reporter": "12D3KooWPhone", "receivedAt": "2026-11-02T10:00:01.000Z" }
+    },
+    {
+      "name": "free text in a device field is dropped, not the record",
+      "input": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "relay.refused", "event": "mark", "elapsedMs": 0, "peer": "/ip4/10.0.0.1", "reporter": "a b", "role": "boss", "bytes": -1, "maxGapMs": -1, "receivedAt": "yesterday", "reason": "dial tcp 10.0.0.1" },
+      "expected": { "version": 2, "source": "mobile", "at": "2026-11-02T10:00:00.000Z", "stage": "relay.refused", "event": "mark", "elapsedMs": 0 }
+    },
+    {
+      "name": "unknown stage is rejected",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "provider.invented", "event": "mark", "elapsedMs": 0 },
+      "expected": null
+    },
+    {
+      "name": "identifier that could carry a path is rejected",
+      "input": { "version": 2, "source": "daemon", "at": "2026-11-02T10:00:00.000Z", "stage": "turn.persist", "event": "mark", "elapsedMs": 0, "conversationId": "/private/file" },
+      "expected": null
+    },
+    {
+      "name": "old GUI record stays readable",
+      "tsOnly": true,
+      "input": { "version": 1, "source": "gui", "at": "2026-01-01T00:00:00.000Z", "stage": "gui.submit", "event": "end", "elapsedMs": 9, "durationMs": 9, "outcome": "completed", "conversationId": "conv-1", "requestId": "req-1" },
+      "expected": { "version": 1, "source": "gui", "at": "2026-01-01T00:00:00.000Z", "stage": "gui.submit", "event": "end", "elapsedMs": 9, "durationMs": 9, "outcome": "completed", "conversationId": "conv-1", "requestId": "req-1" }
+    },
+    {
+      "name": "version 1 still requires a conversation",
+      "tsOnly": true,
+      "input": { "version": 1, "source": "main", "at": "2026-01-01T00:00:00.000Z", "stage": "turn.execute", "event": "mark", "elapsedMs": 0 },
+      "expected": null
+    }
+  ]
+}

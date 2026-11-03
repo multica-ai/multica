@@ -1,4 +1,5 @@
-import { LOCAL_V2_VERSION, localV2UploadSchema, type LocalV2ChooseRequest, type LocalV2ClientMessage, type LocalV2RendererEndpoint, type LocalV2Scope, type LocalV2Transport } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_VERSION, localV2HelloSchema, localV2UploadSchema, type LocalV2ChooseRequest, type LocalV2ClientMessage, type LocalV2RendererEndpoint, type LocalV2Scope, type LocalV2Transport } from "@multica/core/local-conversation/v2";
+import { LOCAL_TIMING_REQUEST_HEADER, consoleLocalTiming, localTimingCloseReason, localTimingRequestId, parseLocalTiming, type LocalTimingRecord, type LocalTimingSink } from "@multica/tutti-agent-gui-host/local-timing";
 import type { LocalHostAvailability, LocalHostUnavailableReason } from "../../../shared/local-host-availability";
 import type { LocalV2Bridge } from "../../../shared/local-v2-bridge";
 
@@ -9,6 +10,7 @@ const RECONNECT_MAX_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const PROBE_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 20_000;
+const TRACKED_TURNS = 64;
 
 /** A failed request, carried as "kind: message" like every local v2 error. */
 const failure = (kind: string, message: string) => new Error(`${kind}: ${message}`);
@@ -21,6 +23,13 @@ interface Socket {
   watch?: AbortController;
   retryNow?: boolean;
   timer?: ReturnType<typeof setTimeout>;
+  /** A socket has closed, so the next subscribe is a resubscribe. */
+  reconnected?: boolean;
+  /** When each conversation last asked to subscribe. */
+  subscribing?: Map<string, number>;
+  retryDelay?: number;
+  /** What each turn's events cost so far, summed for one record at its end. */
+  traffic?: Map<string, { batches: number; bytes: number; last: number; maxGap: number }>;
 }
 
 export interface DirectLocalV2Options {
@@ -31,7 +40,11 @@ export interface DirectLocalV2Options {
   chooseRemote?: (scope: LocalV2Scope, request: LocalV2ChooseRequest) => Promise<unknown>;
   WebSocket?: typeof WebSocket;
   fetch?: typeof fetch;
+  /** Where this link's connection marks go; only another device's link has any. */
+  timing?: LocalTimingSink;
 }
+
+const SNAPSHOT_PATH = /^\/sessions\/([^/]+)\/snapshot$/;
 
 /**
  * The renderer's link to the daemon's `/local/v2` API: JSON and file
@@ -57,6 +70,8 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   private readonly basePath: string;
   /** This client, so the daemon sends a conversation's host requests back here, also after a reconnect. */
   private readonly clientId = crypto.randomUUID();
+  /** Read once per connection; a reconnect may have reached an updated daemon. */
+  private capabilityLoad?: Promise<string[]>;
 
   constructor(private options: DirectLocalV2Options) {
     this.WS = options.WebSocket ?? WebSocket;
@@ -72,6 +87,12 @@ export class DirectLocalV2Transport implements LocalV2Transport {
         .finally(() => { this.endpointLoad = undefined; });
     }
     return this.endpointLoad;
+  }
+
+  private mark(stage: LocalTimingRecord["stage"], extra: Partial<LocalTimingRecord> = {}) {
+    if (this.deviceId === "local") return;
+    const record = parseLocalTiming({ version: 2, source: "renderer", clientKind: "desktop", origin: "p2p", at: new Date().toISOString(), stage, event: extra.event ?? "mark", elapsedMs: 0, peer: this.deviceId, ...extra });
+    if (record) (this.options.timing ?? consoleLocalTiming)(record);
   }
 
   private url(endpoint: LocalV2RendererEndpoint, path: string) { return `http://${endpoint.base}${this.basePath}/local/v2${path}`; }
@@ -122,6 +143,18 @@ export class DirectLocalV2Transport implements LocalV2Transport {
     this.report(compatible ? { state: "connected" } : { state: "unavailable", reason: "incompatible" });
   }
 
+  capabilities(): Promise<string[]> {
+    return this.capabilityLoad ??= (async () => {
+      const endpoint = await this.endpoint();
+      const asked = Date.now();
+      const response = await this.fetch(this.url(endpoint, "/hello"), { headers: { Authorization: `Bearer ${endpoint.token}` }, signal: AbortSignal.timeout(HANDSHAKE_TIMEOUT_MS) });
+      this.mark("ws.hello", { event: "end", durationMs: Date.now() - asked, outcome: response.ok ? "completed" : "failed" });
+      if (!response.ok) throw failure(`http_${response.status}`, "The daemon did not answer");
+      const hello = localV2HelloSchema.safeParse(await response.json());
+      return hello.success ? hello.data.capabilities : [];
+    })().catch((error: unknown) => { this.capabilityLoad = undefined; throw error; });
+  }
+
   private outcome(kind: string | null) {
     if (kind === null) this.report({ state: "connected" });
     else if (kind === "draining") this.report({ state: "updating" });
@@ -161,12 +194,19 @@ export class DirectLocalV2Transport implements LocalV2Transport {
         reads.add(controller);
       }
       try {
+        const snapshot = method === "GET" ? SNAPSHOT_PATH.exec(path)?.[1] : undefined;
+        const conversationId = snapshot ? decodeURIComponent(snapshot) : undefined;
+        const began = Date.now();
+        if (conversationId) this.mark("snapshot.request", { conversationId });
         const response = await this.fetchDaemon(scope, method, path, init, controller?.signal);
+        if (conversationId) this.mark("snapshot.first_byte", { conversationId, durationMs: Date.now() - began });
         // Keep the abort controller until the body is consumed: headers can
         // arrive before the network disappears halfway through a snapshot.
         const body = await response.text();
+        if (conversationId) this.mark("snapshot.received", { conversationId, durationMs: Date.now() - began, bytes: body.length });
         let value: unknown = null;
         try { value = JSON.parse(body); } catch { /* Invalid bodies retain the HTTP error handling below. */ }
+        if (conversationId) this.mark("snapshot.parsed", { conversationId, durationMs: Date.now() - began });
         return this.jsonOutcome(response, value);
       } catch (error) {
         if (controller?.signal.reason === "connection_replaced" && recovery === 0) continue;
@@ -195,7 +235,8 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   }
 
   request(scope: LocalV2Scope, method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
-    return this.json(scope, method, path, body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+    const requestId = this.deviceId === "local" ? undefined : localTimingRequestId(body);
+    return this.json(scope, method, path, body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json", ...(requestId ? { [LOCAL_TIMING_REQUEST_HEADER]: requestId } : {}) } });
   }
 
   async upload(scope: LocalV2Scope, file: File) {
@@ -240,6 +281,10 @@ export class DirectLocalV2Transport implements LocalV2Transport {
 
   setDeviceLink(enabled: boolean): Promise<unknown> { return this.own("PUT", "/local/device-link", { enabled }); }
 
+  /** Whether opening a conversation on this device may start its agent early. */
+  conversationPreheat(): Promise<unknown> { return this.own("GET", "/local/conversation-preheat"); }
+  setConversationPreheat(enabled: boolean): Promise<unknown> { return this.own("PUT", "/local/conversation-preheat", { old_conversations: enabled }); }
+
   servicePreview(): Promise<unknown> { return this.own("GET", "/local/service-preview"); }
   setServicePreview(value: { enabled: boolean; ports: number[] }): Promise<unknown> { return this.own("PUT", "/local/service-preview", value); }
   clearAgentServicePreviews(): Promise<unknown> { return this.own("DELETE", "/local/service-preview"); }
@@ -259,6 +304,10 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   async send(scope: LocalV2Scope, message: LocalV2ClientMessage): Promise<void> {
     const ws = await this.connect(scope);
     ws.send(JSON.stringify(message));
+    if (message.type === "subscribe") {
+      this.sockets.get(this.key(scope))?.subscribing?.set(message.conversation_id, Date.now());
+      this.mark("ws.subscribe", { conversationId: message.conversation_id });
+    }
   }
 
   private key(scope: LocalV2Scope) { return JSON.stringify([scope.userId, scope.workspaceId]); }
@@ -267,18 +316,21 @@ export class DirectLocalV2Transport implements LocalV2Transport {
     const key = this.key(scope);
     let socket = this.sockets.get(key);
     if (!socket) {
-      socket = { scope, backoff: RECONNECT_MIN_MS }; this.sockets.set(key, socket);
+      socket = { scope, backoff: RECONNECT_MIN_MS, subscribing: new Map(), traffic: new Map() }; this.sockets.set(key, socket);
       if (this.deviceId !== "local") this.watchLink(socket);
     }
     if (socket.ws?.readyState === this.WS.OPEN) return Promise.resolve(socket.ws);
     const current = socket;
     return current.connecting ??= (async () => {
       try {
+        const asked = Date.now();
         const { ticket } = await this.json(scope, "POST", "/ws-ticket") as { ticket: string };
+        this.mark("ws.ticket", { event: "end", durationMs: Date.now() - asked, outcome: "completed" });
         const endpoint = await this.endpoint();
         if (this.sockets.get(key) !== current) throw failure("scope_released", "The conversation connection was released");
         const ws = new this.WS(`ws://${endpoint.base}${this.basePath}/local/v2/ws?${new URLSearchParams({ ticket })}`);
         current.ws = ws;
+        const opening = Date.now();
         await new Promise<void>((resolve, reject) => {
           let settled = false;
           const finish = (error?: Error) => {
@@ -294,7 +346,10 @@ export class DirectLocalV2Transport implements LocalV2Transport {
           const opened = () => finish();
           const closed = () => finish(failure("device_unreachable", "The connection closed before the handshake completed"));
           const failed = () => finish(failure(this.deviceId === "local" ? "daemon_offline" : "device_unreachable", "Could not connect to the conversation service"));
-          const timer = setTimeout(() => finish(failure("device_unreachable", "The conversation connection handshake timed out")), HANDSHAKE_TIMEOUT_MS);
+          const timer = setTimeout(() => {
+            this.mark("ws.closed", { reason: "ws_handshake_timeout" });
+            finish(failure("device_unreachable", "The conversation connection handshake timed out"));
+          }, HANDSHAKE_TIMEOUT_MS);
           ws.addEventListener("open", opened, { once: true });
           ws.addEventListener("close", closed, { once: true });
           ws.addEventListener("error", failed, { once: true });
@@ -302,6 +357,8 @@ export class DirectLocalV2Transport implements LocalV2Transport {
         if (this.sockets.get(key) !== current || ws.readyState !== this.WS.OPEN) {
           ws.close(); throw failure("scope_released", "The conversation connection was released");
         }
+        current.retryDelay = undefined;
+        this.mark("ws.open", { event: "end", durationMs: Date.now() - opening, outcome: "completed" });
         this.attach(current, ws);
         return ws;
       } catch (error) {
@@ -322,21 +379,26 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   private attach(socket: Socket, ws: WebSocket) {
     if (this.deviceId !== "local" && !socket.watch) this.watchLink(socket);
     this.abortReads(socket.scope, "connection_replaced");
+    this.capabilityLoad = undefined;
     socket.ws = ws; socket.backoff = RECONNECT_MIN_MS;
     ws.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return;
       let message: unknown;
       try { message = JSON.parse(event.data); } catch { return; }
-      const value = message as { type?: unknown; request_id?: unknown; kind?: unknown; payload?: unknown };
+      const value = message as { type?: unknown; request_id?: unknown; kind?: unknown; payload?: unknown; status?: unknown; conversation_id?: unknown };
+      if (value?.type === "subscription.status") this.markSubscription(socket, value.status, value.conversation_id);
+      if (value?.type === "conversation.events") this.markEvents(socket, message, event.data.length);
       if (value?.type === "host.request" && typeof value.request_id === "string" && typeof value.kind === "string") {
         void this.answer(socket.scope, ws, value.request_id, value.kind, (value.payload ?? {}) as Record<string, unknown>);
         return;
       }
       for (const listener of this.messageListeners) listener(socket.scope, message);
     });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
       if (this.sockets.get(this.key(socket.scope)) !== socket || socket.ws !== ws) return;
       socket.ws = undefined;
+      socket.reconnected = true;
+      this.mark("ws.closed", { reason: localTimingCloseReason((event as CloseEvent | undefined)?.code) });
       this.outcome(this.deviceId === "local" ? "daemon_offline" : "device_unreachable");
       for (const listener of this.connectionListeners) listener(socket.scope, false);
       this.reconnect(socket);
@@ -425,10 +487,51 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   private reconnect(socket: Socket) {
     if (socket.timer || this.sockets.get(this.key(socket.scope)) !== socket) return;
     const delay = socket.backoff; socket.backoff = Math.min(socket.backoff * 2, RECONNECT_MAX_MS);
+    // Only a new backoff is news; retrying at the cap would tick while offline.
+    if (delay !== socket.retryDelay) { socket.retryDelay = delay; this.mark("ws.retry", { durationMs: delay }); }
     socket.timer = setTimeout(() => {
       socket.timer = undefined;
       void this.connect(socket.scope).catch(() => this.reconnect(socket));
     }, delay);
+  }
+
+  private markEvents(socket: Socket, message: unknown, size: number) {
+    if (this.deviceId === "local" || !socket.traffic) return;
+    const { conversation_id: conversationId, events } = message as { conversation_id?: unknown; events?: unknown };
+    if (typeof conversationId !== "string" || !Array.isArray(events)) return;
+    const now = Date.now();
+    let bytes = size;
+    const seen = new Set<string>();
+    for (const event of events as { turn_id?: unknown; type?: unknown }[]) {
+      if (typeof event?.turn_id !== "string") continue;
+      const turn = socket.traffic.get(event.turn_id) ?? { batches: 0, bytes: 0, last: now, maxGap: 0 };
+      if (!seen.has(event.turn_id)) {
+        seen.add(event.turn_id);
+        turn.maxGap = Math.max(turn.maxGap, now - turn.last);
+        turn.last = now; turn.batches++; turn.bytes += bytes;
+        // A batch nearly always holds one turn; otherwise its size stays with the first.
+        bytes = 0;
+      }
+      socket.traffic.set(event.turn_id, turn);
+      // A turn whose end this socket never sees would otherwise stay for its lifetime.
+      if (socket.traffic.size > TRACKED_TURNS) socket.traffic.delete(socket.traffic.keys().next().value!);
+      if (event.type === "turn.completed") {
+        socket.traffic.delete(event.turn_id);
+        this.mark("link.event_received", { conversationId, turnId: event.turn_id, count: turn.batches, bytes: turn.bytes, maxGapMs: turn.maxGap });
+      }
+    }
+  }
+
+  private markSubscription(socket: Socket, status: unknown, conversation: unknown) {
+    if (typeof conversation !== "string" || this.deviceId === "local") return;
+    if (status === "subscribed") {
+      this.mark("ws.subscribed", { conversationId: conversation });
+      if (socket.reconnected) { socket.reconnected = false; this.mark("ws.resubscribed", { conversationId: conversation }); }
+    } else if (status === "live") {
+      const asked = socket.subscribing?.get(conversation);
+      this.mark("ws.catch_up", { conversationId: conversation, ...(asked === undefined ? {} : { durationMs: Date.now() - asked }) });
+      socket.subscribing?.delete(conversation);
+    }
   }
 
   private abortReads(scope: LocalV2Scope, reason: string) {

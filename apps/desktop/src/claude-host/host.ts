@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import desktopPackage from "../../package.json";
 import { ClaudeAdapter, type ClaudeSdk } from "./adapter";
 import { FrameWriter, WriteBacklogError } from "./frame-writer";
-import { CLAUDE_ADAPTER_PROTOCOL_VERSION, daemonMessageSchema } from "./protocol";
+import { CLAUDE_ADAPTER_CAPABILITIES, CLAUDE_ADAPTER_PROTOCOL_VERSION, daemonMessageSchema } from "./protocol";
 
 const SDK_VERSION = desktopPackage.dependencies["@anthropic-ai/claude-agent-sdk"];
 const MAX_QUEUED_BYTES = 16 << 20;
@@ -37,7 +37,7 @@ export function runClaudeHost(options: HostOptions): void {
   const fatal = (error: unknown) => exit(error instanceof WriteBacklogError ? 3 : 1, error instanceof Error ? error.message : String(error));
   const send = (frame: Parameters<FrameWriter["write"]>[0]) => writer.write(frame).catch(fatal);
 
-  void send({ version: CLAUDE_ADAPTER_PROTOCOL_VERSION, type: "ready", sdk_version: SDK_VERSION });
+  void send({ version: CLAUDE_ADAPTER_PROTOCOL_VERSION, type: "ready", sdk_version: SDK_VERSION, capabilities: CLAUDE_ADAPTER_CAPABILITIES });
 
   const lines = createInterface({ input: options.input, crlfDelay: Infinity });
   lines.on("line", (line) => {

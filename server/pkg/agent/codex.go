@@ -2149,46 +2149,7 @@ func (c *codexClient) configuredModel(ctx context.Context, cwd string) (string, 
 		return *model, nil
 	}
 
-	var cursor *string
-	seen := map[string]bool{}
-	defaultModel := ""
-	for page := 0; page < 32; page++ {
-		raw, err = c.request(readCtx, "model/list", map[string]any{"cursor": cursor, "limit": 100})
-		if err != nil {
-			return "", fmt.Errorf("read default model: %w", err)
-		}
-		var catalog struct {
-			Data []struct {
-				Model     string `json:"model"`
-				IsDefault bool   `json:"isDefault"`
-			} `json:"data"`
-			NextCursor *string `json:"nextCursor"`
-		}
-		if err := json.Unmarshal(raw, &catalog); err != nil || catalog.Data == nil {
-			return "", errors.New("invalid default model catalog response")
-		}
-		for _, model := range catalog.Data {
-			if !model.IsDefault {
-				continue
-			}
-			if strings.TrimSpace(model.Model) == "" || (defaultModel != "" && defaultModel != model.Model) {
-				return "", errors.New("default model catalog is ambiguous")
-			}
-			defaultModel = model.Model
-		}
-		if catalog.NextCursor == nil || *catalog.NextCursor == "" {
-			if defaultModel == "" {
-				return "", errors.New("runtime did not report a configured or default model")
-			}
-			return defaultModel, nil
-		}
-		if seen[*catalog.NextCursor] {
-			return "", errors.New("default model catalog repeated its cursor")
-		}
-		seen[*catalog.NextCursor] = true
-		cursor = catalog.NextCursor
-	}
-	return "", errors.New("default model catalog exceeded its page limit")
+	return codexappserver.CatalogDefaultModel(readCtx, c.request)
 }
 
 func (c *codexClient) trySetThreadName(ctx context.Context, threadID, name string, logger *slog.Logger) {

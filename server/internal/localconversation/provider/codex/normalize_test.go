@@ -151,3 +151,106 @@ func TestCodexNormalizerIgnoresUnrelatedNotifications(t *testing.T) {
 		t.Fatalf("events = %s", summary(got))
 	}
 }
+
+func TestCodexNormalizerStreamsReasoningWithTheFinalTextSeparators(t *testing.T) {
+	t.Parallel()
+
+	n := NewNormalizer("multica")
+	got := feed(t, n,
+		note{"item/started", `{"item":{"id":"r1","type":"reasoning","summary":[],"content":[]}}`},
+		note{"item/reasoning/summaryPartAdded", `{"threadId":"th","turnId":"tu","itemId":"r1","summaryIndex":0}`},
+		note{"item/reasoning/summaryTextDelta", `{"itemId":"r1","delta":"pla","summaryIndex":0}`},
+		note{"item/reasoning/summaryTextDelta", `{"itemId":"r1","delta":"n","summaryIndex":0}`},
+		note{"item/reasoning/summaryPartAdded", `{"itemId":"r1","summaryIndex":1}`},
+		note{"item/reasoning/summaryTextDelta", `{"itemId":"r1","delta":"check","summaryIndex":1}`},
+		note{"item/reasoning/textDelta", `{"itemId":"r1","delta":"raw","contentIndex":0}`},
+		note{"item/reasoning/textDelta", `{"itemId":"r1","delta":"more","contentIndex":1}`},
+		note{"item/completed", `{"item":{"id":"r1","type":"reasoning","summary":["plan","check"],"content":["raw","more"]}}`},
+		// Late deltas never reopen the item.
+		note{"item/reasoning/textDelta", `{"itemId":"r1","delta":"late","contentIndex":1}`},
+	)
+	assertEvents(t, got,
+		"item.started r1 kind=reasoning",
+		"item.delta r1 kind=reasoning text=pla",
+		"item.delta r1 kind=reasoning text=n",
+		"item.delta r1 kind=reasoning text=\n",
+		"item.delta r1 kind=reasoning text=check",
+		"item.delta r1 kind=reasoning text=\nraw",
+		"item.delta r1 kind=reasoning text=\nmore",
+		"item.completed r1 final kind=reasoning status=completed text=plan\ncheck\nraw\nmore",
+	)
+	var streamed strings.Builder
+	for _, e := range got {
+		if e.Type == "item.delta" {
+			if e.Payload["field"] != "text" {
+				t.Fatalf("delta payload = %v", e.Payload)
+			}
+			streamed.WriteString(e.Payload["text"].(string))
+		}
+	}
+	if streamed.String() != got[len(got)-1].Payload["text"] {
+		t.Fatalf("streamed %q, final %q", streamed.String(), got[len(got)-1].Payload["text"])
+	}
+}
+
+func TestCodexNormalizerStartsReasoningFromItsFirstDelta(t *testing.T) {
+	t.Parallel()
+
+	assertEvents(t, feed(t, NewNormalizer("multica"), note{"item/reasoning/summaryTextDelta", `{"itemId":"r1","delta":"plan","summaryIndex":0}`}),
+		"item.started r1 kind=reasoning",
+		"item.delta r1 kind=reasoning text=plan",
+	)
+	assertEvents(t, feed(t, NewNormalizer("multica"), note{"item/reasoning/summaryPartAdded", `{"itemId":"r1","summaryIndex":0}`}),
+		"item.started r1 kind=reasoning",
+	)
+}
+
+func TestCodexNormalizerFinalReasoningWins(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, completed, want string }{
+		{"final text replaces the deltas", `{"item":{"id":"r1","type":"reasoning","summary":["final"]}}`, "final"},
+		{"an empty final keeps the deltas", `{"item":{"id":"r1","type":"reasoning","summary":[],"content":[]}}`, "partial"},
+	}
+	for _, tc := range cases {
+		n := NewNormalizer("multica")
+		got := feed(t, n,
+			note{"item/reasoning/textDelta", `{"itemId":"r1","delta":"partial","contentIndex":0}`},
+			note{"item/completed", tc.completed},
+		)
+		if text := got[len(got)-1].Payload["text"]; text != tc.want {
+			t.Fatalf("%s: final text = %v", tc.name, text)
+		}
+		if again := n.Close("cancelled"); len(again) != 0 {
+			t.Fatalf("%s: Close = %s", tc.name, summary(again))
+		}
+	}
+}
+
+// Summaries can be turned off; the item then has no text but stays valid.
+func TestCodexNormalizerReasoningWithoutDeltas(t *testing.T) {
+	t.Parallel()
+
+	got := feed(t, NewNormalizer("multica"),
+		note{"item/started", `{"item":{"id":"r1","type":"reasoning"}}`},
+		note{"item/completed", `{"item":{"id":"r1","type":"reasoning","summary":[],"content":[]}}`},
+	)
+	assertEvents(t, got,
+		"item.started r1 kind=reasoning",
+		"item.completed r1 final kind=reasoning status=completed text=",
+	)
+}
+
+func TestCodexNormalizerCloseKeepsReceivedReasoning(t *testing.T) {
+	t.Parallel()
+
+	n := NewNormalizer("multica")
+	feed(t, n,
+		note{"item/reasoning/summaryTextDelta", `{"itemId":"r1","delta":"half","summaryIndex":0}`},
+		note{"item/started", `{"item":{"id":"r2","type":"reasoning"}}`},
+	)
+	assertEvents(t, n.Close("failed"),
+		"item.completed r1 final kind=reasoning status=failed text=half",
+		"item.completed r2 final kind=reasoning status=failed text=",
+	)
+}

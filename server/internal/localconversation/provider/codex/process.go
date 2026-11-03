@@ -42,6 +42,13 @@ type Server struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	exited chan struct{}
+	// spawnTook and handshakeTook are set before Start returns.
+	spawnTook, handshakeTook time.Duration
+}
+
+// StartDurations is how long launching the process and its handshake took.
+func (s *Server) StartDurations() (spawn, handshake time.Duration) {
+	return s.spawnTook, s.handshakeTook
 }
 
 // Start launches app-server and completes the initialize handshake.
@@ -67,10 +74,11 @@ func startWithArgs(ctx context.Context, command Command, prefix []string, handle
 	if err != nil {
 		return nil, err
 	}
+	began := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
-	s := &Server{Conn: codexappserver.NewConn(stdin), cmd: cmd, stdin: stdin, exited: make(chan struct{})}
+	s := &Server{Conn: codexappserver.NewConn(stdin), cmd: cmd, stdin: stdin, exited: make(chan struct{}), spawnTook: time.Since(began)}
 	readDone, stderrDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stderrDone)
@@ -108,11 +116,13 @@ func startWithArgs(ctx context.Context, command Command, prefix []string, handle
 
 	hsCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
+	handshaking := time.Now()
 	if _, err := s.Request(hsCtx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "multica_dialogue", "title": "Multica", "version": "1.0.0"}}); err != nil {
 		s.Stop()
 		return nil, fmt.Errorf("codex app-server initialize: %w", err)
 	}
 	s.Notify("initialized")
+	s.handshakeTook = time.Since(handshaking)
 	return s, nil
 }
 

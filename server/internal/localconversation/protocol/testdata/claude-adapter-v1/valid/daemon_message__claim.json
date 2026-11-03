@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "type": "claim",
+  "id": "r2",
+  "cwd": "/repo",
+  "model": "claude-opus-5-5",
+  "permission_mode": "full-access",
+  "append_system_prompt": "context",
+  "settings": {
+    "effortLevel": "high"
+  }
+}

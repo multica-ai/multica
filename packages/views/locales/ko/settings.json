@@ -965,6 +965,11 @@
     "actions_aria": "{{url}} 작업"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "대화를 열 때 미리 준비",
+      "description": "기존 대화를 열면(다른 기기에서 여는 경우 포함) 에이전트가 미리 시작되고 프로젝트의 SessionStart 훅이 실행됩니다.",
+      "failed": "이 설정을 변경하지 못했습니다. 다시 시도해 주세요."
+    },
     "device_link": {
       "title": "기기 연결",
       "allow": "다른 기기가 이 기기의 대화 흐름을 사용하도록 허용",

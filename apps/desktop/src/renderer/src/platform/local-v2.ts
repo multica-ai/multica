@@ -4,6 +4,7 @@ import {
   LOCAL_V2_VERSION, localV2ServerMessageSchema, localV2SessionListSchema, localV2SnapshotSchema, localV2UploadSchema,
   type LocalV2Device, type LocalV2Scope, type LocalV2Snapshot, type LocalV2Summary, type LocalV2Transport,
 } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 
 /** A failed v2 request with the daemon's stable error kind. */
 export class LocalV2RequestError extends Error {
@@ -46,8 +47,19 @@ export class LocalV2ScopeClient {
   private generation = "";
   private presenceMap = new Map<string, LocalV2Device[]>();
   private presenceListeners = new Set<() => void>();
+  private focused = new LocalV2FocusTracker(async (id, focused) => {
+    try {
+      const capabilities = await this.transport.capabilities?.();
+      // A daemon that cannot use it has nothing to catch up on either.
+      if (capabilities?.includes(LOCAL_V2_FOCUS_CAPABILITY)) await this.transport.send(this.scope, { version: LOCAL_V2_VERSION, type: "conversation.focus", conversation_id: id, focused });
+      return true;
+    } catch { return false; }
+  });
 
   constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope) {}
+
+  /** Someone is looking at a conversation until the returned function is called. */
+  focus(id: string): () => void { return this.focused.hold(id); }
 
   async request(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
     try { return await this.transport.request(this.scope, method, path, body); }
@@ -190,6 +202,7 @@ export class LocalV2ScopeClient {
       this.conversations.clear();
       return;
     }
+    this.focused.reconnected();
     if (this.summaryLoad) this.reloadSummaries();
     const lost = [...this.lost.entries()];
     this.lost.clear();

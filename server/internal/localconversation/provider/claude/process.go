@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,18 @@ type Process struct {
 	exitMu sync.Mutex
 	exit   error
 	Ready  Ready
+	// spawnTook and readyTook are set before Start returns.
+	spawnTook, readyTook time.Duration
+}
+
+// StartDurations is how long launching the process and its ready frame took.
+func (p *Process) StartDurations() (spawn, ready time.Duration) {
+	return p.spawnTook, p.readyTook
+}
+
+// Supports reports whether the adapter announced a capability.
+func (p *Process) Supports(capability string) bool {
+	return slices.Contains(p.Ready.Capabilities, capability)
 }
 
 // Start launches the adapter and waits for its ready frame.
@@ -68,10 +81,11 @@ func Start(ctx context.Context, command Command, handler Handler, logger *slog.L
 	if err != nil {
 		return nil, err
 	}
+	began := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start claude adapter: %w", err)
 	}
-	p := &Process{cmd: cmd, stdin: stdin, exited: make(chan struct{})}
+	p := &Process{cmd: cmd, stdin: stdin, exited: make(chan struct{}), spawnTook: time.Since(began)}
 	p.Conn = NewConn(stdout, stdin, handler)
 	stderrDone := make(chan struct{})
 	go func() { defer close(stderrDone); drainStderr(stderr, logger) }()
@@ -93,12 +107,14 @@ func Start(ctx context.Context, command Command, handler Handler, logger *slog.L
 
 	readyCtx, cancel := context.WithTimeout(ctx, readyTimeout)
 	defer cancel()
+	waiting := time.Now()
 	ready, err := p.WaitReady(readyCtx)
 	if err != nil {
 		p.kill()
 		return nil, fmt.Errorf("claude adapter did not become ready: %w", err)
 	}
 	p.Ready = ready
+	p.readyTook = time.Since(waiting)
 	return p, nil
 }
 

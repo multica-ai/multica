@@ -20,8 +20,33 @@ limited to 1,000 pending records. They never delay a turn or fail a send. A full
 disk or an overflowing diagnostic queue can therefore leave gaps in the log.
 The directory is created with mode 0700 and files with mode 0600.
 
+The daemon owns a separate file, so the two processes never share a writer:
+
+```text
+<ProfileDir>/local-conversations/diagnostics/daemon-timing.jsonl
+<ProfileDir>/local-conversations/diagnostics/daemon-timing.jsonl.1
+```
+
+For Desktop's runtime, `<ProfileDir>` is `~/.multica/profiles/desktop-runtime`,
+which is not the directory holding `daemon.log`. The file has the same 5 MiB and
+one-previous-file limits. Its writer has a bounded queue of 1,024 records and
+never blocks a send; a full queue or failed write becomes a `timing.dropped`
+record with a `count`, and an export that reads one reports `coverage.incomplete`
+and `coverage.droppedTimingWrites`. Desktop's own log records its gaps the same way
+so the standalone MCP can see them. Exports do not coordinate with the daemon's
+rotation, so a read that exactly straddles one can miss that generation.
+
+Two more files sit beside it, so link traffic and other devices' reports can never
+rotate turn records away:
+
+```text
+<ProfileDir>/local-conversations/diagnostics/device-timing.jsonl   (2 MiB + .1)
+<ProfileDir>/local-conversations/diagnostics/timing-reports.jsonl  (5 MiB + .1)
+```
+
 Only allowlisted stages, opaque conversation/request/turn IDs, provider, source,
-timestamps, durations, outcomes and coarse error categories are accepted.
+timestamps, durations, counts, outcomes, closed-enum dimensions and coarse error
+categories are accepted. Unknown dimension values are dropped, not stored.
 Message text, tool arguments/results, image data, filenames, credentials, raw
 errors, environment variables and unrelated console output are excluded.
 Renderer/GUI records pass the same validation before being written, including
@@ -62,9 +87,10 @@ MCP exports live in `<userData>/local-conversations/diagnostics/exports/`, with
 directory mode 0700 and file mode 0600. Each export prunes generated bundles
 older than seven days and keeps at most 20. Files saved through the native dialog
 are user-managed. Export bundles include allowlisted runtime versions, filters,
-coverage, summary, validated timing records and separate `sources.web` /
-`sources.daemon` sections (schema version 2). `summary.recordCount` totals timing
-records, Web records and daemon lines; separate counts identify each source.
+coverage, summary, validated timing records, `waterfalls`, `deviceTimeline` and
+separate `sources.web` / `sources.daemon` / `sources.daemonTiming` / `sources.linkTiming`
+sections (schema version 3). `summary.recordCount` totals timing records, Web records and daemon lines;
+separate counts identify each source.
 The MCP response includes source availability and truncation without injecting
 all log text into the agent’s context.
 
@@ -106,9 +132,9 @@ started wins when several builds are installed.
 
 The server only reads files the desktop already writes. The desktop publishes
 `<userData>/local-conversations/diagnostics/developer-logs-mcp.json` (API URL,
-signed-in user ID or null, daemon log path, runtime versions; no credentials) at
+signed-in user ID or null, daemon log and timing paths, runtime versions; no credentials) at
 startup and on account changes, and the server reads it on each call. It exposes
-one tool, `export_developer_logs(since_minutes)`, writing the same schema version 2
+one tool, `export_developer_logs(since_minutes)`, writing the same schema version 3
 bundle into the same exports folder. Without a desktop conversation list,
 timings cover **every local conversation in the time range**
 (`filter.timingScope: "device"`, `workspaceId: null`); the Web log is the
@@ -133,6 +159,77 @@ running. Codex dialogue turns reuse the dual app-server pool and unload their
 thread after completion. One-shot CLI calls and persistent Claude SDK queries
 have different lifecycle stages; absent per-turn spawn/exit records are expected
 for a reused process. Foreground completion does not mean that process exited.
+
+## Send-path marks
+
+`packages/core/local-conversation/timing.ts` is the contract: every mark name, the
+closed dimensions (`origin`, `clientKind`, `connection`, `provider`, `prepareKind`,
+`turnKind`), `turnIndex`, `attempt`, `prepareId`, the closed `reason`, and the
+mapping from the old stage names above onto current marks. Its samples in
+`server/internal/localconversation/timing/testdata/contract.json` are decoded by
+both the Go and TypeScript sides. Old logs stay readable and read under their
+current names in a waterfall (`recordedAs` keeps the name written).
+
+| Where | Marks |
+| --- | --- |
+| Client | `client.send`, `client.request`, `client.first_event_received`, `client.first_event_applied`, `client.terminal_applied` |
+| Daemon entry | `daemon.request_received`, `queue.dispatch`, `turn.persist` |
+| Runner | `runner.create`, `runner.limiter`, `prepare.wait` |
+| Preheat | `focus.changed` (`count` is the conversation's focused clients), `preheat.requested`, `preheat.cancelled`, `preheat.started`, `preheat.finished`, `preheat.failed`; `reason` says why |
+| Spares | `spare.created`, `spare.claim`, `spare.claimed`, `spare.rejected`, `spare.discarded`, `mcp.set`; `reason` says why |
+| Reclaim | `runner.evicted` (`durationMs` is how long it sat idle; `reason` is `idle_preheated`, `idle_sent` or `over_limit`) |
+| Codex | `provider.spawn`, `provider.handshake`, `provider.config`, `context.bind`, `model.resolve`, `thread.prepare` (`reason` is `start` or `resume`), `provider.turn_start` |
+| Claude | `adapter.spawn`, `adapter.ready`, `context.bind`, `sdk.load` and `query.init` (from the adapter's start result; absent from an older adapter), `provider.input_queued`, `provider.first_message` |
+| Output | `provider.first_reasoning`, `provider.first_text`, `provider.first_tool`, `batcher.first_output_commit`, `hub.first_output_publish`, `ws.first_output_write` (per subscriber, with `reason` `live` or `catch_up` and that subscriber's identity) |
+| End | `turn.finished`, `turn.output_summary` (`count` events, `bytes`, `maxGapMs`, once per turn) |
+| Provider process | `provider.first_frame` (Codex), `provider.session_ready` (Claude), `provider.exit` (`reason` is `exited` or `stopped`), `thread.prepare` with `bytes` on a Claude resume (its transcript's size) |
+| Client | `client.pending_shown`; on mobile `client.first_commit`, which is a React commit because React Native has no paint callback |
+| Link service, in `device-timing.jsonl` | `link.start`, `link.ready`, `link.registered`, `link.stop`, `peer.known`, `peer.mdns_found`, `peer.connect`, `relay.reserve`, `relay.connected`, `relay.refused`, `holepunch.start`, `holepunch.success`, `holepunch.failed`, `connection.direct`, `connection.relayed`, `connection.lost`, `network.changed`, and `registry.fetch` only when it fails, recovers or is slow. State changes only; never a tick |
+| Tunnel and proxy, in `device-timing.jsonl` | `tunnel.conn` (`reused`), `tunnel.stream_open`, `proxy.request`, `proxy.first_byte` (`role` is `initiator` or `executor`), `migrate.start`, `migrate.stream_closed`, `migrate.reconnected`, `migrate.resubscribed`, and for a client's own commands `link.request_sent`, `link.request_received`, `link.response_sent`, `link.response_received` |
+| Traffic per turn and snapshots | `link.event_sent`, `link.event_received` (`count`, `bytes`, `maxGapMs`); `snapshot.server_read`, and on the client `snapshot.request`, `snapshot.first_byte`, `snapshot.received`, `snapshot.parsed`, on mobile `snapshot.rendered` |
+| Client socket, another device only | `ws.ticket` (Desktop), `ws.hello`, `ws.open`, `ws.subscribe`, `ws.subscribed`, `ws.catch_up`, `ws.closed` (closed `reason`), `ws.retry` (`durationMs` is the backoff, recorded when it changes), `ws.resubscribed` |
+
+"First" means the turn's first model output. Every turn first commits the user's
+message and `turn.started`, which would make a slow turn look fast.
+
+`origin` and `clientKind` come from the daemon's caller, kept in memory by request
+ID so a queued turn retains them; after a restart they read as `unknown`. A remote
+caller's `clientKind` comes from `X-Multica-Client-Kind`, which Desktop's forwarding
+entry and `mobilelink` set; a client that does not send it is `unknown`. A remote
+caller's `connection` is read from the stream the request arrived on, not from device
+state, which says direct as soon as any connection to that device is direct. `turnKind` is `queued` only
+for an item that had to wait: Desktop routes ordinary sends through the queue too.
+Background and native turns carry `background: true`, so percentiles leave them out.
+
+## Reports from a phone
+
+A phone keeps its marks in a bounded buffer and reports them to an executor that
+offers `timing-report-v1` in `/hello`: `POST /local/v2/timing-reports` with
+`{batch_id, records}`, answered `{accepted, rejected, duplicate}`. A batch keeps its
+id until acknowledged and is retried when the socket next opens. The executor allows
+only a remote phone, about 6 batches a minute per device, conversations in the
+request's scope and stages in `timing.Reportable`, and stamps `reporter`, `receivedAt`,
+`origin` and `clientKind` itself.
+
+Exports filter and sort reports by `receivedAt`, so a wrong phone clock loses nothing,
+and hash `peer` and `reporter`. A record naming a conversation, request or turn joins
+that turn's waterfall; one naming none goes on `deviceTimeline`. A turn Desktop started
+on another device is not reported: export on both devices and compare by `requestId`.
+
+## Reading one slow turn
+
+`waterfalls.turns` has one entry per turn, newest first and at most 200, merging
+every source by turn and request ID. `segments` are ordered by start, with `startMs`
+and `endMs` relative to the turn's first record; a segment with `unfinished: true`
+started and never ended. Offsets between a client and a daemon on different devices
+include clock skew. `totals` stay on one clock each: `clientToFirstEventMs`,
+`daemonToFirstOutputMs`, and `transportMs`, which is
+`(client.first_event_received − client.send) − (ws.first_output_write − daemon.request_received)`,
+pairing the sending client with its own delivery when several clients watch a turn.
+A report's own clock does not anchor a turn that has local records, so its offsets can
+be negative.
+`summary.firstOutput` gives p50/p90 of `daemonToFirstOutputMs` by provider, prepare
+kind, origin and client kind.
 
 ## Reading a trace
 
@@ -186,7 +283,7 @@ Tests inject fake executables/SDK transports and never call a real model:
 
 ```sh
 pnpm --filter @multica/desktop exec vitest run src/main/local-timing-log.test.ts src/local-host/local-provider-runner.test.ts src/local-host/local-conversation-service.test.ts src/local-host/local-conversation-queue.test.ts src/local-host/local-claude-conversation.test.ts src/local-host/local-multica-context.test.ts src/renderer/src/platform/local-conversation-service.test.ts
-pnpm --filter @multica/desktop exec vitest run src/main/developer-log-export.test.ts src/main/developer-runtime-logs.test.ts src/local-host/local-context-mcp.test.ts src/local-host/local-codex-pool.test.ts src/renderer/src/components/labs-settings-tab.test.tsx
+pnpm --filter @multica/desktop exec vitest run src/main/developer-log-export.test.ts src/main/developer-log-waterfall.test.ts src/main/developer-runtime-logs.test.ts src/local-host/local-context-mcp.test.ts src/local-host/local-codex-pool.test.ts src/renderer/src/components/labs-settings-tab.test.tsx
 pnpm --filter @multica/views exec vitest run settings/components/settings-page.test.tsx settings/components/settings-navigation.test.ts locales/parity.test.ts
 pnpm --filter @multica/tutti-agent-gui-host exec vitest run src/local-timing.test.ts src/runtime/runtime.test.ts
 pnpm --filter @multica/desktop typecheck

@@ -1225,6 +1225,11 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "打开对话时提前准备",
+      "description": "打开已有对话时（包括从其他设备打开）会提前启动智能体，并运行项目的 SessionStart hooks。",
+      "failed": "无法更改此设置，请重试。"
+    },
     "device_link": {
       "title": "设备互联",
       "allow": "允许其他设备访问本机对话流",

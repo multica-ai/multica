@@ -96,6 +96,33 @@ func TestProcessStartsRequestsAndCloses(t *testing.T) {
 	}
 }
 
+func TestProcessReportsHowLongItsStartTook(t *testing.T) {
+	t.Parallel()
+
+	p, err := Start(context.Background(), helperCommand(""), func(Output) {}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close(context.Background())
+	if spawn, ready := p.StartDurations(); spawn <= 0 || ready <= 0 {
+		t.Fatalf("spawn = %v, ready = %v", spawn, ready)
+	}
+}
+
+func TestParseStartTiming(t *testing.T) {
+	t.Parallel()
+
+	got := ParseStartTiming(json.RawMessage(`{"models":[],"timing":{"sdk_load_ms":1.5,"query_init_ms":2}}`))
+	if got.SDKLoad == nil || *got.SDKLoad != 1500*time.Microsecond || got.QueryInit == nil || *got.QueryInit != 2*time.Millisecond {
+		t.Fatalf("got %+v", got)
+	}
+	for _, raw := range []string{`{"models":[]}`, `{}`, `not json`, `{"timing":{"sdk_load_ms":"soon","query_init_ms":2}}`, `{"timing":{"sdk_load_ms":-1}}`} {
+		if got := ParseStartTiming(json.RawMessage(raw)); got.SDKLoad != nil {
+			t.Fatalf("%s: got %+v", raw, got)
+		}
+	}
+}
+
 func TestProcessExitFailsPendingRequests(t *testing.T) {
 	t.Parallel()
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 const maxSideTabs = 20
@@ -167,7 +168,8 @@ func (s *Service) sideAmbient(ctx context.Context, scopeID int64, conversationID
 // Steer adds a message to the conversation's running Codex turn and
 // records it there. The same request id is a no-op.
 func (s *Service) Steer(ctx context.Context, scopeID int64, conversationID, text, requestID string) (string, error) {
-	if _, err := s.scopedConversation(ctx, scopeID, conversationID); err != nil {
+	conv, err := s.scopedConversation(ctx, scopeID, conversationID)
+	if err != nil {
 		return "", err
 	}
 	if r, err := s.store.Receipt(ctx, scopeID, requestID); err == nil {
@@ -188,13 +190,16 @@ func (s *Service) Steer(ctx context.Context, scopeID int64, conversationID, text
 	if turnID == "" {
 		return "", ErrNoRunningTurn
 	}
-	if err := r.Steer(ctx, text); err != nil {
+	queued := s.traces.detached(conv, requestID, turnID, timing.TurnSteer).Begin(timing.StageProviderInputQueued)
+	err = r.Steer(ctx, text)
+	queued(err)
+	if err != nil {
 		return "", err
 	}
 	now := s.opts.Now()
 	messageID := "msg-" + requestID
 	payload, _ := json.Marshal(map[string]any{"message_id": messageID, "request_id": requestID, "content": text, "steered": true})
-	_, err := s.batcher.AppendWait(ctx, store.Batch{
+	_, err = s.batcher.AppendWait(ctx, store.Batch{
 		ConversationID: conversationID,
 		Messages:       []store.NewMessage{{ID: messageID, TurnID: turnID, Role: "user", Content: text, Steered: true, CreatedAt: now}},
 		Events:         []store.NewEvent{{TurnID: turnID, Type: "user.message", Final: true, Payload: payload, CreatedAt: now}},

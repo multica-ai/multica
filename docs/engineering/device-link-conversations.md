@@ -227,7 +227,7 @@ presence 只在内存中，不写入 SQLite，不占用 `summary_seq`。
 
 - 直连顺序：局域网 mDNS → 登记的直连地址（含 NAT 端口映射和观察到的公网地址）→ 中继，随后 DCUtR 打洞。
 - 建立隧道前：如果到该设备只有中继连接，`p2p.Dial` 最多等待 5 秒，等打洞得到直连后再开流；超时才使用中继。
-- 打洞成功后：守护进程订阅连接事件，出现非 circuit 连接时，关闭这台设备上所有走中继的隧道流（包括 HTTP 连接池里的空闲连接），transport 立即在直连上重建 WebSocket。libp2p 新开流时优先选择直连。
+- 打洞成功后：守护进程订阅连接事件，出现非 circuit 连接时，关闭 HTTP 连接池里的空闲连接和走中继的已升级 WebSocket，进行中的 HTTP 请求继续在中继上完成；transport 立即在直连上重建 WebSocket。libp2p 新开流时优先选择直连。
 - 仍然只有中继时：会话读写照常；单个文件读取或上传超过 5 MB 时返回 `relay_transfer_limited`。
 - `/local/devices` 返回 `connection`，并写入诊断日志，便于统计中继占比。侧边栏不显示连接类型。
 
@@ -388,13 +388,13 @@ func (v *V2) serve(w, r, c caller) // allowed(c.kind, route) → 现有路由
         r.Out.URL.Path = strings.TrimPrefix(r.In.URL.Path, "/local/devices/"+peerID)
         r.Out.Header.Del("Authorization") // Admit 还删除 Origin、ticket 和文件 key 参数
     },
-    Transport:     &http.Transport{DialContext: dialPeer, IdleConnTimeout: 90 * time.Second},
+    Transport:     svc.NewTunnel(peerID, deviceLinkProtocol, &http.Transport{IdleConnTimeout: 90 * time.Second}),
     FlushInterval: -1,
     ErrorHandler:  deviceLinkError, // 502 device_unreachable / 503 device_link_off / 404 device_unknown
 }
 ```
 
-- WebSocket upgrade 由 `ReverseProxy` 原生转发。代理记录每台设备已升级的连接；`OnDirect` 回调时，对 Transport 调用 `CloseIdleConnections()`，并关闭走中继的已升级连接。
+- WebSocket upgrade 由 `ReverseProxy` 原生转发。代理的 Transport 是 `p2p.Tunnel`：它记录每台设备的流，用 `httptrace` 和 101 响应识别已升级的连接；`OnDirect` 回调时调用 `MoveToDirect()`，关闭空闲连接和走中继的已升级连接。
 - 仅经中继时：上传在转发前按请求的 `Content-Length` 检查，读取在 `ModifyResponse` 中按响应的 `Content-Length` 检查，超过 5 MB 返回 `relay_transfer_limited`。
 - 错误格式与 v2 一致：`{ error: { kind, message } }`。
 

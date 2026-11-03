@@ -30,6 +30,8 @@ type openItem struct {
 	kind  string
 	text  strings.Builder
 	start map[string]any
+	// part is the reasoning summary or content part being streamed.
+	part string
 }
 
 // Normalizer converts one turn's app-server item notifications into v2
@@ -54,17 +56,26 @@ func NewNormalizer(contextMCPName string) *Normalizer {
 // Accept normalizes one notification.
 func (n *Normalizer) Accept(method string, params json.RawMessage) []Event {
 	var p struct {
-		ItemID string          `json:"itemId"`
-		Delta  string          `json:"delta"`
-		Item   json.RawMessage `json:"item"`
+		ItemID       string          `json:"itemId"`
+		Delta        string          `json:"delta"`
+		Item         json.RawMessage `json:"item"`
+		SummaryIndex int             `json:"summaryIndex"`
+		ContentIndex int             `json:"contentIndex"`
 	}
 	if json.Unmarshal(params, &p) != nil {
 		return nil
 	}
-	if method == "item/agentMessage/delta" {
+	switch method {
+	case "item/agentMessage/delta":
 		return n.agentDelta(p.ItemID, p.Delta)
-	}
-	if method != "item/started" && method != "item/completed" {
+	case "item/reasoning/summaryPartAdded":
+		return n.reasoningDelta(p.ItemID, "summary:"+strconv.Itoa(p.SummaryIndex), "")
+	case "item/reasoning/summaryTextDelta":
+		return n.reasoningDelta(p.ItemID, "summary:"+strconv.Itoa(p.SummaryIndex), p.Delta)
+	case "item/reasoning/textDelta":
+		return n.reasoningDelta(p.ItemID, "content:"+strconv.Itoa(p.ContentIndex), p.Delta)
+	case "item/started", "item/completed":
+	default:
 		return nil
 	}
 	var item map[string]any
@@ -91,7 +102,7 @@ func (n *Normalizer) Close(status string) []Event {
 			continue
 		}
 		state := map[string]any{"kind": item.kind, "status": status}
-		if item.kind == "assistant_text" {
+		if item.kind == "assistant_text" || item.kind == "reasoning" {
 			state["text"] = item.text.String()
 		} else {
 			for k, v := range item.start {
@@ -129,6 +140,30 @@ func (n *Normalizer) agentDelta(id, delta string) []Event {
 	return append(events, Event{ItemID: id, Type: "item.delta", Payload: map[string]any{"kind": "assistant_text", "field": "text", "text": delta}})
 }
 
+// reasoningDelta streams one reasoning part. Parts are separated the way
+// complete joins the final summary and content, so the streamed text matches
+// the final text.
+func (n *Normalizer) reasoningDelta(id, part, delta string) []Event {
+	if id == "" || n.completed[id] {
+		return nil
+	}
+	var events []Event
+	item := n.open[id]
+	if item == nil {
+		item = n.track(id, "reasoning", nil)
+		events = append(events, Event{ItemID: id, Type: "item.started", Payload: map[string]any{"kind": "reasoning"}})
+	}
+	if part != item.part && item.text.Len() > 0 {
+		delta = "\n" + delta
+	}
+	item.part = part
+	if delta == "" {
+		return events
+	}
+	item.text.WriteString(delta)
+	return append(events, Event{ItemID: id, Type: "item.delta", Payload: map[string]any{"kind": "reasoning", "field": "text", "text": delta}})
+}
+
 func (n *Normalizer) started(id string, item map[string]any) []Event {
 	if n.open[id] != nil {
 		return nil
@@ -148,6 +183,8 @@ func (n *Normalizer) started(id string, item map[string]any) []Event {
 		start = map[string]any{"kind": "tool_call", "tool": mcpToolName(item), "server": str(item, "server"), "input": item["arguments"]}
 	case "dynamicToolCall":
 		start = map[string]any{"kind": "tool_call", "tool": str(item, "tool"), "input": item["arguments"]}
+	case "reasoning":
+		start = map[string]any{"kind": "reasoning"}
 	default:
 		return nil
 	}
@@ -174,7 +211,12 @@ func (n *Normalizer) complete(id string, item map[string]any) []Event {
 		return []Event{n.final(id, state)}
 	case "reasoning":
 		parts := append(strSlice(item["summary"]), strSlice(item["content"])...)
-		return []Event{n.final(id, map[string]any{"kind": "reasoning", "status": "completed", "text": strings.Join(parts, "\n")})}
+		text := strings.Join(parts, "\n")
+		if open := n.open[id]; text == "" && open != nil {
+			// The desktop reducer replaces an item with its final state.
+			text = open.text.String()
+		}
+		return []Event{n.final(id, map[string]any{"kind": "reasoning", "status": "completed", "text": text})}
 	case "commandExecution":
 		state := map[string]any{"kind": "command", "status": status, "command": str(item, "command"), "output": str(item, "aggregatedOutput"), "exit_code": nil}
 		if cwd := str(item, "cwd"); cwd != "" {

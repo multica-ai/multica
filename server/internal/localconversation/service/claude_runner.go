@@ -11,6 +11,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/localconversation/contextmcp"
 	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var (
@@ -19,6 +21,8 @@ var (
 	// ErrOutcomeUnknown means the prompt may or may not have reached Claude;
 	// the command must not be replayed automatically (plan §8.1).
 	ErrOutcomeUnknown = errors.New("local conversation: provider outcome unknown")
+
+	errQueryEnded = errors.New("Claude Code ended the session while it was starting")
 )
 
 // ClaudeAdapter is the running adapter process the runner talks to,
@@ -67,6 +71,8 @@ type SendRequest struct {
 	Hidden bool
 	// Compact invokes the provider's native context compaction.
 	Compact bool
+	// Trace records the turn's timing; nil records nothing.
+	Trace *timing.Trace
 }
 
 func (r SendRequest) prompt() string {
@@ -78,8 +84,20 @@ func (r SendRequest) prompt() string {
 
 const (
 	interruptDeadline = 10 * time.Second
-	previewRunes      = 200
+	// settingsPushDeadline bounds one push of settings to the adapter.
+	settingsPushDeadline = 10 * time.Second
+	previewRunes         = 200
+	// sendDeadline bounds a send's preparation and dispatch. It is generous
+	// because a Claude start includes the project's SessionStart hooks.
+	sendDeadline = 5 * time.Minute
 )
+
+// detachSend is the context of a send's durable part: the caller's values
+// without its cancellation. Once the input is stored the turn exists and a
+// retry replays it, so a caller going away must not fail the turn.
+func detachSend(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), sendDeadline)
+}
 
 // ClaudeRunner runs one Claude conversation: it starts the adapter on
 // demand, records each turn through the batcher, normalizes adapter output
@@ -94,10 +112,18 @@ type ClaudeRunner struct {
 	limiter        *Limiter
 	now            func() time.Time
 	bindContext    ContextBinder
-	onTurnEnd      func(turnID string)
+	// claimSpare takes a parked process for a conversation with no session yet.
+	claimSpare func(ctx context.Context, provider string) *parkedSpare
+	onTurnEnd  func(turnID string)
 	// onBackgroundEnded runs when background tasks end with no turn
 	// running and no native reply started.
 	onBackgroundEnded func(results []BackgroundResult)
+	// nativeTrace starts the timing of a turn Claude began on its own.
+	nativeTrace func(turnID string) *timing.Trace
+	// processTrace records what happens to the process between turns.
+	processTrace func() *timing.Trace
+	// transcriptSize measures the session file a resume reloads.
+	transcriptSize func(id string) (int64, bool)
 	// taskTurns maps a background task item to the turn that started it;
 	// later events of the task are recorded under that turn.
 	taskTurns map[string]string
@@ -117,6 +143,25 @@ type ClaudeRunner struct {
 	norm        *claude.Normalizer
 	turn        *claudeTurn
 	contextName string
+	gate        prepareGate
+	// prompted is set once the running adapter has been given input. Before
+	// that, a Query's own output (such as from a preheat) is no reply to anyone.
+	prompted bool
+	// endedNorm is the normalizer of an adapter whose Query ended before install,
+	// when its error frame had no installed adapter to act on.
+	endedNorm *claude.Normalizer
+	// settingsVersion counts ApplySettings calls and settings is the latest, so
+	// a start that read older fields can apply them once its Query is live.
+	settingsVersion int64
+	settings        *store.ConversationSettings
+	// adapterVersion is the settingsVersion the running adapter has applied.
+	adapterVersion int64
+	// restartAfterTurn is set when settings could not reach the adapter while a
+	// turn ran on it: the turn keeps what it has, nothing after it does.
+	restartAfterTurn bool
+	// pushMu keeps settings pushes to one at a time, so an older one cannot land
+	// after a newer one. Never taken while holding mu.
+	pushMu sync.Mutex
 }
 
 type claudeTurn struct {
@@ -136,6 +181,12 @@ type claudeTurn struct {
 	// unlimited marks a native turn that started over the concurrency
 	// limit; it holds no limiter slot.
 	unlimited bool
+	trace     *timing.Trace
+	stop      *stopSignal
+	// inputSent is set once the prompt went to the adapter, or from the start for
+	// a turn Claude began itself; earlier messages are no reply. Guarded by
+	// ClaudeRunner.mu.
+	inputSent bool
 }
 
 // BackgroundResult is a background task that ended after its turn.
@@ -163,6 +214,14 @@ type ClaudeRunnerOptions struct {
 	OnBackgroundEnded func(results []BackgroundResult)
 	// Context, when set, gives the adapter Multica's context tools.
 	Context ContextBinder
+	// NativeTrace, when set, starts the timing of a turn Claude began itself.
+	NativeTrace func(turnID string) *timing.Trace
+	// ProcessTrace, when set, records what happens to the process between turns.
+	ProcessTrace func() *timing.Trace
+	// TranscriptSize, when set, measures the session file a resume reloads.
+	TranscriptSize func(id string) (int64, bool)
+	// ClaimSpare, when set, offers a parked process for a new conversation.
+	ClaimSpare func(ctx context.Context, provider string) *parkedSpare
 }
 
 // NewClaudeRunner returns a runner for one conversation.
@@ -174,8 +233,8 @@ func NewClaudeRunner(opts ClaudeRunnerOptions) *ClaudeRunner {
 		rec:            turnRecorder{conversationID: opts.ConversationID, scopeID: opts.ScopeID, files: opts.Files, now: opts.Now},
 		conversationID: opts.ConversationID, start: opts.Start, session: opts.Session,
 		batcher: opts.Batcher, limiter: opts.Limiter, now: opts.Now, contextName: opts.ContextMCPName, bindContext: opts.Context,
-		onTurnEnd: opts.OnTurnEnd, onBackgroundEnded: opts.OnBackgroundEnded,
-		taskTurns: map[string]string{}, stopped: map[string]bool{},
+		claimSpare: opts.ClaimSpare, onTurnEnd: opts.OnTurnEnd, onBackgroundEnded: opts.OnBackgroundEnded, nativeTrace: opts.NativeTrace, processTrace: opts.ProcessTrace, transcriptSize: opts.TranscriptSize,
+		taskTurns: map[string]string{}, stopped: map[string]bool{}, gate: newPrepareGate(),
 	}
 }
 
@@ -183,20 +242,35 @@ func NewClaudeRunner(opts ClaudeRunnerOptions) *ClaudeRunner {
 // receipt are durable and the prompt was handed to the adapter; output and
 // completion follow as events.
 func (r *ClaudeRunner) Send(ctx context.Context, req SendRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ctx, cancel := detachSend(ctx)
+	defer cancel()
 	r.mu.Lock()
+	if r.gate.closed {
+		r.mu.Unlock()
+		return ErrClosing
+	}
 	if r.turn != nil {
 		r.mu.Unlock()
 		return ErrTurnRunning
 	}
+	trace := req.Trace
 	if err := r.limiter.TryAcquire(); err != nil {
 		r.mu.Unlock()
+		trace.MarkFailed(timing.StageRunnerLimiter, timing.ReasonConcurrencyLimit)
 		return err
 	}
-	turn := &claudeTurn{id: req.TurnID, references: req.References, createTask: req.CreateTask, compacting: req.Compact}
+	turn := &claudeTurn{id: req.TurnID, references: req.References, createTask: req.CreateTask, compacting: req.Compact, trace: trace, stop: newStopSignal()}
 	r.turn = turn
+	r.gate.sendReady(trace, r.adapter != nil)
 	r.mu.Unlock()
+	trace.Mark(timing.StageRunnerLimiter)
 
+	persisted := trace.Begin(timing.StageTurnPersist)
 	_, err := r.batcher.AppendWait(ctx, r.rec.startBatch(req))
+	persisted(err)
 	if err != nil {
 		r.mu.Lock()
 		r.turn = nil
@@ -205,16 +279,32 @@ func (r *ClaudeRunner) Send(ctx context.Context, req SendRequest) error {
 		return err
 	}
 
-	adapter, err := r.ensureAdapter(ctx)
+	prepared := trace.Begin(timing.StagePrepareWait)
+	adapter, err := r.awaitDispatch(ctx, turn, trace)
+	prepared(err)
 	if err != nil {
 		r.finish(turn, "failed", &turnError{kind: "provider_unavailable", message: err.Error()})
 		return err
 	}
+	if adapter == nil {
+		return nil
+	}
 	content := []map[string]any{{"type": "text", "text": req.prompt()}}
-	if _, err := adapter.Request(ctx, "send", map[string]any{"request_id": req.RequestID, "content": content}); err != nil {
+	queued := trace.Begin(timing.StageProviderInputQueued)
+	_, err = adapter.Request(ctx, "send", map[string]any{"request_id": req.RequestID, "content": content})
+	queued(err)
+	if err != nil {
 		var adapterErr *claude.AdapterError
 		if errors.As(err, &adapterErr) && (adapterErr.Dispatch == "not_dispatched" || adapterErr.Dispatch == "rejected") {
+			r.mu.Lock()
+			norm := r.norm
+			current := r.adapter == adapter
+			r.mu.Unlock()
 			r.finish(turn, "failed", &turnError{kind: "provider_error", message: err.Error()})
+			// The process lives on with no Query, and would refuse every send.
+			if current && adapterErr.Code == "not_started" {
+				r.retireAdapter(norm)
+			}
 			return err
 		}
 		// Anything else may have reached Claude: transport errors included.
@@ -222,6 +312,162 @@ func (r *ClaudeRunner) Send(ctx context.Context, req SendRequest) error {
 		return fmt.Errorf("%w: %w", ErrOutcomeUnknown, err)
 	}
 	return nil
+}
+
+// awaitDispatch returns the adapter the prompt goes to, with the turn marked as
+// sent; nil when the turn was stopped or ended. A prompt must not run under settings
+// the user already replaced, so any push waits to finish first, and one that failed
+// has retired the adapter, which the next round replaces.
+func (r *ClaudeRunner) awaitDispatch(ctx context.Context, turn *claudeTurn, trace *timing.Trace) (ClaudeAdapter, error) {
+	for {
+		adapter, err := r.awaitReady(ctx, turn, trace)
+		if err != nil {
+			return nil, err
+		}
+		if r.stoppedBeforeDispatch(turn) || adapter == nil {
+			return nil, nil
+		}
+		_ = r.syncSettings(adapter)
+		r.mu.Lock()
+		if r.turn == turn && !turn.cancelRequested && r.adapter == adapter && r.adapterVersion == r.settingsVersion {
+			turn.inputSent = true
+			r.prompted = true
+			r.mu.Unlock()
+			return adapter, nil
+		}
+		r.mu.Unlock()
+	}
+}
+
+// awaitReady returns the adapter once it is usable, starting or joining the one
+// prepare task; nil when the turn was stopped or ended meanwhile.
+func (r *ClaudeRunner) awaitReady(ctx context.Context, turn *claudeTurn, trace *timing.Trace) (ClaudeAdapter, error) {
+	for {
+		r.mu.Lock()
+		if r.turn != turn {
+			r.mu.Unlock()
+			return nil, nil
+		}
+		task := r.gate.task
+		if task == nil {
+			if r.adapter != nil {
+				adapter := r.adapter
+				r.mu.Unlock()
+				return adapter, nil
+			}
+			task = r.startPrepareLocked(trace, false)
+		}
+		r.mu.Unlock()
+		stopped, err := waitPrepare(ctx, task, turn.stop.wait())
+		if stopped {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		// A failed preheat was only ever an optimization: the send starts its own.
+		if task.err != nil && !task.preheat {
+			return nil, task.err
+		}
+	}
+}
+
+// startPrepareLocked starts the prepare task; r.mu is held.
+func (r *ClaudeRunner) startPrepareLocked(trace *timing.Trace, preheat bool) *prepareTask {
+	task, ctx, cancel := r.gate.begin(preheat)
+	if preheat {
+		trace.SetPrepare(timing.PreparePreheated, task.id)
+	} else {
+		trace.SetPrepare(timing.PrepareCold, task.id)
+	}
+	go func() {
+		defer cancel()
+		err := r.ensureAdapter(ctx, trace)
+		r.mu.Lock()
+		task.err = err
+		r.gate.finish(task, r.now())
+		r.mu.Unlock()
+		close(task.done)
+	}()
+	return task
+}
+
+// Prepare starts an existing conversation's Query ahead of its next send,
+// without taking a turn slot or sending anything. It does nothing when a turn
+// runs or the adapter is ready, and a conversation without a native session is
+// never prepared. ctx only bounds the wait; the task continues for whoever else
+// waits on it.
+func (r *ClaudeRunner) Prepare(ctx context.Context, trace *timing.Trace) error {
+	r.mu.Lock()
+	if r.gate.closed {
+		r.mu.Unlock()
+		return ErrClosing
+	}
+	if r.turn != nil || r.session.ProviderSessionID == "" {
+		r.mu.Unlock()
+		return nil
+	}
+	task := r.gate.task
+	if task == nil {
+		if r.adapter != nil {
+			r.mu.Unlock()
+			return nil
+		}
+		task = r.startPrepareLocked(trace, true)
+	} else {
+		trace.SetPrepare(timing.PreparePreheated, task.id)
+	}
+	r.mu.Unlock()
+	if _, err := waitPrepare(ctx, task, nil); err != nil {
+		return err
+	}
+	return task.err
+}
+
+// Evict closes an idle adapter to free its resources. The runner and session
+// stay; the next send resumes on a new adapter. The adapter leaves the runner
+// under the lock, so a send can never pick up one that is exiting. Background
+// tasks live in the adapter's process and may outlast any turn, so an adapter
+// with open tasks or undelivered results stays.
+func (r *ClaudeRunner) Evict(ctx context.Context) bool {
+	r.mu.Lock()
+	if r.turn != nil || r.gate.task != nil || r.adapter == nil || !r.evictableLocked() {
+		r.mu.Unlock()
+		return false
+	}
+	adapter, release := r.adapter, r.releaseContext
+	r.adapter, r.norm, r.releaseContext = nil, nil, nil
+	r.gate.preheated = false
+	r.mu.Unlock()
+	if release != nil {
+		release()
+	}
+	_ = adapter.Close(ctx)
+	return true
+}
+
+func (r *ClaudeRunner) evictableLocked() bool { return len(r.taskTurns) == 0 && len(r.ended) == 0 }
+
+// IdleProcess reports the runner's process when it is doing nothing.
+func (r *ClaudeRunner) IdleProcess() (idleProcess, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.adapter == nil || r.turn != nil || r.gate.task != nil {
+		return idleProcess{}, false
+	}
+	return idleProcess{provider: "claude", scopeID: r.rec.scopeID, since: r.gate.idleSince, preheated: r.gate.preheated, evictable: r.evictableLocked()}, true
+}
+
+// stoppedBeforeDispatch ends a turn cancelled during preparation and reports
+// whether the turn is over, so its prompt must not be sent.
+func (r *ClaudeRunner) stoppedBeforeDispatch(turn *claudeTurn) bool {
+	r.mu.Lock()
+	ended, cancelled := r.turn != turn, turn.cancelRequested
+	r.mu.Unlock()
+	if cancelled {
+		r.finish(turn, "cancelled", nil)
+	}
+	return ended || cancelled
 }
 
 // StopTasks asks Claude to stop background tasks. Without a running
@@ -254,6 +500,9 @@ func (r *ClaudeRunner) Interrupt(ctx context.Context) error {
 	turn, adapter := r.turn, r.adapter
 	if turn != nil {
 		turn.cancelRequested = true
+		if !turn.inputSent {
+			turn.stop.fire()
+		}
 	}
 	r.mu.Unlock()
 	if turn == nil || adapter == nil {
@@ -277,6 +526,9 @@ func (r *ClaudeRunner) Interrupt(ctx context.Context) error {
 // Close stops the adapter, failing a running turn.
 func (r *ClaudeRunner) Close(ctx context.Context) error {
 	r.mu.Lock()
+	r.gate.closed = true
+	r.gate.cancel()
+	task := r.gate.task
 	adapter, turn, release := r.adapter, r.turn, r.releaseContext
 	r.adapter, r.releaseContext = nil, nil
 	r.mu.Unlock()
@@ -286,41 +538,73 @@ func (r *ClaudeRunner) Close(ctx context.Context) error {
 	if release != nil {
 		release()
 	}
-	if adapter == nil {
-		return nil
+	var err error
+	if adapter != nil {
+		err = adapter.Close(ctx)
 	}
-	return adapter.Close(ctx)
+	waitClosed(ctx, task)
+	return err
 }
 
-func (r *ClaudeRunner) ensureAdapter(ctx context.Context) (ClaudeAdapter, error) {
+// ensureAdapter starts the adapter. It runs only inside the prepare task, which
+// is what keeps two callers from starting two processes.
+func (r *ClaudeRunner) ensureAdapter(ctx context.Context, trace *timing.Trace) error {
 	r.mu.Lock()
-	if r.adapter != nil {
-		a := r.adapter
-		r.mu.Unlock()
-		return a, nil
-	}
+	fresh := r.session.ProviderSessionID == ""
+	model, _ := r.session.Fields["model"].(string)
 	r.mu.Unlock()
-
+	// Claude resolves its own default inside the Query; asking first would add a
+	// process round trip for an answer nothing here needs.
+	if model == "" || model == agent.ClaudeDefaultModelValue {
+		trace.MarkReason(timing.StageModelResolve, timing.ReasonNativeDefault)
+	} else {
+		trace.MarkReason(timing.StageModelResolve, timing.ReasonExplicit)
+	}
+	if fresh && r.claimSpare != nil {
+		if spare := r.claimSpare(ctx, "claude"); spare != nil {
+			err := r.adoptSpare(ctx, spare, trace)
+			if err == nil || errors.Is(err, ErrClosing) {
+				return err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+	}
 	norm := claude.NewNormalizer(r.contextName)
+	began := trace.Now()
 	adapter, err := r.start(ctx, func(out claude.Output) { r.handle(norm, out) })
+	markProcessStart(trace, timing.StageAdapterSpawn, timing.StageAdapterReady, began, adapter, err)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fields := map[string]any{}
+	r.mu.Lock()
 	for k, v := range r.session.Fields {
 		fields[k] = v
 	}
-	r.mu.Lock()
-	if id := r.session.ProviderSessionID; id != "" {
-		fields["resume"] = id
+	resume := r.session.ProviderSessionID
+	if resume != "" {
+		fields["resume"] = resume
 	}
+	version := r.settingsVersion
 	r.mu.Unlock()
+	if resume != "" && r.transcriptSize != nil {
+		// Finding the file walks the projects folder, which must not delay a start.
+		go func() {
+			if size, ok := r.transcriptSize(resume); ok {
+				trace.MarkBytes(timing.StageThreadPrepare, timing.ReasonResume, size)
+			}
+		}()
+	}
 	release := func() {}
 	if r.bindContext != nil {
+		bound := trace.Begin(timing.StageContextBind)
 		binding, rel, err := r.bindContext(context.Background(), "", r.currentContext)
+		bound(err)
 		if err != nil {
-			_ = adapter.Close(ctx)
-			return nil, err
+			_ = adapter.Close(context.Background())
+			return err
 		}
 		release = rel
 		fields["mcp_servers"] = contextServerEntry(contextName(r.contextName), binding.Binding)
@@ -329,16 +613,120 @@ func (r *ClaudeRunner) ensureAdapter(ctx context.Context) (ClaudeAdapter, error)
 		}
 		fields["allowed_tools"] = []string{"mcp__" + contextName(r.contextName) + "__*"}
 	}
-	if _, err := adapter.Request(ctx, "start", fields); err != nil {
+	starting := trace.Now()
+	started, err := adapter.Request(ctx, "start", fields)
+	if err != nil {
 		release()
-		_ = adapter.Close(ctx)
-		return nil, err
+		_ = adapter.Close(context.Background())
+		return err
 	}
+	markAdapterStart(trace, starting, started)
+	return r.install(adapter, norm, release, version)
+}
+
+// adoptSpare binds a parked process to this conversation: claim, then MCP, and
+// only then is it ready for the first message, so every failure here happens
+// before anything reached the model and the caller can start normally with a new
+// adapter and normalizer. Output stays held until the bind succeeds, which also
+// keeps its session id from being remembered for a resume with no transcript.
+func (r *ClaudeRunner) adoptSpare(ctx context.Context, spare *parkedSpare, trace *timing.Trace) error {
+	spare.claudeFrames.hold()
 	r.mu.Lock()
+	session := r.session.Fields
+	version := r.settingsVersion
+	r.mu.Unlock()
+	fields := map[string]any{"cwd": session["cwd"]}
+	if model, ok := session["model"]; ok {
+		fields["model"] = model
+	}
+	if mode, ok := session["permission_mode"]; ok {
+		fields["permission_mode"] = mode
+	}
+	if effort, ok := session["reasoning_effort"]; ok {
+		fields["settings"] = map[string]any{"effortLevel": effort}
+	}
+	release := func() {}
+	var servers map[string]any
+	if r.bindContext != nil {
+		bound := trace.Begin(timing.StageContextBind)
+		binding, rel, err := r.bindContext(context.Background(), "", r.currentContext)
+		bound(err)
+		if err != nil {
+			spare.reject(timing.ReasonBindFailed)
+			return err
+		}
+		release = rel
+		servers = contextServerEntry(contextName(r.contextName), binding.Binding)
+		if binding.SystemPrompt != "" {
+			fields["append_system_prompt"] = binding.SystemPrompt
+		}
+	}
+	claiming := trace.Begin(timing.StageSpareClaim)
+	_, err := spare.adapter.Request(ctx, "claim", fields)
+	claiming(err)
+	if err != nil {
+		release()
+		spare.reject(claimRejection(err))
+		return err
+	}
+	if servers != nil {
+		binding := trace.Begin(timing.StageMCPSet)
+		raw, err := spare.adapter.Request(ctx, "set_mcp_servers", map[string]any{"servers": servers})
+		if err == nil && claude.MCPSetFailed(raw) {
+			err = errors.New("Claude Code could not bind the Multica tools")
+		}
+		binding(err)
+		if err != nil {
+			release()
+			spare.reject(timing.ReasonMCPFailed)
+			return err
+		}
+	}
+	norm := claude.NewNormalizer(r.contextName)
+	spare.claudeFrames.adopt(func(out claude.Output) { r.handle(norm, out) })
+	if err := r.install(spare.adapter, norm, release, version); err != nil {
+		return err
+	}
+	trace.SetPrepare(timing.PrepareSpare, "")
+	trace.Mark(timing.StageSpareClaimed)
+	return nil
+}
+
+// claimRejection is the closed-enum form of why a claim did not bind.
+func claimRejection(err error) string {
+	switch claude.ClaimReason(err) {
+	case "option_not_applied":
+		return timing.ReasonOptionNotApplied
+	case "settings_not_applied":
+		return timing.ReasonSettingsNotApplied
+	}
+	return timing.ReasonClaimRefused
+}
+
+// install makes a started adapter the runner's, unless Close came first, and
+// brings it up to date with settings that changed while it was starting.
+func (r *ClaudeRunner) install(adapter ClaudeAdapter, norm *claude.Normalizer, release func(), version int64) error {
+	r.mu.Lock()
+	if r.gate.closed {
+		r.mu.Unlock()
+		release()
+		_ = adapter.Close(context.Background())
+		return ErrClosing
+	}
+	if r.endedNorm == norm {
+		r.endedNorm = nil
+		r.mu.Unlock()
+		release()
+		_ = adapter.Close(context.Background())
+		return errQueryEnded
+	}
 	r.adapter, r.norm, r.releaseContext = adapter, norm, release
+	r.prompted, r.restartAfterTurn, r.adapterVersion = false, false, version
 	r.mu.Unlock()
 	go r.watch(adapter)
-	return adapter, nil
+	// A prompt must not run under settings the user already replaced, such as a
+	// permission downgrade, so failing here fails the start.
+	return r.syncSettings(adapter)
 }
 
 // watch fails the running turn when the adapter process goes away.
@@ -347,12 +735,18 @@ func (r *ClaudeRunner) watch(adapter ClaudeAdapter) {
 	r.mu.Lock()
 	if r.adapter != adapter {
 		r.mu.Unlock()
+		markProcessExit(r.processTrace, nil, timing.ReasonStopped)
 		return
 	}
 	r.adapter = nil
 	turn, release := r.turn, r.releaseContext
 	r.releaseContext = nil
 	r.mu.Unlock()
+	var running *timing.Trace
+	if turn != nil {
+		running = turn.trace
+	}
+	markProcessExit(r.processTrace, running, timing.ReasonExited)
 	if release != nil {
 		release()
 	}
@@ -370,9 +764,23 @@ func (r *ClaudeRunner) handle(norm *claude.Normalizer, out claude.Output) {
 	r.mu.Lock()
 	turn := r.turn
 	cancelRequested := turn != nil && turn.cancelRequested
+	inputSent := turn != nil && turn.inputSent
+	// awaitingPrompt is a send's turn before its prompt goes out, whose completion
+	// cannot come from anything Claude says now.
+	awaitingPrompt := turn != nil && !inputSent
+	// Until a Query has had input its output is no reply to anyone, including a
+	// send already waiting on it: a SessionStart hook can make Claude answer, and
+	// its session id has no transcript to resume yet.
+	unprompted := !inputSent && !r.prompted
 	r.mu.Unlock()
+	if unprompted && out.Type == "sdk_message" {
+		return
+	}
 	switch out.Type {
 	case "sdk_message":
+		if inputSent {
+			turn.trace.Once(timing.StageProviderFirstMessage)
+		}
 		if turn != nil && turn.compacting {
 			var status struct {
 				Type          string `json:"type"`
@@ -395,6 +803,9 @@ func (r *ClaudeRunner) handle(norm *claude.Normalizer, out claude.Output) {
 		r.normMu.Unlock()
 		if sessionID != "" {
 			r.rememberSession(sessionID)
+			if turn != nil {
+				turn.trace.Once(timing.StageProviderSessionReady)
+			}
 		}
 		events = r.routeTaskEvents(turn, events)
 		if turn == nil && len(events) > 0 {
@@ -410,7 +821,7 @@ func (r *ClaudeRunner) handle(norm *claude.Normalizer, out claude.Output) {
 			}
 			r.appendOutput(turn, events)
 		}
-		if result != nil && turn != nil {
+		if result != nil && turn != nil && !awaitingPrompt {
 			switch {
 			case turn.storageFailed:
 				r.finish(turn, "failed", &turnError{kind: "storage_limit", message: ErrStorageBacklog.Error()})
@@ -432,6 +843,16 @@ func (r *ClaudeRunner) handle(norm *claude.Normalizer, out claude.Output) {
 			}
 		}
 	case "error":
+		ended := out.Error.Code == "query_ended" || out.Error.Code == "sdk_error"
+		r.mu.Lock()
+		current := r.adapter != nil && r.norm == norm
+		if !current && ended {
+			r.endedNorm = norm
+		}
+		r.mu.Unlock()
+		if !current {
+			return // a retired adapter must not touch its successor's turn
+		}
 		if turn != nil {
 			status := "failed"
 			if cancelRequested {
@@ -439,6 +860,41 @@ func (r *ClaudeRunner) handle(norm *claude.Normalizer, out claude.Output) {
 			}
 			r.finish(turn, status, &turnError{kind: "provider_exited", message: out.Error.Message})
 		}
+		if ended {
+			r.retireAdapter(norm)
+		}
+	}
+}
+
+// retireAdapter drops an adapter whose Query ended: its process lives on but
+// can no longer serve a turn, so the next send has to start a new one. It
+// runs on the adapter's reader, so closing happens in the background.
+func (r *ClaudeRunner) retireAdapter(norm *claude.Normalizer) {
+	r.mu.Lock()
+	closeRetired := r.detachAdapterLocked(norm)
+	r.mu.Unlock()
+	if closeRetired != nil {
+		closeRetired()
+	}
+}
+
+// detachAdapterLocked takes norm's adapter off the runner and returns what closes
+// it in the background, or nil if it is no longer the runner's; r.mu is held.
+func (r *ClaudeRunner) detachAdapterLocked(norm *claude.Normalizer) func() {
+	if r.adapter == nil || r.norm != norm {
+		return nil
+	}
+	adapter, release := r.adapter, r.releaseContext
+	r.adapter, r.releaseContext = nil, nil
+	return func() {
+		go func() {
+			if release != nil {
+				release()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+			defer cancel()
+			_ = adapter.Close(ctx)
+		}()
 	}
 }
 
@@ -450,6 +906,7 @@ func (r *ClaudeRunner) appendOutput(turn *claudeTurn, events []claude.Event) {
 	for i, e := range events {
 		out[i] = claudeOutput(e)
 	}
+	markProviderOutput(turn.trace, out)
 	batch := r.rec.outputBatch(turn.id, out)
 	if err := r.batcher.Append(batch, false); err != nil {
 		r.mu.Lock()
@@ -475,8 +932,18 @@ func (r *ClaudeRunner) finish(turn *claudeTurn, status string, failure *turnErro
 		return
 	}
 	r.turn = nil
+	r.gate.idleSince = r.now()
 	norm := r.norm
+	// Off the runner before anyone can see the turn ended, so the next send cannot
+	// pick up an adapter on old settings.
+	var closeRetired func()
+	if r.restartAfterTurn {
+		closeRetired = r.detachAdapterLocked(norm)
+	}
 	r.mu.Unlock()
+	if closeRetired != nil {
+		closeRetired()
+	}
 	if !turn.unlimited {
 		defer r.limiter.Release()
 	}
@@ -500,6 +967,7 @@ func (r *ClaudeRunner) finish(turn *claudeTurn, status string, failure *turnErro
 	lastMessageID := turn.lastMessageID
 	r.mu.Unlock()
 	_ = r.batcher.Append(r.rec.completionBatch(turn.id, lastMessageID, status, failure, finals), true)
+	finishTrace(turn.trace, status, failure)
 	if r.onTurnEnd != nil {
 		r.onTurnEnd(turn.id)
 	}
@@ -515,9 +983,11 @@ func (r *ClaudeRunner) rememberSession(id string) {
 	}
 }
 
-// ApplySettings changes the provider settings. A live adapter is updated in
-// place; later adapter starts use the new values.
-func (r *ClaudeRunner) ApplySettings(ctx context.Context, st store.ConversationSettings) error {
+// ApplySettings changes the provider settings. A live adapter is updated in place;
+// later adapter starts use the new values. The settings are stored by now, so a push
+// that fails is no error for the caller: the adapter goes away instead of staying on
+// the old ones, and the next start uses them.
+func (r *ClaudeRunner) ApplySettings(_ context.Context, st store.ConversationSettings) error {
 	r.mu.Lock()
 	fields := map[string]any{}
 	for k, v := range r.session.Fields {
@@ -533,10 +1003,69 @@ func (r *ClaudeRunner) ApplySettings(ctx context.Context, st store.ConversationS
 	}
 	fields["permission_mode"] = st.PermissionMode
 	r.session.Fields = fields
+	r.settingsVersion++
+	r.settings = &st
 	adapter := r.adapter
 	r.mu.Unlock()
-	if adapter == nil {
-		return nil
+	if adapter != nil {
+		_ = r.syncSettings(adapter)
+	}
+	return nil
+}
+
+// syncSettings brings adapter up to the newest settings. A push does not depend on
+// the context of whoever asked, since stopping half way would leave the adapter on
+// settings nobody chose. A failure leaves it on unknown ones, so it is retired.
+func (r *ClaudeRunner) syncSettings(adapter ClaudeAdapter) error {
+	r.pushMu.Lock()
+	defer r.pushMu.Unlock()
+	for {
+		r.mu.Lock()
+		if r.adapter != adapter || r.adapterVersion == r.settingsVersion {
+			r.mu.Unlock()
+			return nil
+		}
+		version, st := r.settingsVersion, *r.settings
+		r.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), settingsPushDeadline)
+		err := r.pushSettings(ctx, adapter, st)
+		cancel()
+		if err != nil {
+			r.settingsNotApplied(adapter)
+			return err
+		}
+		r.mu.Lock()
+		if r.adapter == adapter {
+			r.adapterVersion = version
+		}
+		r.mu.Unlock()
+	}
+}
+
+// settingsNotApplied retires an adapter that could not take new settings, or marks
+// it for restart when a turn is running on it. A turn whose prompt has not gone out
+// is not running on it yet: that send starts a new adapter.
+func (r *ClaudeRunner) settingsNotApplied(adapter ClaudeAdapter) {
+	r.mu.Lock()
+	if r.adapter != adapter {
+		r.mu.Unlock()
+		return
+	}
+	if r.turn != nil && r.turn.inputSent {
+		r.restartAfterTurn = true
+		r.mu.Unlock()
+		return
+	}
+	norm := r.norm
+	r.mu.Unlock()
+	r.retireAdapter(norm)
+}
+
+// pushSettings sends permission first: it is the setting that must not stay behind
+// if a later request fails.
+func (r *ClaudeRunner) pushSettings(ctx context.Context, adapter ClaudeAdapter, st store.ConversationSettings) error {
+	if _, err := adapter.Request(ctx, "set_permission_mode", map[string]any{"mode": st.PermissionMode}); err != nil {
+		return err
 	}
 	var model any
 	if st.Model != nil {
@@ -549,10 +1078,7 @@ func (r *ClaudeRunner) ApplySettings(ctx context.Context, st store.ConversationS
 	if st.ReasoningEffort != nil {
 		effort = *st.ReasoningEffort
 	}
-	if _, err := adapter.Request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": effort}}); err != nil {
-		return err
-	}
-	_, err := adapter.Request(ctx, "set_permission_mode", map[string]any{"mode": st.PermissionMode})
+	_, err := adapter.Request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": effort}})
 	return err
 }
 
@@ -656,7 +1182,10 @@ func (r *ClaudeRunner) TakeBackgroundResults() []BackgroundResult {
 // startNativeTurn records a turn Claude started without a prompt from
 // Multica. It answers any background results waiting for delivery.
 func (r *ClaudeRunner) startNativeTurn() *claudeTurn {
-	turn := &claudeTurn{id: "turn-native-" + newID()}
+	turn := &claudeTurn{id: "turn-native-" + newID(), inputSent: true}
+	if r.nativeTrace != nil {
+		turn.trace = r.nativeTrace(turn.id)
+	}
 	turn.unlimited = r.limiter.TryAcquire() != nil
 	r.mu.Lock()
 	if r.turn != nil {

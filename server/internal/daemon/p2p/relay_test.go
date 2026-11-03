@@ -24,9 +24,10 @@ import (
 // relayAccount is a device list whose addresses are read live from the
 // running services, the way the registry serves what devices last reported.
 type relayAccount struct {
-	mu   sync.Mutex
-	svcs []*Service
-	only func(string) bool // filters which reported addresses are served
+	mu    sync.Mutex
+	svcs  []*Service
+	only  func(string) bool // filters which reported addresses are served
+	extra map[peer.ID][]ma.Multiaddr
 }
 
 func (a *relayAccount) fetch(context.Context) ([]Peer, error) {
@@ -43,6 +44,7 @@ func (a *relayAccount) fetch(context.Context) ([]Peer, error) {
 				p.RegisteredAddrs = append(p.RegisteredAddrs, m)
 			}
 		}
+		p.RegisteredAddrs = append(p.RegisteredAddrs, a.extra[p.ID]...)
 		out = append(out, p)
 	}
 	return out, nil

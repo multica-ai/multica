@@ -1225,6 +1225,11 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "開啟對話時提前準備",
+      "description": "開啟現有對話時（包括從其他裝置開啟）會提前啟動智慧體，並執行專案的 SessionStart hooks。",
+      "failed": "無法變更此設定，請再試一次。"
+    },
     "device_link": {
       "title": "裝置互聯",
       "allow": "允許其他裝置存取本機對話流",

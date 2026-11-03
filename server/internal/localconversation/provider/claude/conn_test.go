@@ -196,3 +196,32 @@ func TestConnRequestHonorsContext(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestClaimReasonReadsTheSDKReason(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&AdapterError{Code: CodeNotClaimed, Message: "option_not_applied: model"}, "option_not_applied"},
+		{&AdapterError{Code: CodeNotClaimed, Message: "project_settings_not_claimable"}, "project_settings_not_claimable"},
+		{&AdapterError{Code: "sdk_error", Message: "option_not_applied: model"}, ""},
+		{errors.New("not_claimed: closed"), ""},
+	} {
+		if got := ClaimReason(c.err); got != c.want {
+			t.Errorf("ClaimReason(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+func TestMCPSetFailedOnlyOnReportedErrors(t *testing.T) {
+	t.Parallel()
+
+	if MCPSetFailed(json.RawMessage(`{"added":["multica"],"removed":[],"errors":{}}`)) {
+		t.Error("no errors reported as a failure")
+	}
+	if !MCPSetFailed(json.RawMessage(`{"added":[],"removed":[],"errors":{"multica":"refused"}}`)) {
+		t.Error("an unbound server was not reported")
+	}
+}

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var reasoningEfforts = map[string]bool{"none": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true, "ultra": true}
@@ -20,38 +22,70 @@ func effortLabel(v string) string {
 	return strings.ToUpper(v[:1]) + v[1:]
 }
 
-// claudeModels reads the models of Claude Code's initialize response.
+// claudeModels reads the models of Claude Code's initialize response. Rows keep
+// their picker token as the ID, since settings already hold those. The default
+// row is folded the way pkg/agent folds it: "follow the default" is an empty
+// model, so it only marks the row that resolves to the same model.
 func claudeModels(initialize json.RawMessage) Models {
 	var result struct {
 		Models []struct {
 			Value                 string   `json:"value"`
+			ResolvedModel         string   `json:"resolvedModel"`
 			DisplayName           string   `json:"displayName"`
 			SupportsEffort        bool     `json:"supportsEffort"`
 			SupportedEffortLevels []string `json:"supportedEffortLevels"`
+			Disabled              bool     `json:"disabled"`
 		} `json:"models"`
 	}
 	_ = json.Unmarshal(initialize, &result)
 	models := Models{Supported: true, Models: []Model{}}
-	for _, m := range result.Models {
+	defaultRow := -1
+	identity := map[string]int{}
+	for i, m := range result.Models {
+		if m.Value == agent.ClaudeDefaultModelValue {
+			defaultRow = i
+			continue
+		}
 		if m.Value == "" {
 			continue
 		}
-		model := Model{ID: m.Value, Label: m.DisplayName}
+		model := Model{ID: m.Value, Label: m.DisplayName, Thinking: claudeThinking(m.SupportsEffort, m.SupportedEffortLevels)}
 		if model.Label == "" {
 			model.Label = m.Value
 		}
-		if m.SupportsEffort && len(m.SupportedEffortLevels) > 0 {
-			thinking := &Thinking{SupportedLevels: []Level{}}
-			for _, level := range m.SupportedEffortLevels {
-				if reasoningEfforts[level] {
-					thinking.SupportedLevels = append(thinking.SupportedLevels, Level{Value: level, Label: effortLabel(level)})
-				}
-			}
-			model.Thinking = thinking
-		}
+		identity[agent.ClaudeModelID(m.Value, m.ResolvedModel)] = len(models.Models)
 		models.Models = append(models.Models, model)
 	}
+	if defaultRow < 0 {
+		return models
+	}
+	row := result.Models[defaultRow]
+	id := agent.ClaudeModelID(row.Value, row.ResolvedModel)
+	if i, ok := identity[id]; ok {
+		models.Models[i].IsDefault = true
+	} else if !row.Disabled && id != agent.ClaudeDefaultModelValue {
+		// An org-restricted install can resolve its default to a model no other
+		// row names; without this row nothing says what following it runs.
+		label := row.DisplayName
+		if label == "" {
+			label = id
+		}
+		models.Models = append(models.Models, Model{ID: id, Label: label, IsDefault: true, Thinking: claudeThinking(row.SupportsEffort, row.SupportedEffortLevels)})
+	}
 	return models
+}
+
+func claudeThinking(supported bool, levels []string) *Thinking {
+	if !supported || len(levels) == 0 {
+		return nil
+	}
+	thinking := &Thinking{SupportedLevels: []Level{}}
+	for _, level := range levels {
+		if reasoningEfforts[level] {
+			thinking.SupportedLevels = append(thinking.SupportedLevels, Level{Value: level, Label: effortLabel(level)})
+		}
+	}
+	return thinking
 }
 
 // codexModels reads Codex's local model cache. A missing or unreadable

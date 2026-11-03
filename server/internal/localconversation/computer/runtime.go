@@ -234,6 +234,23 @@ func (m *Manager) Execute(ctx context.Context, key, id, code string, action Acti
 	}
 }
 
+// Alive reports whether a conversation's runtime is running; resetting it loses
+// its variables.
+func (m *Manager) Alive(key string) bool {
+	m.mu.Lock()
+	p := m.sessions[key]
+	m.mu.Unlock()
+	if p == nil {
+		return false
+	}
+	select {
+	case <-p.done:
+		return false
+	default:
+		return true
+	}
+}
+
 func (m *Manager) Reset(key string) {
 	m.mu.Lock()
 	p := m.sessions[key]

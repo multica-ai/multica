@@ -10,7 +10,7 @@ export type AIDevice = z.infer<typeof devicesSchema>["devices"][number];
 export const projectsSchema = z.object({ projects: z.array(z.object({ id: z.string(), title: z.string(), path: z.string() })).default([]) });
 export const providersSchema = z.object({ providers: z.array(z.object({ id: z.string(), name: z.string(), available: z.boolean().default(false) })).default([]) });
 export const modelsSchema = z.object({ supported: z.boolean().default(false), models: z.array(z.object({
-  id: z.string(), label: z.string(),
+  id: z.string(), label: z.string(), isDefault: z.boolean().optional(),
   thinking: z.object({ supported_levels: z.array(z.object({ value: z.string(), label: z.string() })).default([]) }).optional(),
 })).nullable().transform((value) => value ?? []) });
 export const directoriesSchema = z.object({ path: z.string(), parent: z.string(), entries: z.array(z.object({ name: z.string(), path: z.string() })) });

@@ -1,0 +1,1 @@
+{ "version": 1, "type": "result", "id": "r1", "data": { "models": [{ "value": "claude-opus-5-5" }], "timing": { "sdk_load_ms": 51.2, "query_init_ms": 233.7 } } }

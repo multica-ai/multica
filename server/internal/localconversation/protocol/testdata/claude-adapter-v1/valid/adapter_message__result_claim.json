@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "type": "result",
+  "id": "r2",
+  "data": {
+    "session_id": "native-1",
+    "timing": {
+      "claim_ms": 57.2
+    }
+  }
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/localconversation/protocol"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // ErrCloudUnavailable means cloud agents cannot be reached from this
@@ -181,11 +182,16 @@ func (s *Service) SendToAgents(ctx context.Context, cmd SendCommand, agents []Re
 	for _, t := range turns {
 		b.Events = append(b.Events, event(t.ID, "turn.started", map[string]any{"request_id": cmd.RequestID, "input_message_id": messageID}, false))
 	}
+	persisting := s.opts.Now()
 	if _, err := s.batcher.AppendWait(ctx, b); err != nil {
 		if errors.Is(err, store.ErrDuplicateRequest) {
 			return s.SendToAgents(ctx, cmd, agents)
 		}
 		return RemoteResult{}, err
+	}
+	persisted := s.opts.Now()
+	for _, id := range result.TurnIDs {
+		s.traces.turn(conv, cmd.RequestID, id, timing.TurnAgent).Completed(timing.StageTurnPersist, persisted, persisted.Sub(persisting), nil)
 	}
 	prompt := cmd.Prompt
 	if prompt == "" {
@@ -449,6 +455,11 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 	if err != nil || t.Status != "running" {
 		return
 	}
+	reason := ""
+	if status == "failed" {
+		reason = "remote_failed"
+	}
+	s.traces.lookup(turnID).Finish(status, reason, failure)
 	events, _ := s.store.TurnEvents(ctx, conversationID, turnID)
 	now := s.opts.Now()
 	textItem := ""

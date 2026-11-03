@@ -12,6 +12,8 @@
       "description": "Daemon -> adapter. Requests carry an id answered by exactly one result or error.",
       "oneOf": [
         { "$ref": "#/$defs/start" },
+        { "$ref": "#/$defs/prewarm" },
+        { "$ref": "#/$defs/claim" },
         { "$ref": "#/$defs/send" },
         { "$ref": "#/$defs/interrupt" },
         { "$ref": "#/$defs/set_model" },
@@ -57,6 +59,37 @@
         "allowed_tools": { "type": "array", "items": { "type": "string" } },
         "settings": { "type": "object", "description": "Claude settings passed to the SDK `settings` option, prepared by the daemon (plugin configuration)." },
         "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "prewarm": {
+      "description": "Parks a Claude Code process that serves no session yet. Only an adapter announcing the prewarm capability accepts it. Everything here is fixed for the life of the process; MCP is bound after claim.",
+      "allOf": [{ "$ref": "#/$defs/request_base" }],
+      "type": "object",
+      "required": ["type", "executable"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "version": true, "id": true,
+        "type": { "const": "prewarm" },
+        "executable": { "type": "string" },
+        "allowed_tools": { "type": "array", "items": { "type": "string" } },
+        "settings": { "type": "object" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "claim": {
+      "description": "Binds the parked process to a session with no prompt queued. Answered once the SDK's claimed promise settles; any refusal is an error with code not_claimed whose message starts with the SDK's reason, and the refused Query produces no error frames.",
+      "allOf": [{ "$ref": "#/$defs/request_base" }],
+      "type": "object",
+      "required": ["type", "cwd"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "version": true, "id": true,
+        "type": { "const": "claim" },
+        "cwd": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "permission_mode": { "$ref": "#/$defs/permission_mode" },
+        "append_system_prompt": { "type": "string" },
+        "settings": { "type": "object", "description": "Flag-settings overlay, such as effortLevel; keys governing hooks are refused." }
       }
     },
     "send": {
@@ -204,7 +237,7 @@
         "version": { "$ref": "#/$defs/version" },
         "type": { "const": "result" },
         "id": { "$ref": "#/$defs/id" },
-        "data": {}
+        "data": { "description": "Request-specific. A start result carries { models, timing: { sdk_load_ms, query_init_ms } }; an older adapter omits timing, so the daemon treats it as optional. A prewarm result carries { timing: { sdk_load_ms, prewarm_ms } } and a claim result { session_id, timing: { claim_ms } }." }
       }
     },
     "error_message": {
@@ -215,7 +248,7 @@
         "version": { "$ref": "#/$defs/version" },
         "type": { "const": "error" },
         "id": { "$ref": "#/$defs/id", "description": "Absent for errors not tied to a request, such as a Query that ended unexpectedly." },
-        "code": { "type": "string", "description": "Stable code, e.g. unsupported_version, not_started, sdk_error, cli_missing, write_backlog." },
+        "code": { "type": "string", "description": "Stable code, e.g. unsupported_version, not_started, sdk_error, cli_missing, write_backlog, prewarm_unsupported, prewarm_failed, not_claimed, spare_exited." },
         "message": { "type": "string" },
         "dispatch": {
           "enum": ["rejected", "not_dispatched", "outcome_unknown"],

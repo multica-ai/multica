@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "type": "ready",
+  "sdk_version": "0.3.310",
+  "capabilities": [
+    "set_model",
+    "set_permission_mode",
+    "apply_flag_settings",
+    "set_mcp_servers",
+    "stop_task",
+    "prewarm",
+    "claim"
+  ]
+}

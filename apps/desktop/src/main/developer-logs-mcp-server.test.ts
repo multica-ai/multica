@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -66,5 +66,24 @@ describe("standalone developer logs MCP", () => {
     const f = await fixture();
     await writeDeveloperLogsManifest(f.diagnostics, { version: 1, apiUrl: "https://api.test", userId: null, daemonLogPath: null, runtime });
     expect(JSON.parse((await f.call()).text)).toMatchObject({ webRecordCount: 0, sources: { web: { status: "unavailable" }, daemon: { status: "unavailable" } } });
+  });
+  it("merges the daemon timing file the manifest names and reports its dropped writes", async () => {
+    const f = await fixture();
+    const daemonTiming = join(f.root, "daemon-timing.jsonl");
+    const record = { version: 2, source: "daemon", at: new Date().toISOString(), event: "mark", elapsedMs: 1 };
+    await writeFile(daemonTiming, [{ ...record, stage: "provider.first_text", conversationId: "first", turnId: "t", requestId: "r", provider: "codex" }, { ...record, stage: "timing.dropped", count: 2 }, { ...record, stage: "link.start" }].map((line) => JSON.stringify(line)).join("\n") + "\n");
+    await writeDeveloperLogsManifest(f.diagnostics, { version: 1, apiUrl: "https://api.test", userId: null, daemonLogPath: null, daemonTimingPath: daemonTiming, runtime });
+    const summary = JSON.parse((await f.call()).text);
+    expect(summary).toMatchObject({ daemonTimingRecordCount: 2, incomplete: true, waterfallCount: 1, sources: { daemonTiming: { status: "available" } } });
+    const bundle = JSON.parse(await readFile(summary.path, "utf8"));
+    expect(bundle.coverage.droppedTimingWrites).toBe(2);
+    expect(bundle.waterfalls.turns[0]).toMatchObject({ turnId: "t", provider: "codex" });
+  });
+
+  it("reads a manifest an older Desktop published without the daemon timing path", async () => {
+    const f = await fixture();
+    await mkdir(f.diagnostics, { recursive: true });
+    await writeFile(join(f.diagnostics, "developer-logs-mcp.json"), JSON.stringify({ version: 1, apiUrl: "https://api.test", userId: null, daemonLogPath: null, runtime }));
+    expect(JSON.parse((await f.call()).text)).toMatchObject({ daemonTimingRecordCount: 0, sources: { daemonTiming: { status: "unavailable" } } });
   });
 });

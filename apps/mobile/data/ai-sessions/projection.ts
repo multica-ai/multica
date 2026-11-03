@@ -61,24 +61,31 @@ function structuredSnapshot(snapshot: LocalV2Snapshot): LocalV2Snapshot {
   return { ...snapshot, turns: snapshot.turns.map((turn) => ({ ...turn, messages: [...turn.messages], events: [...turn.events] })), pending_interactions: [...snapshot.pending_interactions] };
 }
 
-export interface TranscriptRow { id: string; turnId?: string; role: "user" | "assistant" | "tool"; content: string; attachmentIds?: string[] }
+export interface TranscriptRow { id: string; turnId?: string; role: "user" | "assistant" | "tool" | "reasoning"; content: string; running?: boolean; attachmentIds?: string[] }
 
 export function transcript(snapshot: LocalV2Snapshot): TranscriptRow[] {
   return snapshot.turns.flatMap((turn) => {
     const rows: TranscriptRow[] = turn.messages.filter((m) => m.role === "user").map((m) => ({ id: m.id, role: "user", content: m.content, attachmentIds: m.attachment_ids }));
-    const items = new Map<string, { kind: string; content: string }>();
+    const items = new Map<string, { kind: string; content: string; completed: boolean }>();
     for (const event of turn.events) {
       if (!event.item_id || !event.type.startsWith("item.")) continue;
-      const previous = items.get(event.item_id) ?? { kind: text(event.payload.kind), content: "" };
+      const previous = items.get(event.item_id) ?? { kind: text(event.payload.kind), content: "", completed: false };
       const p = event.payload;
       const delta = event.type === "item.delta" && (p.field === "text" || p.field === "output");
       items.set(event.item_id, {
         kind: text(p.kind) || previous.kind,
         content: delta ? previous.content + text(p.text) : text(p.text) || text(p.output) || text(p.command) || text(p.title) || previous.content,
+        completed: previous.completed || event.type === "item.completed",
       });
     }
     let hasAssistant = false;
     for (const [id, item] of items) {
+      if (item.kind === "reasoning") {
+        // Summaries can be off or arrive late, so a running item shows without text.
+        const running = !item.completed && turn.status === "running";
+        if (item.content || running) rows.push({ id, role: "reasoning", content: item.content, running });
+        continue;
+      }
       if (!item.content) continue;
       const role = item.kind === "assistant_text" ? "assistant" : "tool";
       if (role === "assistant") hasAssistant = true;

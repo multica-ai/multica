@@ -42,7 +42,7 @@ import { getAppVersion } from "./app-version";
 import { DEVELOPER_LOGS_MCP_NAME, writeDeveloperLogsManifest } from "./developer-logs-mcp-server";
 import { registerCodexStdioMcp } from "./codex-mcp-registration";
 import { findCodex } from "./find-codex";
-import { profileLogPath, readDesktopProfileCredentials } from "./daemon-profile";
+import { profileDaemonTimingPath, profileLogPath, readDesktopProfileCredentials } from "./daemon-profile";
 import { desktopRuntimeRegistry, desktopRuntimeProfile } from "./desktop-runtime-instance";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -722,6 +722,7 @@ if (!gotTheLock) {
           const [web, daemon] = await Promise.all([accountWebLog(scope.userId).snapshot(since, until), snapshotDaemonLog(daemonDiagnosticLogPath())]);
           return { web, daemon };
         },
+        daemonTimingPath: () => profileDaemonTimingPath(desktopRuntimeProfile()),
         chooseSavePath: async (filename) => {
           if (!mainWindow || mainWindow.isDestroyed()) return null;
           const result = await dialog.showSaveDialog(mainWindow, { defaultPath: join(app.getPath("downloads"), filename), filters: [{ name: "JSON", extensions: ["json"] }] });
@@ -736,6 +737,7 @@ if (!gotTheLock) {
         void writeDeveloperLogsManifest(diagnosticsDir, {
           version: 1, apiUrl, userId: settingsUserId ?? null,
           daemonLogPath: daemonDiagnosticLogPath() ?? profileLogPath(desktopRuntimeProfile()),
+          daemonTimingPath: profileDaemonTimingPath(desktopRuntimeProfile()),
           runtime: { appVersion: getAppVersion(), platform: process.platform, arch: process.arch, electronVersion: process.versions.electron, chromeVersion: process.versions.chrome, nodeVersion: process.versions.node, packaged: app.isPackaged },
         }).catch((error: unknown) => console.warn("[developer-logs-mcp] Could not publish the diagnostics manifest", error));
       };

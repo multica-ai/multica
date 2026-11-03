@@ -113,5 +113,8 @@
   "search_files": "搜尋檔案",
   "open_source": "返回原文",
   "file_from": "來自 {{device}}",
-  "reasoning_choose_model": "先選擇具體模型，再調整該模型支援的思考強度。"
+  "reasoning_choose_model": "先選擇具體模型，再調整該模型支援的思考強度。",
+  "subscription_rejected": "這個對話的即時更新已中斷。",
+  "thinking": "思考中…",
+  "thought": "思考過程"
 }

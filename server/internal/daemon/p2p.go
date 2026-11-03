@@ -18,6 +18,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/p2p"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 const (
@@ -28,6 +29,31 @@ const (
 )
 
 var p2pRegisterRetrySchedule = []time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute}
+
+const (
+	deviceTimingFile  = "device-timing.jsonl"
+	reportsTimingFile = "timing-reports.jsonl"
+	// deviceTimingMaxBytes is less than a turn file's: state changes are rare and
+	// proxied requests are not worth keeping for long.
+	deviceTimingMaxBytes = 2 << 20
+)
+
+// openDeviceTiming opens this device's connection log, once. It is a separate file
+// so a chatty link cannot rotate turn records away.
+func (d *Daemon) openDeviceTiming() *timing.Log {
+	d.deviceTimingOnce.Do(func() {
+		dir := d.cfg.ProfileDir
+		if dir == "" {
+			profile, err := cli.ProfileDir(d.cfg.Profile)
+			if err != nil {
+				return
+			}
+			dir = profile
+		}
+		d.deviceTiming = timing.Open(filepath.Join(dir, "local-conversations", "diagnostics", deviceTimingFile), timing.Options{MaxBytes: deviceTimingMaxBytes})
+	})
+	return d.deviceTiming
+}
 
 // P2P returns the running device link service, or nil when p2p is disabled
 // or has not started. Features register protocol handlers and open streams
@@ -48,6 +74,7 @@ func (d *Daemon) startP2P(ctx context.Context) error {
 	// devices learn new ones (port mapping, relay circuit) without waiting
 	// for the periodic registration.
 	reregister := make(chan struct{}, 1)
+	marks := timing.NewMarks(d.openDeviceTiming(), timing.SourceDaemon)
 	svc, err := p2p.Start(ctx, p2p.Config{
 		Key:             key,
 		Fetch:           func(ctx context.Context) ([]p2p.Peer, error) { return fetchP2PPeers(ctx, registry) },
@@ -61,6 +88,7 @@ func (d *Daemon) startP2P(ctx context.Context) error {
 			}
 		},
 		Logger: d.logger,
+		Marks:  marks,
 	})
 	if err != nil {
 		return err
@@ -78,7 +106,7 @@ func (d *Daemon) startP2P(ctx context.Context) error {
 		}
 		svc.Close()
 	}()
-	go d.p2pRegistrationLoop(ctx, registry, svc, key.GetPublic(), reregister)
+	go d.p2pRegistrationLoop(ctx, registry, svc, key.GetPublic(), reregister, marks)
 	networks := make(chan struct{}, 1)
 	go d.p2pWatchLoop(ctx, registry, svc, networks)
 	go func() {
@@ -102,19 +130,24 @@ func (d *Daemon) startP2P(ctx context.Context) error {
 // re-publishes whenever the addresses change. After each successful
 // registration the allowlist is refreshed, which also tells the daemon its
 // own entry is live.
-func (d *Daemon) p2pRegistrationLoop(ctx context.Context, registry *p2pRegistryClient, svc *p2p.Service, pub crypto.PubKey, reregister <-chan struct{}) {
+func (d *Daemon) p2pRegistrationLoop(ctx context.Context, registry *p2pRegistryClient, svc *p2p.Service, pub crypto.PubKey, reregister <-chan struct{}, marks *timing.Marks) {
 	raw, err := crypto.MarshalPublicKey(pub)
 	if err != nil {
 		d.logger.Warn("p2p: encode public key", "error", err)
 		return
 	}
 	publicKey := base64.StdEncoding.EncodeToString(raw)
+	registered := false
 	for {
 		for attempt := 0; ; attempt++ {
 			addrs := svc.AdvertisedAddrs()
 			err := registry.register(ctx, d.cfg.DaemonID, d.cfg.Profile, publicKey, d.cfg.DeviceName, addrs)
 			if err == nil {
 				d.logger.Info("p2p: identity registered", "peer_id", svc.ID().String(), "addrs", addrs)
+				if !registered {
+					registered = true
+					marks.Write(timing.Record{Stage: timing.StageLinkRegistered})
+				}
 				if err := svc.Refresh(ctx); err != nil && ctx.Err() == nil {
 					d.logger.Warn("p2p: allowlist refresh failed", "error", err)
 				}
@@ -124,6 +157,7 @@ func (d *Daemon) p2pRegistrationLoop(ctx context.Context, registry *p2pRegistryC
 				return
 			}
 			delay := p2pRegisterRetrySchedule[min(attempt, len(p2pRegisterRetrySchedule)-1)]
+			registered = false
 			d.logger.Warn("p2p: identity registration failed", "error", err, "retry_in", delay)
 			timer := time.NewTimer(delay)
 			select {

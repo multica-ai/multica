@@ -439,6 +439,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	if d.localV2 != nil {
 		d.localV2.Register(mux)
 		d.deviceLink.register(mux)
+		d.conversationPreheat.register(mux)
 	}
 	mux.HandleFunc("/p2p/status", d.p2pStatusHandler())
 

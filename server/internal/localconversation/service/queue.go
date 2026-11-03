@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 const (
@@ -185,6 +187,9 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 	view, err := s.commitQueue(ctx, conversationID, change, len(state.Items)+1)
 	unlock()
 	if err == nil {
+		if paused || len(state.Items) > 0 || conv.Status == "running" {
+			s.traces.waited(item.RequestID)
+		}
 		go s.dispatchQueue(conversationID)
 	}
 	return view, err
@@ -338,7 +343,11 @@ func (s *Service) dispatchQueue(conversationID string) {
 	}
 	first := state.Items[0]
 	item, err := parseQueueItem(first.Item)
+	var trace *timing.Trace
+	var dispatched time.Time
 	if err == nil {
+		trace = s.traces.dispatching(conv, item)
+		dispatched = trace.Now()
 		s.queues.setDispatching(conversationID, first.RequestID)
 		err = s.sendQueued(ctx, conv, item)
 		s.queues.setDispatching(conversationID, "")
@@ -348,6 +357,11 @@ func (s *Service) dispatchQueue(conversationID string) {
 	switch {
 	case errors.Is(err, ErrTurnRunning) || errors.Is(err, ErrClosing) || errors.Is(err, ErrDraining):
 		return
+	}
+	// Recorded after the send because a dispatch that finds a running turn
+	// stays queued and is not the one that counts.
+	trace.Completed(timing.StageQueueDispatch, dispatched, dispatched.Sub(trace.Started()), err)
+	switch {
 	case err != nil && !errors.Is(err, ErrOutcomeUnknown):
 		change.Paused, change.Error = true, err.Error()
 	default:

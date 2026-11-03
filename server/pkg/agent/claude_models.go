@@ -169,6 +169,14 @@ type claudeControlResponse struct {
 // offered as a pick.
 const claudeDefaultModelValue = "default"
 
+// ClaudeDefaultModelValue is that picker row, for other readers of the same rows.
+const ClaudeDefaultModelValue = claudeDefaultModelValue
+
+// ClaudeModelID is claudeModelID for other readers of the same rows.
+func ClaudeModelID(value, resolvedModel string) string {
+	return claudeModelID(claudeModelInfo{Value: value, ResolvedModel: resolvedModel})
+}
+
 // discoverClaudeCatalog answers a model-listing round for claude, preferring
 // the live catalog and degrading to the hand-maintained one.
 //

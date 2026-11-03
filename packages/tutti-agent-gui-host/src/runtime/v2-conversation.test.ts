@@ -204,6 +204,40 @@ describe("V2Conversation", () => {
     expect(conversation.turns.get("turn-1")?.status).toBe("running");
   });
 
+  it("shows reasoning as running until it ends, with a label while it has no text", () => {
+    const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({
+      version: 2, store_generation: "g1", snapshot_seq: 2, has_older_turns: false,
+      conversation: { conversation_id: "conv-1", summary_seq: 1, provider: "codex", title: "t", status: "running", pinned: false, archived: false, updated_at: at },
+      turns: [{ id: "turn-1", turn_index: 0, request_id: "r1", status: "running", started_at: at, messages: [], events: [
+        event(2, "item.started", { kind: "reasoning" }, { item_id: "it-1" }),
+      ] }],
+    }));
+    const reasoning = (locale: "en" | "zh-CN" = "en") => projectV2Conversation(conversation, { workspaceId: "w", agentSessionId: "s", locale }).messages.find((message) => message.messageId === "it-1");
+    expect(reasoning()).toMatchObject({ kind: "reasoning", status: "running", payload: { content: "Thinking" } });
+    expect(reasoning("zh-CN")).toMatchObject({ payload: { content: "思考中" } });
+
+    conversation.apply([event(3, "item.delta", { kind: "reasoning", field: "text", text: "plan" }, { item_id: "it-1" })]);
+    expect(reasoning()).toMatchObject({ status: "running", payload: { content: "plan" } });
+
+    conversation.apply([event(4, "item.completed", { kind: "reasoning", status: "completed", text: "plan\ncheck" }, { item_id: "it-1", final: true })]);
+    expect(reasoning()).toMatchObject({ payload: { content: "plan\ncheck" } });
+    expect(reasoning()?.status).toBeUndefined();
+  });
+
+  it("leaves reasoning without text empty once it has ended", () => {
+    const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({
+      version: 2, store_generation: "g1", snapshot_seq: 3, has_older_turns: false,
+      conversation: { conversation_id: "conv-1", summary_seq: 1, provider: "codex", title: "t", status: "idle", pinned: false, archived: false, updated_at: at },
+      turns: [{ id: "turn-1", turn_index: 0, request_id: "r1", status: "running", started_at: at, messages: [], events: [
+        event(2, "item.started", { kind: "reasoning" }, { item_id: "it-1" }),
+        event(3, "item.completed", { kind: "reasoning", status: "completed", text: "" }, { item_id: "it-1", final: true }),
+      ] }],
+    }));
+    const message = projectV2Conversation(conversation, { workspaceId: "w", agentSessionId: "s", locale: "en" }).messages.find((entry) => entry.messageId === "it-1");
+    expect(message?.payload.content).toBe("");
+    expect(message?.status).toBeUndefined();
+  });
+
   it("keeps assistant message rows out of the user messages", () => {
     // A fork copies messages under new ids, so an assistant row no longer shares its item's id.
     const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({

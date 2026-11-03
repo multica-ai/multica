@@ -75,6 +75,7 @@ export const localV2ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ version: z.literal(LOCAL_V2_VERSION), type: z.literal("subscribe_scope"), after_scope_seq: z.number().int().min(0).optional(), store_generation: z.string().optional() }).strict(),
   z.object({ version: z.literal(LOCAL_V2_VERSION), type: z.literal("subscribe"), conversation_id: z.string(), after_seq: z.number().int().min(0), store_generation: z.string() }).strict(),
   z.object({ version: z.literal(LOCAL_V2_VERSION), type: z.literal("unsubscribe"), conversation_id: z.string() }).strict(),
+  z.object({ version: z.literal(LOCAL_V2_VERSION), type: z.literal("conversation.focus"), conversation_id: z.string(), focused: z.boolean() }).strict(),
   z.object({ version: z.literal(LOCAL_V2_VERSION), type: z.literal("host.reply"), request_id: z.string(), result: z.unknown().optional(), error: errorSchema.optional() }).strict(),
 ]);
 export type LocalV2ClientMessage = z.infer<typeof localV2ClientMessageSchema>;
@@ -139,6 +140,8 @@ export interface LocalV2Transport {
   request(scope: LocalV2Scope, method: "GET" | "POST", path: string, body?: unknown): Promise<unknown>;
   /** Sends a client message on the scope's WebSocket. */
   send(scope: LocalV2Scope, message: LocalV2ClientMessage): Promise<void>;
+  /** What the daemon behind this transport announces in /hello. */
+  capabilities?(): Promise<string[]>;
   /** Receives the scope's server messages. */
   subscribe(listener: (scope: LocalV2Scope, message: unknown) => void): () => void;
   /** Receives connection changes; subscriptions are lost on disconnect. */

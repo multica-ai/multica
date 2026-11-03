@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "type": "error",
+  "id": "r2",
+  "code": "not_claimed",
+  "message": "project_settings_not_claimable"
+}

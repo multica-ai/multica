@@ -60,6 +60,11 @@ export function profileLogPath(profile: string): string {
   return join(profileStateDir(profile), "daemon.log");
 }
 
+/** The daemon keeps local conversation data under the profile directory, not its state directory. */
+export function profileDaemonTimingPath(profile: string): string {
+  return join(profileDir(profile), "local-conversations", "diagnostics", "daemon-timing.jsonl");
+}
+
 export function profilePidPath(profile: string): string {
   return join(profileStateDir(profile), "daemon.pid");
 }

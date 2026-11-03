@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildDeveloperLogBundle, writeDeveloperLogExport, type RuntimeInfo } from "./developer-log-export";
 import { WebDiagnosticLog, snapshotDaemonLog, type RuntimeLogSource } from "./developer-runtime-logs";
-import { LocalTimingLog } from "./local-timing-log";
+import { LocalTimingLog, snapshotDaemonTiming, snapshotLinkTiming } from "./local-timing-log";
 
 export const DEVELOPER_LOGS_MCP_NAME = "multica_developer_logs";
 const MANIFEST_FILE = "developer-logs-mcp.json";
@@ -16,6 +16,8 @@ export interface DeveloperLogsManifest {
   apiUrl: string;
   userId: string | null;
   daemonLogPath: string | null;
+  /** Absent from a manifest an older Desktop published; that source then reads as unavailable. */
+  daemonTimingPath?: string | null;
   runtime: RuntimeInfo;
 }
 const manifestSchema = z.object({
@@ -23,6 +25,7 @@ const manifestSchema = z.object({
   apiUrl: z.string(),
   userId: z.string().min(1).max(128).nullable(),
   daemonLogPath: z.string().nullable(),
+  daemonTimingPath: z.string().nullable().optional(),
   runtime: z.object({ appVersion: z.string(), platform: z.string(), arch: z.string(), electronVersion: z.string(), chromeVersion: z.string(), nodeVersion: z.string(), packaged: z.boolean() }),
 });
 
@@ -54,7 +57,7 @@ export function createDeveloperLogsMcpServer(diagnosticsDir: string): McpServer 
   });
   const exportsRoot = join(diagnosticsDir, "exports");
   mcp.registerTool("export_developer_logs", {
-    description: "Export Multica Desktop developer diagnostics from this computer into one private JSON file: local conversation stage timings (all conversations on this device), the signed-in account's Web renderer console for the same time range, runtime versions and the desktop daemon log tail (not time-filtered). since_minutes defaults to 60. Returns the local path, per-source availability and counts; copy the file into your working directory before attaching it. Common credentials, URLs and payload fields are scrubbed, but diagnostic text may contain private details: never upload it without the user's request. Exports are kept up to 7 days, at most 20 files.",
+    description: "Export Multica Desktop developer diagnostics from this computer into one private JSON file: local conversation stage timings and per-turn waterfalls from the desktop and daemon (all conversations on this device), the signed-in account's Web renderer console for the same time range, runtime versions and the desktop daemon log tail (not time-filtered). since_minutes defaults to 60. Returns the local path, per-source availability and counts; copy the file into your working directory before attaching it. Common credentials, URLs and payload fields are scrubbed, but diagnostic text may contain private details: never upload it without the user's request. Exports are kept up to 7 days, at most 20 files.",
     inputSchema: { since_minutes: z.number().int().min(1).max(10080).default(60) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ since_minutes }) => {
@@ -63,12 +66,16 @@ export function createDeveloperLogsMcpServer(diagnosticsDir: string): McpServer 
       if (!manifest) throw new Error("Multica Desktop has not published its diagnostics on this computer. Open Multica Desktop and try again.");
       const until = Date.now();
       const since = until - since_minutes * 60_000;
-      const timing = await new LocalTimingLog(diagnosticsDir).snapshot(null, since, until);
+      const [timing, daemonTiming, linkTiming] = await Promise.all([
+        new LocalTimingLog(diagnosticsDir).snapshot(null, since, until),
+        snapshotDaemonTiming(manifest.daemonTimingPath ?? null, null, since, until),
+        snapshotLinkTiming(manifest.daemonTimingPath ?? null, since, until),
+      ]);
       const [web, daemon] = await Promise.all([
         manifest.userId ? new WebDiagnosticLog(diagnosticsDir, manifest.apiUrl, manifest.userId).snapshot(since, until) : unavailableWeb,
         snapshotDaemonLog(manifest.daemonLogPath),
       ]);
-      const bundle = buildDeveloperLogBundle({ runtime: manifest.runtime, workspaceId: null, since, until, conversationId: null, timing, sources: { web, daemon }, timingScope: "device" });
+      const bundle = buildDeveloperLogBundle({ runtime: manifest.runtime, workspaceId: null, since, until, conversationId: null, timing, daemonTiming, linkTiming, sources: { web, daemon }, timingScope: "device" });
       const result = await writeDeveloperLogExport(exportsRoot, bundle);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     } catch (error) {

@@ -103,6 +103,16 @@ func TestServerHandshakeRequestsAndNotifications(t *testing.T) {
 	}
 }
 
+func TestServerReportsHowLongItsStartTook(t *testing.T) {
+	t.Parallel()
+
+	s := startHelper(t, &frames{})
+	defer s.Stop()
+	if spawn, handshake := s.StartDurations(); spawn <= 0 || handshake <= 0 {
+		t.Fatalf("spawn = %v, handshake = %v", spawn, handshake)
+	}
+}
+
 func TestServerExitFailsPendingRequests(t *testing.T) {
 	t.Parallel()
 

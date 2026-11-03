@@ -27,6 +27,9 @@ type Catalog struct {
 	models  map[string]cached[Models]
 	account map[string]cached[accountRead]
 	paths   map[string]string
+	// codexDefault is the default a running Codex last reported; its model cache
+	// does not say.
+	codexDefault string
 }
 
 type cached[T any] struct {
@@ -80,6 +83,9 @@ type Model struct {
 	ID       string    `json:"id"`
 	Label    string    `json:"label"`
 	Thinking *Thinking `json:"thinking,omitempty"`
+	// IsDefault marks what following the default runs now. It is only a label:
+	// the setting stays "follow the default", so it can change underneath.
+	IsDefault bool `json:"isDefault,omitempty"`
 }
 
 // Thinking lists a model's reasoning efforts.
@@ -107,13 +113,32 @@ const (
 // ErrUnknownProvider rejects a provider this catalog does not support.
 var ErrUnknownProvider = errors.New("catalog: unknown provider")
 
+// NoteCodexDefault remembers the default model a running Codex reported.
+func (c *Catalog) NoteCodexDefault(model string) {
+	c.mu.Lock()
+	c.codexDefault = model
+	c.mu.Unlock()
+}
+
+func markDefault(models Models, id string) Models {
+	for i := range models.Models {
+		if models.Models[i].ID == id {
+			models.Models[i].IsDefault = true
+		}
+	}
+	return models
+}
+
 // Models returns a provider's models. Claude's come from the CLI's
 // initialize response and are cached for a minute unless force is set;
 // Codex's come from its local model cache.
 func (c *Catalog) Models(ctx context.Context, provider string, force bool) (Models, error) {
 	switch provider {
 	case "codex":
-		return codexModels(c.codexDir), nil
+		c.mu.Lock()
+		reported := c.codexDefault
+		c.mu.Unlock()
+		return markDefault(codexModels(c.codexDir), reported), nil
 	case "claude":
 	default:
 		return Models{}, ErrUnknownProvider
@@ -248,8 +273,8 @@ func (c *Catalog) readAccount(ctx context.Context, provider string, session *Ses
 	return read
 }
 
-// transcript reads the tail of the provider's own session file.
-func (c *Catalog) transcript(provider, id string) [][]byte {
+// sessionFile finds the provider's own session file, or "" when it has none.
+func (c *Catalog) sessionFile(provider, id string) string {
 	root, depth := filepath.Join(c.claudeDir, "projects"), 1
 	if provider == "codex" {
 		root, depth = filepath.Join(c.codexDir, "sessions"), 4
@@ -261,11 +286,33 @@ func (c *Catalog) transcript(provider, id string) [][]byte {
 	if path == "" {
 		path = findSessionFile(root, id+".jsonl", depth)
 		if path == "" {
-			return nil
+			return ""
 		}
 		c.mu.Lock()
 		c.paths[key] = path
 		c.mu.Unlock()
+	}
+	return path
+}
+
+// ClaudeTranscriptSize is the size of the session file a resume reloads.
+func (c *Catalog) ClaudeTranscriptSize(id string) (int64, bool) {
+	path := c.sessionFile("claude", id)
+	if path == "" {
+		return 0, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return info.Size(), true
+}
+
+// transcript reads the tail of the provider's own session file.
+func (c *Catalog) transcript(provider, id string) [][]byte {
+	path := c.sessionFile(provider, id)
+	if path == "" {
+		return nil
 	}
 	f, err := os.Open(path)
 	if err != nil {

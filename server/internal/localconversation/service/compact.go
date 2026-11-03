@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // ErrCompactUnavailable means there is no native conversation to compact.
@@ -40,19 +41,22 @@ func (s *Service) Compact(ctx context.Context, scopeID int64, conversationID, re
 	if err := s.acceptTurn(); err != nil {
 		return SendResult{}, err
 	}
+	turnID := "turn-" + requestID
+	trace := s.traces.turn(conv, requestID, turnID, timing.TurnUser)
+	created := trace.Begin(timing.StageRunnerCreate)
 	r, err := s.runner(ctx, conv)
+	created(err)
 	if err != nil {
 		return SendResult{}, err
 	}
-	turnID := "turn-" + requestID
-	err = r.Send(ctx, SendRequest{TurnID: turnID, RequestID: requestID, Fingerprint: fingerprint, Hidden: true, Compact: true, Text: "/compact"})
+	err = r.Send(ctx, SendRequest{TurnID: turnID, RequestID: requestID, Fingerprint: fingerprint, Hidden: true, Compact: true, Text: "/compact", Trace: trace})
 	switch {
 	case errors.Is(err, store.ErrDuplicateRequest):
 		if result, done, replayErr := s.replay(ctx, scopeID, requestID, fingerprint); done || replayErr != nil {
 			return result, replayErr
 		}
 	case errors.Is(err, ErrOutcomeUnknown):
-		if markErr := s.store.MarkUncertain(ctx, scopeID, requestID); markErr != nil {
+		if markErr := s.store.MarkUncertain(context.WithoutCancel(ctx), scopeID, requestID); markErr != nil {
 			err = errors.Join(err, markErr)
 		}
 	}

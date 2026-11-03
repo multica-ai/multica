@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // AuthorizeDesktop admits Desktop's main process or renderer by their
@@ -63,6 +65,8 @@ func (v *V2) Admit(w http.ResponseWriter, r *http.Request) bool {
 	}
 	r.Header.Del("Authorization")
 	r.Header.Del("Origin")
+	// Only Desktop forwards through this entry; the other device cannot tell.
+	r.Header.Set(headerClientKind, timing.ClientDesktop)
 	q := r.URL.Query()
 	for _, k := range []string{"ticket", "file_key", "api_origin", "user_id", "workspace_id"} {
 		q.Del(k)

@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "type": "conversation.focus",
+  "conversation_id": "conv-1",
+  "focused": true
+}

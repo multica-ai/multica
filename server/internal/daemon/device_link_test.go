@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/p2p"
 	"github.com/multica-ai/multica/server/internal/localconversation/service"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 type linkAccount struct {
@@ -201,5 +202,61 @@ func TestDeviceLinkForwardsDesktopToAnotherDevice(t *testing.T) {
 	}
 	if status, body := viewer.do(t, renderer, http.MethodGet, "/local/devices/"+idA.String()+"x/local/v2/sessions", nil); status != http.StatusNotFound {
 		t.Fatalf("unknown device = %d %v", status, body)
+	}
+}
+
+// The host must read the connection from the stream the request arrived on, which
+// only the device-link server's ConnContext can see.
+func TestDeviceLinkRecordsTheStreamsConnectionOnTheHost(t *testing.T) {
+	keyA, idA := newLinkKey(t)
+	keyB, idB := newLinkKey(t)
+	acct := &linkAccount{peers: []p2p.Peer{{ID: idA, DeviceName: "MacBook"}, {ID: idB, DeviceName: "Mac Studio"}}}
+	viewer := newLinkDevice(t, acct, keyA, "token-a")
+	host := newLinkDevice(t, acct, keyB, "token-b")
+	path := filepath.Join(t.TempDir(), "device-timing.jsonl")
+	log := timing.Open(path, timing.Options{})
+	t.Cleanup(log.Close)
+	host.v2.SetTiming(timing.NewMarks(log, timing.SourceDaemon), nil)
+	var addrs []ma.Multiaddr
+	for _, a := range host.p2p.Status().ListenAddrs {
+		addrs = append(addrs, ma.StringCast(a))
+	}
+	viewer.p2p.AddAddrs(peer.AddrInfo{ID: idB, Addrs: addrs})
+	if err := host.link.setEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	renderer := localhost.RendererToken(viewer.token)
+	base := "/local/devices/" + idB.String() + "/local/v2"
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if status, _ := viewer.do(t, renderer, http.MethodGet, base+"/sessions", nil); status == http.StatusOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the host never answered")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	log.Flush()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		var record timing.Record
+		if json.Unmarshal(line, &record) == nil && record.Stage == timing.StageProxyRequest {
+			found = true
+			if record.Connection != timing.ConnectionDirect || record.Peer != idA.String() || record.Role != timing.RoleExecutor || record.ClientKind != timing.ClientDesktop {
+				t.Fatalf("record = %+v", record)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no proxy.request in %s", raw)
+	}
+	// Reporting is for a phone: this device's Desktop cannot forward a report.
+	if status, _ := viewer.do(t, renderer, http.MethodPost, base+timing.ReportsPath, map[string]any{"batch_id": "b", "records": []any{}}); status != http.StatusForbidden {
+		t.Fatalf("forwarded report = %d", status)
 	}
 }

@@ -1225,6 +1225,11 @@
     "actions_aria": "{{url}} の操作"
   },
   "desktop": {
+    "conversation_preheat": {
+      "label": "会話を開いたときに準備する",
+      "description": "既存の会話を開くと（他のデバイスから開く場合を含む）、エージェントが先に起動し、プロジェクトの SessionStart フックが実行されます。",
+      "failed": "この設定を変更できませんでした。もう一度お試しください。"
+    },
     "device_link": {
       "title": "デバイス連携",
       "allow": "他のデバイスにこのデバイスの会話フローの使用を許可",

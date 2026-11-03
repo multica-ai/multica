@@ -27,6 +27,8 @@ type serviceFixture struct {
 	adapters []*fakeAdapter
 	// reply, when set, answers requests of adapters started after it.
 	reply func(a *fakeAdapter, typ string) (json.RawMessage, error)
+	// beforeLaunch, when set, runs while the provider CLI is being resolved.
+	beforeLaunch func()
 }
 
 func newServiceFixture(t *testing.T, path string) *serviceFixture {
@@ -54,6 +56,12 @@ func newServiceFixtureWith(t *testing.T, path string, opts Options) *serviceFixt
 }
 
 func (f *serviceFixture) launch(_ context.Context, conv sqlitedb.Conversation) (ClaudeSession, StartClaudeAdapter, error) {
+	f.mu.Lock()
+	before := f.beforeLaunch
+	f.mu.Unlock()
+	if before != nil {
+		before()
+	}
 	return ClaudeSession{Fields: map[string]any{"executable": "/bin/claude", "cwd": conv.Cwd}}, func(_ context.Context, h claude.Handler) (ClaudeAdapter, error) {
 		a := &fakeAdapter{handler: h, done: make(chan struct{})}
 		f.mu.Lock()
@@ -255,11 +263,11 @@ func TestServiceUpdateSettingsPersistsAndAppliesToTheLiveAdapter(t *testing.T) {
 	if err := f.svc.UpdateSettings(ctx, f.scopeID, "conv-1", SettingsUpdate{ClearModel: true, PermissionMode: &auto}); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.sent(); fmt.Sprint(got) != "[start send set_model apply_flag_settings set_permission_mode]" {
+	if got := a.sent(); fmt.Sprint(got) != "[start send set_permission_mode set_model apply_flag_settings]" {
 		t.Fatalf("adapter requests = %v", got)
 	}
-	if a.fields[2]["model"] != nil || a.fields[4]["mode"] != "auto" {
-		t.Fatalf("applied fields = %v / %v", a.fields[2], a.fields[4])
+	if a.fields[3]["model"] != nil || a.fields[2]["mode"] != "auto" {
+		t.Fatalf("applied fields = %v / %v", a.fields[3], a.fields[2])
 	}
 	conv, _ := f.svc.Store().Conversation(ctx, "conv-1")
 	if conv.Model.Valid || conv.PermissionMode != "auto" {

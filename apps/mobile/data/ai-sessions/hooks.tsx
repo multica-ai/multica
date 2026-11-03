@@ -44,6 +44,10 @@ export function useAIConnection() {
   const connected = useSyncExternalStore((listener) => client?.onConnection(listener) ?? (() => {}), () => client?.connected ?? false);
   return { client, connected };
 }
+export function useAISubscriptionRejected(sessionId: string) {
+  const client = useContext(Context);
+  return useSyncExternalStore((listener) => client?.onConnection(listener) ?? (() => {}), () => client?.subscriptionRejected(sessionId) ?? false);
+}
 
 export function useAISessionScope() {
   const { device, workspace } = useLocalSearchParams<{ device: string; workspace: string }>();

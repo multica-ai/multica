@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -20,10 +21,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/localconversation/service"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // V2Version is the wire protocol served under /local/v2.
 const V2Version = 2
+
+// ConversationFocusCapability tells clients they may send conversation.focus.
+const ConversationFocusCapability = "conversation-focus-v1"
 
 const (
 	v2MaxSubscriptions = 32
@@ -59,6 +65,15 @@ type V2 struct {
 		service.PreviewServices
 	}
 
+	// marks records this device's side of remote traffic; nil records nothing.
+	marks *timing.Marks
+	// reports holds what other devices reported; nil turns reporting off.
+	reports      *timing.Log
+	reportLimits reportLimits
+	// relayedClosed is when each client's WebSocket on the relay last closed, so
+	// its return on a direct stream reads as a migration finishing.
+	relayedClosed map[string]time.Time
+
 	mu sync.Mutex
 	// origins is the client that last acted on each conversation.
 	origins map[string]string
@@ -74,9 +89,10 @@ func NewV2(svc *service.Service, token, profileDir string) *V2 {
 		// authenticate already checked the Origin for the caller's credential.
 		CheckOrigin: func(*http.Request) bool { return true },
 	}, hosts: hosts{byScope: map[int64][]*wsConn{}, pending: map[string]*hostPending{}, orphans: map[string][]*hostPending{}, grace: hostGrace},
-		tickets: tickets{items: map[string]ticket{}, now: time.Now}, origins: map[string]string{}, presence: map[int64]map[string]map[string]RemotePeer{}}
+		tickets: tickets{items: map[string]ticket{}, now: time.Now}, origins: map[string]string{}, presence: map[int64]map[string]map[string]RemotePeer{}, relayedClosed: map[string]time.Time{}, reportLimits: newReportLimits(time.Now)}
 	v.hosts.origin = v.origin
 	svc.SetHost(v.hosts.request)
+	svc.SetLocalHost(v.hosts.requestLocal)
 	svc.SetComputerHost(v.computer.request)
 	svc.OnTurnEnd(v.turnEnded)
 	return v
@@ -84,6 +100,9 @@ func NewV2(svc *service.Service, token, profileDir string) *V2 {
 
 // SetServerOrigin refuses requests for any API origin but origin.
 func (v *V2) SetServerOrigin(origin string) { v.serverOrigin = normalizeOrigin(origin) }
+
+// SetTiming sets where this device's link marks and other devices' reports go.
+func (v *V2) SetTiming(marks *timing.Marks, reports *timing.Log) { v.marks, v.reports = marks, reports }
 
 // SetRemoteOpen sets whether other devices may use this one now.
 func (v *V2) SetRemoteOpen(open func() bool) { v.remoteOpen = open }
@@ -155,7 +174,10 @@ func (v *V2) ServeRemote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"kind": "device_link_off", "message": "This device does not share its conversations"}})
 		return
 	}
-	v.serve(w, r, caller{kind: callerRemote, clientKey: clientKey(peer.ID, r.Header), peer: peer.ID, deviceName: peer.DeviceName})
+	c := caller{kind: callerRemote, clientKey: clientKey(peer.ID, r.Header), peer: peer.ID, deviceName: peer.DeviceName, clientKind: r.Header.Get(headerClientKind), connection: peer.Connection}
+	writer, done := v.observeRemote(w, r, c)
+	defer done()
+	v.serve(writer, r, c)
 }
 
 func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
@@ -174,6 +196,10 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		capabilities := []string{"claude", "codex", "device-link"}
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
+		}
+		capabilities = append(capabilities, ConversationFocusCapability)
+		if v.reports != nil && c.kind == callerRemote {
+			capabilities = append(capabilities, TimingReportCapability)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"version": V2Version, "store_generation": v.svc.Generation(), "capabilities": capabilities})
 		return
@@ -218,6 +244,8 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 			return
 		}
 		v.servicePreview.Control(w, r, scopeID, c.peer)
+	case path == timing.ReportsPath && r.Method == http.MethodPost:
+		v.timingReport(w, r, scopeID)
 	case path == "/ws-ticket" && r.Method == http.MethodPost:
 		writeJSON(w, http.StatusOK, ticketResponse(v.tickets.issue(kind, scopeFromHeaders(r.Header), r.Header.Get(headerClientID))))
 	case path == "/ws" && r.Method == http.MethodGet:
@@ -391,6 +419,7 @@ func (v *V2) createSession(w http.ResponseWriter, r *http.Request, scopeID int64
 }
 
 func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id string) {
+	began := v.marks.Now()
 	snap, err := v.svc.Snapshot(r.Context(), scopeID, id)
 	if err != nil {
 		writeV2Error(w, err)
@@ -408,13 +437,14 @@ func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id 
 	}
 	c := snap.Conversation
 	settings := map[string]any{"model": nil, "reasoning_effort": nil, "permission_mode": c.PermissionMode}
-	if c.Model.Valid {
+	// A conversation that picked Claude's old "default" row follows the default.
+	if c.Model.Valid && c.Model.String != agent.ClaudeDefaultModelValue {
 		settings["model"] = c.Model.String
 	}
 	if c.ReasoningEffort.Valid {
 		settings["reasoning_effort"] = c.ReasoningEffort.String
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	v.writeSnapshot(w, r, id, began, map[string]any{
 		"version": V2Version, "store_generation": v.svc.Generation(), "snapshot_seq": snap.SnapshotSeq,
 		"conversation": summaryDTO(c), "turns": turns, "has_older_turns": snap.HasOlderTurns,
 		"pending_interactions": pending, "settings": settings, "queue": queue,
@@ -504,6 +534,7 @@ func optionalString(raw json.RawMessage) (value *string, clear bool, err error) 
 }
 
 func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id string) {
+	received := time.Now()
 	var body commandBody
 	if err := decodeBody(r, &body); err != nil {
 		writeV2Error(w, err)
@@ -516,6 +547,17 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 	switch body.Type {
 	case "send", "answer", "queue_enqueue", "compact":
 		v.actedOn(id, callerOf(r.Context()))
+	}
+	switch body.Type {
+	case "send", "compact":
+		v.svc.NoteRequest(id, body.RequestID, received, callerOf(r.Context()).timing())
+	case "queue_enqueue":
+		var item struct {
+			RequestID string `json:"requestId"`
+		}
+		if json.Unmarshal(body.Item, &item) == nil {
+			v.svc.NoteRequest(id, item.RequestID, received, callerOf(r.Context()).timing())
+		}
 	}
 	switch body.Type {
 	case "compact":
@@ -677,11 +719,27 @@ type wsConn struct {
 	scopeID int64
 }
 
+// key names the client; one without an id is one client per connection.
+func (c *wsConn) key() string {
+	if c.caller.clientKey != "" {
+		return c.caller.clientKey
+	}
+	return fmt.Sprintf("%p", c)
+}
+
 func (c *wsConn) send(v any) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(v2WriteTimeout))
 	return c.conn.WriteJSON(v)
+}
+
+// sendRaw sends a message already encoded, for a caller that needs its size.
+func (c *wsConn) sendRaw(data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(v2WriteTimeout))
+	return c.conn.WriteMessage(websocket.TextMessage, data)
 }
 
 type wsClientMessage struct {
@@ -691,6 +749,8 @@ type wsClientMessage struct {
 	AfterSeq        int64  `json:"after_seq"`
 	AfterScopeSeq   int64  `json:"after_scope_seq"`
 	StoreGeneration string `json:"store_generation"`
+	// conversation.focus
+	Focused *bool `json:"focused"`
 	// host.reply
 	RequestID string          `json:"request_id"`
 	Result    json.RawMessage `json:"result"`
@@ -708,7 +768,10 @@ func (v *V2) serveWS(w http.ResponseWriter, r *http.Request, scopeID int64) {
 	c := &wsConn{conn: ws, subs: map[string]*service.Subscription{}, caller: callerOf(r.Context()), scopeID: scopeID}
 	detach := v.hosts.attach(scopeID, c)
 	ctx, cancel := context.WithCancel(context.Background())
+	disconnected := v.svc.ClientConnected(c.key())
 	defer func() {
+		v.noteSocketClosed(c)
+		disconnected()
 		detach()
 		cancel()
 		c.mu.Lock()
@@ -755,6 +818,12 @@ func (v *V2) serveWS(w http.ResponseWriter, r *http.Request, scopeID int64) {
 			}
 		case "subscribe_scope":
 			v.wsSubscribeScope(ctx, c, scopeID, msg)
+		case "conversation.focus":
+			// A view only asks for a preheat, so a refused one has nothing to
+			// report. Every caller kind may do it: remote viewers preheat here.
+			if msg.Focused != nil {
+				_ = v.svc.SetFocus(ctx, scopeID, msg.ConversationID, c.key(), *msg.Focused, c.caller.timing())
+			}
 		}
 	}
 }
@@ -789,8 +858,12 @@ func (v *V2) wsSubscribe(ctx context.Context, c *wsConn, scopeID int64, msg wsCl
 	c.mu.Unlock()
 	_ = c.send(statusMessage(msg.ConversationID, "subscribed", high, nil))
 	v.setPresence(c, msg.ConversationID, true)
+	v.noteResubscribed(c)
+	subscriberKey := c.key()
 	go func() {
 		live := false
+		traffic := v.newLinkTraffic(c, msg.ConversationID)
+		defer traffic.flush()
 		for {
 			events, err := sub.Next(ctx)
 			if err != nil {
@@ -803,11 +876,17 @@ func (v *V2) wsSubscribe(ctx context.Context, c *wsConn, scopeID int64, msg wsCl
 			for i, e := range events {
 				dtos[i] = eventDTO(e)
 			}
-			if err := c.send(map[string]any{"version": V2Version, "type": "conversation.events", "conversation_id": msg.ConversationID,
-				"from_seq": events[0].Seq, "to_seq": events[len(events)-1].Seq, "events": dtos}); err != nil {
+			data, err := json.Marshal(map[string]any{"version": V2Version, "type": "conversation.events", "conversation_id": msg.ConversationID,
+				"from_seq": events[0].Seq, "to_seq": events[len(events)-1].Seq, "events": dtos})
+			if err == nil {
+				err = c.sendRaw(data)
+			}
+			if err != nil {
 				sub.Close()
 				return
 			}
+			traffic.sent(events, int64(len(data)))
+			v.svc.NoteDelivered(events, subscriberKey, c.caller.timing(), sub.Live())
 			if !live && sub.Live() {
 				live = true
 				_ = c.send(statusMessage(msg.ConversationID, "live", events[len(events)-1].Seq, nil))

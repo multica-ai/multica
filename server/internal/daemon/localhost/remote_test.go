@@ -3,6 +3,7 @@ package localhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,11 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
+	"github.com/multica-ai/multica/server/internal/localconversation/service"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // remoteServer serves v's device-link entry as if every connection came
@@ -267,5 +272,152 @@ func TestV2PresenceKeepsARunAnotherDeviceStartedUntilItEnds(t *testing.T) {
 	ended := readUntil(t, localWS, func(m map[string]any) bool { return m["type"] == "scope.presence" })
 	if devices, _ := ended["devices"].([]any); len(devices) != 0 {
 		t.Fatalf("after the turn = %v", ended)
+	}
+}
+
+func TestV2LocalHostRequestsNeverReachAnotherDevice(t *testing.T) {
+	t.Parallel()
+
+	srv, svc, v := newV2Fixture(t)
+	open := &atomic.Bool{}
+	open.Store(true)
+	remote := remoteServer(t, v, RemotePeer{ID: "peer-b", DeviceName: "MacBook"}, open)
+	scopeID, err := svc.Store().EnsureScope(context.Background(), store.Scope{APIOrigin: "https://api.multica.ai", UserID: "user-1", WorkspaceID: "ws-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer := dialWS(t, remote.URL, remoteHeaders("viewer"))
+	if err := viewer.WriteJSON(map[string]any{"version": V2Version, "type": "subscribe_scope", "after_scope_seq": 0}); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, viewer, func(m map[string]any) bool { return m["status"] == "subscribed" })
+	// The remote viewer acted last, so ordinary host requests would go to it.
+	v.actedOn("conv-1", caller{kind: callerRemote, clientKey: "peer-b/viewer"})
+
+	if _, err := v.hosts.requestLocal(context.Background(), scopeID, "conv-1", "developer_logs.export", map[string]any{}); !errors.Is(err, service.ErrLocalHostUnavailable) {
+		t.Fatalf("no local Desktop = %v", err)
+	}
+
+	local := dialWS(t, srv.URL, v2Headers("user-1"))
+	if err := local.WriteJSON(map[string]any{"version": V2Version, "type": "subscribe_scope", "after_scope_seq": 0}); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, local, func(m map[string]any) bool { return m["status"] == "subscribed" })
+	result := make(chan string, 1)
+	go func() {
+		raw, err := v.hosts.requestLocal(context.Background(), scopeID, "conv-1", "developer_logs.export", map[string]any{})
+		if err != nil {
+			result <- "error: " + err.Error()
+			return
+		}
+		result <- string(raw)
+	}()
+	request := readUntil(t, local, func(m map[string]any) bool { return m["type"] == "host.request" })
+	if err := local.WriteJSON(map[string]any{"version": V2Version, "type": "host.reply", "request_id": request["request_id"], "result": map[string]any{"path": "/tmp/logs.json"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-result; got != `{"path":"/tmp/logs.json"}` {
+		t.Fatalf("result = %s", got)
+	}
+}
+
+func TestV2RecordsWhoAskedForATurn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, desktopUserIDFile), []byte("user-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	timingPath := filepath.Join(dir, "daemon-timing.jsonl")
+	svc, err := service.Open(context.Background(), service.Options{TimingPath: timingPath, Path: filepath.Join(dir, "c.sqlite"), Claude: func(context.Context, sqlitedb.Conversation) (service.ClaudeSession, service.StartClaudeAdapter, error) {
+		return service.ClaudeSession{Fields: map[string]any{"executable": "/bin/claude"}}, func(_ context.Context, h claude.Handler) (service.ClaudeAdapter, error) {
+			return &autoAdapter{handler: h, done: make(chan struct{})}, nil
+		}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	mux := http.NewServeMux()
+	v := NewV2(svc, v2Token, dir)
+	v.Register(mux)
+	local := httptest.NewServer(mux)
+	t.Cleanup(local.Close)
+	open := &atomic.Bool{}
+	open.Store(true)
+	remote := remoteServer(t, v, RemotePeer{ID: "peer-b", DeviceName: "Phone"}, open)
+
+	if status, body := v2Do(t, local, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "conv-1", "provider": "claude"}, v2Headers("user-1")); status != http.StatusCreated {
+		t.Fatalf("create = %d %v", status, body)
+	}
+	send := func(srv *httptest.Server, header http.Header, requestID string) {
+		t.Helper()
+		if status, body := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-1/commands", map[string]any{"type": "send", "request_id": requestID, "text": "hi"}, header); status != http.StatusAccepted {
+			t.Fatalf("send %s = %d %v", requestID, status, body)
+		}
+	}
+	ws := dialWS(t, local.URL, v2Headers("user-1"))
+	if err := ws.WriteJSON(map[string]any{"version": V2Version, "type": "subscribe", "conversation_id": "conv-1", "after_seq": 0, "store_generation": svc.Generation()}); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, ws, func(m map[string]any) bool { return m["status"] == "subscribed" })
+	send(local, v2Headers("user-1"), "from-desktop")
+	eventuallyV2(t, func() bool {
+		data, _ := os.ReadFile(timingPath)
+		return strings.Contains(string(data), `"turn.finished"`) && strings.Contains(string(data), `"ws.first_output_write"`)
+	})
+	phone := remoteHeaders("phone")
+	phone.Set(headerClientKind, "mobile")
+	send(remote, phone, "from-phone")
+	unlabelled := remoteHeaders("other")
+	unlabelled.Set(headerClientKind, "toaster")
+	eventuallyV2(t, func() bool {
+		data, _ := os.ReadFile(timingPath)
+		return strings.Count(string(data), `"turn.finished"`) == 2
+	})
+	send(remote, unlabelled, "from-other")
+	eventuallyV2(t, func() bool {
+		data, _ := os.ReadFile(timingPath)
+		return strings.Count(string(data), `"turn.finished"`) == 3
+	})
+
+	data, err := os.ReadFile(timingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := map[string]map[string]any{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var r map[string]any
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r["stage"] == "daemon.request_received" {
+			received[r["requestId"].(string)] = r
+		}
+	}
+	for id, want := range map[string][3]string{
+		"from-desktop": {"local", "desktop", "loopback"},
+		"from-phone":   {"p2p", "mobile", "unknown"},
+		"from-other":   {"p2p", "unknown", "unknown"},
+	} {
+		r := received[id]
+		if r["origin"] != want[0] || r["clientKind"] != want[1] || r["connection"] != want[2] {
+			t.Errorf("%s = %v, want %v", id, r, want)
+		}
+	}
+}
+
+func TestV2AdmitLabelsForwardedRequestsAsDesktop(t *testing.T) {
+	t.Parallel()
+
+	_, _, v := newV2Fixture(t)
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/local/v2/sessions", nil)
+	r.Header.Set("Authorization", "Bearer "+v2Token)
+	r.Header.Set(headerClientKind, "mobile")
+	if !v.Admit(httptest.NewRecorder(), r) {
+		t.Fatal("not admitted")
+	}
+	if got := r.Header.Get(headerClientKind); got != timing.ClientDesktop {
+		t.Fatalf("client kind = %q", got)
 	}
 }

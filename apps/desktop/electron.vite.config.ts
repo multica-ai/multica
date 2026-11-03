@@ -35,7 +35,7 @@ export default defineConfig({
           // Keep everything the entries share out of index.js: the standalone
           // MCP and the Claude adapter must never load (and so boot) the desktop app.
           advancedChunks: { groups: [
-            { name: "developer-logs", test: /src\/main\/(developer-log-export|developer-runtime-logs|developer-logs-mcp-server|local-timing-log)\.ts$|tutti-agent-gui-host\/src\/local-timing\.ts$/ },
+            { name: "developer-logs", test: /src\/main\/(developer-log-export|developer-log-waterfall|developer-runtime-logs|developer-logs-mcp-server|local-timing-log)\.ts$|tutti-agent-gui-host\/src\/local-timing\.ts$|packages\/core\/local-conversation\/timing\.ts$/ },
             { name: "shared", test: /src\/shared\/|packages\/core\// },
             { name: "claude-host", test: (id: string) => /src\/claude-host\//.test(id) && !/src\/claude-host\/entry\.ts$/.test(id) },
           ] },

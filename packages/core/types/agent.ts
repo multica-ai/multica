@@ -1143,6 +1143,8 @@ export interface RuntimeModel {
   label: string;
   provider?: string;
   default?: boolean;
+  /** Local conversations' name for `default`; absent on older daemons. */
+  isDefault?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
    * populated for claude, codex, and opencode runtimes; omitted (or undefined)

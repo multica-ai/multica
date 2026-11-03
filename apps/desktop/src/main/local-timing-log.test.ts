@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { createLocalTiming, LOCAL_TIMING_PREFIX, type LocalTimingRecord } from "@multica/tutti-agent-gui-host/local-timing";
-import { LocalTimingLog } from "./local-timing-log";
+import { LocalTimingLog, snapshotDaemonTiming } from "./local-timing-log";
 
 describe("local timing log", () => {
   it("persists and rotates validated records without copying unrelated console data", async () => {
@@ -47,6 +47,47 @@ describe("local timing log", () => {
       expect(snapshot.records).toHaveLength(2);
       expect(snapshot.incomplete).toBe(true);
       expect(JSON.stringify(snapshot.records)).not.toMatch(/SECRET|foreign/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("reports dropped writes as incomplete, in this process and to a separate reader", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multica-timing-dropped-"));
+    try {
+      const log = new LocalTimingLog(root);
+      const row = { version: 2, source: "main", conversationId: "c", at: new Date().toISOString(), stage: "turn.persist", event: "mark", elapsedMs: 1 };
+      for (let i = 0; i < 1003; i++) log.write(row);
+      const range = [new Set(["c"]), Date.now() - 60000, Date.now() + 60000] as const;
+      const live = await log.snapshot(...range);
+      expect(live).toMatchObject({ incomplete: true, droppedWrites: 3 });
+      expect(live.records).toHaveLength(1000);
+      expect(live.records.every((record) => record.stage === "turn.persist")).toBe(true);
+      const elsewhere = await new LocalTimingLog(root).snapshot(...range);
+      expect(elsewhere).toMatchObject({ incomplete: true, droppedWrites: 3 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("counts a failed write as dropped", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multica-timing-failed-"));
+    try {
+      const file = join(root, "file"); await writeFile(file, "occupied");
+      const log = new LocalTimingLog(file);
+      log.write({ version: 2, source: "main", conversationId: "c", at: new Date().toISOString(), stage: "turn.persist", event: "mark", elapsedMs: 1 });
+      await log.flush();
+      expect(await log.snapshot(null, 0, Date.now() + 1000)).toMatchObject({ incomplete: true, droppedWrites: 1 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("scopes the daemon's file, keeps device-level records to device-wide reads and reports its drops", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multica-daemon-timing-"));
+    try {
+      const path = join(root, "daemon-timing.jsonl");
+      const at = new Date().toISOString();
+      const line = (extra: object) => JSON.stringify({ version: 2, source: "daemon", at, event: "mark", elapsedMs: 1, stage: "turn.persist", ...extra });
+      const range = [Date.now() - 60000, Date.now() + 60000] as const;
+      expect(await snapshotDaemonTiming(null, null, ...range)).toMatchObject({ status: "unavailable", incomplete: false });
+      expect(await snapshotDaemonTiming(path, null, ...range)).toMatchObject({ status: "missing", incomplete: false });
+      await writeFile(path, [line({ conversationId: "c" }), line({ conversationId: "foreign" }), line({ stage: "link.start" }), line({ stage: "timing.dropped", count: 4 })].join("\n") + "\n");
+      const scoped = await snapshotDaemonTiming(path, new Set(["c"]), ...range);
+      expect(scoped).toMatchObject({ status: "available", incomplete: true, droppedWrites: 4 });
+      expect(scoped.records.map((record) => record.conversationId)).toEqual(["c"]);
+      expect((await snapshotDaemonTiming(path, null, ...range)).records.map((record) => record.stage)).toEqual(["turn.persist", "turn.persist", "link.start"]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

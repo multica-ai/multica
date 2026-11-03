@@ -1,4 +1,4 @@
-import { createLocalTiming, createLocalPresentationTiming } from "../local-timing";
+import { createLocalPresentationTiming, createLocalSendTiming, isLocalTimingModelOutput } from "../local-timing";
 import {
   createAgentActivitySnapshotProjector,
   createAgentSessionEngine,
@@ -56,6 +56,7 @@ export function unsupported(capability: string): never {
 export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: AgentGuiInitSnapshot) {
   const workspaceId = init.workspaceId;
   const presentationTiming = createLocalPresentationTiming();
+  const sendTiming = createLocalSendTiming();
   const ledger = new RuntimeLedger();
   const modelPreferences = new ModelPreferences();
   const modelListeners = new Set<() => void>();
@@ -305,12 +306,16 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     }
     return agent;
   }
+  /** Claude's default used to be a catalog row. A saved one now means what no selection means, so it reaches the catalog's default model. */
+  function followingClaudeDefault(agentId: string, model: string | null) {
+    return init.local && model === "default" && executionTargets(workspace).find((entry) => entry.id === agentId)?.provider === "claude";
+  }
   function selectedModel(agentId: string, sessionId?: string | null) {
     const session = sessionId ? details.get(sessionId)?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId)) : undefined;
     if (session && session.agent_id !== agentId) return null;
     const serverId = sessionId ? ledger.serverId(sessionId) : null;
-    if (modelPreferences.has(agentId, serverId)) return modelPreferences.get(agentId, serverId);
-    return sessionId ? details.get(sessionId)?.model ?? null : null;
+    const model = modelPreferences.has(agentId, serverId) ? modelPreferences.get(agentId, serverId) : sessionId ? details.get(sessionId)?.model ?? null : null;
+    return followingClaudeDefault(agentId, model) ? null : model;
   }
   async function loadReasoningCatalog(agentId: string, options?: { force?: boolean; signal?: AbortSignal }) {
     const catalog = await client.request("models.list", { agentId, ...(options?.force ? { force: true } : {}) }, { signal: options?.signal });
@@ -323,7 +328,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     if (detail && detail.session.agent_id !== agentId) return null;
     const model = selectedModel(agentId, sessionId);
     const selection = reasoningPreferences.get(agentId, sessionId ? ledger.serverId(sessionId) : null);
-    const effort = selection ? (selection.model === model ? selection.effort : null)
+    const effort = selection ? ((followingClaudeDefault(agentId, selection.model) ? null : selection.model) === model ? selection.effort : null)
       : model === (detail?.model ?? null) ? detail?.reasoningEffort ?? null : null;
     const catalog = reasoningCatalogs.get(agentId);
     return effort && (!catalog || localReasoningLevels(catalog.models, model ?? descriptor(agentId).model).some((level) => level.value === effort)) ? effort : null;
@@ -548,6 +553,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       return;
     }
     if (message.type !== "conversation.events") return;
+    for (const event of message.events) {
+      if (event.turn_id && isLocalTimingModelOutput(event.type, event.payload.kind)) presentationTiming.received(message.conversation_id, event.turn_id);
+    }
     if (conversation.apply(message.events) === "gap") { reloadLocal(guiId); return; }
     // Coalesce a burst of event batches into one projection.
     if (v2Applies.has(guiId)) return;
@@ -758,9 +766,11 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
 
   const desktopAdmissions = new WeakMap<Parameters<typeof baseEngine.submitPrompt>[0], AgentGuiRpcMethods["queue.enqueue"]["params"]>();
   async function enqueueDesktop(input: Parameters<typeof baseEngine.submitPrompt>[0], paused = false) {
+    const startedAt = Date.now();
     const previous = desktopAdmissions.get(input);
     if (previous) {
-      const result = await client.request("queue.enqueue", previous);
+      const retry = () => client.request("queue.enqueue", previous);
+      const result = await (init.local ? sendTiming.begin(previous.sessionId, input.clientSubmitId, startedAt).measure("client.request", retry) : retry());
       desktopQueue.receive(input.agentSessionId, result);
       return result;
     }
@@ -774,7 +784,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       [input.agentSessionId]: { agentSessionId: input.agentSessionId, workspaceId, prompts: [{ ...input, id: input.clientSubmitId, createdAtUnixMs: Date.now() }],
         deliveryBarrierTurnId: null, failedPromptId: null, failureMessage: null, inFlight: null, sendNextPromptId: null, suspendReason: null, uncertainDelivery: null },
     } }, [...attachments.values()])[0]!.prompts[0]!;
-    const timing = init.local ? createLocalTiming({ source: "gui", conversationId: sessionId, requestId: input.clientSubmitId }) : undefined;
+    // Restoring a saved queue is not the user sending anything.
+    const timing = init.local && !paused ? sendTiming.begin(sessionId, input.clientSubmitId, startedAt) : undefined;
     const reasoningEffort = await reasoningForSend(session.agent_id, input.agentSessionId);
     const params: AgentGuiRpcMethods["queue.enqueue"]["params"] = { sessionId, paused, queued: true, item: { ...encoded, requestId: input.clientSubmitId, display,
       ...(selectedModel(session.agent_id, input.agentSessionId) ? { model: selectedModel(session.agent_id, input.agentSessionId)! } : {}),
@@ -784,12 +795,13 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     // explicit retry of a failed or lost acknowledgement.
     desktopAdmissions.set(input, params);
     const enqueue = () => client.request("queue.enqueue", params);
-    const result = await (timing ? timing.measure("gui.submit", enqueue) : enqueue());
+    const result = await (timing ? timing.measure("client.request", enqueue) : enqueue());
     desktopQueue.receive(input.agentSessionId, result);
     return result;
   }
 
   async function send(input: AgentActivitySendInput, signal?: AbortSignal): Promise<unknown> {
+    const startedAt = Date.now();
     scope(input.workspaceId);
     await modelHydration;
     await modelWrites.catch(() => {});
@@ -818,7 +830,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "pending" });
         await persist();
         try {
-          const timing = init.local ? createLocalTiming({ source: "gui", conversationId: session.id, requestId: input.clientSubmitId }) : undefined;
+          const timing = init.local ? sendTiming.begin(session.id, input.clientSubmitId, startedAt) : undefined;
           const reasoningEffort = init.local && !recipients.length ? await reasoningForSend(session.agent_id, input.agentSessionId) : null;
           const submit = () => client.request("session.send", {
             sessionId: session.id, ...encoded, requestId: input.clientSubmitId,
@@ -826,7 +838,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
             ...(!recipients.length && selectedModel(session.agent_id, input.agentSessionId) ? { model: selectedModel(session.agent_id, input.agentSessionId)! } : {}),
             ...(init.local && !recipients.length ? { reasoningEffort, permissionMode: selectedPermission(session.agent_id, input.agentSessionId) } : {}),
           }, { signal });
-          const response = await (timing ? timing.measure("gui.submit", submit) : submit());
+          const response = await (timing ? timing.measure("client.request", submit) : submit());
           ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "accepted", response });
           await persist();
         } catch (error) {

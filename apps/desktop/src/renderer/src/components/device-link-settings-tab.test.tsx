@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import translations from "../../../../../../packages/views/locales/en/settings.json";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 
-const mocks = vi.hoisted(() => ({ deviceLink: vi.fn(), setDeviceLink: vi.fn(), servicePreview: vi.fn(async () => ({ available: true, enabled: false, ports: [] })), setServicePreview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ deviceLink: vi.fn(), setDeviceLink: vi.fn(), servicePreview: vi.fn(async () => ({ available: true, enabled: false, ports: [] })), setServicePreview: vi.fn(), conversationPreheat: vi.fn(), setConversationPreheat: vi.fn() }));
 vi.mock("@multica/views/i18n", () => ({ useT: () => ({ t: (selector: (resources: typeof translations) => string) => selector(translations) }) }));
 vi.mock("../platform/local-v2-transport", () => ({ localV2Transport: () => mocks }));
 import { DeviceLinkSettingsTab, deviceLinkSettingKey } from "./device-link-settings-tab";
@@ -16,6 +16,26 @@ describe("Device link settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.deviceLink.mockResolvedValue({ available: true, enabled: false });
+    mocks.conversationPreheat.mockResolvedValue({ old_conversations: true });
+  });
+
+  it("turns off early starts for opened conversations on this device", async () => {
+    const preheat = translations.desktop.conversation_preheat;
+    mocks.setConversationPreheat.mockResolvedValueOnce({ old_conversations: false });
+    renderTab();
+    const toggle = await screen.findByRole("switch", { name: preheat.label });
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.setConversationPreheat).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(toggle).not.toBeChecked());
+  });
+
+  it("stays unavailable when the daemon does not have the setting", async () => {
+    mocks.conversationPreheat.mockRejectedValueOnce(new Error("http_404"));
+    renderTab();
+    const toggle = await screen.findByRole("switch", { name: translations.desktop.conversation_preheat.label });
+    await waitFor(() => expect(mocks.conversationPreheat).toHaveBeenCalled());
+    expect(toggle).toHaveAttribute("data-disabled");
   });
 
   it("asks before letting other devices in and stays off until the daemon accepts", async () => {

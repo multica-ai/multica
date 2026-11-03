@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { localV2SummarySchema, type LocalV2Transport } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_FOCUS_STABLE_MS } from "@multica/core/local-conversation/focus";
 import { LocalV2ScopeClient, localV2Error } from "./local-v2";
 
 const scope = { userId: "u", workspaceId: "w" };
@@ -36,6 +37,36 @@ describe("LocalV2ScopeClient", () => {
     client.receiveSummary(summary("a", 1, "stale"));
     expect(client.summary("a")?.title).toBe("renamed");
     expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells a daemon that supports it which conversation is in focus, and again after a reconnect", async () => {
+    vi.useFakeTimers();
+    try {
+      const { t, sent } = transport();
+      t.capabilities = vi.fn(async () => ["conversation-focus-v1"]);
+      const client = new LocalV2ScopeClient(t, scope);
+      const release = client.focus("c1");
+      await vi.advanceTimersByTimeAsync(LOCAL_V2_FOCUS_STABLE_MS);
+      expect(sent).toEqual([{ version: 2, type: "conversation.focus", conversation_id: "c1", focused: true }]);
+      client.connection(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent).toHaveLength(2);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent[2]).toEqual({ version: 2, type: "conversation.focus", conversation_id: "c1", focused: false });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not send focus to a daemon without the capability", async () => {
+    vi.useFakeTimers();
+    try {
+      const { t, sent } = transport();
+      t.capabilities = vi.fn(async () => ["device-link"]);
+      const client = new LocalV2ScopeClient(t, scope);
+      client.focus("c1");
+      await vi.advanceTimersByTimeAsync(LOCAL_V2_FOCUS_STABLE_MS);
+      expect(sent).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("shares one subscription per conversation and reloads late joiners", async () => {

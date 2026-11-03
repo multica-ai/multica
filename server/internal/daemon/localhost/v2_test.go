@@ -12,8 +12,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -349,6 +351,12 @@ func TestV2UpdateSettingsCommand(t *testing.T) {
 	if conv.Model.String != "claude-opus-5-5" || conv.PermissionMode != "full-access" {
 		t.Fatalf("stored = %+v", conv)
 	}
+	if status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-1/commands", map[string]any{"type": "update_settings", "model": "default"}, h); status != http.StatusOK {
+		t.Fatal("could not store the old default row")
+	}
+	if _, snap := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/conv-1/snapshot", nil, h); snap["settings"].(map[string]any)["model"] != nil {
+		t.Fatalf("the old default row must read as following the default: %v", snap["settings"])
+	}
 	if status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-1/commands", map[string]any{"type": "update_settings", "model": nil}, h); status != http.StatusOK {
 		t.Fatalf("reset model = %d", status)
 	}
@@ -606,5 +614,93 @@ func eventuallyV2(t *testing.T, ok func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// newFocusV2Fixture counts the adapter processes a conversation's focus starts.
+func newFocusV2Fixture(t *testing.T) (*httptest.Server, *V2, *service.Service, int64, *atomic.Int32) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, desktopUserIDFile), []byte("user-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	starts := &atomic.Int32{}
+	svc, err := service.Open(context.Background(), service.Options{Path: filepath.Join(dir, "c.sqlite"), Claude: func(context.Context, sqlitedb.Conversation) (service.ClaudeSession, service.StartClaudeAdapter, error) {
+		return service.ClaudeSession{Fields: map[string]any{"executable": "/bin/claude"}}, func(_ context.Context, h claude.Handler) (service.ClaudeAdapter, error) {
+			starts.Add(1)
+			return &autoAdapter{handler: h, done: make(chan struct{})}, nil
+		}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	mux := http.NewServeMux()
+	v := NewV2(svc, v2Token, dir)
+	v.Register(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	scopeID, err := svc.Store().EnsureScope(context.Background(), store.Scope{APIOrigin: "https://api.multica.ai", UserID: "user-1", WorkspaceID: "ws-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Store().CreateConversation(context.Background(), store.NewConversation{ID: "old", ScopeID: scopeID, Provider: "claude", ProviderSessionID: "native-1", Cwd: dir, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	return srv, v, svc, scopeID, starts
+}
+
+func TestV2HelloAdvertisesConversationFocus(t *testing.T) {
+	t.Parallel()
+	srv, _ := newV2Server(t)
+	status, body := v2Do(t, srv, http.MethodGet, "/local/v2/hello", nil, v2Headers("user-1"))
+	capabilities, _ := body["capabilities"].([]any)
+	if status != http.StatusOK || !slices.Contains(capabilities, any(ConversationFocusCapability)) {
+		t.Fatalf("hello = %d, %v", status, body)
+	}
+}
+
+func TestV2FocusPreheatsWithoutActingOnTheConversation(t *testing.T) {
+	t.Parallel()
+	srv, v, _, _, starts := newFocusV2Fixture(t)
+	h := v2Headers("user-1")
+	h.Set(headerClientID, "client-1")
+	conn := dialWS(t, srv.URL, h)
+	focus := func(id string, focused bool) {
+		t.Helper()
+		if err := conn.WriteJSON(map[string]any{"version": V2Version, "type": "conversation.focus", "conversation_id": id, "focused": focused}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	focus("missing", true) // Refused without a reply or a closed connection.
+	focus("old", true)
+	deadline := time.Now().Add(3 * time.Second)
+	for starts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("adapter starts = %d", starts.Load())
+	}
+	if origin := v.origin("old"); origin != "" {
+		t.Fatalf("focus counted as acting on the conversation: %q", origin)
+	}
+}
+
+func TestV2RemoteFocusPreheatsOnThisDevice(t *testing.T) {
+	t.Parallel()
+	_, v, _, _, starts := newFocusV2Fixture(t)
+	open := &atomic.Bool{}
+	open.Store(true)
+	remote := remoteServer(t, v, RemotePeer{ID: "peer-1", DeviceName: "Phone"}, open)
+	conn := dialWS(t, remote.URL, remoteHeaders("client-1"))
+	if err := conn.WriteJSON(map[string]any{"version": V2Version, "type": "conversation.focus", "conversation_id": "old", "focused": true}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for starts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("adapter starts = %d", starts.Load())
 	}
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/p2p"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/localconversation/service"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -445,8 +446,16 @@ type Daemon struct {
 	localV2 *localhost.V2
 	// deviceLink shares local conversations with the account's other
 	// devices; nil without local conversations.
-	deviceLink    *deviceLink
-	conversations *service.Service
+	deviceLink *deviceLink
+	// deviceTiming holds connection records and reportsTiming other devices'
+	// reports, apart from turn records.
+	deviceTiming     *timing.Log
+	deviceTimingOnce sync.Once
+	reportsTiming    *timing.Log
+	conversations    *service.Service
+	// conversationPreheat is this device's preheat choice; nil without local
+	// conversations.
+	conversationPreheat *conversationPreheat
 
 	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
 	// (e.g. on Windows) is logged once rather than on every repo refresh.
@@ -2151,9 +2160,11 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 				if err := d.conversations.Close(stopCtx); err != nil {
 					d.logger.Warn("local conversation v2 service did not stop cleanly", "error", err)
 				}
+				d.reportsTiming.Close()
 			}()
 		}
 	}
+	defer func() { d.openDeviceTiming().Close() }()
 
 	// Bind and serve the health port before the (potentially slow) preflight,
 	// so `daemon start` and the desktop see a live "starting" daemon instead

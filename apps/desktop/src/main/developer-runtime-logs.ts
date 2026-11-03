@@ -30,6 +30,13 @@ export interface DaemonLogSource extends Omit<RuntimeLogSource, "records"> {
   text: string;
 }
 
+const PEER_ID = /\b(?:12D3Koo[1-9A-HJ-NP-Za-km-z]{20,}|Qm[1-9A-HJ-NP-Za-km-z]{44})\b/g;
+
+/** Peer IDs stay readable until a bundle exists, which owns the key that makes them comparable within it. */
+export function hashPeerIds(value: string, hash: (id: string) => string): string {
+  return value.replace(PEER_ID, (id) => `peer:${hash(id)}`);
+}
+
 /** Best-effort scrubbing, not a guarantee that arbitrary application text is private. */
 export function redactDiagnosticText(value: string): string {
   return stripVTControlCharacters(value)
@@ -39,6 +46,8 @@ export function redactDiagnosticText(value: string): string {
     .replace(/\b(?:Bearer|Basic)\s+[^\s"',;]+/gi, "[REDACTED AUTH]")
     .replace(/\b(?:mul_[\w-]+|(?:sk-|gh[pousr]_|github_pat_|glpat-|xox[baprs]-|xapp-)[\w-]{10,}|AKIA[A-Z0-9]{16}|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g, "[REDACTED TOKEN]")
     .replace(/(\b[a-z][a-z\d+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@")
+    // libp2p multiaddrs, in daemon logs and in the raw errors it quotes.
+    .replace(/(?<![\w./-])\/(?:ip4|ip6|dns|dns4|dns6|dnsaddr)\/[^\s"',;()[\]]+/g, "[REDACTED ADDR]")
     // Query and fragment values can carry signed URLs, login codes or search text.
     .replace(/([?&#][\w.%~-]+=)[^\s&#"'<>)]*/g, "$1[REDACTED]")
     .replace(/(\b(?:set-cookie|cookie)\s*:\s*)[^\r\n]*/gi, "$1[REDACTED]")

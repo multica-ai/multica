@@ -98,3 +98,17 @@ func TestSandboxDoesNotGrantUserFilesOrNetworking(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+func TestManagerAliveFollowsTheSession(t *testing.T) {
+	t.Parallel()
+
+	exited := make(chan struct{})
+	close(exited)
+	m := &Manager{sessions: map[string]*process{"1/conv": {done: make(chan struct{})}, "1/exited": {done: exited}}}
+	if !m.Alive("1/conv") {
+		t.Fatal("a running session reads as gone")
+	}
+	if m.Alive("1/other") || m.Alive("1/exited") {
+		t.Fatal("a session that is not running reads as alive")
+	}
+}

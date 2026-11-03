@@ -113,5 +113,8 @@
   "search_files": "搜索文件",
   "open_source": "回到原文",
   "file_from": "来自 {{device}}",
-  "reasoning_choose_model": "先选择具体模型，再调整该模型支持的思考强度。"
+  "reasoning_choose_model": "先选择具体模型，再调整该模型支持的思考强度。",
+  "subscription_rejected": "这个对话的实时更新已中断。",
+  "thinking": "思考中…",
+  "thought": "思考过程"
 }

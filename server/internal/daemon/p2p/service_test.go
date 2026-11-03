@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -449,5 +450,54 @@ func TestUnknownPeerRefreshIsDeferredNotDropped(t *testing.T) {
 	})
 	if !ok {
 		t.Fatal("a never admitted b; its refresh request was dropped")
+	}
+}
+
+// A waiter woken by OnPeersRead must find the devices it asked about, so a read
+// reports only after its list is in place.
+func TestOnPeersReadRunsOnceTheListIsInstalled(t *testing.T) {
+	t.Parallel()
+
+	key, _ := newKey(t)
+	_, other := newKey(t)
+	var ready atomic.Bool
+	var svc atomic.Pointer[Service]
+	failed := make(chan struct{}, 1)
+	installed := make(chan bool, 1)
+	s, err := Start(context.Background(), Config{Key: key, ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"}, RefreshInterval: time.Hour, Logger: testLogger,
+		Fetch: func(context.Context) ([]Peer, error) {
+			if !ready.Load() {
+				return nil, errors.New("registry down")
+			}
+			return []Peer{{ID: other, DeviceName: "Mac"}}, nil
+		},
+		OnPeersRead: func(err error) {
+			if err != nil {
+				select {
+				case failed <- struct{}{}:
+				default:
+				}
+				return
+			}
+			_, known := svc.Load().Peer(other)
+			installed <- known
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	svc.Store(s)
+	select {
+	case <-failed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a failed read was not reported")
+	}
+	ready.Store(true)
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !<-installed {
+		t.Fatal("reported before the list was installed")
 	}
 }

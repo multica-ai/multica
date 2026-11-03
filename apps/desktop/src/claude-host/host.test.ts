@@ -32,6 +32,20 @@ function fakeQuery() {
   return { query, emit: (message: Frame) => { pending.push(message); wake?.(); }, end: () => { closed = true; wake?.(); } };
 }
 
+/** A parked process whose claim outcome the test decides. */
+function fakeSpare(query: unknown) {
+  let settleClaim!: { resolve: (value: { cwd: string; sessionId: string; sdkMcpSettled: boolean }) => void; reject: (error: Error) => void };
+  const claimed = new Promise<{ cwd: string; sessionId: string; sdkMcpSettled: boolean }>((resolve, reject) => { settleClaim = { resolve, reject }; });
+  void claimed.catch(() => {});
+  let exitNow = () => {};
+  const exited = new Promise<void>((resolve) => { exitNow = resolve; });
+  return {
+    claim: vi.fn((_params: { prompt: AsyncIterable<any>; options: Record<string, unknown> }) => query),
+    claimed, exited, close: vi.fn(), accept: (sessionId = "spare-session") => settleClaim.resolve({ cwd: "/repo", sessionId, sdkMcpSettled: true }),
+    refuse: (message: string) => settleClaim.reject(new Error(message)), exit: () => exitNow(),
+  };
+}
+
 function harness() {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -51,6 +65,8 @@ function harness() {
     getSessionMessages: vi.fn(async () => [{ uuid: "u1", type: "user" }]),
     getSessionInfo: vi.fn(async (id: string) => id === "src" ? { sessionId: "src", cwd: "/repo" } : undefined),
   };
+  const spare = fakeSpare(fake.query);
+  Object.assign(sdk, { prewarm: vi.fn(async () => spare) });
   const exit = vi.fn();
   runClaudeHost({ input, output, sdk: async () => sdk as unknown as ClaudeSdk, exit });
   const send = (frame: Frame) => input.write(`${JSON.stringify({ version: 1, ...frame })}\n`);
@@ -58,7 +74,7 @@ function harness() {
     await vi.waitFor(() => { if (!frames.some(predicate)) throw new Error("frame not yet written"); });
     return frames.find(predicate)!;
   };
-  return { input, frames, fake, sdk, prompts, exit, send, waitFor };
+  return { input, frames, fake, sdk: sdk as typeof sdk & { prewarm: ReturnType<typeof vi.fn> }, spare, prompts, exit, send, waitFor };
 }
 
 const start = { id: "r1", type: "start", executable: "/bin/claude", cwd: "/repo" };
@@ -70,18 +86,121 @@ describe("Claude host", () => {
     expect(ready).toMatchObject({ version: 1, sdk_version: expect.any(String) });
   });
 
+  it("announces prewarm and claim, so a daemon can tell this adapter supports spares", async () => {
+    const h = harness();
+    const ready = await h.waitFor((f) => f.type === "ready");
+    expect(ready.capabilities).toEqual(expect.arrayContaining(["prewarm", "claim"]));
+  });
+
+  it("prewarms with the options a session cannot change later and no MCP", async () => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude", allowed_tools: ["mcp__multica__*"], settings: { enabledPlugins: {} }, env: { A: "1" } });
+    const result = await h.waitFor((f) => f.id === "p");
+    expect(result.data).toEqual({ timing: { sdk_load_ms: expect.any(Number), prewarm_ms: expect.any(Number) } });
+    expect(h.sdk.prewarm.mock.calls[0]![0].options).toEqual({
+      pathToClaudeCodeExecutable: "/bin/claude", includePartialMessages: true, settingSources: ["user", "project", "local"], plugins: [],
+      strictMcpConfig: true, mcpServers: {}, allowDangerouslySkipPermissions: true, systemPrompt: { type: "preset", preset: "claude_code", snapshot: false },
+      allowedTools: ["mcp__multica__*"], settings: { enabledPlugins: {} }, env: { A: "1" },
+    });
+    expect(h.sdk.query).not.toHaveBeenCalled();
+  });
+
+  it.each([["unknown option --await-claim", "prewarm_unsupported"], ["spawn failed", "prewarm_failed"]])("reports a rejected prewarm (%s) as %s", async (message, code) => {
+    const h = harness();
+    h.sdk.prewarm.mockRejectedValueOnce(new Error(message));
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    expect(await h.waitFor((f) => f.id === "p")).toMatchObject({ type: "error", code });
+  });
+
+  it("tells the daemon when a parked process exits", async () => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    await h.waitFor((f) => f.id === "p");
+    h.spare.exit();
+    expect(await h.waitFor((f) => f.type === "error" && !f.id)).toMatchObject({ code: "spare_exited" });
+  });
+
+  it("claims with the session's options and answers only once claimed", async () => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    await h.waitFor((f) => f.id === "p");
+    h.send({ id: "c", type: "claim", cwd: "/repo", model: "claude-opus-5-5", permission_mode: "full-access", append_system_prompt: "ctx", settings: { effortLevel: "high" } });
+    await vi.waitFor(() => expect(h.spare.claim).toHaveBeenCalled());
+    expect(h.spare.claim.mock.calls[0]![0].options).toEqual({ cwd: "/repo", model: "claude-opus-5-5", permissionMode: "bypassPermissions", appendSystemPrompt: "ctx", settings: { effortLevel: "high" } });
+    expect(h.frames.some((f) => f.id === "c")).toBe(false);
+    h.spare.accept();
+    expect((await h.waitFor((f) => f.id === "c")).data).toEqual({ session_id: "spare-session", timing: { claim_ms: expect.any(Number) } });
+    h.send({ id: "m", type: "set_mcp_servers", servers: { multica: { type: "http" } } });
+    await h.waitFor((f) => f.id === "m");
+    expect(h.fake.query.setMcpServers).toHaveBeenCalled();
+    h.send({ id: "s", type: "send", request_id: "req-1", content: [{ type: "text", text: "hi" }] });
+    await h.waitFor((f) => f.id === "s" && f.type === "result");
+    const prompt = await h.spare.claim.mock.calls[0]![0].prompt[Symbol.asyncIterator]().next();
+    expect(prompt.value).toMatchObject({ uuid: "req-1", session_id: "spare-session" });
+  });
+
+  it("leaves the default permission mode out of a claim, so a project's own default refuses it as on a cold start", async () => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    await h.waitFor((f) => f.id === "p");
+    h.send({ id: "c", type: "claim", cwd: "/repo", permission_mode: "default" });
+    await vi.waitFor(() => expect(h.spare.claim).toHaveBeenCalled());
+    expect(h.spare.claim.mock.calls[0]![0].options).toEqual({ cwd: "/repo" });
+  });
+
+  it.each(["project_settings_not_claimable", "option_not_applied: model", "settings_not_applied: x"])("turns refusal %s into a typed error with no end or error frames of its own", async (reason) => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    await h.waitFor((f) => f.id === "p");
+    h.send({ id: "c", type: "claim", cwd: "/repo" });
+    await vi.waitFor(() => expect(h.spare.claim).toHaveBeenCalled());
+    h.fake.end(); // A refused Query ends before claimed rejects.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    h.spare.refuse(reason);
+    expect(await h.waitFor((f) => f.id === "c")).toMatchObject({ type: "error", code: "not_claimed", message: reason });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(h.frames.filter((f) => f.type === "error" && !f.id)).toEqual([]);
+    expect(h.spare.close).toHaveBeenCalled();
+    h.send({ id: "s", type: "send", request_id: "req", content: [] });
+    expect(await h.waitFor((f) => f.id === "s")).toMatchObject({ code: "not_started", dispatch: "not_dispatched" });
+  });
+
+  it("refuses a claim with nothing parked", async () => {
+    const h = harness();
+    h.send({ id: "c", type: "claim", cwd: "/repo" });
+    expect(await h.waitFor((f) => f.id === "c")).toMatchObject({ type: "error", code: "not_claimed" });
+  });
+
+  it("stops a parked process on close", async () => {
+    const h = harness();
+    h.send({ id: "p", type: "prewarm", executable: "/bin/claude" });
+    await h.waitFor((f) => f.id === "p");
+    h.input.end();
+    await vi.waitFor(() => expect(h.exit).toHaveBeenCalledWith(0));
+    expect(h.spare.close).toHaveBeenCalled();
+  });
+
   it("starts one Query with the conversation's options and returns the model catalog", async () => {
     const h = harness();
     h.send({ ...start, resume: "native-1", model: "claude-opus-5-5", reasoning_effort: "high", permission_mode: "full-access",
       append_system_prompt: "ctx", mcp_servers: { multica: { type: "http", url: "http://127.0.0.1:1/mcp/t" } }, allowed_tools: ["mcp__multica__*"] });
     const result = await h.waitFor((f) => f.type === "result" && f.id === "r1");
-    expect(result.data).toEqual({ models: [{ value: "claude-opus-5-5" }] });
+    expect(result.data).toEqual({ models: [{ value: "claude-opus-5-5" }], timing: { sdk_load_ms: expect.any(Number), query_init_ms: expect.any(Number) } });
     const options = h.sdk.query.mock.calls[0]![0].options;
     expect(options).toMatchObject({
       pathToClaudeCodeExecutable: "/bin/claude", cwd: "/repo", resume: "native-1", model: "claude-opus-5-5", effort: "high",
       permissionMode: "bypassPermissions", strictMcpConfig: true, includePartialMessages: true,
       systemPrompt: { type: "preset", preset: "claude_code", append: "ctx", snapshot: false }, allowedTools: ["mcp__multica__*"],
     });
+  });
+
+  it.each([undefined, "default", "auto", "full-access"])("always allows bypass while permission_mode %s decides the mode", async (mode) => {
+    const h = harness();
+    h.send({ ...start, ...(mode ? { permission_mode: mode } : {}) });
+    await h.waitFor((f) => f.type === "result" && f.id === "r1");
+    const options = h.sdk.query.mock.calls[0]![0].options;
+    expect(options.allowDangerouslySkipPermissions).toBe(true);
+    expect(options.permissionMode).toBe(mode === "full-access" ? "bypassPermissions" : mode === "auto" ? "auto" : undefined);
   });
 
   it("forwards SDK messages unchanged and queues user turns on the same Query", async () => {

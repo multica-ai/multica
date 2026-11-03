@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { localMessageDisplayContent, sideWorkspaceSyncSchema } from "./protocol";
+import { localMessageDisplayContent, localReasoningLevels, sideWorkspaceSyncSchema } from "./protocol";
 
 describe("local image message display", () => {
   it("hides standalone image markers while retaining authored paragraphs and the stored message", () => {
@@ -35,5 +35,13 @@ describe("Side workspace snapshot boundary", () => {
     expect(() => sideWorkspaceSyncSchema.parse({ ...snapshot, revision: -1 })).toThrow();
     expect(() => sideWorkspaceSyncSchema.parse({ ...snapshot, tabs: Array.from({ length: 21 }, (_, id) => ({ ...snapshot.tabs[0], id: `web:${id}` })) })).toThrow();
     expect(() => sideWorkspaceSyncSchema.parse({ ...snapshot, tabs: [{ id: "file:one", kind: "file", path: "/tmp/test" }] })).toThrow();
+  });
+});
+
+describe("following the default model", () => {
+  const levels = [{ value: "high", label: "High" }];
+  it("reads the row a daemon marks as the default, and tolerates a daemon that marks none", () => {
+    expect(localReasoningLevels([{ id: "a", label: "A" }, { id: "b", label: "B", isDefault: true, thinking: { supported_levels: levels } }], null)).toEqual(levels);
+    expect(localReasoningLevels([{ id: "a", label: "A", thinking: { supported_levels: levels } }], null)).toEqual([]);
   });
 });

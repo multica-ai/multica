@@ -54,7 +54,11 @@ func TestDeveloperLogsExportThroughDesktopOnce(t *testing.T) {
 	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
 	f.create(t, "conv-1", "claude")
 	var queries []string
-	f.svc.SetHost(func(_ context.Context, _ int64, _ string, kind string, payload any) (json.RawMessage, error) {
+	f.svc.SetHost(func(context.Context, int64, string, string, any) (json.RawMessage, error) {
+		t.Fatal("developer logs must not go to a host that may be another device")
+		return nil, nil
+	})
+	f.svc.SetLocalHost(func(_ context.Context, _ int64, _ string, kind string, payload any) (json.RawMessage, error) {
 		data, _ := json.Marshal(payload)
 		queries = append(queries, kind+" "+string(data))
 		return json.RawMessage(`{"path":"/tmp/logs.json"}`), nil

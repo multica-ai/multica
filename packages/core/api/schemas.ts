@@ -3301,6 +3301,7 @@ const RuntimeModelSchema = z.object({
   label: z.string().default(""),
   provider: z.string().optional(),
   default: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
   thinking: RuntimeModelThinkingSchema.nullable().optional()
     .transform((v) => v ?? undefined),
   service_tiers: z.array(RuntimeModelServiceTierSchema).optional(),

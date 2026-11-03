@@ -19,12 +19,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/localconversation/settings"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 	"github.com/multica-ai/multica/server/internal/localconversation/workspace"
 )
 
 var (
 	// ErrHostUnavailable means no Desktop of the scope is connected.
 	ErrHostUnavailable = errors.New("local conversation: Multica Desktop is not connected")
+	// ErrLocalHostUnavailable means no Desktop runs on this device; requests
+	// about the device itself cannot go to another device's Desktop.
+	ErrLocalHostUnavailable = errors.New("local conversation: open Multica Desktop on the device running this conversation; its diagnostics are not available from another device")
 	// ErrClosing rejects new work while the service shuts down.
 	ErrClosing = errors.New("local conversation: the service is shutting down")
 	// ErrDraining rejects new turns while the daemon waits to restart.
@@ -63,6 +67,14 @@ type runner interface {
 	Running() bool
 	// StopTasks stops the provider's background tasks with these ids.
 	StopTasks(ctx context.Context, taskIDs []string) error
+	// Prepare loads a conversation that already has a native session ahead of
+	// its next send; it takes no turn slot and sends no prompt.
+	Prepare(ctx context.Context, trace *timing.Trace) error
+	// IdleProcess reports the runner's process when it is doing nothing.
+	IdleProcess() (idleProcess, bool)
+	// Evict stops an idle process and reports whether it did; the next send
+	// starts a new one.
+	Evict(ctx context.Context) bool
 	Close(ctx context.Context) error
 }
 
@@ -80,6 +92,18 @@ type Options struct {
 	Catalog *catalog.Catalog
 	Logger  *slog.Logger
 	Now     func() time.Time
+	// TimingPath is the daemon's timing file; empty records no timing.
+	TimingPath string
+	// CodexSpare and ClaudeSpare, when set, keep a spare process of the provider
+	// ready for new conversations.
+	CodexSpare  *CodexSpareLauncher
+	ClaudeSpare *ClaudeSpareLauncher
+	// PreheatOldConversations reports whether opening a conversation with a
+	// native session may start its process, which runs its SessionStart hooks.
+	// nil allows it.
+	PreheatOldConversations func() bool
+	// maintenanceEvery replaces maintenanceInterval in tests.
+	maintenanceEvery time.Duration
 }
 
 // Service is the Go-owned local conversation service: one store, one
@@ -108,13 +132,21 @@ type Service struct {
 	titles    titleRuns
 	delivery  deliveries
 	host      Host
+	localHost Host
 	preview   PreviewServices
 	// turnEnd learns that a conversation's turn ended; see OnTurnEnd.
 	turnEnd func(conversationID string)
 	side    sideWorkspaces
 	imports imports
+	traces  *turnTraces
+	focus   *focusTracker
+	spares  *sparePool
 	// closed is closed when Close begins.
 	closed chan struct{}
+	// maintenanceKick asks for an early maintenance pass.
+	maintenanceKick chan struct{}
+	// background is the goroutines Close waits for before closing the store.
+	background sync.WaitGroup
 }
 
 // Open opens the store, closes turns a previous daemon left running, removes
@@ -163,11 +195,19 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 		delivery:  deliveries{timers: map[string]*time.Timer{}},
 		side:      sideWorkspaces{entries: map[string]SideWorkspace{}},
 		imports:   imports{busy: map[int64]context.CancelFunc{}},
-		closed:    make(chan struct{})}
+		traces:    newTurnTraces(timing.Open(opts.TimingPath, timing.Options{}), opts.Now),
+		focus:     newFocusTracker(),
+		closed:    make(chan struct{}), maintenanceKick: make(chan struct{}, 1)}
+	s.spares = newSparePool(s, opts)
 	s.computer = &computer.Manager{Command: opts.Computer}
 	s.computers.active = map[string]*computerExecution{}
 	s.batcher = NewBatcher(writer, BatcherOptions{
-		Published: s.hub.Publish,
+		Published: func(id string, committed store.Committed) {
+			s.traces.reached(committed.Events, timing.StageBatcherFirstOutput)
+			s.traces.observe(committed.Events)
+			s.hub.Publish(id, committed)
+			s.traces.reached(committed.Events, timing.StageHubFirstOutputPublish)
+		},
 		Failed: func(id string, err error) {
 			if !errors.Is(err, store.ErrDuplicateRequest) {
 				opts.Logger.Error("local conversations: commit failed", "conversation_id", id, "error", err)
@@ -185,6 +225,7 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 		}
 	}
 	s.resumeRemote(ctx)
+	s.goBackground(s.maintain)
 	return s, nil
 }
 
@@ -213,12 +254,14 @@ func (s *Service) Close(ctx context.Context) error {
 		s.endComputer(id)
 	}
 	s.computer.Close()
+	s.spares.close()
 	var errs []error
 	for _, r := range runners {
 		closeCtx, cancel := context.WithTimeout(ctx, closeTimeout)
 		errs = append(errs, r.Close(closeCtx))
 		cancel()
 	}
+	s.background.Wait()
 	errs = append(errs, s.context.Close())
 	if preview := s.previewServices(); preview != nil {
 		preview.Revoke()
@@ -226,6 +269,7 @@ func (s *Service) Close(ctx context.Context) error {
 	s.batcher.Close()
 	s.writer.Close()
 	errs = append(errs, s.store.Close())
+	s.traces.log.Close()
 	return errors.Join(errs...)
 }
 
@@ -259,6 +303,8 @@ func (s *Service) Undrain(ctx context.Context) error {
 		}
 	}
 	s.mu.Unlock()
+	s.preheatFocused()
+	s.kickMaintenance()
 	return err
 }
 
@@ -271,6 +317,7 @@ func (s *Service) StopProviders(ctx context.Context) error {
 	runners := s.runners
 	s.runners = map[string]runner{}
 	s.mu.Unlock()
+	s.spares.stopAll()
 	var errs []error
 	for _, r := range runners {
 		closeCtx, cancel := context.WithTimeout(ctx, closeTimeout)
@@ -290,6 +337,10 @@ func (s *Service) Busy(ctx context.Context) (int64, error) {
 func (s *Service) acceptTurn() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.acceptTurnLocked()
+}
+
+func (s *Service) acceptTurnLocked() error {
 	switch {
 	case s.closing:
 		return ErrClosing
@@ -406,13 +457,16 @@ func (s *Service) Send(ctx context.Context, cmd SendCommand) (SendResult, error)
 	if err := s.acceptTurn(); err != nil {
 		return SendResult{}, err
 	}
+	turnID := "turn-" + cmd.RequestID
+	trace := s.traces.turn(conv, cmd.RequestID, turnID, timing.TurnUser)
+	created := trace.Begin(timing.StageRunnerCreate)
 	runner, err := s.runner(ctx, conv)
+	created(err)
 	if err != nil {
 		return SendResult{}, err
 	}
-	turnID := "turn-" + cmd.RequestID
 	err = runner.Send(ctx, SendRequest{TurnID: turnID, RequestID: cmd.RequestID, Fingerprint: fingerprint, MessageID: "msg-" + cmd.RequestID, Text: cmd.Text, Prompt: prompt, AttachmentIDs: cmd.AttachmentIDs, References: readableReferences(cmd.References), CreateTask: len(readableReferences(cmd.References)) < len(cmd.References),
-		Title: firstTitle(conv.TurnCount, conv.TitleMode, conv.Title, cmd.Text)})
+		Title: firstTitle(conv.TurnCount, conv.TitleMode, conv.Title, cmd.Text), Trace: trace})
 	switch {
 	case errors.Is(err, store.ErrDuplicateRequest):
 		// A concurrent retry committed first.
@@ -421,7 +475,7 @@ func (s *Service) Send(ctx context.Context, cmd SendCommand) (SendResult, error)
 		}
 		return SendResult{}, err
 	case errors.Is(err, ErrOutcomeUnknown):
-		if markErr := s.store.MarkUncertain(ctx, cmd.ScopeID, cmd.RequestID); markErr != nil {
+		if markErr := s.store.MarkUncertain(context.WithoutCancel(ctx), cmd.ScopeID, cmd.RequestID); markErr != nil {
 			err = errors.Join(err, markErr)
 		}
 		return SendResult{TurnID: turnID}, err
@@ -518,7 +572,7 @@ func (s *Service) runner(ctx context.Context, conv sqlitedb.Conversation) (runne
 		if err != nil {
 			return nil, err
 		}
-		return s.keepRunner(conv.ID, r)
+		return s.keepRunner(ctx, conv, r)
 	case conv.Provider != "claude" || s.opts.Claude == nil:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, conv.Provider)
 	}
@@ -545,10 +599,14 @@ func (s *Service) runner(ctx context.Context, conv sqlitedb.Conversation) (runne
 		fields["permission_mode"] = conv.PermissionMode
 	}
 	session.Fields = fields
-	return s.keepRunner(conv.ID, NewClaudeRunner(ClaudeRunnerOptions{
+	return s.keepRunner(ctx, conv, NewClaudeRunner(ClaudeRunnerOptions{
 		ConversationID: conv.ID, ScopeID: conv.ScopeID, Files: s.store, Start: start, Session: session,
 		Batcher: s.batcher, Limiter: s.limiter, ContextMCPName: contextmcp.Name, Now: s.opts.Now, Context: s.contextBinder(conv), OnTurnEnd: func(turnID string) { s.turnEnded(conv.ID, turnID) },
 		OnBackgroundEnded: func([]BackgroundResult) { s.scheduleDelivery(conv.ID) },
+		NativeTrace:       func(turnID string) *timing.Trace { return s.traces.turn(conv, turnID, turnID, timing.TurnNative) },
+		ProcessTrace:      func() *timing.Trace { return s.traces.process(conv.ID, conv.Provider) },
+		TranscriptSize:    s.claudeTranscriptSize,
+		ClaimSpare:        s.spares.claim,
 	}))
 }
 
@@ -571,25 +629,87 @@ func (s *Service) codexRunner(ctx context.Context, conv sqlitedb.Conversation) (
 	return NewCodexRunner(CodexRunnerOptions{
 		ConversationID: conv.ID, ScopeID: conv.ScopeID, Files: s.store, Start: start, Session: session,
 		Batcher: s.batcher, Limiter: s.limiter, ContextMCPName: contextmcp.Name, Now: s.opts.Now, Context: s.contextBinder(conv), OnTurnEnd: func(turnID string) { s.turnEnded(conv.ID, turnID) },
+		ClaimSpare: s.spares.claim, NoteDefault: s.noteCodexDefault,
+		ProcessTrace: func() *timing.Trace { return s.traces.process(conv.ID, conv.Provider) },
 	}), nil
 }
 
-// keepRunner registers r unless a concurrent call registered one first.
+func (s *Service) claudeTranscriptSize(id string) (int64, bool) {
+	if s.opts.Catalog == nil {
+		return 0, false
+	}
+	return s.opts.Catalog.ClaudeTranscriptSize(id)
+}
+
+func (s *Service) noteCodexDefault(model string) {
+	if s.opts.Catalog != nil {
+		s.opts.Catalog.NoteCodexDefault(model)
+	}
+}
+
 // keepRunner registers a new runner, or returns the one another caller
-// registered first. A runner that arrives after Close began is closed.
-func (s *Service) keepRunner(id string, r runner) (runner, error) {
+// registered first. A runner that arrives after Close or a drain began is closed:
+// its process would run the executable an update is about to replace.
+func (s *Service) keepRunner(ctx context.Context, conv sqlitedb.Conversation, r runner) (runner, error) {
 	s.mu.Lock()
-	if s.closing {
+	if err := s.acceptTurnLocked(); err != nil {
 		s.mu.Unlock()
 		_ = r.Close(context.Background())
-		return nil, ErrClosing
+		return nil, err
 	}
-	defer s.mu.Unlock()
-	if existing := s.runners[id]; existing != nil {
+	if existing := s.runners[conv.ID]; existing != nil {
+		s.mu.Unlock()
 		return existing, nil
 	}
-	s.runners[id] = r
+	s.runners[conv.ID] = r
+	s.mu.Unlock()
+	if err := s.catchUpSettings(context.WithoutCancel(ctx), conv, r); err != nil {
+		s.mu.Lock()
+		if s.runners[conv.ID] == r {
+			delete(s.runners, conv.ID)
+		}
+		s.mu.Unlock()
+		_ = r.Close(context.Background())
+		return nil, err
+	}
 	return r, nil
+}
+
+// catchUpSettings applies settings committed after conv was read: UpdateSettings
+// found no runner then, and the new runner was built from conv. Reading after
+// registering leaves no gap, since a later commit does find the runner. Reading
+// again after applying keeps this apply from overwriting that later one.
+func (s *Service) catchUpSettings(ctx context.Context, conv sqlitedb.Conversation, r runner) error {
+	applied := conversationSettings(conv)
+	for {
+		latest, err := s.store.Conversation(ctx, conv.ID)
+		if err != nil {
+			return err
+		}
+		settings := conversationSettings(latest)
+		if sameSettings(applied, settings) {
+			return nil
+		}
+		if err := r.ApplySettings(ctx, settings); err != nil {
+			s.opts.Logger.Warn("local conversations: settings not applied to a new runner", "conversation_id", conv.ID, "error", err)
+		}
+		applied = settings
+	}
+}
+
+func conversationSettings(conv sqlitedb.Conversation) store.ConversationSettings {
+	st := store.ConversationSettings{PermissionMode: conv.PermissionMode}
+	if conv.Model.Valid {
+		st.Model = &conv.Model.String
+	}
+	if conv.ReasoningEffort.Valid {
+		st.ReasoningEffort = &conv.ReasoningEffort.String
+	}
+	return st
+}
+
+func sameSettings(a, b store.ConversationSettings) bool {
+	return a.PermissionMode == b.PermissionMode && sameModel(a.Model, b.Model) && sameModel(a.ReasoningEffort, b.ReasoningEffort)
 }
 
 func sendFingerprint(cmd SendCommand) string {
@@ -622,13 +742,7 @@ func (s *Service) UpdateSettings(ctx context.Context, scopeID int64, conversatio
 	if err != nil {
 		return err
 	}
-	st := store.ConversationSettings{PermissionMode: conv.PermissionMode}
-	if conv.Model.Valid {
-		st.Model = &conv.Model.String
-	}
-	if conv.ReasoningEffort.Valid {
-		st.ReasoningEffort = &conv.ReasoningEffort.String
-	}
+	st := conversationSettings(conv)
 	switch {
 	case u.ClearModel:
 		st.Model = nil
@@ -763,6 +877,24 @@ func (s *Service) SetHost(h Host) {
 	s.mu.Lock()
 	s.host = h
 	s.mu.Unlock()
+}
+
+// SetLocalHost connects the service to the Desktop of the executing device.
+func (s *Service) SetLocalHost(h Host) {
+	s.mu.Lock()
+	s.localHost = h
+	s.mu.Unlock()
+}
+
+// askLocalHost sends a host request that only this device's Desktop may answer.
+func (s *Service) askLocalHost(ctx context.Context, scopeID int64, conversationID, kind string, payload any) (json.RawMessage, error) {
+	s.mu.Lock()
+	h := s.localHost
+	s.mu.Unlock()
+	if h == nil {
+		return nil, ErrLocalHostUnavailable
+	}
+	return h(ctx, scopeID, conversationID, kind, payload)
 }
 
 // askHost sends a host request, or fails when no transport is set.

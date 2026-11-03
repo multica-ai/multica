@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -21,9 +22,12 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
+	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // DefaultMDNSServiceName keeps Multica's LAN announcements apart from other
@@ -81,7 +85,12 @@ type Config struct {
 	// OnAddrsChanged is called, debounced, when AdvertisedAddrs changes, so
 	// the new addresses can be registered.
 	OnAddrsChanged func()
-	Logger         *slog.Logger
+	// OnPeersRead is called after each device list read, with the read's error;
+	// on success the list is already in place.
+	OnPeersRead func(err error)
+	Logger      *slog.Logger
+	// Marks records connection state changes; nil records nothing.
+	Marks *timing.Marks
 }
 
 type peerDial struct {
@@ -91,6 +100,11 @@ type peerDial struct {
 
 // Service is this device's endpoint on the account's peer-to-peer network.
 type Service struct {
+	marks      *timing.Marks
+	connState  connectionStates
+	fetchState fetchState
+	stopReason atomic.Value
+
 	host     host.Host
 	allow    *allowlist
 	fetch    FetchFunc
@@ -113,6 +127,7 @@ type Service struct {
 
 	relayFetch RelayFunc
 	onAddrs    func()
+	onPeers    func(error)
 	relayLost  chan struct{}
 	probePeers chan struct{}
 
@@ -149,7 +164,10 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	began := cfg.Marks.Now()
+	cfg.Marks.Write(timing.Record{Stage: timing.StageLinkStart})
 	s := &Service{
+		marks:      cfg.Marks,
 		allow:      newAllowlist(self),
 		fetch:      cfg.Fetch,
 		logger:     logger,
@@ -161,6 +179,7 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		discovered: map[peer.ID]peer.AddrInfo{},
 		relayFetch: cfg.Relay,
 		onAddrs:    cfg.OnAddrsChanged,
+		onPeers:    cfg.OnPeersRead,
 		relayLost:  make(chan struct{}, 1),
 		probePeers: make(chan struct{}, 1),
 	}
@@ -169,7 +188,8 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 	}
 	gater := &accountGater{allow: s.allow, isRelay: s.isRelay, onUnknown: func(peer.ID) { s.requestRefresh() }}
 
-	h, err := newHost(cfg.Key, listen, gater, s.withCircuitAddrs)
+	tracer := &holePunchMarks{marks: cfg.Marks}
+	h, err := newHost(cfg.Key, listen, gater, s.withCircuitAddrs, holepunch.WithMetricsAndEventTracer(tracer, tracer))
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("p2p: start host: %w", err)
@@ -189,7 +209,10 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		s.Close()
 		return nil, fmt.Errorf("p2p: subscribe to address updates: %w", err)
 	}
-	h.Network().Notify(&network.NotifyBundle{DisconnectedF: s.onDisconnected})
+	h.Network().Notify(&network.NotifyBundle{ConnectedF: func(_ network.Network, c network.Conn) { s.noteConnection(c, true) }, DisconnectedF: func(n network.Network, c network.Conn) {
+		s.noteConnection(c, false)
+		s.onDisconnected(n, c)
+	}})
 	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
@@ -212,11 +235,24 @@ func Start(ctx context.Context, cfg Config) (*Service, error) {
 		}()
 	}
 	logger.Info("p2p: host started", "peer_id", self.String(), "addrs", h.Addrs())
+	s.marks.Since(timing.Record{Stage: timing.StageLinkReady}, began, nil)
 	return s, nil
+}
+
+// CloseBecause is Close with a closed-enum reason on its record, such as a phone
+// that stopped the link because the app went to the background.
+func (s *Service) CloseBecause(reason string) error {
+	s.stopReason.Store(reason)
+	return s.Close()
 }
 
 // Close stops discovery and the host, closing every connection.
 func (s *Service) Close() error {
+	reason, _ := s.stopReason.Load().(string)
+	if reason == "" {
+		reason = timing.ReasonStopped
+	}
+	s.marks.Write(timing.Record{Stage: timing.StageLinkStop, Reason: reason})
 	s.dialMu.Lock()
 	s.cancel()
 	s.dialMu.Unlock()
@@ -271,12 +307,19 @@ func (s *Service) Ping(ctx context.Context, p peer.ID) (time.Duration, error) {
 
 // AddAddrs records addresses for a peer learned outside mDNS and the
 // registry.
-func (s *Service) AddAddrs(info peer.AddrInfo) { s.HandlePeerFound(info) }
+func (s *Service) AddAddrs(info peer.AddrInfo) { s.addDiscovered(info) }
 
 // HandlePeerFound implements mdns.Notifee. Addresses are remembered even for
 // peers not yet on the allowlist, because mDNS reports each peer once and the
 // device may register on the server after it was seen.
 func (s *Service) HandlePeerFound(info peer.AddrInfo) {
+	if info.ID != s.host.ID() && len(info.Addrs) > 0 {
+		s.marks.Write(timing.Record{Stage: timing.StagePeerMDNSFound, Peer: info.ID.String(), AddrType: bestAddrType(info.Addrs)})
+	}
+	s.addDiscovered(info)
+}
+
+func (s *Service) addDiscovered(info peer.AddrInfo) {
 	if info.ID == s.host.ID() || len(info.Addrs) == 0 {
 		return
 	}
@@ -319,6 +362,8 @@ func (s *Service) connect(info peer.AddrInfo) {
 				s.connect(info)
 			}
 		}()
+		attempts := int64(0)
+		began := s.marks.Now()
 		for delay := minKickInterval; s.ctx.Err() == nil; delay = min(delay*2, peerRetryMax) {
 			p, allowed := s.allow.get(info.ID)
 			if !allowed || s.host.Network().Connectedness(info.ID) == network.Connected {
@@ -332,6 +377,12 @@ func (s *Service) connect(info peer.AddrInfo) {
 			if len(target.Addrs) == 0 {
 				return
 			}
+			// One start and the first failure say a device is unreachable; every
+			// later retry would only tick while it stays that way.
+			if attempts == 0 {
+				s.marks.Write(timing.Record{Stage: timing.StagePeerConnect, Event: timing.EventStart, Peer: info.ID.String(), AddrType: bestAddrType(target.Addrs), Count: timing.N(int64(len(target.Addrs)))})
+			}
+			attempts++
 			// This loop owns the bounded retry delay; old transport backoff must not hide recovery.
 			if sw, ok := s.host.Network().(*swarm.Swarm); ok {
 				sw.Backoff().Clear(info.ID)
@@ -352,8 +403,16 @@ func (s *Service) connect(info peer.AddrInfo) {
 			s.dialMu.Lock()
 			job.cancel = nil
 			s.dialMu.Unlock()
-			if err == nil || s.ctx.Err() != nil {
+			if err == nil {
+				s.marks.Since(timing.Record{Stage: timing.StagePeerConnect, Peer: info.ID.String(), AddrType: s.connectedAddrType(info.ID), Count: timing.N(attempts)}, began, nil)
 				return
+			}
+			if s.ctx.Err() != nil {
+				return
+			}
+			if attempts == 1 {
+				s.marks.Since(timing.Record{Stage: timing.StagePeerConnect, Peer: info.ID.String(), Count: timing.N(attempts)}, began, err)
+				s.noteCircuitRefused(err)
 			}
 			s.logger.Debug("p2p: connect failed; retrying", "peer_id", info.ID.String(), "error", err, "retry_in", delay)
 			s.requestRefresh()
@@ -483,6 +542,7 @@ func (s *Service) wakeDials(ids ...peer.ID) {
 // NetworkChanged is called when local interfaces or routes change, rather than
 // waiting for the old TCP/QUIC paths to time out. New incoming paths are retained.
 func (s *Service) NetworkChanged() {
+	s.marks.Write(timing.Record{Stage: timing.StageNetworkChanged})
 	conns := s.host.Network().Conns()
 	s.relayMu.Lock()
 	if s.relayCancel != nil {
@@ -551,17 +611,31 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	s.lastRefresh = time.Now()
+	fetching := s.marks.Now()
 	peers, err := s.fetch(ctx)
+	s.noteFetch(fetching, err)
 	if err != nil {
+		if s.onPeers != nil {
+			s.onPeers(err)
+		}
 		return err
 	}
 	var changed []peer.ID
 	for _, p := range peers {
 		if previous, ok := s.allow.get(p.ID); ok && !slices.EqualFunc(previous.RegisteredAddrs, p.RegisteredAddrs, func(a, b ma.Multiaddr) bool { return a.Equal(b) }) {
 			changed = append(changed, p.ID)
+			if s.Connection(p.ID) == ConnectionRelayed {
+				s.dialDirect(p)
+			}
 		}
 	}
-	_, removed := s.allow.replace(peers)
+	added, removed := s.allow.replace(peers)
+	if s.onPeers != nil {
+		s.onPeers(nil)
+	}
+	for _, id := range added {
+		s.marks.Write(timing.Record{Stage: timing.StagePeerKnown, Peer: id.String()})
+	}
 	for _, id := range removed {
 		s.host.Network().ClosePeer(id)
 	}
@@ -587,6 +661,34 @@ func (s *Service) Refresh(ctx context.Context) error {
 		s.wakeDials(changed...)
 	}
 	return nil
+}
+
+// dialDirect tries a relayed device's newly registered direct addresses once.
+// connect treats a relayed device as connected, and hole punching ignores
+// private addresses, so nothing else would reach a LAN address registered late.
+func (s *Service) dialDirect(p Peer) {
+	addrs := slices.DeleteFunc(slices.Clone(p.RegisteredAddrs), isCircuit)
+	if len(addrs) == 0 {
+		return
+	}
+	s.dialMu.Lock()
+	if s.ctx.Err() != nil {
+		s.dialMu.Unlock()
+		return
+	}
+	s.wg.Add(1)
+	s.dialMu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(network.WithForceDirectDial(s.ctx, "multica-registered-direct"), connectTimeout)
+		defer cancel()
+		began := s.marks.Now()
+		err := s.host.Connect(ctx, peer.AddrInfo{ID: p.ID, Addrs: addrs})
+		s.marks.Since(timing.Record{Stage: timing.StagePeerConnect, Peer: p.ID.String(), AddrType: bestAddrType(addrs), Reason: timing.ReasonLateDirect}, began, err)
+		if err != nil {
+			s.logger.Debug("p2p: direct dial failed; staying on the relay", "peer_id", p.ID.String(), "error", err)
+		}
+	}()
 }
 
 // AdvertisedAddrs are the addresses to register for other devices: listen,
@@ -749,8 +851,11 @@ func (s *Service) reserve() (time.Duration, error) {
 	s.relayInfo = info
 	s.relayMu.Unlock()
 
+	reserving := s.marks.Now()
 	rsvp, err := relayclient.Reserve(ctx, s.host, *info)
+	s.marks.Since(timing.Record{Stage: timing.StageRelayReserve}, reserving, err)
 	if err != nil {
+		s.noteReservationRefused(err)
 		return 0, err
 	}
 	s.host.ConnManager().Protect(info.ID, "multica-relay")

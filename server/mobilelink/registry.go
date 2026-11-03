@@ -20,10 +20,27 @@ import (
 // registry holds a mobile login's short-lived registry credential. It never
 // sends the Multica login token to devices or to the relay transport.
 type registry struct {
-	url, login, session string
-	expires             time.Time
-	mu                  sync.Mutex
-	http                *http.Client
+	url, session string
+	expires      time.Time
+	mu           sync.Mutex
+	http         *http.Client
+
+	// loginMu is separate because mu is held across registry requests, and a
+	// token refresh must not wait on a slow one.
+	loginMu sync.Mutex
+	login   string
+}
+
+func (r *registry) setLogin(token string) {
+	r.loginMu.Lock()
+	r.login = token
+	r.loginMu.Unlock()
+}
+
+func (r *registry) currentLogin() string {
+	r.loginMu.Lock()
+	defer r.loginMu.Unlock()
+	return r.login
 }
 
 func (r *registry) call(ctx context.Context, method, path string, body, out any) error {
@@ -35,7 +52,7 @@ func (r *registry) call(ctx context.Context, method, path string, body, out any)
 				Token   string    `json:"session_token"`
 				Expires time.Time `json:"expires_at"`
 			}
-			status, err := r.send(ctx, "POST", "/v1/sessions", r.login, nil, &issued)
+			status, err := r.send(ctx, "POST", "/v1/sessions", r.currentLogin(), nil, &issued)
 			if err != nil {
 				return err
 			}

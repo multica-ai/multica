@@ -92,7 +92,7 @@ func (l *deviceLink) detach(svc *p2p.Service) {
 	l.svc = nil
 	l.apply()
 	for id, p := range l.proxies {
-		p.transport.CloseIdleConnections()
+		p.tunnel.CloseIdleConnections()
 		delete(l.proxies, id)
 	}
 }
@@ -144,7 +144,7 @@ func (l *deviceLink) apply() {
 				return ctx
 			}
 			info, _ := svc.Peer(id)
-			return localhost.WithRemotePeer(ctx, localhost.RemotePeer{ID: id.String(), DeviceName: info.DeviceName})
+			return localhost.WithRemotePeer(ctx, localhost.RemotePeer{ID: id.String(), DeviceName: info.DeviceName, Connection: p2p.StreamConnection(c)})
 		},
 	}
 	go func(s *http.Server) {
@@ -302,48 +302,34 @@ func (l *deviceLink) handleForward(w http.ResponseWriter, r *http.Request) {
 	p.proxy.ServeHTTP(w, r)
 }
 
-// moveToDirect closes relayed streams to a device once a direct connection
-// exists, so Desktop reconnects over it.
+// moveToDirect closes idle and relayed WebSocket streams to a device once a
+// direct connection exists, so Desktop reconnects over it.
 func (l *deviceLink) moveToDirect(id peer.ID) {
 	l.mu.Lock()
 	p := l.proxies[id]
 	l.mu.Unlock()
 	if p != nil {
-		p.closeRelayed()
+		p.tunnel.MoveToDirect()
 	}
 }
 
 type deviceProxy struct {
-	proxy     *httputil.ReverseProxy
-	transport *http.Transport
-
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
+	proxy  *httputil.ReverseProxy
+	tunnel *p2p.Tunnel
 }
 
 var errRelayLimit = errors.New("relay transfer limited")
 
 func newDeviceProxy(svc *p2p.Service, id peer.ID) *deviceProxy {
-	p := &deviceProxy{conns: map[net.Conn]struct{}{}}
-	p.transport = &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			c, err := svc.Dial(ctx, id, deviceLinkProtocol)
-			if err != nil {
-				return nil, err
-			}
-			p.mu.Lock()
-			p.conns[c] = struct{}{}
-			p.mu.Unlock()
-			return &trackedConn{Conn: c, done: func() { p.mu.Lock(); delete(p.conns, c); p.mu.Unlock() }}, nil
-		},
+	p := &deviceProxy{tunnel: svc.NewTunnel(id, deviceLinkProtocol, &http.Transport{
 		IdleConnTimeout:     90 * time.Second,
 		MaxIdleConnsPerHost: 8,
-	}
+	})}
 	p.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host, pr.Out.Host = "http", "device-link", "device-link"
 		},
-		Transport:     p.transport,
+		Transport:     p.tunnel,
 		FlushInterval: -1,
 		ModifyResponse: func(res *http.Response) error {
 			if res.ContentLength > relayTransferLimit && svc.Connection(id) == p2p.ConnectionRelayed {
@@ -367,30 +353,4 @@ func newDeviceProxy(svc *p2p.Service, id peer.ID) *deviceProxy {
 		},
 	}
 	return p
-}
-
-func (p *deviceProxy) closeRelayed() {
-	p.transport.CloseIdleConnections()
-	p.mu.Lock()
-	var relayed []net.Conn
-	for c := range p.conns {
-		if p2p.Relayed(c) {
-			relayed = append(relayed, c)
-		}
-	}
-	p.mu.Unlock()
-	for _, c := range relayed {
-		_ = c.Close()
-	}
-}
-
-type trackedConn struct {
-	net.Conn
-	once sync.Once
-	done func()
-}
-
-func (c *trackedConn) Close() error {
-	c.once.Do(c.done)
-	return c.Conn.Close()
 }

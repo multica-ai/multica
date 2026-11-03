@@ -7,7 +7,7 @@ export function isLocalReasoningEffort(value: unknown): value is LocalReasoningE
   return LOCAL_REASONING_EFFORTS.some((effort) => effort === value);
 }
 export function localReasoningLevels(models: RuntimeModel[], model: string | null | undefined) {
-  return models.find((entry) => model ? entry.id === model : entry.default)?.thinking?.supported_levels ?? [];
+  return models.find((entry) => model ? entry.id === model : entry.default || entry.isDefault)?.thinking?.supported_levels ?? [];
 }
 export type LocalProviderId = "codex" | "claude";
 export const LOCAL_PERMISSION_MODES = ["default", "auto", "full-access"] as const;

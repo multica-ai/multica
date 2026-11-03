@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLocalTiming, createLocalPresentationTiming, parseLocalTiming, type LocalTimingRecord } from "./local-timing";
+import { createLocalSendTiming, createLocalTiming, createLocalPresentationTiming, parseLocalTiming, type LocalTimingRecord } from "./local-timing";
 
 afterEach(() => vi.useRealTimers());
 describe("local turn timing", () => {
@@ -77,6 +77,43 @@ describe("local turn timing", () => {
     timing.applied("c", "live", true, false);
     timing.applied("c", "live", true, true);
     timing.applied("c", "live", true, true);
-    expect(records.map((record) => record.stage)).toEqual(["gui.first_output_applied", "gui.terminal_applied"]);
+    expect(records.map((record) => record.stage)).toEqual(["client.first_event_applied", "client.terminal_applied"]);
+  });
+  it("records the first model output received once, as a live turn even if it settles at once", () => {
+    const records: LocalTimingRecord[] = [];
+    const timing = createLocalPresentationTiming((record) => records.push(record));
+    timing.received("c", "fast");
+    timing.received("c", "fast");
+    timing.applied("c", "fast", true, true);
+    expect(records.map((record) => record.stage)).toEqual(["client.first_event_received", "client.first_event_applied", "client.terminal_applied"]);
+    expect(records[0]).toMatchObject({ version: 2, source: "gui", clientKind: "desktop", conversationId: "c", turnId: "fast" });
+  });
+  it("marks the pending message on the next frame, and not at all without a window", () => {
+    const records: LocalTimingRecord[] = [];
+    createLocalSendTiming((record) => records.push(record)).begin("c", "r", Date.now());
+    expect(records.map((record) => record.stage)).toEqual(["client.send"]);
+    const frames: (() => void)[] = [];
+    vi.stubGlobal("requestAnimationFrame", (run: () => void) => frames.push(run));
+    try {
+      records.length = 0;
+      createLocalSendTiming((record) => records.push(record)).begin("c", "r2", Date.now());
+      expect(records.map((record) => record.stage)).toEqual(["client.send"]);
+      frames[0]!();
+      expect(records.map((record) => record.stage)).toEqual(["client.send", "client.pending_shown"]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("dates client.send back to the user's action and counts retries of one request", () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
+    vi.setSystemTime(new Date("2026-11-02T10:00:00.000Z"));
+    const records: LocalTimingRecord[] = [];
+    const sends = createLocalSendTiming((record) => records.push(record));
+    const startedAt = Date.now();
+    vi.advanceTimersByTime(40);
+    sends.begin("c", "r", startedAt).mark("turn.persist");
+    sends.begin("c", "r", Date.now());
+    expect(records[0]).toMatchObject({ stage: "client.send", at: "2026-11-02T10:00:00.000Z", elapsedMs: 0, attempt: 1, requestId: "r", conversationId: "c" });
+    expect(records[1]).toMatchObject({ elapsedMs: 40 });
+    expect(records[2]).toMatchObject({ stage: "client.send", attempt: 2 });
   });
 });

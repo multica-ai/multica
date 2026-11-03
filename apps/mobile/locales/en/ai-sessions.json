@@ -113,5 +113,8 @@
   "search_files": "Search files",
   "open_source": "Back to original message",
   "file_from": "From {{device}}",
-  "reasoning_choose_model": "Choose a specific model to select its supported reasoning effort."
+  "reasoning_choose_model": "Choose a specific model to select its supported reasoning effort.",
+  "subscription_rejected": "Live updates stopped for this conversation.",
+  "thinking": "Thinking…",
+  "thought": "Thinking"
 }

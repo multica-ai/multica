@@ -3,6 +3,9 @@ import { z } from "zod";
 /** Daemon <-> Claude adapter protocol; see server/internal/localconversation/protocol/schema/claude-adapter-v1.schema.json. */
 export const CLAUDE_ADAPTER_PROTOCOL_VERSION = 1;
 
+/** Announced in ready; a daemon uses prewarm and claim only when both are listed. */
+export const CLAUDE_ADAPTER_CAPABILITIES = ["set_model", "set_permission_mode", "apply_flag_settings", "set_mcp_servers", "stop_task", "prewarm", "claim"];
+
 const id = z.string().min(1).max(200);
 const request = { version: z.literal(CLAUDE_ADAPTER_PROTOCOL_VERSION), id };
 const permissionMode = z.enum(["default", "auto", "full-access"]);
@@ -15,6 +18,14 @@ export const daemonMessageSchema = z.discriminatedUnion("type", [
     permission_mode: permissionMode.optional(), append_system_prompt: z.string().optional(),
     mcp_servers: z.record(z.string(), objectRecord).optional(), allowed_tools: z.array(z.string()).optional(),
     settings: objectRecord.optional(), env: z.record(z.string(), z.string()).optional(),
+  }),
+  z.strictObject({
+    ...request, type: z.literal("prewarm"), executable: z.string().min(1), allowed_tools: z.array(z.string()).optional(),
+    settings: objectRecord.optional(), env: z.record(z.string(), z.string()).optional(),
+  }),
+  z.strictObject({
+    ...request, type: z.literal("claim"), cwd: z.string(), model: z.string().nullable().optional(),
+    permission_mode: permissionMode.optional(), append_system_prompt: z.string().optional(), settings: objectRecord.optional(),
   }),
   z.strictObject({ ...request, type: z.literal("send"), request_id: id, content: z.array(objectRecord) }),
   z.strictObject({ ...request, type: z.literal("interrupt"), deadline_ms: z.number().int().positive().optional() }),

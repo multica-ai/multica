@@ -8,6 +8,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 // Addr is a device's address as net.Addr: its peer ID.
@@ -29,6 +31,19 @@ func (c streamConn) Relayed() bool { return isCircuit(c.Conn().RemoteMultiaddr()
 func Relayed(conn net.Conn) bool {
 	c, ok := conn.(streamConn)
 	return ok && c.Relayed()
+}
+
+// StreamConnection says how conn itself travels, which Connection cannot: that
+// reads direct as soon as any connection to the device is direct.
+func StreamConnection(conn net.Conn) string {
+	c, ok := conn.(streamConn)
+	switch {
+	case !ok:
+		return timing.ConnectionUnknown
+	case c.Relayed():
+		return timing.ConnectionRelayed
+	}
+	return timing.ConnectionDirect
 }
 
 // PeerOf returns the device at the other end of a stream connection.

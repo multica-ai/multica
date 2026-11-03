@@ -264,8 +264,21 @@
         { "$ref": "#/$defs/subscribe_scope" },
         { "$ref": "#/$defs/subscribe" },
         { "$ref": "#/$defs/unsubscribe" },
+        { "$ref": "#/$defs/conversation_focus" },
         { "$ref": "#/$defs/host_reply" }
       ]
+    },
+    "conversation_focus": {
+      "description": "A client has stayed on a conversation (focused) or left it. Clients send it only to a daemon announcing the conversation-focus-v1 capability; older daemons ignore unknown types anyway.",
+      "type": "object",
+      "required": ["version", "type", "conversation_id", "focused"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 2 },
+        "type": { "const": "conversation.focus" },
+        "conversation_id": { "$ref": "#/$defs/id" },
+        "focused": { "type": "boolean" }
+      }
     },
     "host_reply": {
       "description": "Desktop's answer to a host.request: a result, or an error.",

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "type": "prewarm",
+  "id": "r1",
+  "executable": "/usr/local/bin/claude",
+  "allowed_tools": [
+    "mcp__multica__*"
+  ],
+  "settings": {
+    "enabledPlugins": {}
+  },
+  "env": {
+    "PATH": "/usr/bin"
+  }
+}

@@ -144,6 +144,30 @@ func (h *hosts) target(scopeID int64, conversationID string) *wsConn {
 	return conns[len(conns)-1]
 }
 
+// localTarget is target among this device's own connections; a remote
+// device's Desktop attaches to the same scope but is another machine.
+func (h *hosts) localTarget(scopeID int64, conversationID string) *wsConn {
+	var fallback *wsConn
+	origin := ""
+	if h.origin != nil {
+		origin = h.origin(conversationID)
+	}
+	conns := h.byScope[scopeID]
+	for i := len(conns) - 1; i >= 0; i-- {
+		c := conns[i]
+		if c.caller.kind == callerRemote {
+			continue
+		}
+		if origin != "" && c.caller.clientKey == origin {
+			return c
+		}
+		if fallback == nil {
+			fallback = c
+		}
+	}
+	return fallback
+}
+
 // request sends kind to a Desktop of the scope and waits for its reply.
 func (h *hosts) request(ctx context.Context, scopeID int64, conversationID, kind string, payload any) (json.RawMessage, error) {
 	h.mu.Lock()
@@ -152,6 +176,23 @@ func (h *hosts) request(ctx context.Context, scopeID int64, conversationID, kind
 		h.mu.Unlock()
 		return nil, service.ErrHostUnavailable
 	}
+	return h.send(ctx, c, kind, payload)
+}
+
+// requestLocal sends kind to the Desktop running on this device only.
+func (h *hosts) requestLocal(ctx context.Context, scopeID int64, conversationID, kind string, payload any) (json.RawMessage, error) {
+	h.mu.Lock()
+	c := h.localTarget(scopeID, conversationID)
+	if c == nil {
+		h.mu.Unlock()
+		return nil, service.ErrLocalHostUnavailable
+	}
+	return h.send(ctx, c, kind, payload)
+}
+
+// send delivers a request to c and waits for its reply; h.mu is held and
+// released here so the pending entry is visible before the request is.
+func (h *hosts) send(ctx context.Context, c *wsConn, kind string, payload any) (json.RawMessage, error) {
 	id := "host-" + newRequestID()
 	p := &hostPending{reply: make(chan v2HostReply, 1), conn: c,
 		message: map[string]any{"version": V2Version, "type": "host.request", "request_id": id, "kind": kind, "payload": payload}}

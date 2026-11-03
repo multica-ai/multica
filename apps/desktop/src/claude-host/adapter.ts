@@ -1,9 +1,9 @@
-import type { Options, Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, Query, SDKUserMessage, SpareProcess } from "@anthropic-ai/claude-agent-sdk";
 import { AdapterError, CLAUDE_ADAPTER_PROTOCOL_VERSION, type AdapterMessage, type DaemonMessage, type DaemonRequest } from "./protocol";
 
 type Sdk = typeof import("@anthropic-ai/claude-agent-sdk");
 /** The SDK calls the adapter makes; tests inject a fake. */
-export type ClaudeSdk = Pick<Sdk, "query" | "forkSession" | "listSessions" | "getSessionMessages" | "getSessionInfo">;
+export type ClaudeSdk = Pick<Sdk, "query" | "forkSession" | "listSessions" | "getSessionMessages" | "getSessionInfo" | "prewarm">;
 
 export interface AdapterOutput { write(frame: AdapterMessage): Promise<void> }
 
@@ -41,6 +41,9 @@ export class ClaudeAdapter {
   private sessionId?: string;
   private generation = 0;
   private closing = false;
+  private spare?: SpareProcess;
+  /** Settles once a claim was answered; a Query that ends first waits for it. */
+  private claiming?: Promise<void>;
 
   constructor(private sdk: () => Promise<ClaudeSdk>, private output: AdapterOutput) {}
 
@@ -58,6 +61,8 @@ export class ClaudeAdapter {
   private async dispatch(message: DaemonMessage): Promise<unknown> {
     switch (message.type) {
       case "start": return this.start(message);
+      case "prewarm": return this.prewarm(message);
+      case "claim": return this.claim(message);
       case "send": return this.send(message);
       case "interrupt": return this.interrupt(message);
       case "set_model": await this.live().setModel(message.model ?? undefined); return undefined;
@@ -86,13 +91,17 @@ export class ClaudeAdapter {
 
   private async start(message: DaemonRequest<"start">): Promise<unknown> {
     if (this.query) throw new AdapterError("already_started", "this adapter already serves a conversation");
+    const loading = performance.now();
     const sdk = await this.sdk();
+    const sdkLoadMs = performance.now() - loading;
     this.prompts = new PromptQueue();
     this.controller = new AbortController();
     this.sessionId = message.resume;
     const options: Options = {
       pathToClaudeCodeExecutable: message.executable, cwd: message.cwd, abortController: this.controller,
       includePartialMessages: true, settingSources: ["user", "project", "local"], plugins: [], strictMcpConfig: true,
+      // Only unlocks switching to bypassPermissions, including mid-session; permissionMode decides what applies.
+      allowDangerouslySkipPermissions: true,
       ...(message.env ? { env: message.env } : {}),
       ...(message.settings ? { settings: message.settings as Options["settings"] } : {}),
       ...(message.resume ? { resume: message.resume } : {}),
@@ -108,8 +117,80 @@ export class ClaudeAdapter {
     this.pump = this.consume(this.query, this.generation);
     void this.pump.catch(() => {});
     // Initialization completes the handshake; failures surface to the start request.
+    const initializing = performance.now();
     const models = await this.query.supportedModels();
-    return { models };
+    return { models, timing: { sdk_load_ms: sdkLoadMs, query_init_ms: performance.now() - initializing } };
+  }
+
+  /** Parks a Claude Code process with everything a session cannot change later; it serves no session until claimed. */
+  private async prewarm(message: DaemonRequest<"prewarm">): Promise<unknown> {
+    if (this.query || this.spare) throw new AdapterError("already_started", "this adapter already serves a conversation");
+    const loading = performance.now();
+    const sdk = await this.sdk();
+    const sdkLoadMs = performance.now() - loading;
+    if (typeof sdk.prewarm !== "function") throw new AdapterError("prewarm_unsupported", "this Agent SDK cannot prewarm");
+    const options: Options = {
+      pathToClaudeCodeExecutable: message.executable, includePartialMessages: true, settingSources: ["user", "project", "local"],
+      plugins: [], strictMcpConfig: true, mcpServers: {}, allowDangerouslySkipPermissions: true,
+      systemPrompt: { type: "preset", preset: "claude_code", snapshot: false },
+      ...(message.env ? { env: message.env } : {}),
+      ...(message.settings ? { settings: message.settings as Options["settings"] } : {}),
+      ...(message.allowed_tools ? { allowedTools: message.allowed_tools } : {}),
+    };
+    const warming = performance.now();
+    let spare: SpareProcess;
+    try { spare = await sdk.prewarm({ options }); }
+    catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      throw new AdapterError(/await-claim/.test(text) ? "prewarm_unsupported" : "prewarm_failed", text);
+    }
+    this.spare = spare;
+    void spare.exited.then(async () => {
+      if (this.spare === spare && !this.closing) await this.output.write({ version: V, type: "error", code: "spare_exited", message: "the parked Claude Code process exited" });
+    });
+    return { timing: { sdk_load_ms: sdkLoadMs, prewarm_ms: performance.now() - warming } };
+  }
+
+  /**
+   * Binds the parked process to a session with no prompt queued, so nothing has
+   * reached the model when this fails. Readiness is the claimed promise:
+   * supportedModels() keeps describing the parked process after a refusal.
+   * Refusal output is withheld, so the daemon only sees a typed not_claimed.
+   */
+  private async claim(message: DaemonRequest<"claim">): Promise<unknown> {
+    const spare = this.spare;
+    if (!spare || this.query) throw new AdapterError("not_claimed", "no spare process is parked");
+    this.spare = undefined;
+    const prompts = new PromptQueue();
+    let settle = () => {};
+    this.claiming = new Promise((resolve) => { settle = resolve; });
+    const claimingAt = performance.now();
+    try {
+      const query = spare.claim({ prompt: prompts, options: {
+        cwd: message.cwd,
+        ...(message.model ? { model: message.model } : {}),
+        ...(message.permission_mode && message.permission_mode !== "default" ? { permissionMode: sdkPermissionMode(message.permission_mode) } : {}),
+        ...(message.append_system_prompt ? { appendSystemPrompt: message.append_system_prompt } : {}),
+        ...(message.settings ? { settings: message.settings as Parameters<Query["applyFlagSettings"]>[0] } : {}),
+      } });
+      this.query = query;
+      this.prompts = prompts;
+      this.generation++;
+      this.pump = this.consume(query, this.generation);
+      void this.pump.catch(() => {});
+      const claimed = await spare.claimed;
+      this.sessionId = claimed.sessionId;
+      return { session_id: claimed.sessionId, timing: { claim_ms: performance.now() - claimingAt } };
+    } catch (error) {
+      this.query = undefined;
+      this.prompts = undefined;
+      prompts.end();
+      spare.close();
+      throw new AdapterError("not_claimed", error instanceof Error ? error.message : String(error));
+    } finally {
+      settle();
+      this.claiming = undefined;
+    }
   }
 
   private send(message: DaemonRequest<"send">): undefined {
@@ -150,6 +231,7 @@ export class ClaudeAdapter {
     this.closing = true;
     this.prompts?.end();
     this.query?.close();
+    this.spare?.close();
     await this.pump?.catch(() => {});
   }
 
@@ -165,9 +247,11 @@ export class ClaudeAdapter {
         // Awaiting each write applies backpressure to the SDK iterator, and so to Claude Code.
         await this.output.write({ version: V, type: "sdk_message", query_generation: generation, message: message as unknown as { type: string } & Record<string, unknown> });
       }
-      if (!this.closing) await this.output.write({ version: V, type: "error", code: "query_ended", message: "Claude Code ended the session" });
+      await this.claiming;
+      if (!this.closing && this.query === query) await this.output.write({ version: V, type: "error", code: "query_ended", message: "Claude Code ended the session" });
     } catch (error) {
-      if (!this.closing) await this.output.write({ version: V, type: "error", code: "sdk_error", message: error instanceof Error ? error.message : String(error) });
+      await this.claiming;
+      if (!this.closing && this.query === query) await this.output.write({ version: V, type: "error", code: "sdk_error", message: error instanceof Error ? error.message : String(error) });
     } finally {
       if (this.query === query) { this.query = undefined; this.prompts = undefined; }
     }

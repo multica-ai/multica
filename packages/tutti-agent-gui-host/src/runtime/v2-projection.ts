@@ -107,8 +107,12 @@ function projectItem(item: V2Item, turn: V2Turn, finalText: boolean, locale: "en
         // The turn's last answer settles it once the turn has ended.
         semantics: { userVisibleAssistantResponse: true, turnSettling: finalText && turn.status !== "running" },
       };
-    case "reasoning":
-      return { messageId: item.id, kind: "reasoning", payload: { content: text(state.text) } };
+    case "reasoning": {
+      const running = item.status === "in_progress" && turn.status === "running";
+      // The transcript drops a reasoning row without text, and summaries can be off entirely.
+      const pending = running ? (locale === "zh-CN" ? "思考中" : "Thinking") : "";
+      return { messageId: item.id, kind: "reasoning", ...(running ? { status } : {}), payload: { content: text(state.text) || pending } };
+    }
     case "error":
       return { messageId: item.id, kind: "error", payload: { content: errorMessage(state.error) } };
     case "compaction": {

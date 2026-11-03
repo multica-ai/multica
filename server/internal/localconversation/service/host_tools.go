@@ -29,8 +29,9 @@ const maxLogExports = 20
 
 var logConversationID = regexp.MustCompile(`^[\w:.-]{1,160}$`)
 
-// developerLogTool exports diagnostics through Desktop, where the
-// renderer logs and timings live. Each request_id exports once.
+// developerLogTool exports diagnostics through the executing device's
+// Desktop: another device's Desktop would describe the wrong machine. Each
+// request_id exports once.
 func (s *Service) developerLogTool(conv sqlitedb.Conversation) contextmcp.Tool {
 	var mu sync.Mutex
 	exports := map[string]*sideWrite{}
@@ -79,7 +80,7 @@ func (s *Service) developerLogTool(conv sqlitedb.Conversation) contextmcp.Tool {
 				prior = &sideWrite{input: string(fingerprint), done: make(chan struct{})}
 				exports[in.RequestID] = prior
 				mu.Unlock()
-				raw, err := s.askHost(ctx, conv.ScopeID, conv.ID, "developer_logs.export", query)
+				raw, err := s.askLocalHost(ctx, conv.ScopeID, conv.ID, "developer_logs.export", query)
 				var value any
 				_ = json.Unmarshal(raw, &value)
 				prior.value, prior.err = contextmcp.Result{Value: value}, err

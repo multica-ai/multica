@@ -1,79 +1,18 @@
+import { localTimingFailure, parseLocalTiming, type LocalTimingFailure, type LocalTimingIdentity, type LocalTimingOutcome, type LocalTimingRecord, type LocalTimingStage } from "@multica/core/local-conversation/timing";
+
+export * from "@multica/core/local-conversation/timing";
+
 /** Diagnostics contain identifiers and timings only, never prompts or provider payloads. */
 export const LOCAL_TIMING_PREFIX = "[local-turn-timing] ";
-export const LOCAL_TIMING_STAGES = [
-  "gui.submit", "gui.first_output_applied", "gui.terminal_applied", "renderer.request", "renderer.first_output_received", "main.request",
-  "queue.dispatch", "queue.context", "turn.persist", "turn.execute", "turn.result", "attachments.resolve",
-  "context.prepare", "context.credentials", "context.mcp", "provider.lookup", "provider.config",
-  "provider.spawn", "provider.sdk_ready", "provider.refresh", "provider.input_written", "provider.input_yielded",
-  "provider.pool_admission", "provider.pool_wait", "provider.pool_create", "provider.pool_reused", "provider.bridge", "provider.handshake",
-  "provider.thread_wait", "provider.thread_ready", "provider.turn_start", "provider.thread_unload",
-  "provider.first_stdout", "provider.first_stderr", "provider.first_event", "provider.session_ready",
-  "provider.first_output", "provider.first_text", "provider.tool", "provider.result", "provider.exit", "provider.failure", "provider.retry",
-  "title.generate", "title.persist", "user.question", "images.save", "context.dispose", "images.recover", "turn.save", "turn.finished",
-] as const;
-export type LocalTimingStage = typeof LOCAL_TIMING_STAGES[number];
-export type LocalTimingOutcome = "completed" | "failed" | "cancelled";
-export type LocalTimingFailure = "rate_limit" | "authentication" | "transport" | "cancelled" | "other";
-export function localTimingFailure(error: unknown): LocalTimingFailure {
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  if (/429|rate.?limit|insufficient|quota|余额不足/i.test(message)) return "rate_limit";
-  if (/401|403|unauthorized|authentication|not signed in/i.test(message)) return "authentication";
-  if (/abort|cancel/i.test(message)) return "cancelled";
-  if (/websocket|disconnect|ECONN|ETIMEDOUT|fetch failed|timeout|timed out/i.test(message)) return "transport";
-  return "other";
-}
-export interface LocalTimingIdentity {
-  source: "main" | "renderer" | "gui";
-  background?: boolean;
-  conversationId: string;
-  requestId?: string;
-  turnId?: string;
-  provider?: "codex" | "claude";
-}
-export interface LocalTimingRecord extends LocalTimingIdentity {
-  version: 1;
-  at: string;
-  stage: LocalTimingStage;
-  event: "start" | "end" | "mark" | "wait";
-  elapsedMs: number;
-  durationMs?: number;
-  idleMs?: number;
-  outcome?: LocalTimingOutcome;
-  failure?: LocalTimingFailure;
-}
 export type LocalTimingSink = (record: LocalTimingRecord) => void;
-
-/** Rebuild the allowlisted shape even for console records originating in another frame. */
-export function parseLocalTiming(value: unknown): LocalTimingRecord | null {
-  if (!value || typeof value !== "object") return null;
-  const raw = value as Record<string, unknown>;
-  const id = (v: unknown) => typeof v === "string" && /^[\w:.-]{1,160}$/.test(v);
-  const ms = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
-  if (raw.version !== 1 || !["main", "renderer", "gui"].includes(String(raw.source)) || !id(raw.conversationId)
-    || !LOCAL_TIMING_STAGES.includes(raw.stage as LocalTimingStage) || !["start", "end", "mark", "wait"].includes(String(raw.event))
-    || typeof raw.at !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(raw.at) || !Number.isFinite(Date.parse(raw.at)) || !ms(raw.elapsedMs)) return null;
-  if ((raw.requestId !== undefined && !id(raw.requestId)) || (raw.turnId !== undefined && !id(raw.turnId))) return null;
-  const result: LocalTimingRecord = {
-    version: 1, source: raw.source as LocalTimingIdentity["source"], conversationId: raw.conversationId as string,
-    at: raw.at, stage: raw.stage as LocalTimingStage, event: raw.event as LocalTimingRecord["event"], elapsedMs: raw.elapsedMs as number,
-  };
-  if (raw.background === true) result.background = true;
-  if (raw.requestId !== undefined) result.requestId = raw.requestId as string;
-  if (raw.turnId !== undefined) result.turnId = raw.turnId as string;
-  if (raw.provider === "codex" || raw.provider === "claude") result.provider = raw.provider;
-  if (ms(raw.durationMs)) result.durationMs = raw.durationMs as number;
-  if (ms(raw.idleMs)) result.idleMs = raw.idleMs as number;
-  if (["completed", "failed", "cancelled"].includes(String(raw.outcome))) result.outcome = raw.outcome as LocalTimingOutcome;
-  if (["rate_limit", "authentication", "transport", "cancelled", "other"].includes(String(raw.failure))) result.failure = raw.failure as LocalTimingFailure;
-  return result;
-}
 
 export const consoleLocalTiming: LocalTimingSink = (record) => {
   console.info(LOCAL_TIMING_PREFIX + JSON.stringify(record));
 };
 
-export function createLocalTiming(identity: LocalTimingIdentity, sink: LocalTimingSink = consoleLocalTiming) {
-  const start = performance.now();
+/** `startedAt` dates the span back to a wall-clock moment before its conversation was known. */
+export function createLocalTiming(identity: LocalTimingIdentity, sink: LocalTimingSink = consoleLocalTiming, startedAt?: number) {
+  const start = performance.now() - (startedAt === undefined ? 0 : Date.now() - startedAt);
   const seen = new Set<LocalTimingStage>();
   const tools = new Map<string, number>();
   const active: { stage: LocalTimingStage }[] = [];
@@ -84,7 +23,7 @@ export function createLocalTiming(identity: LocalTimingIdentity, sink: LocalTimi
   const write = (stage: LocalTimingStage, event: LocalTimingRecord["event"], extra: Partial<Pick<LocalTimingRecord, "durationMs" | "idleMs" | "outcome" | "failure">> = {}, background = false) => {
     if (closed && !background) return;
     try {
-      const record = parseLocalTiming({ ...identity, version: 1, at: new Date().toISOString(), stage, event, elapsedMs: Math.round(performance.now() - start), ...(background ? { background: true } : {}), ...extra });
+      const record = parseLocalTiming({ ...identity, version: 2, at: new Date().toISOString(), stage, event, elapsedMs: Math.round(performance.now() - start), ...(background ? { background: true } : {}), ...extra });
       if (record) sink(record);
     }
     catch { /* Diagnostics must not change execution or delivery. */ }
@@ -104,6 +43,13 @@ export function createLocalTiming(identity: LocalTimingIdentity, sink: LocalTimi
     }
   };
   return {
+    markStart(stage: LocalTimingStage) {
+      try {
+        const record = parseLocalTiming({ ...identity, version: 2, at: new Date(startedAt ?? Date.now()).toISOString(), stage, event: "mark", elapsedMs: 0 });
+        if (record) sink(record);
+      }
+      catch { /* Diagnostics must not change execution or delivery. */ }
+    },
     mark(stage: LocalTimingStage, extra?: Partial<Pick<LocalTimingRecord, "durationMs" | "outcome" | "failure">>) {
       phase = stage; lastActivity = performance.now(); write(stage, "mark", extra);
     },
@@ -135,20 +81,47 @@ export function createLocalTiming(identity: LocalTimingIdentity, sink: LocalTimi
 }
 export type LocalTiming = ReturnType<typeof createLocalTiming>;
 
+/** One attempt at sending a message: a retry keeps its request id and counts as another attempt. */
+export function createLocalSendTiming(sink: LocalTimingSink = consoleLocalTiming) {
+  const attempts = new Map<string, number>();
+  return {
+    begin(conversationId: string, requestId: string, startedAt: number): LocalTiming {
+      const attempt = (attempts.get(requestId) ?? 0) + 1;
+      attempts.set(requestId, attempt);
+      if (attempts.size > 512) attempts.delete(attempts.keys().next().value!);
+      const timing = createLocalTiming({ source: "gui", clientKind: "desktop", conversationId, requestId, attempt }, sink, startedAt);
+      timing.markStart("client.send");
+      // The engine shows the pending message before this runs, so the next frame paints it.
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => timing.mark("client.pending_shown"));
+      return timing;
+    },
+  };
+}
+
 /** Observe live turns only. Loading old history must not look like a new reply. */
 export function createLocalPresentationTiming(sink: LocalTimingSink = consoleLocalTiming) {
-  const turns = new Map<string, { timing: LocalTiming; output: boolean; terminal: boolean }>();
+  interface Turn { timing: LocalTiming; received: boolean; output: boolean; terminal: boolean }
+  const turns = new Map<string, Turn>();
+  const open = (conversationId: string, turnId: string): Turn => {
+    let turn = turns.get(turnId);
+    if (!turn) {
+      turn = { timing: createLocalTiming({ source: "gui", clientKind: "desktop", conversationId, turnId }, sink), received: false, output: false, terminal: false };
+      turns.set(turnId, turn);
+      if (turns.size > 512) turns.delete(turns.keys().next().value!);
+    }
+    return turn;
+  };
   return {
+    /** An event carrying model output reached this client; only live delivery calls this, never a history read. */
+    received(conversationId: string, turnId: string) {
+      const turn = open(conversationId, turnId);
+      if (!turn.received) { turn.received = true; turn.timing.mark("client.first_event_received"); }
+    },
     applied(conversationId: string, turnId: string, hasOutput: boolean, terminal: boolean) {
-      let turn = turns.get(turnId);
-      if (!turn && terminal) return;
-      if (!turn) {
-        turn = { timing: createLocalTiming({ source: "gui", conversationId, turnId }, sink), output: false, terminal: false };
-        turns.set(turnId, turn);
-        if (turns.size > 512) turns.delete(turns.keys().next().value!);
-      }
-      if (hasOutput && !turn.output) { turn.output = true; turn.timing.mark("gui.first_output_applied"); }
-      if (terminal && !turn.terminal) { turn.terminal = true; turn.timing.mark("gui.terminal_applied"); }
+      if (!turns.has(turnId) && terminal) return;
+      const turn = open(conversationId, turnId);
+      if (hasOutput && !turn.output) { turn.output = true; turn.timing.mark("client.first_event_applied"); }
+      if (terminal && !turn.terminal) { turn.terminal = true; turn.timing.mark("client.terminal_applied"); }
     },
   };
 }
