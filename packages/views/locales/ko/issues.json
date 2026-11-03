@@ -178,6 +178,8 @@
     "relation_my_agents": "내 에이전트가 담당",
     "section_agent_status": "에이전트 상태",
     "agent_status_running": "실행 중",
+    "section_read_state": "읽음 상태",
+    "read_state_unread": "읽지 않음",
     "operator_label": "조건",
     "operator_is": "일치",
     "operator_is_not": "제외",

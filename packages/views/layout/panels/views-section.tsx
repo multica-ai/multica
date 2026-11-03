@@ -24,11 +24,13 @@ import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
   builtinSidebarSource,
+  viewSidebarNeedsUnread,
   viewSidebarRequest,
   viewSidebarSource,
   type SidebarIssuesRequest,
 } from "@multica/core/issues/sidebar-list";
 import { todayDateOnly } from "@multica/core/issues/date";
+import { useIssueUnreadIds } from "@multica/core/issues/unread";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -416,7 +418,10 @@ function SavedViewRow({
   const source = viewSidebarSource(view.id);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
-  const request = viewSidebarRequest(view, todayDateOnly());
+  const needsUnread = viewSidebarNeedsUnread(view);
+  const unreadIssueIds = useIssueUnreadIds(wsId, needsUnread);
+  const request =
+    needsUnread && !unreadIssueIds ? undefined : viewSidebarRequest(view, todayDateOnly(), unreadIssueIds);
   const prefetch = usePrefetch(wsId, source, request);
   const canManage = actions.canManage(view);
 

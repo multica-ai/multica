@@ -180,6 +180,8 @@
     "relation_my_agents": "Assigned to my agents",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
+    "section_read_state": "Read state",
+    "read_state_unread": "Unread",
     "operator_label": "Match",
     "operator_is": "is",
     "operator_is_not": "is not",

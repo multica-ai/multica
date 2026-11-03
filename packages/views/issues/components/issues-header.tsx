@@ -12,6 +12,7 @@ import {
   CircleDot,
   CircleUser,
   Columns3,
+  Eye,
   Filter,
   FolderKanban,
   FolderMinus,
@@ -166,6 +167,7 @@ function getActiveFilterCount(
     advancedFilter?: AdvancedFilterGroup | null;
     dateFilter?: IssueDateFilter | null;
     agentRunningFilter?: boolean;
+    unreadFilter?: boolean;
   },
   // Inside a saved view only the user's additions on top of the view's own
   // query count — the baseline is the view, not "active filtering".
@@ -213,6 +215,7 @@ function getActiveFilterCount(
   }
   if (state.dateFilter) count++;
   if (state.agentRunningFilter && !baseline?.agentRunning) count++;
+  if (state.unreadFilter && !baseline?.unread) count++;
   return count;
 }
 
@@ -1047,6 +1050,7 @@ export function IssueFilterMenu({
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const unreadFilter = useViewStore((s) => s.unreadFilter);
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const advancedMode = advancedFilter !== null;
@@ -1101,6 +1105,7 @@ export function IssueFilterMenu({
         advancedFilter,
         dateFilter: showDateFilter ? dateFilter : null,
         agentRunningFilter,
+        unreadFilter,
       },
       viewBaseline,
     ) > 0;
@@ -1131,6 +1136,8 @@ export function IssueFilterMenu({
       ? t(($) => $.filters.section_date)
       : key === "agentRunning"
         ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)}`
+        : key === "unread"
+          ? `${t(($) => $.filters.section_read_state)} ${t(($) => $.filters.read_state_unread)}`
         : key.startsWith("property:")
           ? filterableProperties.find((p) => `property:${p.id}` === key)?.name ?? ""
           : fieldLabels[key as NegatableFilterDimension] ?? "";
@@ -1212,6 +1219,32 @@ export function IssueFilterMenu({
                   <HoverCheck checked={agentRunningFilter} />
                   <Activity className="size-3.5 text-muted-foreground" />
                   {t(($) => $.filters.agent_status_running)}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            )}
+
+            {/* Read state */}
+            {show("unread") && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Eye className="size-3.5" />
+                <span className="flex-1">{t(($) => $.filters.section_read_state)}</span>
+                {triggerValue("unread")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-44">
+                <DropdownMenuCheckboxItem
+                  checked={unreadFilter}
+                  disabled={viewBaseline?.unread === true}
+                  title={viewBaseline?.unread === true ? fixedTitle : undefined}
+                  onCheckedChange={() => act.toggleUnreadFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={unreadFilter} />
+                  <span className="flex size-3.5 items-center justify-center">
+                    <span className="size-1.5 rounded-full bg-brand" />
+                  </span>
+                  {t(($) => $.filters.read_state_unread)}
                 </DropdownMenuCheckboxItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1544,6 +1577,7 @@ export function IssueFilterMenu({
   const sectionKeys = [
     ...searchFields.filter((field) => field !== "relation" || showRelation),
     "agentRunning",
+    "unread",
     ...(showDateFilter ? ["date"] : []),
     ...filterableProperties.map((p) => `property:${p.id}`),
   ];
@@ -1801,6 +1835,7 @@ export function IssueDisplayControls({
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const unreadFilter = useViewStore((s) => s.unreadFilter);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -1882,6 +1917,7 @@ export function IssueDisplayControls({
       advancedFilter,
       dateFilter: showDateFilter ? dateFilter : null,
       agentRunningFilter,
+      unreadFilter,
     },
     viewBaseline,
   );

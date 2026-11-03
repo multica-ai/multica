@@ -41,6 +41,15 @@ export function useIssueUnread(wsId: string, issueId: string): IssueUnread | nul
   return data;
 }
 
+const selectUnreadIssueIds = (items: IssueUnread[]) => items.map((item) => item.issue_id);
+
+/** The ids of the viewer's unread issues, or `undefined` until the list
+ *  loads (or while `enabled` is false). */
+export function useIssueUnreadIds(wsId: string, enabled = true): string[] | undefined {
+  const { data } = useQuery({ ...issueUnreadOptions(wsId), select: selectUnreadIssueIds, enabled: enabled && !!wsId });
+  return data;
+}
+
 function useSetIssueUnread(wsId: string, unread: boolean) {
   const qc = useQueryClient();
   const key = issueUnreadKeys.all(wsId);

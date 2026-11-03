@@ -178,6 +178,8 @@
     "relation_my_agents": "分配给我的智能体的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "section_read_state": "阅读状态",
+    "read_state_unread": "未读",
     "operator_label": "关系",
     "operator_is": "是",
     "operator_is_not": "不是",
