@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -8,11 +8,13 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, InboxSection } from "@multica/core/types";
+import { isInboxItemUnread } from "@multica/core/inbox/section";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/ui/header";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
@@ -29,9 +31,10 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
+import { useInboxUnreadCount } from "@/lib/unread-counts";
 import {
-  deduplicateInboxItems,
   getInboxNavigationTarget,
+  groupInboxItemsBySection,
 } from "@/lib/inbox-display";
 
 export default function Inbox() {
@@ -42,12 +45,15 @@ export default function Inbox() {
   const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
     inboxListOptions(wsId),
   );
-  // Dedup + drop archived to match web/desktop. See CLAUDE.md
-  // "Behavioral parity" → inbox dedup incident.
-  const data = useMemo(
-    () => deduplicateInboxItems(rawItems ?? []),
+  // Dedup + drop archived to match web/desktop, split into the same two
+  // sections. See CLAUDE.md "Behavioral parity" → inbox dedup incident.
+  const [section, setSection] = useState<InboxSection>("action");
+  const sections = useMemo(
+    () => groupInboxItemsBySection(rawItems ?? []),
     [rawItems],
   );
+  const data = sections[section];
+  const unreadCount = useInboxUnreadCount(wsId);
   const markRead = useMarkInboxRead();
   const markAllRead = useMarkAllInboxRead();
   const archive = useArchiveInbox();
@@ -56,7 +62,7 @@ export default function Inbox() {
   const archiveCompleted = useArchiveCompletedInbox();
 
   const onPressItem = useCallback((item: InboxItem) => {
-    if (!item.read) {
+    if (isInboxItemUnread(item)) {
       // Optimistic read flip lives in useMarkInboxRead.onMutate — fires
       // setQueryData synchronously before the cancelQueries await, so the
       // row is already styled "read" by the time iOS captures the source
@@ -123,6 +129,24 @@ export default function Inbox() {
           </>
         }
       />
+      <View className="px-4 pb-2">
+        <Tabs
+          value={section}
+          onValueChange={(value) => setSection(value as InboxSection)}
+        >
+          <TabsList className="w-full">
+            <TabsTrigger value="action" className="flex-1">
+              <Text>{t("sections.action")}</Text>
+              {unreadCount > 0 ? (
+                <Text className="text-xs text-brand">{unreadCount}</Text>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="activity" className="flex-1">
+              <Text>{t("sections.activity")}</Text>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </View>
       {isLoading ? (
         <InboxLoading />
       ) : error ? (
@@ -137,7 +161,10 @@ export default function Inbox() {
           </Button>
         </View>
       ) : !data || data.length === 0 ? (
-        <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
+        <InboxEmpty
+          section={section}
+          iconColor={THEME[colorScheme].mutedForeground}
+        />
       ) : (
         <FlatList
           data={data}
@@ -180,17 +207,27 @@ function InboxLoading() {
   );
 }
 
-function InboxEmpty({ iconColor }: { iconColor: string }) {
+function InboxEmpty({
+  section,
+  iconColor,
+}: {
+  section: InboxSection;
+  iconColor: string;
+}) {
   const { t } = useT("inbox");
 
   return (
     <View className="flex-1 items-center justify-center px-8 gap-3">
       <Ionicons name="mail-open-outline" size={42} color={iconColor} />
       <Text className="text-base font-medium text-foreground text-center">
-        {t("empty.title")}
+        {section === "activity"
+          ? t("sections.activity_empty")
+          : t("empty.title")}
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        {t("empty.body")}
+        {section === "activity"
+          ? t("sections.activity_empty_body")
+          : t("empty.body")}
       </Text>
     </View>
   );

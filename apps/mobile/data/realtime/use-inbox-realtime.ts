@@ -25,6 +25,7 @@
  * no replay buffer in v1).
  */
 import { useQueryClient } from "@tanstack/react-query";
+import { inboxItemSection } from "@multica/core/inbox/section";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   dropInboxItemsByIssue,
@@ -48,7 +49,13 @@ export function useInboxRealtime() {
 
       return [
         // Inbox-domain events: refetch the inbox list and the badge count.
-        ws.on("inbox:new", invalidate),
+        // Activity never counts as unread, so it cannot move the badge.
+        ws.on("inbox:new", (payload) => {
+          void refreshInboxList(qc, wsId);
+          if (inboxItemSection(payload.item) !== "activity") {
+            void refreshInboxUnreadSummary(qc);
+          }
+        }),
         ws.on("inbox:read", invalidate),
         // Mobile has no mark-unread affordance yet (web/desktop right-click
         // only), but a mark-unread there must un-read the row here too —
