@@ -182,5 +182,14 @@
   "object_page": {
     "toggle_panel": "Afficher ou masquer le panneau de droite",
     "properties": "Propriétés"
+  },
+  "feature_intro": {
+    "read_docs": "Lire la documentation",
+    "carousel": "carrousel",
+    "slide": "diapositive",
+    "slide_position": "{{current}} sur {{total}}",
+    "go_to_slide": "Aller à la diapositive {{index}}",
+    "previous": "Précédent",
+    "next": "Suivant"
   }
 }

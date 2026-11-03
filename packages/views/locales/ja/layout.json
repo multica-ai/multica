@@ -175,5 +175,14 @@
   "object_page": {
     "toggle_panel": "右サイドバーを切り替え",
     "properties": "プロパティ"
+  },
+  "feature_intro": {
+    "read_docs": "ドキュメントを読む",
+    "carousel": "カルーセル",
+    "slide": "スライド",
+    "slide_position": "{{total}} 枚中 {{current}} 枚目",
+    "go_to_slide": "{{index}} 枚目に移動",
+    "previous": "前へ",
+    "next": "次へ"
   }
 }
