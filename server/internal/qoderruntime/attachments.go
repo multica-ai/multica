@@ -28,7 +28,7 @@ type attachment struct {
 }
 
 const (
-	// Qoder's file upload accepts about 5 MB of text.
+	// Qoder's file upload accepts about 5 MB per file.
 	maxAttachmentFileBytes = 5 << 20
 	// Qoder echoes the submitted message in the send response and in the event
 	// list, and the bridge reads at most 8 MiB per response. Keep the encoded
@@ -42,26 +42,11 @@ const (
 
 var imageMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
 
-var textMediaTypes = map[string]bool{"application/json": true, "application/xml": true, "application/javascript": true, "application/x-yaml": true, "application/x-toml": true}
-
-// Extensions Qoder's file upload accepts when the stored MIME type is generic.
-var textExtensions = map[string]bool{}
-
-func init() {
-	for _, ext := range strings.Fields(".txt .md .csv .json .xml .yaml .yml .toml .ini .conf .cfg .env .log .html .htm .css .scss .less .js .jsx .ts .tsx .vue .svelte .py .go .rs .java .kt .scala .c .cpp .cc .h .hpp .rb .php .swift .r .lua .pl .sh .bash .zsh .fish .ps1 .sql .graphql .gql .proto .dockerfile .makefile .gitignore .editorconfig .eslintrc .prettierrc .tex .rst .adoc .org .svg") {
-		textExtensions[ext] = true
-	}
-}
-
-func isTextAttachment(a attachment) bool {
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
-	return strings.HasPrefix(mediaType, "text/") || textMediaTypes[mediaType] || textExtensions[strings.ToLower(path.Ext(a.Filename))]
-}
-
-// attachFiles hands issue or chat attachments to the Qoder session: text files
-// are uploaded through Qoder Files and mounted under mountDir, and images are
-// sent as image blocks with the task message. Other files are listed in the
-// prompt under heading as unavailable so the agent knows they exist.
+// attachFiles hands issue or chat attachments to the Qoder session: images are
+// sent as image blocks with the task message, and other files are uploaded
+// through Qoder Files and mounted under mountDir. Files that cannot be handed
+// over are listed in the prompt under heading as unavailable so the agent
+// knows they exist.
 func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDir string, attachments []attachment, r *run, p *strings.Builder) error {
 	if len(attachments) == 0 {
 		return nil
@@ -97,7 +82,7 @@ func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDi
 			imageEncoded += len(encoded)
 			r.Images = append(r.Images, map[string]string{"type": "base64", "media_type": mediaType, "data": encoded})
 			images = append(images, name)
-		case isTextAttachment(a):
+		default:
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentFileBytes)
 			if errors.Is(err, errTooLarge) {
 				skipped = append(skipped, name+" (file too large)")
@@ -123,8 +108,6 @@ func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDi
 			mountPath := mountDir + name
 			r.Files = append(r.Files, map[string]any{"type": "file", "file_id": file.ID, "mount_path": mountPath})
 			mounted = append(mounted, mountPath)
-		default:
-			skipped = append(skipped, name+" (unsupported file type)")
 		}
 	}
 	fmt.Fprintf(p, "\n%s:\n", heading)

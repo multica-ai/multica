@@ -96,6 +96,7 @@ type harness struct {
 	issueGet                string
 	downloads               map[string]string
 	uploads                 map[string]string
+	rejectUploads           map[string]int
 	sessionResources        []map[string]any
 	sentContent             []map[string]any
 	usage                   []map[string]any
@@ -254,6 +255,11 @@ func setup(t *testing.T) *harness {
 			data, _ := io.ReadAll(file)
 			if r.FormValue("name") != header.Filename {
 				t.Error("upload name mismatch")
+			}
+			if status := h.rejectUploads[header.Filename]; status != 0 {
+				w.WriteHeader(status)
+				io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"unsupported file"}}`)
+				return
 			}
 			if h.uploads == nil {
 				h.uploads = map[string]string{}
@@ -440,10 +446,10 @@ func TestIssueAttachmentsReachSession(t *testing.T) {
 	if h.failure != nil || h.sends != 1 {
 		t.Fatalf("run failed: %#v", h.failure)
 	}
-	if h.uploads["notes.md"] != "hello" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 2 {
+	if h.uploads["notes.md"] != "hello" || h.uploads["spec.pdf"] != "%PDF" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 3 {
 		t.Fatalf("uploads: %#v", h.uploads)
 	}
-	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/notes-2.md"}
+	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/spec.pdf", "file_3 /data/attachments/notes-2.md"}
 	var got []string
 	for _, res := range h.sessionResources {
 		if res["type"] == "file" {
@@ -460,7 +466,7 @@ func TestIssueAttachmentsReachSession(t *testing.T) {
 	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte(screen)) {
 		t.Fatalf("image source: %#v", source)
 	}
-	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
+	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "/data/attachments/spec.pdf (mounted file)", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
 		if !strings.Contains(h.prompt, s) {
 			t.Fatalf("prompt missing %q: %s", s, h.prompt)
 		}
@@ -640,7 +646,9 @@ func TestChatAttachmentsReachSession(t *testing.T) {
 		[3]string{"notes.md", "text/markdown", "hello"},
 		[3]string{"screen.png", "image/png", screen},
 		[3]string{"report.pdf", "application/pdf", "%PDF"},
+		[3]string{"setup.exe", "application/octet-stream", "MZ"},
 		[3]string{"old.txt", "text/plain", ""})
+	h.rejectUploads = map[string]int{"setup.exe": 400}
 	ctx := context.Background()
 	if err := h.b.step(ctx); err != nil {
 		t.Fatal(err)
@@ -648,16 +656,16 @@ func TestChatAttachmentsReachSession(t *testing.T) {
 	if h.failure != nil || h.sends != 1 {
 		t.Fatalf("run failed: %#v", h.failure)
 	}
-	if h.uploads["notes.md"] != "hello" || len(h.uploads) != 1 {
+	if h.uploads["notes.md"] != "hello" || h.uploads["report.pdf"] != "%PDF" || len(h.uploads) != 2 {
 		t.Fatalf("uploads: %#v", h.uploads)
 	}
-	if len(h.sessionResources) != 1 || h.sessionResources[0]["mount_path"] != "/data/attachments/task-1/notes.md" {
+	if len(h.sessionResources) != 2 || h.sessionResources[0]["mount_path"] != "/data/attachments/task-1/notes.md" || h.sessionResources[1]["mount_path"] != "/data/attachments/task-1/report.pdf" {
 		t.Fatalf("mounted resources: %v", h.sessionResources)
 	}
 	if len(h.sentContent) != 2 || h.sentContent[1]["type"] != "image" {
 		t.Fatalf("message content: %#v", h.sentContent)
 	}
-	for _, s := range []string{"What is in these?", "Message attachments:", "/data/attachments/task-1/notes.md (mounted file)", "screen.png (image attached", "report.pdf (unsupported file type): not available", "old.txt (deleted): not available"} {
+	for _, s := range []string{"What is in these?", "Message attachments:", "/data/attachments/task-1/notes.md (mounted file)", "screen.png (image attached", "/data/attachments/task-1/report.pdf (mounted file)", "setup.exe (rejected by Qoder Files): not available", "old.txt (deleted): not available"} {
 		if !strings.Contains(h.prompt, s) {
 			t.Fatalf("prompt missing %q: %s", s, h.prompt)
 		}
