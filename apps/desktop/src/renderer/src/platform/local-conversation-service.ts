@@ -12,6 +12,8 @@ import { isAutomaticLocalDirectory } from "@multica/tutti-agent-gui-host/local-p
 import { projectForDirectory } from "./local-conversation-projects";
 import { blobBase64 } from "./local-preview-file";
 import { localV2, type LocalV2ScopeClient } from "./local-v2";
+import { createLocalV2SnapshotStore, type LocalV2SnapshotStore } from "./local-v2-snapshot-store";
+import { createLocalV2Uploads } from "./local-v2-uploads";
 
 /** Query keys of a device's conversations; deviceId is "local" or another device's peer ID. */
 export const localConversationKey = (scope: LocalV2Scope, deviceId = "local") => ["local-conversations", deviceId, scope.userId, scope.workspaceId] as const;
@@ -38,18 +40,6 @@ function projectQueue(raw: unknown): LocalPromptQueue {
     ...(queue.dispatching_request_id ? { dispatchingRequestId: queue.dispatching_request_id } : {}), items: (queue.items ?? []) as LocalQueuedPrompt[] };
 }
 
-/** The text of a conversation as quoted context: user messages and answers. */
-function conversationText(snapshot: LocalV2Snapshot): string {
-  const lines: string[] = [];
-  for (const turn of snapshot.turns) {
-    for (const message of turn.messages) lines.push(`${message.role}: ${message.content}`);
-    for (const event of turn.events) {
-      if (event.type === "item.completed" && event.payload.kind === "assistant_text" && typeof event.payload.text === "string") lines.push(`assistant: ${event.payload.text}`);
-    }
-  }
-  return lines.join("\n");
-}
-
 export function createLocalConversationParentService(options: ParentServiceOptions & {
   onLocalSelect(id: string | null, provider?: LocalProviderId): void;
   getSelectionIntent?: () => string;
@@ -59,11 +49,16 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   onLocateSource?: (sessionId: string, turnId?: string, quote?: string) => void;
   storagePrefix?: string;
   locale?: string;
+  snapshotStore?: LocalV2SnapshotStore;
 }, transport: LocalV2Transport): ReturnType<typeof createAgentGuiParentService> {
   const storage = options.storage ?? defaultStorage;
   const usageStorageKey = `multica:local-agent-mentions:v1:${JSON.stringify([api.getBaseUrl(), options.userId, options.workspaceId])}`;
   const scope: LocalV2Scope = { userId: options.userId, workspaceId: options.workspaceId };
   const client: LocalV2ScopeClient = localV2(transport, scope);
+  const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
+  // Only another device's conversations cost anything to read.
+  const snapshots: LocalV2SnapshotStore | null = deviceId === "local" ? null : options.snapshotStore ?? createLocalV2SnapshotStore();
+  const snapshotKey = (id: string) => JSON.stringify([deviceId, scope.userId, scope.workspaceId, id]);
   const cloud = createAgentGuiParentService(options);
   const listeners = new Set<(event: AgentGuiHostEvent) => void>();
   const subscriptions = new Map<string, () => void>();
@@ -82,6 +77,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     }
     return cloudState;
   };
+  const uploads = createLocalV2Uploads(client, () => transport.capabilities?.() ?? Promise.resolve([]), (outcome) => publish({ type: "attachment.upload", ...outcome }));
   const conversationPath = (id: string, suffix = "") => `/sessions/${encodeURIComponent(id)}${suffix}`;
   const received = (raw: unknown) => {
     const summary = localV2SummarySchema.parse(raw);
@@ -89,6 +85,11 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     return projectLocalSession(summary, scope);
   };
   const command = async (id: string, body: Record<string, unknown>) => { assertCurrent(); return client.command(id, body); };
+  const fileLocation = (path: string) => {
+    const url = client.fileUrl(path);
+    if (!url) throw new Error("daemon_offline: The local daemon is not reachable yet");
+    return url;
+  };
   const fileData = async (path: string) => {
     const response = await fetch(client.fileUrl(path));
     if (!response.ok) throw new Error(`Local file request failed (HTTP ${response.status})`);
@@ -117,10 +118,15 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   async function detail(id: string): Promise<{ detail: AgentGuiSessionDetail; snapshot: LocalV2Snapshot }> {
     const snapshot = await client.snapshot(id); assertCurrent();
     client.receiveSummary(snapshot.conversation);
+    void snapshots?.write(snapshotKey(id), snapshot);
+    return projectDetail(snapshot);
+  }
+
+  function projectDetail(snapshot: LocalV2Snapshot): { detail: AgentGuiSessionDetail; snapshot: LocalV2Snapshot } {
     // The fork's copied turns started before the fork was created; the last one is where it branched.
     const branched = snapshot.turns.filter((turn) => Date.parse(turn.started_at) <= Date.parse(snapshot.created_at)).at(-1);
     const forked = snapshot.forked_from_id && snapshot.forked_from_turn_id
-      ? { forkedFrom: { sessionId: snapshot.forked_from_id, turnId: snapshot.forked_from_turn_id, targetTurnId: branched?.id ?? "", operationId: id, createdAt: snapshot.created_at } } : {};
+      ? { forkedFrom: { sessionId: snapshot.forked_from_id, turnId: snapshot.forked_from_turn_id, targetTurnId: branched?.id ?? "", operationId: snapshot.conversation.conversation_id, createdAt: snapshot.created_at } } : {};
     return { snapshot, detail: {
       session: projectLocalSession(snapshot.conversation, scope), model: snapshot.settings.model, reasoningEffort: snapshot.settings.reasoning_effort as AgentGuiSessionDetail["reasoningEffort"],
       permissionMode: snapshot.settings.permission_mode as AgentGuiSessionDetail["permissionMode"], promptQueue: projectQueue(snapshot.queue),
@@ -133,9 +139,10 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     for (const reference of references) {
       if (isTaskCreationReference(reference)) continue;
       if (reference.kind === "session") {
-        const snapshot = await client.snapshot(reference.id);
-        const messages = conversationText(snapshot);
-        excerpts.push(`Multica local conversation ${JSON.stringify(snapshot.conversation.title)} (id: ${reference.id}; workspace: ${scope.workspaceId})\n${messages.slice(-6000)}\n[Conversation snapshot only: saved tool results and attachment contents are not included.${messages.length > 6000 ? " Earlier text omitted." : ""} Use the built-in Multica MCP read_context tool with kind=conversation, source=local and this ID for current messages and pagination.]`);
+        // The provider reads what it needs through its context tools; the
+        // conversation itself never has to cross the device link to be quoted.
+        const title = client.summary(reference.id)?.title;
+        excerpts.push(`Multica local conversation ${title ? `${JSON.stringify(title)} ` : ""}(id: ${reference.id}; workspace: ${scope.workspaceId})\n[Not included here. Read it with read_context(kind="conversation", id=${JSON.stringify(reference.id)}, source="local") when it is relevant.]`);
       } else if (reference.kind === "issue") {
         const issue = await api.getIssue(reference.id); assertCurrent();
         if (issue.workspace_id !== scope.workspaceId) throw new Error("Referenced task is outside this workspace");
@@ -169,6 +176,10 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     switch (method) {
       case "workspace.load": return load();
       case "local.snapshot": return detail(params.sessionId);
+      case "local.storedSnapshot": {
+        const stored = await snapshots?.read(snapshotKey(params.sessionId)); assertCurrent();
+        return stored ? projectDetail(stored) : null;
+      }
       case "session.load": return (await detail(params.sessionId)).detail;
       case "local.subscribe": {
         unsubscribe(params.sessionId);
@@ -294,12 +305,17 @@ export function createLocalConversationParentService(options: ParentServiceOptio
       }
       case "attachment.upload": {
         if (!(params.file instanceof File) || params.file.size > 25 * 1024 * 1024) throw new Error("Invalid file, or file exceeds 25 MB");
-        const uploaded = await client.upload(params.file);
+        const uploaded = params.background ? await uploads.begin(params.file) : { ...await client.upload(params.file), uploading: false };
         const url = client.fileUrl(`/attachments/${uploaded.id}`);
         return { id: uploaded.id, workspace_id: scope.workspaceId, issue_id: null, comment_id: null, chat_session_id: null, chat_message_id: null, uploader_type: "user", uploader_id: scope.userId,
-          filename: uploaded.name, content_type: uploaded.mime_type, size_bytes: uploaded.size, url, download_url: url, markdown_url: url, created_at: new Date().toISOString() } satisfies Attachment;
+          filename: uploaded.name, content_type: uploaded.mime_type, size_bytes: uploaded.size, url, download_url: url, markdown_url: url, created_at: new Date().toISOString(), uploading: uploaded.uploading } satisfies Attachment & { uploading: boolean };
       }
+      case "attachment.cancel": await uploads.cancel(params.attachmentId); return undefined;
+      case "attachment.retry": uploads.retry(params.attachmentId); return undefined;
+      case "attachment.forget": uploads.forget(params.attachmentId); return undefined;
+      case "attachment.url": return { url: fileLocation(`/attachments/${encodeURIComponent(params.attachmentId)}`) };
       case "attachment.read": return fileData(`/attachments/${encodeURIComponent(params.attachmentId)}`);
+      case "image.url": return { url: fileLocation(`${conversationPath(params.sessionId, "/image")}?path=${encodeURIComponent(params.path)}`) };
       case "image.read": return fileData(`${conversationPath(params.sessionId, "/image")}?path=${encodeURIComponent(params.path)}`);
       default: return cloud.request(method, params as never);
     }
@@ -325,6 +341,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     reconnect: () => { cloudDirty = true; cloud.reconnect(); publish({ type: "invalidate", scope: "workspace" }); },
     dispose: () => {
       disposed = true;
+      uploads.dispose();
       for (const id of [...subscriptions.keys()]) unsubscribe(id);
       if (workspaceTimer) clearTimeout(workspaceTimer);
       unsubscribeSummaries(); unsubscribeCloud(); unsubscribeConnection(); cloud.dispose(); listeners.clear();

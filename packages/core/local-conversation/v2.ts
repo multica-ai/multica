@@ -137,7 +137,7 @@ export interface LocalV2Scope { userId: string; workspaceId: string }
  */
 export interface LocalV2Transport {
   /** A JSON request to `/local/v2{path}`. */
-  request(scope: LocalV2Scope, method: "GET" | "POST", path: string, body?: unknown): Promise<unknown>;
+  request(scope: LocalV2Scope, method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<unknown>;
   /** Sends a client message on the scope's WebSocket. */
   send(scope: LocalV2Scope, message: LocalV2ClientMessage): Promise<void>;
   /** What the daemon behind this transport announces in /hello. */
@@ -148,8 +148,11 @@ export interface LocalV2Transport {
   onConnection(listener: (scope: LocalV2Scope, connected: boolean) => void): () => void;
   /** A URL streaming a daemon file: an attachment, a conversation image or preview content. */
   fileUrl(scope: LocalV2Scope, path: string): string;
-  /** Uploads a message attachment; the result is parsed with localV2UploadSchema. */
-  upload(scope: LocalV2Scope, file: File): Promise<unknown>;
+  /**
+   * Uploads a message attachment; the result is parsed with localV2UploadSchema.
+   * id names the attachment up front on daemons announcing attachment-reserve-v1.
+   */
+  upload(scope: LocalV2Scope, file: File, options?: { id?: string; signal?: AbortSignal }): Promise<unknown>;
   /**
    * Asks the user for a path and applies it; null when cancelled. Paths that
    * widen what the daemon may read come only from the OS picker.

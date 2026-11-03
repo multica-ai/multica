@@ -31,6 +31,10 @@ const V2Version = 2
 // ConversationFocusCapability tells clients they may send conversation.focus.
 const ConversationFocusCapability = "conversation-focus-v1"
 
+// AttachmentReserveCapability says clients may choose attachment ids, link
+// stored content by SHA-256 and discard uploads a draft dropped.
+const AttachmentReserveCapability = "attachment-reserve-v1"
+
 const (
 	v2MaxSubscriptions = 32
 	v2WriteTimeout     = 10 * time.Second
@@ -197,7 +201,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
 		}
-		capabilities = append(capabilities, ConversationFocusCapability)
+		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability)
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
@@ -310,6 +314,14 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		writeJSON(w, http.StatusOK, map[string]any{"name": a.FileName, "mime_type": a.MediaType, "size": a.Size})
 	case path == "/attachments" && r.Method == http.MethodPost:
 		v.upload(w, r, scopeID)
+	case path == "/attachments/link" && r.Method == http.MethodPost:
+		v.linkUpload(w, r, scopeID)
+	case len(parts) == 2 && parts[0] == "attachments" && r.Method == http.MethodDelete:
+		if err := v.svc.DiscardUpload(r.Context(), scopeID, parts[1]); err != nil {
+			writeV2Error(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 2 && parts[0] == "attachments" && r.Method == http.MethodGet:
 		v.attachment(w, r, scopeID, parts[1])
 	case path == "/preview/roots" && r.Method == http.MethodPost:
@@ -1024,6 +1036,8 @@ func writeV2Error(w http.ResponseWriter, err error) {
 		status, code = http.StatusForbidden, "outside_folder"
 	case errors.Is(err, store.ErrUploadTooLarge):
 		status, code = http.StatusRequestEntityTooLarge, "file_too_large"
+	case errors.Is(err, store.ErrAttachmentConflict):
+		status, code = http.StatusConflict, "attachment_conflict"
 	case errors.Is(err, service.ErrDraining) || errors.Is(err, service.ErrClosing):
 		status, code = http.StatusServiceUnavailable, "draining"
 	case errors.Is(err, service.ErrCloudUnavailable):
@@ -1113,7 +1127,8 @@ func (v *V2) directorySource(w http.ResponseWriter, r *http.Request, scopeID int
 }
 
 // upload stores the request body as an attachment. The name travels
-// URL-encoded in X-File-Name and the type in Content-Type.
+// URL-encoded in X-File-Name, the type in Content-Type and an id the client
+// chose, if any, in X-Attachment-ID.
 func (v *V2) upload(w http.ResponseWriter, r *http.Request, scopeID int64) {
 	name, err := url.QueryUnescape(r.Header.Get("X-File-Name"))
 	if err != nil {
@@ -1121,11 +1136,31 @@ func (v *V2) upload(w http.ResponseWriter, r *http.Request, scopeID int64) {
 		return
 	}
 	body := http.MaxBytesReader(w, r.Body, store.MaxUploadBytes+1)
-	a, err := v.svc.Upload(r.Context(), scopeID, name, r.Header.Get("Content-Type"), body)
+	a, err := v.svc.Upload(r.Context(), scopeID, r.Header.Get("X-Attachment-ID"), name, r.Header.Get("Content-Type"), body)
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		err = store.ErrUploadTooLarge
 	}
+	if err != nil {
+		writeV2Error(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"id": a.ID, "name": a.FileName, "mime_type": a.MediaType, "size": a.Size})
+}
+
+// linkUpload attaches content the scope already has; not_found means upload it.
+func (v *V2) linkUpload(w http.ResponseWriter, r *http.Request, scopeID int64) {
+	var body struct {
+		ID       string `json:"id"`
+		SHA256   string `json:"sha256"`
+		Name     string `json:"name"`
+		MimeType string `json:"mime_type"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeV2Error(w, err)
+		return
+	}
+	a, err := v.svc.LinkUpload(r.Context(), scopeID, body.ID, body.SHA256, body.Name, body.MimeType)
 	if err != nil {
 		writeV2Error(w, err)
 		return
@@ -1139,6 +1174,8 @@ func (v *V2) attachment(w http.ResponseWriter, r *http.Request, scopeID int64, i
 		writeV2Error(w, err)
 		return
 	}
+	// An attachment id always names the same bytes.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	serveLocalFile(w, r, path, a.MediaType, a.FileName)
 }
 

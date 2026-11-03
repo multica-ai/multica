@@ -48,8 +48,10 @@ export function createAgentGuiHostApi(
     workspace: {
       ensureDirectory: unsupported,
       readFile: snapshot.local && sessionId ? async ({ path }) => {
-        const image = await client.request("image.read", { sessionId, path });
-        return { path, bytes: Uint8Array.from(atob(image.data), (character) => character.charCodeAt(0)) };
+        const { url } = await client.request("image.url", { sessionId, path });
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Local file request failed (HTTP ${response.status})`);
+        return { path, bytes: new Uint8Array(await response.arrayBuffer()) };
       } : unsupported,
       selectDirectory: unsupported,
       selectFiles: unsupported,

@@ -166,13 +166,19 @@ service 提交事件 → hub 按订阅分发（每个订阅 4 MiB 缓冲，超�
 
 v2 推送的是事件本身（含流式文本），不需要「changed → 重新读取」，也不需要在隧道上额外合并。
 
+查看端保存读过的远端快照（桌面 IndexedDB，手机缓存目录，各 40 个，退出登录时删除），打开会话时先显示。桌面随后重新读取，内容未变时 ETag 返回 304；手机从保存的 seq 订阅，无法续传时收到 `snapshot_required` 再读快照。
+
 ### 4. 文件
 
 ```text
 读取：文件 URL = http://127.0.0.1:{port}/local/devices/{peerId}/local/v2/<文件路由>?file_key&api_origin&user_id&workspace_id
  → <img src> 等直接请求 → 本机守护进程校验文件 key，把 scope 还原为请求头 → ReverseProxy（Range 透传）→ 被访问端 serveLocalFile
      文件 key 由本机守护进程校验；被访问端只看 p2p 身份
-上传：渲染进程 fetch POST …/local/devices/{peerId}/local/v2/attachments → 附件 id
+上传：添加附件时就有最终 id（客户端生成，32 位十六进制），传输在后台进行，发送只等待结果
+     计算 SHA-256 → POST …/attachments/link（内容已存在则不再传输）→ 否则 POST …/attachments（X-Attachment-ID）
+     从草稿移除 → 中止传输，DELETE …/attachments/{id}；守护进程每 6 小时清理 7 天未被消息或队列引用的上传
+     传输持续有进展就不超时，60 秒无进展才算失败；单次上传失败不影响设备可用状态
+消息图片：直接用文件 URL，附件响应带 immutable 缓存
 保存到本机：文件右键菜单（远端只有「复制路径」「保存到本机」）→ 主进程 showSaveDialog → 主进程用主进程 token 经 /local/devices/{peerId} 读取 /preview/content 并写入本机文件（受预览 10 MB 上限约束）
 仅经中继时：读取超过 5 MB（按 Content-Length）或上传超过 5 MB → relay_transfer_limited
 ```

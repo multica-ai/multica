@@ -1,10 +1,24 @@
 import { requireOptionalNativeModule } from "expo";
 import type { AISessionClient } from "./client";
 
-interface NativeFiles { clearFiles(): Promise<void>; openFile(url: string, headers: Record<string, string>, name: string, share: boolean): Promise<void> }
+interface NativeFiles { sha256File(uri: string): Promise<string | null>; readSnapshot(key: string): Promise<string | null>; writeSnapshot(key: string, content: string): Promise<void>; clearSnapshots(): Promise<void>; clearFiles(): Promise<void>; openFile(url: string, headers: Record<string, string>, name: string, share: boolean): Promise<void> }
 const native = requireOptionalNativeModule<NativeFiles>("MulticaDeviceLink");
 
-export function clearDeviceFiles() { void native?.clearFiles().catch(() => {}); }
+export function clearDeviceFiles() {
+  void native?.clearFiles().catch(() => {});
+  void native?.clearSnapshots().catch(() => {});
+}
+
+/** The file's SHA-256; null when it cannot be read here, which only costs a transfer. */
+export async function fileContentHash(uri: string): Promise<string | null> {
+  return native ? native.sha256File(uri).catch(() => null) : null;
+}
+
+export async function readStoredSnapshot(key: string): Promise<string | null> {
+  return native ? native.readSnapshot(key).catch(() => null) : null;
+}
+
+export function writeStoredSnapshot(key: string, content: string) { void native?.writeSnapshot(key, content).catch(() => {}); }
 
 export async function openDeviceFile(client: AISessionClient, path: string, name = "", share = false) {
   if (!native) throw new Error("native_unavailable");

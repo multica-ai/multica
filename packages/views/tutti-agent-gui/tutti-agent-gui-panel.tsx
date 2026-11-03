@@ -147,7 +147,9 @@ export function TuttiAgentGuiPanel(props: Props) {
           const backgroundAllowed = data.method === "workspace.load" || data.method === "session.load"
             || data.method === "session.watch" || data.method === "task.messages"
             // Local history and its event stream must survive startup and focus changes.
-            || data.method === "local.snapshot" || data.method === "local.subscribe" || data.method === "local.unsubscribe"
+            || data.method === "local.snapshot" || data.method === "local.storedSnapshot" || data.method === "local.subscribe" || data.method === "local.unsubscribe"
+            // A transfer outlives the focus that started it.
+            || data.method === "attachment.cancel" || data.method === "attachment.retry" || data.method === "attachment.forget" || data.method === "attachment.url" || data.method === "image.url"
             || data.method === "attachment.read" || data.method === "image.read" || data.method === "context.tasks" || data.method === "host.promptApplied"
             || data.method === "host.showMessage" || data.method.startsWith("storage.")
             // A prompt admitted to the queue must survive focus and tab changes.

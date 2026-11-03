@@ -131,6 +131,8 @@ export interface AgentGuiRpcMethods {
   /** A local conversation's metadata and its v2 snapshot (`LocalV2Snapshot`). */
   "local.snapshot": { params: { sessionId: string }; result: { detail: AgentGuiSessionDetail; snapshot: unknown } };
   /** Receive a local conversation's events after afterSeq as `local.events`. */
+  /** The conversation as this viewer last read it from another device; null otherwise. */
+  "local.storedSnapshot": { params: { sessionId: string }; result: { detail: AgentGuiSessionDetail; snapshot: unknown } | null };
   "local.subscribe": { params: { sessionId: string; afterSeq: number; generation: string }; result: void };
   "local.unsubscribe": { params: { sessionId: string }; result: void };
   "session.create": {
@@ -154,13 +156,19 @@ export interface AgentGuiRpcMethods {
   "session.compact": { params: { sessionId: string; requestId: string }; result: { turnId: string } };
   "context.tasks": { params: { query: string; limit: number }; result: AgentGuiContextItem[] };
   "attachment.upload": {
-    params: { file: File; sessionId?: string };
-    result: Attachment;
+    /** background answers at once with the final id; "attachment.upload" events report the outcome. */
+    params: { file: File; sessionId?: string; background?: boolean };
+    result: Attachment & { uploading?: boolean };
   };
+  "attachment.cancel": { params: { attachmentId: string }; result: void };
+  "attachment.retry": { params: { attachmentId: string }; result: void };
+  "attachment.forget": { params: { attachmentId: string }; result: void };
+  "attachment.url": { params: { attachmentId: string }; result: { url: string } };
   "attachment.read": {
     params: { attachmentId: string };
     result: { data: string; mimeType: string; name: string };
   };
+  "image.url": { params: { sessionId: string; path: string }; result: { url: string } };
   "image.read": { params: { sessionId: string; path: string }; result: { data: string; mimeType: string; name: string } };
   /** Parent prefixes keys by account and workspace before using StorageAdapter. */
   "storage.read": { params: { key: string }; result: string | null };
@@ -194,6 +202,8 @@ export type AgentGuiHostEvent =
   | { type: "appendPrompt"; sequence: number; prompt: string; sessionId?: string; attachments?: Attachment[]; restoreRequestId?: string }
   | { type: "connection"; connected: boolean }
   /** A v2 server message of a subscribed local conversation. */
+  | { type: "attachment.upload"; attachmentId: string; state: "uploaded" }
+  | { type: "attachment.upload"; attachmentId: string; state: "failed"; message: string }
   | { type: "local.events"; sessionId: string; message: unknown }
   /** The local conversation's subscription ended; reload its snapshot. */
   | { type: "local.reload"; sessionId: string };

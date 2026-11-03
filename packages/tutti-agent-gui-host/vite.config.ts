@@ -89,6 +89,24 @@ const hostPresentationAdaptations = [
     replacement: "        paste: (_view, event) => {\n          if (disabled) return false;\n          if (pasteMessageImageReferences({\n            text: event.clipboardData?.getData(\"text/plain\") ?? \"\",\n            supported: promptImagesSupportedRef.current,\n            onImages: onPasteImagesRef.current,\n            onUnsupported: onPromptImagesUnsupportedRef.current,\n            insertText: (text) => routeAgentRichTextTextPaste({\n              availableCapabilities: availableCapabilitiesRef.current,\n              availableSkills: availableSkillsRef.current,\n              editorRef, html: \"\", mentionSuggestionSuppression, text,\n            }),\n          })) {\n            event.preventDefault();\n            return true;\n          }",
   },
   {
+    // A removal from the draft stops its transfer. Sending clears the draft
+    // through the controller instead, so it never reaches this path.
+    path: "/composer/useComposerDraftAttachments.ts",
+    original: "      const next = update(current);\n      publishScopedDraft(sourceScopeKey, next);",
+    replacement: "      const next = update(current);\n      publishScopedDraft(sourceScopeKey, next);\n      agentActivityRuntime?.promptAttachmentsRemoved?.(current, next);",
+  },
+  {
+    // Message images load as files: base64 costs a third more and a copy in memory.
+    path: "/agentConversation/components/AgentMessageImages.tsx",
+    original: "        const readImage = image.attachmentId\n          ? runtime.readSessionAttachment?.({",
+    replacement: "        const readImage = image.attachmentId\n          ? (runtime.readSessionAttachmentSource ?? runtime.readSessionAttachment)?.({",
+  },
+  {
+    path: "/agentConversation/components/AgentMessageImages.tsx",
+    original: "                `data:${attachment.mimeType};base64,${attachment.data}`\n              );\n              return next;",
+    replacement: "                attachment.url ?? `data:${attachment.mimeType};base64,${attachment.data}`\n              );\n              return next;",
+  },
+  {
     path: "/composer/useComposerDraftAttachments.ts",
     original: "import { flushSync } from \"react-dom\";",
     replacement: "import { flushSync } from \"react-dom\";\nimport { createMessageDraftImage, prepareMessageDraftImage } from \"@multica-message-image-clipboard\";",

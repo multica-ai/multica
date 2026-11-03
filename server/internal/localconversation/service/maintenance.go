@@ -47,6 +47,23 @@ func (s *Service) runMaintenance() {
 	s.sweepFocus()
 	s.sweepIdle()
 	s.spares.check()
+	s.sweepUploads()
+}
+
+// sweepUploads removes attachments of drafts that were never sent. Drafts can
+// wait for days, so the age is generous; the check itself runs rarely.
+func (s *Service) sweepUploads() {
+	now := s.opts.Now()
+	if now.Sub(s.uploadsSwept) < uploadSweepInterval {
+		return
+	}
+	s.uploadsSwept = now
+	removed, err := s.store.RemoveAbandonedUploads(context.Background(), abandonedUploadAge, now)
+	if err != nil {
+		s.opts.Logger.Warn("local conversations: abandoned upload cleanup failed", "error", err)
+	} else if removed > 0 {
+		s.opts.Logger.Info("local conversations: removed abandoned uploads", "uploads", removed)
+	}
 }
 
 func (s *Service) kickMaintenance() {

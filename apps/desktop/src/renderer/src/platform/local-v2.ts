@@ -61,7 +61,7 @@ export class LocalV2ScopeClient {
   /** Someone is looking at a conversation until the returned function is called. */
   focus(id: string): () => void { return this.focused.hold(id); }
 
-  async request(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
+  async request(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<unknown> {
     try { return await this.transport.request(this.scope, method, path, body); }
     catch (error) { throw localV2Error(error); }
   }
@@ -81,7 +81,15 @@ export class LocalV2ScopeClient {
   }
 
   fileUrl(path: string): string { return this.transport.fileUrl(this.scope, path); }
-  async upload(file: File) { return localV2UploadSchema.parse(await this.transport.upload(this.scope, file)); }
+  async upload(file: File, options?: { id?: string; signal?: AbortSignal }) {
+    try { return localV2UploadSchema.parse(await this.transport.upload(this.scope, file, options)); }
+    catch (error) { throw localV2Error(error); }
+  }
+  /** Attaches content the daemon already stores; kind not_found means upload it. */
+  async linkUpload(body: { id: string; sha256: string; name: string; mime_type: string }) {
+    return localV2UploadSchema.parse(await this.request("POST", "/attachments/link", body));
+  }
+  async discardUpload(id: string) { await this.request("DELETE", `/attachments/${encodeURIComponent(id)}`); }
 
   /** Every conversation of the scope, loaded once and kept current. */
   summaries(): LocalV2Summary[] { return this.summaryList; }

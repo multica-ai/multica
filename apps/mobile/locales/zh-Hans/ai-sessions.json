@@ -81,6 +81,7 @@
   "resume_queue": "继续队列",
   "send_now": "立即发送",
   "remove": "移除",
+  "attachment_failed": "上传失败。发送时会重试，点按可移除。",
   "attached_files": "已添加附件",
   "usage": "用量与额度",
   "refresh_usage": "刷新用量",

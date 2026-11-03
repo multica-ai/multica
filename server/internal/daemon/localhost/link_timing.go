@@ -1,6 +1,8 @@
 package localhost
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -206,7 +208,7 @@ func (f *firstByteWriter) Unwrap() http.ResponseWriter { return f.ResponseWriter
 // reading it took and its size. Opening a conversation is observed, not optimized.
 func (v *V2) writeSnapshot(w http.ResponseWriter, r *http.Request, id string, began time.Time, body map[string]any) {
 	c := callerOf(r.Context())
-	if v.marks == nil || c.kind != callerRemote {
+	if c.kind != callerRemote {
 		writeJSON(w, http.StatusOK, body)
 		return
 	}
@@ -217,6 +219,17 @@ func (v *V2) writeSnapshot(w http.ResponseWriter, r *http.Request, id string, be
 	}
 	record := timing.Record{Stage: timing.StageSnapshotServerRead, ConversationID: id, Peer: c.peer, Role: timing.RoleExecutor, Connection: c.connection, Bytes: timing.N(int64(len(data)))}
 	v.marks.Since(record, began, nil)
+	// A viewer's HTTP cache revalidates, so an unchanged conversation costs one
+	// round trip instead of its whole history over the device link.
+	sum := sha256.Sum256(data)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Vary", headerUserID+", "+headerWorkspaceID)
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(append(data, '\n'))

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { LocalV2Bridge } from "../../../shared/local-v2-bridge";
 import { DirectLocalV2Transport, type DirectLocalV2Options } from "./local-v2-transport";
@@ -401,5 +401,81 @@ describe("DirectLocalV2Transport", () => {
     await own.transport.request(scope, "POST", "/sessions/c1/commands", { type: "send", request_id: "req-1" });
     expect(local).toEqual([]);
     expect(own.daemon.requests.find((req) => req.url?.endsWith("/commands"))?.headers["x-multica-request-id"]).toBeUndefined();
+  });
+});
+
+describe("uploads", () => {
+  class FakeXHR {
+    static last: FakeXHR;
+    upload = new EventTarget();
+    private events = new EventTarget();
+    status = 0;
+    responseText = "";
+    headers: Record<string, string> = {};
+    aborted = false;
+    body?: unknown;
+    constructor() { FakeXHR.last = this; }
+    open() {}
+    setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+    getResponseHeader() { return "application/json"; }
+    addEventListener(type: string, listener: () => void) { this.events.addEventListener(type, listener); }
+    send(body: unknown) { this.body = body; }
+    abort() { this.aborted = true; this.events.dispatchEvent(new Event("abort")); }
+    respond(status: number, body: unknown) { this.status = status; this.responseText = JSON.stringify(body); this.events.dispatchEvent(new Event("load")); }
+    fail() { this.events.dispatchEvent(new Event("error")); }
+    progress() { this.upload.dispatchEvent(new Event("progress")); }
+  }
+  const bridge = { endpoint: async () => ({ base: "127.0.0.1:1", apiUrl: "https://api", token: "t", fileKey: "k" }) } as unknown as LocalV2Bridge;
+  const file = new File(["x"], "a b.txt", { type: "text/plain" });
+  const started = <T,>(value: Promise<T>) => { void value.catch(() => undefined); return value; };
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("sends the id the client chose and keeps going while bytes move", async () => {
+    const transport = new DirectLocalV2Transport({ bridge, XMLHttpRequest: FakeXHR as never });
+    const upload = started(transport.upload(scope, file, { id: "abc" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeXHR.last.headers).toMatchObject({ "X-Attachment-ID": "abc", "X-File-Name": "a%20b.txt", "Content-Type": "text/plain" });
+    // Far past any total deadline, but the file is still moving.
+    for (let minute = 0; minute < 10; minute++) { await vi.advanceTimersByTimeAsync(59_000); FakeXHR.last.progress(); }
+    FakeXHR.last.respond(201, { id: "abc", name: "a b.txt", mime_type: "text/plain", size: 1 });
+    await expect(upload).resolves.toMatchObject({ id: "abc" });
+  });
+
+  it("gives up when the file stops moving, without reporting the device down", async () => {
+    const transport = new DirectLocalV2Transport({ bridge, deviceId: "peer", XMLHttpRequest: FakeXHR as never });
+    const upload = started(transport.upload(scope, file));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(upload).rejects.toThrow(/^upload_stalled: /);
+    expect(FakeXHR.last.aborted).toBe(true);
+    expect(transport.availability()).toBeNull();
+  });
+
+  it("does not report the device down when one upload fails", async () => {
+    const transport = new DirectLocalV2Transport({ bridge, deviceId: "peer", XMLHttpRequest: FakeXHR as never });
+    const upload = started(transport.upload(scope, file));
+    await vi.advanceTimersByTimeAsync(0);
+    FakeXHR.last.fail();
+    await expect(upload).rejects.toThrow(/^upload_failed: /);
+    expect(transport.availability()).toBeNull();
+  });
+
+  it("stops when the caller cancels", async () => {
+    const transport = new DirectLocalV2Transport({ bridge, XMLHttpRequest: FakeXHR as never });
+    const controller = new AbortController();
+    const upload = started(transport.upload(scope, file, { signal: controller.signal }));
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(upload).rejects.toThrow();
+    expect(FakeXHR.last.aborted).toBe(true);
+  });
+
+  it("carries the daemon's error kind", async () => {
+    const transport = new DirectLocalV2Transport({ bridge, XMLHttpRequest: FakeXHR as never });
+    const upload = started(transport.upload(scope, file));
+    await vi.advanceTimersByTimeAsync(0);
+    FakeXHR.last.respond(413, { error: { kind: "file_too_large", message: "The file exceeds 25 MB" } });
+    await expect(upload).rejects.toThrow("file_too_large: The file exceeds 25 MB");
   });
 });

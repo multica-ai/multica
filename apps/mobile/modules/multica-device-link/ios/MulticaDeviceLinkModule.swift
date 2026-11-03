@@ -12,6 +12,8 @@ public final class MulticaDeviceLinkModule: Module {
   private func invalidateFiles() { fileLock.lock(); fileEpoch += 1; fileLock.unlock() }
   private func currentFileEpoch() -> Int { fileLock.lock(); defer { fileLock.unlock() }; return fileEpoch }
   private let queue = DispatchQueue(label: "ai.multica.mobile.device-link")
+  private let contentQueue = DispatchQueue(label: "ai.multica.mobile.device-content")
+  private func snapshotRoot() throws -> URL { try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true) }
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
   private func closeClient() {
@@ -78,6 +80,23 @@ public final class MulticaDeviceLinkModule: Module {
       self.client?.foregrounded()
       return self.client != nil
     }.runOnQueue(queue)
+
+    AsyncFunction("sha256File") { (uri: String) -> String? in
+      guard let url = URL(string: uri), url.isFileURL else { return nil }
+      return try DeviceContentStore.sha256(fileAt: url)
+    }.runOnQueue(self.contentQueue)
+
+    AsyncFunction("readSnapshot") { (key: String) -> String? in
+      DeviceContentStore.read(key: key, under: try self.snapshotRoot())
+    }.runOnQueue(self.contentQueue)
+
+    AsyncFunction("writeSnapshot") { (key: String, content: String) in
+      try DeviceContentStore.write(key: key, content: content, under: try self.snapshotRoot())
+    }.runOnQueue(self.contentQueue)
+
+    AsyncFunction("clearSnapshots") {
+      DeviceContentStore.clear(under: try self.snapshotRoot())
+    }.runOnQueue(self.contentQueue)
 
     AsyncFunction("clearFiles") {
       self.invalidateFiles()

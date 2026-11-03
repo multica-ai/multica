@@ -30,6 +30,8 @@ export interface SessionTeardown {
   /** The local daemon process itself. Resolves to an IPC result we ignore —
    *  a daemon that was already down is success enough. */
   stopDaemon: () => Promise<unknown>;
+  /** Conversations of other devices kept on this device for instant opening. */
+  deleteStoredConversations: () => Promise<unknown>;
 }
 
 /**
@@ -45,6 +47,7 @@ export async function tearDownOnLogout(t: SessionTeardown): Promise<void> {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
+  void t.deleteStoredConversations().catch(() => undefined);
   try {
     await t.clearDaemonToken();
   } catch {

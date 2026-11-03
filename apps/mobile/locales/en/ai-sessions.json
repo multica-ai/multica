@@ -81,6 +81,7 @@
   "resume_queue": "Resume queue",
   "send_now": "Send now",
   "remove": "Remove",
+  "attachment_failed": "Upload failed. Sending tries again; tap to remove.",
   "attached_files": "Attached files",
   "usage": "Usage and limits",
   "refresh_usage": "Refresh usage",

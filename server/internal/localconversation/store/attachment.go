@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -73,28 +74,153 @@ const MaxUploadBytes = 25 << 20
 // ErrUploadTooLarge rejects an upload over MaxUploadBytes.
 var ErrUploadTooLarge = errors.New("local conversation store: the file exceeds 25 MB")
 
+// ErrAttachmentConflict rejects a client-chosen id another scope already uses.
+var ErrAttachmentConflict = errors.New("local conversation store: the attachment id is in use")
+
 // StoreUpload saves a file the user attaches to a message and commits it at
-// once, so a later send can reference it.
-func (s *Store) StoreUpload(ctx context.Context, scopeID int64, fileName, mediaType string, src io.Reader, now time.Time) (sqlitedb.Attachment, error) {
+// once, so a later send can reference it. A client that chose id can repeat the
+// upload safely; identical content shares one file on disk.
+func (s *Store) StoreUpload(ctx context.Context, scopeID int64, id, fileName, mediaType string, src io.Reader, now time.Time) (sqlitedb.Attachment, error) {
+	if a, found, err := s.existingUpload(ctx, scopeID, id); found || err != nil {
+		return a, err
+	}
 	ext, ok := mediaExtensions[mediaType]
 	if !ok {
 		if e := strings.ToLower(filepath.Ext(fileName)); safeExtension.MatchString(e) {
 			ext = e
 		}
 	}
-	id, name, size, err := s.writeFile(src, ext, MaxUploadBytes)
+	hash := sha256.New()
+	fileID, name, size, err := s.writeFile(io.TeeReader(src, hash), ext, MaxUploadBytes)
 	if err != nil {
 		return sqlitedb.Attachment{}, err
 	}
-	a := sqlitedb.Attachment{ID: id, ScopeID: scopeID, Path: name, FileName: fileName, Size: size, MediaType: mediaType, CreatedAt: formatTime(now)}
-	err = sqlitedb.New(s.write).InsertAttachment(ctx, sqlitedb.InsertAttachmentParams{
-		ID: a.ID, ScopeID: a.ScopeID, Path: a.Path, FileName: a.FileName, Size: a.Size, MediaType: a.MediaType, CreatedAt: a.CreatedAt,
-	})
-	if err != nil {
-		_ = os.Remove(filepath.Join(s.FilesDir(), name))
+	if id == "" {
+		id = fileID
+	}
+	sum := hex.EncodeToString(hash.Sum(nil))
+	stored := filepath.Join(s.FilesDir(), name)
+	if same, found := s.uploadWithHash(ctx, scopeID, sum); found && same.Path != name {
+		_ = os.Remove(stored)
+		name = same.Path
+		stored = ""
+	}
+	a := sqlitedb.Attachment{ID: id, ScopeID: scopeID, Path: name, FileName: fileName, Size: size, MediaType: mediaType, Sha256: sum, CreatedAt: formatTime(now)}
+	if err := s.insertUpload(ctx, a); err != nil {
+		if stored != "" {
+			_ = os.Remove(stored)
+		}
 		return sqlitedb.Attachment{}, err
 	}
 	return a, nil
+}
+
+// LinkUpload records an attachment for content this scope already stored, so
+// the file is not transferred again. ErrNotFound means it has to be uploaded.
+func (s *Store) LinkUpload(ctx context.Context, scopeID int64, id, sum, fileName, mediaType string, now time.Time) (sqlitedb.Attachment, error) {
+	if a, found, err := s.existingUpload(ctx, scopeID, id); found || err != nil {
+		return a, err
+	}
+	same, found := s.uploadWithHash(ctx, scopeID, sum)
+	if !found {
+		return sqlitedb.Attachment{}, fmt.Errorf("%w: content %s", ErrNotFound, sum)
+	}
+	a := sqlitedb.Attachment{ID: id, ScopeID: scopeID, Path: same.Path, FileName: fileName, Size: same.Size, MediaType: mediaType, Sha256: sum, CreatedAt: formatTime(now)}
+	if err := s.insertUpload(ctx, a); err != nil {
+		return sqlitedb.Attachment{}, err
+	}
+	return a, nil
+}
+
+// DiscardUpload removes an upload no message or queued prompt uses. It is a
+// no-op for anything else, because the caller only says the draft dropped it.
+func (s *Store) DiscardUpload(ctx context.Context, scopeID int64, id string) error {
+	a, err := sqlitedb.New(s.read).GetAttachment(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (a.ScopeID != scopeID || a.ConversationID != "")) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.removeIfUnused(ctx, a)
+	return err
+}
+
+// RemoveAbandonedUploads deletes uploads older than minAge that no message or
+// queued prompt uses. It returns the number removed.
+func (s *Store) RemoveAbandonedUploads(ctx context.Context, minAge time.Duration, now time.Time) (int, error) {
+	uploads, err := sqlitedb.New(s.read).ListUploadsCreatedBefore(ctx, formatTime(now.Add(-minAge)))
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, a := range uploads {
+		gone, err := s.removeIfUnused(ctx, a)
+		if err != nil {
+			return removed, err
+		}
+		if gone {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+func (s *Store) removeIfUnused(ctx context.Context, a sqlitedb.Attachment) (bool, error) {
+	// sqlc cannot parse json_each, so this query is written by hand.
+	var used bool
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM message, json_each(message.attachment_ids) WHERE json_each.value = ?1)
+		OR EXISTS (SELECT 1 FROM prompt_queue_item, json_each(prompt_queue_item.item, '$.attachmentIds') WHERE json_each.value = ?1)`, a.ID).Scan(&used)
+	if err != nil || used {
+		return false, err
+	}
+	if err := sqlitedb.New(s.write).DeleteAttachment(ctx, a.ID); err != nil {
+		return false, err
+	}
+	// Other attachments may share the file.
+	sharing, err := sqlitedb.New(s.read).CountAttachmentsAtPath(ctx, a.Path)
+	if err != nil {
+		return false, err
+	}
+	if sharing == 0 {
+		_ = os.Remove(filepath.Join(s.FilesDir(), a.Path))
+	}
+	return true, nil
+}
+
+func (s *Store) existingUpload(ctx context.Context, scopeID int64, id string) (sqlitedb.Attachment, bool, error) {
+	if id == "" {
+		return sqlitedb.Attachment{}, false, nil
+	}
+	a, err := sqlitedb.New(s.read).GetAttachment(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sqlitedb.Attachment{}, false, nil
+	}
+	if err != nil {
+		return sqlitedb.Attachment{}, false, err
+	}
+	if a.ScopeID != scopeID {
+		return sqlitedb.Attachment{}, false, ErrAttachmentConflict
+	}
+	return a, true, nil
+}
+
+// uploadWithHash finds this scope's stored content, skipping a file that is gone.
+func (s *Store) uploadWithHash(ctx context.Context, scopeID int64, sum string) (sqlitedb.Attachment, bool) {
+	a, err := sqlitedb.New(s.read).FindUploadByHash(ctx, sqlitedb.FindUploadByHashParams{ScopeID: scopeID, Sha256: sum})
+	if err != nil {
+		return sqlitedb.Attachment{}, false
+	}
+	if _, err := os.Stat(filepath.Join(s.FilesDir(), a.Path)); err != nil {
+		return sqlitedb.Attachment{}, false
+	}
+	return a, true
+}
+
+func (s *Store) insertUpload(ctx context.Context, a sqlitedb.Attachment) error {
+	return sqlitedb.New(s.write).InsertAttachment(ctx, sqlitedb.InsertAttachmentParams{
+		ID: a.ID, ScopeID: a.ScopeID, Path: a.Path, FileName: a.FileName, Size: a.Size, MediaType: a.MediaType, Sha256: a.Sha256, CreatedAt: a.CreatedAt,
+	})
 }
 
 var safeExtension = regexp.MustCompile(`^\.[a-z0-9]{1,16}$`)

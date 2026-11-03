@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -28,13 +29,48 @@ const (
 // ErrOutsideFolder rejects a path outside the folders the scope may read.
 var ErrOutsideFolder = errors.New("local conversation: choose this folder before previewing its contents")
 
-// Upload stores a file the user attaches to a message.
-func (s *Service) Upload(ctx context.Context, scopeID int64, name, mediaType string, src io.Reader) (sqlitedb.Attachment, error) {
+// Upload stores a file the user attaches to a message. id is optional: a client
+// that chose one can reference the attachment before its bytes have arrived.
+func (s *Service) Upload(ctx context.Context, scopeID int64, id, name, mediaType string, src io.Reader) (sqlitedb.Attachment, error) {
+	name, err := uploadName(id, name, mediaType)
+	if err != nil {
+		return sqlitedb.Attachment{}, err
+	}
+	return s.store.StoreUpload(ctx, scopeID, id, name, mediaType, src, s.opts.Now())
+}
+
+// LinkUpload attaches content this scope already stored, identified by its
+// SHA-256, without transferring it again.
+func (s *Service) LinkUpload(ctx context.Context, scopeID int64, id, sum, name, mediaType string) (sqlitedb.Attachment, error) {
+	if id == "" || !uploadHash.MatchString(sum) {
+		return sqlitedb.Attachment{}, fmt.Errorf("%w: an attachment id and SHA-256 are required", ErrInvalidRequest)
+	}
+	name, err := uploadName(id, name, mediaType)
+	if err != nil {
+		return sqlitedb.Attachment{}, err
+	}
+	return s.store.LinkUpload(ctx, scopeID, id, sum, name, mediaType, s.opts.Now())
+}
+
+// DiscardUpload removes an attachment the user took out of a draft.
+func (s *Service) DiscardUpload(ctx context.Context, scopeID int64, id string) error {
+	return s.store.DiscardUpload(ctx, scopeID, id)
+}
+
+var (
+	uploadID   = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	uploadHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+func uploadName(id, name, mediaType string) (string, error) {
+	if id != "" && !uploadID.MatchString(id) {
+		return "", fmt.Errorf("%w: an attachment id is 32 lowercase hex digits", ErrInvalidRequest)
+	}
 	name = strings.TrimSpace(filepath.Base(name))
 	if name == "" || name == "." || len(name) > 512 || mediaType == "" || len(mediaType) > 256 {
-		return sqlitedb.Attachment{}, fmt.Errorf("%w: a file name and type are required", ErrInvalidRequest)
+		return "", fmt.Errorf("%w: a file name and type are required", ErrInvalidRequest)
 	}
-	return s.store.StoreUpload(ctx, scopeID, name, mediaType, src, s.opts.Now())
+	return name, nil
 }
 
 // promptWithAttachments is the provider input for a message: the text, then

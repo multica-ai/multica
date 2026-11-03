@@ -5,7 +5,7 @@ import { Header } from "@/components/ui/header";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { localV2SummarySchema, localV2UploadSchema } from "@multica/core/local-conversation/v2";
+import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
 import * as DocumentPicker from "expo-document-picker";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -18,13 +18,17 @@ import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { aiKeys } from "@/data/ai-sessions/client";
 import { useAIConnection, useAISessionScope, useAISubscriptionRejected } from "@/data/ai-sessions/hooks";
-import { useAIDrafts, aiDraftKey } from "@/data/ai-sessions/drafts";
-import { commandResultSchema, historySchema, providersSchema, queueSchema, readResponse } from "@/data/ai-sessions/schemas";
+import { useAIDrafts, aiDraftKey, type DraftAttachment } from "@/data/ai-sessions/drafts";
+import { draftUploads } from "@/data/ai-sessions/uploads";
+import { useStoredSnapshot } from "@/data/ai-sessions/snapshot-store";
+import { commandResultSchema, historySchema, providersSchema, queueSchema } from "@/data/ai-sessions/schemas";
 import { transcript } from "@/data/ai-sessions/projection";
 import { ConnectionNotice } from "@/components/ai-sessions/connection-notice";
 import { SessionAttachment } from "@/components/ai-sessions/session-attachment";
 import { openDeviceFile, remoteWebURL } from "@/data/ai-sessions/files";
 import { SessionQuestions } from "@/components/ai-sessions/questions";
+
+const NO_ATTACHMENTS: DraftAttachment[] = [];
 
 export function AISessionContent({ sessionId, embedded = false, active = true, onOpenSource }: { sessionId?: string; embedded?: boolean; active?: boolean; onOpenSource?: () => void }) {
   const { t } = useT("aiSessions");
@@ -37,7 +41,9 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
   const subscriptionRejected = useAISubscriptionRejected(session);
   const qc = useQueryClient();
   const key = aiKeys.snapshot(scope, session);
-  const query = useQuery({ queryKey: key, enabled: !!client, retry: false, staleTime: Infinity, queryFn: ({ signal }) => client!.snapshot(session, signal) });
+  // The conversation as last read shows at once; the daemon sends what changed since.
+  const restored = useStoredSnapshot(scope, session, key);
+  const query = useQuery({ queryKey: key, enabled: !!client && restored, retry: false, staleTime: Infinity, queryFn: ({ signal }) => client!.snapshot(session, signal) });
   const snapshot = query.data;
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
@@ -46,9 +52,10 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
   const setDraft = useAIDrafts((s) => s.setDraft);
   const pending = useAIDrafts((s) => s.pending[draftKey]);
   const setPending = useAIDrafts((s) => s.setPending);
-  const [attachments, setAttachments] = useState<{ id: string; name: string }[]>([]);
+  const attachments = useAIDrafts((s) => s.attachments[draftKey] ?? NO_ATTACHMENTS);
+  const setAttachments = useAIDrafts((s) => s.setAttachments);
+  const uploading = attachments.some((file) => file.status === "uploading");
   const [busy, setBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const list = useRef<FlashListRef<ReturnType<typeof transcript>[number]>>(null);
@@ -64,7 +71,8 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
   const hasOlder = history.data ? history.hasNextPage : snapshot?.has_older_turns;
   const [readingHistory, setReadingHistory] = useState(false);
   const running = snapshot?.turns.some((turn) => turn.status === "running") ?? false;
-  useEffect(() => { if (connected && focused && active) client?.select(session); }, [client, connected, session, focused, active]);
+  // Selecting subscribes from the cached position, so the stored one must be in place first.
+  useEffect(() => { if (restored && connected && focused && active) client?.select(session); }, [restored, client, connected, session, focused, active]);
   useEffect(() => (client && focused && active ? client.focus(session) : undefined), [client, session, focused, active]);
   useEffect(() => { if (nearBottom.current && rows.length) list.current?.scrollToEnd({ animated: false }); }, [rows]);
   useEffect(() => { if (snapshot) client?.committed(session); }, [client, session, snapshot]);
@@ -73,8 +81,10 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
   useEffect(() => {
     if (!pending || !(snapshot?.queue.items.some((item) => item.requestId === pending.requestId) || snapshot?.turns.some((turn) => turn.request_id === pending.requestId))) return;
     if (draft === pending.text) setDraft(draftKey, "");
+    setAttachments(draftKey, (files) => files.filter((file) => !pending.attachments.includes(file.id)));
+    draftUploads.forget(pending.attachments);
     setPending(draftKey, null);
-  }, [snapshot, pending, draft, draftKey, setDraft, setPending]);
+  }, [snapshot, pending, draft, draftKey, setDraft, setPending, setAttachments]);
 
   const showError = () => Alert.alert(t("error_title"), t("operation_failed"));
   const chooseProvider = async () => {
@@ -93,38 +103,36 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
     });
   };
   const send = async () => {
-    if (!client || !connected || !snapshot || busy || uploading || snapshot.conversation.archived || !(draft.trim() || attachments.length || pending)) return;
+    if (!client || !connected || !snapshot || busy || snapshot.conversation.archived || !(draft.trim() || attachments.length || pending)) return;
     if (pending && pending.text !== draft) { Alert.alert(t("error_title"), t("send_failed")); return; }
-    const request = pending ?? { requestId: createRequestId(), text: draft, attachments: attachments.map((file) => file.id), queued: running || snapshot.queue.items.length > 0 || snapshot.queue.paused, queueContent: draft || t("attached_files"), createdAt: Date.now() };
+    let request = pending ?? { requestId: createRequestId(), text: draft, attachments: attachments.map((file) => file.id), queued: running || snapshot.queue.items.length > 0 || snapshot.queue.paused, queueContent: draft || t("attached_files"), createdAt: Date.now() };
     setPending(draftKey, request); setBusy(true); setSendFailed(false);
     try {
+      // The message stays pending while its attachments finish; a failed one gets another attempt.
+      const stored = await draftUploads.ensure(request.attachments);
+      draftUploads.forget(request.attachments);
+      if (stored.some((id, index) => id !== request.attachments[index])) { request = { ...request, attachments: stored }; setPending(draftKey, request); }
       if (request.queued) {
         await client.submit(session, { type: "queue_enqueue", paused: snapshot.queue.paused, item: { requestId: request.requestId, content: request.queueContent ?? request.text, attachmentIds: request.attachments, display: { id: request.requestId, clientSubmitId: request.requestId, createdAtUnixMs: request.createdAt, content: [{ type: "text", text: request.text }] } } }, queueSchema, request.createdAt);
       } else await client.submit(session, { type: "send", request_id: request.requestId, text: request.text, attachment_ids: request.attachments }, commandResultSchema, request.createdAt);
-      setDraft(draftKey, ""); setPending(draftKey, null); setAttachments([]);
+      setDraft(draftKey, ""); setPending(draftKey, null); setAttachments(draftKey, () => []);
       void query.refetch();
     } catch (error) {
-      const rejected = error instanceof Error && ["invalid_request", "turn_running", "archived", "unknown_provider", "invalid_settings"].includes(error.message);
+      const rejected = error instanceof Error && ["invalid_request", "not_found", "turn_running", "archived", "unknown_provider", "invalid_settings"].includes(error.message);
       if (rejected) { setPending(draftKey, null); showError(); }
       else setSendFailed(true);
     }
     finally { setBusy(false); }
   };
   const upload = async () => {
-    if (!client || !connected || uploading || busy || pending) return;
+    if (!client || !connected || busy || pending) return;
     const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
     if (result.canceled) return;
-    setUploading(true);
-    try {
-      for (const asset of result.assets) {
-        const local = await fetch(asset.uri);
-        const blob = await local.blob();
-        const response = await fetch(client.url("/attachments"), { method: "POST", headers: { ...client.headers(), "Content-Type": asset.mimeType ?? "application/octet-stream", "X-File-Name": encodeURIComponent(asset.name) }, body: blob });
-        if (!response.ok) throw new Error("upload_failed");
-        const file = readResponse(await response.json(), localV2UploadSchema, "ai.attachments");
-        setAttachments((old) => [...old, file]);
-      }
-    } catch { showError(); } finally { setUploading(false); }
+    for (const asset of result.assets) draftUploads.start(client, draftKey, { uri: asset.uri, name: asset.name, mimeType: asset.mimeType });
+  };
+  const removeAttachment = (id: string) => {
+    setAttachments(draftKey, (files) => files.filter((file) => file.id !== id));
+    if (client) draftUploads.remove(client, id);
   };
   const metadata = (body: Record<string, unknown>) => client!.command(session, { type: "update", ...body }, localV2SummarySchema).then(() => { void query.refetch(); void qc.invalidateQueries({ queryKey: aiKeys.list(scope) }); });
   const actions = () => {
@@ -199,14 +207,14 @@ export function AISessionContent({ sessionId, embedded = false, active = true, o
       {!!snapshot && Math.max(snapshot.queue.items.length, snapshot.conversation.queue_count) > 0 && <Button variant="outline" className="mx-3 mb-2" onPress={() => router.push({ pathname: "/[workspace]/ai-sessions/[device]/queue", params })}><Text>{t(snapshot.queue.paused ? "queued_paused" : "queued_count", { count: Math.max(snapshot.queue.items.length, snapshot.conversation.queue_count) })} ›</Text></Button>}
       {sendFailed && pending && <View className="px-4 py-2"><Text accessibilityRole="alert" className="text-sm text-destructive">{t("send_failed")}</Text></View>}
       <View className="mx-3 mb-2 p-3 rounded-xl border border-border bg-background gap-2">
-        {!!attachments.length && <View className="gap-1">{attachments.map((file) => <Button key={file.id} variant="ghost" size="sm" disabled={!!pending} onPress={() => setAttachments((old) => old.filter((f) => f.id !== file.id))}><Text numberOfLines={1}>{file.name} ×</Text></Button>)}</View>}
+        {!!attachments.length && <View className="gap-1">{attachments.map((file) => <Button key={file.id} variant="ghost" size="sm" disabled={!!pending} onPress={() => removeAttachment(file.id)}>{file.status === "uploading" && <ActivityIndicator />}<Text numberOfLines={1} className={file.status === "failed" ? "text-destructive" : undefined}>{file.name} ×</Text></Button>)}{attachments.some((file) => file.status === "failed") && <Text accessibilityRole="alert" className="text-sm text-destructive">{t("attachment_failed")}</Text>}</View>}
         <TextInput multiline value={draft} onChangeText={(value) => setDraft(draftKey, value)} editable={!busy && !pending && !snapshot?.conversation.archived} placeholder={t(rows.length ? "continue" : "message")} placeholderTextColor={theme.mutedForeground} accessibilityLabel={t("message")} style={{ color: theme.foreground, fontSize: 16, minHeight: 48, maxHeight: 160, padding: 0 }} />
         <View className="flex-row items-center gap-1">
-          <IconButton name="add" accessibilityLabel={t("attachment")} disabled={!connected || uploading || !!pending} onPress={() => void upload().catch(showError)} />
+          <IconButton name="add" accessibilityLabel={t("attachment")} disabled={!connected || !!pending} onPress={() => void upload().catch(showError)} />
           <Button variant="ghost" size="sm" disabled={!connected || running || busy} onPress={() => router.push({ pathname: "/[workspace]/ai-sessions/[device]/models", params: { ...params, provider: snapshot?.conversation.provider } })}><Text className="max-w-24" numberOfLines={1}>{snapshot?.settings.model || t("default_model")}⌄</Text></Button>
           <Button variant="ghost" size="sm" disabled={!connected || running || busy || uploading || !!pending} accessibilityLabel={t("provider")} onPress={() => void chooseProvider().catch(showError)}><Text className="text-xs" numberOfLines={1}>{snapshot?.conversation.provider === "claude" ? "Claude Code" : "Codex"}⌄</Text></Button>
           <View className="flex-1" />
-          {uploading || busy ? <ActivityIndicator /> : <Button size={running ? "sm" : "icon"} disabled={!connected || !snapshot || !(draft.trim() || attachments.length || pending) || snapshot.conversation.archived} accessibilityLabel={t(sendFailed ? "retry" : "send")} onPress={() => void send()}><Text>{running ? t("enqueue") : "↑"}</Text></Button>}
+          {busy ? <ActivityIndicator /> : <Button size={running ? "sm" : "icon"} disabled={!connected || !snapshot || !(draft.trim() || attachments.length || pending) || snapshot.conversation.archived} accessibilityLabel={t(sendFailed ? "retry" : "send")} onPress={() => void send()}><Text>{running ? t("enqueue") : "↑"}</Text></Button>}
         </View>
       </View>
     </KeyboardAvoidingView>

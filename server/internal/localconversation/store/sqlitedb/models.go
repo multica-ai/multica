@@ -17,6 +17,7 @@ type Attachment struct {
 	Size           int64
 	MediaType      string
 	CreatedAt      string
+	Sha256         string
 }
 
 type CommandReceipt struct {

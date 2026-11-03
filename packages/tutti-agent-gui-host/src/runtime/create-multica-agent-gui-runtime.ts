@@ -39,6 +39,8 @@ import { createDesktopQueueEngine } from "./desktop-queue-engine";
 import { promptSubmissionError } from "./prompt-submission-policy";
 import { createDesktopPendingStore } from "./desktop-pending-store";
 import { snapshotPromptQueues } from "./saved-prompt-queues";
+import { composerDraftAttachmentIds, createAttachmentUploadTracker } from "./attachment-upload-tracker";
+import type { AgentComposerDraft } from "../../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/model/agentGuiNodeTypes";
 
 const STORAGE_KEY = "runtime-ledger-v1";
 
@@ -54,6 +56,7 @@ export function unsupported(capability: string): never {
 }
 
 export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: AgentGuiInitSnapshot) {
+  const uploads = createAttachmentUploadTracker(client, init.locale);
   const workspaceId = init.workspaceId;
   const presentationTiming = createLocalPresentationTiming();
   const sendTiming = createLocalSendTiming();
@@ -532,6 +535,17 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   /** Loads a local conversation's snapshot and subscribes to what follows. */
   async function loadLocalSession(guiId: string, signal?: AbortSignal) {
     const sessionId = await backendSessionId(guiId);
+    // Show the conversation as last read at once; the current state replaces it below.
+    if (!details.has(guiId)) {
+      const stored = await client.request("local.storedSnapshot", { sessionId }, { signal }).catch(() => null);
+      const parsed = stored ? localV2SnapshotSchema.safeParse(stored.snapshot) : null;
+      if (stored && parsed?.success && !details.has(guiId)) {
+        scope(stored.detail.session.workspace_id);
+        details.set(guiId, stored.detail);
+        v2.set(guiId, V2Conversation.fromSnapshot(parsed.data));
+        applyDetail(guiId);
+      }
+    }
     const { detail, snapshot } = await client.request("local.snapshot", { sessionId }, { signal });
     const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse(snapshot));
     scope(detail.session.workspace_id);
@@ -769,8 +783,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     const startedAt = Date.now();
     const previous = desktopAdmissions.get(input);
     if (previous) {
+      await uploads.ensure(previous.item.attachmentIds ?? []);
       const retry = () => client.request("queue.enqueue", previous);
       const result = await (init.local ? sendTiming.begin(previous.sessionId, input.clientSubmitId, startedAt).measure("client.request", retry) : retry());
+      uploads.forget(previous.item.attachmentIds ?? []);
       desktopQueue.receive(input.agentSessionId, result);
       return result;
     }
@@ -780,6 +796,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     const submissionError = promptSubmissionError(input, init.locale);
     if (submissionError) throw new MulticaAgentGuiError(submissionError, "unsupported");
     const encoded = encodeContent([...(input.runtimeContent ?? input.content)]);
+    // The prompt waits here in the visible pending queue, with its failure and retry.
+    await uploads.ensure(encoded.attachmentIds ?? []);
     const display = snapshotPromptQueues({ nextCommandSequence: 0, recordsBySessionId: {
       [input.agentSessionId]: { agentSessionId: input.agentSessionId, workspaceId, prompts: [{ ...input, id: input.clientSubmitId, createdAtUnixMs: Date.now() }],
         deliveryBarrierTurnId: null, failedPromptId: null, failureMessage: null, inFlight: null, sendNextPromptId: null, suspendReason: null, uncertainDelivery: null },
@@ -796,6 +814,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     desktopAdmissions.set(input, params);
     const enqueue = () => client.request("queue.enqueue", params);
     const result = await (timing ? timing.measure("client.request", enqueue) : enqueue());
+    uploads.forget(encoded.attachmentIds ?? []);
     desktopQueue.receive(input.agentSessionId, result);
     return result;
   }
@@ -821,6 +840,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     const operation = (async () => {
       if (!previous?.response) {
         const encoded = encodeContent(input.content);
+        await uploads.ensure(encoded.attachmentIds ?? []);
         const recipients = encoded.references?.filter((entry) => entry.kind === "agent") ?? [];
         if (recipients.length) recipients.forEach((entry) => {
           const target = workspace.agents.find((item) => item.agent.id === entry.id);
@@ -839,6 +859,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
             ...(init.local && !recipients.length ? { reasoningEffort, permissionMode: selectedPermission(session.agent_id, input.agentSessionId) } : {}),
           }, { signal });
           const response = await (timing ? timing.measure("client.request", submit) : submit());
+          uploads.forget(encoded.attachmentIds ?? []);
           ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "accepted", response });
           await persist();
         } catch (error) {
@@ -856,6 +877,13 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     })().finally(() => { sendPromises.delete(input.clientSubmitId); });
     sendPromises.set(input.clientSubmitId, operation);
     return operation;
+  }
+
+  async function uploadAttachment(file: File) {
+    const attachment = await client.request("attachment.upload", { file, ...(init.local ? { background: true } : {}) });
+    registerAttachments([attachment]);
+    if (attachment.uploading) uploads.track(attachment.id, attachment.filename);
+    return attachment;
   }
 
   function encodeContent(blocks: AgentActivitySendInput["content"]) {
@@ -1013,8 +1041,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
           blob = await fetch(block.url).then((response) => response.blob());
         } else return unsupported("Unprepared local file paths");
         const file = new File([blob], block.name || "attachment", { type: block.mimeType || blob.type });
-        const attachment = await client.request("attachment.upload", { file });
-        registerAttachments([attachment]);
+        const attachment = await uploadAttachment(file);
         return { ...block, data: undefined, attachmentId: attachment.id, assetId: attachment.id,
           name: attachment.filename, mimeType: attachment.content_type, sizeBytes: attachment.size_bytes,
           url: init.local && block.type === "image" ? undefined : attachment.markdown_url || attachment.url, uploadStatus: "uploaded" };
@@ -1023,8 +1050,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     },
     stagePastedText: async (input) => {
       scope(input.workspaceId);
-      const attachment = await client.request("attachment.upload", { file: new File([input.text], input.name, { type: "text/plain" }) });
-      registerAttachments([attachment]);
+      const attachment = await uploadAttachment(new File([input.text], input.name, { type: "text/plain" }));
       return { name: attachment.filename, url: attachment.markdown_url || attachment.url, assetId: attachment.id,
         mimeType: attachment.content_type, sizeBytes: attachment.size_bytes, uploadStatus: "uploaded" };
     },
@@ -1032,6 +1058,17 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       scope(input.workspaceId);
       return { attachmentId: input.attachmentId, ...await client.request("attachment.read", { attachmentId: input.attachmentId }) };
     },
+    ...(init.local ? {
+      readSessionAttachmentSource: async (input: { workspaceId: string; attachmentId: string }) => {
+        scope(input.workspaceId);
+        await uploads.ensure([input.attachmentId]);
+        return { attachmentId: input.attachmentId, ...await client.request("attachment.url", { attachmentId: input.attachmentId }) };
+      },
+      promptAttachmentsRemoved: (before: AgentComposerDraft, after: AgentComposerDraft) => {
+        const kept = composerDraftAttachmentIds(after);
+        uploads.remove([...composerDraftAttachmentIds(before)].filter((id) => !kept.has(id)));
+      },
+    } : {}),
     readPromptAsset: async (input) => {
       scope(input.workspaceId);
       if (!input.assetId) unsupported("Unprepared prompt assets");
@@ -1041,6 +1078,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   };
 
   const unsubscribe = client.subscribe((event) => {
+    if (event.type === "attachment.upload") { uploads.settle(event); return; }
     if (disposed) return;
     if (event.type === "init") {
       const snapshot = event.snapshot;
@@ -1093,6 +1131,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       const sessionId = await backendSessionId(agentSessionId);
       const requestId = `side:${sessionId}:${prompt.clientSubmitId || prompt.id}`;
       const encoded = encodeContent([...(prompt.runtimeContent ?? prompt.content)]);
+      await uploads.ensure(encoded.attachmentIds ?? []);
       const session = details.get(agentSessionId)?.session;
       const model = session ? selectedModel(session.agent_id, agentSessionId) : null;
       const reasoningEffort = session ? await reasoningForSend(session.agent_id, agentSessionId) : null;
@@ -1161,6 +1200,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     toServerSessionId: resolvedServerId,
     toGuiSessionId: (id: string) => ledger.guiId(id),
     registerAttachments,
+    uploadAttachment,
+    subscribeUploads: uploads.subscribe,
+    activeUploadCount: uploads.activeCount,
     dispose() {
       if (disposed) return;
       disposed = true;

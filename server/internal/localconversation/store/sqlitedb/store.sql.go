@@ -107,6 +107,15 @@ func (q *Queries) CountPendingInteractions(ctx context.Context, conversationID s
 	return count, err
 }
 
+const deleteAttachment = `-- name: DeleteAttachment :exec
+DELETE FROM attachment WHERE id = ?
+`
+
+func (q *Queries) DeleteAttachment(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteAttachment, id)
+	return err
+}
+
 const deletePromptQueueItem = `-- name: DeletePromptQueueItem :exec
 DELETE FROM prompt_queue_item WHERE conversation_id = ? AND request_id = ?
 `
@@ -216,8 +225,37 @@ func (q *Queries) FindImportedConversation(ctx context.Context, arg FindImported
 	return i, err
 }
 
+const findUploadByHash = `-- name: FindUploadByHash :one
+SELECT id, scope_id, conversation_id, path, file_name, size, media_type, created_at, sha256 FROM attachment
+WHERE scope_id = ? AND sha256 = ? AND sha256 != '' AND conversation_id = ''
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindUploadByHashParams struct {
+	ScopeID int64
+	Sha256  string
+}
+
+func (q *Queries) FindUploadByHash(ctx context.Context, arg FindUploadByHashParams) (Attachment, error) {
+	row := q.db.QueryRowContext(ctx, findUploadByHash, arg.ScopeID, arg.Sha256)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeID,
+		&i.ConversationID,
+		&i.Path,
+		&i.FileName,
+		&i.Size,
+		&i.MediaType,
+		&i.CreatedAt,
+		&i.Sha256,
+	)
+	return i, err
+}
+
 const getAttachment = `-- name: GetAttachment :one
-SELECT id, scope_id, conversation_id, path, file_name, size, media_type, created_at FROM attachment WHERE id = ?
+SELECT id, scope_id, conversation_id, path, file_name, size, media_type, created_at, sha256 FROM attachment WHERE id = ?
 `
 
 func (q *Queries) GetAttachment(ctx context.Context, id string) (Attachment, error) {
@@ -232,6 +270,7 @@ func (q *Queries) GetAttachment(ctx context.Context, id string) (Attachment, err
 		&i.Size,
 		&i.MediaType,
 		&i.CreatedAt,
+		&i.Sha256,
 	)
 	return i, err
 }
@@ -465,8 +504,8 @@ func (q *Queries) GetTurn(ctx context.Context, id string) (Turn, error) {
 }
 
 const insertAttachment = `-- name: InsertAttachment :exec
-INSERT INTO attachment (id, scope_id, conversation_id, path, file_name, size, media_type, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO attachment (id, scope_id, conversation_id, path, file_name, size, media_type, sha256, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertAttachmentParams struct {
@@ -477,6 +516,7 @@ type InsertAttachmentParams struct {
 	FileName       string
 	Size           int64
 	MediaType      string
+	Sha256         string
 	CreatedAt      string
 }
 
@@ -489,6 +529,7 @@ func (q *Queries) InsertAttachment(ctx context.Context, arg InsertAttachmentPara
 		arg.FileName,
 		arg.Size,
 		arg.MediaType,
+		arg.Sha256,
 		arg.CreatedAt,
 	)
 	return err
@@ -1599,6 +1640,43 @@ func (q *Queries) ListTurnsBefore(ctx context.Context, arg ListTurnsBeforeParams
 			&i.LastTurnSeq,
 			&i.StartedAt,
 			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUploadsCreatedBefore = `-- name: ListUploadsCreatedBefore :many
+SELECT id, scope_id, conversation_id, path, file_name, size, media_type, created_at, sha256 FROM attachment WHERE conversation_id = '' AND created_at < ?
+`
+
+func (q *Queries) ListUploadsCreatedBefore(ctx context.Context, createdAt string) ([]Attachment, error) {
+	rows, err := q.db.QueryContext(ctx, listUploadsCreatedBefore, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.ConversationID,
+			&i.Path,
+			&i.FileName,
+			&i.Size,
+			&i.MediaType,
+			&i.CreatedAt,
+			&i.Sha256,
 		); err != nil {
 			return nil, err
 		}

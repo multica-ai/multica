@@ -193,8 +193,7 @@ export function AgentGuiApplication({
   const prepareFiles = useMemo<NonNullable<AgentGUIProps["workspace"]["prepareExternalPromptFiles"]>>(() => async (files) => Promise.all(files.map(async (file, sourceIndex) => {
     if (file.size > MAX_FILE_SIZE) return { sourceIndex, status: "error" as const, errorCode: "file_too_large" as const, retryable: false };
     try {
-      const attachment = await client.request("attachment.upload", { file });
-      handle.registerAttachments([attachment]);
+      const attachment = await handle.uploadAttachment(file);
       return { sourceIndex, status: "prepared" as const, file: {
         name: attachment.filename,
         url: attachment.markdown_url || attachment.url || attachment.download_url,
@@ -206,7 +205,7 @@ export function AgentGuiApplication({
     } catch {
       return { sourceIndex, status: "error" as const, errorCode: "preparation_failed" as const, retryable: true };
     }
-  })), [client, handle]);
+  })), [handle]);
 
   return <ComposerDraftProvider initial={initial}><InvokedAgentsProvider value={workspace.agents}><ResourceLinkProvider client={client} scope={{ workspaceId: initial.workspaceId, workspaceSlug: initial.workspaceSlug, appOrigin: snapshot.appOrigin }} agents={workspace.agents}><SideEntryProvider enabled={snapshot.sideWorkspace === true} sidePane={snapshot.sidePane} client={client} handle={handle} sessionId={node.lastActiveAgentSessionId ? handle.toServerSessionId(node.lastActiveAgentSessionId) : null} chinese={snapshot.locale === "zh-CN"}><AgentGUI
     identity={{ nodeId: `multica-agent-gui:${snapshot.workspaceId}`, workspaceId: snapshot.workspaceId, currentUserId: snapshot.userId, title: "Agent GUI" }}

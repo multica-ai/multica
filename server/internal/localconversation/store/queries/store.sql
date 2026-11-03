@@ -127,14 +127,26 @@ WHERE conversation_id = ? AND status = 'pending'
 ORDER BY created_at, id;
 
 -- name: InsertAttachment :exec
-INSERT INTO attachment (id, scope_id, conversation_id, path, file_name, size, media_type, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO attachment (id, scope_id, conversation_id, path, file_name, size, media_type, sha256, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetAttachment :one
 SELECT * FROM attachment WHERE id = ?;
 
 -- name: CountAttachmentsAtPath :one
 SELECT COUNT(*) FROM attachment WHERE path = ?;
+
+-- name: FindUploadByHash :one
+SELECT * FROM attachment
+WHERE scope_id = ? AND sha256 = ? AND sha256 != '' AND conversation_id = ''
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: DeleteAttachment :exec
+DELETE FROM attachment WHERE id = ?;
+
+-- name: ListUploadsCreatedBefore :many
+SELECT * FROM attachment WHERE conversation_id = '' AND created_at < ?;
 
 -- name: InsertCommandReceipt :exec
 INSERT INTO command_receipt (scope_id, request_id, fingerprint, result, uncertain, created_at)

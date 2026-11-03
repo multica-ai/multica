@@ -10,6 +10,8 @@ const RECONNECT_MAX_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const PROBE_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 20_000;
+/** An upload may take as long as it needs while its bytes keep moving. */
+const UPLOAD_STALL_MS = 60_000;
 const TRACKED_TURNS = 64;
 
 /** A failed request, carried as "kind: message" like every local v2 error. */
@@ -40,6 +42,7 @@ export interface DirectLocalV2Options {
   chooseRemote?: (scope: LocalV2Scope, request: LocalV2ChooseRequest) => Promise<unknown>;
   WebSocket?: typeof WebSocket;
   fetch?: typeof fetch;
+  XMLHttpRequest?: typeof XMLHttpRequest;
   /** Where this link's connection marks go; only another device's link has any. */
   timing?: LocalTimingSink;
 }
@@ -65,6 +68,7 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   private probeTimer?: ReturnType<typeof setInterval>;
   private readonly WS: typeof WebSocket;
   private readonly fetch: typeof fetch;
+  private readonly XHR: typeof XMLHttpRequest;
   readonly deviceId: string;
   /** Another device's API sits under this daemon's /local/devices/{peer}. */
   private readonly basePath: string;
@@ -76,6 +80,7 @@ export class DirectLocalV2Transport implements LocalV2Transport {
   constructor(private options: DirectLocalV2Options) {
     this.WS = options.WebSocket ?? WebSocket;
     this.fetch = options.fetch ?? fetch.bind(globalThis);
+    this.XHR = options.XMLHttpRequest ?? globalThis.XMLHttpRequest;
     this.deviceId = options.deviceId ?? "local";
     this.basePath = this.deviceId === "local" ? "" : `/local/devices/${encodeURIComponent(this.deviceId)}`;
   }
@@ -207,7 +212,7 @@ export class DirectLocalV2Transport implements LocalV2Transport {
         let value: unknown = null;
         try { value = JSON.parse(body); } catch { /* Invalid bodies retain the HTTP error handling below. */ }
         if (conversationId) this.mark("snapshot.parsed", { conversationId, durationMs: Date.now() - began });
-        return this.jsonOutcome(response, value);
+        return this.jsonOutcome(response.ok, response.status, value);
       } catch (error) {
         if (controller?.signal.reason === "connection_replaced" && recovery === 0) continue;
         if (controller?.signal.reason === "scope_released") throw failure("scope_released", "The conversation connection was released");
@@ -223,25 +228,75 @@ export class DirectLocalV2Transport implements LocalV2Transport {
     throw failure("device_unreachable", "The device connection changed while reading");
   }
 
-  private jsonOutcome(response: Response, value: unknown): unknown {
-    if (!response.ok) {
+  private jsonOutcome(ok: boolean, status: number, value: unknown): unknown {
+    if (!ok) {
       const error = (value as { error?: { kind?: unknown; message?: unknown } } | null)?.error;
-      const kind = typeof error?.kind === "string" ? error.kind : `http_${response.status}`;
+      const kind = typeof error?.kind === "string" ? error.kind : `http_${status}`;
       this.outcome(kind);
-      throw failure(kind, typeof error?.message === "string" ? error.message : `Local conversation request failed (HTTP ${response.status})`);
+      throw failure(kind, typeof error?.message === "string" ? error.message : `Local conversation request failed (HTTP ${status})`);
     }
     this.outcome(null);
     return value;
   }
 
-  request(scope: LocalV2Scope, method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
+  request(scope: LocalV2Scope, method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<unknown> {
     const requestId = this.deviceId === "local" ? undefined : localTimingRequestId(body);
     return this.json(scope, method, path, body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json", ...(requestId ? { [LOCAL_TIMING_REQUEST_HEADER]: requestId } : {}) } });
   }
 
-  async upload(scope: LocalV2Scope, file: File) {
-    const raw = await this.json(scope, "POST", "/attachments", { body: file, headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) } });
-    return localV2UploadSchema.parse(raw);
+  /**
+   * XMLHttpRequest because fetch cannot report upload progress, and a file on a
+   * slow link is only a failure once it stops moving. Losing one upload says
+   * nothing about the device, so it never changes availability by itself.
+   */
+  async upload(scope: LocalV2Scope, file: File, options: { id?: string; signal?: AbortSignal } = {}) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const endpoint = await this.endpoint(attempt > 0);
+      const headers = { ...this.headers(endpoint, scope), "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), ...(options.id ? { "X-Attachment-ID": options.id } : {}) };
+      const result = await this.sendFile(this.url(endpoint, "/attachments"), headers, file, options.signal);
+      // The daemon restarted with a new token, or moved to another port.
+      if (result.status === 403 && attempt === 0 && !result.contentType.includes("json")) continue;
+      let value: unknown = null;
+      try { value = JSON.parse(result.body); } catch { /* Invalid bodies retain the HTTP error handling below. */ }
+      return localV2UploadSchema.parse(this.jsonOutcome(result.status >= 200 && result.status < 300, result.status, value));
+    }
+    throw failure("forbidden", "The local daemon refused the connection");
+  }
+
+  private sendFile(url: string, headers: Record<string, string>, file: File, signal?: AbortSignal) {
+    return new Promise<{ status: number; contentType: string; body: string }>((resolve, reject) => {
+      const xhr = new this.XHR();
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const watch = () => {
+        clearTimeout(watchdog);
+        watchdog = setTimeout(() => {
+          settle(() => reject(failure("upload_stalled", "The file stopped uploading; check the connection and try again")));
+          xhr.abort();
+        }, UPLOAD_STALL_MS);
+      };
+      let settled = false;
+      const settle = (finish: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        signal?.removeEventListener("abort", aborted);
+        finish();
+      };
+      const aborted = () => {
+        settle(() => reject(signal?.reason ?? new DOMException("Aborted", "AbortError")));
+        xhr.abort();
+      };
+      if (signal?.aborted) { aborted(); return; }
+      signal?.addEventListener("abort", aborted, { once: true });
+      xhr.open("POST", url);
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+      xhr.upload.addEventListener("progress", watch);
+      xhr.addEventListener("load", () => settle(() => resolve({ status: xhr.status, contentType: xhr.getResponseHeader("Content-Type") ?? "", body: xhr.responseText })));
+      xhr.addEventListener("error", () => settle(() => reject(failure("upload_failed", "The file could not be uploaded; check the connection and try again"))));
+      xhr.addEventListener("abort", () => settle(() => reject(new DOMException("Aborted", "AbortError"))));
+      watch();
+      xhr.send(file);
+    });
   }
 
   /**

@@ -112,6 +112,85 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(data.request.mock.calls.filter(([method]) => method === "queue.enqueue")).toHaveLength(1);
     expect(data.request.mock.calls.filter(([method]) => method === "session.send" || method === "host.showMessage")).toEqual([]);
   });
+  describe("attachments still uploading", () => {
+    const uploading = async () => {
+      const data = backend(); data.sessions.push(session);
+      const original = data.request.getMockImplementation()!;
+      data.request.mockImplementation(async (method, params) => {
+        if (method === "workspace.load") return { ...await original(method, params), local: true, queueOwner: "desktop" };
+        if (method === "queue.enqueue") return { revision: 1, paused: true, items: [params.item] };
+        if (method === "attachment.upload") return { ...await original(method, params), uploading: params.background === true };
+        if (method === "attachment.retry" || method === "attachment.forget" || method === "attachment.cancel") return undefined;
+        return original(method, params);
+      });
+      const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true, queueOwner: "desktop", sessions: [session] });
+      handles.push(handle); await handle.initialize();
+      await handle.runtime.getSession(init.workspaceId, session.id);
+      const { content } = await handle.runtime.uploadPromptContent!({ workspaceId: init.workspaceId, content: [{ type: "image", mimeType: "image/png", data: "AAAA", name: "a.png" }] });
+      const engine = handle.runtime.getSessionEngine(init.workspaceId);
+      const enqueued = () => data.request.mock.calls.filter(([method]) => method === "queue.enqueue");
+      return { data, handle, engine, content, enqueued };
+    };
+
+    it("sends the message once the transfer finishes", async () => {
+      const { data, handle, engine, content, enqueued } = await uploading();
+      expect(handle.activeUploadCount()).toBe(1);
+      expect(engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "with-image", content: content as never }).accepted).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(enqueued()).toHaveLength(0);
+      data.emit({ type: "attachment.upload", attachmentId: "attachment-1", state: "uploaded" });
+      await vi.waitFor(() => expect(enqueued()).toHaveLength(1));
+      expect(enqueued()[0]![1].item.attachmentIds).toEqual(["attachment-1"]);
+      expect(handle.activeUploadCount()).toBe(0);
+      await vi.waitFor(() => expect(data.request).toHaveBeenCalledWith("attachment.forget", { attachmentId: "attachment-1" }));
+    });
+
+    it("keeps a failed message for an explicit retry, which transfers again", async () => {
+      const { data, engine, content, enqueued } = await uploading();
+      engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "with-image", content: content as never });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      data.emit({ type: "attachment.upload", attachmentId: "attachment-1", state: "failed", message: "offline" });
+      await vi.waitFor(() => {
+        const queue = engine.getSnapshot().promptQueue.recordsBySessionId[session.id];
+        expect(queue?.failureMessage).toContain("Could not upload a.png: offline");
+      });
+      expect(enqueued()).toHaveLength(0);
+      expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.prompts.map((prompt) => prompt.clientSubmitId)).toEqual(["with-image"]);
+    });
+
+    it("stops the transfer when the draft drops the attachment", async () => {
+      const { data, handle } = await uploading();
+      const with_ = [{ type: "text", text: "" }, { type: "image", attachmentId: "attachment-1", mimeType: "image/png", name: "a.png" }];
+      (handle.runtime as unknown as { promptAttachmentsRemoved(before: unknown, after: unknown): void }).promptAttachmentsRemoved(with_, [{ type: "text", text: "" }]);
+      expect(data.request).toHaveBeenCalledWith("attachment.cancel", { attachmentId: "attachment-1" });
+      expect(handle.activeUploadCount()).toBe(0);
+    });
+  });
+  it("shows a stored conversation before the current one arrives", async () => {
+    const data = backend(); data.sessions.push(session);
+    const original = data.request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "workspace.load") return { ...await original(method, params), local: true, queueOwner: "desktop" };
+      return original(method, params);
+    });
+    const request = data.client.request;
+    const seen: string[] = [];
+    data.client.request = (async (method: string, params: never, options: never) => {
+      if (method === "local.storedSnapshot") { seen.push("stored"); return request("local.snapshot" as never, params, options); }
+      if (method === "local.snapshot") { seen.push("fresh"); await held; }
+      return request(method as never, params, options);
+    }) as never;
+    const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true, queueOwner: "desktop", sessions: [session] });
+    handles.push(handle); await handle.initialize();
+    const loading = handle.runtime.getSession(init.workspaceId, session.id);
+    await vi.waitFor(() => expect(seen).toEqual(["stored", "fresh"]));
+    const shown = handle.runtime.getSessionEngine(init.workspaceId).getSnapshot().sessionLifecycle.sessionsById[session.id];
+    expect(shown).toBeDefined();
+    release();
+    await expect(loading).resolves.toMatchObject({ agentSessionId: session.id });
+  });
   it("marks the send and its request under the mapped client stages, once for each attempt", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {

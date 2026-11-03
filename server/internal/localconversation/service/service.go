@@ -43,6 +43,8 @@ var (
 
 const (
 	unreferencedFileAge = time.Hour
+	abandonedUploadAge  = 7 * 24 * time.Hour
+	uploadSweepInterval = 6 * time.Hour
 	closeTimeout        = 10 * time.Second
 	snapshotTurns       = 20
 )
@@ -145,6 +147,8 @@ type Service struct {
 	closed chan struct{}
 	// maintenanceKick asks for an early maintenance pass.
 	maintenanceKick chan struct{}
+	// uploadsSwept is only touched by the maintenance goroutine.
+	uploadsSwept time.Time
 	// background is the goroutines Close waits for before closing the store.
 	background sync.WaitGroup
 }

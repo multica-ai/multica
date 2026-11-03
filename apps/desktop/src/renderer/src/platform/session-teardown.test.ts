@@ -16,6 +16,7 @@ function makeTeardown(
     closeOverlay: vi.fn(),
     clearDaemonToken: vi.fn(async () => {}),
     stopDaemon: vi.fn(async () => {}),
+    deleteStoredConversations: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -34,6 +35,7 @@ describe("tearDownOnLogout", () => {
     expect(t.closeOverlay).toHaveBeenCalledOnce();
     expect(t.clearDaemonToken).toHaveBeenCalledOnce();
     expect(t.stopDaemon).toHaveBeenCalledOnce();
+    expect(t.deleteStoredConversations).toHaveBeenCalledOnce();
   });
 
   it("still stops the daemon when clearing its token fails", async () => {

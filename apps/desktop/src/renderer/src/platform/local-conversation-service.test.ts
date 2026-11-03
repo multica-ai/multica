@@ -110,9 +110,38 @@ describe("local conversation parent service over v2", () => {
     const send = requests.find((entry) => entry.body?.type === "send")!.body!;
     expect(send).toMatchObject({ request_id: "req-1", text: "Review this", agents: [{ id: "design", name: "Design reviewer" }] });
     expect(send.prompt).toContain("Referenced context (quoted data)");
-    expect(send.prompt).toContain("user: earlier question");
+    expect(send.prompt).toContain('read_context(kind="conversation", id="c1", source="local")');
+    expect(send.prompt).not.toContain("earlier question");
+    expect(requests.some((entry) => entry.path === "/sessions/c1/snapshot")).toBe(false);
     // Model choices belong to the local provider; agent sends leave them alone.
     expect(requests.some((entry) => entry.body?.type === "update_settings")).toBe(false);
+  });
+
+  it("stores another device's conversations and returns them for an instant open", async () => {
+    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? snapshot("c1") : undefined);
+    const saved = new Map<string, unknown>();
+    const snapshotStore = { read: vi.fn(async (key: string) => (saved.get(key) ?? null) as never), write: vi.fn(async (key: string, value: unknown) => { saved.set(key, value); }) };
+    const { service } = setup({ snapshotStore } as never, "peer");
+    await expect(service.request("local.storedSnapshot", { sessionId: "c1" })).resolves.toBeNull();
+    await service.request("local.snapshot", { sessionId: "c1" });
+    expect(snapshotStore.write).toHaveBeenCalledWith(JSON.stringify(["peer", "user", "ws", "c1"]), expect.objectContaining({ snapshot_seq: expect.any(Number) }));
+    const stored = await service.request("local.storedSnapshot", { sessionId: "c1" });
+    expect(stored?.detail.session.id).toBe("c1");
+  });
+
+  it("does not store this device's own conversations", async () => {
+    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? snapshot("c1") : undefined);
+    const snapshotStore = { read: vi.fn(), write: vi.fn() };
+    const { service } = setup({ snapshotStore } as never);
+    await service.request("local.snapshot", { sessionId: "c1" });
+    expect(snapshotStore.write).not.toHaveBeenCalled();
+    await expect(service.request("local.storedSnapshot", { sessionId: "c1" })).resolves.toBeNull();
+  });
+
+  it("gives message images a file URL instead of their bytes", async () => {
+    const { service } = setup();
+    await expect(service.request("attachment.url", { attachmentId: "a/b" })).resolves.toEqual({ url: "v2:/attachments/a%2Fb" });
+    await expect(service.request("image.url", { sessionId: "c1", path: "/tmp/a b.png" })).resolves.toEqual({ url: "v2:/sessions/c1/image?path=%2Ftmp%2Fa%20b.png" });
   });
 
   it("applies composer settings before a local send", async () => {

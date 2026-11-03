@@ -86,7 +86,7 @@ export class AISessionClient {
   headers() { return { Authorization: `Bearer ${this.endpoint.token}`, "X-Workspace-ID": this.scope.workspaceId, "X-Multica-Client-ID": this.clientId }; }
   url(path: string) { return `${this.endpoint.url}/devices/${encodeURIComponent(this.scope.deviceId)}/local/v2${path}`; }
 
-  async request<T>(method: "GET" | "POST", path: string, schema: z.ZodType<T>, body?: unknown, signal?: AbortSignal, timeoutMs = REQUEST_TIMEOUT_MS, snapshotOf?: string): Promise<T> {
+  async request<T>(method: "GET" | "POST" | "DELETE", path: string, schema: z.ZodType<T>, body?: unknown, signal?: AbortSignal, timeoutMs = REQUEST_TIMEOUT_MS, snapshotOf?: string): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener("abort", abort);
@@ -100,7 +100,8 @@ export class AISessionClient {
       if (snapshotOf) this.mark("snapshot.first_byte", { conversationId: snapshotOf, durationMs: Date.now() - began });
       const text = await response.text();
       if (snapshotOf) this.mark("snapshot.received", { conversationId: snapshotOf, durationMs: Date.now() - began, bytes: text.length });
-      const value: unknown = JSON.parse(text);
+      // A DELETE answers 204 without a body.
+      const value: unknown = text ? JSON.parse(text) : null;
       if (!response.ok) {
         const error = z.object({ error: z.object({ kind: z.string(), message: z.string() }) }).safeParse(value);
         throw new Error(error.success ? error.data.error.kind : `http_${response.status}`);
