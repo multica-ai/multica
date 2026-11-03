@@ -1,5 +1,6 @@
 import type { AgentTask } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { formatSpend, type TaskUsageSummary } from "../../runtimes/utils";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
 // Display labels shared by every surface that lists an issue's agent runs:
@@ -113,4 +114,10 @@ export function taskDurationMs(task: AgentTask): number | null {
   const end = new Date(task.completed_at).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
   return end - start;
+}
+
+/** Formats a run's spend, labelling provider credits in the reader's locale. */
+export function useFormatSpend(): (usage: Pick<TaskUsageSummary, "cost" | "credits">) => string {
+  const { t } = useT("issues");
+  return (usage) => formatSpend(usage, (credits) => t(($) => $.runs_timeline.credits_count, { credits }));
 }

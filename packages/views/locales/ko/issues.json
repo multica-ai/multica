@@ -869,6 +869,7 @@
     "col_tokens": "토큰",
     "col_cost": "비용",
     "tokens_count": "토큰 {{tokens}}",
+    "credits_count": "{{credits}} credits",
     "details_toggle": "실행 세부 정보",
     "detail_breakdown": "비용 내역",
     "detail_total": "합계",

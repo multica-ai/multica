@@ -166,6 +166,31 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+export function formatCredits(n: number): string {
+  if (n >= 1000) return formatTokens(n);
+  if (n >= 100) return n.toFixed(0);
+  return String(Number(n.toFixed(2)));
+}
+
+/**
+ * A run's spend for display. Credits have no USD rate, so a credit-billed run
+ * shows its credits and a mix shows both; `creditsLabel` supplies the
+ * translated unit.
+ */
+export function formatSpend(
+  usage: Pick<TaskUsageSummary, "cost" | "credits">,
+  creditsLabel: (credits: string) => string,
+): string {
+  if (usage.credits === null) return formatUsd(usage.cost);
+  const credits = creditsLabel(formatCredits(usage.credits));
+  return usage.cost > 0 ? `${formatUsd(usage.cost)} + ${credits}` : credits;
+}
+
+/** False for usage billed only in credits, whose token count is not reported. */
+export function hasTokenFigure(usage: Pick<TaskUsageSummary, "tokens" | "credits">): boolean {
+  return usage.tokens > 0 || usage.credits === null;
+}
+
 // Cost estimation
 
 // Pricing per million tokens (USD). Sources, each authoritative for the
@@ -825,6 +850,7 @@ export type Priceable = Pick<
 > & {
   provider?: string;
   cost_usd_ticks?: number;
+  credits_micros?: number;
   uncosted_input_tokens?: number;
   uncosted_output_tokens?: number;
   uncosted_cache_read_tokens?: number;
@@ -976,6 +1002,8 @@ export interface TaskUsageSummary {
   cacheWrite: number;
   /** Distinct models this run touched, in first-seen order. Usually one. */
   models: string[];
+  /** Provider credits charged, or null when no slice was billed in credits. */
+  credits: number | null;
 }
 
 /**
@@ -999,7 +1027,7 @@ export function summarizeTaskUsage(
   const summary: TaskUsageSummary = {
     tokens: 0, cost: 0, cacheSavings: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-    models,
+    models, credits: null,
   };
 
   for (const slice of usage) {
@@ -1010,6 +1038,9 @@ export function summarizeTaskUsage(
     summary.cost += estimateCost(slice);
     summary.cacheSavings += estimateCacheSavings(slice);
     if (slice.model && !models.includes(slice.model)) models.push(slice.model);
+    if (slice.credits_micros != null) {
+      summary.credits = (summary.credits ?? 0) + slice.credits_micros / 1e6;
+    }
   }
   summary.tokens =
     summary.input + summary.output + summary.cacheRead + summary.cacheWrite;

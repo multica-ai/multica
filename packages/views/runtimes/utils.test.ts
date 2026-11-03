@@ -13,7 +13,10 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatCredits,
+  formatSpend,
   formatTokens,
+  hasTokenFigure,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -2076,5 +2079,48 @@ describe("formatTokens", () => {
     expect(formatTokens(999_949)).toBe("999.9K");
     expect(formatTokens(999_950)).toBe("1M");
     expect(formatTokens(999_999_999)).toBe("1B");
+  });
+});
+
+describe("credits usage", () => {
+  const qoder = {
+    provider: "qoder_cloud",
+    model: "",
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    credits_micros: 1_250_000,
+  };
+  const label = (credits: string) => `${credits} credits`;
+
+  it("sums credits across slices and leaves token cost at zero", () => {
+    const s = summarizeTaskUsage([qoder, { ...qoder, credits_micros: 500_000 }]);
+    expect(s?.credits).toBe(1.75);
+    expect(s?.cost).toBe(0);
+    expect(s?.models).toEqual([]);
+  });
+
+  it("reports no credits when no slice was billed in credits", () => {
+    const { credits_micros: _, ...tokensOnly } = qoder;
+    expect(summarizeTaskUsage([tokensOnly])?.credits).toBeNull();
+  });
+
+  it("shows credits alone, USD alone, or both", () => {
+    expect(formatSpend({ cost: 0, credits: 1.75 }, label)).toBe("1.75 credits");
+    expect(formatSpend({ cost: 1.5, credits: null }, label)).toBe("$1.50");
+    expect(formatSpend({ cost: 1.5, credits: 2 }, label)).toBe("$1.50 + 2 credits");
+  });
+
+  it("formats credits by magnitude", () => {
+    expect(formatCredits(0.125)).toBe("0.13");
+    expect(formatCredits(250.4)).toBe("250");
+    expect(formatCredits(12_500)).toBe(formatTokens(12_500));
+  });
+
+  it("hides the token figure only for credits-only usage", () => {
+    expect(hasTokenFigure({ tokens: 0, credits: 1 })).toBe(false);
+    expect(hasTokenFigure({ tokens: 10, credits: 1 })).toBe(true);
+    expect(hasTokenFigure({ tokens: 0, credits: null })).toBe(true);
   });
 });

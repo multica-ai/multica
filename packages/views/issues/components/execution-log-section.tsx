@@ -28,7 +28,7 @@ import { compareActiveIssueTasks } from "./active-task-order";
 import { formatDuration as formatAgentTime } from "../../dashboard/utils";
 import {
   formatTokens,
-  formatUsd,
+  hasTokenFigure,
   summarizeTaskUsage,
   summarizeTaskUsageAcross,
 } from "../../runtimes/utils";
@@ -42,7 +42,7 @@ import {
 } from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { TaskStatusIcon } from "./task-status-icon";
-import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { useFormatSpend, useStatusLabel, useTriggerText } from "./task-run-labels";
 import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // Sidebar summary: totals, a bounded cost chart, active runs and recent history.
@@ -207,10 +207,19 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
 // run reported, never 0.
 function RunTotals({ timeline }: { timeline: RunTimeline }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const priced = timeline.pricedCount > 0;
   const stats = [
-    [t(($) => $.runs_timeline.stat_spent), priced ? formatUsd(timeline.totalCost) : "—"],
-    [t(($) => $.runs_timeline.stat_tokens), priced ? formatTokens(timeline.tokens.total) : "—"],
+    [
+      t(($) => $.runs_timeline.stat_spent),
+      priced ? formatSpend({ cost: timeline.totalCost, credits: timeline.totalCredits }) : "—",
+    ],
+    [
+      t(($) => $.runs_timeline.stat_tokens),
+      priced && hasTokenFigure({ tokens: timeline.tokens.total, credits: timeline.totalCredits })
+        ? formatTokens(timeline.tokens.total)
+        : "—",
+    ],
     [t(($) => $.runs_timeline.stat_agent_time), formatAgentTime(timeline.agentMs / 1000, "0s")],
   ] as const;
   return (
@@ -315,6 +324,7 @@ function RunCostBars({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () =
 
 function RunBarSummary({ run }: { run: TimelineRun }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const trigger = useTriggerText(run.task);
   const status = useStatusLabel(run.task.status);
   return (
@@ -325,8 +335,12 @@ function RunBarSummary({ run }: { run: TimelineRun }) {
       <span className="text-micro text-muted-foreground">
         {[
           // A run still going has not reported usage yet — that is not "none".
-          run.usage ? formatUsd(run.usage.cost) : run.active ? null : t(($) => $.execution_log.strip_no_usage),
           run.usage
+            ? formatSpend(run.usage)
+            : run.active
+              ? null
+              : t(($) => $.execution_log.strip_no_usage),
+          run.usage && hasTokenFigure(run.usage)
             ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(run.usage.tokens) })
             : null,
           run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
@@ -366,6 +380,7 @@ export function IssueRunsTotal({
   onOpen: () => void;
 }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   // Custom rates are read imperatively inside `estimateCost`, so a saved rate
   // change does not re-render this on its own — subscribe and make the memo
   // depend on the snapshot, or the header total keeps quoting the old price
@@ -407,7 +422,7 @@ export function IssueRunsTotal({
         {total && (
           <>
             <span className={`text-faint-foreground ${narrowTier}`}>·</span>
-            <span className="font-medium">{formatUsd(total.cost)}</span>
+            <span className="font-medium">{formatSpend(total)}</span>
           </>
         )}
       </TooltipTrigger>
@@ -621,6 +636,7 @@ function QueuedTasksGroup({ tasks, issueId }: { tasks: AgentTask[]; issueId: str
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const { t: tAgents } = useT("agents");
   const { getActorName } = useActorName();
   const timeAgo = useTimeAgo();
@@ -662,7 +678,9 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     agentName,
     reason ? null : duration,
     time,
-    usage ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(usage.tokens) }) : null,
+    usage && hasTokenFigure(usage)
+      ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(usage.tokens) })
+      : null,
     usage?.models.join(", "),
   ].filter(Boolean).join(" · ");
 
@@ -680,7 +698,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             <TaskStatusIcon status={task.status} />
             <span className="sr-only">{[label, time].filter(Boolean).join(" · ")}</span>
             {usage ? (
-              <span className="tabular-nums">{formatUsd(usage.cost)}</span>
+              <span className="tabular-nums">{formatSpend(usage)}</span>
             ) : (
               <span className="text-faint-foreground">—</span>
             )}

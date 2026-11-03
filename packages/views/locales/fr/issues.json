@@ -909,6 +909,7 @@
     "col_tokens": "Tokens",
     "col_cost": "Coût",
     "tokens_count": "{{tokens}} tokens",
+    "credits_count": "{{credits}} crédits",
     "details_toggle": "Détails de l'exécution",
     "detail_breakdown": "Détail du coût",
     "detail_total": "Total",

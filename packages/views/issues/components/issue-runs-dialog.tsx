@@ -25,6 +25,7 @@ import {
   collectUnmappedModels,
   formatTokens,
   formatUsd,
+  hasTokenFigure,
   type CostBreakdown,
 } from "../../runtimes/utils";
 import { AttributionBadge } from "./attribution-badge";
@@ -41,7 +42,7 @@ import {
 import { RunCumulativeChart } from "./issue-runs-cumulative-chart";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { RunTriggerLabel } from "./run-trigger-label";
-import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { useFormatSpend, useStatusLabel, useTriggerText } from "./task-run-labels";
 
 // The issue's runs laid out in time — the surface the execution log's header
 // and cost bars open.
@@ -205,6 +206,7 @@ const UNDER_A_SECOND = "0s";
 
 function RunStats({ timeline }: { timeline: RunTimeline }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const percent = usePercent();
   const priced = timeline.pricedCount > 0;
   const hit = cacheHitRate(timeline.tokens);
@@ -223,12 +225,14 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
         {/* Proportional figures: a standalone hero number set in tabular
             digits reads loose. "—" when nothing reported usage — never $0. */}
         <span className="text-display-sm font-semibold">
-          {priced ? formatUsd(timeline.totalCost) : "—"}
+          {priced ? formatSpend({ cost: timeline.totalCost, credits: timeline.totalCredits }) : "—"}
         </span>
       </Stat>
       <Stat label={t(($) => $.runs_timeline.stat_tokens)}>
         <span className="text-title-sm font-medium tabular-nums">
-          {priced ? formatTokens(timeline.tokens.total) : "—"}
+          {priced && hasTokenFigure({ tokens: timeline.tokens.total, credits: timeline.totalCredits })
+            ? formatTokens(timeline.tokens.total)
+            : "—"}
         </span>
         {/* Cache reads are most of an agent's tokens; without the share the
             total reads as far more fresh work than it was. */}
@@ -590,6 +594,7 @@ function formatTick(v: number): string {
 
 function RunHoverCard({ run, parts }: { run: TimelineRun; parts: boolean }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const partLabel = useCostPartLabel();
   const { getActorName } = useActorName();
   const trigger = useTriggerText(run.task);
@@ -620,11 +625,13 @@ function RunHoverCard({ run, parts }: { run: TimelineRun; parts: boolean }) {
       <span className="text-micro tabular-nums">
         {run.usage ? (
           <>
-            <span className="font-medium">{formatUsd(run.usage.cost)}</span>
-            <span className="text-muted-foreground">
-              {" · "}
-              {t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(run.usage.tokens) })}
-            </span>
+            <span className="font-medium">{formatSpend(run.usage)}</span>
+            {hasTokenFigure(run.usage) && (
+              <span className="text-muted-foreground">
+                {" · "}
+                {t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(run.usage.tokens) })}
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">{t(($) => $.runs_timeline.no_usage)}</span>
@@ -742,6 +749,7 @@ const COL = {
 
 function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: string }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const groups = useMemo(() => groupRunsByDay(timeline.runs), [timeline.runs]);
 
@@ -788,8 +796,10 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
                 {[
                   t(($) => $.runs_timeline.day_runs, { count: group.runs.length }),
                   group.agentMs > 0 ? formatDuration(group.agentMs / 1000, UNDER_A_SECOND) : null,
-                  priced ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(group.tokens) }) : null,
-                  priced ? formatUsd(group.cost) : null,
+                  priced && hasTokenFigure(group)
+                    ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(group.tokens) })
+                    : null,
+                  priced ? formatSpend(group) : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -819,6 +829,7 @@ function useStatusReason(task: AgentTask): string | null {
 
 function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const { getActorName } = useActorName();
   const [expanded, setExpanded] = useState(false);
@@ -910,9 +921,9 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
         {run.usage ? (
           <>
             <span className={cn(COL.tokens, "tabular-nums text-muted-foreground")}>
-              {formatTokens(run.usage.tokens)}
+              {hasTokenFigure(run.usage) ? formatTokens(run.usage.tokens) : "—"}
             </span>
-            <span className={cn(COL.cost, "font-medium tabular-nums")}>{formatUsd(run.usage.cost)}</span>
+            <span className={cn(COL.cost, "font-medium tabular-nums")}>{formatSpend(run.usage)}</span>
           </>
         ) : (
           // No figure is not zero: a run without usage data was not free.
@@ -957,6 +968,7 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
 
 function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason: string | null }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const partLabel = useCostPartLabel();
   const percent = usePercent();
@@ -1006,8 +1018,8 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
             ))}
             <span />
             <span className="font-medium">{t(($) => $.runs_timeline.detail_total)}</span>
-            <span className="text-right font-medium">{formatTokens(usage.tokens)}</span>
-            <span className="w-14 text-right font-semibold">{formatUsd(usage.cost)}</span>
+            <span className="text-right font-medium">{hasTokenFigure(usage) ? formatTokens(usage.tokens) : "—"}</span>
+            <span className="min-w-14 text-right font-semibold whitespace-nowrap">{formatSpend(usage)}</span>
             <span />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentTaskSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -2449,5 +2450,34 @@ describe("AgentActivityBucketListSchema duration", () => {
     expect(parsed[0]?.task_count).toBe(201);
     expect(parsed[0]?.duration_ms).toBeUndefined();
     expect(parsed[0]?.duration_count).toBeUndefined();
+  });
+});
+
+describe("task usage credits", () => {
+  const slice = {
+    provider: "qoder_cloud",
+    model: "",
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("keeps credits and treats a missing field as token-only usage", () => {
+    const parsed = AgentTaskSchema.parse({
+      id: "run",
+      usage: [{ ...slice, credits_micros: 1_250_000 }, { ...slice, provider: "anthropic" }],
+    });
+    expect(parsed.usage?.[0]?.credits_micros).toBe(1_250_000);
+    expect(parsed.usage?.[1]?.credits_micros).toBeUndefined();
+  });
+
+  it("drops malformed credits without losing the usage row", () => {
+    const parsed = AgentTaskSchema.parse({
+      id: "run",
+      usage: [{ ...slice, credits_micros: "lots" }],
+    });
+    expect(parsed.usage).toHaveLength(1);
+    expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
   });
 });

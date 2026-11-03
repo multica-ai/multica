@@ -232,6 +232,39 @@ describe("buildRunTimeline", () => {
   });
 });
 
+describe("credits", () => {
+  const credits = (micros: number): TaskUsage[] => [
+    {
+      provider: "qoder_cloud",
+      model: "",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      credits_micros: micros,
+    },
+  ];
+
+  it("totals credits separately from USD, per timeline and per day", () => {
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "a", usage: credits(1_000_000) }),
+        makeTask({ id: "b", started_at: "2026-09-24T11:00:00", completed_at: "2026-09-24T11:30:00", usage: credits(500_000) }),
+        makeTask({ id: "c", started_at: "2026-09-25T11:00:00", completed_at: "2026-09-25T11:30:00", usage: usage(200_000) }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.totalCredits).toBe(1.5);
+    expect(timeline.totalCost).toBe(5);
+    expect(groupRunsByDay(timeline.runs).map((g) => g.credits)).toEqual([null, 1.5]);
+  });
+
+  it("reports no credits when no run was billed in credits", () => {
+    expect(buildRunTimeline([makeTask({ usage: usage(200_000) })], NOW).totalCredits).toBeNull();
+  });
+});
+
 describe("costSoFar", () => {
   it("reads the curve at each run's end, unpriced runs included", () => {
     const timeline = buildRunTimeline(
