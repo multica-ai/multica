@@ -151,7 +151,7 @@ function RemoteArt() {
       <div className="bg-muted/60 px-2.5 py-2 font-mono text-micro leading-5">
         {SETUP_COMMANDS.map((command, i) => (
           <div key={command} className="flex gap-2">
-            <span className="text-muted-foreground/60">{i + 1}</span>
+            <span className="text-faint-foreground">{i + 1}</span>
             <span className="truncate">{command}</span>
           </div>
         ))}
