@@ -20,21 +20,12 @@
         "description": "Skills you created"
       }
     },
-    "empty": {
-      "title": "No skills yet",
-      "description": "Create or import a skill."
-    },
     "no_matches": {
       "title": "No matches",
       "with_query": "No skills match \"{{query}}\"{{filterSuffix}}.",
       "with_query_filter_suffix": " in this filter",
       "filter_only": "No skills match this filter.",
       "try_different": " Try a different query."
-    },
-    "intro_banner": {
-      "title": "Shared with your workspace.",
-      "body": "Anyone can create a skill, import one from a URL or a local folder, or copy one from their local runtime — and every agent can use it.",
-      "highlight": "Local runtime skills stay private until you copy one here."
     },
     "list_error": {
       "title": "Couldn't load skills",
@@ -369,5 +360,31 @@
     "markdown_placeholder": "Write markdown content...",
     "raw_placeholder": "File content...",
     "raw_aria": "Plain text content of {{path}}"
+  },
+  "intro": {
+    "title": "Turn how your team works into skills",
+    "description": "A skill is a reusable set of instructions (SKILL.md). Add it to the workspace once, give it to an agent, and the agent follows it.",
+    "slides": {
+      "methods": {
+        "title": "Four ways to add one",
+        "description": "Start from a blank SKILL.md, or bring in an existing skill from a local folder, a URL, or a runtime."
+      },
+      "assign": {
+        "title": "Give it to agents",
+        "description": "One skill can serve many agents. Edit it in one place and every agent that uses it gets the change."
+      },
+      "share": {
+        "title": "Shared across the workspace",
+        "description": "Skills on a local runtime stay private until you copy them here. After that, any agent can use them."
+      }
+    },
+    "art": {
+      "skill_summary": "Run the tests first, then check accessibility and performance.",
+      "add_to_agent": "Add to agent",
+      "local_skills": "Local skills",
+      "private": "Private",
+      "workspace_shared": "Workspace",
+      "all_agents": "Any agent can use it"
+    }
   }
 }

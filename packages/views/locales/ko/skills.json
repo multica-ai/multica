@@ -20,21 +20,12 @@
         "description": "내가 생성한 스킬"
       }
     },
-    "empty": {
-      "title": "아직 스킬이 없습니다",
-      "description": "skill을 만들거나 가져오세요."
-    },
     "no_matches": {
       "title": "일치하는 결과 없음",
       "with_query": "\"{{query}}\"와 일치하는 스킬이 없습니다{{filterSuffix}}.",
       "with_query_filter_suffix": " (이 필터 기준)",
       "filter_only": "이 필터와 일치하는 스킬이 없습니다.",
       "try_different": " 다른 검색어를 시도해 보세요."
-    },
-    "intro_banner": {
-      "title": "워크스페이스와 공유됩니다.",
-      "body": "누구나 스킬을 만들거나 URL이나 로컬 폴더에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
-      "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
     },
     "list_error": {
       "title": "스킬을 불러오지 못했습니다",
@@ -356,5 +347,31 @@
     "markdown_placeholder": "Markdown 내용 작성...",
     "raw_placeholder": "파일 내용...",
     "raw_aria": "{{path}}의 일반 텍스트 내용"
+  },
+  "intro": {
+    "title": "팀의 일하는 방식을 스킬로 만드세요",
+    "description": "스킬은 재사용할 수 있는 작업 지침(SKILL.md)입니다. 워크스페이스에 한 번 추가하고 에이전트에 할당하면 에이전트가 그대로 따릅니다.",
+    "slides": {
+      "methods": {
+        "title": "네 가지 추가 방법",
+        "description": "빈 SKILL.md부터 쓰거나, 로컬 폴더, URL, 런타임에서 기존 스킬을 가져오세요."
+      },
+      "assign": {
+        "title": "에이전트에 할당",
+        "description": "스킬 하나를 여러 에이전트가 쓸 수 있습니다. 한 곳만 고치면 이를 쓰는 모든 에이전트에 반영됩니다."
+      },
+      "share": {
+        "title": "워크스페이스에서 공유",
+        "description": "로컬 런타임의 스킬은 여기로 복사하기 전까지 비공개입니다. 복사하면 어떤 에이전트든 쓸 수 있습니다."
+      }
+    },
+    "art": {
+      "skill_summary": "먼저 테스트를 돌린 뒤 접근성과 성능을 확인한다.",
+      "add_to_agent": "에이전트에 추가",
+      "local_skills": "로컬 스킬",
+      "private": "비공개",
+      "workspace_shared": "워크스페이스",
+      "all_agents": "모든 에이전트가 사용 가능"
+    }
   }
 }

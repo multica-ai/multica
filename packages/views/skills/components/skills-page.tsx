@@ -51,6 +51,7 @@ import {
   type CollectionSort,
 } from "../../layout/collection-list";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
+import { SkillsIntro } from "./skills-intro";
 import { originSourceUrl, readOrigin } from "../lib/origin";
 import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 import {
@@ -231,19 +232,6 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
       />
       <span className="min-w-0 truncate">{creator.name}</span>
     </>
-  );
-}
-
-// Empty state
-
-function EmptyState() {
-  const { t } = useT("skills");
-  return (
-    <CollectionPageState
-      icon={SkillIcon}
-      title={t(($) => $.page.empty.title)}
-      description={t(($) => $.page.empty.description)}
-    />
   );
 }
 
@@ -549,9 +537,7 @@ export default function SkillsPage() {
       )}
 
       {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState />
-        </div>
+        <SkillsIntro onCreate={setCreateMethod} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}

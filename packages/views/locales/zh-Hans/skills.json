@@ -20,21 +20,12 @@
         "description": "你创建的 skill"
       }
     },
-    "empty": {
-      "title": "还没有 skill",
-      "description": "创建或导入一个 skill。"
-    },
     "no_matches": {
       "title": "无匹配",
       "with_query": "没有 skill 匹配 \"{{query}}\"{{filterSuffix}}。",
       "with_query_filter_suffix": "（在当前筛选下）",
       "filter_only": "当前筛选下没有匹配的 skill。",
       "try_different": " 换个关键词试试。"
-    },
-    "intro_banner": {
-      "title": "在工作区内共享。",
-      "body": "任何成员都可以创建 skill、从 URL 或本地文件夹导入、或从本地运行时复制——之后所有智能体都能用它。",
-      "highlight": "本地运行时里的 skill 在你复制过来之前是私有的。"
     },
     "list_error": {
       "title": "无法加载 skill",
@@ -356,5 +347,31 @@
     "markdown_placeholder": "输入 Markdown 内容...",
     "raw_placeholder": "文件内容...",
     "raw_aria": "{{path}} 的纯文本内容"
+  },
+  "intro": {
+    "title": "把团队的做事方法写成 skill",
+    "description": "Skill 是一份可复用的做事说明（SKILL.md）。在工作区里添加一次，分配给哪个智能体，它就会照着做。",
+    "slides": {
+      "methods": {
+        "title": "四种方式添加",
+        "description": "从空白的 SKILL.md 写起，或从本地文件夹、URL、运行时导入已有的 skill。"
+      },
+      "assign": {
+        "title": "分配给智能体",
+        "description": "一个 skill 可以给多个智能体用。改一处，所有用到它的智能体都会更新。"
+      },
+      "share": {
+        "title": "在工作区内共享",
+        "description": "本地运行时里的 skill 在你复制过来之前是私有的，复制后所有智能体都能用。"
+      }
+    },
+    "art": {
+      "skill_summary": "先跑测试，再看可访问性和性能。",
+      "add_to_agent": "分配给智能体",
+      "local_skills": "本地 skill",
+      "private": "私有",
+      "workspace_shared": "工作区",
+      "all_agents": "所有智能体可用"
+    }
   }
 }
