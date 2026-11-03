@@ -93,9 +93,6 @@ catalogs:
     typescript:
       specifier: npm:@typescript/typescript6@6.0.2
       version: 6.0.2
-    unicode-animations:
-      specifier: ^1.0.3
-      version: 1.0.3
     vitest:
       specifier: ^4.1.0
       version: 4.1.0
@@ -831,9 +828,6 @@ importers:
       tailwind-merge:
         specifier: 'catalog:'
         version: 3.5.0
-      unicode-animations:
-        specifier: 'catalog:'
-        version: 1.0.3
     devDependencies:
       '@multica/eslint-config':
         specifier: workspace:*
@@ -11149,10 +11143,6 @@ packages:
   undici@7.24.5:
     resolution: {integrity: sha512-3IWdCpjgxp15CbJnsi/Y9TCDE7HWVN19j1hmzVhoAkY/+CJx449tVxT5wZc1Gwg8J+P0LWvzlBzxYRnHJ+1i7Q==}
     engines: {node: '>=20.18.1'}
-
-  unicode-animations@1.0.3:
-    resolution: {integrity: sha512-+klB2oWwcYZjYWhwP4Pr8UZffWDFVx6jKeIahE6z0QYyM2dwDeDPyn5nevCYbyotxvtT9lh21cVURO1RX0+YMg==}
-    hasBin: true
 
   unicode-canonical-property-names-ecmascript@2.0.1:
     resolution: {integrity: sha512-dA8WbNeb2a6oQzAQ55YlT5vQAWGV9WXOsi3SskE3bcCdM0P4SDd+24zS/OCacdRq5BkdsRj9q3Pg6YyQoxIGqg==}
@@ -23400,8 +23390,6 @@ snapshots:
   undici-types@7.24.6: {}
 
   undici@7.24.5: {}
-
-  unicode-animations@1.0.3: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 
