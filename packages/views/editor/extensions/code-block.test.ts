@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
 import { createEditorExtensions } from ".";
 import { preprocessMarkdown } from "../utils/preprocess";
+import {
+  MARKDOWN_CHUNK_THRESHOLD,
+  parseMarkdownChunked,
+  type MarkdownManagerLike,
+} from "../utils/parse-markdown-chunked";
 
 const editors: Editor[] = [];
 
@@ -14,12 +19,21 @@ afterEach(() => {
 function load(markdown: string): Editor {
   const element = document.createElement("div");
   document.body.appendChild(element);
+  const processed = preprocessMarkdown(markdown, { cdnDomain: "" });
+  const chunked = processed.length > MARKDOWN_CHUNK_THRESHOLD;
   const editor = new Editor({
     element,
     extensions: createEditorExtensions({ disableMentions: true }),
-    content: preprocessMarkdown(markdown, { cdnDomain: "" }),
-    contentType: "markdown",
+    content: chunked ? "" : processed,
+    contentType: chunked ? undefined : "markdown",
   });
+  if (chunked) {
+    const manager = (editor.storage as { markdown: { manager: MarkdownManagerLike } })
+      .markdown.manager;
+    editor.commands.setContent(parseMarkdownChunked(manager, processed), {
+      emitUpdate: false,
+    });
+  }
   editors.push(editor);
   return editor;
 }
@@ -76,4 +90,28 @@ describe("code block Markdown save and reload", () => {
     const saved = editor.getMarkdown();
     expect(load(saved).getJSON()).toEqual(editor.getJSON());
   });
+});
+
+describe("production preprocessing and large-document loading", () => {
+  it("keeps a URL literal after serialization grows the outer fence", () => {
+    const content = "https://example.com\nconst ticks = '`````';";
+    const source = `Intro\n\n\`\`\`javascript\n${content}\n\`\`\`\n\nOutro`;
+    roundTrip(source, content, "javascript");
+  });
+
+  it("keeps URLs literal between nested fences on initial load", () => {
+    const content = "```\nhttps://example.com\n```\nafter";
+    const source = `Intro\n\n\`\`\`\`markdown\n${content}\n\`\`\`\`\n\nOutro`;
+    roundTrip(source, content, "markdown");
+  });
+
+  it.each(["```", "~~~", "````javascript"])(
+    "does not split a large code block at an inner %s line",
+    (inner) => {
+      const content = `${"x".repeat(4_100)}\n${inner}\n\n# still literal\n${"y".repeat(4_100)}`;
+      const source = `Intro\n\n\`\`\`\`markdown\n${content}\n\`\`\`\`\n\nOutro`;
+      expect(source.length).toBeGreaterThan(MARKDOWN_CHUNK_THRESHOLD);
+      roundTrip(source, content, "markdown");
+    },
+  );
 });

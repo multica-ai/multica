@@ -73,19 +73,50 @@ export function shouldAutoLink(value: string): boolean {
   )
 }
 
+/** Find complete fenced blocks, retaining the opening marker and its length. */
+export function findFencedCodeRanges(text: string): CodeRange[] {
+  const ranges: CodeRange[] = []
+  let opening: { start: number; marker: string; length: number; quoteDepth: number } | undefined
+  let offset = 0
+
+  for (const line of text.split('\n')) {
+    // Include fences nested in blockquotes or list items in the protected range.
+    const match = line.match(/^((?:[ \t]*>[ \t]?)*[ \t]*)((?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/)
+    if (match) {
+      const quoteDepth = (match[1]!.match(/>/g) ?? []).length
+      const fence = match[3]!
+      const suffix = match[4]!
+      if (!opening) {
+        // Backtick fence info strings cannot themselves contain backticks.
+        if (fence[0] === '~' || !suffix.includes('`')) {
+          opening = { start: offset, marker: fence[0]!, length: fence.length, quoteDepth }
+        }
+      } else if (
+        !match[2] &&
+        quoteDepth === opening.quoteDepth &&
+        fence[0] === opening.marker &&
+        fence.length >= opening.length &&
+        suffix.trim() === ''
+      ) {
+        ranges.push({ start: opening.start, end: offset + line.length })
+        opening = undefined
+      }
+    }
+    offset += line.length + 1
+  }
+
+  // CommonMark keeps an unclosed fence literal through the end of the document.
+  if (opening) ranges.push({ start: opening.start, end: text.length })
+  return ranges
+}
+
 /**
  * Find all code block and inline code ranges in text
  * These ranges should be excluded from link detection
  */
 export function findCodeRanges(text: string): CodeRange[] {
-  const ranges: CodeRange[] = []
-
-  // Find fenced code blocks (```...```)
-  const fencedRegex = /```[\s\S]*?```/g
+  const ranges = findFencedCodeRanges(text)
   let match
-  while ((match = fencedRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length })
-  }
 
   // Find display math blocks ($$...$$)
   const displayMathRegex = /\$\$[\s\S]*?\$\$/g
@@ -107,9 +138,9 @@ export function findCodeRanges(text: string): CodeRange[] {
     }
   }
 
-  // Find inline code (`...`)
-  // But skip escaped backticks and code inside fenced blocks
-  const inlineRegex = /(?<!`)`(?!`)([^`\n]+)`(?!`)/g
+  // Find inline code spans with matching backtick runs.
+  // Ignore spans inside fenced code or math blocks.
+  const inlineRegex = /(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)/g
   while ((match = inlineRegex.exec(text)) !== null) {
     const pos = match.index
     // Check if this is inside a fenced block or math block
