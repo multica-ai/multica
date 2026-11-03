@@ -32,9 +32,12 @@ import { CollectionPageHeader, CollectionPageState } from "../layout/collection-
 import { useT } from "../i18n";
 import { KnowledgeDocuments } from "./knowledge-documents";
 import { KnowledgeDrafts } from "./knowledge-drafts";
+import { KnowledgeGovernance } from "./knowledge-governance";
 import { KnowledgeSearch } from "./knowledge-search";
+import { KnowledgeUploadPanel } from "./knowledge-upload";
+import { KnowledgeSetupPanel } from "./knowledge-setup";
 
-type KnowledgeTab = "library" | "drafts";
+type KnowledgeTab = "library" | "drafts" | "governance";
 
 /**
  * The Knowledge page: one state dispatch over the knowledge service's state,
@@ -186,6 +189,8 @@ export function KnowledgePage() {
           <TabsList variant="line">
             <TabsTrigger value="library">{t(($) => $.tabs.library)}</TabsTrigger>
             <TabsTrigger value="drafts">{t(($) => $.tabs.drafts)}</TabsTrigger>
+            {canManage ? <TabsTrigger value="setup">{t(($) => $.tabs.setup)}</TabsTrigger> : null}
+            {canManage ? <TabsTrigger value="governance">{t(($) => $.tabs.governance)}</TabsTrigger> : null}
           </TabsList>
           <TabsContent value="library" className="flex flex-col gap-6 pt-4">
             <KnowledgeSearch
@@ -193,6 +198,7 @@ export function KnowledgePage() {
               knowledgeBases={knowledgeBases}
               secretaryAgentId={secretaryAgentId}
             />
+            <KnowledgeUploadPanel wsId={wsId} knowledgeBases={knowledgeBases} />
             <KnowledgeDocuments wsId={wsId} knowledgeBases={knowledgeBases} />
           </TabsContent>
           <TabsContent value="drafts" className="pt-4">
@@ -202,6 +208,16 @@ export function KnowledgePage() {
               canManage={canManage}
             />
           </TabsContent>
+          {canManage ? (
+            <TabsContent value="setup" className="pt-4">
+              <KnowledgeSetupPanel wsId={wsId} knowledgeBases={knowledgeBases} />
+            </TabsContent>
+          ) : null}
+          {canManage ? (
+            <TabsContent value="governance" className="pt-4">
+              <KnowledgeGovernance wsId={wsId} knowledgeBases={knowledgeBases} />
+            </TabsContent>
+          ) : null}
         </Tabs>
       </div>
     );

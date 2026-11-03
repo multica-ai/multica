@@ -28,14 +28,28 @@ const (
 	briefMaxLimit       = 50
 )
 
-// briefHeadings are the H2 sections every brief carries, in this order.
-var briefHeadings = []string{
-	"Headline",
-	"Needs your decision",
-	"Progress",
-	"Blockers and risks",
-	"Watch",
-	"FYI",
+// briefSection is one H2 heading of a brief. The sections appear in this order
+// (spec 3.7). A required section must be present; an optional one appears when
+// there is data for it.
+type briefSection struct {
+	name     string
+	required bool
+}
+
+// briefSections is the brief's section order. Pipeline, Goals and Budget come
+// after Progress; Goals and Budget are phase 4 sections and are accepted now so
+// that their publishers need no validator change later.
+var briefSections = []briefSection{
+	{"Headline", true},
+	{"Needs your decision", true},
+	{"Progress", true},
+	{"Pipeline", false},
+	{"Goals", false},
+	{"Budget", false},
+	{"Blockers and risks", true},
+	{"Watch", false},
+	{"People", false},
+	{"FYI", true},
 }
 
 // briefKindWindow is how far back a brief's period reaches when the publisher
@@ -86,9 +100,10 @@ func briefToResponse(b db.Brief) BriefResponse {
 	return resp
 }
 
-// validateBriefBody checks the body has every required H2 heading, once each
-// and in order, and returns a message written for the publishing agent, or "".
-// Headings inside fenced code blocks do not count.
+// validateBriefBody checks the body's H2 headings: each named section at most
+// once, in the order of briefSections, and every required section present. It
+// returns a message written for the publishing agent, or "". Headings inside
+// fenced code blocks do not count.
 func validateBriefBody(body string) string {
 	var found []string
 	inFence := false
@@ -104,38 +119,48 @@ func validateBriefBody(body string) string {
 		found = append(found, strings.TrimSpace(strings.TrimRight(strings.TrimSpace(line[3:]), "#")))
 	}
 
-	required := make([]string, len(briefHeadings))
-	for i, h := range briefHeadings {
-		required[i] = "## " + h
-	}
-	layout := "a brief needs these H2 headings, in this order: " + strings.Join(required, ", ")
+	layout := "a brief's H2 headings come in this order, and the required ones must be present: " + briefLayout()
 
-	next := 0 // index into briefHeadings of the next heading to be matched in order
+	next := 0 // index into briefSections of the next section that may appear
 	seen := map[string]bool{}
 	for _, heading := range found {
-		for i, want := range briefHeadings {
-			if strings.EqualFold(heading, want) {
-				if seen[want] {
-					return fmt.Sprintf("body has the heading %q twice; %s", "## "+want, layout)
-				}
-				seen[want] = true
-				if i < next {
-					return fmt.Sprintf("the heading %q is out of order; %s", "## "+want, layout)
-				}
-				next = i + 1
+		for i, want := range briefSections {
+			if !strings.EqualFold(heading, want.name) {
+				continue
 			}
+			if seen[want.name] {
+				return fmt.Sprintf("body has the heading %q twice; %s", "## "+want.name, layout)
+			}
+			seen[want.name] = true
+			if i < next {
+				return fmt.Sprintf("the heading %q is out of order; %s", "## "+want.name, layout)
+			}
+			next = i + 1
 		}
 	}
 	var missing []string
-	for _, want := range briefHeadings {
-		if !seen[want] {
-			missing = append(missing, "## "+want)
+	for _, want := range briefSections {
+		if want.required && !seen[want.name] {
+			missing = append(missing, "## "+want.name)
 		}
 	}
 	if len(missing) > 0 {
 		return fmt.Sprintf("body is missing the required heading(s) %s; %s", strings.Join(missing, ", "), layout)
 	}
 	return ""
+}
+
+// briefLayout names the sections in order, marking the optional ones.
+func briefLayout() string {
+	parts := make([]string, 0, len(briefSections))
+	for _, s := range briefSections {
+		if s.required {
+			parts = append(parts, "## "+s.name)
+		} else {
+			parts = append(parts, "## "+s.name+" (optional)")
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 type CreateBriefRequest struct {

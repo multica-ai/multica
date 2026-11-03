@@ -356,6 +356,10 @@ rewrite_env_ports() {
     -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:${backend}|" \
     -e "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=ws://localhost:${backend}/ws|" \
     "$file" > "$tmp"
+  # The web dev proxy reads BACKEND_PORT, not PORT (apps/web/config/runtime-urls.ts),
+  # so an env file without it proxies /api to 8080 and fails for worktrees.
+  grep -q '^BACKEND_PORT=' "$tmp" || printf 'BACKEND_PORT=%s\n' "$backend" >> "$tmp"
+  sed -i "s|^BACKEND_PORT=.*|BACKEND_PORT=${backend}|" "$tmp"
   mv "$tmp" "$file"
 }
 

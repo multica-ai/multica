@@ -1,0 +1,1 @@
+ALTER TABLE initiative_stage_event ADD CONSTRAINT initiative_stage_event_pkey PRIMARY KEY USING INDEX initiative_stage_event_id_uidx;

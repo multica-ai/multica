@@ -401,41 +401,7 @@ func (h *Handler) createOperatingReview(r *http.Request, qtx *db.Queries, squad 
 	if err != nil {
 		return db.Autopilot{}, err
 	}
-	nextRun, err := computeNextRun(service.OperatingReviewCadence, timezone)
-	if err != nil {
-		return db.Autopilot{}, err
-	}
-	description, err := service.OperatingReviewDescription(charter)
-	if err != nil {
-		return db.Autopilot{}, err
-	}
-	status := "active"
-	if !charter.OperatingReviewEnabled {
-		status = "paused"
-	}
-	ap, err := service.CreateSquadScheduledAutopilot(r.Context(), qtx, service.SquadScheduledAutopilot{
-		WorkspaceID: squad.WorkspaceID,
-		SquadID:     squad.ID,
-		ActorUserID: actor.UserID,
-		Title:       service.OperatingReviewTitle,
-		Description: pgtype.Text{String: description, Valid: true},
-		Status:      status,
-		Cron:        service.OperatingReviewCadence,
-		Timezone:    timezone,
-		NextRun:     nextRun,
-	})
-	if err != nil {
-		return db.Autopilot{}, err
-	}
-	if _, err := qtx.InsertSquadRoutine(r.Context(), routineFields{
-		purpose:        service.OperatingReviewPurpose,
-		expectedOutput: "report",
-		required:       true,
-		graceHours:     routineDefaultGraceHours,
-	}.params(ap.ID, squad.WorkspaceID, squad.ID)); err != nil {
-		return db.Autopilot{}, err
-	}
-	return ap, nil
+	return service.CreateOperatingReview(r.Context(), qtx, squad, charter, actor.UserID, timezone)
 }
 
 // setOperatingReviewActive pauses or resumes the squad's operating review to match

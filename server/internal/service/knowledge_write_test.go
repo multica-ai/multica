@@ -74,7 +74,7 @@ func TestKnowledgeAgentWritesADraftThatSearchCannotSeeUntilPublished(t *testing.
 		t.Fatal("a draft must not be searchable")
 	}
 
-	pub, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID))
+	pub, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID), memberActor(e))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestKnowledgeAgentWritesADraftThatSearchCannotSeeUntilPublished(t *testing.
 
 	// Publishing again changes nothing and calls nothing.
 	before := e.fake.Calls(knowledge.OpPublish)
-	if _, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID)); err != nil {
+	if _, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID), memberActor(e)); err != nil {
 		t.Fatal(err)
 	}
 	if e.fake.Calls(knowledge.OpPublish) != before {
@@ -146,7 +146,7 @@ func TestKnowledgeURLIsFetchedOnlyAfterPublish(t *testing.T) {
 	if e.fake.Calls(knowledge.OpCreateURL) != 0 || e.fake.Calls(knowledge.OpCreateManual) != 0 {
 		t.Fatal("a URL draft must not reach the sidecar before publish")
 	}
-	pub, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID))
+	pub, err := e.svc.PublishDocument(ctx, e.ws, mustUUID(t, v.ID), memberActor(e))
 	if err != nil {
 		t.Fatal(err)
 	}

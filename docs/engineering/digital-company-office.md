@@ -986,6 +986,77 @@ text is kept for the reasoning. Phases 2 to 4 below are written against these fa
     and Lark, but the plan's steps cover only Slack (9.11a) and Lark (9.11b).
   - The brief dialog hides a proposal put aside with Decide later until its date. The
     decisions dialog still lists put-aside proposals under "Decide later".
+- Phase 3 deviations
+  - Migrations 736 to 773 are used. 769 holds the initiative timeline kinds; 770 holds the
+    knowledge review pointer; 771 to 773 hold the repo-docs sync. Migration 759 is unused.
+  - Initiative artifacts, knowledge kinds, policies, eval cases, ACL grants and the new tables
+    have no primary key. Each is keyed by a unique index, because the migration budget is
+    spent on concurrent builds.
+  - The build project uses the `SDLC Auto` workflow, the same one the quickstart creates,
+    not the workspace Default. The workflow text is held in Go and can drift from the
+    TypeScript template in `packages/core/squads/templates.ts`.
+  - Permissions for transitions: shelve, resume, close and force are workspace admins;
+    advance, attest and waive are the owning squad or an admin; send-back is the owning leader
+    or an admin. Creating an initiative is an admin or the Secretary, as 3.1 says.
+  - A rejected stage gate is filed again after seven days. The spec does not give a rule.
+  - An opportunity proposal is refused when the workspace has no default pipeline.
+  - The initiative panel embeds the backing issue's thread through the issue detail view. Evidence
+    links open the knowledge page, since there is no route per document.
+  - Starter company apply does not create the Secretary. Office setup must run first, and the
+    apply step reports the missing Secretary. The Librarian is created by apply and by a
+    backfill for existing workspaces, not by setup.
+  - Starter company apply writes the publish policies `decision_record` and `brief_archive` as
+    `auto`. Other kinds keep the default `manual`. The spec names only the system writers.
+  - People & Performance is in the card list (plan 10.18d); the spec's 3.4 table omits it.
+  - `per_floor` starts each floor's lead routine as well as the two routines; `leave_paused`
+    starts only the brief and the Market Research scan.
+  - The starter company's routines have no expected output (`none`). The operating review's
+    schedule comes from the charter path, so the cron on the card is not used for it.
+  - The launch step creates the weekly `metrics_report` routine (`0 9 * * 1`, UTC) once per
+    initiative. Re-entering operate creates no second routine.
+  - Direct knowledge publishing and member writes are not governed by publish policy; only
+    agent writes are.
+  - Supersession is enforced by Multica only. WeKnora's MCP search still returns a superseded
+    document, because WeKnora has no way to hide one.
+  - WeKnora has no folder for manual documents. The initiative folder is a WeKnora tag named
+    `INI-<seq>-<slug>`, created on the first write, not on publish.
+  - Uploads of `.md`, `.markdown`, `.txt`, `.docx` and `.pdf` are checked for required headings
+    before storage. DOCX headings are paragraphs with a Heading N style. PDF headings are lines
+    whose text equals a required heading, read with `github.com/ledongthuc/pdf`; a body line
+    equal to a heading also counts. Scanned PDFs have no text and report every heading missing,
+    and encrypted PDFs are refused. Legacy `.doc` files are not checked. A live check against
+    WeKnora's own parse agreed on four sample files (two with headings, two without). URL imports
+    are checked after WeKnora fetches the page, and the page is removed if a heading is missing.
+    A held URL draft is checked at publish.
+  - Freshness reviews open an issue for the owning squad. A document with an open request, or
+    one opened in the last 30 days, gets no second request. A document without an owning squad
+    is reported, not requested. The issue creator is the first workspace owner.
+  - The taxonomy audit repairs only orphaned link rows, and only when the listing is complete.
+    Missing kinds are reported and not changed.
+  - The repo-docs sync (10.12) has settings, tables, a daily job that is off by default, and a
+    git client with a fixed argument list. It has no HTTP endpoint and no UI. A file that lacks
+    a `## Summary` heading is recorded as a failure, because kind `reference` requires it.
+    Archiving a file removes its WeKnora document and link and keeps the sync record with
+    `archived_at`. Limits: 500 files, 1 MB each, https only, no submodules, no LFS.
+  - The WeKnora models step, owner logins and tenant deprovisioning are tested against fakes
+    written from the upstream WeKnora source. None has run against a live WeKnora. The 10.11
+    live check against the 9router endpoint was not run.
+  - Governance hooks are placeholders until phase 4: the governance writer is a no-op, the
+    autonomy check that gates auto-publish returns true, and the retrospective hook is a no-op.
+  - The brief FYI for automatic publishes (10.8) is not built.
+  - The wizard's run-cost estimate uses only the stated default. No measured average exists.
+  - Creating an initiative requires a thesis: the server returns 400 without one, and the UI
+    requires it too. Section 3.1 gives the column an empty default.
+  - `multica proposal decide` sends a decision with its `outcome`, so an operate review gate can
+    be decided from the CLI (3.6 names no command).
+  - `PATCH /api/initiatives/{id}` sets `gate_days` for an initiative's 30 and 90-day reviews,
+    for its owner or an admin (3.6 names no endpoint). It accepts one to 365 days, at most ten
+    values, with no repeats.
+  - Publishing a document with an initiative's id links it to the stage's required artifact of
+    the same kind, and records an `artifact_linked` event. When that completes an auto stage's
+    required artifacts, the stage advances.
+  - The live WeKnora check covered heading parsing only. The models step (10.11), Wiki and
+    summaries, owner logins and tenant deprovisioning have not been run against a live WeKnora.
 
 ## Phase 2: proactive operations
 

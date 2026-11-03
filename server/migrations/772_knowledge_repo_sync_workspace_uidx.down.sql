@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS knowledge_repo_sync_workspace_uidx;

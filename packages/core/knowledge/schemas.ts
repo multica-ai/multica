@@ -45,6 +45,9 @@ export const KnowledgeBaseSchema = z
     name: z.string().default(""),
     visibility: VisibilitySchema,
     position: z.number().default(0),
+    // Off unless the server says otherwise: a missing flag is never shown as on.
+    wiki_enabled: z.boolean().default(false),
+    summaries_enabled: z.boolean().default(false),
   })
   .loose();
 

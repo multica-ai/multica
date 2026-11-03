@@ -392,6 +392,29 @@ type wireKB struct {
 	Description      string `json:"description"`
 	EmbeddingModelID string `json:"embedding_model_id"`
 	KnowledgeCount   int    `json:"knowledge_count"`
+	SummaryModelID   string `json:"summary_model_id"`
+	// IndexingStrategy is sent back whole on update, so the flags Multica does
+	// not own are read first and returned unchanged.
+	IndexingStrategy wireStrategy `json:"indexing_strategy"`
+}
+
+type wireStrategy struct {
+	VectorEnabled  bool `json:"vector_enabled"`
+	KeywordEnabled bool `json:"keyword_enabled"`
+	WikiEnabled    bool `json:"wiki_enabled"`
+	GraphEnabled   bool `json:"graph_enabled"`
+}
+
+type wireDataSource struct {
+	ID               string     `json:"id"`
+	KnowledgeBaseID  string     `json:"knowledge_base_id"`
+	Name             string     `json:"name"`
+	Type             string     `json:"type"`
+	Status           string     `json:"status"`
+	SyncSchedule     string     `json:"sync_schedule"`
+	LastSyncAt       *time.Time `json:"last_sync_at"`
+	ErrorMessage     string     `json:"error_message"`
+	TotalItemsSynced int64      `json:"total_items_synced"`
 }
 
 type wireDocument struct {
@@ -523,6 +546,46 @@ func (c *Client) DeleteTenant(ctx context.Context, tenantID string) error {
 	}, nil)
 }
 
+// EnsureUser implements Knowledge. WeKnora answers an existing login with the
+// same user and no password, so a retry never resets one.
+func (c *Client) EnsureUser(ctx context.Context, spec UserSpec) (User, error) {
+	if spec.Username == "" || spec.Email == "" {
+		return User{}, fmt.Errorf("knowledge: user needs a username and an email: %w", ErrInvalid)
+	}
+	body := map[string]any{"username": spec.Username, "email": spec.Email}
+	if spec.Password != "" {
+		body["password"] = spec.Password
+	}
+	var resp struct {
+		User *struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	if err := c.do(ctx, request{
+		op: "create user", method: http.MethodPost, path: "/system/admin/users/create", mode: authJWT, body: body,
+	}, &resp); err != nil {
+		return User{}, err
+	}
+	if resp.User == nil || resp.User.ID == "" {
+		return User{}, &APIError{Op: "create user", Status: http.StatusOK, Message: "response carried no user"}
+	}
+	return User{ID: resp.User.ID, Email: resp.User.Email}, nil
+}
+
+// AddTenantMember implements Knowledge. A login already in the tenant is not an
+// error, so a retried enable can run it again.
+func (c *Client) AddTenantMember(ctx context.Context, tenantID, email, role string) error {
+	err := c.do(ctx, request{
+		op: "add tenant member", method: http.MethodPost, path: "/tenants/" + url.PathEscape(tenantID) + "/members",
+		mode: authJWT, tenant: tenantID, body: map[string]string{"email": email, "role": role},
+	}, nil)
+	if errors.Is(err, ErrDuplicate) {
+		return nil
+	}
+	return err
+}
+
 // Workspace implements Knowledge.
 func (c *Client) Workspace(apiKey string) Workspace { return &workspace{c: c, key: apiKey} }
 
@@ -541,6 +604,36 @@ func (w *workspace) EnsureEmbeddingModel(ctx context.Context, spec EmbeddingMode
 	if spec.Name == "" || spec.Dimension <= 0 {
 		return Model{}, fmt.Errorf("knowledge: embedding model needs a name and a dimension: %w", ErrInvalid)
 	}
+	params := map[string]any{
+		"provider":             spec.Provider,
+		"base_url":             spec.BaseURL,
+		"embedding_parameters": map[string]any{"dimension": spec.Dimension},
+	}
+	if spec.APIKey != "" {
+		params["api_key"] = spec.APIKey
+	}
+	source := "remote"
+	if spec.Provider == "ollama" {
+		source = "local"
+	}
+	return w.ensureModel(ctx, spec.Name, "Embedding", source, params)
+}
+
+// EnsureModel implements Workspace.
+func (w *workspace) EnsureModel(ctx context.Context, spec ModelSpec) (Model, error) {
+	if spec.Name == "" || spec.Type == "" || spec.BaseURL == "" {
+		return Model{}, fmt.Errorf("knowledge: model needs a name, a type and an endpoint: %w", ErrInvalid)
+	}
+	params := map[string]any{"provider": spec.Provider, "base_url": spec.BaseURL}
+	if spec.APIKey != "" {
+		params["api_key"] = spec.APIKey
+	}
+	return w.ensureModel(ctx, spec.Name, string(spec.Type), "remote", params)
+}
+
+// ensureModel finds the tenant's model of this name and type, or creates it,
+// and waits until it is usable.
+func (w *workspace) ensureModel(ctx context.Context, name, typ, source string, params map[string]any) (Model, error) {
 	var list struct {
 		Data []wireModel `json:"data"`
 	}
@@ -550,35 +643,103 @@ func (w *workspace) EnsureEmbeddingModel(ctx context.Context, spec EmbeddingMode
 	var model Model
 	found := false
 	for _, m := range list.Data {
-		if m.Type == "Embedding" && m.Name == spec.Name {
+		if m.Type == typ && m.Name == name {
 			model, found = Model{ID: m.ID, Name: m.Name, Status: m.Status}, true
 			break
 		}
 	}
 	if !found {
-		params := map[string]any{
-			"provider":             spec.Provider,
-			"base_url":             spec.BaseURL,
-			"embedding_parameters": map[string]any{"dimension": spec.Dimension},
-		}
-		if spec.APIKey != "" {
-			params["api_key"] = spec.APIKey
-		}
-		source := "remote"
-		if spec.Provider == "ollama" {
-			source = "local"
-		}
 		var created struct {
 			Data wireModel `json:"data"`
 		}
-		r := w.req("create embedding model", http.MethodPost, "/models")
-		r.body = map[string]any{"name": spec.Name, "type": "Embedding", "source": source, "parameters": params}
+		r := w.req("create "+typ+" model", http.MethodPost, "/models")
+		r.body = map[string]any{"name": name, "type": typ, "source": source, "parameters": params}
 		if err := w.c.do(ctx, r, &created); err != nil {
 			return Model{}, err
 		}
 		model = Model{ID: created.Data.ID, Name: created.Data.Name, Status: created.Data.Status}
 	}
 	return w.waitModelActive(ctx, model)
+}
+
+// modelTestTimeout bounds one connection test. A model that answers in a few
+// seconds is healthy; a longer wait is reported as a failure.
+const modelTestTimeout = 60 * time.Second
+
+// TestModel implements Workspace. WeKnora's debug route runs the model once and
+// answers with an error body when the endpoint, key or model name is wrong.
+func (w *workspace) TestModel(ctx context.Context, modelID string, probe ModelProbe) error {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("input", probe.Input); err != nil {
+		return fmt.Errorf("knowledge: test model: %w", err)
+	}
+	if len(probe.Documents) > 0 {
+		docs, err := json.Marshal(probe.Documents)
+		if err != nil {
+			return fmt.Errorf("knowledge: test model: %w", err)
+		}
+		if err := mw.WriteField("documents", string(docs)); err != nil {
+			return fmt.Errorf("knowledge: test model: %w", err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("knowledge: test model: %w", err)
+	}
+	r := w.req("test model", http.MethodPost, "/models/"+url.PathEscape(modelID)+"/debug")
+	r.raw, r.rawType, r.timeout = &buf, mw.FormDataContentType(), modelTestTimeout
+	return w.c.do(ctx, r, nil)
+}
+
+// UpdateKnowledgeBase implements Workspace. The indexing strategy is one object,
+// so it is read first and sent back with only the wiki flag changed.
+func (w *workspace) UpdateKnowledgeBase(ctx context.Context, kbID string, patch KnowledgeBasePatch) (KnowledgeBase, error) {
+	body := map[string]any{}
+	if patch.SummaryModelID != nil {
+		body["summary_model_id"] = *patch.SummaryModelID
+	}
+	if patch.WikiEnabled != nil {
+		var cur struct {
+			Data wireKB `json:"data"`
+		}
+		if err := w.c.do(ctx, w.req("get knowledge base", http.MethodGet, "/knowledge-bases/"+url.PathEscape(kbID)), &cur); err != nil {
+			return KnowledgeBase{}, err
+		}
+		strategy := cur.Data.IndexingStrategy
+		strategy.WikiEnabled = *patch.WikiEnabled
+		body["indexing_strategy"] = strategy
+		if *patch.WikiEnabled {
+			body["wiki_config"] = map[string]any{"extraction_granularity": "focused"}
+		}
+	}
+	var resp struct {
+		Data wireKB `json:"data"`
+	}
+	r := w.req("update knowledge base", http.MethodPatch, "/knowledge-bases/"+url.PathEscape(kbID))
+	r.body = body
+	if err := w.c.do(ctx, r, &resp); err != nil {
+		return KnowledgeBase{}, err
+	}
+	return resp.Data.toKB(), nil
+}
+
+// ListDataSources implements Workspace. WeKnora answers this route with the bare
+// list, not an envelope.
+func (w *workspace) ListDataSources(ctx context.Context, kbID string) ([]DataSource, error) {
+	var resp []wireDataSource
+	path := "/datasource?" + url.Values{"kb_id": {kbID}}.Encode()
+	if err := w.c.do(ctx, w.req("list data sources", http.MethodGet, path), &resp); err != nil {
+		return nil, err
+	}
+	out := make([]DataSource, 0, len(resp))
+	for _, d := range resp {
+		out = append(out, DataSource{
+			ID: d.ID, KnowledgeBaseID: d.KnowledgeBaseID, Name: d.Name, Type: d.Type, Status: d.Status,
+			SyncSchedule: d.SyncSchedule, LastSyncAt: d.LastSyncAt, ErrorMessage: d.ErrorMessage,
+			TotalItemsSynced: d.TotalItemsSynced,
+		})
+	}
+	return out, nil
 }
 
 // waitModelActive polls until a new model leaves its "downloading" state. A
@@ -628,7 +789,10 @@ func (w *workspace) CreateKnowledgeBase(ctx context.Context, spec KnowledgeBaseS
 }
 
 func (k wireKB) toKB() KnowledgeBase {
-	return KnowledgeBase{ID: k.ID, Name: k.Name, Description: k.Description, EmbeddingModelID: k.EmbeddingModelID, DocumentCount: k.KnowledgeCount}
+	return KnowledgeBase{
+		ID: k.ID, Name: k.Name, Description: k.Description, EmbeddingModelID: k.EmbeddingModelID,
+		DocumentCount: k.KnowledgeCount, SummaryModelID: k.SummaryModelID, WikiEnabled: k.IndexingStrategy.WikiEnabled,
+	}
 }
 
 func (w *workspace) ListKnowledgeBases(ctx context.Context) ([]KnowledgeBase, error) {
@@ -667,14 +831,22 @@ func (w *workspace) CreateManual(ctx context.Context, kbID string, doc ManualDoc
 	if doc.Publish {
 		status = "publish"
 	}
+	body := map[string]any{"title": doc.Title, "content": doc.Content, "status": status}
+	if len(doc.TagIDs) > 0 {
+		body["tag_ids"] = doc.TagIDs
+	}
 	r := w.req("create manual document", http.MethodPost, "/knowledge-bases/"+url.PathEscape(kbID)+"/knowledge/manual")
-	r.body = map[string]any{"title": doc.Title, "content": doc.Content, "status": status}
+	r.body = body
 	return w.docResult(ctx, r)
 }
 
 func (w *workspace) CreateURL(ctx context.Context, kbID string, doc URLDocument) (Document, error) {
 	r := w.req("import url", http.MethodPost, "/knowledge-bases/"+url.PathEscape(kbID)+"/knowledge/url")
-	r.body = map[string]any{"url": doc.URL, "title": doc.Title}
+	body := map[string]any{"url": doc.URL, "title": doc.Title}
+	if len(doc.TagIDs) > 0 {
+		body["tag_ids"] = doc.TagIDs
+	}
+	r.body = body
 	r.timeout = w.c.cfg.UploadTimeout
 	return w.docResult(ctx, r)
 }
@@ -700,6 +872,12 @@ func (w *workspace) CreateFile(ctx context.Context, kbID string, doc FileDocumen
 	}
 	if err := mw.WriteField("fileName", fileName); err != nil {
 		return Document{}, fmt.Errorf("knowledge: upload file: %w", err)
+	}
+	// WeKnora reads an upload's tags as one comma-separated field.
+	if len(doc.TagIDs) > 0 {
+		if err := mw.WriteField("tag_ids", strings.Join(doc.TagIDs, ",")); err != nil {
+			return Document{}, fmt.Errorf("knowledge: upload file: %w", err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return Document{}, fmt.Errorf("knowledge: upload file: %w", err)
@@ -740,6 +918,61 @@ func (w *workspace) Publish(ctx context.Context, docID string) (Document, error)
 
 func (w *workspace) Delete(ctx context.Context, docID string) error {
 	return w.c.do(ctx, w.req("delete document", http.MethodDelete, "/knowledge/"+url.PathEscape(docID)), nil)
+}
+
+// EnsureTag implements Workspace. WeKnora refuses a second tag with a name
+// that exists (409), so the existing tag is looked up by name when the create
+// is refused. The lookup is one page of keyword matches, which is ample for
+// the handful of kinds and initiatives a knowledge base carries.
+func (w *workspace) EnsureTag(ctx context.Context, kbID, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("knowledge: tag needs a name: %w", ErrInvalid)
+	}
+	base := "/knowledge-bases/" + url.PathEscape(kbID) + "/tags"
+	find := func() (string, error) {
+		var resp struct {
+			Data struct {
+				Data []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"data"`
+			} `json:"data"`
+		}
+		path := base + "?" + url.Values{"page": {"1"}, "page_size": {"100"}, "keyword": {name}}.Encode()
+		if err := w.c.do(ctx, w.req("list tags", http.MethodGet, path), &resp); err != nil {
+			return "", err
+		}
+		for _, t := range resp.Data.Data {
+			if t.Name == name {
+				return t.ID, nil
+			}
+		}
+		return "", fmt.Errorf("knowledge: tag %q: %w", name, ErrNotFound)
+	}
+	id, err := find()
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	r := w.req("create tag", http.MethodPost, base)
+	r.body = map[string]any{"name": name}
+	err = w.c.do(ctx, r, &created)
+	var dup *DuplicateError
+	if errors.As(err, &dup) {
+		return find()
+	}
+	if err != nil {
+		return "", err
+	}
+	return created.Data.ID, nil
 }
 
 func (w *workspace) ListDocuments(ctx context.Context, kbID string, opts ListOptions) (DocumentPage, error) {

@@ -92,6 +92,9 @@ func (e *KnowledgeConflictError) Error() string { return e.Message }
 type KnowledgeActor struct {
 	Type string
 	ID   pgtype.UUID
+	// Curator is true for a human owner or admin, who may use restricted bases
+	// that no grant names. The system actor is always a curator.
+	Curator bool
 }
 
 // KnowledgeDocumentInput is a new document. Exactly one of Content and URL is
@@ -109,8 +112,26 @@ type KnowledgeDocumentInput struct {
 	// call writes.
 	IdempotencyKey string
 	// Publish indexes the document at once instead of holding a draft. It is
-	// ignored for agents: they only ever write drafts.
+	// ignored for agents: they only ever write drafts, unless the publish policy
+	// of the kind or base says auto.
 	Publish bool
+
+	// Kind is a knowledge kind key. Empty writes an untyped document. A kind
+	// with a default base lets KB be left empty.
+	Kind string
+	// InitiativeID and InitiativeFolder file the document in an initiative's
+	// folder of the ventures base. The folder is named INI-<seq>-<slug>.
+	InitiativeID     pgtype.UUID
+	InitiativeFolder string
+	StageKey         string
+	// Confidence is low, medium or high, or empty.
+	Confidence string
+	// ValidUntil is the date the document stops being current.
+	ValidUntil pgtype.Date
+	// SupersedesLinkID is a document of this workspace that this one replaces.
+	SupersedesLinkID pgtype.UUID
+	// Tags are extra labels pushed to WeKnora with the kind and the folder.
+	Tags []string
 }
 
 // KnowledgeDocumentView is one document as the API reports it. ID is the
@@ -131,6 +152,19 @@ type KnowledgeDocumentView struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	PublishedAt   *time.Time `json:"published_at"`
 	Error         string     `json:"error"`
+
+	// KnowledgeKind is the document's kind key, empty when it has none.
+	KnowledgeKind string  `json:"knowledge_kind"`
+	InitiativeID  *string `json:"initiative_id"`
+	StageKey      string  `json:"stage_key"`
+	Confidence    *string `json:"confidence"`
+	// ValidUntil is a YYYY-MM-DD date.
+	ValidUntil   *string `json:"valid_until"`
+	SupersedesID *string `json:"supersedes_id"`
+	// Superseded is true once a published document names this one as replaced.
+	Superseded    bool     `json:"superseded"`
+	Tags          []string `json:"tags"`
+	ReviewVerdict string   `json:"review_verdict"`
 }
 
 // KnowledgeDocumentList is a document listing. State is "ready", or "offline"
@@ -148,6 +182,9 @@ type KnowledgeHitView struct {
 	Content       string  `json:"content"`
 	Source        string  `json:"source"`
 	Score         float64 `json:"score"`
+	// KnowledgeKind is the kind of the document, empty when it has none or
+	// WeKnora holds it without a link.
+	KnowledgeKind string `json:"knowledge_kind"`
 }
 
 // KnowledgeSearchResult is a search. State is "ready" or "offline"; hits are
@@ -166,13 +203,29 @@ type KnowledgeBasesView struct {
 	KnowledgeBases []KnowledgeBaseView `json:"knowledge_bases"`
 }
 
-// Bases reports the workspace's knowledge bases and state.
+// Bases reports the workspace's knowledge bases and state, as the system sees
+// them: every base. Callers acting for a person or an agent use BasesFor.
 func (s *KnowledgeService) Bases(ctx context.Context, workspaceID pgtype.UUID) (KnowledgeBasesView, error) {
+	return s.BasesFor(ctx, workspaceID, KnowledgeActor{Type: KnowledgeActorSystem})
+}
+
+// BasesFor reports the knowledge bases the actor may read, and the state.
+func (s *KnowledgeService) BasesFor(ctx context.Context, workspaceID pgtype.UUID, actor KnowledgeActor) (KnowledgeBasesView, error) {
 	status, err := s.Status(ctx, workspaceID)
 	if err != nil {
 		return KnowledgeBasesView{}, err
 	}
-	return KnowledgeBasesView{Offered: status.Offered, State: status.State, KnowledgeBases: status.KnowledgeBases}, nil
+	grants, err := s.actorKnowledgeGrants(ctx, workspaceID, actor)
+	if err != nil {
+		return KnowledgeBasesView{}, err
+	}
+	visible := make([]KnowledgeBaseView, 0, len(status.KnowledgeBases))
+	for _, b := range status.KnowledgeBases {
+		if knowledgeCanRead(actor, b.Visibility, b.ID, grants) {
+			visible = append(visible, b)
+		}
+	}
+	return KnowledgeBasesView{Offered: status.Offered, State: status.State, KnowledgeBases: visible}, nil
 }
 
 // workspaceClient returns the tenant-scoped client of a workspace whose
@@ -214,9 +267,15 @@ func (s *KnowledgeService) baseKeys(ctx context.Context, workspaceID pgtype.UUID
 func validateKnowledgeInput(in *KnowledgeDocumentInput) error {
 	in.Title = strings.TrimSpace(in.Title)
 	in.URL = strings.TrimSpace(in.URL)
+	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
+	in.Confidence = strings.ToLower(strings.TrimSpace(in.Confidence))
+	in.StageKey = strings.TrimSpace(in.StageKey)
+	in.InitiativeFolder = strings.TrimSpace(in.InitiativeFolder)
 	switch {
-	case in.KB == "":
-		return &KnowledgeInvalidError{"kb is required"}
+	case in.KB == "" && in.Kind == "":
+		return &KnowledgeInvalidError{"kb is required unless a kind with a default base is given"}
+	case in.Kind != "" && !kindKeyPattern.MatchString(in.Kind):
+		return &KnowledgeInvalidError{"kind must be a lowercase key such as market_report"}
 	case in.Title == "":
 		return &KnowledgeInvalidError{"title is required"}
 	case utf8.RuneCountInString(in.Title) > knowledgeMaxTitle:
@@ -241,7 +300,50 @@ func validateKnowledgeInput(in *KnowledgeDocumentInput) error {
 	if !knowledgeSourceTypes[in.SourceType] {
 		return &KnowledgeInvalidError{"unknown source_type " + in.SourceType}
 	}
+	switch in.Confidence {
+	case "", "low", "medium", "high":
+	default:
+		return &KnowledgeInvalidError{"confidence must be low, medium or high"}
+	}
+	if utf8.RuneCountInString(in.StageKey) > 64 {
+		return &KnowledgeInvalidError{"stage_key is longer than 64 characters"}
+	}
+	if in.InitiativeFolder != "" {
+		if !initiativeFolderPattern.MatchString(in.InitiativeFolder) {
+			return &KnowledgeInvalidError{"initiative_folder must look like INI-3-invoicing"}
+		}
+		if !in.InitiativeID.Valid {
+			return &KnowledgeInvalidError{"initiative_folder needs initiative_id"}
+		}
+	}
+	tags, err := normalizeKnowledgeTags(in.Tags)
+	if err != nil {
+		return err
+	}
+	in.Tags = tags
 	return nil
+}
+
+// normalizeKnowledgeTags lowercases and deduplicates tags, which become WeKnora
+// labels. At most ten, each at most 64 characters.
+func normalizeKnowledgeTags(tags []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || seen[t] {
+			continue
+		}
+		if utf8.RuneCountInString(t) > 64 {
+			return nil, &KnowledgeInvalidError{"a tag is longer than 64 characters"}
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	if len(out) > 10 {
+		return nil, &KnowledgeInvalidError{"at most 10 tags"}
+	}
+	return out, nil
 }
 
 // CreateDocument writes a document. Agents always write a draft; a member or
@@ -256,15 +358,28 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 	if err := validateKnowledgeInput(&in); err != nil {
 		return KnowledgeDocumentView{}, false, err
 	}
+	ws, err := s.workspaceClient(ctx, workspaceID)
+	if err != nil {
+		return KnowledgeDocumentView{}, false, err
+	}
+	if _, err := s.resolveWriteKind(ctx, workspaceID, &in); err != nil {
+		return KnowledgeDocumentView{}, false, err
+	}
+	if in.InitiativeID.Valid && in.InitiativeFolder == "" {
+		folder, err := s.initiativeFolder(ctx, workspaceID, in.InitiativeID)
+		if err != nil {
+			return KnowledgeDocumentView{}, false, err
+		}
+		in.InitiativeFolder = folder
+	}
 	if actor.Type == KnowledgeActorAgent {
 		in.Publish = false
 		if in.KB == DecisionsKnowledgeKey {
 			return KnowledgeDocumentView{}, false, ErrKnowledgeForbidden
 		}
 	}
-	ws, err := s.workspaceClient(ctx, workspaceID)
-	if err != nil {
-		return KnowledgeDocumentView{}, false, err
+	if in.KB == "" {
+		return KnowledgeDocumentView{}, false, &KnowledgeInvalidError{"kb is required; kind " + in.Kind + " has no default base"}
 	}
 	base, err := s.Queries.GetKnowledgeBaseByKey(ctx, db.GetKnowledgeBaseByKeyParams{WorkspaceID: workspaceID, Key: in.KB})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -272,6 +387,40 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 	}
 	if err != nil {
 		return KnowledgeDocumentView{}, false, fmt.Errorf("load knowledge base: %w", err)
+	}
+	if in.SupersedesLinkID.Valid {
+		if _, err := s.Queries.GetKnowledgeLink(ctx, db.GetKnowledgeLinkParams{ID: in.SupersedesLinkID, WorkspaceID: workspaceID}); errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDocumentView{}, false, &KnowledgeInvalidError{"supersedes_id is not a document of this workspace"}
+		} else if err != nil {
+			return KnowledgeDocumentView{}, false, fmt.Errorf("load superseded document: %w", err)
+		}
+	}
+
+	// An agent's draft is published at once only when the policy says auto;
+	// its author squad is recorded for the critic rule.
+	publishNow := in.Publish
+	var (
+		mode     string
+		authorSq pgtype.UUID
+	)
+	grants, err := s.actorKnowledgeGrants(ctx, workspaceID, actor)
+	if err != nil {
+		return KnowledgeDocumentView{}, false, err
+	}
+	if !knowledgeCanWrite(actor, base.Visibility, util.UUIDToString(base.ID), grants) {
+		return KnowledgeDocumentView{}, false, ErrKnowledgeForbidden
+	}
+	if actor.Type == KnowledgeActorAgent {
+		if mode, err = s.agentPublishMode(ctx, workspaceID, in.Kind, in.KB); err != nil {
+			return KnowledgeDocumentView{}, false, err
+		}
+		publishNow = mode == PublishModeAuto
+		if authorSq, err = s.agentSquad(ctx, actor); err != nil {
+			return KnowledgeDocumentView{}, false, err
+		}
+	}
+	if actor.Type == KnowledgeActorSystem {
+		mode = PublishModeAuto
 	}
 
 	key := in.IdempotencyKey
@@ -283,6 +432,9 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 		SourceType: in.SourceType, SourceID: in.SourceID, IdempotencyKey: key,
 		CreatedByType: actor.Type, CreatedByID: actor.ID,
 		Title: in.Title, SourceUrl: in.URL, PendingContent: in.Content, PublishRequested: in.Publish,
+		Kind: in.Kind, InitiativeID: in.InitiativeID, StageKey: in.StageKey, SquadID: authorSq,
+		Confidence: pgtype.Text{String: in.Confidence, Valid: in.Confidence != ""},
+		ValidUntil: in.ValidUntil, SupersedesLinkID: in.SupersedesLinkID, Tags: documentTagNames(in),
 	})
 	if err != nil {
 		return KnowledgeDocumentView{}, false, fmt.Errorf("record knowledge write: %w", err)
@@ -297,7 +449,7 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 		return view, false, err
 	}
 
-	settled, err := s.send(ctx, ws, base, link, in.Publish)
+	settled, err := s.send(ctx, ws, base, link, publishNow)
 	if err != nil {
 		// A person retries their own write; only the system's is kept.
 		if actor.Type != KnowledgeActorSystem {
@@ -307,8 +459,69 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 		}
 		return KnowledgeDocumentView{}, false, err
 	}
+	if settled.State == KnowledgeLinkPublished && mode == PublishModeAuto && actor.Type != KnowledgeActorMember {
+		s.recordAutoPublish(ctx, AutoPublishEvent{
+			WorkspaceID: workspaceID, LinkID: settled.ID, KnowledgeBase: base.Key, Kind: in.Kind,
+			Mode: PublishModeAuto, AuthorSquadID: authorSq,
+		})
+	}
+	s.linkInitiativeArtifact(ctx, settled, actor)
 	view, err := s.linkView(ctx, workspaceID, settled)
 	return view, true, err
+}
+
+// resolveWriteKind checks a write's kind: it must exist, the content must carry
+// its required headings, and an empty base takes the kind's default. It returns
+// the kind key ("" for an untyped write).
+func (s *KnowledgeService) resolveWriteKind(ctx context.Context, workspaceID pgtype.UUID, in *KnowledgeDocumentInput) (string, error) {
+	if in.Kind == "" {
+		return "", nil
+	}
+	k, err := s.loadKnowledgeKind(ctx, workspaceID, in.Kind)
+	if errors.Is(err, ErrKnowledgeKindNotFound) {
+		return "", &KnowledgeInvalidError{"unknown kind " + in.Kind + "; see multica knowledge kinds"}
+	}
+	if err != nil {
+		return "", err
+	}
+	if in.URL == "" {
+		if missing := MissingSections(k.RequiredSections, in.Content); len(missing) > 0 {
+			return "", &KnowledgeMissingSectionsError{Kind: in.Kind, Missing: missing}
+		}
+	}
+	if in.KB == "" {
+		in.KB = k.DefaultBaseKey
+	}
+	return in.Kind, nil
+}
+
+// agentSquad returns the squad of an agent actor, or the zero id when the agent
+// is in none.
+func (s *KnowledgeService) agentSquad(ctx context.Context, actor KnowledgeActor) (pgtype.UUID, error) {
+	if !actor.ID.Valid {
+		return pgtype.UUID{}, nil
+	}
+	sq, err := s.Queries.GetAgentSquadID(ctx, actor.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pgtype.UUID{}, nil
+	}
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("load agent squad: %w", err)
+	}
+	return sq, nil
+}
+
+// documentTagNames is what a document carries into WeKnora: its kind, its
+// initiative folder, and the caller's tags. Each is a WeKnora tag.
+func documentTagNames(in KnowledgeDocumentInput) []string {
+	names := make([]string, 0, len(in.Tags)+2)
+	if in.Kind != "" {
+		names = append(names, in.Kind)
+	}
+	if in.InitiativeFolder != "" {
+		names = append(names, in.InitiativeFolder)
+	}
+	return append(names, in.Tags...)
 }
 
 // send performs the WeKnora side of a claimed link and records the outcome.
@@ -320,13 +533,24 @@ func (s *KnowledgeService) send(ctx context.Context, ws knowledge.Workspace, bas
 		doc knowledge.Document
 		err error
 	)
+	// Tags are created in WeKnora when the document first reaches it: a draft
+	// has none, so an initiative folder appears with its first written document.
 	switch {
 	case link.SourceUrl != "" && !publish:
 		return s.settle(ctx, link, "", KnowledgeLinkDraft, "")
 	case link.SourceUrl != "":
-		doc, err = ws.CreateURL(ctx, base.WeknoraKbID, knowledge.URLDocument{URL: link.SourceUrl, Title: link.Title})
+		var tagIDs []string
+		if tagIDs, err = s.weknoraTagIDs(ctx, ws, base.WeknoraKbID, link.Tags); err == nil {
+			doc, err = ws.CreateURL(ctx, base.WeknoraKbID, knowledge.URLDocument{URL: link.SourceUrl, Title: link.Title, TagIDs: tagIDs})
+		}
+		if err == nil {
+			err = s.checkImportedHeadings(ctx, ws, link, doc.ID)
+		}
 	default:
-		doc, err = ws.CreateManual(ctx, base.WeknoraKbID, knowledge.ManualDocument{Title: link.Title, Content: link.PendingContent, Publish: publish})
+		var tagIDs []string
+		if tagIDs, err = s.weknoraTagIDs(ctx, ws, base.WeknoraKbID, link.Tags); err == nil {
+			doc, err = ws.CreateManual(ctx, base.WeknoraKbID, knowledge.ManualDocument{Title: link.Title, Content: link.PendingContent, Publish: publish, TagIDs: tagIDs})
+		}
 	}
 	var dup *knowledge.DuplicateError
 	if errors.As(err, &dup) {
@@ -344,6 +568,49 @@ func (s *KnowledgeService) send(ctx context.Context, ws knowledge.Workspace, bas
 		state = KnowledgeLinkPublished
 	}
 	return s.settle(ctx, link, doc.ID, state, "")
+}
+
+// checkImportedHeadings applies the kind's required headings to a page WeKnora
+// has just imported. A page without them is deleted from WeKnora again and the
+// caller gets the missing list, the same refusal a written draft gets. A held
+// URL draft makes no WeKnora call, so its headings are checked when it is
+// published.
+func (s *KnowledgeService) checkImportedHeadings(ctx context.Context, ws knowledge.Workspace, link db.KnowledgeLink, docID string) error {
+	if link.Kind == "" {
+		return nil
+	}
+	k, err := s.loadKnowledgeKind(ctx, link.WorkspaceID, link.Kind)
+	if errors.Is(err, ErrKnowledgeKindNotFound) || (err == nil && len(k.RequiredSections) == 0) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	doc, err := ws.Read(ctx, docID)
+	if err != nil {
+		return fmt.Errorf("read imported page: %w", err)
+	}
+	missing := MissingSections(k.RequiredSections, doc.Content)
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := ws.Delete(ctx, docID); err != nil && !errors.Is(err, knowledge.ErrNotFound) {
+		slog.Warn("knowledge: could not remove an imported page that lacks its kind's headings", "document_id", docID, "error", err)
+	}
+	return &KnowledgeMissingSectionsError{Kind: link.Kind, Missing: missing}
+}
+
+// weknoraTagIDs finds or creates each named tag in the knowledge base.
+func (s *KnowledgeService) weknoraTagIDs(ctx context.Context, ws knowledge.Workspace, kbID string, names []string) ([]string, error) {
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		id, err := ws.EnsureTag(ctx, kbID, name)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func (s *KnowledgeService) settle(ctx context.Context, link db.KnowledgeLink, weknoraID, state, errText string) (db.KnowledgeLink, error) {
@@ -368,8 +635,9 @@ func (s *KnowledgeService) loadLink(ctx context.Context, workspaceID, id pgtype.
 
 // PublishDocument indexes a draft, making it searchable. A URL draft is
 // fetched now. Publishing a published document returns it unchanged. A failed
-// write is retried with publishing on.
-func (s *KnowledgeService) PublishDocument(ctx context.Context, workspaceID, linkID pgtype.UUID) (KnowledgeDocumentView, error) {
+// write is retried with publishing on. actor is who publishes, as the
+// initiative timeline records it when the document takes an artifact.
+func (s *KnowledgeService) PublishDocument(ctx context.Context, workspaceID, linkID pgtype.UUID, actor KnowledgeActor) (KnowledgeDocumentView, error) {
 	link, err := s.loadLink(ctx, workspaceID, linkID)
 	if err != nil {
 		return KnowledgeDocumentView{}, err
@@ -390,6 +658,7 @@ func (s *KnowledgeService) PublishDocument(ctx context.Context, workspaceID, lin
 		if err != nil {
 			return KnowledgeDocumentView{}, fmt.Errorf("record publish: %w", err)
 		}
+		s.linkInitiativeArtifact(ctx, link, actor)
 		return s.linkView(ctx, workspaceID, link)
 	}
 	base, err := s.baseByID(ctx, workspaceID, link.KnowledgeBaseID)
@@ -400,7 +669,33 @@ func (s *KnowledgeService) PublishDocument(ctx context.Context, workspaceID, lin
 	if err != nil {
 		return KnowledgeDocumentView{}, err
 	}
+	s.linkInitiativeArtifact(ctx, link, actor)
 	return s.linkView(ctx, workspaceID, link)
+}
+
+// linkInitiativeArtifact takes a published document into its initiative's
+// checklist when it names one. A failure is logged and does not fail the
+// publish: the document is already searchable.
+func (s *KnowledgeService) linkInitiativeArtifact(ctx context.Context, link db.KnowledgeLink, actor KnowledgeActor) {
+	if s.Initiatives == nil || link.State != KnowledgeLinkPublished || !link.InitiativeID.Valid || link.Kind == "" {
+		return
+	}
+	if _, err := s.Initiatives.LinkArtifact(ctx, link.WorkspaceID, link.InitiativeID, link.ID, link.Kind, initiativeActorOf(actor)); err != nil {
+		slog.Warn("knowledge: could not take the published document into its initiative",
+			"link_id", util.UUIDToString(link.ID), "error", err)
+	}
+}
+
+// initiativeActorOf is the actor a knowledge write is recorded as on an
+// initiative's timeline. A retry the system makes is the system's.
+func initiativeActorOf(a KnowledgeActor) InitiativeActor {
+	switch a.Type {
+	case KnowledgeActorMember:
+		return InitiativeActor{Type: "member", ID: a.ID}
+	case KnowledgeActorAgent:
+		return InitiativeActor{Type: "agent", ID: a.ID}
+	}
+	return InitiativeActor{Type: "system"}
 }
 
 func (s *KnowledgeService) baseByID(ctx context.Context, workspaceID, id pgtype.UUID) (db.KnowledgeBase, error) {
@@ -461,6 +756,12 @@ func (s *KnowledgeService) remove(ctx context.Context, workspaceID pgtype.UUID, 
 // (so ones added there appear too), enriched with the records. When WeKnora
 // does not answer, the list falls back to the records and says "offline".
 func (s *KnowledgeService) ListDocuments(ctx context.Context, workspaceID pgtype.UUID, kb, state string) (KnowledgeDocumentList, error) {
+	return s.ListDocumentsFor(ctx, workspaceID, KnowledgeActor{Type: KnowledgeActorSystem}, kb, state)
+}
+
+// ListDocumentsFor is ListDocuments over the bases the actor may read. A
+// restricted base the actor may not read is reported as not found when named.
+func (s *KnowledgeService) ListDocumentsFor(ctx context.Context, workspaceID pgtype.UUID, actor KnowledgeActor, kb, state string) (KnowledgeDocumentList, error) {
 	out := KnowledgeDocumentList{State: "ready", Documents: []KnowledgeDocumentView{}}
 	switch state {
 	case "", KnowledgeLinkDraft, KnowledgeLinkPublished, KnowledgeLinkFailed:
@@ -473,6 +774,9 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, workspaceID pgtype
 	}
 	bases, err := s.baseKeys(ctx, workspaceID)
 	if err != nil {
+		return out, err
+	}
+	if err := s.dropUnreadable(ctx, workspaceID, actor, bases); err != nil {
 		return out, err
 	}
 	var only *db.KnowledgeBase
@@ -495,6 +799,14 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, workspaceID pgtype
 	if err != nil {
 		return out, fmt.Errorf("list knowledge records: %w", err)
 	}
+	superseded, err := s.Queries.ListSupersededLinkIDs(ctx, workspaceID)
+	if err != nil {
+		return out, fmt.Errorf("list superseded documents: %w", err)
+	}
+	supersededSet := map[string]bool{}
+	for _, id := range superseded {
+		supersededSet[util.UUIDToString(id)] = true
+	}
 	linked := map[string]bool{}
 	for _, l := range links {
 		if l.WeknoraKnowledgeID != "" {
@@ -502,7 +814,9 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, workspaceID pgtype
 		}
 		if state == "" || l.State == state {
 			if _, ok := bases[util.UUIDToString(l.KnowledgeBaseID)]; ok {
-				out.Documents = append(out.Documents, linkViewWith(bases, l))
+				v := linkViewWith(bases, l)
+				v.Superseded = supersededSet[v.ID]
+				out.Documents = append(out.Documents, v)
 			}
 		}
 	}
@@ -538,18 +852,39 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, workspaceID pgtype
 // Search is retrieval across the workspace's knowledge bases, or one of them
 // (kb is its key). It calls no LLM. WeKnora not answering is the "offline"
 // state with no hits, never an error.
+// Search is retrieval across the workspace's knowledge bases, or one of them
+// (kb is its key). It calls no LLM. WeKnora not answering is the "offline"
+// state with no hits, never an error.
 func (s *KnowledgeService) Search(ctx context.Context, workspaceID pgtype.UUID, query, kb string, limit int) (KnowledgeSearchResult, error) {
+	return s.SearchKind(ctx, workspaceID, query, kb, "", limit)
+}
+
+// SearchKind is Search narrowed to documents of one kind (empty for all). A
+// document superseded by a published one is never returned: the newer document
+// replaces it, so the old one would only mislead.
+func (s *KnowledgeService) SearchKind(ctx context.Context, workspaceID pgtype.UUID, query, kb, kind string, limit int) (KnowledgeSearchResult, error) {
+	return s.SearchKindFor(ctx, workspaceID, KnowledgeActor{Type: KnowledgeActorSystem}, query, kb, kind, limit)
+}
+
+// SearchKindFor is SearchKind over the bases the actor may read. An agent with
+// no grants searches the workspace-visible bases only, which is what automatic
+// issue context uses.
+func (s *KnowledgeService) SearchKindFor(ctx context.Context, workspaceID pgtype.UUID, actor KnowledgeActor, query, kb, kind string, limit int) (KnowledgeSearchResult, error) {
 	out := KnowledgeSearchResult{State: "ready", Hits: []KnowledgeHitView{}}
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return out, &KnowledgeInvalidError{"q is required"}
 	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
 	ws, err := s.workspaceClient(ctx, workspaceID)
 	if err != nil {
 		return out, err
 	}
 	bases, err := s.baseKeys(ctx, workspaceID)
 	if err != nil {
+		return out, err
+	}
+	if err := s.dropUnreadable(ctx, workspaceID, actor, bases); err != nil {
 		return out, err
 	}
 	byWeKnora := map[string]string{}
@@ -570,7 +905,13 @@ func (s *KnowledgeService) Search(ctx context.Context, workspaceID pgtype.UUID, 
 	if limit <= 0 {
 		limit = knowledgeSearchDefaultLimit
 	}
-	hits, err := ws.Search(ctx, knowledge.SearchRequest{Query: query, KnowledgeBaseIDs: ids, Limit: limit})
+	// Over-fetch: superseded documents and other kinds are dropped after the
+	// search, and the caller still gets up to limit results.
+	fetch := limit * 2
+	if fetch > knowledgeSearchMaxFetch {
+		fetch = knowledgeSearchMaxFetch
+	}
+	hits, err := ws.Search(ctx, knowledge.SearchRequest{Query: query, KnowledgeBaseIDs: ids, Limit: fetch})
 	if errors.Is(err, knowledge.ErrUnavailable) {
 		out.State = KnowledgeStateOffline
 		return out, nil
@@ -578,11 +919,65 @@ func (s *KnowledgeService) Search(ctx context.Context, workspaceID pgtype.UUID, 
 	if err != nil {
 		return out, err
 	}
+	taxonomy, err := s.hitTaxonomy(ctx, workspaceID, hits)
+	if err != nil {
+		return out, err
+	}
 	for _, h := range hits {
-		out.Hits = append(out.Hits, KnowledgeHitView{
+		if len(out.Hits) >= limit {
+			break
+		}
+		link, linked := taxonomy.byDocument[h.DocumentID]
+		if linked && taxonomy.superseded[util.UUIDToString(link.ID)] {
+			continue
+		}
+		if kind != "" && (!linked || link.Kind != kind) {
+			continue
+		}
+		view := KnowledgeHitView{
 			DocumentID: h.DocumentID, KnowledgeBase: byWeKnora[h.KnowledgeBaseID], Title: h.Title,
 			Content: h.Content, Source: h.Source, Score: h.Score,
-		})
+		}
+		if linked {
+			view.KnowledgeKind = link.Kind
+		}
+		out.Hits = append(out.Hits, view)
+	}
+	return out, nil
+}
+
+// knowledgeSearchMaxFetch caps the over-fetch of a filtered search.
+const knowledgeSearchMaxFetch = 100
+
+// hitTaxonomy holds what the registry knows about the documents of a search:
+// their links by WeKnora id, and the links that a published document supersedes.
+type hitTaxonomy struct {
+	byDocument map[string]db.KnowledgeLink
+	superseded map[string]bool
+}
+
+func (s *KnowledgeService) hitTaxonomy(ctx context.Context, workspaceID pgtype.UUID, hits []knowledge.SearchHit) (hitTaxonomy, error) {
+	out := hitTaxonomy{byDocument: map[string]db.KnowledgeLink{}, superseded: map[string]bool{}}
+	if len(hits) == 0 {
+		return out, nil
+	}
+	docIDs := make([]string, 0, len(hits))
+	for _, h := range hits {
+		docIDs = append(docIDs, h.DocumentID)
+	}
+	links, err := s.Queries.GetKnowledgeLinksByDocumentIDs(ctx, db.GetKnowledgeLinksByDocumentIDsParams{WorkspaceID: workspaceID, DocumentIds: docIDs})
+	if err != nil {
+		return out, fmt.Errorf("load document taxonomy: %w", err)
+	}
+	for _, l := range links {
+		out.byDocument[l.WeknoraKnowledgeID] = l
+	}
+	superseded, err := s.Queries.ListSupersededLinkIDs(ctx, workspaceID)
+	if err != nil {
+		return out, fmt.Errorf("load superseded documents: %w", err)
+	}
+	for _, id := range superseded {
+		out.superseded[util.UUIDToString(id)] = true
 	}
 	return out, nil
 }
@@ -617,6 +1012,26 @@ func linkViewWith(bases map[string]db.KnowledgeBase, l db.KnowledgeLink) Knowled
 		t := l.PublishedAt.Time
 		v.PublishedAt = &t
 	}
+	v.KnowledgeKind = l.Kind
+	v.StageKey = l.StageKey
+	if l.InitiativeID.Valid {
+		id := util.UUIDToString(l.InitiativeID)
+		v.InitiativeID = &id
+	}
+	if l.Confidence.Valid {
+		c := l.Confidence.String
+		v.Confidence = &c
+	}
+	if l.ValidUntil.Valid {
+		d := l.ValidUntil.Time.Format("2006-01-02")
+		v.ValidUntil = &d
+	}
+	if l.SupersedesLinkID.Valid {
+		id := util.UUIDToString(l.SupersedesLinkID)
+		v.SupersedesID = &id
+	}
+	v.Tags = append([]string{}, l.Tags...)
+	v.ReviewVerdict = l.ReviewVerdict
 	return v
 }
 
@@ -643,11 +1058,14 @@ func (s *KnowledgeService) RetryFailed(ctx context.Context, workspaceID pgtype.U
 		if err != nil {
 			continue
 		}
-		if _, err := s.send(ctx, ws, base, l, false); err != nil {
+		settled, err := s.send(ctx, ws, base, l, false)
+		if err != nil {
 			slog.Warn("knowledge: retry of a failed write did not succeed", "link_id", util.UUIDToString(l.ID), "error", err)
 			if errors.Is(err, knowledge.ErrUnavailable) {
 				return
 			}
+			continue
 		}
+		s.linkInitiativeArtifact(ctx, settled, KnowledgeActor{Type: KnowledgeActorSystem})
 	}
 }

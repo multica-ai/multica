@@ -1,0 +1,219 @@
+{
+  "title": "Pipeline",
+  "toolbar": {
+    "squad": "Owner squad",
+    "squad_all": "All squads",
+    "status": "Status",
+    "status_option": {
+      "open": "Open",
+      "active": "Active",
+      "operating": "Operating",
+      "shelved": "Shelved",
+      "closed": "Closed"
+    }
+  },
+  "board": {
+    "no_pipeline": "No pipeline is set up for this workspace yet.",
+    "no_initiatives": "No initiatives match these filters.",
+    "column_empty": "Nothing in this stage",
+    "unknown_stage": "Unknown stage",
+    "load_failed": "Could not load initiatives."
+  },
+  "card": {
+    "days_in_stage_one": "{{count}} day in stage",
+    "days_in_stage_other": "{{count}} days in stage",
+    "artifacts": "{{present}}/{{required}} artifacts",
+    "stalled": "Stalled",
+    "no_owner": "No owner"
+  },
+  "status": {
+    "active": "Active",
+    "operating": "Operating",
+    "shelved": "Shelved",
+    "closed": "Closed",
+    "unknown": "Unknown"
+  },
+  "stage_sla": {
+    "ok": "Within the stage SLA",
+    "stalled": "Past the stage SLA"
+  },
+  "panel": {
+    "loading": "Loading initiative…",
+    "unavailable": "This initiative could not be loaded.",
+    "overview": "Overview",
+    "stage": "Stage",
+    "owner": "Owner squad",
+    "status": "Status",
+    "days_in_stage": "Days in stage",
+    "exit": "Exit",
+    "exit_mode": {
+      "auto": "Advances once the required artifacts are published",
+      "attest": "The owning squad attests the stage is complete",
+      "gate": "The boss decides",
+      "unknown": "Exit rule not recognised"
+    },
+    "open_issue": "Open backing issue",
+    "artifacts": "Artifacts",
+    "gates": "Gates",
+    "timeline": "Stage timeline",
+    "force": "Force move",
+    "sla": "Stage SLA",
+    "actions": "Actions",
+    "thread": "Backing issue thread"
+  },
+  "artifact": {
+    "required": "Required",
+    "optional": "Optional",
+    "published": "Published",
+    "missing": "Missing",
+    "waived": "Waived",
+    "open_knowledge": "Open in knowledge",
+    "waive": "Waive",
+    "waive_note": "Why it is waived",
+    "waive_note_required": "A note is required to waive an artifact.",
+    "waive_submit": "Waive artifact",
+    "none": "No artifacts for this stage."
+  },
+  "gate": {
+    "state": {
+      "pending": "Waiting for a decision",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "revising": "Sent back for changes",
+      "expired": "Expired",
+      "unknown": "Unknown"
+    },
+    "approve": "Approve",
+    "outcome": {
+      "continue": "Continue",
+      "scale": "Scale",
+      "sunset": "Sunset"
+    },
+    "outcome_hint": "Continue keeps the initiative operating. Scale starts a follow-on at Define. Sunset closes it.",
+    "reject": "Reject",
+    "reject_note": "Why it is rejected",
+    "reject_note_required": "A note is required to reject a gate.",
+    "reject_submit": "Reject gate",
+    "cancel": "Cancel",
+    "none": "No gates for this initiative."
+  },
+  "event": {
+    "created": "Created",
+    "advanced": "Advanced",
+    "sent_back": "Sent back",
+    "shelved": "Shelved",
+    "resumed": "Resumed",
+    "closed": "Closed",
+    "forced": "Forced",
+    "attested": "Attested",
+    "artifact_waived": "Artifact waived",
+    "unknown": "Updated",
+    "move": "{{from}} → {{to}}",
+    "none": "No events yet."
+  },
+  "force": {
+    "to_stage": "Move to stage",
+    "reason": "Reason",
+    "reason_required": "A reason is required to force a move.",
+    "submit": "Force move"
+  },
+  "toast": {
+    "waived": "Artifact waived.",
+    "waive_failed": "Could not waive the artifact.",
+    "approved": "Gate approved.",
+    "rejected": "Gate rejected.",
+    "decide_failed": "Could not record the decision.",
+    "forced": "Moved to {{stage}}.",
+    "force_failed": "Could not move the initiative.",
+    "created": "Initiative created.",
+    "advanced": "Initiative advanced.",
+    "attested": "Stage attested.",
+    "sent_back": "Initiative sent back.",
+    "shelved": "Initiative shelved.",
+    "resumed": "Initiative resumed.",
+    "closed": "Initiative closed."
+  },
+  "kind": {
+    "label": {
+      "decision": "Decision",
+      "opportunity": "Opportunity",
+      "stage_gate": "Stage gate",
+      "org_change": "Org change",
+      "budget": "Budget",
+      "standing_approval": "Standing approval",
+      "unknown": "Other"
+    }
+  },
+  "opportunity": {
+    "thesis": "Thesis",
+    "market": "Market",
+    "evidence": "Evidence",
+    "evidence_item": "Document {{index}}",
+    "no_evidence": "No evidence attached.",
+    "target_stage": "Starts at {{stage}}"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "Artifact checklist",
+    "checklist_empty": "No artifacts for this stage.",
+    "attestation": "Leader’s attestation",
+    "attested_by": "Attested by {{name}}, {{time}}",
+    "not_attested": "Not attested yet.",
+    "unavailable": "The initiative could not be loaded."
+  },
+  "badge": {
+    "label_one": "{{count}} initiative owned",
+    "label_other": "{{count}} initiatives owned",
+    "open": "Open pipeline"
+  },
+  "create": {
+    "button": "New initiative",
+    "title": "New initiative",
+    "title_label": "Title",
+    "title_required": "A title is required.",
+    "title_too_long": "The title must be at most 200 characters.",
+    "thesis_label": "Thesis",
+    "thesis_required": "A thesis is required: say why this is worth doing.",
+    "thesis_too_long": "The thesis is too long.",
+    "pipeline_label": "Pipeline",
+    "no_pipeline": "This workspace has no pipeline to start an initiative in.",
+    "failed": "Could not create the initiative.",
+    "submit": "Create initiative",
+    "cancel": "Cancel"
+  },
+  "actions": {
+    "advance": "Advance",
+    "attest": "Attest stage",
+    "send_back": "Send back",
+    "send_back_note": "Note for the leader",
+    "send_back_note_required": "A note is required to send an initiative back.",
+    "send_back_submit": "Send back",
+    "resume": "Resume",
+    "shelve": "Shelve",
+    "shelve_title": "Shelve this initiative?",
+    "shelve_description": "Its stage clock stops until it is resumed.",
+    "shelve_note": "Note (optional)",
+    "shelve_submit": "Shelve initiative",
+    "close": "Close",
+    "close_title": "Close this initiative?",
+    "close_description": "The backing issue is marked done, and the initiative leaves the pipeline.",
+    "close_reason": "Reason",
+    "close_reason_required": "A reason is required to close an initiative.",
+    "close_submit": "Close initiative",
+    "cancel": "Cancel"
+  },
+  "action_error": {
+    "generic": "Could not change the initiative.",
+    "stage_not_ready": "The stage still needs its required artifacts.",
+    "needs_attest": "The owning squad must attest the stage first.",
+    "stage_is_gate": "A gate decides this stage.",
+    "not_attest_stage": "This stage does not take an attestation.",
+    "initiative_closed": "The initiative is closed.",
+    "initiative_shelved": "The initiative is shelved. Resume it first.",
+    "initiative_not_shelved": "The initiative is not shelved.",
+    "no_previous_stage": "There is no earlier stage to return to.",
+    "note_required": "A note is required for this change.",
+    "stage_unowned": "This stage has no owning squad.",
+    "build_squad_not_sdlc": "The Build stage needs a squad with the software workflow."
+  }
+}

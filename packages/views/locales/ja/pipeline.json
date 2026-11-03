@@ -1,0 +1,217 @@
+{
+  "title": "パイプライン",
+  "toolbar": {
+    "squad": "担当スクワッド",
+    "squad_all": "すべてのスクワッド",
+    "status": "ステータス",
+    "status_option": {
+      "open": "進行中",
+      "active": "アクティブ",
+      "operating": "運用中",
+      "shelved": "保留中",
+      "closed": "終了"
+    }
+  },
+  "board": {
+    "no_pipeline": "このワークスペースにはまだパイプラインがありません。",
+    "no_initiatives": "フィルターに一致するイニシアチブはありません。",
+    "column_empty": "このステージには何もありません",
+    "unknown_stage": "不明なステージ",
+    "load_failed": "イニシアチブを読み込めませんでした。"
+  },
+  "card": {
+    "days_in_stage_other": "このステージで{{count}}日",
+    "artifacts": "成果物 {{present}}/{{required}}",
+    "stalled": "停滞",
+    "no_owner": "担当なし"
+  },
+  "status": {
+    "active": "アクティブ",
+    "operating": "運用中",
+    "shelved": "保留中",
+    "closed": "終了",
+    "unknown": "不明"
+  },
+  "stage_sla": {
+    "ok": "ステージのSLA内",
+    "stalled": "ステージのSLAを超過"
+  },
+  "panel": {
+    "loading": "イニシアチブを読み込み中…",
+    "unavailable": "このイニシアチブを読み込めませんでした。",
+    "overview": "概要",
+    "stage": "ステージ",
+    "owner": "担当スクワッド",
+    "status": "ステータス",
+    "days_in_stage": "このステージの日数",
+    "exit": "終了条件",
+    "exit_mode": {
+      "auto": "必須の成果物が公開されると進みます",
+      "attest": "担当スクワッドがステージの完了を承認します",
+      "gate": "ボスが判断します",
+      "unknown": "未対応の終了ルール"
+    },
+    "open_issue": "関連イシューを開く",
+    "artifacts": "成果物",
+    "gates": "ゲート",
+    "timeline": "ステージの履歴",
+    "force": "強制移動",
+    "sla": "ステージのSLA",
+    "actions": "アクション",
+    "thread": "関連する課題のスレッド"
+  },
+  "artifact": {
+    "required": "必須",
+    "optional": "任意",
+    "published": "公開済み",
+    "missing": "未作成",
+    "waived": "免除",
+    "open_knowledge": "ナレッジで開く",
+    "waive": "免除する",
+    "waive_note": "免除の理由",
+    "waive_note_required": "成果物を免除するには理由の入力が必要です。",
+    "waive_submit": "成果物を免除",
+    "none": "このステージの成果物はありません。"
+  },
+  "gate": {
+    "state": {
+      "pending": "判断待ち",
+      "approved": "承認済み",
+      "rejected": "却下",
+      "revising": "修正のため差し戻し",
+      "expired": "期限切れ",
+      "unknown": "不明"
+    },
+    "approve": "承認",
+    "outcome": {
+      "continue": "継続",
+      "scale": "拡大",
+      "sunset": "終了"
+    },
+    "outcome_hint": "継続はイニシアチブの運用を続けます。拡大は「定義」段階で後続のイニシアチブを開始します。終了はイニシアチブを閉じます。",
+    "reject": "却下",
+    "reject_note": "却下の理由",
+    "reject_note_required": "ゲートを却下するには理由の入力が必要です。",
+    "reject_submit": "ゲートを却下",
+    "cancel": "キャンセル",
+    "none": "このイニシアチブのゲートはありません。"
+  },
+  "event": {
+    "created": "作成",
+    "advanced": "前進",
+    "sent_back": "差し戻し",
+    "shelved": "保留",
+    "resumed": "再開",
+    "closed": "終了",
+    "forced": "強制移動",
+    "attested": "承認",
+    "artifact_waived": "成果物を免除",
+    "unknown": "更新",
+    "move": "{{from}} → {{to}}",
+    "none": "まだイベントはありません。"
+  },
+  "force": {
+    "to_stage": "移動先のステージ",
+    "reason": "理由",
+    "reason_required": "強制移動には理由の入力が必要です。",
+    "submit": "強制移動"
+  },
+  "toast": {
+    "waived": "成果物を免除しました。",
+    "waive_failed": "成果物を免除できませんでした。",
+    "approved": "ゲートを承認しました。",
+    "rejected": "ゲートを却下しました。",
+    "decide_failed": "判断を記録できませんでした。",
+    "forced": "{{stage}} に移動しました。",
+    "force_failed": "イニシアチブを移動できませんでした。",
+    "created": "イニシアチブを作成しました。",
+    "advanced": "イニシアチブを進めました。",
+    "attested": "ステージを承認しました。",
+    "sent_back": "イニシアチブを差し戻しました。",
+    "shelved": "イニシアチブを保留にしました。",
+    "resumed": "イニシアチブを再開しました。",
+    "closed": "イニシアチブを終了しました。"
+  },
+  "kind": {
+    "label": {
+      "decision": "判断",
+      "opportunity": "機会",
+      "stage_gate": "ステージゲート",
+      "org_change": "組織変更",
+      "budget": "予算",
+      "standing_approval": "常設の承認",
+      "unknown": "その他"
+    }
+  },
+  "opportunity": {
+    "thesis": "仮説",
+    "market": "市場",
+    "evidence": "根拠",
+    "evidence_item": "ドキュメント {{index}}",
+    "no_evidence": "根拠は添付されていません。",
+    "target_stage": "{{stage}} から開始"
+  },
+  "stage_gate": {
+    "moving": "{{from}} → {{to}}",
+    "checklist": "成果物チェックリスト",
+    "checklist_empty": "このステージの成果物はありません。",
+    "attestation": "リーダーの承認",
+    "attested_by": "{{name}} が承認（{{time}}）",
+    "not_attested": "まだ承認されていません。",
+    "unavailable": "イニシアチブを読み込めませんでした。"
+  },
+  "badge": {
+    "label_other": "担当するイニシアチブ {{count}} 件",
+    "open": "パイプラインを開く"
+  },
+  "create": {
+    "button": "新しいイニシアチブ",
+    "title": "新しいイニシアチブ",
+    "title_label": "タイトル",
+    "title_required": "タイトルは必須です。",
+    "title_too_long": "タイトルは200文字以内にしてください。",
+    "thesis_label": "仮説",
+    "thesis_required": "仮説は必須です。なぜ取り組む価値があるかを書いてください。",
+    "thesis_too_long": "仮説が長すぎます。",
+    "pipeline_label": "パイプライン",
+    "no_pipeline": "このワークスペースにはイニシアチブを開始できるパイプラインがありません。",
+    "failed": "イニシアチブを作成できませんでした。",
+    "submit": "イニシアチブを作成",
+    "cancel": "キャンセル"
+  },
+  "actions": {
+    "advance": "進める",
+    "attest": "ステージを承認",
+    "send_back": "差し戻す",
+    "send_back_note": "責任者へのメモ",
+    "send_back_note_required": "差し戻すにはメモが必要です。",
+    "send_back_submit": "差し戻す",
+    "resume": "再開",
+    "shelve": "保留にする",
+    "shelve_title": "このイニシアチブを保留にしますか？",
+    "shelve_description": "再開するまで、ステージの計測は止まります。",
+    "shelve_note": "メモ（任意）",
+    "shelve_submit": "保留にする",
+    "close": "終了",
+    "close_title": "このイニシアチブを終了しますか？",
+    "close_description": "関連する課題は完了になり、イニシアチブはパイプラインから外れます。",
+    "close_reason": "理由",
+    "close_reason_required": "終了するには理由が必要です。",
+    "close_submit": "イニシアチブを終了",
+    "cancel": "キャンセル"
+  },
+  "action_error": {
+    "generic": "イニシアチブを変更できませんでした。",
+    "stage_not_ready": "このステージには必要な成果物がまだ揃っていません。",
+    "needs_attest": "先に担当スクワッドがこのステージを承認する必要があります。",
+    "stage_is_gate": "このステージはゲートで決定されます。",
+    "not_attest_stage": "このステージは承認を必要としません。",
+    "initiative_closed": "イニシアチブは終了しています。",
+    "initiative_shelved": "イニシアチブは保留中です。先に再開してください。",
+    "initiative_not_shelved": "イニシアチブは保留中ではありません。",
+    "no_previous_stage": "戻る前のステージがありません。",
+    "note_required": "この変更にはメモが必要です。",
+    "stage_unowned": "このステージには担当スクワッドがありません。",
+    "build_squad_not_sdlc": "Build ステージにはソフトウェアワークフローのスクワッドが必要です。"
+  }
+}

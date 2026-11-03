@@ -1357,6 +1357,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Company knowledge base (optional WeKnora sidecar). Always wired so the
 	// status endpoint can say "not offered"; see knowledge.go.
 	h.Knowledge = newKnowledgeService(queries, pool)
+	// A published document with an initiative takes its artifact through the
+	// initiative service, which owns the checklist and the stage advance.
+	h.Knowledge.Initiatives, _ = service.NewInitiativeSet(h.IssueService, nil)
+	// The freshness review files its requests as issues (plan 10.9).
+	h.Knowledge.Issues = h.IssueService
 
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
 	// VCS and channel secrets gives operators an isolated rotation and blast
@@ -2067,11 +2072,37 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/documents/{id}/publish", h.PublishKnowledgeDocument)
 					r.Post("/documents/{id}/discard", h.DiscardKnowledgeDocument)
 					r.Delete("/documents/{id}", h.DeleteKnowledgeDocument)
+					// Taxonomy and eval administration: owners and admins.
+					r.Patch("/kinds/{key}", h.UpdateKnowledgeKind)
+					r.Put("/policies", h.SetKnowledgePolicy)
+					r.Delete("/policies", h.DeleteKnowledgePolicy)
+					r.Post("/eval/runs", h.RunKnowledgeEval)
+					r.Delete("/eval-cases/{id}", h.DeleteKnowledgeEvalCase)
+					// Sources, restricted-base access, per-base LLM switches and
+					// the model connection test (plan 10.11 to 10.13).
+					r.Get("/sources", h.ListKnowledgeSources)
+					r.Get("/bases/{key}/access", h.GetKnowledgeBaseAccess)
+					r.Put("/bases/{key}/visibility", h.SetKnowledgeBaseVisibility)
+					r.Put("/bases/{key}/access/{subject_type}/{subject_id}", h.PutKnowledgeGrant)
+					r.Delete("/bases/{key}/access/{subject_type}/{subject_id}", h.DeleteKnowledgeGrant)
+					r.Patch("/bases/{key}/settings", h.PatchKnowledgeBaseSettings)
+					r.Post("/models/test", h.TestKnowledgeModels)
+					r.Post("/owner-account/reveal", h.RevealKnowledgeOwnerPassword)
 				})
+				// A person uploads a file and it is published at once: the
+				// person is the curator. Agents are refused by RequireHumanActor.
+				r.With(handler.RequireHumanActor).Post("/documents/upload", h.UploadKnowledgeDocument)
 				r.Get("/bases", h.ListKnowledgeBases)
 				r.Get("/documents", h.ListKnowledgeDocuments)
 				r.Post("/documents", h.CreateKnowledgeDocument)
+				r.Post("/documents/{id}/review", h.ReviewKnowledgeDocument)
 				r.Get("/search", h.SearchKnowledge)
+				r.Get("/kinds", h.ListKnowledgeKinds)
+				r.Get("/health", h.GetKnowledgeHealth)
+				r.Get("/policies", h.ListKnowledgePolicies)
+				r.Get("/eval-cases", h.ListKnowledgeEvalCases)
+				r.Post("/eval-cases", h.CreateKnowledgeEvalCase)
+				r.Get("/eval/runs", h.ListKnowledgeEvalRuns)
 			})
 
 			// Local search index sync for Web/Desktop (MUL-7754). Human clients
@@ -2253,6 +2284,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)
 				r.Post("/", h.CreateSquad)
+				// The directory (spec 3.5) is a static path, so it is matched before /{id}.
+				r.Get("/directory", h.ListSquadDirectory)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)
@@ -2269,6 +2302,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/routines", h.ListSquadRoutines)
 					r.Post("/routines", h.CreateSquadRoutine)
 					r.Delete("/routines/{routine_id}", h.DeleteSquadRoutine)
+				})
+			})
+
+			// Pipeline and initiatives (spec 3.1). Decisions on a stage gate go through
+			// /api/proposals; the routes here move an initiative directly.
+			r.Get("/api/pipelines", h.ListPipelines)
+			r.Route("/api/initiatives", func(r chi.Router) {
+				r.Get("/", h.ListInitiatives)
+				r.Post("/", h.CreateInitiative)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetInitiative)
+					r.Patch("/", h.UpdateInitiative)
+					r.Post("/advance", h.AdvanceInitiative)
+					r.Post("/attest", h.AttestInitiative)
+					r.Post("/send-back", h.SendBackInitiative)
+					r.Post("/shelve", h.ShelveInitiative)
+					r.Post("/resume", h.ResumeInitiative)
+					r.Post("/close", h.CloseInitiative)
+					r.Post("/force", h.ForceInitiative)
+					r.Post("/artifacts/{kind}/waive", h.WaiveInitiativeArtifact)
 				})
 			})
 
@@ -2299,6 +2352,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Setup is idempotent: a second POST changes nothing.
 			r.Get("/api/office/setup", h.GetOfficeSetup)
 			r.Post("/api/office/setup", h.SetupOffice)
+			r.Post("/api/office/company-template/apply", h.ApplyCompanyTemplate)
 			// The caller's brief push to a chat app (plan 9.10). Member scope only:
 			// the handler reads and writes the caller's own row and refuses agents.
 			r.Get("/api/office/brief-push", h.GetBriefPushPreference)

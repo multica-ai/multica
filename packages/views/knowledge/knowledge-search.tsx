@@ -7,6 +7,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
+  knowledgeKindsOptions,
   knowledgeSearchOptions,
   type KnowledgeBase,
   type KnowledgeHit,
@@ -17,6 +18,8 @@ import {
   formatSecretaryResult,
   useAskSecretary,
 } from "./ask-secretary";
+import { AddEvalCaseButton } from "./knowledge-add-eval-case";
+import { KnowledgeKindPicker } from "./knowledge-kind-picker";
 import { isWebLink } from "./web-link";
 
 /**
@@ -38,7 +41,9 @@ export function KnowledgeSearch({
   const { t } = useT("knowledge");
   const [draft, setDraft] = useState("");
   const [submitted, setSubmitted] = useState("");
-  const search = useQuery(knowledgeSearchOptions(wsId, { q: submitted }));
+  const [kind, setKind] = useState("");
+  const search = useQuery(knowledgeSearchOptions(wsId, { q: submitted, kind: kind || undefined }));
+  const kinds = useQuery(knowledgeKindsOptions(wsId));
   const askSecretary = useAskSecretary();
 
   const names = new Map(knowledgeBases.map((kb) => [kb.key, kb.name]));
@@ -95,6 +100,8 @@ export function KnowledgeSearch({
           {search.data.hits.map((hit, index) => (
             <SearchHit
               key={`${hit.knowledge_base}-${hit.document_id}-${index}`}
+              wsId={wsId}
+              question={submitted}
               hit={hit}
               knowledgeBaseName={names.get(hit.knowledge_base) ?? hit.knowledge_base}
             />
@@ -121,6 +128,7 @@ export function KnowledgeSearch({
             className="pl-8"
           />
         </div>
+        <KnowledgeKindPicker kinds={kinds.data?.kinds ?? []} value={kind} onValueChange={setKind} />
         <Button type="submit" variant="outline" disabled={draft.trim() === ""}>
           {t(($) => $.search.submit)}
         </Button>
@@ -145,9 +153,13 @@ export function KnowledgeSearch({
 }
 
 function SearchHit({
+  wsId,
+  question,
   hit,
   knowledgeBaseName,
 }: {
+  wsId: string;
+  question: string;
   hit: KnowledgeHit;
   knowledgeBaseName: string;
 }) {
@@ -181,6 +193,14 @@ function SearchHit({
             )}
           </>
         ) : null}
+        <span className="ml-auto">
+          <AddEvalCaseButton
+            wsId={wsId}
+            question={question}
+            documentId={hit.document_id}
+            documentTitle={hit.title || hit.document_id}
+          />
+        </span>
       </div>
     </li>
   );

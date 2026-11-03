@@ -1,0 +1,7 @@
+{
+  "success": false,
+  "error": {
+    "code": "model_error",
+    "message": "upstream returned 401: invalid api key"
+  }
+}

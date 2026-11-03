@@ -99,9 +99,13 @@ func TestPublishBrief_SecretaryOfAnotherWorkspaceIsNotTheSecretary(t *testing.T)
 func TestPublishBrief_HeadingValidation(t *testing.T) {
 	e := newDigestEnv(t)
 
-	missing := strings.Replace(validBriefBody(), "## Watch", "### Watch", 1)
+	// Watch is optional (spec 3.7): dropping it is fine. A required section is not.
+	noWatch := strings.Replace(validBriefBody(), "## Watch", "### Watch", 1)
+	e.publish(t, "", "", briefRequestBody(map[string]any{"body": noWatch})).Want(http.StatusCreated)
+
+	missing := strings.Replace(validBriefBody(), "## Progress", "### Progress", 1)
 	w := e.publish(t, "", "", briefRequestBody(map[string]any{"body": missing})).Want(http.StatusBadRequest)
-	if msg := w.Map()["error"].(string); !strings.Contains(msg, "## Watch") || !strings.Contains(msg, "in this order") {
+	if msg := w.Map()["error"].(string); !strings.Contains(msg, "## Progress") || !strings.Contains(msg, "in this order") {
 		t.Fatalf("the error should name the missing heading and the layout: %s", msg)
 	}
 
@@ -121,6 +125,16 @@ func TestPublishBrief_HeadingValidation(t *testing.T) {
 	w = e.publish(t, "", "", briefRequestBody(map[string]any{"body": validBriefBody() + "\n## FYI\nagain"})).Want(http.StatusBadRequest)
 	if msg := w.Map()["error"].(string); !strings.Contains(msg, "twice") {
 		t.Fatalf("want a duplicate error, got: %s", msg)
+	}
+
+	// The optional data sections sit between Progress and Blockers and risks, in
+	// the spec's order. Pipeline after Blockers and risks is out of order.
+	withPipeline := strings.Replace(validBriefBody(), "## Blockers and risks", "## Pipeline\nINI-1 is in Validate.\n\n## Blockers and risks", 1)
+	e.publish(t, "", "", briefRequestBody(map[string]any{"body": withPipeline})).Want(http.StatusCreated)
+	badPipeline := strings.Replace(validBriefBody(), "## FYI", "## Pipeline\nINI-1.\n\n## FYI", 1)
+	w = e.publish(t, "", "", briefRequestBody(map[string]any{"body": badPipeline})).Want(http.StatusBadRequest)
+	if msg := w.Map()["error"].(string); !strings.Contains(msg, "out of order") {
+		t.Fatalf("want an out-of-order error for Pipeline after Blockers and risks, got: %s", msg)
 	}
 
 	// Empty body, and extra sections and different casing are fine.

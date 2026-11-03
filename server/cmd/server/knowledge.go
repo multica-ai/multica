@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -67,8 +68,39 @@ func newKnowledgeService(queries *db.Queries, pool *pgxpool.Pool) *service.Knowl
 		APIKey:    os.Getenv("KNOWLEDGE_EMBEDDING_API_KEY"),
 		Dimension: dimension,
 	}
+	svc.LLM = newKnowledgeLLM()
+	if raw := strings.TrimSpace(os.Getenv("KNOWLEDGE_UPLOAD_MAX_MB")); raw != "" {
+		if mb, err := strconv.Atoi(raw); err == nil && mb > 0 {
+			svc.UploadMaxBytes = int64(mb) << 20
+		} else {
+			slog.Warn("knowledge: ignoring invalid KNOWLEDGE_UPLOAD_MAX_MB", "value", raw)
+		}
+	}
 	slog.Info("knowledge base configured", "model", svc.Embedding.Name, "provider", svc.Embedding.Provider, "offered", svc.Box != nil)
 	return svc
+}
+
+// newKnowledgeLLM reads the OpenAI-compatible endpoint WeKnora uses for summaries,
+// Wiki, reranking and vision. Nil means no model is registered. The endpoint must
+// be in WeKnora's SSRF allow-list (SSRF_WHITELIST_EXTRA) when it is a private host.
+func newKnowledgeLLM() *service.KnowledgeLLM {
+	base := strings.TrimSpace(os.Getenv("KNOWLEDGE_LLM_BASE_URL"))
+	if base == "" {
+		return nil
+	}
+	if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		slog.Error("knowledge: KNOWLEDGE_LLM_BASE_URL must be an absolute http or https URL; models not registered")
+		return nil
+	}
+	llm := &service.KnowledgeLLM{
+		BaseURL:     base,
+		APIKey:      os.Getenv("KNOWLEDGE_LLM_API_KEY"),
+		ChatModel:   strings.TrimSpace(os.Getenv("KNOWLEDGE_LLM_MODEL")),
+		RerankModel: strings.TrimSpace(os.Getenv("KNOWLEDGE_RERANK_MODEL")),
+		VisionModel: strings.TrimSpace(os.Getenv("KNOWLEDGE_VISION_MODEL")),
+	}
+	slog.Info("knowledge models configured", "chat", llm.ChatModel != "", "rerank", llm.RerankModel != "", "vision", llm.VisionModel != "")
+	return llm
 }
 
 func envOr(name, def string) string {

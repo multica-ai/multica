@@ -19,7 +19,8 @@ test("a squad's charter and routines show, decisions can be sent back or set asi
     const runtimeId = await api.seedRuntime("Phase 2 office runtime");
     const researchLead = await api.createAgent("Phase 2 Research Lead", runtimeId);
 
-    const research = await api.createOfficeFloor("Research");
+    // A floor name unique to this spec: office-first-loop also creates a "Research" floor in the shared run.
+    const research = await api.createOfficeFloor("Phase 2 Research");
     const market = await api.createSquad(
       "Market Research",
       researchLead.id,
@@ -61,7 +62,7 @@ test("a squad's charter and routines show, decisions can be sent back or set asi
     await page.goto(`/${workspace.slug}/office`, { waitUntil: "domcontentloaded" });
 
     // The squad panel opens from its room. Charter first, then the routines on Overview.
-    await page.getByRole("tab", { name: /Research/ }).click();
+    await page.getByRole("tab", { name: /Phase 2 Research/ }).click();
     await page.locator("[data-room-name]", { hasText: "Market Research" }).click();
     await page.getByRole("tab", { name: "Charter" }).click();
     await expect(page.getByText(charterMission)).toBeVisible({ timeout: 45_000 });

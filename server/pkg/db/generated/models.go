@@ -891,6 +891,55 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type Initiative struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	PipelineID       pgtype.UUID        `json:"pipeline_id"`
+	Seq              int32              `json:"seq"`
+	Title            string             `json:"title"`
+	Thesis           string             `json:"thesis"`
+	StageKey         string             `json:"stage_key"`
+	OwnerSquadID     pgtype.UUID        `json:"owner_squad_id"`
+	Status           string             `json:"status"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	BuildProjectID   pgtype.UUID        `json:"build_project_id"`
+	SourceProposalID pgtype.UUID        `json:"source_proposal_id"`
+	SponsorUserID    pgtype.UUID        `json:"sponsor_user_id"`
+	GateDays         []int32            `json:"gate_days"`
+	StageEnteredAt   pgtype.Timestamptz `json:"stage_entered_at"`
+	ShelvedAt        pgtype.Timestamptz `json:"shelved_at"`
+	OperatingSince   pgtype.Timestamptz `json:"operating_since"`
+	ClosedAt         pgtype.Timestamptz `json:"closed_at"`
+	ClosedReason     string             `json:"closed_reason"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type InitiativeArtifact struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	InitiativeID    pgtype.UUID        `json:"initiative_id"`
+	StageKey        string             `json:"stage_key"`
+	Kind            string             `json:"kind"`
+	Required        bool               `json:"required"`
+	KnowledgeLinkID pgtype.UUID        `json:"knowledge_link_id"`
+	WaivedBy        pgtype.UUID        `json:"waived_by"`
+	WaivedNote      string             `json:"waived_note"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type InitiativeStageEvent struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InitiativeID   pgtype.UUID        `json:"initiative_id"`
+	FromStage      pgtype.Text        `json:"from_stage"`
+	ToStage        pgtype.Text        `json:"to_stage"`
+	Kind           string             `json:"kind"`
+	ActorType      string             `json:"actor_type"`
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	GateProposalID pgtype.UUID        `json:"gate_proposal_id"`
+	Note           string             `json:"note"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type InstanceTelemetryState struct {
 	Singleton         bool               `json:"singleton"`
 	InstanceID        pgtype.UUID        `json:"instance_id"`
@@ -1189,16 +1238,71 @@ type IssueWorkflow struct {
 	OwnerID          pgtype.UUID        `json:"owner_id"`
 }
 
+type KnowledgeAcl struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID        `json:"knowledge_base_id"`
+	SubjectType     string             `json:"subject_type"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	Access          string             `json:"access"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type KnowledgeBase struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	WeknoraKbID        string             `json:"weknora_kb_id"`
+	Key                string             `json:"key"`
+	Name               string             `json:"name"`
+	Visibility         string             `json:"visibility"`
+	Position           int32              `json:"position"`
+	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	WikiEnabled        bool               `json:"wiki_enabled"`
+	SummariesEnabled   bool               `json:"summaries_enabled"`
+	LlmDefaultsApplied bool               `json:"llm_defaults_applied"`
+}
+
+type KnowledgeEvalCase struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Question           string             `json:"question"`
+	ExpectedKind       string             `json:"expected_kind"`
+	ExpectedDocumentID string             `json:"expected_document_id"`
+	OwnerSquadID       pgtype.UUID        `json:"owner_squad_id"`
+	CreatedByType      string             `json:"created_by_type"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeEvalRun struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	WeknoraKbID string             `json:"weknora_kb_id"`
-	Key         string             `json:"key"`
-	Name        string             `json:"name"`
-	Visibility  string             `json:"visibility"`
-	Position    int32              `json:"position"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Total       int32              `json:"total"`
+	Hits        int32              `json:"hits"`
+	HitRate     float64            `json:"hit_rate"`
+	Results     []byte             `json:"results"`
+	RanAt       pgtype.Timestamptz `json:"ran_at"`
+}
+
+type KnowledgeHealthRun struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Job         string             `json:"job"`
+	Summary     []byte             `json:"summary"`
+	RanAt       pgtype.Timestamptz `json:"ran_at"`
+}
+
+type KnowledgeKind struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Key              string             `json:"key"`
+	Name             string             `json:"name"`
+	DefaultBaseKey   string             `json:"default_base_key"`
+	Template         string             `json:"template"`
+	ReviewDays       int32              `json:"review_days"`
+	RequiredSections []string           `json:"required_sections"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type KnowledgeLink struct {
@@ -1219,6 +1323,73 @@ type KnowledgeLink struct {
 	PendingContent     string             `json:"pending_content"`
 	PublishRequested   bool               `json:"publish_requested"`
 	Error              string             `json:"error"`
+	Kind               string             `json:"kind"`
+	InitiativeID       pgtype.UUID        `json:"initiative_id"`
+	StageKey           string             `json:"stage_key"`
+	SquadID            pgtype.UUID        `json:"squad_id"`
+	Confidence         pgtype.Text        `json:"confidence"`
+	ValidUntil         pgtype.Date        `json:"valid_until"`
+	SupersedesLinkID   pgtype.UUID        `json:"supersedes_link_id"`
+	Tags               []string           `json:"tags"`
+	ReviewVerdict      string             `json:"review_verdict"`
+	ReviewByID         pgtype.UUID        `json:"review_by_id"`
+	ReviewSquadID      pgtype.UUID        `json:"review_squad_id"`
+	ReviewNote         string             `json:"review_note"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewIssueID      pgtype.UUID        `json:"review_issue_id"`
+}
+
+type KnowledgeOwnerAccount struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	WeknoraUserID      string             `json:"weknora_user_id"`
+	Email              string             `json:"email"`
+	PasswordCiphertext []byte             `json:"password_ciphertext"`
+	RevealedAt         pgtype.Timestamptz `json:"revealed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgePublishPolicy struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Scope       string             `json:"scope"`
+	ScopeKey    string             `json:"scope_key"`
+	Mode        string             `json:"mode"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeRepoFile struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Path            string             `json:"path"`
+	KnowledgeLinkID pgtype.UUID        `json:"knowledge_link_id"`
+	ContentHash     string             `json:"content_hash"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	SyncedAt        pgtype.Timestamptz `json:"synced_at"`
+}
+
+type KnowledgeRepoSync struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Enabled      bool               `json:"enabled"`
+	RepoUrl      string             `json:"repo_url"`
+	Branch       string             `json:"branch"`
+	DocsPath     string             `json:"docs_path"`
+	KbKey        string             `json:"kb_key"`
+	LastSyncedAt pgtype.Timestamptz `json:"last_synced_at"`
+	LastError    string             `json:"last_error"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeTenantDeprovision struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	WeknoraTenantID string             `json:"weknora_tenant_id"`
+	State           string             `json:"state"`
+	HoldUntil       pgtype.Timestamptz `json:"hold_until"`
+	Attempts        int32              `json:"attempts"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	ClaimedAt       pgtype.Timestamptz `json:"claimed_at"`
+	LastError       string             `json:"last_error"`
+	RequestedAt     pgtype.Timestamptz `json:"requested_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 }
 
 type LarkBindingToken struct {
@@ -1375,6 +1546,18 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Pipeline struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Stages      []byte             `json:"stages"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PluginHookSchedule struct {
 	ID             pgtype.UUID        `json:"id"`
 	InstallationID pgtype.UUID        `json:"installation_id"`
@@ -1523,6 +1706,8 @@ type Proposal struct {
 	Revision       int32              `json:"revision"`
 	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
 	SnoozedUntil   pgtype.Timestamptz `json:"snoozed_until"`
+	Kind           string             `json:"kind"`
+	Payload        []byte             `json:"payload"`
 }
 
 type ProposalRevision struct {

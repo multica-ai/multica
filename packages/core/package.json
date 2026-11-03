@@ -93,6 +93,7 @@
     "./squads/stores": "./squads/stores/index.ts",
     "./knowledge": "./knowledge/index.ts",
     "./office": "./office/index.ts",
+    "./pipeline": "./pipeline/index.ts",
     "./office/layout": "./office/layout.ts",
     "./office/queries": "./office/queries.ts",
     "./office/mutations": "./office/mutations.ts",

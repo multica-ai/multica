@@ -35,6 +35,11 @@ type Fake struct {
 
 	tenants map[string]*fakeTenant // by id
 	keys    map[string]string      // token -> tenant id
+	// urlContent is the text of a URL import, by URL; see SetURLContent.
+	urlContent map[string]string
+	// platform holds the logins, members, model tests and data sources; see
+	// fake_platform.go. It is created on first use.
+	platform *fakePlatform
 }
 
 type fakeTenant struct {
@@ -44,11 +49,17 @@ type fakeTenant struct {
 	kbOrder   []string
 	docs      map[string]*fakeDoc
 	endpoints map[string]*MCPEndpoint
+	tags      map[string]*fakeTag
+}
+
+type fakeTag struct {
+	id, kbID, name string
 }
 
 type fakeDoc struct {
 	Document
 	content string
+	tagIDs  []string
 }
 
 // Operation names for FailNext, FailAlways and Calls.
@@ -68,6 +79,7 @@ const (
 	OpDelete              = "Delete"
 	OpListDocuments       = "ListDocuments"
 	OpRead                = "Read"
+	OpEnsureTag           = "EnsureTag"
 	OpSearch              = "Search"
 	OpListMCPEndpoints    = "ListMCPEndpoints"
 	OpCreateMCPEndpoint   = "CreateMCPEndpoint"
@@ -184,6 +196,7 @@ func (f *Fake) EnsureTenant(_ context.Context, name, description string) (Tenant
 		kbs:       map[string]*KnowledgeBase{},
 		docs:      map[string]*fakeDoc{},
 		endpoints: map[string]*MCPEndpoint{},
+		tags:      map[string]*fakeTag{},
 	}
 	f.tenants[t.ID] = t
 	return t.Tenant, nil
@@ -367,11 +380,67 @@ func (w *fakeWorkspace) CreateManual(_ context.Context, kbID string, doc ManualD
 	if strings.TrimSpace(doc.Content) == "" {
 		return Document{}, fmt.Errorf("knowledge: manual document needs content: %w", ErrInvalid)
 	}
+	for _, id := range doc.TagIDs {
+		if tag, ok := t.tags[id]; !ok || tag.kbID != kbID {
+			return Document{}, fmt.Errorf("knowledge: tag %s: %w", id, ErrNotFound)
+		}
+	}
 	status := ParseDraft
 	if doc.Publish {
 		status = ParseCompleted
 	}
-	return w.addDoc(t, kbID, Document{Title: doc.Title, FileName: doc.Title + ".md", Type: "manual", ParseStatus: status}, doc.Content)
+	d, err := w.addDoc(t, kbID, Document{Title: doc.Title, FileName: doc.Title + ".md", Type: "manual", ParseStatus: status}, doc.Content)
+	if err != nil {
+		return Document{}, err
+	}
+	t.docs[d.ID].tagIDs = append([]string(nil), doc.TagIDs...)
+	return d, nil
+}
+
+// EnsureTag implements Workspace. The tag is found by name within the knowledge
+// base, or created.
+func (w *fakeWorkspace) EnsureTag(_ context.Context, kbID, name string) (string, error) {
+	t, err := w.begin(OpEnsureTag)
+	if err != nil {
+		return "", err
+	}
+	defer w.f.mu.Unlock()
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("knowledge: tag needs a name: %w", ErrInvalid)
+	}
+	if _, ok := t.kbs[kbID]; !ok {
+		return "", fmt.Errorf("knowledge: knowledge base %s: %w", kbID, ErrNotFound)
+	}
+	for _, tag := range t.tags {
+		if tag.kbID == kbID && tag.name == name {
+			return tag.id, nil
+		}
+	}
+	tag := &fakeTag{id: w.f.nextID("tag"), kbID: kbID, name: name}
+	t.tags[tag.id] = tag
+	return tag.id, nil
+}
+
+// DocumentTags returns the names of the tags attached to a document, sorted,
+// so tests can assert what reached WeKnora. Unknown documents return nil.
+func (f *Fake) DocumentTags(docID string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.tenants {
+		d, ok := t.docs[docID]
+		if !ok {
+			continue
+		}
+		var names []string
+		for _, id := range d.tagIDs {
+			if tag, ok := t.tags[id]; ok {
+				names = append(names, tag.name)
+			}
+		}
+		sort.Strings(names)
+		return names
+	}
+	return nil
 }
 
 func (w *fakeWorkspace) findDuplicate(t *fakeTenant, kbID string, match func(*fakeDoc) bool) (Document, bool) {
@@ -397,7 +466,32 @@ func (w *fakeWorkspace) CreateURL(_ context.Context, kbID string, doc URLDocumen
 	if existing, ok := w.findDuplicate(t, kbID, func(d *fakeDoc) bool { return d.Type == "url" && d.Source == doc.URL }); ok {
 		return Document{}, &DuplicateError{APIError: APIError{Status: 409, Code: "duplicate_url", Op: "import url"}, Existing: existing}
 	}
-	return w.addDoc(t, kbID, Document{Title: doc.Title, Type: "url", Source: doc.URL, ParseStatus: ParseCompleted}, "Imported from "+doc.URL)
+	content, ok := w.f.urlContent[doc.URL]
+	if !ok {
+		content = "Imported from " + doc.URL
+	}
+	for _, id := range doc.TagIDs {
+		if tag, ok := t.tags[id]; !ok || tag.kbID != kbID {
+			return Document{}, fmt.Errorf("knowledge: tag %s: %w", id, ErrNotFound)
+		}
+	}
+	d, err := w.addDoc(t, kbID, Document{Title: doc.Title, Type: "url", Source: doc.URL, ParseStatus: ParseCompleted}, content)
+	if err != nil {
+		return Document{}, err
+	}
+	t.docs[d.ID].tagIDs = append([]string(nil), doc.TagIDs...)
+	return d, nil
+}
+
+// SetURLContent sets the text a page imported from url carries. A page without
+// one carries a one-line stub.
+func (f *Fake) SetURLContent(url, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.urlContent == nil {
+		f.urlContent = map[string]string{}
+	}
+	f.urlContent[url] = content
 }
 
 func (w *fakeWorkspace) CreateFile(_ context.Context, kbID string, doc FileDocument) (Document, error) {
@@ -419,7 +513,17 @@ func (w *fakeWorkspace) CreateFile(_ context.Context, kbID string, doc FileDocum
 	}); ok {
 		return Document{}, &DuplicateError{APIError: APIError{Status: 409, Code: "duplicate_file", Op: "upload file"}, Existing: existing}
 	}
-	return w.addDoc(t, kbID, Document{Title: doc.Name, FileName: doc.Name, FolderPath: folder, Type: "file", ParseStatus: ParseCompleted}, string(bytes.TrimSpace(body)))
+	for _, id := range doc.TagIDs {
+		if tag, ok := t.tags[id]; !ok || tag.kbID != kbID {
+			return Document{}, fmt.Errorf("knowledge: tag %s: %w", id, ErrNotFound)
+		}
+	}
+	d, err := w.addDoc(t, kbID, Document{Title: doc.Name, FileName: doc.Name, FolderPath: folder, Type: "file", ParseStatus: ParseCompleted}, string(bytes.TrimSpace(body)))
+	if err != nil {
+		return Document{}, err
+	}
+	t.docs[d.ID].tagIDs = append([]string(nil), doc.TagIDs...)
+	return d, nil
 }
 
 func (w *fakeWorkspace) Publish(_ context.Context, docID string) (Document, error) {

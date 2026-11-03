@@ -81,6 +81,9 @@ export interface TestProposalInput {
   cost_risk: string;
   ask: string;
   handoff_squad_id?: string | null;
+  /** Proposal kind (phase 3); empty is a decision. */
+  kind?: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface TestProposal {
@@ -116,6 +119,67 @@ export interface TestOfficeIssue {
 export interface TestProject {
   id: string;
   title: string;
+}
+
+export interface TestCompanyApplyInput {
+  runtime_id: string;
+  squads: string[];
+  start: "all" | "per_floor" | "leave_paused";
+  model?: string;
+}
+
+export interface TestCompanyApplyResult {
+  steps: { key: string; status: "created" | "reused" | "failed"; message: string }[];
+  pipeline_id: string | null;
+  unowned_stages: string[];
+}
+
+export interface TestSquadRoutineView {
+  autopilot_id: string;
+  autopilot_status: "active" | "paused";
+  purpose: string;
+}
+
+export interface TestPipelineStage {
+  key: string;
+  name: string;
+  owner_squad_id: string | null;
+  exit: { mode: "auto" | "attest" | "gate"; criteria: string };
+}
+
+export interface TestPipeline {
+  id: string;
+  name: string;
+  is_default: boolean;
+  stages: TestPipelineStage[];
+}
+
+export interface TestInitiative {
+  id: string;
+  identifier: string;
+  title: string;
+  thesis: string;
+  pipeline_id: string;
+  stage_key: string;
+  owner_squad_id: string | null;
+  status: string;
+  issue_id: string;
+  artifacts_required: number;
+  artifacts_present: number;
+  pending_gate_proposal_id: string | null;
+  closed_reason: string;
+}
+
+export interface TestInitiativeDetail {
+  initiative: TestInitiative;
+  artifacts: { kind: string; stage_key: string; required: boolean; waived: boolean }[];
+  events: {
+    kind: string;
+    from_stage: string | null;
+    to_stage: string | null;
+    actor_type: string;
+    note: string;
+  }[];
 }
 
 export class TestApiClient {
@@ -437,15 +501,15 @@ export class TestApiClient {
   }
 
   /** Seed an owned runtime without launching an actual agent tool. */
-  async seedRuntime(name: string): Promise<string> {
+  async seedRuntime(name: string, provider = "claude"): Promise<string> {
     if (!this.workspaceId || !this.email) throw new Error("Select a workspace before seeding a runtime");
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
       const result = await client.query(
         `INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, owner_id, last_seen_at)
-         SELECT $1, $2, 'local', 'claude', 'online', id, now() FROM "user" WHERE email = $3 RETURNING id`,
-        [this.workspaceId, name, this.email],
+         SELECT $1, $2, 'local', $4, 'online', id, now() FROM "user" WHERE email = $3 RETURNING id`,
+        [this.workspaceId, name, this.email, provider],
       );
       return result.rows[0].id as string;
     } finally {
@@ -660,6 +724,156 @@ export class TestApiClient {
       throw new Error(`get project failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as TestProject;
+  }
+
+  /**
+   * Create a workspace this user owns and select it. Unlike ensureWorkspace it
+   * never falls back to an existing workspace, so a test can start from an empty
+   * one. deleteWorkspace() removes it.
+   */
+  async createWorkspace(name: string, slug: string): Promise<TestWorkspace> {
+    const res = await this.authedFetch("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify({ name, slug }),
+    });
+    if (!res.ok) {
+      throw new Error(`create workspace failed: ${res.status} ${await res.text()}`);
+    }
+    const created = (await res.json()) as TestWorkspace;
+    this.workspaceId = created.id;
+    this.workspaceSlug = created.slug;
+    return created;
+  }
+
+  /**
+   * The Office's first-run setup: the Secretary, its Executive floor and squad, and
+   * the brief autopilots. It needs an online Hermes runtime (seedRuntime(name, "hermes")),
+   * and the starter company's apply refuses until it has run.
+   */
+  async setupOffice(secretaryInstructions = "Phase 3 acceptance Secretary."): Promise<void> {
+    const res = await this.authedFetch("/api/office/setup", {
+      method: "POST",
+      body: JSON.stringify({ secretary_instructions: secretaryInstructions }),
+    });
+    if (!res.ok) {
+      throw new Error(`office setup failed: ${res.status} ${await res.text()}`);
+    }
+  }
+
+  /** The Office setup's readiness checklist (GET /api/office/setup). */
+  async officeSetup(): Promise<{ autopilot_daily: boolean; ready: boolean }> {
+    const res = await this.authedFetch("/api/office/setup");
+    if (!res.ok) {
+      throw new Error(`get office setup failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as { autopilot_daily: boolean; ready: boolean };
+  }
+
+  /** Install the starter company (spec 3.4). A failed step is in the steps, not an error. */
+  async applyStarterCompany(input: TestCompanyApplyInput): Promise<TestCompanyApplyResult> {
+    const res = await this.authedFetch("/api/office/company-template/apply", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      throw new Error(`apply starter company failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestCompanyApplyResult;
+  }
+
+  async listFloors(): Promise<TestOfficeFloor[]> {
+    const res = await this.authedFetch("/api/office/floors");
+    if (!res.ok) {
+      throw new Error(`list office floors failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestOfficeFloor[];
+  }
+
+  async listSquads(): Promise<TestSquad[]> {
+    const res = await this.authedFetch("/api/squads");
+    if (!res.ok) {
+      throw new Error(`list squads failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestSquad[];
+  }
+
+  async listAgents(): Promise<TestAgent[]> {
+    const res = await this.authedFetch("/api/agents");
+    if (!res.ok) {
+      throw new Error(`list agents failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestAgent[];
+  }
+
+  async getSquadCharter(squadId: string): Promise<{ mission: string }> {
+    const res = await this.authedFetch(`/api/squads/${squadId}/charter`);
+    if (!res.ok) {
+      throw new Error(`get squad charter failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as { mission: string };
+  }
+
+  async listSquadRoutines(squadId: string): Promise<TestSquadRoutineView[]> {
+    const res = await this.authedFetch(`/api/squads/${squadId}/routines`);
+    if (!res.ok) {
+      throw new Error(`list squad routines failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestSquadRoutineView[];
+  }
+
+  async listPipelines(): Promise<TestPipeline[]> {
+    const res = await this.authedFetch("/api/pipelines");
+    if (!res.ok) {
+      throw new Error(`list pipelines failed: ${res.status} ${await res.text()}`);
+    }
+    return ((await res.json()) as { pipelines: TestPipeline[] }).pipelines;
+  }
+
+  async listKnowledgeKinds(): Promise<{ key: string }[]> {
+    const res = await this.authedFetch("/api/knowledge/kinds");
+    if (!res.ok) {
+      throw new Error(`list knowledge kinds failed: ${res.status} ${await res.text()}`);
+    }
+    return ((await res.json()) as { kinds: { key: string }[] }).kinds;
+  }
+
+  /** Start an initiative directly. Owners and admins only; squads propose an opportunity instead. */
+  async createInitiative(input: { pipeline_id: string; title: string; thesis: string }): Promise<TestInitiative> {
+    const res = await this.authedFetch("/api/initiatives", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      throw new Error(`create initiative failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestInitiative;
+  }
+
+  async listInitiatives(): Promise<TestInitiative[]> {
+    const res = await this.authedFetch("/api/initiatives");
+    if (!res.ok) {
+      throw new Error(`list initiatives failed: ${res.status} ${await res.text()}`);
+    }
+    return ((await res.json()) as { initiatives: TestInitiative[] }).initiatives;
+  }
+
+  async getInitiative(id: string): Promise<TestInitiativeDetail> {
+    const res = await this.authedFetch(`/api/initiatives/${id}`);
+    if (!res.ok) {
+      throw new Error(`get initiative failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestInitiativeDetail;
+  }
+
+  /**
+   * POST an initiative transition (advance, attest, send-back, shelve, resume,
+   * close, force). Returns the raw response so a test can check refusals too.
+   */
+  async initiativeAction(id: string, action: string, body: Record<string, unknown> = {}): Promise<Response> {
+    return this.authedFetch(`/api/initiatives/${id}/${action}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   /** Clean up all issues created during this test. */

@@ -2,7 +2,9 @@
   "title": "知识库",
   "tabs": {
     "library": "资料",
-    "drafts": "草稿"
+    "drafts": "草稿",
+    "governance": "治理",
+    "setup": "设置"
   },
   "state": {
     "ready": "就绪",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "询问秘书",
     "prompt": "请根据以下公司知识库检索结果回答我的问题。引用你使用的每份文档时，写明它的标题和链接；如果检索结果无法回答，请直接说明。\n\n问题：{{question}}\n\n检索结果：\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "类型",
+      "all": "全部类型"
+    },
+    "policy": {
+      "title": "发布策略",
+      "description": "智能体草稿的发布方式。类型的策略优先于知识库的策略。没有策略时，草稿等待人工发布。",
+      "scope_base": "知识库",
+      "scope_kind": "类型",
+      "inherited": "默认",
+      "reset": "重置",
+      "load_error": "无法加载发布策略",
+      "aria_mode": "{{name}} 的发布模式",
+      "toast_failed": "无法更改发布策略",
+      "toast_reset": "已重置发布策略",
+      "mode": {
+        "manual": "手动：由人发布",
+        "auto_after_review": "评审通过后自动发布",
+        "auto": "自动发布",
+        "unknown": "未知模式"
+      }
+    },
+    "add_eval": {
+      "button": "添加为评估用例",
+      "title": "添加为评估用例",
+      "description": "针对该问题，搜索应返回此文档。下一次评估运行时会检查。",
+      "question": "问题",
+      "document": "期望文档",
+      "submit": "添加用例",
+      "toast_added": "已添加评估用例",
+      "toast_failed": "无法添加评估用例"
+    },
+    "retrieval": {
+      "title": "检索质量",
+      "run": "运行评估",
+      "last_run": "命中率 {{rate}}%（{{total}} 个用例中命中 {{hits}} 个）",
+      "no_runs": "尚未运行评估。从搜索结果添加用例即可开始。",
+      "ran": "评估已记录：命中率 {{rate}}%",
+      "offline": "未记录：知识服务离线",
+      "run_failed": "无法运行评估"
+    },
+    "routines": {
+      "title": "图书管理员例行任务",
+      "empty": "尚无例行任务运行。",
+      "load_error": "无法加载例行任务",
+      "nothing": "无需报告",
+      "count": "{{label}}：{{count}}",
+      "triage": "草稿分拣",
+      "freshness": "时效性检查",
+      "audit": "分类审计",
+      "eval": "检索评估",
+      "backfill": "设置补全",
+      "counts": {
+        "review_due": "待复核",
+        "duplicate": "重复标题",
+        "missing_sections": "缺少标题",
+        "missing_kind": "缺少类型",
+        "orphaned": "WeKnora 中已不存在",
+        "repaired": "已修复",
+        "new_drafts": "新草稿"
+      }
+    }
+  },
+  "upload": {
+    "title": "添加文件",
+    "drop_hint": "将文件拖到这里，或选择文件。添加后立即发布。",
+    "choose": "选择文件",
+    "base_label": "知识库",
+    "kind_label": "类型",
+    "kind_hint": "使用小写字母、数字和下划线，例如 market_report。",
+    "submit": "上传",
+    "toast": {
+      "uploaded": "{{name}} 已加入知识库",
+      "failed": "无法上传文件"
+    }
+  },
+  "import": {
+    "title": "导入网页",
+    "url_label": "页面地址",
+    "title_label": "标题（可选）",
+    "submit": "导入",
+    "toast": {
+      "imported": "页面已加入知识库",
+      "failed": "无法导入页面"
+    }
+  },
+  "sources": {
+    "title": "数据源",
+    "description": "WeKnora 同步到知识库的连接。失败会显示在这里，请在 WeKnora 中修复。",
+    "load_error": "无法加载数据源",
+    "offline": "知识服务离线，无法读取数据源。",
+    "empty": "尚未连接任何数据源。",
+    "create": "在 WeKnora 中添加数据源",
+    "never_synced": "从未同步",
+    "last_sync": "上次同步 {{when}}",
+    "items": "{{count}} 项",
+    "status": {
+      "active": "正常",
+      "paused": "已暂停",
+      "error": "失败",
+      "unknown": "未知"
+    }
+  },
+  "bases": {
+    "title": "知识库",
+    "description": "可将知识库限定为指定的小组、楼层或智能体。Wiki 最多开启三个知识库；摘要会产生模型调用费用。",
+    "restricted": "受限",
+    "wiki": "Wiki",
+    "summaries": "摘要",
+    "access": "权限",
+    "toast": {
+      "failed": "未能保存更改"
+    }
+  },
+  "access": {
+    "loading": "正在加载权限",
+    "load_error": "无法加载权限列表",
+    "empty": "只有所有者和管理员可以查看此知识库。",
+    "remove": "移除权限",
+    "level": {
+      "read": "读取",
+      "write": "写入"
+    },
+    "subject": {
+      "squad": "小组",
+      "floor": "楼层",
+      "agent": "智能体",
+      "unknown": "未知"
+    },
+    "add": {
+      "subject_type": "授予",
+      "subject": "对象",
+      "subject_placeholder": "选择",
+      "level": "权限",
+      "submit": "授予权限"
+    },
+    "toast": {
+      "failed": "未能更改权限"
+    }
+  },
+  "models": {
+    "title": "模型",
+    "description": "各已配置的对话、重排序和视觉模型各运行一次，并显示失败的模型及原因。",
+    "test": "测试模型",
+    "not_configured": "此服务器未配置模型，因此摘要和 Wiki 已关闭。",
+    "ok": "正常",
+    "failed": "失败",
+    "role": {
+      "chat": "对话",
+      "rerank": "重排序",
+      "vision": "视觉",
+      "unknown": "模型"
+    }
+  },
+  "owner_login": {
+    "title": "你的 WeKnora 登录信息",
+    "description": "可登录 WeKnora 自身的界面进行高级设置。密码只显示一次。",
+    "show": "显示我的密码",
+    "email": "邮箱：{{email}}",
+    "once": "请立即复制，之后不会再次显示。",
+    "open": "打开 WeKnora",
+    "failed": "无法显示密码"
   }
 }

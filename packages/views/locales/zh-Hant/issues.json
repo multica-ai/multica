@@ -2026,7 +2026,120 @@
     "attention_pin_clear": "取消固定",
     "attention_pin_saved": "已固定上限",
     "attention_pin_cleared": "已取消固定",
-    "attention_pin_failed": "無法修改上限"
+    "attention_pin_failed": "無法修改上限",
+    "company_entry": "組建你的公司",
+    "company_title": "組建你的公司",
+    "company_intro": "安裝入門公司：小隊、智能體、例行任務、流水線與知識庫。再次執行會保留已有內容。",
+    "company_loading": "載入中…",
+    "company_model": "模型（選填）",
+    "company_model_placeholder": "執行環境預設",
+    "company_squads": "小隊",
+    "company_select_all": "全選",
+    "company_clear": "清空",
+    "company_squad_existing": "已存在",
+    "company_no_squad": "至少選擇一個小隊。",
+    "company_unowned": "沒有負責小隊的階段：{{stages}}。選入負責它們的小隊之前，這些階段沒有負責人。",
+    "company_estimate": "約每週 {{runs}} 次執行，約每週 {{cost}}。",
+    "company_estimate_default": "在本工作區有實測平均值之前，費用以每次執行 {{rate}} 計算。",
+    "company_estimate_none": "此選擇不會執行任何例行任務。",
+    "company_start": "何時啟動例行任務",
+    "company_start_all": "啟動全部例行任務",
+    "company_start_all_hint": "所選小隊的每個例行任務都會按排程執行。",
+    "company_start_per_floor": "依樓層啟動",
+    "company_start_per_floor_hint": "每層啟動其主要例行任務，其餘保持暫停。",
+    "company_start_leave_paused": "保持暫停",
+    "company_start_leave_paused_hint": "只執行秘書的每日簡報與市場掃描。",
+    "company_submit": "組建公司",
+    "company_applying": "正在組建你的公司…",
+    "company_cancel": "取消",
+    "company_close": "關閉",
+    "company_retry": "重新執行",
+    "company_done_title": "你的公司已組建完成",
+    "company_failed_title": "完成，但有問題",
+    "company_failed_message": "部分步驟未完成。重新執行會補上缺少的部分，並保留已有內容。",
+    "company_unconfirmed": "無法讀取伺服器的回覆，因此無法確認任何結果。重新執行是安全的。",
+    "company_errored": "無法組建公司。尚無任何結果得到確認；重新執行是安全的。",
+    "company_done_toast": "公司已組建",
+    "company_error_toast": "無法組建公司",
+    "company_step_created": "已建立",
+    "company_step_reused": "已存在",
+    "company_step_failed": "失敗",
+    "company_steps": "步驟",
+    "company_floors": {
+      "executive": "管理",
+      "research": "研究",
+      "product": "產品",
+      "build": "建構",
+      "launch": "發布",
+      "governance": "治理"
+    },
+    "company_stages": {
+      "validate": "驗證",
+      "define": "定義",
+      "plan": "規劃",
+      "build": "建構",
+      "launch": "發布",
+      "operate": "營運",
+      "learn": "復盤"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "行政辦公室",
+        "description": "秘書與圖書管理員統籌公司：每日簡報與知識庫。"
+      },
+      "market_research": {
+        "name": "市場研究",
+        "description": "每週掃描市場，只提交有證據支持的提案。"
+      },
+      "opportunity_lab": {
+        "name": "機會實驗室",
+        "description": "每週產生並評估產品機會。"
+      },
+      "competitor_intelligence": {
+        "name": "競品情報",
+        "description": "每週追蹤競爭對手，並為每家維護有來源的檔案。"
+      },
+      "customer_voice": {
+        "name": "客戶之聲",
+        "description": "把支援請求與回饋整理成客戶洞察。"
+      },
+      "product_discovery": {
+        "name": "產品探索",
+        "description": "驗證機會，並建議哪些值得做成產品。"
+      },
+      "product_analysis": {
+        "name": "產品分析",
+        "description": "撰寫產品簡報、經濟性與可行性分析，以及風險登記冊。"
+      },
+      "planning": {
+        "name": "規劃",
+        "description": "撰寫 PRD、路線圖、發布大綱與預算申請。"
+      },
+      "build": {
+        "name": "建構",
+        "description": "透過 SDLC 工作流建構並驗證產品，並負責復盤。"
+      },
+      "release_ops": {
+        "name": "發布與營運",
+        "description": "維護上線清單與發布說明，並為老闆的上線決定做好準備。"
+      },
+      "growth_gtm": {
+        "name": "成長與市場進入",
+        "description": "制定市場推廣計畫，並每週回報各上線專案的成長指標。"
+      },
+      "support": {
+        "name": "客戶支援",
+        "description": "上線後回應客戶，升級缺陷，並把答案寫回知識庫。"
+      },
+      "finance_risk": {
+        "name": "財務與風險",
+        "description": "審查支出提案，並維持風險登記冊的時效。"
+      },
+      "people_performance": {
+        "name": "人員與績效",
+        "description": "每週對照章程審查各小組的紀錄，並回報延誤或沉默的事項。"
+      }
+    }
   },
   "views": {
     "builtin": {

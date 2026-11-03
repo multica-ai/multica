@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS knowledge_kind_workspace_key_uidx;

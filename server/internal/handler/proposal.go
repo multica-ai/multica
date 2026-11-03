@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	proposalkinds "github.com/multica-ai/multica/server/internal/service/proposal_kinds"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -47,12 +48,16 @@ type ProposalResponse struct {
 	Urgent          bool    `json:"urgent"`
 	UrgentReason    string  `json:"urgent_reason"`
 	State           string  `json:"state"`
-	CreatedByType   string  `json:"created_by_type"`
-	CreatedByID     string  `json:"created_by_id"`
-	DecidedBy       *string `json:"decided_by"`
-	DecidedAt       *string `json:"decided_at"`
-	DecisionNote    string  `json:"decision_note"`
-	CreatedAt       string  `json:"created_at"`
+	// Kind is the proposal kind (decision, opportunity or stage_gate). Payload is
+	// that kind's fields, an object.
+	Kind          string          `json:"kind"`
+	Payload       json.RawMessage `json:"payload"`
+	CreatedByType string          `json:"created_by_type"`
+	CreatedByID   string          `json:"created_by_id"`
+	DecidedBy     *string         `json:"decided_by"`
+	DecidedAt     *string         `json:"decided_at"`
+	DecisionNote  string          `json:"decision_note"`
+	CreatedAt     string          `json:"created_at"`
 	// Revision starts at 1 and goes up each time the squad resubmits after
 	// the boss asked for changes.
 	Revision int32 `json:"revision"`
@@ -116,6 +121,8 @@ func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix stri
 		Urgent:          p.Urgent,
 		UrgentReason:    p.UrgentReason,
 		State:           p.State,
+		Kind:            p.Kind,
+		Payload:         rawJSONOrEmpty(p.Payload),
 		CreatedByType:   p.CreatedByType,
 		CreatedByID:     uuidToString(p.CreatedByID),
 		DecidedBy:       uuidToPtr(p.DecidedBy),
@@ -178,6 +185,10 @@ type CreateProposalRequest struct {
 	HandoffSquadID *string  `json:"handoff_squad_id"`
 	Urgent         bool     `json:"urgent"`
 	UrgentReason   string   `json:"urgent_reason"`
+	// Kind is the proposal kind; empty is a decision. Payload carries the kind's
+	// fields and is checked by the kind's handler.
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // cleanProposalText trims a proposal text field and strips the bytes
@@ -290,7 +301,7 @@ func (h *Handler) mayFileProposalForSquad(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) proposalService() *service.ProposalService {
-	svc := service.NewProposalService(h.IssueService)
+	_, svc := service.NewInitiativeSet(h.IssueService, nil)
 	// Typed nil would make the interface non-nil, so only set it when offered.
 	if h.Knowledge != nil {
 		svc.Knowledge = h.Knowledge
@@ -354,9 +365,21 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 		UrgentReason: req.UrgentReason,
 		CreatorType:  actorType,
 		CreatorID:    creatorUUID,
+		Kind:         req.Kind,
+		Payload:      req.Payload,
 	})
 	var limitErr *service.ProposalLimitError
+	var payloadErr *service.ProposalPayloadError
 	switch {
+	case errors.Is(err, proposalkinds.ErrUnknownKind):
+		writeErrorCode(w, http.StatusBadRequest, "unknown_kind", err.Error())
+		return
+	case errors.Is(err, service.ErrProposalKindNotFilable):
+		writeErrorCode(w, http.StatusBadRequest, "kind_not_filable", err.Error())
+		return
+	case errors.As(err, &payloadErr):
+		writeErrorCode(w, http.StatusBadRequest, "invalid_payload", payloadErr.Message)
+		return
 	case errors.As(err, &limitErr):
 		writeErrorCode(w, http.StatusConflict, "proposal_limit", limitErr.Message)
 		return
@@ -525,6 +548,9 @@ type DecideProposalRequest struct {
 	// Until is the snooze end: a date (YYYY-MM-DD, midnight UTC) or an RFC 3339
 	// timestamp. Only used by the snooze decision.
 	Until string `json:"until"`
+	// Outcome is the boss's choice at an operate-stage review gate: continue,
+	// scale or sunset. Only a stage_gate approval takes one.
+	Outcome string `json:"outcome"`
 }
 
 // parseSnoozeUntil reads the snooze end the boss or the CLI sent. A bare date
@@ -584,6 +610,10 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decision must be 'approve', 'reject', 'revise' or 'snooze'")
 		return
 	}
+	if outcome := strings.TrimSpace(req.Outcome); outcome != "" && !proposalkinds.ValidOutcome(outcome) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_outcome", service.ErrOutcomeInvalid.Error())
+		return
+	}
 	note := cleanProposalText(req.Note)
 	if len(note) > proposalMaxTextLen {
 		writeError(w, http.StatusBadRequest, "note must be at most "+strconv.Itoa(proposalMaxTextLen)+" characters")
@@ -610,6 +640,7 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		Decision:    req.Decision,
 		Note:        note,
 		Until:       until,
+		Outcome:     strings.TrimSpace(req.Outcome),
 	})
 	switch {
 	case errors.Is(err, service.ErrProposalNotFound):
@@ -623,6 +654,21 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, service.ErrProposalHandoffSquadNotFound):
 		writeErrorCode(w, http.StatusConflict, "handoff_squad_unavailable", "the handoff squad no longer exists or is archived; approve without it or ask the squad to refile")
+		return
+	case errors.Is(err, service.ErrGateStale):
+		writeErrorCode(w, http.StatusConflict, "gate_stale", err.Error())
+		return
+	case errors.Is(err, service.ErrOutcomeRequired), errors.Is(err, service.ErrOutcomeInvalid), errors.Is(err, service.ErrOutcomeNotAllowed):
+		writeErrorCode(w, http.StatusBadRequest, "invalid_outcome", err.Error())
+		return
+	case errors.Is(err, service.ErrBuildNeedsSDLCSquad):
+		writeErrorCode(w, http.StatusConflict, "build_squad_not_sdlc", err.Error())
+		return
+	case errors.Is(err, service.ErrStageOwnerRequired):
+		writeErrorCode(w, http.StatusConflict, "stage_unowned", err.Error())
+		return
+	case errors.Is(err, service.ErrUnknownStage), errors.Is(err, service.ErrInitiativeClosed), errors.Is(err, service.ErrInitiativeShelved):
+		writeErrorCode(w, http.StatusConflict, "initiative_not_live", err.Error())
 		return
 	case errors.Is(err, service.ErrProposalSquadUnavailable):
 		writeErrorCode(w, http.StatusConflict, "squad_unavailable", "the proposing squad no longer exists or is archived, so the proposal cannot go back to it; approve or reject it instead")
@@ -653,6 +699,7 @@ type proposalDecision struct {
 	Decision string
 	Note     string
 	Until    time.Time
+	Outcome  string
 }
 
 // settleProposalDecision applies a decision through the proposal service and
@@ -671,6 +718,7 @@ func (h *Handler) settleProposalDecision(ctx context.Context, actorUserID string
 		Decision:    in.Decision,
 		Note:        in.Note,
 		Until:       in.Until,
+		Outcome:     in.Outcome,
 		Kickoff: service.IssueCreateOpts{
 			ActorID:  actorUserID,
 			Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(ctx); return p }(),

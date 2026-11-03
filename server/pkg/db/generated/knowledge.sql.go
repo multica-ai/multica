@@ -60,9 +60,11 @@ const claimKnowledgeLink = `-- name: ClaimKnowledgeLink :execrows
 INSERT INTO knowledge_link (
     workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id,
     idempotency_key, state, created_by_type, created_by_id,
-    title, source_url, pending_content, publish_requested, error
+    title, source_url, pending_content, publish_requested, error,
+    kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags
 ) VALUES (
-    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet'
+    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet',
+    $12, $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (workspace_id, idempotency_key) DO NOTHING
 `
@@ -79,6 +81,14 @@ type ClaimKnowledgeLinkParams struct {
 	SourceUrl        string      `json:"source_url"`
 	PendingContent   string      `json:"pending_content"`
 	PublishRequested bool        `json:"publish_requested"`
+	Kind             string      `json:"kind"`
+	InitiativeID     pgtype.UUID `json:"initiative_id"`
+	StageKey         string      `json:"stage_key"`
+	SquadID          pgtype.UUID `json:"squad_id"`
+	Confidence       pgtype.Text `json:"confidence"`
+	ValidUntil       pgtype.Date `json:"valid_until"`
+	SupersedesLinkID pgtype.UUID `json:"supersedes_link_id"`
+	Tags             []string    `json:"tags"`
 }
 
 // The idempotency claim of a write: the row exists before WeKnora is asked,
@@ -97,6 +107,14 @@ func (q *Queries) ClaimKnowledgeLink(ctx context.Context, arg ClaimKnowledgeLink
 		arg.SourceUrl,
 		arg.PendingContent,
 		arg.PublishRequested,
+		arg.Kind,
+		arg.InitiativeID,
+		arg.StageKey,
+		arg.SquadID,
+		arg.Confidence,
+		arg.ValidUntil,
+		arg.SupersedesLinkID,
+		arg.Tags,
 	)
 	if err != nil {
 		return 0, err
@@ -175,7 +193,7 @@ func (q *Queries) DeleteKnowledgeLink(ctx context.Context, arg DeleteKnowledgeLi
 }
 
 const getKnowledgeBaseByKey = `-- name: GetKnowledgeBaseByKey :one
-SELECT id, workspace_id, weknora_kb_id, key, name, visibility, position, archived_at, created_at FROM knowledge_base WHERE workspace_id = $1 AND key = $2 AND archived_at IS NULL
+SELECT id, workspace_id, weknora_kb_id, key, name, visibility, position, archived_at, created_at, wiki_enabled, summaries_enabled, llm_defaults_applied FROM knowledge_base WHERE workspace_id = $1 AND key = $2 AND archived_at IS NULL
 `
 
 type GetKnowledgeBaseByKeyParams struct {
@@ -196,12 +214,15 @@ func (q *Queries) GetKnowledgeBaseByKey(ctx context.Context, arg GetKnowledgeBas
 		&i.Position,
 		&i.ArchivedAt,
 		&i.CreatedAt,
+		&i.WikiEnabled,
+		&i.SummariesEnabled,
+		&i.LlmDefaultsApplied,
 	)
 	return i, err
 }
 
 const getKnowledgeLink = `-- name: GetKnowledgeLink :one
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link WHERE id = $1 AND workspace_id = $2
 `
 
 type GetKnowledgeLinkParams struct {
@@ -230,12 +251,26 @@ func (q *Queries) GetKnowledgeLink(ctx context.Context, arg GetKnowledgeLinkPara
 		&i.PendingContent,
 		&i.PublishRequested,
 		&i.Error,
+		&i.Kind,
+		&i.InitiativeID,
+		&i.StageKey,
+		&i.SquadID,
+		&i.Confidence,
+		&i.ValidUntil,
+		&i.SupersedesLinkID,
+		&i.Tags,
+		&i.ReviewVerdict,
+		&i.ReviewByID,
+		&i.ReviewSquadID,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewIssueID,
 	)
 	return i, err
 }
 
 const getKnowledgeLinkByKey = `-- name: GetKnowledgeLinkByKey :one
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2
 `
 
 type GetKnowledgeLinkByKeyParams struct {
@@ -264,8 +299,88 @@ func (q *Queries) GetKnowledgeLinkByKey(ctx context.Context, arg GetKnowledgeLin
 		&i.PendingContent,
 		&i.PublishRequested,
 		&i.Error,
+		&i.Kind,
+		&i.InitiativeID,
+		&i.StageKey,
+		&i.SquadID,
+		&i.Confidence,
+		&i.ValidUntil,
+		&i.SupersedesLinkID,
+		&i.Tags,
+		&i.ReviewVerdict,
+		&i.ReviewByID,
+		&i.ReviewSquadID,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewIssueID,
 	)
 	return i, err
+}
+
+const getKnowledgeLinksByDocumentIDs = `-- name: GetKnowledgeLinksByDocumentIDs :many
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+WHERE workspace_id = $1
+  AND weknora_knowledge_id = ANY($2::text[])
+  AND state = 'published'
+`
+
+type GetKnowledgeLinksByDocumentIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DocumentIds []string    `json:"document_ids"`
+}
+
+// The taxonomy of the documents a search returned. Documents WeKnora holds
+// without a link come back as no row.
+func (q *Queries) GetKnowledgeLinksByDocumentIDs(ctx context.Context, arg GetKnowledgeLinksByDocumentIDsParams) ([]KnowledgeLink, error) {
+	rows, err := q.db.Query(ctx, getKnowledgeLinksByDocumentIDs, arg.WorkspaceID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeLink{}
+	for rows.Next() {
+		var i KnowledgeLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeBaseID,
+			&i.WeknoraKnowledgeID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.IdempotencyKey,
+			&i.State,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.PublishedAt,
+			&i.Title,
+			&i.SourceUrl,
+			&i.PendingContent,
+			&i.PublishRequested,
+			&i.Error,
+			&i.Kind,
+			&i.InitiativeID,
+			&i.StageKey,
+			&i.SquadID,
+			&i.Confidence,
+			&i.ValidUntil,
+			&i.SupersedesLinkID,
+			&i.Tags,
+			&i.ReviewVerdict,
+			&i.ReviewByID,
+			&i.ReviewSquadID,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getWorkspaceKnowledge = `-- name: GetWorkspaceKnowledge :one
@@ -310,7 +425,7 @@ func (q *Queries) GetWorkspaceMcpServerByName(ctx context.Context, arg GetWorksp
 }
 
 const listKnowledgeBases = `-- name: ListKnowledgeBases :many
-SELECT id, workspace_id, weknora_kb_id, key, name, visibility, position, archived_at, created_at FROM knowledge_base
+SELECT id, workspace_id, weknora_kb_id, key, name, visibility, position, archived_at, created_at, wiki_enabled, summaries_enabled, llm_defaults_applied FROM knowledge_base
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY position ASC, created_at ASC
 `
@@ -335,6 +450,9 @@ func (q *Queries) ListKnowledgeBases(ctx context.Context, workspaceID pgtype.UUI
 			&i.Position,
 			&i.ArchivedAt,
 			&i.CreatedAt,
+			&i.WikiEnabled,
+			&i.SummariesEnabled,
+			&i.LlmDefaultsApplied,
 		); err != nil {
 			return nil, err
 		}
@@ -347,7 +465,7 @@ func (q *Queries) ListKnowledgeBases(ctx context.Context, workspaceID pgtype.UUI
 }
 
 const listKnowledgeLinks = `-- name: ListKnowledgeLinks :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
 WHERE workspace_id = $1
   AND ($2::uuid IS NULL OR knowledge_base_id = $2::uuid)
   AND ($3::text IS NULL OR state = $3::text)
@@ -389,6 +507,82 @@ func (q *Queries) ListKnowledgeLinks(ctx context.Context, arg ListKnowledgeLinks
 			&i.PendingContent,
 			&i.PublishRequested,
 			&i.Error,
+			&i.Kind,
+			&i.InitiativeID,
+			&i.StageKey,
+			&i.SquadID,
+			&i.Confidence,
+			&i.ValidUntil,
+			&i.SupersedesLinkID,
+			&i.Tags,
+			&i.ReviewVerdict,
+			&i.ReviewByID,
+			&i.ReviewSquadID,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishedKnowledgeLinks = `-- name: ListPublishedKnowledgeLinks :many
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'published'
+ORDER BY created_at DESC, id DESC
+LIMIT 5000
+`
+
+// Every published link of a workspace, for the freshness review and the
+// taxonomy audit. Bounded; a workspace past the bound is audited in part and
+// the job says so.
+func (q *Queries) ListPublishedKnowledgeLinks(ctx context.Context, workspaceID pgtype.UUID) ([]KnowledgeLink, error) {
+	rows, err := q.db.Query(ctx, listPublishedKnowledgeLinks, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeLink{}
+	for rows.Next() {
+		var i KnowledgeLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeBaseID,
+			&i.WeknoraKnowledgeID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.IdempotencyKey,
+			&i.State,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.PublishedAt,
+			&i.Title,
+			&i.SourceUrl,
+			&i.PendingContent,
+			&i.PublishRequested,
+			&i.Error,
+			&i.Kind,
+			&i.InitiativeID,
+			&i.StageKey,
+			&i.SquadID,
+			&i.Confidence,
+			&i.ValidUntil,
+			&i.SupersedesLinkID,
+			&i.Tags,
+			&i.ReviewVerdict,
+			&i.ReviewByID,
+			&i.ReviewSquadID,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -401,7 +595,7 @@ func (q *Queries) ListKnowledgeLinks(ctx context.Context, arg ListKnowledgeLinks
 }
 
 const listRetryableKnowledgeLinks = `-- name: ListRetryableKnowledgeLinks :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
 WHERE workspace_id = $1 AND state = 'failed' AND created_by_type = 'system'
 ORDER BY created_at ASC
 LIMIT 20
@@ -435,6 +629,20 @@ func (q *Queries) ListRetryableKnowledgeLinks(ctx context.Context, workspaceID p
 			&i.PendingContent,
 			&i.PublishRequested,
 			&i.Error,
+			&i.Kind,
+			&i.InitiativeID,
+			&i.StageKey,
+			&i.SquadID,
+			&i.Confidence,
+			&i.ValidUntil,
+			&i.SupersedesLinkID,
+			&i.Tags,
+			&i.ReviewVerdict,
+			&i.ReviewByID,
+			&i.ReviewSquadID,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -444,6 +652,117 @@ func (q *Queries) ListRetryableKnowledgeLinks(ctx context.Context, workspaceID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const listSupersededLinkIDs = `-- name: ListSupersededLinkIDs :many
+SELECT supersedes_link_id FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'published' AND supersedes_link_id IS NOT NULL
+`
+
+// Links some published document supersedes. Search hides them.
+func (q *Queries) ListSupersededLinkIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listSupersededLinkIDs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var supersedes_link_id pgtype.UUID
+		if err := rows.Scan(&supersedes_link_id); err != nil {
+			return nil, err
+		}
+		items = append(items, supersedes_link_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setKnowledgeLinkReview = `-- name: SetKnowledgeLinkReview :one
+UPDATE knowledge_link SET
+    review_verdict = $1::text,
+    review_by_id = $2::uuid,
+    review_squad_id = $3::uuid,
+    review_note = $4::text,
+    reviewed_at = now()
+WHERE id = $5 AND workspace_id = $6
+RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id
+`
+
+type SetKnowledgeLinkReviewParams struct {
+	ReviewVerdict string      `json:"review_verdict"`
+	ReviewByID    pgtype.UUID `json:"review_by_id"`
+	ReviewSquadID pgtype.UUID `json:"review_squad_id"`
+	ReviewNote    string      `json:"review_note"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Records a critic's verdict. It does not change the document's state; the
+// caller publishes it when the policy allows.
+func (q *Queries) SetKnowledgeLinkReview(ctx context.Context, arg SetKnowledgeLinkReviewParams) (KnowledgeLink, error) {
+	row := q.db.QueryRow(ctx, setKnowledgeLinkReview,
+		arg.ReviewVerdict,
+		arg.ReviewByID,
+		arg.ReviewSquadID,
+		arg.ReviewNote,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeLink
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeBaseID,
+		&i.WeknoraKnowledgeID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.IdempotencyKey,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.Title,
+		&i.SourceUrl,
+		&i.PendingContent,
+		&i.PublishRequested,
+		&i.Error,
+		&i.Kind,
+		&i.InitiativeID,
+		&i.StageKey,
+		&i.SquadID,
+		&i.Confidence,
+		&i.ValidUntil,
+		&i.SupersedesLinkID,
+		&i.Tags,
+		&i.ReviewVerdict,
+		&i.ReviewByID,
+		&i.ReviewSquadID,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewIssueID,
+	)
+	return i, err
+}
+
+const setKnowledgeLinkReviewIssue = `-- name: SetKnowledgeLinkReviewIssue :exec
+UPDATE knowledge_link SET review_issue_id = $1::uuid
+WHERE id = $2 AND workspace_id = $3
+`
+
+type SetKnowledgeLinkReviewIssueParams struct {
+	ReviewIssueID pgtype.UUID `json:"review_issue_id"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Records the freshness review request the Librarian opened for a document.
+func (q *Queries) SetKnowledgeLinkReviewIssue(ctx context.Context, arg SetKnowledgeLinkReviewIssueParams) error {
+	_, err := q.db.Exec(ctx, setKnowledgeLinkReviewIssue, arg.ReviewIssueID, arg.ID, arg.WorkspaceID)
+	return err
 }
 
 const setWorkspaceKnowledgeState = `-- name: SetWorkspaceKnowledgeState :execrows
@@ -471,7 +790,7 @@ UPDATE knowledge_link SET
     pending_content = CASE WHEN $2::text = 'failed' THEN pending_content ELSE '' END,
     published_at = CASE WHEN $2::text = 'published' THEN COALESCE(published_at, now()) ELSE published_at END
 WHERE id = $4 AND workspace_id = $5
-RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error
+RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id
 `
 
 type SettleKnowledgeLinkParams struct {
@@ -512,6 +831,20 @@ func (q *Queries) SettleKnowledgeLink(ctx context.Context, arg SettleKnowledgeLi
 		&i.PendingContent,
 		&i.PublishRequested,
 		&i.Error,
+		&i.Kind,
+		&i.InitiativeID,
+		&i.StageKey,
+		&i.SquadID,
+		&i.Confidence,
+		&i.ValidUntil,
+		&i.SupersedesLinkID,
+		&i.Tags,
+		&i.ReviewVerdict,
+		&i.ReviewByID,
+		&i.ReviewSquadID,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewIssueID,
 	)
 	return i, err
 }

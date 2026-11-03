@@ -267,6 +267,7 @@ describe("secretary template", () => {
       "## Headline",
       "## Needs your decision",
       "## Progress",
+      "## Pipeline",
       "## Blockers and risks",
       "## Watch",
       "## FYI",
@@ -279,8 +280,8 @@ describe("secretary template", () => {
   });
 
   it("names the required routines not on time and the silent squads under Blockers and risks", () => {
-    const blockers = secretary.indexOf("4. ## Blockers and risks");
-    const watch = secretary.indexOf("5. ## Watch");
+    const blockers = secretary.indexOf("5. ## Blockers and risks");
+    const watch = secretary.indexOf("6. ## Watch");
     const sentence = secretary.indexOf("`routines_not_on_time`");
 
     expect(sentence).toBeGreaterThan(blockers);
@@ -288,6 +289,17 @@ describe("secretary template", () => {
     expect(secretary.slice(blockers, watch)).toContain("with its state");
     expect(secretary.slice(blockers, watch)).toContain("`charter.silent` is `true`");
     expect(secretary.slice(blockers, watch)).toContain("give each one a proposed fix");
+  });
+
+  it("names the overdue squad requests and a retrieval drop under Blockers and risks", () => {
+    const blockers = secretary.indexOf("5. ## Blockers and risks");
+    const watch = secretary.indexOf("6. ## Watch");
+    const section = secretary.slice(blockers, watch);
+
+    expect(section).toContain("`overdue_requests`");
+    expect(section).toContain("`hours_overdue`");
+    expect(section).toContain("`knowledge.retrieval.dropped` is `true`");
+    expect(section).toContain("`risk` line");
   });
 
   it("keeps the brief decision-first and the language rule explicit", () => {
@@ -364,9 +376,131 @@ describe("secretary brief", () => {
   });
 
   it("lists stale knowledge under FYI, not as its own section", () => {
-    const fyi = secretary.slice(secretary.indexOf("6. ## FYI"));
+    const fyi = secretary.slice(secretary.indexOf("7. ## FYI"));
     expect(fyi).toContain("`knowledge.stale_published`");
     expect(fyi).toContain("more than 90 days ago");
-    expect(secretary.match(/^\d\. ## /gm)).toHaveLength(6);
+    expect(secretary.match(/^\d\. ## /gm)).toHaveLength(7);
+  });
+});
+
+describe("shared blocks", () => {
+  const SHARED_HEADINGS = [
+    "Evidence and citation:",
+    "Knowledge first:",
+    "Money and outside effects: propose, do not act:",
+    "Language:",
+  ];
+
+  it("includes the four shared blocks in every instruction template", () => {
+    for (const template of AGENT_INSTRUCTION_TEMPLATES) {
+      for (const heading of SHARED_HEADINGS) {
+        expect(template.instructions, `${template.id}: ${heading}`).toContain(heading);
+      }
+    }
+  });
+
+  it("sends money and outside effects to a proposal", () => {
+    for (const template of AGENT_INSTRUCTION_TEMPLATES) {
+      expect(template.instructions, template.id).toContain("multica proposal create");
+    }
+  });
+});
+
+describe("company role templates", () => {
+  const instructionsOf = (id: AgentInstructionTemplate["id"]) =>
+    AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === id)?.instructions ?? "";
+
+  it("gives the Librarian the four knowledge routines and makes it unable to publish on its own", () => {
+    const librarian = instructionsOf("knowledge_curator");
+
+    expect(librarian).toContain("Daily draft triage");
+    expect(librarian).toContain("Weekly freshness review");
+    expect(librarian).toContain("Weekly retrieval check");
+    expect(librarian).toContain("Monthly taxonomy audit");
+    expect(librarian).toContain("You do not publish");
+    expect(librarian).toContain("multica knowledge template");
+  });
+
+  it("gives the Secretary the initiative commands it may run, and only those", () => {
+    const secretary = instructionsOf("secretary");
+
+    expect(secretary).toContain("multica initiative list --output json");
+    expect(secretary).toContain("multica initiative show INI-<seq> --output json");
+    expect(secretary).toContain("You do not run `multica initiative attest`, `advance`, or `shelve`");
+  });
+
+  it("describes the pipeline vocabulary the Secretary reports with", () => {
+    const secretary = instructionsOf("secretary");
+
+    for (const word of ["Validate", "Define", "Plan", "Build", "Launch", "Operate", "Learn", "stalled", "auto", "attest", "gate"]) {
+      expect(secretary, word).toContain(word);
+    }
+  });
+
+  it("asks the Secretary's brief for a Pipeline section only when the digest has pipeline data", () => {
+    const secretary = instructionsOf("secretary");
+    const pipeline = secretary.slice(secretary.indexOf("4. ## Pipeline"), secretary.indexOf("5. ## Blockers and risks"));
+
+    expect(pipeline).toContain("the digest's `pipeline` lists active initiatives");
+    expect(pipeline).toContain("Leave the section out when it is empty");
+    expect(pipeline).toContain("Pipeline reports; it proposes no moves");
+  });
+
+  it("gives stage-owning leads the pipeline rules and the attest exit", () => {
+    for (const id of ["discovery_lead", "product_analysis_lead", "planning_lead", "release_lead", "growth_lead", "support_lead", "tech_lead"] as const) {
+      const text = instructionsOf(id);
+      expect(text, id).toContain("Pipeline stages you work:");
+      expect(text, id).toContain("multica initiative attest INI-<seq>");
+    }
+  });
+
+  it("states each company stage's exit mode where its owner works it", () => {
+    expect(instructionsOf("discovery_lead")).toContain("The Validate exit is a gate");
+    expect(instructionsOf("product_analysis_lead")).toContain("The Define exit is attest");
+    expect(instructionsOf("planning_lead")).toContain("The Plan exit is a gate");
+  });
+
+  it("keeps the company templates off the spend and launch decisions", () => {
+    expect(instructionsOf("release_lead")).toContain("the boss decides when the product goes live");
+    expect(instructionsOf("growth_lead")).toContain("Prepare the plan; do not act on it");
+    expect(instructionsOf("support_agent")).toContain("the boss's to decide");
+    expect(instructionsOf("finance_lead")).toContain("You approve nothing and commit nothing");
+  });
+
+  it("tells every squad leader to consult the squad directory before asking the boss", () => {
+    for (const id of ["research_lead", "opportunity_lead", "competitor_lead", "customer_lead", "discovery_lead", "product_analysis_lead", "planning_lead", "tech_lead", "release_lead", "growth_lead", "support_lead", "finance_lead", "people_performance"] as const) {
+      expect(instructionsOf(id), id).toContain("consult the squad directory (`multica squad directory`)");
+    }
+  });
+
+  it("names only commands the CLI has or the spec specifies", () => {
+    const known = new Set([
+      "brief ask",
+      "brief digest",
+      "brief feedback",
+      "brief publish",
+      "initiative advance",
+      "initiative attest",
+      "initiative list",
+      "initiative show",
+      "issue create",
+      "issue status",
+      "knowledge add",
+      "knowledge list",
+      "knowledge publish",
+      "knowledge review",
+      "knowledge search",
+      "knowledge template",
+      "proposal create",
+      "proposal revise",
+      "squad activity",
+      "squad directory",
+    ]);
+    for (const template of AGENT_INSTRUCTION_TEMPLATES) {
+      const named = template.instructions.match(/\bmultica (?:brief|initiative|issue|knowledge|proposal|squad) [a-z-]+/g) ?? [];
+      for (const command of named) {
+        expect(known.has(command.replace(/^multica /, "")), `${template.id}: ${command}`).toBe(true);
+      }
+    }
   });
 });

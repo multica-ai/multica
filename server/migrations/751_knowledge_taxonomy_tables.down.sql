@@ -1,0 +1,19 @@
+ALTER TABLE knowledge_link
+    DROP COLUMN IF EXISTS reviewed_at,
+    DROP COLUMN IF EXISTS review_note,
+    DROP COLUMN IF EXISTS review_squad_id,
+    DROP COLUMN IF EXISTS review_by_id,
+    DROP COLUMN IF EXISTS review_verdict,
+    DROP COLUMN IF EXISTS tags,
+    DROP COLUMN IF EXISTS supersedes_link_id,
+    DROP COLUMN IF EXISTS valid_until,
+    DROP COLUMN IF EXISTS confidence,
+    DROP COLUMN IF EXISTS squad_id,
+    DROP COLUMN IF EXISTS stage_key,
+    DROP COLUMN IF EXISTS initiative_id,
+    DROP COLUMN IF EXISTS kind;
+DROP TABLE IF EXISTS knowledge_health_run;
+DROP TABLE IF EXISTS knowledge_eval_run;
+DROP TABLE IF EXISTS knowledge_eval_case;
+DROP TABLE IF EXISTS knowledge_publish_policy;
+DROP TABLE IF EXISTS knowledge_kind;

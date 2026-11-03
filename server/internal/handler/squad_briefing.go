@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -50,6 +51,9 @@ Your responsibilities, in order:
    criteria) and decide which squad member is best suited to do the work.
    Match the task to each member's listed **skills** and role in the Squad
    Roster below — prefer the member whose skills cover the work.
+   Before you ask the boss for work or a decision, consult the squad
+   directory (` + "`multica squad directory`" + `): another squad may already take
+   that work, and its response hours say when to expect an answer.
 2. **Delegate by @mention.** Post a single comment on this issue that
    @mentions the chosen member(s) and tells them what to do.
    - **Be terse.** Every Multica agent already has full context of the
@@ -348,6 +352,59 @@ func squadCharterBriefing(charter db.SquadCharter) string {
 	return sb.String()
 }
 
+// squadInitiative is one active or operating initiative whose current stage
+// this squad owns.
+type squadInitiative struct {
+	Seq         int
+	Title       string
+	Stage       string
+	DaysInStage int
+}
+
+// loadSquadOwnedInitiatives lists the active and operating initiatives whose
+// current stage this squad owns, in seq order.
+func loadSquadOwnedInitiatives(ctx context.Context, q *db.Queries, squad db.Squad) ([]squadInitiative, error) {
+	rows, err := q.ListSquadOwnedInitiatives(ctx, db.ListSquadOwnedInitiativesParams{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     squad.ID,
+		Now:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]squadInitiative, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, squadInitiative{
+			Seq:         int(r.Seq),
+			Title:       r.Title,
+			Stage:       r.StageName,
+			DaysInStage: int(r.DaysInStage),
+		})
+	}
+	return out, nil
+}
+
+// squadInitiativesBriefing renders "Initiatives your squad owns": each
+// initiative with the stage the squad works now and how long it has been there.
+// It returns "" when the squad owns none, so a squad with no initiative gets no
+// block.
+func squadInitiativesBriefing(initiatives []squadInitiative) string {
+	if len(initiatives) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Initiatives your squad owns\n\n")
+	sb.WriteString("Each initiative below is in a stage your squad owns now. Read it first with `multica initiative show INI-<seq> --output json`, then follow the stage's instructions on its issue.\n\n")
+	for _, ini := range initiatives {
+		unit := "days"
+		if ini.DaysInStage == 1 {
+			unit = "day"
+		}
+		sb.WriteString(fmt.Sprintf("- INI-%d %s, stage %s, %d %s in stage\n", ini.Seq, strings.TrimSpace(ini.Title), ini.Stage, ini.DaysInStage, unit))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
@@ -408,6 +465,14 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 		SquadID: squad.ID, WorkspaceID: squad.WorkspaceID,
 	}); err == nil {
 		if block := squadCharterBriefing(charter); block != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(block)
+		}
+	}
+
+	// A failed lookup leaves the block out, as the charter does above.
+	if initiatives, err := loadSquadOwnedInitiatives(ctx, q, squad); err == nil {
+		if block := squadInitiativesBriefing(initiatives); block != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(block)
 		}

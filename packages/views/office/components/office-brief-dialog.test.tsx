@@ -343,4 +343,20 @@ describe("OfficeBriefDialog", () => {
       expect(screen.queryByRole("heading", { name: "Newest brief" })).toBeNull();
     });
   });
+
+  it("shows an opportunity's thesis on its card in the brief", () => {
+    queryClient.setQueryData(
+      proposalKeys.detail("ws-1", "p3"),
+      proposal("p3", {
+        kind: "opportunity",
+        title: "Invoicing for small firms",
+        payload: { thesis: "Small firms close their books late.", market: "SMB finance", evidence_doc_ids: [], target_stage: "validate" },
+      }),
+    );
+    setup({ briefs: [brief("b1", { proposal_ids: ["p3"] })] });
+
+    expect(screen.getByText("Small firms close their books late.")).toBeTruthy();
+    expect(screen.getByText("Opportunity")).toBeTruthy();
+    expect(screen.getByText("No evidence attached.")).toBeTruthy();
+  });
 });

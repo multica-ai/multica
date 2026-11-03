@@ -2,7 +2,9 @@
   "title": "Knowledge",
   "tabs": {
     "library": "Library",
-    "drafts": "Drafts"
+    "drafts": "Drafts",
+    "governance": "Governance",
+    "setup": "Setup"
   },
   "state": {
     "ready": "Ready",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "Ask the Secretary",
     "prompt": "Answer my question from these company knowledge results. Cite each document you use by its title and link, and say so if the results do not answer it.\n\nQuestion: {{question}}\n\nResults:\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "Kind",
+      "all": "All kinds"
+    },
+    "policy": {
+      "title": "Publish policy",
+      "description": "How an agent's draft is published. A kind's policy overrides its knowledge base's. Without a policy, drafts wait for a person.",
+      "scope_base": "Knowledge base",
+      "scope_kind": "Kind",
+      "inherited": "using the default",
+      "reset": "Reset",
+      "load_error": "Could not load the publish policies",
+      "aria_mode": "Publish mode for {{name}}",
+      "toast_failed": "Could not change the publish policy",
+      "toast_reset": "Publish policy reset",
+      "mode": {
+        "manual": "Manual: a person publishes",
+        "auto_after_review": "After a critic's review",
+        "auto": "Automatic",
+        "unknown": "Unknown mode"
+      }
+    },
+    "add_eval": {
+      "button": "Add as eval case",
+      "title": "Add as eval case",
+      "description": "The search should return this document for the question. The next eval run checks it.",
+      "question": "Question",
+      "document": "Expected document",
+      "submit": "Add case",
+      "toast_added": "Eval case added",
+      "toast_failed": "Could not add the eval case"
+    },
+    "retrieval": {
+      "title": "Retrieval quality",
+      "run": "Run eval",
+      "last_run": "Hit rate {{rate}}% ({{hits}} of {{total}} cases)",
+      "no_runs": "No eval run yet. Add a case from a search result to start.",
+      "ran": "Eval recorded: hit rate {{rate}}%",
+      "offline": "Nothing recorded: the knowledge service is offline",
+      "run_failed": "Could not run the eval"
+    },
+    "routines": {
+      "title": "Librarian routines",
+      "empty": "No routine has run yet.",
+      "load_error": "Could not load the routines",
+      "nothing": "Nothing to report",
+      "count": "{{label}}: {{count}}",
+      "triage": "Draft triage",
+      "freshness": "Freshness review",
+      "audit": "Taxonomy audit",
+      "eval": "Retrieval eval",
+      "backfill": "Setup backfill",
+      "counts": {
+        "review_due": "due for review",
+        "duplicate": "duplicate titles",
+        "missing_sections": "missing headings",
+        "missing_kind": "no kind",
+        "orphaned": "gone from WeKnora",
+        "repaired": "repaired",
+        "new_drafts": "new drafts"
+      }
+    }
+  },
+  "upload": {
+    "title": "Add a file",
+    "drop_hint": "Drop a file here, or choose one. It is published as soon as it is added.",
+    "choose": "Choose file",
+    "base_label": "Knowledge base",
+    "kind_label": "Kind",
+    "kind_hint": "Use lowercase letters, digits and underscores, such as market_report.",
+    "submit": "Upload",
+    "toast": {
+      "uploaded": "{{name}} is in the knowledge base",
+      "failed": "Could not upload the file"
+    }
+  },
+  "import": {
+    "title": "Import a web page",
+    "url_label": "Page address",
+    "title_label": "Title (optional)",
+    "submit": "Import",
+    "toast": {
+      "imported": "The page is in the knowledge base",
+      "failed": "Could not import the page"
+    }
+  },
+  "sources": {
+    "title": "Sources",
+    "description": "Connections that WeKnora syncs into the knowledge bases. Failures are shown here; fix them in WeKnora.",
+    "load_error": "Could not load the sources",
+    "offline": "The knowledge service is offline, so the sources cannot be read.",
+    "empty": "No sources are connected.",
+    "create": "Add a source in WeKnora",
+    "never_synced": "Never synced",
+    "last_sync": "Last sync {{when}}",
+    "items": "{{count}} items",
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "error": "Failed",
+      "unknown": "Unknown"
+    }
+  },
+  "bases": {
+    "title": "Knowledge bases",
+    "description": "Restrict a base to the squads, floors or agents you name. Wiki is limited to three bases; summaries cost model calls.",
+    "restricted": "Restricted",
+    "wiki": "Wiki",
+    "summaries": "Summaries",
+    "access": "Access",
+    "toast": {
+      "failed": "The change was not saved"
+    }
+  },
+  "access": {
+    "loading": "Loading access",
+    "load_error": "Could not load the access list",
+    "empty": "Only owners and admins can see this base.",
+    "remove": "Remove access",
+    "level": {
+      "read": "Read",
+      "write": "Write"
+    },
+    "subject": {
+      "squad": "Squad",
+      "floor": "Floor",
+      "agent": "Agent",
+      "unknown": "Unknown"
+    },
+    "add": {
+      "subject_type": "Granted to",
+      "subject": "Who",
+      "subject_placeholder": "Choose",
+      "level": "Access",
+      "submit": "Grant access"
+    },
+    "toast": {
+      "failed": "The access was not changed"
+    }
+  },
+  "models": {
+    "title": "Models",
+    "description": "Runs each configured chat, rerank and vision model once and reports which failed and why.",
+    "test": "Test models",
+    "not_configured": "No model is configured on this server, so summaries and Wiki are off.",
+    "ok": "Working",
+    "failed": "Failed",
+    "role": {
+      "chat": "Chat",
+      "rerank": "Rerank",
+      "vision": "Vision",
+      "unknown": "Model"
+    }
+  },
+  "owner_login": {
+    "title": "Your WeKnora login",
+    "description": "Sign in to WeKnora's own interface for advanced settings. The password is shown once.",
+    "show": "Show my password",
+    "email": "Email: {{email}}",
+    "once": "Copy it now. It will not be shown again.",
+    "open": "Open WeKnora",
+    "failed": "Could not show the password"
   }
 }

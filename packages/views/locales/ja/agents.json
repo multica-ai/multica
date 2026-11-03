@@ -1044,6 +1044,74 @@
         "ux_designer": {
           "name": "UX デザイナー",
           "description": "要件から画面、状態、デザインシステムを設計し、まず既存コンポーネントを再利用します。"
+        },
+        "knowledge_curator": {
+          "name": "ライブラリアン",
+          "description": "毎日ドラフトを仕分け、ナレッジベースの鮮度・検索精度・分類を確認します。"
+        },
+        "opportunity_lead": {
+          "name": "オポチュニティリード",
+          "description": "週ごとの問いを定め、根拠のある機会だけを提案します。"
+        },
+        "opportunity_analyst": {
+          "name": "オポチュニティアナリスト",
+          "description": "候補を範囲で見積もり、前提と反対の根拠を添えます。"
+        },
+        "competitor_lead": {
+          "name": "競合リード",
+          "description": "競合の週次監視と月次プロファイルを進め、各主張に出典を付けます。"
+        },
+        "customer_lead": {
+          "name": "カスタマーリード",
+          "description": "毎週サポートの兆候をテーマ別に整理し、月次の顧客インサイトをまとめます。"
+        },
+        "discovery_lead": {
+          "name": "ディスカバリーリード",
+          "description": "根拠で機会を検証し、続行か中止かを上長に提案します。"
+        },
+        "validation_analyst": {
+          "name": "検証アナリスト",
+          "description": "機会の仮説を、顧客と市場の根拠で一つずつ検証します。"
+        },
+        "product_analysis_lead": {
+          "name": "プロダクト分析リード",
+          "description": "製品ブリーフを書き、分析のすべての数字を前提と照合します。"
+        },
+        "feasibility_analyst": {
+          "name": "実現性アナリスト",
+          "description": "コスト・リターン・実現性を試算し、各前提と出典を明記します。"
+        },
+        "planning_lead": {
+          "name": "プランニングリード",
+          "description": "ロードマップ、ローンチ概要、予算申請を作成し、計画とともに上長の承認を得ます。"
+        },
+        "prd_writer": {
+          "name": "PRD ライター",
+          "description": "各要件を、テスト担当者が確認できる受け入れ基準付きで書きます。"
+        },
+        "release_lead": {
+          "name": "リリースリード",
+          "description": "ローンチのチェックリストとリリースノートを管理し、上長の公開判断に備えます。"
+        },
+        "growth_lead": {
+          "name": "グロースリード",
+          "description": "市場投入計画を作成し、公開済みイニシアチブの指標レポートを毎週まとめます。"
+        },
+        "support_lead": {
+          "name": "サポートリード",
+          "description": "毎日お客様の問い合わせを仕分け、再現手順付きの不具合を開発に回し、回答をナレッジベースに書き戻します。"
+        },
+        "support_agent": {
+          "name": "サポート担当",
+          "description": "社内のナレッジをもとにお客様に回答し、答えられないものは引き継ぎます。"
+        },
+        "finance_lead": {
+          "name": "財務リード",
+          "description": "上長が確認を求めた支出の提案を審査し、リスク登録簿を最新に保ちます。承認はしません。"
+        },
+        "people_performance": {
+          "name": "人材リード",
+          "description": "各チームの実績をチャーターと照らし合わせて確認し、遅れや沈黙を報告します。目標は設定しません。"
         }
       }
     },

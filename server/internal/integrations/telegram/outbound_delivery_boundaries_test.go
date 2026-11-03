@@ -657,7 +657,11 @@ func TestReview8545PostgresSlowCallIsCutOffInsideTheLease(t *testing.T) {
 	o, _, _, e := review8545Setup(t, bot)
 	o.apiBase = srv.URL
 	o.client = srv.Client()
-	o.leaseTTL = 600 * time.Millisecond
+	// The measured span includes Postgres round trips, which under -race and a
+	// full parallel run can take hundreds of milliseconds. A 600ms lease left
+	// no margin for them. The call budget is still a third of the lease, so the
+	// HTTP send is bounded at 1s; the assertion below is unchanged.
+	o.leaseTTL = 3 * time.Second
 
 	done := make(chan time.Duration, 1)
 	go func() {

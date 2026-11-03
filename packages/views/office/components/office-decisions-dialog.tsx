@@ -12,7 +12,13 @@ import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
 import { useDecisionQueue } from "../lib/decision-queue";
 import { OfficeProposalDecision } from "./office-proposal-decision";
-import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
+import {
+  OfficeProposalHistory,
+  OfficeProposalKindLabel,
+  OfficeProposalKindSummary,
+  OfficeProposalRelated,
+  OfficeProposalStatus,
+} from "./office-proposal-details";
 
 /**
  * The proposals waiting for the boss. The list names each one. Proposals put
@@ -142,9 +148,11 @@ function ProposalDetail({
           {from ? <span>{t(($) => $.office.decision_from, { name: from.name })}</span> : null}
           {handoff ? <span>{t(($) => $.office.decision_handoff, { name: handoff.name })}</span> : null}
           {proposal.urgent ? <span className="font-medium text-destructive">{t(($) => $.office.decision_urgent)}</span> : null}
+          <OfficeProposalKindLabel kind={proposal.kind} />
         </div>
         <h3 className="text-heading">{proposal.title}</h3>
         <OfficeProposalStatus proposal={proposal} squadName={from?.name ?? null} />
+        <OfficeProposalKindSummary proposal={proposal} />
         {issue?.description ? <ReadonlyContent content={issue.description} /> : null}
         <OfficeProposalRelated related={proposal.related} />
         <OfficeProposalHistory proposal={proposal} />

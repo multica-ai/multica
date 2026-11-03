@@ -1044,6 +1044,74 @@
         "ux_designer": {
           "name": "UX 디자이너",
           "description": "요구사항에서 화면, 상태, 디자인 시스템을 설계하며 기존 컴포넌트를 먼저 재사용합니다."
+        },
+        "knowledge_curator": {
+          "name": "사서",
+          "description": "매일 초안을 분류하고, 지식 베이스의 최신성·검색·분류를 점검합니다."
+        },
+        "opportunity_lead": {
+          "name": "기회 리드",
+          "description": "매주 기회 발굴의 질문을 정하고, 근거가 뒷받침하는 기회만 제출합니다."
+        },
+        "opportunity_analyst": {
+          "name": "기회 분석가",
+          "description": "후보를 범위로 추정하고, 가정과 반대 근거를 함께 적습니다."
+        },
+        "competitor_lead": {
+          "name": "경쟁사 리드",
+          "description": "경쟁사 주간 모니터링과 월간 프로필을 진행하며, 모든 주장에 출처를 답니다."
+        },
+        "customer_lead": {
+          "name": "고객 리드",
+          "description": "매주 지원 신호를 주제별로 정리하고, 월간 고객 인사이트를 작성합니다."
+        },
+        "discovery_lead": {
+          "name": "디스커버리 리드",
+          "description": "근거로 기회를 검증하고, 진행 또는 중단을 보스에게 권고합니다."
+        },
+        "validation_analyst": {
+          "name": "검증 분석가",
+          "description": "기회의 가설을 고객·시장 근거로 항목별로 검증합니다."
+        },
+        "product_analysis_lead": {
+          "name": "프로덕트 분석 리드",
+          "description": "제품 브리프를 작성하고, 분석의 모든 숫자를 가정과 대조합니다."
+        },
+        "feasibility_analyst": {
+          "name": "실현 가능성 분석가",
+          "description": "비용·수익·실현 가능성을 추산하고, 각 가정과 출처를 밝힙니다."
+        },
+        "planning_lead": {
+          "name": "기획 리드",
+          "description": "로드맵, 런치 개요, 예산 요청서를 작성하여 계획과 함께 보스의 승인을 받습니다."
+        },
+        "prd_writer": {
+          "name": "PRD 작성자",
+          "description": "각 요구사항을 테스터가 확인할 수 있는 인수 기준과 함께 작성합니다."
+        },
+        "release_lead": {
+          "name": "릴리스 리드",
+          "description": "런치 체크리스트와 릴리스 노트를 관리하고, 보스의 출시 결정을 준비합니다."
+        },
+        "growth_lead": {
+          "name": "그로스 리드",
+          "description": "시장 출시 계획을 작성하고, 출시된 이니셔티브의 지표 보고서를 매주 작성합니다."
+        },
+        "support_lead": {
+          "name": "지원 리드",
+          "description": "매일 고객 요청을 분류하고, 재현 단계가 있는 버그는 개발로 넘기며, 답변을 지식 베이스에 다시 기록합니다."
+        },
+        "support_agent": {
+          "name": "지원 담당자",
+          "description": "회사 지식을 바탕으로 고객 요청에 답하고, 답할 수 없는 것은 넘깁니다."
+        },
+        "finance_lead": {
+          "name": "재무 리드",
+          "description": "보스가 묻는 지출 제안을 검토하고 리스크 레지스터를 최신으로 유지합니다. 승인은 하지 않습니다."
+        },
+        "people_performance": {
+          "name": "인재 리드",
+          "description": "각 스쿼드의 실적을 헌장과 비교해 검토하고, 지연되거나 침묵하는 항목을 보고합니다. 목표는 정하지 않습니다."
         }
       }
     },

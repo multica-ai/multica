@@ -576,6 +576,9 @@ func (h *Handler) PutOfficeSeats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update seats")
 		return
 	}
+	for _, i := range changed {
+		h.recomputeSquadKnowledgeAccess(r, wsUUID, targets[i].squadID)
+	}
 
 	resp := OfficeSeatsResponse{Squads: make([]SquadResponse, 0, len(targets))}
 	for i := range targets {

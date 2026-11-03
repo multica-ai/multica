@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS knowledge_publish_policy_scope_uidx;

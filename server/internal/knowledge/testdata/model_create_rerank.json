@@ -1,0 +1,24 @@
+{
+  "data": {
+    "created_at": "2026-11-02T09:01:05.000000+08:00",
+    "credentials": {"api_key": {"configured": true}, "app_secret": {"configured": false}},
+    "description": "",
+    "display_name": "",
+    "id": "5c2b9e8d-1f3a-4d6e-9b7c-8a0e2d4f6b21",
+    "is_builtin": false,
+    "is_default": false,
+    "name": "rerank-model",
+    "parameters": {
+      "base_url": "https://llm.example.test/v1",
+      "interface_type": "",
+      "provider": "generic",
+      "supports_vision": false
+    },
+    "source": "remote",
+    "status": "active",
+    "tenant_id": 10002,
+    "type": "Rerank",
+    "updated_at": "2026-11-02T09:01:05.000000+08:00"
+  },
+  "success": true
+}

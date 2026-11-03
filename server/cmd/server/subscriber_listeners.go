@@ -284,7 +284,15 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 
 // addSubscriber adds a user as an issue subscriber and publishes a
 // subscriber:added event for real-time frontend sync.
+//
+// Only members and agents can hold a subscriber row. Mention targets of other
+// kinds (issue, squad, all) are skipped here, before the user ID is parsed:
+// @all carries no UUID, and parseUUID panics on it, which would abort the
+// remaining mentions in the same event.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	if userType != "member" && userType != "agent" {
+		return
+	}
 	affected, err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
 		IssueID:  parseUUID(issueID),
 		UserType: userType,

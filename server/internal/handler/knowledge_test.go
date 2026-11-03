@@ -43,6 +43,11 @@ func useKnowledge(t *testing.T) *knowledge.Fake {
 			`DELETE FROM agent_mcp_server WHERE server_id IN (SELECT id FROM workspace_mcp_server WHERE workspace_id = $1 AND name = 'company-read')`,
 			`DELETE FROM workspace_mcp_server WHERE workspace_id = $1 AND name = 'company-read'`,
 			`DELETE FROM knowledge_link WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_eval_case WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_eval_run WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_health_run WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_publish_policy WHERE workspace_id = $1`,
+			`DELETE FROM knowledge_kind WHERE workspace_id = $1`,
 			`DELETE FROM knowledge_base WHERE workspace_id = $1`,
 			`DELETE FROM workspace_knowledge WHERE workspace_id = $1`,
 		} {
@@ -103,7 +108,7 @@ func TestKnowledgeEnableAndStatus(t *testing.T) {
 	}
 
 	code, status, body = callKnowledge(t, testUserID, http.MethodPost)
-	if code != http.StatusOK || !status.Enabled || status.State != "ready" || len(status.KnowledgeBases) != 5 {
+	if code != http.StatusOK || !status.Enabled || status.State != "ready" || len(status.KnowledgeBases) != 6 {
 		t.Fatalf("POST enable = %d %s", code, body)
 	}
 	// The JSON contract: snake_case, no secrets.

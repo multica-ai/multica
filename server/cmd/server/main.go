@@ -852,6 +852,23 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.ProposalExpiryJob(h)); err != nil {
 		slog.Error("scheduler: register proposal expiry", "error", err)
 	}
+	// Hourly: WeKnora tenants of deleted workspaces are removed once their
+	// seven-day hold has passed; a failed removal is retried with backoff
+	// (plan 10.14). Without a knowledge sidecar it does nothing.
+	if err := schedulerMgr.Register(scheduler.KnowledgeDeprovisionJob(h.Knowledge)); err != nil {
+		slog.Error("scheduler: register knowledge deprovision", "error", err)
+	}
+	// Hourly: initiatives whose stage is ready move on or file their gate, and
+	// operating initiatives file the review gates of their 30 and 90 day marks
+	// (spec 3.1, 3.6).
+	if err := schedulerMgr.Register(scheduler.InitiativeSweepJob(h)); err != nil {
+		slog.Error("scheduler: register initiative sweep", "error", err)
+	}
+	// The Librarian of the starter company (plan 10.9): a workspace set up before
+	// phase 3 gets it from this hourly job, which does nothing once it has it.
+	if err := schedulerMgr.Register(scheduler.LibrarianBackfillJob(service.NewCompanyTemplateService(queries, pool, h.Knowledge))); err != nil {
+		slog.Error("scheduler: register librarian backfill job", "error", err)
+	}
 	// Hourly: a daily brief the schedule missed is caught up once the workspace's
 	// catch-up hour has passed and the Secretary can run (plan 9.13).
 	if err := schedulerMgr.Register(scheduler.BriefCatchupJob(service.NewBriefCatchupService(queries, autopilotSvc))); err != nil {
@@ -875,6 +892,28 @@ func main() {
 	// machinery. The job is inert while plugins_v1 is disabled.
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
+	}
+	// The Librarian's routines (spec 3.3, plan 10.9). Each runs for every
+	// workspace with ready knowledge; a deployment without knowledge has none.
+	// The taxonomy backfill is hourly and does nothing once every workspace is
+	// current.
+	for _, job := range []struct {
+		name, routine string
+		cadence       time.Duration
+	}{
+		{scheduler.JobNameKnowledgeTaxonomyBackfill, service.LibrarianJobTaxonomyBackfill, time.Hour},
+		{scheduler.JobNameKnowledgeTriage, service.LibrarianJobTriage, 24 * time.Hour},
+		{scheduler.JobNameKnowledgeFreshness, service.LibrarianJobFreshness, 7 * 24 * time.Hour},
+		{scheduler.JobNameKnowledgeEval, service.LibrarianJobEval, 7 * 24 * time.Hour},
+		{scheduler.JobNameKnowledgeAudit, service.LibrarianJobAudit, 30 * 24 * time.Hour},
+	} {
+		if err := schedulerMgr.Register(scheduler.KnowledgeLibrarianJob(h.Knowledge, job.name, job.routine, job.cadence)); err != nil {
+			slog.Error("scheduler: register knowledge librarian job", "job", job.name, "error", err)
+		}
+	}
+	// The repo-docs sync (plan 10.12) runs for workspaces that enabled it.
+	if err := schedulerMgr.Register(scheduler.KnowledgeRepoDocsJob(h.Knowledge)); err != nil {
+		slog.Error("scheduler: register knowledge repo docs job", "error", err)
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)

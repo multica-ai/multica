@@ -105,6 +105,14 @@ type Knowledge interface {
 	// DeleteTenant removes a tenant and everything in it.
 	DeleteTenant(ctx context.Context, tenantID string) error
 
+	// EnsureUser creates a WeKnora login for a person, or finds the one with
+	// this email. WeKnora returns no password for an existing login, so the
+	// password is meaningful only on the call that creates it. The service
+	// account must be a system administrator.
+	EnsureUser(ctx context.Context, spec UserSpec) (User, error)
+	// AddTenantMember gives an existing WeKnora login a role in a tenant.
+	AddTenantMember(ctx context.Context, tenantID, email, role string) error
+
 	// Workspace returns the tenant-scoped API for a workspace API key.
 	Workspace(apiKey string) Workspace
 
@@ -120,9 +128,24 @@ type Workspace interface {
 	// fixes its vector store at creation, so this runs before any of them.
 	EnsureEmbeddingModel(ctx context.Context, spec EmbeddingModelSpec) (Model, error)
 
+	// EnsureModel returns the tenant's model with this name and type, creating
+	// it when absent, and waits until it is usable. Chat, rerank and vision
+	// models use it; embedding models go through EnsureEmbeddingModel.
+	EnsureModel(ctx context.Context, spec ModelSpec) (Model, error)
+	// TestModel runs the model once with the probe. A failure is an *APIError
+	// carrying WeKnora's message, so the caller can say which model failed and
+	// why.
+	TestModel(ctx context.Context, modelID string, probe ModelProbe) error
+
 	CreateKnowledgeBase(ctx context.Context, spec KnowledgeBaseSpec) (KnowledgeBase, error)
 	ListKnowledgeBases(ctx context.Context) ([]KnowledgeBase, error)
+	// UpdateKnowledgeBase changes the settings the patch names. Fields left nil
+	// keep their values.
+	UpdateKnowledgeBase(ctx context.Context, kbID string, patch KnowledgeBasePatch) (KnowledgeBase, error)
 	DeleteKnowledgeBase(ctx context.Context, kbID string) error
+	// ListDataSources returns the sync connections (Notion, Confluence, RSS and
+	// others) that feed one knowledge base. Creating one happens in WeKnora.
+	ListDataSources(ctx context.Context, kbID string) ([]DataSource, error)
 
 	// CreateManual stores Markdown. With Publish false it is a draft: stored,
 	// not indexed, not searchable. With Publish true it is indexed.
@@ -140,6 +163,10 @@ type Workspace interface {
 	ListDocuments(ctx context.Context, kbID string, opts ListOptions) (DocumentPage, error)
 	// Read returns a document with its text.
 	Read(ctx context.Context, docID string) (DocumentContent, error)
+	// EnsureTag returns the id of the tag with this name in the knowledge base,
+	// creating the tag when it is absent. Tags carry a document's kind and its
+	// initiative folder into WeKnora.
+	EnsureTag(ctx context.Context, kbID, name string) (string, error)
 	// Search is retrieval only: no LLM is called. Drafts are never returned.
 	Search(ctx context.Context, req SearchRequest) ([]SearchHit, error)
 
@@ -199,6 +226,82 @@ type KnowledgeBase struct {
 	Description      string
 	EmbeddingModelID string
 	DocumentCount    int
+	// SummaryModelID is the model that writes document summaries; empty when
+	// summaries are off.
+	SummaryModelID string
+	// WikiEnabled reports whether Wiki pages are generated for the base.
+	WikiEnabled bool
+}
+
+// KnowledgeBasePatch changes a knowledge base. A nil field is left as it is.
+type KnowledgeBasePatch struct {
+	SummaryModelID *string
+	// WikiEnabled turns Wiki generation on or off. Turning it on uses the
+	// focused extraction granularity, which bounds the LLM calls per document.
+	WikiEnabled *bool
+}
+
+// ModelSpec describes a model to register in a tenant.
+type ModelSpec struct {
+	// Name is the model name the endpoint expects, for example "gpt-4o-mini".
+	Name string
+	// Type is one of the ModelType constants.
+	Type ModelType
+	// Provider is "generic" for any OpenAI-compatible endpoint.
+	Provider string
+	// BaseURL is the endpoint as WeKnora, not Multica, reaches it.
+	BaseURL string
+	// APIKey is optional and write-only.
+	APIKey string
+}
+
+// ModelType is the role a model plays in WeKnora.
+type ModelType string
+
+// The model roles WeKnora knows that Multica registers.
+const (
+	ModelTypeKnowledgeQA ModelType = "KnowledgeQA"
+	ModelTypeRerank      ModelType = "Rerank"
+	ModelTypeVLLM        ModelType = "VLLM"
+)
+
+// ModelProbe is the input for a connection test. Documents is set for a
+// rerank model only.
+type ModelProbe struct {
+	Input     string
+	Documents []string
+}
+
+// UserSpec describes a WeKnora login.
+type UserSpec struct {
+	Username string
+	Email    string
+	// Password is set when the login is created. It is never read back.
+	Password string
+}
+
+// User is a WeKnora login.
+type User struct {
+	ID    string
+	Email string
+}
+
+// DataSource is a sync connection that feeds a knowledge base.
+type DataSource struct {
+	ID              string
+	KnowledgeBaseID string
+	Name            string
+	// Type is the connector, such as "notion", "confluence" or "rss".
+	Type string
+	// Status is "active", "paused" or "error", or a newer value.
+	Status string
+	// SyncSchedule is a cron expression; empty for manual sync.
+	SyncSchedule string
+	// LastSyncAt is nil before the first sync.
+	LastSyncAt *time.Time
+	// ErrorMessage is the last sync failure; empty when none.
+	ErrorMessage     string
+	TotalItemsSynced int64
 }
 
 // Parse states a document passes through, as WeKnora reports them.
@@ -240,12 +343,16 @@ type ManualDocument struct {
 	Content string
 	// Publish indexes the document at once. False stores a draft.
 	Publish bool
+	// TagIDs are WeKnora tag ids from EnsureTag, attached to the document.
+	TagIDs []string
 }
 
 // URLDocument is a web page to import.
 type URLDocument struct {
 	URL   string
 	Title string
+	// TagIDs are WeKnora tag ids from EnsureTag, attached to the imported page.
+	TagIDs []string
 }
 
 // FileDocument is a file to upload.
@@ -255,6 +362,8 @@ type FileDocument struct {
 	// FolderPath groups the document, slash separated, relative to the base.
 	FolderPath string
 	Content    io.Reader
+	// TagIDs are WeKnora tag ids from EnsureTag, attached to the document.
+	TagIDs []string
 }
 
 // ListOptions pages a document listing.

@@ -27,6 +27,14 @@ export interface KnowledgeBase {
   name: string;
   visibility: KnowledgeVisibility;
   position: number;
+  /**
+   * Wiki pages are generated for the base. Optional on the type so fixtures
+   * from before the flags existed still compile; the schema always supplies it,
+   * off unless the server says otherwise.
+   */
+  wiki_enabled?: boolean;
+  /** Documents are summarised when stored. Same convention as wiki_enabled. */
+  summaries_enabled?: boolean;
 }
 
 export interface KnowledgeBases {
@@ -104,6 +112,8 @@ export interface ListKnowledgeDocumentsParams {
 export interface SearchKnowledgeParams {
   q: string;
   kb?: string;
+  /** Only documents of this kind key. */
+  kind?: string;
   limit?: number;
 }
 
@@ -117,4 +127,14 @@ export interface CreateKnowledgeDocumentRequest {
   source_id?: string;
   idempotency_key?: string;
   publish?: boolean;
+  /** Taxonomy: see the server's knowledge write. Every field is optional. */
+  kind?: string;
+  initiative_id?: string;
+  initiative_folder?: string;
+  stage_key?: string;
+  confidence?: "low" | "medium" | "high";
+  /** YYYY-MM-DD. */
+  valid_until?: string;
+  supersedes_id?: string;
+  tags?: string[];
 }

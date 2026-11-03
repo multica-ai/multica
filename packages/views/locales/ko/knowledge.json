@@ -2,7 +2,9 @@
   "title": "지식 베이스",
   "tabs": {
     "library": "자료",
-    "drafts": "초안"
+    "drafts": "초안",
+    "governance": "거버넌스",
+    "setup": "설정"
   },
   "state": {
     "ready": "준비됨",
@@ -82,5 +84,169 @@
   "ask_secretary": {
     "button": "비서에게 묻기",
     "prompt": "다음 지식 베이스 검색 결과를 바탕으로 제 질문에 답해 주세요. 사용한 문서는 제목과 링크로 인용하고, 결과로 답할 수 없으면 그렇다고 알려 주세요.\n\n질문: {{question}}\n\n검색 결과:\n{{results}}"
+  },
+  "taxonomy": {
+    "kind": {
+      "label": "종류",
+      "all": "모든 종류"
+    },
+    "policy": {
+      "title": "게시 정책",
+      "description": "에이전트 초안이 게시되는 방식입니다. 종류의 정책이 지식 베이스의 정책보다 우선합니다. 정책이 없으면 초안은 사람이 게시할 때까지 대기합니다.",
+      "scope_base": "지식 베이스",
+      "scope_kind": "종류",
+      "inherited": "기본값",
+      "reset": "초기화",
+      "load_error": "게시 정책을 불러올 수 없습니다",
+      "aria_mode": "{{name}}의 게시 모드",
+      "toast_failed": "게시 정책을 변경할 수 없습니다",
+      "toast_reset": "게시 정책을 초기화했습니다",
+      "mode": {
+        "manual": "수동: 사람이 게시",
+        "auto_after_review": "비평가 검토 후",
+        "auto": "자동",
+        "unknown": "알 수 없는 모드"
+      }
+    },
+    "add_eval": {
+      "button": "평가 사례로 추가",
+      "title": "평가 사례로 추가",
+      "description": "이 질문에 대해 검색이 이 문서를 반환해야 합니다. 다음 평가 실행에서 확인합니다.",
+      "question": "질문",
+      "document": "기대 문서",
+      "submit": "사례 추가",
+      "toast_added": "평가 사례를 추가했습니다",
+      "toast_failed": "평가 사례를 추가할 수 없습니다"
+    },
+    "retrieval": {
+      "title": "검색 품질",
+      "run": "평가 실행",
+      "last_run": "적중률 {{rate}}% ({{total}}개 중 {{hits}}개)",
+      "no_runs": "아직 평가가 실행되지 않았습니다. 검색 결과에서 사례를 추가하세요.",
+      "ran": "평가 기록: 적중률 {{rate}}%",
+      "offline": "기록되지 않음: 지식 서비스가 오프라인입니다",
+      "run_failed": "평가를 실행할 수 없습니다"
+    },
+    "routines": {
+      "title": "사서 루틴",
+      "empty": "아직 실행된 루틴이 없습니다.",
+      "load_error": "루틴을 불러올 수 없습니다",
+      "nothing": "보고할 내용이 없습니다",
+      "count": "{{label}}: {{count}}",
+      "triage": "초안 분류",
+      "freshness": "최신성 검토",
+      "audit": "분류 감사",
+      "eval": "검색 평가",
+      "backfill": "설정 보완",
+      "counts": {
+        "review_due": "검토 기한",
+        "duplicate": "중복 제목",
+        "missing_sections": "누락된 제목",
+        "missing_kind": "종류 없음",
+        "orphaned": "WeKnora에 없음",
+        "repaired": "복구됨",
+        "new_drafts": "새 초안"
+      }
+    }
+  },
+  "upload": {
+    "title": "파일 추가",
+    "drop_hint": "파일을 여기에 놓거나 선택하세요. 추가하면 바로 게시됩니다.",
+    "choose": "파일 선택",
+    "base_label": "지식 베이스",
+    "kind_label": "종류",
+    "kind_hint": "영문 소문자, 숫자, 밑줄을 사용하세요(예: market_report).",
+    "submit": "업로드",
+    "toast": {
+      "uploaded": "{{name}} 이(가) 지식 베이스에 추가되었습니다",
+      "failed": "파일을 업로드할 수 없습니다"
+    }
+  },
+  "import": {
+    "title": "웹 페이지 가져오기",
+    "url_label": "페이지 주소",
+    "title_label": "제목(선택)",
+    "submit": "가져오기",
+    "toast": {
+      "imported": "페이지가 지식 베이스에 추가되었습니다",
+      "failed": "페이지를 가져올 수 없습니다"
+    }
+  },
+  "sources": {
+    "title": "소스",
+    "description": "WeKnora가 지식 베이스로 동기화하는 연결입니다. 실패는 여기에 표시되며, 수정은 WeKnora에서 하세요.",
+    "load_error": "소스를 불러올 수 없습니다",
+    "offline": "지식 서비스가 오프라인이라 소스를 읽을 수 없습니다.",
+    "empty": "연결된 소스가 없습니다.",
+    "create": "WeKnora에서 소스 추가",
+    "never_synced": "동기화 전",
+    "last_sync": "마지막 동기화 {{when}}",
+    "items": "{{count}}개 항목",
+    "status": {
+      "active": "활성",
+      "paused": "일시 중지",
+      "error": "실패",
+      "unknown": "알 수 없음"
+    }
+  },
+  "bases": {
+    "title": "지식 베이스",
+    "description": "지정한 팀, 층, 에이전트로만 제한할 수 있습니다. Wiki는 세 개의 베이스까지만 켤 수 있으며, 요약은 모델 호출 비용이 듭니다.",
+    "restricted": "제한",
+    "wiki": "Wiki",
+    "summaries": "요약",
+    "access": "접근",
+    "toast": {
+      "failed": "변경 사항을 저장하지 못했습니다"
+    }
+  },
+  "access": {
+    "loading": "접근 권한을 불러오는 중",
+    "load_error": "접근 권한 목록을 불러올 수 없습니다",
+    "empty": "이 베이스는 소유자와 관리자만 볼 수 있습니다.",
+    "remove": "접근 권한 제거",
+    "level": {
+      "read": "읽기",
+      "write": "쓰기"
+    },
+    "subject": {
+      "squad": "팀",
+      "floor": "층",
+      "agent": "에이전트",
+      "unknown": "알 수 없음"
+    },
+    "add": {
+      "subject_type": "부여 대상",
+      "subject": "대상",
+      "subject_placeholder": "선택",
+      "level": "접근",
+      "submit": "접근 권한 부여"
+    },
+    "toast": {
+      "failed": "접근 권한을 변경하지 못했습니다"
+    }
+  },
+  "models": {
+    "title": "모델",
+    "description": "설정된 채팅, 재순위, 비전 모델을 각각 한 번씩 실행해 실패한 모델과 그 이유를 보여 줍니다.",
+    "test": "모델 테스트",
+    "not_configured": "이 서버에 설정된 모델이 없어 요약과 Wiki가 꺼져 있습니다.",
+    "ok": "작동 중",
+    "failed": "실패",
+    "role": {
+      "chat": "채팅",
+      "rerank": "재순위",
+      "vision": "비전",
+      "unknown": "모델"
+    }
+  },
+  "owner_login": {
+    "title": "WeKnora 로그인",
+    "description": "고급 설정을 위해 WeKnora 화면에 로그인할 수 있습니다. 비밀번호는 한 번만 표시됩니다.",
+    "show": "내 비밀번호 보기",
+    "email": "이메일: {{email}}",
+    "once": "지금 복사하세요. 다시 표시되지 않습니다.",
+    "open": "WeKnora 열기",
+    "failed": "비밀번호를 표시할 수 없습니다"
   }
 }

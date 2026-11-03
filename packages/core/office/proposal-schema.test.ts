@@ -5,6 +5,8 @@ import {
   ProposalListSchema,
   ProposalRevisionListSchema,
   ProposalSchema,
+  opportunityPayloadOf,
+  stageGatePayloadOf,
   type Proposal,
   type ProposalRevision,
 } from "./proposal-schema";
@@ -232,5 +234,101 @@ describe("proposalRefusalCode", () => {
     expect(proposalRefusalCode(new ApiError("boom", 500, "Server Error", "text"))).toBeNull();
     expect(proposalRefusalCode(new ApiError("boom", 500, "Server Error", { code: 7 }))).toBeNull();
     expect(proposalRefusalCode(new Error("network"))).toBeNull();
+  });
+});
+
+describe("ProposalSchema kinds and payloads", () => {
+  const parse = (body: unknown) => parseWithFallback(body, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" });
+
+  it("reads the kind and payload a server sends", () => {
+    const p = parse({ ...full, kind: "opportunity", payload: { title: "Invoices", thesis: "Slow close" } });
+    expect(p.kind).toBe("opportunity");
+    expect(p.payload).toEqual({ title: "Invoices", thesis: "Slow close" });
+  });
+
+  it("treats a server without kinds as a decision with an empty payload", () => {
+    const p = parse({ id: "p1", state: "pending" });
+    expect(p).toMatchObject({ kind: "decision", payload: {} });
+  });
+
+  it("degrades an unknown kind to 'unknown' so views can keep it read-only", () => {
+    const p = parse({ ...full, kind: "org_change_v2", payload: { anything: 1 } });
+    expect(p.kind).toBe("unknown");
+    expect(p.payload).toEqual({ anything: 1 });
+  });
+
+  it("degrades a non-object payload to empty without failing the proposal", () => {
+    for (const payload of ["oops", 42, [1, 2], null]) {
+      const p = parse({ ...full, kind: "opportunity", payload });
+      expect(p.id).toBe("p1");
+      expect(p.payload).toEqual({});
+    }
+  });
+
+  it("still returns the fallback when the kind is not a string", () => {
+    expect(parse({ ...full, kind: 7 })).toBe(FALLBACK_PROPOSAL);
+  });
+
+  it("reads the opportunity fields and fills defaults for missing ones", () => {
+    const withPayload = parse({
+      ...full,
+      kind: "opportunity",
+      payload: {
+        title: "Invoices",
+        thesis: "Small firms close late",
+        market: "SMB finance",
+        evidence_doc_ids: ["d1", "d2"],
+        target_stage: "validate",
+      },
+    });
+    expect(opportunityPayloadOf(withPayload)).toEqual({
+      title: "Invoices",
+      thesis: "Small firms close late",
+      market: "SMB finance",
+      evidence_doc_ids: ["d1", "d2"],
+      target_stage: "validate",
+    });
+    expect(opportunityPayloadOf(parse({ ...full, kind: "opportunity", payload: {} }))).toEqual({
+      title: "",
+      thesis: "",
+      market: "",
+      evidence_doc_ids: [],
+      target_stage: "validate",
+    });
+  });
+
+  it("degrades malformed opportunity fields to their defaults", () => {
+    const p = parse({
+      ...full,
+      kind: "opportunity",
+      payload: { thesis: 12, evidence_doc_ids: "d1", target_stage: null },
+    });
+    expect(opportunityPayloadOf(p)).toEqual({
+      title: "",
+      thesis: "",
+      market: "",
+      evidence_doc_ids: [],
+      target_stage: "validate",
+    });
+  });
+
+  it("reads the stage gate fields and drops non-string artifact ids", () => {
+    const p = parse({
+      ...full,
+      kind: "stage_gate",
+      payload: { initiative_id: "i1", from: "validate", to: "define", artifact_ids: ["a1", 9] },
+    });
+    expect(stageGatePayloadOf(p)).toEqual({
+      initiative_id: "i1",
+      from: "validate",
+      to: "define",
+      artifact_ids: [],
+    });
+    const ok = parse({
+      ...full,
+      kind: "stage_gate",
+      payload: { initiative_id: "i1", from: "validate", to: "define", artifact_ids: ["a1"] },
+    });
+    expect(stageGatePayloadOf(ok).artifact_ids).toEqual(["a1"]);
   });
 });

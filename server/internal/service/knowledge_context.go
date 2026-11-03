@@ -70,7 +70,9 @@ func (s *KnowledgeService) IssueContext(ctx context.Context, workspaceID pgtype.
 	defer cancel()
 	// Search checks readiness itself, so a workspace without knowledge stops
 	// here with an error that is dropped below.
-	result, err := s.Search(ctx, workspaceID, query, "", knowledgeIssueContextLimit)
+	// Automatic context is not any one agent's reading: it sees the
+	// workspace-visible bases only, never a restricted one.
+	result, err := s.SearchKindFor(ctx, workspaceID, KnowledgeActor{Type: KnowledgeActorAgent}, query, "", "", knowledgeIssueContextLimit)
 	if err != nil {
 		slog.Debug("knowledge: issue context skipped", "workspace_id", util.UUIDToString(workspaceID), "error", err)
 		return nil

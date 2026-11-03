@@ -56,9 +56,11 @@ SELECT * FROM knowledge_base WHERE workspace_id = $1 AND key = $2 AND archived_a
 INSERT INTO knowledge_link (
     workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id,
     idempotency_key, state, created_by_type, created_by_id,
-    title, source_url, pending_content, publish_requested, error
+    title, source_url, pending_content, publish_requested, error,
+    kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags
 ) VALUES (
-    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet'
+    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet',
+    $12, $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
 
@@ -99,3 +101,42 @@ LIMIT 20;
 
 -- name: DeleteKnowledgeLink :execrows
 DELETE FROM knowledge_link WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetKnowledgeLinksByDocumentIDs :many
+-- The taxonomy of the documents a search returned. Documents WeKnora holds
+-- without a link come back as no row.
+SELECT * FROM knowledge_link
+WHERE workspace_id = @workspace_id
+  AND weknora_knowledge_id = ANY(@document_ids::text[])
+  AND state = 'published';
+
+-- name: ListSupersededLinkIDs :many
+-- Links some published document supersedes. Search hides them.
+SELECT supersedes_link_id FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'published' AND supersedes_link_id IS NOT NULL;
+
+-- name: ListPublishedKnowledgeLinks :many
+-- Every published link of a workspace, for the freshness review and the
+-- taxonomy audit. Bounded; a workspace past the bound is audited in part and
+-- the job says so.
+SELECT * FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'published'
+ORDER BY created_at DESC, id DESC
+LIMIT 5000;
+
+-- name: SetKnowledgeLinkReview :one
+-- Records a critic's verdict. It does not change the document's state; the
+-- caller publishes it when the policy allows.
+UPDATE knowledge_link SET
+    review_verdict = sqlc.arg('review_verdict')::text,
+    review_by_id = sqlc.narg('review_by_id')::uuid,
+    review_squad_id = sqlc.narg('review_squad_id')::uuid,
+    review_note = sqlc.arg('review_note')::text,
+    reviewed_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: SetKnowledgeLinkReviewIssue :exec
+-- Records the freshness review request the Librarian opened for a document.
+UPDATE knowledge_link SET review_issue_id = sqlc.arg('review_issue_id')::uuid
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id');

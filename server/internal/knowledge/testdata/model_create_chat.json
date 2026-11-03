@@ -1,0 +1,24 @@
+{
+  "data": {
+    "created_at": "2026-11-02T09:01:00.000000+08:00",
+    "credentials": {"api_key": {"configured": true}, "app_secret": {"configured": false}},
+    "description": "",
+    "display_name": "",
+    "id": "0e4f7a52-6c1d-4a8e-8a5b-2f1d9c7b3e10",
+    "is_builtin": false,
+    "is_default": false,
+    "name": "summary-chat",
+    "parameters": {
+      "base_url": "https://llm.example.test/v1",
+      "interface_type": "",
+      "provider": "generic",
+      "supports_vision": false
+    },
+    "source": "remote",
+    "status": "active",
+    "tenant_id": 10002,
+    "type": "KnowledgeQA",
+    "updated_at": "2026-11-02T09:01:00.000000+08:00"
+  },
+  "success": true
+}

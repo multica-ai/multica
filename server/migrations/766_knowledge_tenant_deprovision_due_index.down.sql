@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS knowledge_tenant_deprovision_due_idx;

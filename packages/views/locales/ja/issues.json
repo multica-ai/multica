@@ -2026,7 +2026,120 @@
     "attention_pin_clear": "固定を解除",
     "attention_pin_saved": "上限を固定しました",
     "attention_pin_cleared": "固定を解除しました",
-    "attention_pin_failed": "上限を変更できませんでした"
+    "attention_pin_failed": "上限を変更できませんでした",
+    "company_entry": "会社を組み立てる",
+    "company_title": "会社を組み立てる",
+    "company_intro": "スターター会社を導入します：スクワッド、エージェント、ルーティン、パイプライン、ナレッジベース。もう一度実行しても、既存のものはそのまま残ります。",
+    "company_loading": "読み込み中…",
+    "company_model": "モデル（任意）",
+    "company_model_placeholder": "ランタイムの既定",
+    "company_squads": "スクワッド",
+    "company_select_all": "すべて選択",
+    "company_clear": "クリア",
+    "company_squad_existing": "既存",
+    "company_no_squad": "少なくとも1つのスクワッドを選んでください。",
+    "company_unowned": "担当スクワッドのないステージ：{{stages}}。担当するスクワッドを選ぶまで、担当者はいません。",
+    "company_estimate": "週あたり約 {{runs}} 回の実行、週あたり約 {{cost}}。",
+    "company_estimate_default": "このワークスペースの実測平均が出るまで、1回あたり {{rate}} の既定値で計算します。",
+    "company_estimate_none": "この選択では定期実行はありません。",
+    "company_start": "ルーティンを開始するタイミング",
+    "company_start_all": "すべてのルーティンを開始",
+    "company_start_all_hint": "選んだスクワッドのルーティンはすべてスケジュール通りに実行されます。",
+    "company_start_per_floor": "フロアごとに開始",
+    "company_start_per_floor_hint": "各フロアは主要なルーティンを開始し、ほかは一時停止のままです。",
+    "company_start_leave_paused": "一時停止のままにする",
+    "company_start_leave_paused_hint": "秘書の日次ブリーフと市場スキャンだけが実行されます。",
+    "company_submit": "会社を組み立てる",
+    "company_applying": "会社を組み立てています…",
+    "company_cancel": "キャンセル",
+    "company_close": "閉じる",
+    "company_retry": "もう一度実行",
+    "company_done_title": "会社の準備ができました",
+    "company_failed_title": "問題が残ったまま終了しました",
+    "company_failed_message": "一部の手順が完了していません。もう一度実行すると、不足分を補い、既存のものは残します。",
+    "company_unconfirmed": "サーバーの応答を読み取れなかったため、何も確認できていません。もう一度実行しても安全です。",
+    "company_errored": "会社を組み立てられませんでした。何も確認できていません。もう一度実行しても安全です。",
+    "company_done_toast": "会社の準備ができました",
+    "company_error_toast": "会社を組み立てられませんでした",
+    "company_step_created": "作成済み",
+    "company_step_reused": "既存",
+    "company_step_failed": "失敗",
+    "company_steps": "手順",
+    "company_floors": {
+      "executive": "エグゼクティブ",
+      "research": "リサーチ",
+      "product": "プロダクト",
+      "build": "ビルド",
+      "launch": "ローンチ",
+      "governance": "ガバナンス"
+    },
+    "company_stages": {
+      "validate": "検証",
+      "define": "定義",
+      "plan": "計画",
+      "build": "ビルド",
+      "launch": "ローンチ",
+      "operate": "運用",
+      "learn": "振り返り"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "エグゼクティブオフィス",
+        "description": "秘書とライブラリアンが会社全体を回し、ブリーフとナレッジベースを管理します。"
+      },
+      "market_research": {
+        "name": "マーケットリサーチ",
+        "description": "毎週市場をスキャンし、根拠のある提案だけを出します。"
+      },
+      "opportunity_lab": {
+        "name": "オポチュニティラボ",
+        "description": "毎週、製品の機会を洗い出して規模を見積もります。"
+      },
+      "competitor_intelligence": {
+        "name": "競合インテリジェンス",
+        "description": "競合を毎週監視し、各社の出典付きプロファイルを維持します。"
+      },
+      "customer_voice": {
+        "name": "カスタマーボイス",
+        "description": "サポートの問い合わせやフィードバックを顧客インサイトにまとめます。"
+      },
+      "product_discovery": {
+        "name": "プロダクトディスカバリー",
+        "description": "機会を検証し、製品化する価値があるものを提案します。"
+      },
+      "product_analysis": {
+        "name": "プロダクト分析",
+        "description": "製品ブリーフ、採算性と実現性の分析、リスク登録簿を作成します。"
+      },
+      "planning": {
+        "name": "プランニング",
+        "description": "PRD、ロードマップ、ローンチの概要、予算申請を作成します。"
+      },
+      "build": {
+        "name": "ビルド",
+        "description": "SDLC ワークフローで製品を構築・検証し、振り返りを行います。"
+      },
+      "release_ops": {
+        "name": "リリース & 運用",
+        "description": "ローンチのチェックリストとリリースノートを管理し、ボスの公開判断に備えます。"
+      },
+      "growth_gtm": {
+        "name": "グロース & GTM",
+        "description": "市場投入計画を立て、公開済みの各イニシアチブの成長指標を毎週報告します。"
+      },
+      "support": {
+        "name": "サポート",
+        "description": "公開後のお客様に対応し、不具合を開発に回し、回答をナレッジベースに書き戻します。"
+      },
+      "finance_risk": {
+        "name": "財務 & リスク",
+        "description": "支出の提案を審査し、リスク登録簿を最新に保ちます。"
+      },
+      "people_performance": {
+        "name": "人材 & パフォーマンス",
+        "description": "各チームの実績をチャーターと照らし合わせて毎週確認し、遅れている項目や沈黙しているチームを報告します。"
+      }
+    }
   },
   "views": {
     "builtin": {

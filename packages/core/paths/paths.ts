@@ -71,6 +71,9 @@ function workspaceScoped(slug: string) {
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     knowledge: () => `${ws}/knowledge`,
+    pipeline: () => `${ws}/pipeline`,
+    // The pipeline board filtered to one owner squad (the Office room badge).
+    pipelineForSquad: (squadId: string) => `${ws}/pipeline?squad=${encode(squadId)}`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     chat: () => `${ws}/chat`,

@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { initiativeListOptions, type Initiative } from "@multica/core/pipeline";
+import { useWorkspacePaths } from "@multica/core/paths";
 import {
   layoutFloor,
   officeFloorsOptions,
@@ -37,6 +39,7 @@ import { OfficeSquadPanel } from "./office-squad-panel";
 import { OfficeDecisionsDialog } from "./office-decisions-dialog";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
+import { ownedOpenCount } from "../../pipeline/pipeline-filters";
 import { useOfficeAdmin } from "../lib/use-office-admin";
 import { useDecisionQueue } from "../lib/decision-queue";
 import { useSeatAll } from "../lib/use-seat-all";
@@ -46,6 +49,7 @@ const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
 const EMPTY_FLOORS: OfficeFloor[] = [];
 const EMPTY_PROPOSALS: Proposal[] = [];
+const EMPTY_INITIATIVES: Initiative[] = [];
 
 /** True while no live squad holds a seat on any floor. */
 function noSquadSeated(squads: readonly Squad[], floors: readonly OfficeFloor[]): boolean {
@@ -97,6 +101,8 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const userId = useAuthStore((s) => s.user?.id);
   const { data: pendingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
   const { data: revisingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "revising" }));
+  const { data: initiativesAll = EMPTY_INITIATIVES } = useQuery(initiativeListOptions(wsId));
+  const paths = useWorkspacePaths();
   // The queue leaves out proposals put aside with Decide later until their date.
   const { needsDecision: pending } = useDecisionQueue(pendingAll);
   // The dialog lists the whole decision book: the queue, the put aside and the revising.
@@ -138,6 +144,10 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const pendingBySlot = useMemo(
     () => layout.rooms.map((room) => (room.squad ? pending.filter((proposal) => proposal.squad_id === room.squad?.id).length : 0)),
     [layout, pending],
+  );
+  const initiativesBySlot = useMemo(
+    () => layout.rooms.map((room) => (room.squad ? ownedOpenCount(initiativesAll, room.squad.id) : 0)),
+    [layout, initiativesAll],
   );
   const [decisionsOpen, setDecisionsOpen] = useState(false);
 
@@ -262,9 +272,11 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
                 stage={stage}
                 rooms={layout.rooms}
                 pendingBySlot={pendingBySlot}
+                initiativesBySlot={initiativesBySlot}
                 onCreateSquad={openCreateSquad}
                 onOpenSquad={openSquad}
                 onOpenDecisions={() => setDecisionsOpen(true)}
+                onOpenPipeline={(squadId) => navigation.push(paths.pipelineForSquad(squadId))}
               />
             </>
           )}

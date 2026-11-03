@@ -484,3 +484,20 @@ func TestProposalListAcceptsTheLifecycleStates(t *testing.T) {
 		t.Fatalf("error = %v, want the valid states listed", err)
 	}
 }
+
+func TestProposalDecideRefusesAMalformedOutcomeBeforeCallingTheServer(t *testing.T) {
+	cmd := proposalDecideCmd
+	if err := cmd.Flags().Set("decision", "approve"); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Flags().Set("decision", "")
+	if err := cmd.Flags().Set("outcome", "delete"); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Flags().Set("outcome", "")
+
+	err := runProposalDecide(cmd, []string{"11111111-1111-1111-1111-111111111111"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --outcome") {
+		t.Fatalf("a malformed outcome must be refused client side, got %v", err)
+	}
+}

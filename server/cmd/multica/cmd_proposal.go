@@ -252,6 +252,10 @@ func runProposalCreate(cmd *cobra.Command, _ []string) error {
 	in.HandoffSquad, _ = cmd.Flags().GetString("handoff-squad")
 	in.Urgent, _ = cmd.Flags().GetBool("urgent")
 	in.UrgentReason, _ = cmd.Flags().GetString("urgent-reason")
+	kind, payload, err := proposalKindFromFlags(cmd)
+	if err != nil {
+		return err
+	}
 	if err := in.validate(); err != nil {
 		return err
 	}
@@ -275,7 +279,12 @@ func runProposalCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/proposals", in.body(squadID, handoffID), &result); err != nil {
+	body := in.body(squadID, handoffID)
+	if kind != "" && kind != "decision" {
+		body["kind"] = kind
+		body["payload"] = payload
+	}
+	if err := client.PostJSON(ctx, "/api/proposals", body, &result); err != nil {
 		return proposalLimitError(err)
 	}
 
@@ -434,6 +443,11 @@ func addProposalCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().String("squad", "", "Proposing squad (id or name) — required")
 	addProposalBodyFlags(cmd)
 	cmd.Flags().String("handoff-squad", "", "Squad (id or name) that starts the work if the boss approves")
+	cmd.Flags().String("kind", "decision", "Proposal kind: decision (the default) or opportunity. Stage gates are filed by the system")
+	cmd.Flags().String("thesis", "", "Opportunity: why this is worth doing — required with --kind opportunity")
+	cmd.Flags().String("market", "", "Opportunity: the market it is in")
+	cmd.Flags().StringArray("evidence-doc", nil, "Opportunity: a knowledge document id that supports it; repeat for more")
+	cmd.Flags().String("target-stage", "", "Opportunity: the pipeline stage it starts at (default validate)")
 	cmd.Flags().Bool("urgent", false, "Only for a decision that cannot wait a day; assigns the boss at once")
 	cmd.Flags().String("urgent-reason", "", "Why this cannot wait a day — required with --urgent")
 }
@@ -453,8 +467,101 @@ func init() {
 	addProposalCreateFlags(proposalCreateCmd)
 	addProposalReviseFlags(proposalReviseCmd)
 	addProposalListFlags(proposalListCmd)
+	proposalDecideCmd.Flags().String("decision", "", "approve or reject — required")
+	proposalDecideCmd.Flags().String("note", "", "Why the proposal is rejected; optional on approval")
+	proposalDecideCmd.Flags().String("outcome", "", "At an operate review gate: continue, scale or sunset. Required to approve one")
 
 	proposalCmd.AddCommand(proposalCreateCmd)
 	proposalCmd.AddCommand(proposalReviseCmd)
 	proposalCmd.AddCommand(proposalListCmd)
+	proposalCmd.AddCommand(proposalDecideCmd)
+}
+
+// proposalDecideCmd settles a proposal the boss can decide. The server refuses an
+// agent, so this runs for a person with an owner or admin login.
+var proposalDecideCmd = &cobra.Command{
+	Use:   "decide <proposal-id>",
+	Short: "Approve or reject a proposal; an operate review takes an outcome",
+	Long: `Approve or reject a pending proposal. An operate-stage review gate (at 30 and
+90 days after launch) is approved with its outcome:
+
+  multica proposal decide <proposal-id> --decision approve --outcome continue
+  multica proposal decide <proposal-id> --decision approve --outcome scale
+  multica proposal decide <proposal-id> --decision approve --outcome sunset
+
+Continue keeps the initiative operating; scale starts a follow-on at Define;
+sunset closes it. Other gates and proposals take no outcome.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runProposalDecide,
+}
+
+// proposalDecideOutcomes are the outcomes of an operate review, as the server accepts them.
+var proposalDecideOutcomes = []string{"continue", "scale", "sunset"}
+
+func runProposalDecide(cmd *cobra.Command, args []string) error {
+	id := strings.TrimSpace(args[0])
+	if !uuidPattern.MatchString(id) {
+		return fmt.Errorf("proposal id must be a UUID; find it with `multica proposal list --state pending`")
+	}
+	decision, _ := cmd.Flags().GetString("decision")
+	if decision != "approve" && decision != "reject" {
+		return fmt.Errorf("--decision must be approve or reject")
+	}
+	outcome, _ := cmd.Flags().GetString("outcome")
+	if outcome != "" && !containsString(proposalDecideOutcomes, outcome) {
+		return fmt.Errorf("invalid --outcome %q; valid values: %s", outcome, strings.Join(proposalDecideOutcomes, ", "))
+	}
+	note, _ := cmd.Flags().GetString("note")
+	body := map[string]any{"decision": decision, "note": strings.TrimSpace(note), "outcome": outcome}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/proposals/"+url.PathEscape(id)+"/decision", body, &result); err != nil {
+		return err
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Proposal %s: %s\n", strVal(result, "id"), decision+"d")
+	return nil
+}
+
+// proposalKindFromFlags reads --kind and the kind's own flags. The decision kind
+// has no payload. An opportunity needs its thesis; its other fields are optional.
+// A kind the CLI does not know is sent as given, and the server refuses it.
+func proposalKindFromFlags(cmd *cobra.Command) (string, map[string]any, error) {
+	kind, _ := cmd.Flags().GetString("kind")
+	thesis, _ := cmd.Flags().GetString("thesis")
+	market, _ := cmd.Flags().GetString("market")
+	docs, _ := cmd.Flags().GetStringArray("evidence-doc")
+	target, _ := cmd.Flags().GetString("target-stage")
+	if kind == "" || kind == "decision" {
+		if thesis != "" || market != "" || len(docs) > 0 || target != "" {
+			return "", nil, fmt.Errorf("--thesis, --market, --evidence-doc and --target-stage need --kind opportunity")
+		}
+		return "decision", nil, nil
+	}
+	if kind != "opportunity" {
+		return kind, map[string]any{}, nil
+	}
+	if thesis == "" {
+		return "", nil, fmt.Errorf("--thesis is required with --kind opportunity: say why this is worth doing")
+	}
+	payload := map[string]any{"thesis": thesis}
+	if market != "" {
+		payload["market"] = market
+	}
+	if len(docs) > 0 {
+		payload["evidence_doc_ids"] = docs
+	}
+	if target != "" {
+		payload["target_stage"] = target
+	}
+	return kind, payload, nil
 }

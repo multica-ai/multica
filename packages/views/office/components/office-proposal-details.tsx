@@ -4,11 +4,15 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   isProposalSnoozed,
+  opportunityPayloadOf,
   proposalRevisionsOptions,
+  stageGatePayloadOf,
   type Proposal,
+  type ProposalKind,
   type ProposalRelated,
   type ProposalState,
 } from "@multica/core/office";
+import { initiativeDetailOptions } from "@multica/core/pipeline";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -16,6 +20,7 @@ import { ChevronDown, ChevronRight } from "@multica/ui/icons";
 import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT, useTimeAgo } from "../../i18n";
 import { AppLink } from "../../navigation";
+import { humanizeKey } from "../../pipeline/key-label";
 
 
 /** A snooze date as the server stores it (midnight UTC), shown on the UTC day it names. */
@@ -56,6 +61,147 @@ export function OfficeProposalStatus({ proposal, squadName }: { proposal: Propos
           <p className="whitespace-pre-line text-body">{proposal.decision_note}</p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The kind of a proposal, as a small label. A plain decision has none: it is
+ * the question the queue has always asked. An unknown kind reads as "Other".
+ */
+export function OfficeProposalKindLabel({ kind }: { kind: ProposalKind }) {
+  const { t } = useT("pipeline");
+  if (kind === "decision") return null;
+  return <span className="text-caption font-medium text-muted-foreground">{t(($) => $.kind.label[kind])}</span>;
+}
+
+/**
+ * What a kind asks the boss, beyond its title: an opportunity's thesis and
+ * evidence, a stage gate's artifact checklist and the leader's attestation.
+ * A decision, or a kind this client does not know, shows nothing extra.
+ */
+export function OfficeProposalKindSummary({ proposal }: { proposal: Proposal }) {
+  switch (proposal.kind) {
+    case "opportunity":
+      return <OpportunitySummary proposal={proposal} />;
+    case "stage_gate":
+      return <StageGateSummary proposal={proposal} />;
+    default:
+      return null;
+  }
+}
+
+function OpportunitySummary({ proposal }: { proposal: Proposal }) {
+  const { t } = useT("pipeline");
+  const paths = useWorkspacePaths();
+  const payload = opportunityPayloadOf(proposal);
+  return (
+    <div className="flex flex-col gap-3">
+      {payload.thesis ? (
+        <section className="flex flex-col gap-1">
+          <h4 className="text-caption font-medium text-muted-foreground">{t(($) => $.opportunity.thesis)}</h4>
+          <p className="whitespace-pre-line text-body">{payload.thesis}</p>
+        </section>
+      ) : null}
+      {payload.market ? (
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.opportunity.market)}: <span className="text-foreground">{payload.market}</span>
+        </p>
+      ) : null}
+      <section className="flex flex-col gap-1">
+        <h4 className="text-caption font-medium text-muted-foreground">{t(($) => $.opportunity.evidence)}</h4>
+        {payload.evidence_doc_ids.length > 0 ? (
+          <ul className="flex flex-col gap-1">
+            {payload.evidence_doc_ids.map((id, index) => (
+              <li key={id}>
+                <AppLink href={paths.knowledge()} className="text-body text-primary hover:underline">
+                  {t(($) => $.opportunity.evidence_item, { index: index + 1 })}
+                </AppLink>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-caption text-muted-foreground">{t(($) => $.opportunity.no_evidence)}</p>
+        )}
+      </section>
+      {payload.target_stage ? (
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.opportunity.target_stage, { stage: humanizeKey(payload.target_stage) })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function StageGateSummary({ proposal }: { proposal: Proposal }) {
+  const { t } = useT("pipeline");
+  const wsId = useWorkspaceId();
+  const timeAgo = useTimeAgo();
+  const { getActorName } = useActorName();
+  const payload = stageGatePayloadOf(proposal);
+  const detail = useQuery({
+    ...initiativeDetailOptions(wsId, payload.initiative_id),
+    enabled: !!wsId && !!payload.initiative_id,
+  });
+
+  if (!payload.initiative_id || (detail.isError && !detail.data)) {
+    return <p className="text-caption text-muted-foreground">{t(($) => $.stage_gate.unavailable)}</p>;
+  }
+  if (detail.isPending) {
+    return <p className="text-caption text-muted-foreground">{t(($) => $.panel.loading)}</p>;
+  }
+  const data = detail.data;
+  if (!data || !data.initiative.id) {
+    return <p className="text-caption text-muted-foreground">{t(($) => $.stage_gate.unavailable)}</p>;
+  }
+
+  const checklist = data.artifacts.filter((artifact) => artifact.stage_key === payload.from);
+  const attestation = data.events.find(
+    (event) => event.kind === "attested" && event.from_stage === payload.from,
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-body font-medium">
+        {t(($) => $.stage_gate.moving, { from: humanizeKey(payload.from), to: humanizeKey(payload.to) })}
+      </p>
+      <section className="flex flex-col gap-1">
+        <h4 className="text-caption font-medium text-muted-foreground">{t(($) => $.stage_gate.checklist)}</h4>
+        {checklist.length > 0 ? (
+          <ul className="flex flex-col gap-1 text-body">
+            {checklist.map((artifact) => (
+              <li key={artifact.kind} className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 truncate">{humanizeKey(artifact.kind)}</span>
+                <span className="shrink-0 text-caption text-muted-foreground">
+                  {artifact.knowledge_link_id
+                    ? t(($) => $.artifact.published)
+                    : artifact.waived
+                      ? t(($) => $.artifact.waived)
+                      : t(($) => $.artifact.missing)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-caption text-muted-foreground">{t(($) => $.stage_gate.checklist_empty)}</p>
+        )}
+      </section>
+      <section className="flex flex-col gap-1">
+        <h4 className="text-caption font-medium text-muted-foreground">{t(($) => $.stage_gate.attestation)}</h4>
+        {attestation ? (
+          <>
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.stage_gate.attested_by, {
+                name: getActorName(attestation.actor_type, attestation.actor_id ?? ""),
+                time: timeAgo(attestation.created_at),
+              })}
+            </p>
+            {attestation.note ? <p className="whitespace-pre-line text-body">{attestation.note}</p> : null}
+          </>
+        ) : (
+          <p className="text-caption text-muted-foreground">{t(($) => $.stage_gate.not_attested)}</p>
+        )}
+      </section>
     </div>
   );
 }

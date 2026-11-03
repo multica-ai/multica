@@ -462,6 +462,74 @@
         "ux_designer": {
           "name": "Designer UX",
           "description": "Conçoit écrans, états et design system à partir des exigences, en réutilisant d'abord l'existant."
+        },
+        "knowledge_curator": {
+          "name": "Bibliothécaire",
+          "description": "Trie les brouillons chaque jour, et contrôle la fraîcheur, la recherche et la taxonomie de la base."
+        },
+        "opportunity_lead": {
+          "name": "Responsable des opportunités",
+          "description": "Fixe la question de la semaine et ne dépose que les opportunités étayées par des preuves."
+        },
+        "opportunity_analyst": {
+          "name": "Analyste d'opportunités",
+          "description": "Chiffre un candidat sous forme de fourchette, avec ses hypothèses et les preuves contraires."
+        },
+        "competitor_lead": {
+          "name": "Responsable concurrence",
+          "description": "Mène la veille hebdomadaire et les profils mensuels des concurrents, chaque affirmation étant sourcée."
+        },
+        "customer_lead": {
+          "name": "Responsable client",
+          "description": "Classe chaque semaine les signaux du support par thème, et rédige l'analyse client mensuelle."
+        },
+        "discovery_lead": {
+          "name": "Responsable découverte",
+          "description": "Valide une opportunité sur preuves, et recommande au patron de poursuivre ou d'arrêter."
+        },
+        "validation_analyst": {
+          "name": "Analyste de validation",
+          "description": "Teste chaque partie de la thèse d'une opportunité contre les preuves clients et marché."
+        },
+        "product_analysis_lead": {
+          "name": "Responsable analyse produit",
+          "description": "Rédige le brief produit, et vérifie chaque chiffre de l'analyse par rapport à son hypothèse."
+        },
+        "feasibility_analyst": {
+          "name": "Analyste de faisabilité",
+          "description": "Évalue coût, rendement et faisabilité, en précisant chaque hypothèse et sa source."
+        },
+        "planning_lead": {
+          "name": "Responsable planification",
+          "description": "Rédige la feuille de route, le plan de lancement et la demande budgétaire, pour approbation du patron avec le plan."
+        },
+        "prd_writer": {
+          "name": "Rédacteur de PRD",
+          "description": "Rédige chaque exigence avec un critère d'acceptation vérifiable par un testeur."
+        },
+        "release_lead": {
+          "name": "Responsable de release",
+          "description": "Tient la liste de lancement et les notes de version, et prépare la mise en ligne pour la décision du patron."
+        },
+        "growth_lead": {
+          "name": "Responsable croissance",
+          "description": "Rédige le plan de mise sur le marché et, chaque semaine, le rapport d'indicateurs des initiatives lancées."
+        },
+        "support_lead": {
+          "name": "Responsable support",
+          "description": "Trie chaque jour les demandes clients, transmet les bugs avec leurs étapes de reproduction, et enrichit la base de connaissances."
+        },
+        "support_agent": {
+          "name": "Agent de support",
+          "description": "Répond aux demandes clients à partir des connaissances de l'entreprise, et transmet ce qu'il ne peut pas résoudre."
+        },
+        "finance_lead": {
+          "name": "Responsable finance",
+          "description": "Examine les propositions de dépenses soumises par le patron et tient le registre des risques à jour. N'approuve rien."
+        },
+        "people_performance": {
+          "name": "Responsable personnes",
+          "description": "Examine le bilan de chaque équipe au regard de sa charte et signale ce qui est en retard ou silencieux. Ne fixe aucun objectif."
         }
       }
     },

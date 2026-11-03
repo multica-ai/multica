@@ -2026,7 +2026,120 @@
     "attention_pin_clear": "取消固定",
     "attention_pin_saved": "已固定上限",
     "attention_pin_cleared": "已取消固定",
-    "attention_pin_failed": "无法修改上限"
+    "attention_pin_failed": "无法修改上限",
+    "company_entry": "组建你的公司",
+    "company_title": "组建你的公司",
+    "company_intro": "安装入门公司：小队、智能体、例行任务、流水线和知识库。再次运行会保留已有内容。",
+    "company_loading": "加载中…",
+    "company_model": "模型（可选）",
+    "company_model_placeholder": "运行时默认",
+    "company_squads": "小队",
+    "company_select_all": "全选",
+    "company_clear": "清空",
+    "company_squad_existing": "已存在",
+    "company_no_squad": "至少选择一个小队。",
+    "company_unowned": "没有负责小队的阶段：{{stages}}。在选中负责它们的小队之前，这些阶段没有负责人。",
+    "company_estimate": "约每周 {{runs}} 次运行，约每周 {{cost}}。",
+    "company_estimate_default": "在本工作区有实测平均值之前，费用按每次运行 {{rate}} 的默认值计算。",
+    "company_estimate_none": "此选择不会运行任何例行任务。",
+    "company_start": "何时启动例行任务",
+    "company_start_all": "启动全部例行任务",
+    "company_start_all_hint": "所选小队的每个例行任务都按计划运行。",
+    "company_start_per_floor": "按楼层启动",
+    "company_start_per_floor_hint": "每层启动其主要例行任务，其余保持暂停。",
+    "company_start_leave_paused": "保持暂停",
+    "company_start_leave_paused_hint": "只运行秘书的每日简报和市场扫描。",
+    "company_submit": "组建公司",
+    "company_applying": "正在组建你的公司…",
+    "company_cancel": "取消",
+    "company_close": "关闭",
+    "company_retry": "重新运行",
+    "company_done_title": "你的公司已组建完成",
+    "company_failed_title": "完成，但有问题",
+    "company_failed_message": "部分步骤未完成。重新运行会补齐缺少的部分，并保留已有内容。",
+    "company_unconfirmed": "无法读取服务器的回复，因此无法确认任何结果。重新运行是安全的。",
+    "company_errored": "无法组建公司。尚无任何结果得到确认；重新运行是安全的。",
+    "company_done_toast": "公司已组建",
+    "company_error_toast": "无法组建公司",
+    "company_step_created": "已创建",
+    "company_step_reused": "已存在",
+    "company_step_failed": "失败",
+    "company_steps": "步骤",
+    "company_floors": {
+      "executive": "管理",
+      "research": "研究",
+      "product": "产品",
+      "build": "构建",
+      "launch": "发布",
+      "governance": "治理"
+    },
+    "company_stages": {
+      "validate": "验证",
+      "define": "定义",
+      "plan": "规划",
+      "build": "构建",
+      "launch": "发布",
+      "operate": "运营",
+      "learn": "复盘"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "行政办公室",
+        "description": "秘书与图书管理员统筹公司：每日简报与知识库。"
+      },
+      "market_research": {
+        "name": "市场调研",
+        "description": "每周扫描市场，只提交有证据支持的提案。"
+      },
+      "opportunity_lab": {
+        "name": "机会实验室",
+        "description": "每周生成并评估产品机会。"
+      },
+      "competitor_intelligence": {
+        "name": "竞品情报",
+        "description": "每周跟踪竞争对手，并为每家维护有来源的档案。"
+      },
+      "customer_voice": {
+        "name": "客户之声",
+        "description": "把支持请求和反馈整理成客户洞察。"
+      },
+      "product_discovery": {
+        "name": "产品探索",
+        "description": "验证机会，并建议哪些值得做成产品。"
+      },
+      "product_analysis": {
+        "name": "产品分析",
+        "description": "撰写产品简报、经济性与可行性分析，以及风险登记册。"
+      },
+      "planning": {
+        "name": "规划",
+        "description": "撰写 PRD、路线图、发布大纲和预算申请。"
+      },
+      "build": {
+        "name": "构建",
+        "description": "通过 SDLC 工作流构建并验证产品，并负责复盘。"
+      },
+      "release_ops": {
+        "name": "发布与运维",
+        "description": "维护上线清单和发布说明，并为老板的上线决定做好准备。"
+      },
+      "growth_gtm": {
+        "name": "增长与市场进入",
+        "description": "制定市场推广计划，并每周汇报各上线项目的增长指标。"
+      },
+      "support": {
+        "name": "客户支持",
+        "description": "上线后回应客户，升级缺陷，并把答案写回知识库。"
+      },
+      "finance_risk": {
+        "name": "财务与风险",
+        "description": "审查支出提案，并保持风险登记册的时效。"
+      },
+      "people_performance": {
+        "name": "人员与绩效",
+        "description": "每周对照章程审查各小组的记录，并报告延误或沉默的事项。"
+      }
+    }
   },
   "views": {
     "builtin": {

@@ -22,6 +22,7 @@ import { docsLocalePrefix } from "../../common/docs-locale";
 import { useT } from "../../i18n";
 import { DOCS_URL } from "../../layout/help-links";
 import { useOfficeAdmin } from "../lib/use-office-admin";
+import { OfficeCompanyWizard } from "./office-company-wizard";
 
 const MARKET_RESEARCH = SQUAD_TEMPLATES.find((template) => template.id === "market_research")!;
 
@@ -41,6 +42,7 @@ export function OfficeSetupCard() {
   const setup = useSetupOffice(wsId);
   const quickstart = useSquadQuickstart(wsId);
   const [refusal, setRefusal] = useState<OfficeSetupRefusal | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
 
   const readiness = readinessQuery.data;
   if (!readiness) return null;
@@ -166,6 +168,14 @@ export function OfficeSetupCard() {
         </div>
       ) : null}
 
+      {ready && canManage ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button type="button" onClick={() => setCompanyOpen(true)}>
+            {t(($) => $.office.company_entry)}
+          </Button>
+        </div>
+      ) : null}
+
       {ready && canManage && !marketResearchExists ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Button
@@ -182,6 +192,9 @@ export function OfficeSetupCard() {
             <p className="text-caption text-muted-foreground">{t(($) => $.office.setup_market_no_runtime)}</p>
           ) : null}
         </div>
+      ) : null}
+      {companyOpen ? (
+        <OfficeCompanyWizard open onClose={() => setCompanyOpen(false)} />
       ) : null}
     </section>
   );

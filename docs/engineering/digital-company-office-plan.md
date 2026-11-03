@@ -341,7 +341,7 @@ defaults) are stubbed and completed in 11.2, 11.8 and 11.9.
 ## Implementation status
 
 Measured against the code on `main`. "Done" means implemented and covered by tests that
-ran; "Open" means specified here and not built. WS9 is built on the phase 2 branch; WS10 to WS12 are open.
+ran; "Open" means specified here and not built. WS9 is built on the phase 2 branch and WS10 on the phase 3 branch; WS11 and WS12 are open.
 
 | Area | Status | Notes |
 |---|---|---|
@@ -356,7 +356,7 @@ ran; "Open" means specified here and not built. WS9 is built on the phase 2 bran
 | WS8 Docs | Done for phase 1 | en, fr, ja, ko, zh; the new phases are in 12.1. |
 | Phase 1 acceptance in a browser | Partly done | `office-first-loop` passes; the full Playwright suite is slow here and unclassified. |
 | WS9 Phase 2 completion | Built on `feat/digital-company-office-phase2`, not yet merged | Steps 9.1 to 9.14 are built; Slack and Lark (9.11a, 9.11b) are built, and DingTalk and WeCom are not built. Playwright spec `e2e/phase2-office.spec.ts` passes locally (one test, two runs). Manual sign-off is in `docs/engineering/runbooks/phase2.md`. |
-| WS10 Phase 3 | Open | 10.1 to 10.20. |
+| WS10 Phase 3 | Built on `feat/digital-company-office-phase3`, not yet merged | Steps 10.1 to 10.20 are built and unit-tested, and the initiative controls and issue thread (10.15) are in the pipeline panel. Upload heading checks cover `.md`, `.txt`, `.docx` and `.pdf` (10.12); they agreed with WeKnora's own parse on four live samples. Open or partial: 10.11 models, Wiki and summaries are not run live (needs the model endpoint); 10.12 repo-docs sync has no HTTP endpoint or UI and no live git test; 10.8 brief FYI for automatic publishes; 10.9 freshness routines report and open review issues only. Acceptance: `e2e/phase3-office.spec.ts` and `e2e/phase3-pipeline-ui.spec.ts` pass with WeKnora-dependent steps skipped; runbook `docs/engineering/runbooks/phase3.md` is unsigned. Deviations are in the spec's "Phase 3 deviations". |
 | WS11 Phase 4 | Open | 11.1 to 11.21. |
 | WS12 Release | Open | 12.1 to 12.5. |
 

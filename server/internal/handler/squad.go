@@ -637,6 +637,7 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to archive squad")
 		return
 	}
+	h.recomputeSquadKnowledgeAccess(r, squad.WorkspaceID, squad.ID)
 
 	h.publishAgentsChanged(workspaceID, userID, rehomed)
 	h.publish(protocol.EventSquadDeleted, workspaceID, "member", userID, map[string]any{
@@ -976,6 +977,9 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	if homed != nil {
 		h.publishAgentsChanged(workspaceID, requestUserID(r), []db.Agent{*homed})
 	}
+	if req.MemberType == "agent" {
+		h.recomputeKnowledgeAccess(r, wsUUID, memberUUID)
+	}
 	writeJSON(w, http.StatusCreated, squadMemberToResponse(sm))
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
@@ -1054,6 +1058,9 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publishAgentsChanged(workspaceID, requestUserID(r), rehomed)
+	if req.MemberType == "agent" {
+		h.recomputeKnowledgeAccess(r, squad.WorkspaceID, memberUUID)
+	}
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})

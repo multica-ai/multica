@@ -17,6 +17,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/lmittmann/tint v1.2.0
 	github.com/mattn/go-shellwords v1.0.14
 	github.com/oklog/ulid/v2 v2.1.2

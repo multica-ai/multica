@@ -2100,7 +2100,120 @@
     "attention_pin_clear": "Retirer la fixation",
     "attention_pin_saved": "Limites fixées",
     "attention_pin_cleared": "Fixation retirée",
-    "attention_pin_failed": "Impossible de modifier les limites"
+    "attention_pin_failed": "Impossible de modifier les limites",
+    "company_entry": "Construire votre entreprise",
+    "company_title": "Construire votre entreprise",
+    "company_intro": "Installe l'entreprise de départ : squads, agents, routines, pipeline et base de connaissances. Relancer ne modifie pas ce qui existe déjà.",
+    "company_loading": "Chargement…",
+    "company_model": "Modèle (facultatif)",
+    "company_model_placeholder": "Par défaut du runtime",
+    "company_squads": "Squads",
+    "company_select_all": "Tout sélectionner",
+    "company_clear": "Tout désélectionner",
+    "company_squad_existing": "Déjà présent",
+    "company_no_squad": "Choisissez au moins un squad.",
+    "company_unowned": "Étapes sans responsable : {{stages}}. Elles restent sans responsable tant qu'un squad qui les porte n'est pas sélectionné.",
+    "company_estimate": "Environ {{runs}} exécutions par semaine, soit environ {{cost}} par semaine.",
+    "company_estimate_default": "Le coût utilise une valeur par défaut de {{rate}} par exécution, jusqu'à ce que l'espace de travail dispose d'une moyenne mesurée.",
+    "company_estimate_none": "Ce choix ne lance aucune routine.",
+    "company_start": "Quand démarrer les routines",
+    "company_start_all": "Démarrer toutes les routines",
+    "company_start_all_hint": "Chaque routine des squads choisis s'exécute selon son planning.",
+    "company_start_per_floor": "Démarrer par étage",
+    "company_start_per_floor_hint": "Chaque étage démarre sa routine principale ; les autres restent en pause.",
+    "company_start_leave_paused": "Laisser en pause",
+    "company_start_leave_paused_hint": "Seuls le briefing quotidien du Secrétaire et le scan de marché tournent.",
+    "company_submit": "Construire l'entreprise",
+    "company_applying": "Construction de votre entreprise…",
+    "company_cancel": "Annuler",
+    "company_close": "Fermer",
+    "company_retry": "Relancer",
+    "company_done_title": "Votre entreprise est prête",
+    "company_failed_title": "Terminé avec des problèmes",
+    "company_failed_message": "Certaines étapes ne sont pas terminées. Relancer complète ce qui manque et conserve ce qui existe.",
+    "company_unconfirmed": "La réponse du serveur n'a pas pu être lue, donc rien n'est confirmé. Relancer est sans risque.",
+    "company_errored": "L'entreprise n'a pas pu être construite. Rien n'est confirmé ; relancer est sans risque.",
+    "company_done_toast": "Entreprise configurée",
+    "company_error_toast": "Impossible de construire l'entreprise",
+    "company_step_created": "Créé",
+    "company_step_reused": "Déjà présent",
+    "company_step_failed": "Échec",
+    "company_steps": "Étapes",
+    "company_floors": {
+      "executive": "Direction",
+      "research": "Recherche",
+      "product": "Produit",
+      "build": "Build",
+      "launch": "Lancement",
+      "governance": "Gouvernance"
+    },
+    "company_stages": {
+      "validate": "Valider",
+      "define": "Définir",
+      "plan": "Planifier",
+      "build": "Construire",
+      "launch": "Lancer",
+      "operate": "Opérer",
+      "learn": "Apprendre"
+    },
+    "company_cards": {
+      "executive_office": {
+        "name": "Bureau exécutif",
+        "description": "Le Secrétaire et le Bibliothécaire font tourner l'entreprise : le briefing et la base de connaissances."
+      },
+      "market_research": {
+        "name": "Étude de marché",
+        "description": "Scanne le marché chaque semaine et ne dépose que les propositions étayées."
+      },
+      "opportunity_lab": {
+        "name": "Laboratoire d'opportunités",
+        "description": "Génère et chiffre chaque semaine des opportunités produit."
+      },
+      "competitor_intelligence": {
+        "name": "Veille concurrentielle",
+        "description": "Surveille les concurrents chaque semaine et tient à jour un profil sourcé de chacun."
+      },
+      "customer_voice": {
+        "name": "Voix du client",
+        "description": "Transforme les demandes de support et les retours en connaissance client."
+      },
+      "product_discovery": {
+        "name": "Découverte produit",
+        "description": "Valide les opportunités et recommande celles qui méritent un produit."
+      },
+      "product_analysis": {
+        "name": "Analyse produit",
+        "description": "Rédige le brief produit, l'analyse économique et de faisabilité, et le registre des risques."
+      },
+      "planning": {
+        "name": "Planification",
+        "description": "Rédige le PRD, la feuille de route, le plan de lancement et la demande budgétaire."
+      },
+      "build": {
+        "name": "Build",
+        "description": "Construit et vérifie le produit par le flux SDLC, et conduit la rétrospective."
+      },
+      "release_ops": {
+        "name": "Release & Ops",
+        "description": "Tient la liste de lancement et les notes de version, et prépare la mise en ligne pour la décision du patron."
+      },
+      "growth_gtm": {
+        "name": "Croissance & GTM",
+        "description": "Prépare la mise sur le marché et rapporte chaque semaine les indicateurs de croissance de chaque initiative lancée."
+      },
+      "support": {
+        "name": "Support",
+        "description": "Répond aux clients après le lancement, transmet les bugs et enrichit la base de connaissances."
+      },
+      "finance_risk": {
+        "name": "Finance & Risques",
+        "description": "Examine les propositions de dépenses et tient le registre des risques à jour."
+      },
+      "people_performance": {
+        "name": "Personnes & performance",
+        "description": "Suit chaque semaine le bilan de chaque équipe au regard de sa charte, et signale ce qui est en retard ou silencieux."
+      }
+    }
   },
   "views": {
     "builtin": {

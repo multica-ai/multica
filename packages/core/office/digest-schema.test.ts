@@ -296,3 +296,59 @@ describe("digestKeys", () => {
     expect(digestKeys.since("w1")).not.toEqual(digestKeys.since("w2"));
   });
 });
+
+describe("DigestSchema pipeline and overdue requests", () => {
+  const initiative = {
+    id: "ini-1",
+    identifier: "INI-1",
+    title: "Invoicing",
+    stage_key: "validate",
+    stage_name: "Validate",
+    owner_squad_id: "sq-1",
+    status: "active",
+    days_in_stage: 16,
+    sla_days: 14,
+    stalled: true,
+    artifacts_required: 2,
+    artifacts_present: 1,
+    blockers: ["missing competitor_profile", "stalled: 16 days in Validate, SLA 14"],
+    next_gate: "A go / no-go recommendation with evidence.",
+    pending_gate_proposal_id: null,
+  };
+
+  it("reads each initiative and overdue request", () => {
+    const d = DigestSchema.parse({
+      pipeline: [initiative],
+      overdue_requests: [{ issue_id: "i-9", identifier: "MUL-9", title: "PRD", squad_id: "sq-2", hours_overdue: 30 }],
+    });
+    expect(d.pipeline).toHaveLength(1);
+    expect(d.pipeline[0]).toMatchObject({ identifier: "INI-1", stalled: true, blockers: initiative.blockers });
+    expect(d.overdue_requests[0]).toMatchObject({ identifier: "MUL-9", hours_overdue: 30 });
+  });
+
+  it("reads neither list from an older server as none", () => {
+    const d = DigestSchema.parse({});
+    expect(d.pipeline).toEqual([]);
+    expect(d.overdue_requests).toEqual([]);
+  });
+
+  it("drops a malformed initiative alone and keeps the others", () => {
+    const d = DigestSchema.parse({
+      pipeline: [initiative, "not an object", null, { ...initiative, id: "ini-2", blockers: "oops" }],
+    });
+    expect(d.pipeline.map((p) => p.id)).toEqual(["ini-1", "ini-2"]);
+    expect(d.pipeline[1]?.blockers).toEqual([]);
+  });
+
+  it("treats a non-list pipeline as none and keeps the rest of the digest", () => {
+    const d = DigestSchema.parse({ pipeline: { not: "a list" }, overdue_requests: 3, omitted_squad_count: 2 });
+    expect(d.pipeline).toEqual([]);
+    expect(d.overdue_requests).toEqual([]);
+    expect(d.omitted_squad_count).toBe(2);
+  });
+
+  it("falls back to empty lists when the whole digest is unreadable", () => {
+    expect(FALLBACK_DIGEST.pipeline).toEqual([]);
+    expect(FALLBACK_DIGEST.overdue_requests).toEqual([]);
+  });
+});

@@ -222,6 +222,9 @@ type DigestKnowledge struct {
 	StalePublished DigestKnowledgeStaleList `json:"stale_published"`
 	// PendingDrafts counts drafts awaiting publishing across the bases.
 	PendingDrafts int `json:"pending_drafts"`
+	// Retrieval is the latest eval run against the previous one. Nil until a
+	// run is recorded. A fall beyond EvalDropThreshold carries a risk line.
+	Retrieval *DigestRetrieval `json:"retrieval"`
 }
 
 // Digest is the whole response of GET /api/office/digest.
@@ -238,6 +241,40 @@ type Digest struct {
 	// Inquiries are the Secretary's questions to squad leaders asked today or
 	// yesterday (UTC), newest first. The daily cap keeps the list short.
 	Inquiries []DigestInquiry `json:"inquiries"`
+	// Pipeline lists each initiative that is active or operating (spec 3.7).
+	Pipeline []DigestInitiative `json:"pipeline"`
+	// OverdueRequests are squad requests the receiving squad has not answered
+	// within its response_hours (spec 3.5).
+	OverdueRequests []DigestOverdueRequest `json:"overdue_requests"`
+}
+
+// DigestInitiative is one initiative's place in its pipeline. Stalled is set
+// when the stage has run past its sla_days; it is a flag, not a move.
+type DigestInitiative struct {
+	ID                    string   `json:"id"`
+	Identifier            string   `json:"identifier"`
+	Title                 string   `json:"title"`
+	StageKey              string   `json:"stage_key"`
+	StageName             string   `json:"stage_name"`
+	OwnerSquadID          *string  `json:"owner_squad_id"`
+	Status                string   `json:"status"`
+	DaysInStage           int      `json:"days_in_stage"`
+	SLADays               int      `json:"sla_days"`
+	Stalled               bool     `json:"stalled"`
+	ArtifactsRequired     int      `json:"artifacts_required"`
+	ArtifactsPresent      int      `json:"artifacts_present"`
+	Blockers              []string `json:"blockers"`
+	NextGate              string   `json:"next_gate"`
+	PendingGateProposalID *string  `json:"pending_gate_proposal_id"`
+}
+
+// DigestOverdueRequest is a squad request past the receiving squad's response time.
+type DigestOverdueRequest struct {
+	IssueID      string `json:"issue_id"`
+	Identifier   string `json:"identifier"`
+	Title        string `json:"title"`
+	SquadID      string `json:"squad_id"`
+	HoursOverdue int    `json:"hours_overdue"`
 }
 
 // DigestService computes the digest.
@@ -440,6 +477,14 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	pipeline, err := s.computePipeline(ctx, workspaceID, now)
+	if err != nil {
+		return Digest{}, err
+	}
+	overdue, err := s.computeOverdueRequests(ctx, workspaceID, now, issuePrefix)
+	if err != nil {
+		return Digest{}, err
+	}
 
 	return Digest{
 		Since:             since.UTC().Format(time.RFC3339),
@@ -450,7 +495,126 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		Quiet:             quiet,
 		Knowledge:         know,
 		Inquiries:         inquiries,
+		Pipeline:          pipeline,
+		OverdueRequests:   overdue,
 	}, nil
+}
+
+// computePipeline reports every active or operating initiative: its stage, how
+// long it has been there, whether that is past the stage's SLA, what it is
+// waiting for, and the gate it is waiting at, if any.
+func (s *DigestService) computePipeline(ctx context.Context, workspaceID pgtype.UUID, now time.Time) ([]DigestInitiative, error) {
+	list, err := s.Queries.ListInitiatives(ctx, db.ListInitiativesParams{WorkspaceID: workspaceID})
+	if err != nil {
+		return nil, fmt.Errorf("digest initiatives: %w", err)
+	}
+	out := []DigestInitiative{}
+	if len(list) == 0 {
+		return out, nil
+	}
+	pipelines, err := s.Queries.ListPipelines(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("digest pipelines: %w", err)
+	}
+	stagesByPipeline := make(map[pgtype.UUID][]PipelineStage, len(pipelines))
+	for _, p := range pipelines {
+		var stages []PipelineStage
+		if err := decodeStages(p.Stages, &stages); err != nil {
+			return nil, err
+		}
+		stagesByPipeline[p.ID] = stages
+	}
+	pending := map[string]pgtype.UUID{}
+	gates, err := s.Queries.ListPendingGateProposalsForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("digest pending gates: %w", err)
+	}
+	for _, g := range gates {
+		if _, ok := pending[g.InitiativeID]; !ok {
+			pending[g.InitiativeID] = g.ProposalID
+		}
+	}
+	artifacts, err := s.Queries.ListInitiativeArtifactsForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("digest artifacts: %w", err)
+	}
+	byInitiative := map[string][]db.InitiativeArtifact{}
+	for _, a := range artifacts {
+		key := util.UUIDToString(a.InitiativeID)
+		byInitiative[key] = append(byInitiative[key], a)
+	}
+
+	for _, ini := range list {
+		if ini.Status != InitiativeStatusActive && ini.Status != InitiativeStatusOperating {
+			continue
+		}
+		stages := stagesByPipeline[ini.PipelineID]
+		idx := stageIndex(stages, ini.StageKey)
+		if idx < 0 {
+			continue
+		}
+		stage := stages[idx]
+		days := int(now.Sub(ini.StageEnteredAt.Time).Hours() / 24)
+		item := DigestInitiative{
+			ID:           util.UUIDToString(ini.ID),
+			Identifier:   fmt.Sprintf("INI-%d", ini.Seq),
+			Title:        ini.Title,
+			StageKey:     stage.Key,
+			StageName:    stage.Name,
+			OwnerSquadID: util.UUIDToPtr(ini.OwnerSquadID),
+			Status:       ini.Status,
+			DaysInStage:  days,
+			SLADays:      stage.SLADays,
+			Stalled:      stage.SLADays > 0 && days > stage.SLADays,
+			Blockers:     []string{},
+		}
+		for _, a := range byInitiative[item.ID] {
+			if a.StageKey != stage.Key || !a.Required {
+				continue
+			}
+			item.ArtifactsRequired++
+			if artifactSatisfied(a) {
+				item.ArtifactsPresent++
+			} else {
+				item.Blockers = append(item.Blockers, "missing "+a.Kind)
+			}
+		}
+		if stage.Exit.Mode == PipelineExitGate {
+			item.NextGate = stage.Exit.Criteria
+		}
+		if id, ok := pending[item.ID]; ok {
+			pid := util.UUIDToString(id)
+			item.PendingGateProposalID = &pid
+		}
+		if item.Stalled {
+			item.Blockers = append(item.Blockers, fmt.Sprintf("stalled: %d days in %s, SLA %d", days, stage.Name, stage.SLADays))
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// computeOverdueRequests lists squad requests older than the receiving squad's
+// response_hours.
+func (s *DigestService) computeOverdueRequests(ctx context.Context, workspaceID pgtype.UUID, now time.Time, prefix string) ([]DigestOverdueRequest, error) {
+	rows, err := s.Queries.ListOverdueSquadRequests(ctx, db.ListOverdueSquadRequestsParams{
+		WorkspaceID: workspaceID, Now: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("digest overdue requests: %w", err)
+	}
+	out := make([]DigestOverdueRequest, 0, len(rows))
+	for _, r := range rows {
+		deadline := r.CreatedAt.Time.Add(time.Duration(r.ResponseHours) * time.Hour)
+		out = append(out, DigestOverdueRequest{
+			IssueID:      util.UUIDToString(r.IssueID),
+			Identifier:   IssueIdentifier(prefix, r.Number),
+			Title:        r.Title,
+			SquadID:      util.UUIDToString(r.SquadID),
+			HoursOverdue: int(now.Sub(deadline).Hours()),
+		})
+	}
+	return out, nil
 }
 
 // computeInquiries lists the inquiries asked today or yesterday (UTC). The
@@ -576,6 +740,12 @@ func (s *DigestService) computeKnowledge(ctx context.Context, workspaceID pgtype
 		return know, fmt.Errorf("digest knowledge pending drafts: %w", err)
 	}
 	know.PendingDrafts = int(drafts)
+
+	runs, err := s.Queries.ListKnowledgeEvalRuns(ctx, db.ListKnowledgeEvalRunsParams{WorkspaceID: workspaceID, Limit: 2})
+	if err != nil {
+		return know, fmt.Errorf("digest knowledge eval runs: %w", err)
+	}
+	know.Retrieval = retrievalHealth(runs)
 	return know, nil
 }
 
