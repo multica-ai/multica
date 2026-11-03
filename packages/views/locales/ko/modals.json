@@ -61,6 +61,12 @@
     "toast_failed": "하위 태스크를 추가하지 못했습니다",
     "toast_success": "{{identifier}}을(를) 하위 태스크로 추가했습니다"
   },
+  "add_project_issue": {
+    "title": "기존 태스크 추가",
+    "description": "이 프로젝트로 옮길 태스크를 검색하세요",
+    "toast_success": "{{identifier}}을(를) 프로젝트로 옮겼습니다",
+    "toast_failed": "태스크를 옮기지 못했습니다"
+  },
   "run_confirm": {
     "title_assign": "할당을 확인할까요?",
     "assign_single": "이 태스크를 {{name}}에게 할당합니다. 실행 조건을 충족하면 바로 시작합니다.",

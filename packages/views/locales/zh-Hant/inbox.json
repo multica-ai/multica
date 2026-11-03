@@ -3,6 +3,14 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "sections": {
+    "action": "需要處理",
+    "activity": "動態",
+    "action_empty": "需要你處理的都處理完了",
+    "activity_empty": "暫無動態",
+    "activity_waiting_other": "動態裡還有 {{count}} 條更新，隨時可以看。",
+    "open_activity": "查看動態"
+  },
   "menu": {
     "mark_all_read": "全部標為已讀",
     "archive_all": "歸檔全部",

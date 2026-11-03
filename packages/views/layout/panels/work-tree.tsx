@@ -25,7 +25,15 @@ import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Issue, ListIssuesResponse, Project } from "@multica/core/types";
 import { useT } from "../../i18n";
-import { PanelCount, PanelLink, PanelList, PanelSection, isPathWithin } from "../panel-nav";
+import {
+  PANEL_ROW_CLASS,
+  PanelCount,
+  PanelLink,
+  PanelList,
+  PanelSection,
+  isPathWithin,
+  panelRowStateClass,
+} from "../panel-nav";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
@@ -165,13 +173,32 @@ export function ProjectsSection({
         </SortableContext>
       </DndContext>
       <PanelList className="mt-px">
-        <PanelLink
-          href={p.projects()}
-          icon={<span className="size-4" aria-hidden />}
-          label={t(($) => $.panels.work.all_projects, { count: totalProjects })}
-          active={pathname === p.projects()}
-          className="text-caption"
-        />
+        {totalProjects === 0 ? (
+          <li>
+            <button
+              type="button"
+              className={cn(
+                PANEL_ROW_CLASS,
+                panelRowStateClass(false),
+                "w-full text-caption text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0",
+              )}
+              onClick={() => useModalStore.getState().open("create-project")}
+            >
+              <Plus aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {t(($) => $.panels.work.new_project)}
+              </span>
+            </button>
+          </li>
+        ) : (
+          <PanelLink
+            href={p.projects()}
+            icon={<span className="size-4" aria-hidden />}
+            label={t(($) => $.panels.work.all_projects, { count: totalProjects })}
+            active={pathname === p.projects()}
+            className="text-caption"
+          />
+        )}
       </PanelList>
     </PanelSection>
   );
@@ -251,7 +278,7 @@ function ProjectTreeItem({
             <IconButton
               label={t(($) => $.panels.work.new_issue_in_project, { name: project.title })}
               size="icon-xs"
-              className="absolute -right-1 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              className="absolute -right-2 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => openCreateIssueWithPreference({ project_id: project.id })}
             >

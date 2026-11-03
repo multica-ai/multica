@@ -397,7 +397,7 @@
       "preferences": "Préférences",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
-      "notifications": "Notifications",
+      "notifications": "Boîte de réception",
       "tokens": "Jetons d'API",
       "general": "Général",
       "github": "GitHub",
@@ -653,38 +653,61 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Tri des notifications",
+    "description": "Les changements s'appliquent aux nouvelles notifications.",
+    "reset": "Rétablir les valeurs par défaut",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
-    "groups": {
-      "assignments": {
-        "label": "Assignations",
-        "description": "Quand une tâche vous est assignée ou retirée"
+    "routes": {
+      "action": {
+        "label": "À traiter",
+        "description": "Compte comme non lu, peut envoyer une notification système"
       },
-      "status_changes": {
-        "label": "Changements de statut",
-        "description": "Quand une tâche que vous suivez change de statut (à faire, en cours, terminé…)"
+      "activity": {
+        "label": "Activité",
+        "description": "Consigné discrètement, jamais non lu"
       },
-      "comments": {
-        "label": "Commentaires",
-        "description": "Nouveaux commentaires sur les tâches que vous suivez"
+      "muted": {
+        "label": "Désactivé",
+        "description": "Hors de la boîte de réception ; toujours visible sur la tâche"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "Assigné à moi",
+        "description": "Quand une tâche vous est assignée"
       },
       "mentions": {
         "label": "Mentions",
-        "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
+        "description": "Quand quelqu'un vous @mentionne, y compris @all et @squad"
+      },
+      "member_comments": {
+        "label": "Commentaires des membres",
+        "description": "Quand un membre commente une tâche que vous suivez"
+      },
+      "agent_failures": {
+        "label": "Erreurs d'agent",
+        "description": "Quand l'exécution d'un agent échoue ou est bloquée et requiert votre intervention"
+      },
+      "status_changes": {
+        "label": "Changements de statut",
+        "description": "Quand une tâche que vous suivez change de statut"
+      },
+      "assignee_changes": {
+        "label": "Changements d'assigné",
+        "description": "Quand une tâche change d'assigné, ou que vous n'êtes plus assigné"
       },
       "updates": {
-        "label": "Priorité et date d'échéance",
-        "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
+        "label": "Priorité et dates",
+        "description": "Quand la priorité, la date de début ou l'échéance change"
       },
-      "agent_activity": {
-        "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+      "agent_comments": {
+        "label": "Commentaires d'agent",
+        "description": "Quand un agent répond sur une tâche que vous suivez"
       }
     },
     "system": {
       "title": "Notifications système",
-      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
+      "label": "Envoyer une notification système pour les éléments « À traiter » quand Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",

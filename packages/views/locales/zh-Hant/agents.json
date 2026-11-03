@@ -46,7 +46,15 @@
   },
   "empty": {
     "title": "還沒有 AI 代理",
-    "description": "建立 AI 代理後，即可把任務分配給它。"
+    "description": "AI 代理會接手指派給它的任務，在你的執行時上自己完成。",
+    "setup": {
+      "label": "設定步驟",
+      "runtime": "接入執行時",
+      "agent": "建立 AI 代理",
+      "issue": "指派一個任務給它",
+      "done": "（已完成）",
+      "connect_runtime": "去接入"
+    }
   },
   "no_matches": {
     "title": "無匹配項",
@@ -703,6 +711,7 @@
       "load_failed": "無法載入你已連線的應用，請稍後重試。",
       "empty_title": "還沒有已連線的應用",
       "empty_link_to_settings": "去 \"設定 → 整合\" 連一個",
+      "open_settings": "開啟設定",
       "connected": "已連線",
       "toggle_aria": "允許該 AI 代理使用 {{toolkit}}",
       "saving": "正在儲存…",

@@ -6,7 +6,10 @@ import {
   archivedInboxPagesOptions,
   deduplicateArchivedInboxItems,
   deduplicateInboxItems,
+  groupInboxItemsBySection,
   hasOtherWorkspaceUnread,
+  inboxItemSection,
+  isInboxItemUnread,
   inboxKeys,
   unreadCountForWorkspace,
   unreadWorkspaceIds,
@@ -33,6 +36,32 @@ function item(overrides: Partial<InboxItem>): InboxItem {
     ...overrides,
   };
 }
+
+describe("inbox sections", () => {
+  it("reads a missing or unknown section as action", () => {
+    expect(inboxItemSection(item({}))).toBe("action");
+    expect(inboxItemSection(item({ section: "activity" }))).toBe("activity");
+  });
+
+  it("never treats activity as unread", () => {
+    expect(isInboxItemUnread(item({ read: false, section: "activity" }))).toBe(false);
+    expect(isInboxItemUnread(item({ read: false, section: "action" }))).toBe(true);
+    expect(isInboxItemUnread(item({ read: true, section: "action" }))).toBe(false);
+  });
+
+  it("groups each section per issue, so activity does not move the action row", () => {
+    const { action, activity } = groupInboxItemsBySection([
+      item({ id: "mention", type: "mentioned", section: "action", created_at: "2026-06-15T08:00:00Z" }),
+      item({ id: "other-assign", issue_id: "issue-2", type: "issue_assigned", section: "action", created_at: "2026-06-15T08:01:00Z" }),
+      item({ id: "status", type: "status_changed", section: "activity", created_at: "2026-06-15T08:02:00Z" }),
+      item({ id: "reply", type: "new_comment", section: "activity", created_at: "2026-06-15T08:03:00Z" }),
+      item({ id: "archived", issue_id: "issue-3", section: "activity", archived: true }),
+    ]);
+
+    expect(action.map((i) => i.id)).toEqual(["other-assign", "mention"]);
+    expect(activity.map((i) => i.id)).toEqual(["reply"]);
+  });
+});
 
 describe("deduplicateInboxItems", () => {
   it("keeps the newest issue row while preserving an older comment anchor", () => {

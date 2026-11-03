@@ -325,6 +325,88 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 }
 
+// TestNotification_StatusChanged_Routed verifies that each recipient's routing
+// choice is stored on the row it creates, independent of other subscribers.
+func TestNotification_StatusChanged_Routed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	var published []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) { published = append(published, e) })
+
+	recipients := map[string]string{}
+	for _, name := range []string{"action", "legacy", "default"} {
+		email := "notif-routed-status-" + name + "@multica.ai"
+		recipients[name] = createNotificationMember(t, email)
+		t.Cleanup(func() { cleanupTestUser(t, email) })
+	}
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	for name, prefs := range map[string]string{
+		"action": `{"status_changes":"action"}`,
+		// A muted legacy group must not reach kinds it never covered.
+		"legacy": `{"assignments":"muted"}`,
+	} {
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO notification_preference (workspace_id, user_id, preferences)
+			VALUES ($1, $2, $3::jsonb)
+		`, testWorkspaceID, recipients[name], prefs); err != nil {
+			t.Fatalf("seed %s notification preference: %v", name, err)
+		}
+	}
+	for _, id := range recipients {
+		addTestSubscriber(t, issueID, "member", id, "commenter")
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "routed status test issue",
+				Status:      "in_review",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   true,
+			"prev_status":      "in_progress",
+		},
+	})
+
+	want := map[string]string{"action": "action", "legacy": "activity", "default": "activity"}
+	for name, section := range want {
+		items := inboxItemsForRecipient(t, queries, recipients[name])
+		if len(items) != 1 {
+			t.Fatalf("%s: expected 1 item, got %d", name, len(items))
+		}
+		if !items[0].Section.Valid || items[0].Section.String != section {
+			t.Errorf("%s: stored section = %+v, want %q", name, items[0].Section, section)
+		}
+	}
+	if len(published) != len(want) {
+		t.Fatalf("published %d inbox:new events, want %d", len(published), len(want))
+	}
+	for _, e := range published {
+		payload, _ := e.Payload.(map[string]any)
+		item, _ := payload["item"].(map[string]any)
+		for name, id := range recipients {
+			if item["recipient_id"] == id && item["section"] != want[name] {
+				t.Errorf("%s: inbox:new section = %v, want %q", name, item["section"], want[name])
+			}
+		}
+	}
+}
+
 // TestNotification_StatusChanged_Muted verifies that status_changes="muted"
 // prevents a new Inbox row without affecting other subscribers.
 func TestNotification_StatusChanged_Muted(t *testing.T) {

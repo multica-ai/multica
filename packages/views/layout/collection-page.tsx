@@ -417,53 +417,126 @@ interface CollectionPageStateProps {
   icon: IconComponent;
   title: ReactNode;
   description?: ReactNode;
+  /** One solid button at most: on an empty page it is the page's one action. */
   actions?: ReactNode;
+  /** Below the actions: a quiet link, or content such as starter templates. */
+  children?: ReactNode;
   tone?: PageStateTone;
+  /**
+   * `compact` is for rows hidden by filters or search inside a list that still
+   * shows its header; `default` is for a page with nothing to show.
+   */
+  size?: "default" | "compact";
   role?: "alert" | "status";
   className?: string;
 }
 
 const stateToneClass: Record<PageStateTone, string> = {
   muted: "text-muted-foreground",
-  destructive: "text-destructive",
-  warning: "text-warning",
+  destructive: "bg-destructive/10 text-destructive",
+  warning: "bg-warning/15 text-warning",
 };
 
-/** Shared centered state for collection empty, error and not-found views. */
+/**
+ * The centered state of a page or list with nothing to show: a first-run
+ * empty collection, rows hidden by filters, a missing object or a load error.
+ * A first run says what the collection is for and offers to create one; the
+ * others always offer a way out (clear, go back, retry).
+ */
 export function CollectionPageState({
   icon: Icon,
   title,
   description,
   actions,
+  children,
   tone = "muted",
+  size = "default",
   role,
   className,
 }: CollectionPageStateProps) {
+  const compact = size === "compact";
   return (
     <Empty
       role={role}
-      className={cn("rounded-none border-0 px-6 py-16", className)}
+      className={cn(
+        "rounded-none border-0 px-6",
+        compact ? "gap-3.5 py-12" : "py-16",
+        className,
+      )}
     >
-      <EmptyHeader>
+      <EmptyHeader className={compact ? "gap-0.5" : "gap-1"}>
         <EmptyMedia
           variant="icon"
           className={cn(
-            "size-12 rounded-full [&_svg]:size-6",
+            "rounded-full",
+            compact ? "mb-2.5 size-10 [&_svg]:size-5" : "mb-3 size-12 [&_svg]:size-6",
             stateToneClass[tone],
           )}
         >
           <Icon aria-hidden="true" />
         </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyTitle className={compact ? undefined : "text-title-sm font-semibold"}>
+          {title}
+        </EmptyTitle>
         {description ? (
-          <EmptyDescription className="max-w-md">{description}</EmptyDescription>
+          <EmptyDescription className={cn("max-w-md", compact && "text-label")}>
+            {description}
+          </EmptyDescription>
         ) : null}
       </EmptyHeader>
       {actions ? (
-        <EmptyContent className="mt-1 flex-row justify-center">
+        <EmptyContent className={cn("flex-row flex-wrap justify-center gap-2", !compact && "mt-1")}>
           {actions}
         </EmptyContent>
       ) : null}
+      {children}
     </Empty>
+  );
+}
+
+/**
+ * A list whose filters or search hide every row. It never offers to create:
+ * the rows exist, they are only hidden, so its one action clears what hides
+ * them.
+ */
+export function CollectionNoMatches({
+  title,
+  description,
+  onReset,
+  hasFilters = false,
+  hasSearch = false,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  /** Clears the filters and search; omit when neither is on. */
+  onReset?: () => void;
+  hasFilters?: boolean;
+  hasSearch?: boolean;
+  children?: ReactNode;
+}) {
+  const { t } = useT("layout");
+  const resetLabel =
+    hasFilters && hasSearch
+      ? t(($) => $.collection.clear_filters_and_search)
+      : hasSearch
+        ? t(($) => $.collection.clear_search)
+        : t(($) => $.collection.clear_filters);
+  return (
+    <CollectionPageState
+      size="compact"
+      icon={Search}
+      title={title}
+      description={description}
+      actions={
+        onReset && (hasFilters || hasSearch) ? (
+          <Button type="button" variant="outline" size="sm" onClick={onReset}>
+            {resetLabel}
+          </Button>
+        ) : null
+      }
+    >
+      {children}
+    </CollectionPageState>
   );
 }
