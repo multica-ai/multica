@@ -191,7 +191,9 @@
     "filter_count_few": "{{count}} фильтра",
     "filter_count_many": "{{count}} фильтров",
     "selected_few": "Выбрано: {{count}}",
-    "selected_many": "Выбрано: {{count}}"
+    "selected_many": "Выбрано: {{count}}",
+    "clear_filters": "Сбросить фильтры",
+    "clear_filters_and_search": "Сбросить фильтры и поиск"
   },
   "object_page": {
     "toggle_panel": "Показать или скрыть правую панель",

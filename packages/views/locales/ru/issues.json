@@ -123,7 +123,10 @@
     "breadcrumb_title": "Задачи",
     "breadcrumb_workspace_fallback": "Рабочее пространство",
     "empty_title": "Пока нет задач",
-    "move_failed": "Не удалось переместить задачу"
+    "move_failed": "Не удалось переместить задачу",
+    "empty_description": "Задача — это конкретная работа для участника или агента. Назначьте её агенту, и он начнёт работу в вашей среде выполнения.",
+    "break_down_with_chat": "Разбить на задачи в чате",
+    "break_down_prompt": "Я хочу выполнить следующее. Задай необходимые вопросы, а затем разбей работу на задачи в этом рабочем пространстве:\n\n"
   },
   "status": {
     "backlog": "Бэклог",
@@ -583,7 +586,8 @@
     "pull_request_card_files_count_few": "{{count}} файла",
     "pull_request_card_files_count_many": "{{count}} файлов",
     "thread_nav_show_replies_few": "Показать {{count}} ответа",
-    "thread_nav_show_replies_many": "Показать {{count}} ответов"
+    "thread_nav_show_replies_many": "Показать {{count}} ответов",
+    "not_found_title": "Задача не найдена"
   },
   "timeline": {
     "loading": "Загрузка...",
@@ -999,7 +1003,8 @@
     "day_runs_few": "{{count}} запуска",
     "day_runs_many": "{{count}} запусков",
     "cumulative_aria_few": "Совокупная стоимость во времени: {{cost}} за {{count}} запуска",
-    "cumulative_aria_many": "Совокупная стоимость во времени: {{cost}} за {{count}} запусков"
+    "cumulative_aria_many": "Совокупная стоимость во времени: {{cost}} за {{count}} запусков",
+    "credits_count": "Кредиты {{provider}}: {{credits}}"
   },
   "terminate_dialog": {
     "title": "Остановить этот запуск?",
@@ -1983,7 +1988,8 @@
       "star": "Добавить «{{name}}» на боковую панель",
       "unstar": "Убрать «{{name}}» с боковой панели",
       "row_actions": "Действия с «{{name}}»",
-      "no_matches": "Подходящих представлений нет"
+      "empty_title": "Пока нет сохранённых представлений",
+      "empty_description": "Настройте фильтры и отображение списка задач, а затем сохраните их как представление."
     },
     "filter_count_few": "{{count}} фильтра",
     "filter_count_many": "{{count}} фильтров"

@@ -13,7 +13,8 @@
     },
     "no_matches": "Нет совпадений",
     "row_menu": "Действия с командой",
-    "archive_action": "Архивировать"
+    "archive_action": "Архивировать",
+    "empty_description": "Объединяйте агентов и участников в команду, чтобы назначать задачи всей команде."
   },
   "member_type": {
     "agent": "Агент",
@@ -75,7 +76,9 @@
     "status_unstable": "Нестабильно",
     "status_archived": "Архивирован",
     "issue_status_blocked": "заблокирована",
-    "active_issue_more": "и ещё {{count}}"
+    "active_issue_more": "и ещё {{count}}",
+    "empty_title": "Пока нет участников",
+    "empty_description": "Добавьте агентов или участников, и задачи, назначенные этой команде, будут передаваться им."
   },
   "detail": {
     "assign_work": "Назначить работу",
@@ -88,7 +91,9 @@
     "recent_work": "Недавняя работа",
     "recent_work_empty": "Этому отряду ещё не назначали задач.",
     "member_menu": "Действия для {{name}}",
-    "working_on": "Работает над"
+    "working_on": "Работает над",
+    "not_found_description": "Возможно, она удалена или у вас нет доступа.",
+    "back_to_list": "Все команды"
   },
   "details": {
     "leader": "Лидер",
