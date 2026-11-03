@@ -8,6 +8,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 const hostPresentationAdaptations = [
   {
+    path: "/agentConversation/components/AgentSystemNoticeMessage.tsx",
+    original: 'import type { JSX } from "react";',
+    replacement: 'import type { JSX } from "react";\nimport { SubagentTranscript } from "@multica-subagent-transcript";',
+  },
+  {
     path: "/view/useAgentGUIDetailScroll.ts",
     original: 'const AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX = 240;',
     replacement: 'import { useTimelineEndPosition } from "@multica-timeline-end-position";\n\nconst AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX = 240;',
@@ -106,7 +111,7 @@ const hostPresentationAdaptations = [
   {
     path: "/agentConversation/components/AgentSystemNoticeMessage.tsx",
     original: '        <div className="font-medium text-[var(--text-secondary)]">{title}</div>',
-    replacement: '        <div className="font-medium text-[var(--text-secondary)]">{title}</div>\n        {notice?.noticeKind === "background_task" && message.body.trim() !== title ? <div role="status" className="mt-1 whitespace-pre-line break-words text-[12px] leading-5">{message.body}</div> : null}',
+    replacement: '        <div className="font-medium text-[var(--text-secondary)]">{title}</div>\n        {notice?.noticeKind === "background_task" && message.body.trim() !== title ? <div role="status" className="mt-1 whitespace-pre-line break-words text-[12px] leading-5">{message.body}</div> : null}\n        {notice?.noticeKind === "background_task" ? <SubagentTranscript message={message} /> : null}',
   },
   {
     path: "/agentGuiNode/agentGuiHeroCarouselImageLoad.ts",
@@ -583,6 +588,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      "@multica-subagent-transcript": fileURLToPath(new URL("./src/subagent-transcript.tsx", import.meta.url)),
       "@multica-timeline-end-position": fileURLToPath(new URL("./src/timeline-end-position.ts", import.meta.url)),
       "@multica-prompt-submission-policy": fileURLToPath(new URL("./src/runtime/prompt-submission-policy.ts", import.meta.url)),
       "@multica-invoked-agent-reply": fileURLToPath(new URL("./src/invoked-agent-reply.tsx", import.meta.url)),

@@ -94,8 +94,9 @@
     },
 
     "item_kind": {
-      "enum": ["assistant_text", "reasoning", "command", "file_change", "tool_call", "image", "background_task", "compaction", "error"]
+      "enum": ["assistant_text", "reasoning", "command", "file_change", "tool_call", "image", "background_task", "compaction", "error", "subagent"]
     },
+    "subagent_kind": { "enum": ["assistant_text", "command", "tool_call", "image", "error"] },
     "item_status": { "enum": ["in_progress", "completed", "failed", "cancelled"] },
     "item_started": {
       "type": "object",
@@ -108,7 +109,12 @@
         "command": { "type": "string" },
         "cwd": { "type": "string" },
         "task_id": { "type": "string" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "task_type": { "type": "string" },
+        "item_order": { "type": "integer", "minimum": 0 },
+        "item_kind": { "$ref": "#/$defs/subagent_kind" },
+        "parent_tool_use_id": { "type": "string", "description": "Spawning tool call; child items stay in the original turn but render inside its subagent transcript." }
       }
     },
     "item_delta": {
@@ -117,9 +123,12 @@
       "required": ["kind", "field", "text"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["assistant_text", "reasoning", "command", "tool_call", "background_task"] },
+        "kind": { "enum": ["assistant_text", "reasoning", "command", "tool_call", "background_task", "subagent"] },
         "field": { "enum": ["text", "output"] },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "parent_tool_use_id": { "type": "string" },
+        "item_order": { "type": "integer", "minimum": 0 },
+        "item_kind": { "$ref": "#/$defs/subagent_kind" }
       }
     },
     "item_state": {
@@ -129,6 +138,11 @@
       "properties": {
         "kind": { "$ref": "#/$defs/item_kind" },
         "status": { "$ref": "#/$defs/item_status" },
+        "parent_tool_use_id": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "task_type": { "type": "string" },
+        "item_order": { "type": "integer", "minimum": 0 },
+        "item_kind": { "$ref": "#/$defs/subagent_kind" },
         "error": { "$ref": "#/$defs/error" }
       },
       "allOf": [
@@ -139,6 +153,7 @@
         { "if": { "properties": { "kind": { "const": "tool_call" } } }, "then": { "required": ["tool"], "properties": { "tool": { "type": "string" }, "server": { "type": "string" }, "input": {}, "output": { "type": "string" } } } },
         { "if": { "properties": { "kind": { "const": "image" } } }, "then": { "required": ["attachment_id", "mime_type"], "properties": { "attachment_id": { "$ref": "#/$defs/id" }, "mime_type": { "type": "string" } } } },
         { "if": { "properties": { "kind": { "const": "background_task" } } }, "then": { "required": ["task_id", "description"], "properties": { "task_id": { "type": "string" }, "description": { "type": "string" }, "summary": { "type": "string" }, "progress_summary": { "type": "string" }, "output": { "type": "string" }, "usage": { "$ref": "#/$defs/task_usage" } } } },
+        { "if": { "properties": { "kind": { "const": "subagent" } } }, "then": { "required": ["parent_tool_use_id", "item_kind"] } },
         { "if": { "properties": { "kind": { "const": "error" } } }, "then": { "required": ["error"] } }
       ]
     },

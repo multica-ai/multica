@@ -77,6 +77,14 @@ GUI 请求切换会话时，先记录选择顺序和宿主当前导航意图，�
 
 本机 CLI 的 `status` 事件在 GUI 协议中单独保留。重连提示映射到已有的 `transport_retry` 系统通知，原始错误放在详情中；其他状态映射为普通系统通知。这些事件不拼入助手正文，也不结束运行。运行结束后不再显示临时重连提示，原始事件仍保留在执行记录中。重试次数、传输方式和最终成功/失败仍由原生 CLI 决定，界面不自动重发用户请求。
 
+### 后台子智能体的子对话（Go V2）
+
+Claude 后台任务卡片可展开子对话，依次展示任务指令、公开回复、工具输入/输出、图片和错误。工具调用单独展开，执行中的结果原位更新；主会话继续对话不改变子任务归属。已有历史未采集的详情显示未记录，不补造内容。后台 shell 保留原来的输出详情。
+
+Go Claude normalizer 为每个 `parent_tool_use_id` 使用独立解析器，将子任务 item 的 ID 隔离，并保存 `kind=subagent`、公开的 `item_kind`、首次出现的 `item_order` 及父工具调用。子任务的 session、result 和私有 reasoning 不进入主会话。GUI 按 task 的 `tool_use_id` 关联这些 item；旧客户端跳过未知的 `subagent` 类型。事件继续使用现有 V2 SQLite 存储，无表结构迁移。
+
+主轮次结束但后台任务仍在运行时，快照保留该轮未结束的 item；后台任务终止或 daemon 重启时结算子项，保留已收到的内容。最终事件保存首次顺序，刷新后的子对话顺序与实时展示一致。覆盖假 SDK 并发隔离、主轮次续聊、失败/停止、重启及快照回放的回归分别位于 `provider/claude/subagent_test.go`、`service/subagent_test.go` 和 GUI host 的 `v2-subagent.test.ts`、`subagent-transcript.test.tsx`。
+
 ### 上下文压缩分割线（Go V2）
 
 本机 Codex 和 Claude 的压缩生命周期统一保存为 V2 `compaction` item。`item.started` 显示压缩中的分割线；同一 item 的 `item.completed` 将其替换为完成、失败或取消分割线。压缩 item 不结束当前轮次，也不生成助手正文。GUI 复用已有 `noticeCommand=compact` 展示，在压缩期间用专用进度替代普通处理提示，完成后停止该节点的计时。

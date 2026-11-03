@@ -191,7 +191,7 @@ export class V2Conversation {
     let item = this.items.get(event.item_id);
     if (!item) {
       item = {
-        id: event.item_id, turnId: event.turn_id, order: event.seq, kind: text(payload.kind),
+        id: event.item_id, turnId: event.turn_id, order: event.seq, kind: payload.kind === "subagent" ? text(payload.item_kind) : text(payload.kind),
         status: "in_progress", state: {}, startedAt: event.created_at, updatedAt: event.created_at,
       };
       this.items.set(item.id, item);

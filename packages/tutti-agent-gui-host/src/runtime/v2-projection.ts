@@ -43,10 +43,13 @@ export function projectV2Conversation(
   }
 
   for (const turn of conversation.turns.values()) {
-    const items = conversation.turnItems(turn.id);
+    const allItems = conversation.turnItems(turn.id);
+    const items = allItems.filter((item) => !text(item.state.parent_tool_use_id));
     const lastText = items.findLast((item) => item.kind === "assistant_text")?.id;
     for (const item of items) {
-      const message = projectItem(item, turn, item.id === lastText, locale);
+      const message = item.kind === "background_task"
+        ? backgroundTask(item, locale, allItems)
+        : projectItem(item, turn, item.id === lastText, locale);
       if (message) messages.push({ ...base, turnId: turn.id, role: "assistant", occurredAtUnixMs: millis(item.startedAt), ...message });
     }
   }
@@ -158,7 +161,7 @@ function toolCall(id: string, status: string, toolName: string, input: unknown, 
   };
 }
 
-function backgroundTask(item: V2Item, locale: "en" | "zh-CN"): ItemMessage {
+function backgroundTask(item: V2Item, locale: "en" | "zh-CN", items: V2Item[] = []): ItemMessage {
   const state = item.state;
   const usage = record(state.usage);
   const status: LocalBackgroundTask["status"] = item.status === "in_progress" ? "running" : item.status === "completed" ? "completed" : item.status === "failed" ? "failed" : "cancelled";
@@ -174,9 +177,26 @@ function backgroundTask(item: V2Item, locale: "en" | "zh-CN"): ItemMessage {
     : { running: "Background task running", completed: "Background task completed", failed: "Background task failed", cancelled: "Background task stopped" };
   const title = `${labels[status]} · ${task.description}`;
   const { progress, detail } = backgroundTaskPresentation(task, [], locale);
+  const parent = text(state.tool_use_id);
+  const transcript = parent ? items.filter((child) => child.state.parent_tool_use_id === parent && child.kind !== "reasoning")
+    .sort((a, b) => number(a.state.item_order ?? a.order) - number(b.state.item_order ?? b.order)) : [];
+  const spawn = parent ? items.find((call) => call.id === parent) : undefined;
+  const input = record(spawn?.state.input);
+  const prompt = text(input?.prompt);
+  const subagentTranscript = {
+    locale, prompt,
+    items: transcript.map((child) => ({
+      id: child.id, kind: child.kind, status: child.status === "in_progress" && status !== "running" ? "cancelled" : child.status,
+      text: text(child.state.text), tool: child.kind === "command" ? "Bash" : text(child.state.tool),
+      input: child.state.input, output: text(child.state.output) || errorMessage(child.state.error),
+      attachmentId: text(child.state.attachment_id), mimeType: text(child.state.mime_type),
+    })),
+  };
   return {
     messageId: item.id, kind: "text", status,
-    payload: { kind: "agent_system_notice", noticeKind: "background_task", title, content: progress || title, ...(detail ? { detail } : {}) },
+    payload: { kind: "agent_system_notice", noticeKind: "background_task", title, content: progress || title, ...(detail ? { detail } : {}),
+      ...(state.task_type !== "local_bash" && (state.task_type === "local_agent" || parent || !detail) ? { subagentTranscript } : {}),
+    },
     semantics: { userVisibleAssistantResponse: false, turnSettling: false },
   };
 }

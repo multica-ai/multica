@@ -78,6 +78,20 @@ func CloseOrphanedBackgroundTasks(ctx context.Context, s *store.Store, committer
 			}
 			state["status"] = "cancelled"
 			state["summary"] = "Multica restarted; this background task stopped with it."
+			if parent, ok := state["tool_use_id"].(string); ok && parent != "" {
+				events, err := s.TurnEvents(ctx, id, row.TurnID.String)
+				if err != nil {
+					return closed, err
+				}
+				for _, final := range finalsForOpenItems(events) {
+					if final.payload["parent_tool_use_id"] != parent {
+						continue
+					}
+					final.payload["status"] = "cancelled"
+					payload, _ := json.Marshal(final.payload)
+					batch.Events = append(batch.Events, store.NewEvent{TurnID: row.TurnID.String, ItemID: final.itemID, Type: "item.completed", Final: true, Payload: payload, CreatedAt: now})
+				}
+			}
 			payload, _ := json.Marshal(state)
 			batch.Events = append(batch.Events, store.NewEvent{TurnID: row.TurnID.String, ItemID: row.ItemID.String, Type: "item.completed", Final: true, Payload: payload, CreatedAt: now})
 		}
@@ -87,7 +101,7 @@ func CloseOrphanedBackgroundTasks(ctx context.Context, s *store.Store, committer
 		if _, err := committer.Submit(ctx, batch); err != nil {
 			return closed, err
 		}
-		closed += len(batch.Events)
+		closed += len(rows)
 	}
 	return closed, nil
 }
@@ -148,7 +162,11 @@ func finalsForOpenItems(events []sqlitedb.Event) []synthesizedFinal {
 			state[k] = v
 		}
 		state["status"] = "failed"
-		switch state["kind"] {
+		kind := state["kind"]
+		if kind == "subagent" {
+			kind = state["item_kind"]
+		}
+		switch kind {
 		case "assistant_text", "reasoning":
 			state["text"] = item.text
 		case "command":

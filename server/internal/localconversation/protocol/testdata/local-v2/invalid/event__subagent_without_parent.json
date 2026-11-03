@@ -1,0 +1,16 @@
+{
+  "seq": 4,
+  "turn_id": "turn-1",
+  "turn_seq": 4,
+  "item_id": "subagent:7:agent-a:m:0",
+  "type": "item.completed",
+  "final": true,
+  "created_at": "2026-11-03T01:00:00Z",
+  "payload": {
+    "kind": "subagent",
+    "status": "completed",
+    "text": "Reading the source",
+    "item_kind": "assistant_text",
+    "item_order": 0
+  }
+}

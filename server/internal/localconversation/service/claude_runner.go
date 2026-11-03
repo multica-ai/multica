@@ -1114,10 +1114,11 @@ func contextName(name string) string {
 // its session transcript: user and assistant messages.
 func transcriptMessageID(raw json.RawMessage) string {
 	var m struct {
-		Type string `json:"type"`
-		UUID string `json:"uuid"`
+		Type            string `json:"type"`
+		UUID            string `json:"uuid"`
+		ParentToolUseID string `json:"parent_tool_use_id"`
 	}
-	if json.Unmarshal(raw, &m) != nil || (m.Type != "user" && m.Type != "assistant") {
+	if json.Unmarshal(raw, &m) != nil || m.ParentToolUseID != "" || (m.Type != "user" && m.Type != "assistant") {
 		return ""
 	}
 	return m.UUID
@@ -1132,7 +1133,16 @@ func (r *ClaudeRunner) routeTaskEvents(turn *claudeTurn, events []claude.Event) 
 	var ended []BackgroundResult
 	r.mu.Lock()
 	for _, e := range events {
+		if parent, ok := e.Payload["parent_tool_use_id"].(string); ok && parent != "" {
+			if owner := r.taskTurns["tool:"+parent]; owner != "" {
+				_ = r.batcher.Append(r.rec.outputBatch(owner, []outputEvent{claudeOutput(e)}), e.Final)
+			}
+			continue
+		}
 		if e.Payload["kind"] != "background_task" {
+			if turn != nil && e.Type == "item.started" && (e.Payload["kind"] == "tool_call" || e.Payload["kind"] == "command") {
+				r.taskTurns["tool:"+e.ItemID] = turn.id
+			}
 			rest = append(rest, e)
 			continue
 		}
@@ -1142,6 +1152,9 @@ func (r *ClaudeRunner) routeTaskEvents(turn *claudeTurn, events []claude.Event) 
 				continue // a task this adapter never saw start
 			}
 			r.taskTurns[e.ItemID] = turn.id
+			if parent, ok := e.Payload["tool_use_id"].(string); ok && parent != "" {
+				r.taskTurns["tool:"+parent] = turn.id
+			}
 			rest = append(rest, e)
 			continue
 		}

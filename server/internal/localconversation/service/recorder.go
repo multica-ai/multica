@@ -79,7 +79,7 @@ func (t *turnRecorder) outputBatch(turnID string, events []outputEvent) store.Ba
 			e = t.storeImage(&batch, e, now)
 		}
 		batch.Events = append(batch.Events, t.event(turnID, e.ItemID, e.Type, e.Final, e.Payload, now))
-		if e.Final && e.Payload["kind"] == "assistant_text" {
+		if e.Final && e.Payload["kind"] == "assistant_text" && e.Payload["parent_tool_use_id"] == nil {
 			text, _ := e.Payload["text"].(string)
 			batch.Messages = append(batch.Messages, store.NewMessage{ID: e.ItemID, TurnID: turnID, Role: "assistant", Content: text, CreatedAt: now})
 			p := truncateRunes(text, previewRunes)
@@ -133,9 +133,13 @@ func (t *turnRecorder) storeImage(batch *store.Batch, e outputEvent, now time.Ti
 		attachment, err = t.files.WriteAttachmentFile(t.scopeID, t.conversationID, e.ImageMime, data, now)
 	}
 	if err != nil {
-		return outputEvent{ItemID: e.ItemID, Type: "item.completed", Final: true, Payload: map[string]any{
+		payload := map[string]any{
 			"kind": "error", "status": "failed", "error": map[string]any{"kind": "attachment_failed", "message": err.Error()},
-		}}
+		}
+		if parent := e.Payload["parent_tool_use_id"]; parent != nil {
+			payload["kind"], payload["item_kind"], payload["parent_tool_use_id"] = "subagent", "error", parent
+		}
+		return outputEvent{ItemID: e.ItemID, Type: "item.completed", Final: true, Payload: payload}
 	}
 	batch.Attachments = append(batch.Attachments, attachment)
 	payload := map[string]any{"attachment_id": attachment.ID}

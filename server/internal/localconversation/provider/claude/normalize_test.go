@@ -132,13 +132,12 @@ func TestNormalizerSeparatesInlineImagesFromToolOutput(t *testing.T) {
 	}
 }
 
-func TestNormalizerHidesAskUserQuestionAndSubagentFrames(t *testing.T) {
+func TestNormalizerHidesAskUserQuestion(t *testing.T) {
 	t.Parallel()
 
 	got := feed(t, NewNormalizer("multica"),
 		`{"type":"assistant","message":{"id":"m5","content":[{"type":"tool_use","id":"q-1","name":"mcp__multica__ask_user_question","input":{}}]}}`,
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"q-1","content":"yes"}]}}`,
-		`{"type":"assistant","parent_tool_use_id":"tu-9","message":{"id":"sub","content":[{"type":"text","text":"subagent"}]}}`,
 	)
 	if len(got) != 0 {
 		t.Fatalf("events = %v", summary(got))

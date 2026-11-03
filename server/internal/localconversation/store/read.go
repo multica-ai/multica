@@ -124,6 +124,22 @@ func (s *Store) RunningTurns(ctx context.Context) ([]sqlitedb.Turn, error) {
 }
 
 func turnViews(ctx context.Context, q *sqlitedb.Queries, conversationID string, turns []sqlitedb.Turn) ([]TurnView, error) {
+	background, err := q.ListBackgroundTaskEvents(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	openTasks := map[string]string{}
+	for _, event := range background {
+		if event.Final == 1 {
+			delete(openTasks, event.ItemID.String)
+		} else {
+			openTasks[event.ItemID.String] = event.TurnID.String
+		}
+	}
+	backgroundTurns := map[string]bool{}
+	for _, turnID := range openTasks {
+		backgroundTurns[turnID] = true
+	}
 	views := make([]TurnView, 0, len(turns))
 	for _, t := range turns {
 		messages, err := q.ListTurnMessages(ctx, sqlitedb.ListTurnMessagesParams{ConversationID: conversationID, TurnID: t.ID})
@@ -132,7 +148,7 @@ func turnViews(ctx context.Context, q *sqlitedb.Queries, conversationID string, 
 		}
 		turnID := sql.NullString{String: t.ID, Valid: true}
 		var events []sqlitedb.Event
-		if t.Status == "running" {
+		if t.Status == "running" || backgroundTurns[t.ID] {
 			all, err := q.ListTurnEvents(ctx, sqlitedb.ListTurnEventsParams{ConversationID: conversationID, TurnID: turnID})
 			if err != nil {
 				return nil, err

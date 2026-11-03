@@ -1,0 +1,173 @@
+{
+  "version": 2,
+  "type": "conversation.events",
+  "conversation_id": "conv-1",
+  "from_seq": 1,
+  "to_seq": 10,
+  "events": [
+    {
+      "seq": 1,
+      "turn_id": "turn-1",
+      "turn_seq": 1,
+      "item_id": null,
+      "type": "turn.started",
+      "final": false,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "request_id": "r1"
+      }
+    },
+    {
+      "seq": 2,
+      "turn_id": "turn-1",
+      "turn_seq": 2,
+      "item_id": "agent-a",
+      "type": "item.started",
+      "final": false,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "tool_call",
+        "tool": "Agent",
+        "input": {
+          "prompt": "Review daemon changes"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn_id": "turn-1",
+      "turn_seq": 3,
+      "item_id": "task:a",
+      "type": "item.started",
+      "final": false,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "background_task",
+        "task_id": "a",
+        "tool_use_id": "agent-a",
+        "task_type": "local_agent",
+        "description": "Review daemon"
+      }
+    },
+    {
+      "seq": 4,
+      "turn_id": "turn-1",
+      "turn_seq": 4,
+      "item_id": "subagent:7:agent-a:m:0",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "subagent",
+        "status": "completed",
+        "text": "Reading the source",
+        "parent_tool_use_id": "agent-a",
+        "item_kind": "assistant_text",
+        "item_order": 0
+      }
+    },
+    {
+      "seq": 5,
+      "turn_id": "turn-1",
+      "turn_seq": 5,
+      "item_id": "subagent:7:agent-a:call",
+      "type": "item.started",
+      "final": false,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "subagent",
+        "command": "git diff",
+        "input": {
+          "command": "git diff"
+        },
+        "parent_tool_use_id": "agent-a",
+        "item_kind": "command",
+        "item_order": 1
+      }
+    },
+    {
+      "seq": 6,
+      "turn_id": "turn-1",
+      "turn_seq": 6,
+      "item_id": "subagent:7:agent-a:call",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "subagent",
+        "status": "completed",
+        "command": "git diff",
+        "input": {
+          "command": "git diff"
+        },
+        "output": "diff contents",
+        "exit_code": 0,
+        "parent_tool_use_id": "agent-a",
+        "item_kind": "command",
+        "item_order": 1
+      }
+    },
+    {
+      "seq": 7,
+      "turn_id": "turn-1",
+      "turn_seq": 7,
+      "item_id": "task:a",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "background_task",
+        "status": "completed",
+        "task_id": "a",
+        "tool_use_id": "agent-a",
+        "task_type": "local_agent",
+        "description": "Review daemon",
+        "summary": "Review complete"
+      }
+    },
+    {
+      "seq": 8,
+      "turn_id": "turn-1",
+      "turn_seq": 8,
+      "item_id": "agent-a",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "tool_call",
+        "tool": "Agent",
+        "status": "completed",
+        "output": "Dispatched",
+        "input": {
+          "prompt": "Review daemon changes"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "turn_id": "turn-1",
+      "turn_seq": 9,
+      "item_id": "answer",
+      "type": "item.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "kind": "assistant_text",
+        "status": "completed",
+        "text": "Root answer"
+      }
+    },
+    {
+      "seq": 10,
+      "turn_id": "turn-1",
+      "turn_seq": 10,
+      "item_id": null,
+      "type": "turn.completed",
+      "final": true,
+      "created_at": "2026-11-03T01:00:00Z",
+      "payload": {
+        "status": "completed"
+      }
+    }
+  ]
+}

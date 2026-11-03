@@ -62,15 +62,17 @@ type Normalizer struct {
 	sessionID string
 	result    *TurnResult
 
-	messageID string
-	blocks    map[string][]*streamBlock
-	byIndex   map[int]*streamBlock
-	ordinal   map[string]int
-	open      map[string]*openItem
-	order     []string
-	toolNames map[string]string
-	skipped   map[string]bool
-	tasks     map[string]*backgroundTask
+	messageID   string
+	blocks      map[string][]*streamBlock
+	byIndex     map[int]*streamBlock
+	ordinal     map[string]int
+	open        map[string]*openItem
+	order       []string
+	toolNames   map[string]string
+	skipped     map[string]bool
+	tasks       map[string]*backgroundTask
+	children    map[string]*Normalizer
+	childOrders map[string]map[string]int
 
 	compactionID   string
 	compactionSeen map[string]bool
@@ -89,6 +91,8 @@ func NewNormalizer(contextMCPName string) *Normalizer {
 		toolNames:    map[string]string{},
 		skipped:      map[string]bool{},
 		tasks:        map[string]*backgroundTask{},
+		children:     map[string]*Normalizer{},
+		childOrders:  map[string]map[string]int{},
 
 		compactionSeen: map[string]bool{},
 	}
@@ -115,6 +119,8 @@ type sdkMessage struct {
 	Result          string          `json:"result"`
 	Errors          []string        `json:"errors"`
 	TaskID          string          `json:"task_id"`
+	ToolUseID       string          `json:"tool_use_id"`
+	TaskType        string          `json:"task_type"`
 	Description     string          `json:"description"`
 	Summary         *string         `json:"summary"`
 	Status          string          `json:"status"`
@@ -172,12 +178,12 @@ func (n *Normalizer) Accept(raw json.RawMessage) []Event {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil
 	}
-	if m.SessionID != "" {
-		n.sessionID = m.SessionID
-	}
 	// Subagent transcript frames belong to the tool call that spawned them.
 	if m.ParentToolUseID != nil && *m.ParentToolUseID != "" {
-		return nil
+		return n.subagent(raw, *m.ParentToolUseID)
+	}
+	if m.SessionID != "" {
+		n.sessionID = m.SessionID
 	}
 	switch m.Type {
 	case "stream_event":
@@ -333,8 +339,19 @@ func (n *Normalizer) system(m sdkMessage) []Event {
 			return nil
 		}
 		state := map[string]any{"kind": "background_task", "status": "in_progress", "task_id": m.TaskID, "description": m.Description}
+		if m.ToolUseID != "" {
+			state["tool_use_id"] = m.ToolUseID
+		}
+		if m.TaskType != "" {
+			state["task_type"] = m.TaskType
+		}
 		n.tasks[m.TaskID] = &backgroundTask{state: state}
-		return []Event{{ItemID: taskItemID(m.TaskID), Type: "item.started", Payload: map[string]any{"kind": "background_task", "task_id": m.TaskID, "description": m.Description}}}
+		payload := map[string]any{}
+		for k, v := range state {
+			payload[k] = v
+		}
+		delete(payload, "status")
+		return []Event{{ItemID: taskItemID(m.TaskID), Type: "item.started", Payload: payload}}
 	case "task_progress":
 		task := n.tasks[m.TaskID]
 		if task == nil || task.done {
@@ -361,7 +378,7 @@ func (n *Normalizer) system(m sdkMessage) []Event {
 		if errText, ok := m.Patch["error"].(string); ok && status != "" {
 			task.state["summary"] = errText
 		}
-		return []Event{n.taskEvent(m.TaskID, status)}
+		return n.endTask(m.TaskID, status)
 	case "task_notification":
 		task := n.tasks[m.TaskID]
 		status := map[string]string{"completed": "completed", "failed": "failed", "stopped": "cancelled"}[m.Status]
@@ -372,7 +389,7 @@ func (n *Normalizer) system(m sdkMessage) []Event {
 			task.state["summary"] = *m.Summary
 		}
 		applyTaskUsage(task.state, m.Usage)
-		return []Event{n.taskEvent(m.TaskID, status)}
+		return n.endTask(m.TaskID, status)
 	case "background_tasks_changed":
 		live := map[string]bool{}
 		for _, t := range m.Tasks {
@@ -387,7 +404,7 @@ func (n *Normalizer) system(m sdkMessage) []Event {
 		for _, id := range ids {
 			task := n.tasks[id]
 			if task.background && !task.done && !live[id] {
-				events = append(events, n.taskEvent(id, "completed"))
+				events = append(events, n.endTask(id, "completed")...)
 			}
 		}
 		for _, t := range m.Tasks {
