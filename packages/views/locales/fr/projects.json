@@ -5,8 +5,6 @@
     "scope_all": "Tous les projets",
     "scope_active": "Projets actifs",
     "scope_closed": "Projets clos",
-    "empty": "Aucun projet pour l'instant",
-    "create_first": "Créez votre premier projet",
     "view_compact": "Compact",
     "view_comfortable": "Confortable",
     "no_search_results": "Aucun résultat ne correspond à votre recherche",
@@ -171,5 +169,33 @@
     "section_priority": "Priorité",
     "section_lead": "Responsable",
     "view": "Vue"
+  },
+  "intro": {
+    "title": "Découpez les grands chantiers en projets",
+    "description": "Un projet regroupe des tâches liées pour suivre leur avancement ensemble. Sa description et ses dépôts liés accompagnent chaque exécution d'agent comme contexte.",
+    "slides": {
+      "progress": {
+        "title": "L'avancement en un coup d'œil",
+        "description": "Statut, responsable, échéance et taux d'achèvement tiennent sur une carte : inutile d'ouvrir chaque tâche."
+      },
+      "context": {
+        "title": "Le contexte suit chaque exécution",
+        "description": "Rédigez la description et liez les dépôts une seule fois. Chaque exécution sur les tâches du projet les reprend."
+      },
+      "pinned": {
+        "title": "Épinglez-le dans la barre latérale",
+        "description": "Gardez vos projets favoris à portée de clic. Les épingles sont personnelles et n'affectent personne d'autre."
+      }
+    },
+    "art": {
+      "project_website": "Refonte du site",
+      "project_mobile": "Mobile 1.0",
+      "project_onboarding": "Onboarding",
+      "context_label": "Description du projet",
+      "context_body": "Nouveau site vitrine en Next.js et Tailwind. Les textes suivent docs/brand et chaque page gère le mode sombre.",
+      "run_started": "a lancé une exécution",
+      "context_loaded": "Contexte du projet et 2 dépôts chargés",
+      "pinned": "Épinglés"
+    }
   }
 }

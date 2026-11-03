@@ -5,8 +5,6 @@
     "scope_all": "전체 프로젝트",
     "scope_active": "진행 중인 프로젝트",
     "scope_closed": "종료된 프로젝트",
-    "empty": "아직 프로젝트가 없습니다",
-    "create_first": "첫 프로젝트 만들기",
     "view_compact": "간결하게",
     "view_comfortable": "넓게",
     "no_search_results": "검색 결과가 없습니다",
@@ -171,5 +169,33 @@
     "section_priority": "우선순위",
     "section_lead": "리드",
     "view": "보기"
+  },
+  "intro": {
+    "title": "큰일은 프로젝트로 나눠 진행하세요",
+    "description": "프로젝트는 관련 태스크를 한데 모아 진행 상황을 함께 보게 해 줍니다. 프로젝트 설명과 연결된 저장소는 에이전트가 실행될 때마다 컨텍스트로 전달됩니다.",
+    "slides": {
+      "progress": {
+        "title": "진행 상황을 한눈에",
+        "description": "상태, 리드, 목표일, 완료율이 카드 한 장에 모여 있어 태스크를 하나씩 열어 볼 필요가 없습니다."
+      },
+      "context": {
+        "title": "실행마다 컨텍스트가 따라갑니다",
+        "description": "설명은 한 번만 쓰고 저장소도 한 번만 연결하세요. 프로젝트 안 태스크의 모든 실행이 이를 가져갑니다."
+      },
+      "pinned": {
+        "title": "사이드바에 고정",
+        "description": "자주 쓰는 프로젝트를 한 번의 클릭으로 엽니다. 고정은 나에게만 적용되며 다른 사람에게는 영향을 주지 않습니다."
+      }
+    },
+    "art": {
+      "project_website": "웹사이트 개편",
+      "project_mobile": "모바일 1.0",
+      "project_onboarding": "온보딩",
+      "context_label": "프로젝트 설명",
+      "context_body": "Next.js와 Tailwind로 만드는 새 웹사이트. 문구는 docs/brand를 따르고 모든 페이지에서 다크 모드를 지원한다.",
+      "run_started": "실행 시작",
+      "context_loaded": "프로젝트 컨텍스트와 저장소 2개를 불러왔습니다",
+      "pinned": "고정됨"
+    }
   }
 }

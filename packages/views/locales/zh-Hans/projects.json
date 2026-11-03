@@ -5,8 +5,6 @@
     "scope_all": "全部项目",
     "scope_active": "进行中的项目",
     "scope_closed": "已结束的项目",
-    "empty": "还没有项目",
-    "create_first": "创建第一个项目",
     "view_compact": "紧凑视图",
     "view_comfortable": "舒适视图",
     "no_search_results": "未找到匹配的项目",
@@ -171,5 +169,33 @@
     "section_priority": "优先级",
     "section_lead": "负责人",
     "view": "视图"
+  },
+  "intro": {
+    "title": "把一件大事拆成项目来推进",
+    "description": "项目把相关任务收在一起，统一看进度。项目描述和关联的仓库会作为上下文，自动带进每一次智能体运行。",
+    "slides": {
+      "progress": {
+        "title": "进度一眼看清",
+        "description": "状态、负责人、截止日期和完成比例都在一张卡上，不用逐个翻任务。"
+      },
+      "context": {
+        "title": "上下文自动带给智能体",
+        "description": "写一次项目描述、关联一次仓库，项目里每个任务的运行都会带上。"
+      },
+      "pinned": {
+        "title": "钉在侧栏，随手进入",
+        "description": "常用项目固定在侧栏，一点就到。固定只对你自己生效，不影响其他人。"
+      }
+    },
+    "art": {
+      "project_website": "官网改版",
+      "project_mobile": "移动端 1.0",
+      "project_onboarding": "新手引导",
+      "context_label": "项目描述",
+      "context_body": "新版官网，Next.js + Tailwind。文案以 docs/brand 为准，所有页面都要支持深色模式。",
+      "run_started": "开始运行",
+      "context_loaded": "已载入项目上下文和 2 个仓库",
+      "pinned": "已固定"
+    }
   }
 }

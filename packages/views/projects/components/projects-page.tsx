@@ -70,7 +70,6 @@ import {
   CollectionCreateButton,
   CollectionFilterButton,
   CollectionPageHeader,
-  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -85,6 +84,7 @@ import {
   type CollectionSort,
 } from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
+import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
@@ -846,15 +846,7 @@ export function ProjectsPage() {
       />
 
       {showEmpty ? (
-        <CollectionPageState
-          icon={FolderKanban}
-          title={t(($) => $.page.empty)}
-          actions={
-            <Button size="sm" variant="outline" onClick={openCreateProject}>
-              {t(($) => $.page.create_first)}
-            </Button>
-          }
-        />
+        <ProjectsIntro onCreate={openCreateProject} />
       ) : (
         <>
           {isCompact ? (
