@@ -56,7 +56,7 @@ func newLabrastroProjectBaselineCmd() *cobra.Command {
 		case "adopt":
 			sub.Short = "Decide explicitly named chapter versions using the current credentials"
 			sub.Long = "Adopt chapter:number versions atomically. The server checks decider permissions,\n" +
-				"task credential scope and concurrent changes. Rule warnings do not block adoption."
+				"human decision credentials and concurrent changes."
 			sub.Flags().StringArray("revision", nil, "Chapter:number to adopt (required, repeatable for different chapters)")
 			sub.Flags().Bool("reject", false, "Reject the specified candidates instead of adopting")
 		case "export":
@@ -90,7 +90,7 @@ func labrastroBaselineExitCode(cmd *cobra.Command, err error) int {
 		return 0
 	}
 	for c := cmd; c != nil; c = c.Parent() {
-		if c.Name() == "baseline" && c.Parent() != nil && c.Parent().Name() == "project" {
+		if (c.Name() == "baseline" || c.Name() == "engineering") && c.Parent() != nil && c.Parent().Name() == "project" {
 			var e *baselineCLIError
 			if errors.As(err, &e) {
 				return e.code
@@ -506,6 +506,16 @@ func baselineAdopt(ctx context.Context, cmd *cobra.Command, client *cli.APIClien
 	}
 	var raw json.RawMessage
 	if err := client.PostJSON(ctx, "/api/projects/"+project+"/baseline/decisions", map[string]any{"action": action, "revisions": revisions}, &raw); err != nil {
+		if cli.ServerErrorCode(err) == "baseline_human_required" {
+			ids := make([]string, 0, len(selected))
+			for _, revision := range selected {
+				ids = append(ids, revision.ID)
+			}
+			if link := baselineApprovalURL(cmd, client, project, ids...); link != "" {
+				return baselineFailure(1, "基线只能由决定人采用或驳回：%s", link)
+			}
+			return baselineFailure(1, "基线只能由决定人采用或驳回，请在工程总览中审批候选")
+		}
 		return baselineRequestError(err, true)
 	}
 	var result struct {
@@ -618,17 +628,21 @@ func baselineRequestError(err error, writing bool) error {
 }
 
 func baselineReadContent(path string) (string, error) {
+	return readProjectInputFile(path, "content-file", 65536)
+}
+
+func readProjectInputFile(path, flag string, limit int64) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", baselineFailure(2, "cannot locate current directory")
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
-		return "", baselineFailure(2, "invalid --content-file path")
+		return "", baselineFailure(2, "invalid --%s path", flag)
 	}
 	rel, err := filepath.Rel(cwd, absolute)
 	if err != nil || !filepath.IsLocal(rel) {
-		return "", baselineFailure(2, "--content-file must be inside the current directory")
+		return "", baselineFailure(2, "--%s must be inside the current directory", flag)
 	}
 	root, err := os.OpenRoot(cwd)
 	if err != nil {
@@ -637,23 +651,23 @@ func baselineReadContent(path string) (string, error) {
 	defer root.Close()
 	info, err := root.Stat(rel)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", baselineFailure(2, "--content-file must be a regular file inside the current directory")
+		return "", baselineFailure(2, "--%s must be a regular file inside the current directory", flag)
 	}
 	f, err := root.Open(rel)
 	if err != nil {
-		return "", baselineFailure(2, "cannot open --content-file inside the current directory")
+		return "", baselineFailure(2, "cannot open --%s inside the current directory", flag)
 	}
 	defer f.Close()
 	info, err = f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return "", baselineFailure(2, "--content-file must be a regular file")
+		return "", baselineFailure(2, "--%s must be a regular file", flag)
 	}
-	data, err := io.ReadAll(io.LimitReader(f, 65537))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
-		return "", baselineFailure(2, "cannot read --content-file")
+		return "", baselineFailure(2, "cannot read --%s", flag)
 	}
-	if len(data) > 65536 || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
-		return "", baselineFailure(2, "--content-file must contain at most 64 KiB of UTF-8 Markdown without NUL bytes")
+	if int64(len(data)) > limit || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+		return "", baselineFailure(2, "--%s must contain at most %d bytes of UTF-8 text without NUL bytes", flag, limit)
 	}
 	return string(data), nil
 }
@@ -688,17 +702,16 @@ func baselineMarkdown(r *baselineCLIRevision) string {
 }
 func baselinePrintWarnings(cmd *cobra.Command, d engineering.Diff) {
 	for _, warning := range d.Warnings {
-		label := "BASELINE WARNING"
-		if warning.Code == "rule_removed" || warning.Code == "rule_shrunk" || warning.Code == "rule_deferred" {
-			label = "RULE DOWNGRADE WARNING"
-		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "[%s] %s [%s] %s\n", label, d.Chapter, warning.Anchor, warning.Code)
+		fmt.Fprintf(cmd.ErrOrStderr(), "[BASELINE WARNING] %s [%s] %s\n", d.Chapter, warning.Anchor, warning.Code)
 	}
 }
 func baselinePrintDiff(cmd *cobra.Command, d engineering.Diff, body bool) {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "%s (base %d): +%d ~%d -%d; unchanged %d\n", d.Chapter, d.BaseRevisionNumber, len(d.Added), len(d.Modified), len(d.Removed), d.UnchangedCount)
 	if !body {
+		for _, removed := range d.Removed {
+			fmt.Fprintf(w, "@@ removed [%s] %s @@\n", removed.Anchor, removed.Title)
+		}
 		return
 	}
 	for _, group := range []struct {

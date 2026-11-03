@@ -114,6 +114,45 @@ jsonb_agg(decision_credential ORDER BY revision_number)::text FROM project_basel
 		}
 	}
 	versions = append(versions, upgrade)
+	stagesMigration := "9047_labrastro_engineering_stages"
+	for _, direction := range []string{"up", "down", "up"} {
+		opts.Direction, opts.Files, opts.Hooks = direction, realMigrationFiles(t, []string{stagesMigration}, direction), hooksForDirection(direction)
+		if err := runMigrations(ctx, pool, opts); err != nil {
+			t.Fatal(err)
+		}
+		var after string
+		if err := pool.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(r)-'decision_credential' ORDER BY revision_number)::text FROM project_baseline_revision r`).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before {
+			t.Fatal("stage migration changed historical revisions")
+		}
+		var hasStages, enabled bool
+		if err := pool.QueryRow(ctx, `SELECT to_jsonb(e) ? 'stages', enabled FROM project_engineering e`).Scan(&hasStages, &enabled); err != nil {
+			t.Fatal(err)
+		}
+		if !enabled || hasStages != (direction == "up") {
+			t.Fatalf("%s hasStages=%v enabled=%v", direction, hasStages, enabled)
+		}
+		if direction == "down" {
+			continue
+		}
+		var stages string
+		if err := pool.QueryRow(ctx, `SELECT stages::text FROM project_engineering`).Scan(&stages); err != nil || stages != "[]" {
+			t.Fatalf("default stages=%s err=%v", stages, err)
+		}
+		for _, invalid := range []any{nil, `null`, `{}`, `"text"`, `1`, `true`, `[` + strings.Repeat(`{},`, 50) + `{}]`} {
+			if _, err := pool.Exec(ctx, `UPDATE project_engineering SET stages=$1::jsonb`, invalid); err == nil {
+				t.Fatalf("CHECK accepted %v", invalid)
+			}
+		}
+		for _, valid := range []string{`[]`, `[` + strings.Repeat(`{},`, 49) + `{}]`, `[{"stage":9,"title":"Release","goal":""}]`} {
+			if _, err := pool.Exec(ctx, `UPDATE project_engineering SET stages=$1::jsonb`, valid); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	versions = append(versions, stagesMigration)
 	reversed := slices.Clone(versions)
 	slices.Reverse(reversed)
 	opts.Direction, opts.Files, opts.Hooks = "down", realMigrationFiles(t, reversed, "down"), hooksForDirection("down")

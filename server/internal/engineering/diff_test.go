@@ -1,152 +1,102 @@
 package engineering
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestDiffChineseAnchorsAndWarnings(t *testing.T) {
-	before := "前言\n### [Term-基线] 定义\n正本\n### [Rule-1] 保留规则\n一二三四五六七八九十\n### [Rule-2] 删除规则\n必须保留\n### [Rule-3] 恰好四成\n一二三四五六七八九十"
-	after := "前言  \r\n\r\n### [Term-基线] 定义\r\n正本\r\n### [Rule-1] 保留规则\n一二三四五\n### [Rule-3] 恰好四成\n一二三四五六\n### [Term-新词] 新词\n新增"
-	exclusions := "### [Defer-1] 延后\n[Rule-1] 转 OL-123\n### [Defer-2] 延后\nRule-20"
-	d, err := Compute("domain_rules", before, after, 4, exclusions, "OL")
-	if err != nil {
-		t.Fatal(err)
+func TestNaturalSections(t *testing.T) {
+	content := "导言\r\n\r\n\r\n# 总览\n总览正文\n### 起步\n开始\n## 风险   与\t回滚 ###\n父正文\n### 回滚\n子正文\n### 回滚\n再次\n## [草案] 标题\n正文\n### 子标题\n最后"
+	got, err := Parse("overview", content)
+	want := []Section{
+		{"_preamble", "", "导言"}, {"总览", "总览", "总览正文"}, {"总览 / 起步", "起步", "开始"},
+		{"风险 与 回滚", "风险 与 回滚", "父正文"}, {"风险 与 回滚 / 回滚", "回滚", "子正文"},
+		{"风险 与 回滚 / 回滚 (2)", "回滚", "再次"}, {"[草案] 标题", "[草案] 标题", "正文"}, {"[草案] 标题 / 子标题", "子标题", "最后"},
 	}
-	want := []Warning{{"rule_shrunk", "Rule-1"}, {"rule_removed", "Rule-2"}, {"rule_deferred", "Rule-1"}}
-	if !reflect.DeepEqual(d.Warnings, want) {
-		t.Fatalf("warnings = %#v", d.Warnings)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections=%+v err=%v", got, err)
 	}
-	if d.BaseRevisionNumber != 4 || len(d.Added) != 1 || len(d.Modified) != 2 || len(d.Removed) != 1 || d.UnchangedCount != 2 {
-		t.Fatalf("unexpected diff: %#v", d)
+}
+
+func TestExplicitKeysInEveryChapterAndLevel(t *testing.T) {
+	for _, chapter := range Chapters {
+		for _, heading := range []string{"#", "##", "###"} {
+			for _, key := range []string{"X-1", "Rule-中文", "决策-7", "自定义_2-序号"} {
+				t.Run(chapter+heading+key, func(t *testing.T) {
+					before := heading + " [" + key + "] Old\nBody"
+					after := "## New parent\n" + heading + " [" + key + "] New\nBody"
+					d, err := Compute(chapter, before, after, 4)
+					if err != nil || len(d.Modified) != 1 || d.Modified[0].Anchor != key || d.Modified[0].Before != "Old\nBody" || d.Modified[0].After != "New\nBody" || d.BaseRevisionNumber != 4 {
+						t.Fatalf("diff=%+v err=%v", d, err)
+					}
+				})
+			}
+		}
 	}
-	if d.Modified[0].BeforeChars != 10 || d.Modified[0].AfterChars != 5 {
-		t.Fatal("count must use Unicode characters")
+}
+
+func TestDuplicateKeysRemainUnique(t *testing.T) {
+	got, err := Parse("overview", "## Same\n### Child\n## Same\n### Child\n# Same (2)\n# [X-1] One\n# [X-1] Two\n# _preamble")
+	var keys []string
+	for _, s := range got {
+		keys = append(keys, s.Anchor)
+	}
+	want := []string{"Same", "Same / Child", "Same (2)", "Same (2) / Child", "Same (2) (2)", "X-1", "X-1 (2)", "_preamble"}
+	if err != nil || !reflect.DeepEqual(keys, want) {
+		t.Fatalf("keys=%v err=%v", keys, err)
+	}
+}
+
+func TestFencesAndNonSectionHeadings(t *testing.T) {
+	body := "Body\n#### Detail\n#\n##\nSetext\n===\n---\n    ## Indented\n```md\n## Example\n~~~\n### Still fenced\n```\n~~~~\n# Another example\n~~~\n# Still fenced too\n~~~~"
+	got, err := Parse("architecture", "   ## Real\n"+body+"\n## Next\nEnd")
+	if err != nil || len(got) != 2 || got[0].Body != body || got[1].Anchor != "Next" {
+		t.Fatalf("sections=%+v err=%v", got, err)
+	}
+}
+
+func TestDiffChangesWithoutWarnings(t *testing.T) {
+	before := "前言\n### [Rule-1] Keep\n一二三四五六七八九十\n### [Rule-2] Remove\nRequired\n## Old name\nBody"
+	after := "前言\n### [Rule-1] Keep\n一二三\n## New name\nBody\n### [Defer-1] Later\nRule-2 deferred without issue"
+	d, err := Compute("domain_rules", before, after, 4)
+	if err != nil || len(d.Modified) != 1 || len(d.Removed) != 2 || len(d.Added) != 2 || d.UnchangedCount != 1 || d.Warnings == nil || len(d.Warnings) != 0 {
+		t.Fatalf("diff=%+v err=%v", d, err)
+	}
+	raw, _ := json.Marshal(d)
+	if !strings.Contains(string(raw), `"warnings":[]`) || strings.Contains(string(raw), "_chars") {
+		t.Fatalf("wire=%s", raw)
+	}
+	d, err = Compute("domain_rules", before, strings.ReplaceAll(strings.ReplaceAll(before, "\n", "\r\n"), "前言", "前言  \r\n\r\n"), 1)
+	if err != nil || len(d.Modified) != 0 || d.UnchangedCount != 4 {
+		t.Fatalf("normalized=%+v err=%v", d, err)
 	}
 }
 
 func TestDiffValidation(t *testing.T) {
 	for _, tt := range []struct{ chapter, content, code string }{
-		{"wrong", "", "baseline_anchor_invalid"},
-		{"overview", "### [Rule-1] bad", "baseline_anchor_invalid"},
-		{"overview", "### [Stage-一] A\n### [Stage-一] B", "baseline_anchor_duplicate"},
-		{"overview", "### [Stage-] bad", "baseline_anchor_invalid"},
-		{"overview", "### [Unknown-1] bad", "baseline_anchor_invalid"},
-		{"overview", "### [Stage-" + strings.Repeat("字", 65) + "] bad", "baseline_anchor_invalid"},
-		{"overview", strings.Repeat("字", 21846), "baseline_too_large"},
-		{"overview", "\x00", "baseline_anchor_invalid"},
+		{"wrong", "", "invalid_request"}, {"overview", strings.Repeat("字", 21846), "baseline_too_large"},
+		{"overview", "\x00", "baseline_content_invalid"}, {"overview", string([]byte{0xff}), "baseline_content_invalid"},
 	} {
-		t.Run(tt.code+tt.chapter, func(t *testing.T) {
-			_, err := Parse(tt.chapter, tt.content)
-			var e *Error
-			if !errors.As(err, &e) || e.Code != tt.code {
-				t.Fatalf("error = %v", err)
-			}
-		})
+		_, err := Parse(tt.chapter, tt.content)
+		var e *Error
+		if !errors.As(err, &e) || e.Code != tt.code {
+			t.Fatalf("error=%v want=%s", err, tt.code)
+		}
+	}
+	for _, text := range []string{"", strings.Repeat("x", 65536), "### [Stage-] title", "### [X-" + strings.Repeat("字", 65) + "] title"} {
+		if _, err := Parse("overview", text); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func TestDiffFencesBoundariesNormalizationAndTitle(t *testing.T) {
-	before := "intro\r\n\r\n\r\n### [Rule-中文] old\r\nbody  \r\n\r\n```md\n### [Rule-example] ignored\n```\n## Other\nnot part of rule"
-	after := strings.ReplaceAll(before, "old", "new")
-	d, err := Compute("domain_rules", before, after, 1, "", "OL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(d.Modified) != 1 || d.Modified[0].Anchor != "Rule-中文" || !strings.Contains(d.Modified[0].Before, "old") || strings.Contains(d.Modified[0].After, "not part of rule") {
-		t.Fatalf("diff = %#v", d)
-	}
-	d, err = Compute("domain_rules", before, strings.ReplaceAll(strings.ReplaceAll(before, "\r\n", "\n"), "body  ", "body"), 1, "", "OL")
-	if err != nil || len(d.Modified) != 0 {
-		t.Fatalf("whitespace diff = %#v %v", d, err)
-	}
-}
-
-func TestDeferMissingPool(t *testing.T) {
-	d, err := Compute("exclusions_and_risks", "", "### [Defer-1] no issue\nRule-1 needs a pool\n### [Defer-2] valid\n[pool](mention://issue/01a1429f-69bf-7162-a5bc-e942b1ea79aa)\n### [Defer-3] valid\nOL-23", 0, "", "OL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(d.Warnings, []Warning{{"defer_missing_pool", "Defer-1"}}) {
-		t.Fatalf("diff = %#v", d)
-	}
-}
-
-func TestDeferIssueReferences(t *testing.T) {
-	const issueID = "01a0e590-4ba8-7940-8dbe-756a9e6260ac"
-	for _, tt := range []struct {
-		name, text string
-		missing    bool
-	}{
-		{"adr", "依赖 ADR-3 的结论", true},
-		{"encoding", "统一 UTF-8 后再做", true},
-		{"pull request", "PR-201 合并后再议", true},
-		{"other workspace", "OTHER-1097", true},
-		{"other workspace URL", "https://example.test/issues/OTHER-1097", true},
-		{"identifier prefix", "XOL-1097", true},
-		{"identifier suffix", "OL-1097x", true},
-		{"bare UUID", issueID, true},
-		{"invalid UUID link", "mention://issue/------------------------------------", true},
-		{"identifier", "转入 OL-1097", false},
-		{"identifier URL", "[pool](https://example.test/outlune/issues/OL-1097)", false},
-		{"mention", "[pool](mention://issue/" + issueID + ")", false},
-		{"UUID URL", "[pool](https://example.test/outlune/issues/" + issueID + ")", false},
-		{"uppercase UUID URL", "/issues/" + strings.ToUpper(issueID), false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			for _, content := range []string{"### [Defer-1] Later\n" + tt.text, "### [Defer-1] " + tt.text} {
-				d, err := Compute("exclusions_and_risks", "", content, 0, "", "OL")
-				if err != nil {
-					t.Fatal(err)
-				}
-				want := []Warning{}
-				if tt.missing {
-					want = append(want, Warning{"defer_missing_pool", "Defer-1"})
-				}
-				if !reflect.DeepEqual(d.Warnings, want) {
-					t.Fatalf("content=%q warnings=%+v want=%+v", content, d.Warnings, want)
-				}
-			}
-		})
-	}
-}
-
-func TestDeferWorkspaceIssuePrefix(t *testing.T) {
-	for _, tt := range []struct {
-		prefix, text string
-		missing      bool
-	}{
-		{"TEAM", "TEAM-1097", false},
-		{"TEAM", "OL-1097", true},
-		{"O.L", "O.L-1097", false},
-		{"O.L", "OXL-1097", true},
-		{"", "OL-1097", true},
-		{"", "x-1097", true},
-		{"", "mention://issue/01a0e590-4ba8-7940-8dbe-756a9e6260ac", false},
-	} {
-		t.Run(tt.prefix+"/"+tt.text, func(t *testing.T) {
-			d, err := Compute("exclusions_and_risks", "", "### [Defer-1] Later\n"+tt.text, 0, "", tt.prefix)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := []Warning{}
-			if tt.missing {
-				want = append(want, Warning{"defer_missing_pool", "Defer-1"})
-			}
-			if !reflect.DeepEqual(d.Warnings, want) {
-				t.Fatalf("warnings=%+v want=%+v", d.Warnings, want)
-			}
-		})
-	}
-}
-
-func TestDiffKeepsUnanchoredTextVisible(t *testing.T) {
-	before := "### [Rule-1] Keep\nRequired\n## Details\nOld detail"
-	after := strings.ReplaceAll(before, "Old detail", "New detail")
-	d, err := Compute("domain_rules", before, after, 1, "", "OL")
-	if err != nil || len(d.Modified) != 1 || d.Modified[0].Anchor != "_unanchored" {
-		t.Fatalf("unanchored edit hidden or extended rule: %+v, %v", d, err)
+func TestPreambleKeyCollision(t *testing.T) {
+	got, err := Parse("overview", "Intro\n# _preamble\nHeading body")
+	want := []Section{{"_preamble", "", "Intro"}, {"_preamble (2)", "_preamble", "Heading body"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections=%+v err=%v", got, err)
 	}
 }

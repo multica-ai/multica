@@ -1681,6 +1681,7 @@ type ProjectEngineering struct {
 	UpdatedByID      pgtype.UUID        `json:"updated_by_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Stages           []byte             `json:"stages"`
 }
 
 type ProjectFile struct {

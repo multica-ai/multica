@@ -101,6 +101,7 @@ beforeEach(() => {
     currentStage: 1,
     modeSummary: "",
     deciderMemberIds: [],
+    stages: [],
   };
   chapters = [
     { chapter: "overview", adopted: null, candidate: null },

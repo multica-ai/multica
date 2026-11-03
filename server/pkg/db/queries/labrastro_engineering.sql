@@ -1,5 +1,5 @@
 -- name: LabrastroLockEngineeringProject :one
--- Serializes cross-chapter diffs, configuration changes and project deletion.
+-- Serializes baseline decisions, configuration changes and project deletion.
 SELECT * FROM project WHERE workspace_id = $1 AND id = $2 FOR UPDATE;
 
 -- name: LabrastroReadEngineeringProject :one
@@ -13,11 +13,11 @@ SELECT * FROM project_engineering WHERE workspace_id = $1 AND project_id = $2;
 
 -- name: LabrastroPutEngineering :one
 INSERT INTO project_engineering (workspace_id, project_id, enabled, current_stage, mode_summary,
-    decider_member_ids, updated_by_type, updated_by_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    decider_member_ids, updated_by_type, updated_by_id, stages)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT (workspace_id, project_id) DO UPDATE SET
     enabled = EXCLUDED.enabled, current_stage = EXCLUDED.current_stage, mode_summary = EXCLUDED.mode_summary,
-    decider_member_ids = EXCLUDED.decider_member_ids,
+    decider_member_ids = EXCLUDED.decider_member_ids, stages = EXCLUDED.stages,
     updated_by_type = EXCLUDED.updated_by_type, updated_by_id = EXCLUDED.updated_by_id, updated_at = now()
 RETURNING *;
 

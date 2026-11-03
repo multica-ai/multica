@@ -2,7 +2,7 @@ import type { z } from "zod";
 import type { ApiClient } from "./client";
 import { clientFetch, installLabrastroApiMethods } from "./labrastro-api-helpers";
 import { parseWithFallback } from "./schema";
-import { BaselineDecisionSchema, BaselineDiffSchema, BaselineHistorySchema, BaselineRevisionSchema, EngineeringOverviewSchema, EngineeringUpdatedSchema, type BaselineChapter } from "./labrastro-engineering-schemas";
+import { BaselineDecisionSchema, BaselineDiffSchema, BaselineHistorySchema, BaselineRevisionSchema, EngineeringOverviewSchema, EngineeringUpdatedSchema, type BaselineChapter, type EngineeringStageSchema } from "./labrastro-engineering-schemas";
 
 const headers = (workspaceId: string) => ({ "X-Workspace-ID": workspaceId, "X-Workspace-Slug": "" });
 const projectPath = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}`;
@@ -13,11 +13,11 @@ const labrastroEngineeringApi = {
     return parseWithFallback<z.infer<typeof EngineeringOverviewSchema> | null>(raw, EngineeringOverviewSchema, null, { endpoint });
   },
   async updateProjectEngineering(this: ApiClient, workspaceId: string, projectId: string, data: {
-    enabled?: boolean; currentStage?: number; modeSummary?: string; deciderMemberIds?: string[];
+    enabled?: boolean; currentStage?: number; modeSummary?: string; deciderMemberIds?: string[]; stages?: z.input<typeof EngineeringStageSchema>[];
   }) {
     const endpoint = `${projectPath(projectId)}/engineering`;
     const raw = await clientFetch<unknown>(this, endpoint, { method: "PATCH", headers: headers(workspaceId), body: JSON.stringify({
-      enabled: data.enabled, current_stage: data.currentStage, mode_summary: data.modeSummary, decider_member_ids: data.deciderMemberIds,
+      enabled: data.enabled, current_stage: data.currentStage, mode_summary: data.modeSummary, decider_member_ids: data.deciderMemberIds, stages: data.stages,
     }) });
     return parseWithFallback<z.infer<typeof EngineeringUpdatedSchema> | null>(raw, EngineeringUpdatedSchema, null, { endpoint });
   },

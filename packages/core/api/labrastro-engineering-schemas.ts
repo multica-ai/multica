@@ -19,11 +19,16 @@ export const BaselineDiffSchema = z.object({
   })),
 }).transform((v) => ({ chapter: v.chapter, baseRevisionNumber: v.base_revision_number, added: v.added, modified: v.modified, removed: v.removed, unchangedCount: v.unchanged_count, warnings: v.warnings }));
 
+export const EngineeringStageSchema = z.object({
+  stage: z.number().int().positive(), title: z.string(), goal: z.string().default(""),
+});
+export type EngineeringStage = z.infer<typeof EngineeringStageSchema>;
+
 export const EngineeringConfigSchema = z.object({
   project_id: id, workspace_id: id, enabled: z.boolean().default(false),
   current_stage: z.number().int().positive().default(1), mode_summary: z.string().default(""),
-  decider_member_ids: z.array(id).default([]),
-}).transform((v) => ({ projectId: v.project_id, workspaceId: v.workspace_id, enabled: v.enabled, currentStage: v.current_stage, modeSummary: v.mode_summary, deciderMemberIds: v.decider_member_ids }));
+  decider_member_ids: z.array(id).default([]), stages: z.array(EngineeringStageSchema).catch([]),
+}).transform((v) => ({ projectId: v.project_id, workspaceId: v.workspace_id, enabled: v.enabled, currentStage: v.current_stage, modeSummary: v.mode_summary, deciderMemberIds: v.decider_member_ids, stages: v.stages }));
 
 export const BaselineRevisionSchema = z.object({
   id, workspace_id: id, project_id: id, chapter: BaselineChapterSchema,

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -92,10 +91,10 @@ func (f engineeringFixture) readRevision(id string) db.ProjectBaselineRevision {
 	return r
 }
 
-func TestLabrastroEngineeringDisabledAndRiskSeed(t *testing.T) {
+func TestLabrastroEngineeringEnableLeavesBaselineEmpty(t *testing.T) {
 	f := newEngineeringFixture(t)
 	var out struct {
-		Engineering db.ProjectEngineering     `json:"engineering"`
+		Engineering engineeringConfigResponse `json:"engineering"`
 		Chapters    []baselineChapterResponse `json:"chapters"`
 	}
 	testutil.Call(t, testHandler.LabrastroGetEngineering, f.request("GET", "/engineering", nil, "session")).Want(200).JSON(&out)
@@ -110,31 +109,40 @@ func TestLabrastroEngineeringDisabledAndRiskSeed(t *testing.T) {
 	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroProposeBaseline, f.request("POST", "/baseline/candidates", map[string]any{"chapter": "overview", "content_markdown": "hi"}, "session")).Want(409), "engineering_disabled")
 	f.enable()
 	testutil.Call(t, testHandler.LabrastroGetEngineering, f.request("GET", "/engineering", nil, "session")).Want(200).JSON(&out)
-	risk := out.Chapters[3].Adopted
-	if risk == nil || risk.ContentMarkdown != baselinePATRisk || risk.DecisionCredential.String != "session" || risk.DecidedByID != parseUUID(testUserID) {
-		t.Fatalf("risk=%+v", risk)
+	for _, c := range out.Chapters {
+		if c.Adopted != nil || c.Candidate != nil {
+			t.Fatal("enabled project has an injected baseline")
+		}
 	}
+	if string(out.Engineering.Stages) != "[]" {
+		t.Fatalf("default stages=%s", out.Engineering.Stages)
+	}
+
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"enabled": false}, "pat")).Want(200)
 	f.enable()
-	if n := dbfx.Count(t, `SELECT count(*) FROM project_baseline_revision WHERE project_id=$1`, f.project); n != 1 {
-		t.Fatalf("risk reseeded: %d", n)
+	for _, table := range []string{"project_baseline_doc", "project_baseline_revision"} {
+		if n := dbfx.Count(t, "SELECT count(*) FROM "+table+" WHERE project_id=$1", f.project); n != 0 {
+			t.Fatalf("enable created %s: %d", table, n)
+		}
 	}
 }
 
 func TestLabrastroEngineeringDecisionCredentialMatrix(t *testing.T) {
 	for _, tt := range []struct {
 		name, credential, action, code string
-		nonDecider, red                bool
+		nonDecider, removal            bool
 		status                         int
 	}{
 		{name: "session", credential: "session", action: "adopt", status: 200},
 		{name: "pat", credential: "pat", action: "adopt", status: 200},
+		{name: "session reject", credential: "session", action: "reject", status: 200},
+		{name: "pat reject", credential: "pat", action: "reject", status: 200},
 		{name: "non-decider session", credential: "session", action: "adopt", nonDecider: true, status: 403, code: "baseline_not_decider"},
 		{name: "non-decider pat", credential: "pat", action: "adopt", nonDecider: true, status: 403, code: "baseline_not_decider"},
-		{name: "task adopt", credential: "task", action: "adopt", nonDecider: true, status: 200},
-		{name: "task reject", credential: "task", action: "reject", nonDecider: true, status: 200},
-		{name: "task red card", credential: "task", action: "adopt", nonDecider: true, red: true, status: 200},
-		{name: "task reject red card", credential: "task", action: "reject", nonDecider: true, red: true, status: 200},
+		{name: "task adopt", credential: "task", action: "adopt", nonDecider: true, status: 403, code: "baseline_human_required"},
+		{name: "task reject", credential: "task", action: "reject", nonDecider: true, status: 403, code: "baseline_human_required"},
+		{name: "task remove section", credential: "task", action: "adopt", nonDecider: true, removal: true, status: 403, code: "baseline_human_required"},
+		{name: "task reject removal", credential: "task", action: "reject", nonDecider: true, removal: true, status: 403, code: "baseline_human_required"},
 		{name: "other workspace task", credential: "other_workspace_task", action: "adopt", status: 403, code: "baseline_credential_denied"},
 		{name: "cloud", credential: "cloud_pat", action: "adopt", status: 403, code: "baseline_credential_denied"},
 		{name: "unknown", credential: "future", action: "adopt", status: 403, code: "baseline_credential_denied"},
@@ -144,7 +152,7 @@ func TestLabrastroEngineeringDecisionCredentialMatrix(t *testing.T) {
 			f.enable()
 			var base *string
 			content := "### [Rule-1] Rule\nMust always verify the full result."
-			if tt.red {
+			if tt.removal {
 				prior := f.propose("domain_rules", content, nil, nil)
 				testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", prior), "session")).Want(200)
 				base = uuidToPtr(prior.ID)
@@ -165,8 +173,16 @@ func TestLabrastroEngineeringDecisionCredentialMatrix(t *testing.T) {
 			got := f.readRevision(uuidToString(candidate.ID))
 			if tt.status != 200 {
 				wantEngineeringCode(t, response, tt.code)
-				if got.Status != "candidate" || got.DecidedByID.Valid {
+				if got.Status != "candidate" || got.DecidedByID.Valid || got.DecidedAt.Valid {
 					t.Fatal("denied operation mutated revision")
+				}
+				docs, err := testHandler.Queries.LabrastroListBaselineDocs(context.Background(), db.LabrastroListBaselineDocsParams{WorkspaceID: parseUUID(testWorkspaceID), ProjectID: parseUUID(f.project)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				doc := baselineDoc(docs, candidate.Chapter)
+				if doc.CandidateRevisionID != candidate.ID || doc.AdoptedRevisionID != candidate.BaseRevisionID {
+					t.Fatal("denied operation mutated baseline pointers")
 				}
 				return
 			}
@@ -175,56 +191,13 @@ func TestLabrastroEngineeringDecisionCredentialMatrix(t *testing.T) {
 				wantStatus = "rejected"
 			}
 			wantCredential := tt.credential
-			if tt.credential == "task" {
-				wantCredential = "agent_task"
-			}
 			if got.Status != wantStatus || got.DecisionCredential.String != wantCredential {
 				t.Fatalf("audit=%+v", got)
 			}
-			if tt.credential == "task" {
-				if got.DecidedByType.String != "agent" || got.DecidedByID != parseUUID(f.agent) || got.DecidedByTaskID != parseUUID(f.task) {
-					t.Fatalf("wrong agent attribution: %+v", got)
-				}
-			} else if got.DecidedByType.String != "member" || got.DecidedByID != parseUUID(testUserID) || got.DecidedByTaskID.Valid {
+			if got.DecidedByType.String != "member" || got.DecidedByID != parseUUID(testUserID) || got.DecidedByTaskID.Valid {
 				t.Fatalf("wrong member attribution: %+v", got)
 			}
 		})
-	}
-}
-
-func TestLabrastroEngineeringTaskAdoptsAllWarningKinds(t *testing.T) {
-	f := newEngineeringFixture(t)
-	f.enable()
-	initial := f.propose("domain_rules", "### [Rule-1] Required\nAlways verify the complete result.\n### [Rule-2] Required too\nAlways preserve all required business behavior.", nil, nil)
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", initial), "session")).Want(200)
-	var risk string
-	dbfx.QueryRow(t, `SELECT adopted_revision_id::text FROM project_baseline_doc WHERE project_id=$1 AND chapter='exclusions_and_risks'`, f.project).Scan(&risk)
-	exclusions := f.propose("exclusions_and_risks", baselinePATRisk+"\n### [Defer-1] Later\nDefer Rule-1", &risk, nil)
-	cut := f.propose("domain_rules", "### [Rule-2] Required too\nVerify.", uuidToPtr(initial.ID), nil)
-	var response struct {
-		Chapters []baselineChapterResponse `json:"chapters"`
-	}
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", cut, exclusions), "task")).Want(200).JSON(&response)
-	warnings := map[string]bool{}
-	for _, chapter := range response.Chapters {
-		if chapter.Chapter != "domain_rules" && chapter.Chapter != "exclusions_and_risks" {
-			continue
-		}
-		if chapter.Candidate != nil || chapter.Adopted == nil || chapter.Adopted.DecisionCredential.String != "agent_task" {
-			t.Fatalf("task adoption missing from response: %+v", chapter)
-		}
-		var diff engineering.Diff
-		if err := json.Unmarshal(chapter.Adopted.AnchorsDiff, &diff); err != nil {
-			t.Fatal(err)
-		}
-		for _, warning := range diff.Warnings {
-			warnings[warning.Code] = true
-		}
-	}
-	for _, code := range []string{"rule_removed", "rule_shrunk", "rule_deferred", "defer_missing_pool"} {
-		if !warnings[code] {
-			t.Errorf("successful task adoption lost %s warning", code)
-		}
 	}
 }
 
@@ -243,7 +216,7 @@ func TestLabrastroEngineeringConfigurationPermissions(t *testing.T) {
 		req.Header.Set("X-User-ID", member)
 		testutil.Call(t, testHandler.LabrastroPatchEngineering, req).Want(403)
 	}
-	req = f.request("PATCH", "/engineering", map[string]any{"current_stage": 2, "mode_summary": "Iterate"}, "session")
+	req = f.request("PATCH", "/engineering", map[string]any{"current_stage": 9, "mode_summary": "Iterate", "stages": []any{map[string]any{"stage": 9, "title": "Release"}}}, "session")
 	req.Header.Set("X-User-ID", member)
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, req).Want(200)
 	req = f.request("POST", "/baseline/decisions", decision("adopt", candidate), "session")
@@ -329,72 +302,6 @@ func TestLabrastroEngineeringConcurrentProposals(t *testing.T) {
 	}
 }
 
-func TestLabrastroEngineeringDiffRecheckedAcrossChapters(t *testing.T) {
-	f := newEngineeringFixture(t)
-	f.enable()
-	initial := f.propose("domain_rules", "### [Rule-1] Required\nAlways verify", nil, nil)
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", initial), "task")).Want(200)
-	cut := f.propose("domain_rules", "", uuidToPtr(initial.ID), nil)
-	var risk string
-	dbfx.QueryRow(t, `SELECT adopted_revision_id::text FROM project_baseline_doc WHERE project_id=$1 AND chapter='exclusions_and_risks'`, f.project).Scan(&risk)
-	f.propose("exclusions_and_risks", baselinePATRisk+"\n### [Defer-1] Later\nRule-1 goes to OL-1", &risk, nil)
-	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", cut), "task")).Want(409), "baseline_base_stale")
-	if f.readRevision(uuidToString(cut.ID)).Status != "candidate" {
-		t.Fatal("changed diff was adopted")
-	}
-	cut = f.propose("domain_rules", "", uuidToPtr(initial.ID), uuidToPtr(cut.ID))
-	var diff engineering.Diff
-	if err := json.Unmarshal(cut.AnchorsDiff, &diff); err != nil {
-		t.Fatal(err)
-	}
-	if len(diff.Warnings) != 2 || diff.Warnings[1].Code != "rule_deferred" {
-		t.Fatalf("diff=%+v", diff)
-	}
-}
-
-func TestLabrastroEngineeringDeferUsesCurrentWorkspacePrefix(t *testing.T) {
-	f := newEngineeringFixture(t)
-	f.enable()
-	var prefix, risk string
-	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id=$1`, testWorkspaceID).Scan(&prefix)
-	dbfx.QueryRow(t, `SELECT adopted_revision_id::text FROM project_baseline_doc WHERE project_id=$1 AND chapter='exclusions_and_risks'`, f.project).Scan(&risk)
-	dbfx.Cleanup(t, `UPDATE workspace SET issue_prefix=$2 WHERE id=$1`, testWorkspaceID, prefix)
-
-	content := baselinePATRisk + "\n### [Defer-1] Later\n" + prefix + "-1097"
-	first := f.propose("exclusions_and_risks", content, &risk, nil)
-	var diff engineering.Diff
-	if err := json.Unmarshal(first.AnchorsDiff, &diff); err != nil {
-		t.Fatal(err)
-	}
-	if len(diff.Warnings) != 0 {
-		t.Fatalf("workspace issue reference warned: %+v", diff.Warnings)
-	}
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", first), "session")).Want(200)
-	candidate := f.propose("exclusions_and_risks", content+"\nADR-3", uuidToPtr(first.ID), nil)
-
-	dbfx.Exec(t, `UPDATE workspace SET issue_prefix='RENAMED' WHERE id=$1`, testWorkspaceID)
-	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", candidate), "session")).Want(409), "baseline_base_stale")
-	if f.readRevision(uuidToString(candidate.ID)).Status != "candidate" {
-		t.Fatal("prefix change must leave the candidate undecided")
-	}
-
-	path := "/baseline/revisions?chapter=exclusions_and_risks&diff_from=" + strconv.Itoa(int(first.RevisionNumber)) + "&diff_to=" + strconv.Itoa(int(candidate.RevisionNumber))
-	testutil.Call(t, testHandler.LabrastroBaselineHistory, f.request("GET", path, nil, "session")).Want(200).JSON(&diff)
-	want := []engineering.Warning{{Code: "defer_missing_pool", Anchor: "Defer-1"}}
-	if !reflect.DeepEqual(diff.Warnings, want) {
-		t.Fatalf("historical diff must use current prefix: %+v", diff.Warnings)
-	}
-
-	replacement := f.propose("exclusions_and_risks", candidate.ContentMarkdown, uuidToPtr(first.ID), uuidToPtr(candidate.ID))
-	if err := json.Unmarshal(replacement.AnchorsDiff, &diff); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(diff.Warnings, want) {
-		t.Fatalf("replacement must retain missing-pool warning: %+v", diff.Warnings)
-	}
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", replacement), "session")).Want(200)
-}
-
 func TestLabrastroEngineeringOpenIssuesAndIsolation(t *testing.T) {
 	f := newEngineeringFixture(t)
 	f.enable()
@@ -421,6 +328,7 @@ func TestLabrastroEngineeringDeleteProjectCleansOnlyItsRows(t *testing.T) {
 	a, b := newEngineeringFixture(t), newEngineeringFixture(t)
 	a.enable()
 	b.enable()
+	b.propose("overview", "## Preserve\nBody", nil, nil)
 	a.propose("overview", "### [Stage-1] First", nil, nil)
 	testutil.Call(t, testHandler.DeleteProject, a.request("DELETE", "", nil, "session")).Want(204)
 	for _, table := range []string{"project_engineering", "project_baseline_doc", "project_baseline_revision"} {
@@ -436,13 +344,19 @@ func TestLabrastroEngineeringDeleteProjectCleansOnlyItsRows(t *testing.T) {
 func TestLabrastroEngineeringRejectsInvalidInputAndAuditFields(t *testing.T) {
 	f := newEngineeringFixture(t)
 	f.enable()
-	for _, body := range []any{
-		map[string]any{"chapter": "overview", "content_markdown": "### [Rule-1] Wrong chapter"},
-		map[string]any{"chapter": "overview", "content_markdown": strings.Repeat("x", 65537)},
+	for _, tt := range []struct {
+		chapter, content, code string
+		status                 int
+	}{
+		{"wrong", "", "invalid_request", 400},
+		{"overview", strings.Repeat("x", 65537), "baseline_too_large", 422},
+		{"overview", "\x00", "baseline_content_invalid", 422},
 	} {
-		testutil.Call(t, testHandler.LabrastroProposeBaseline, f.request("POST", "/baseline/candidates", body, "session")).Want(422)
+		wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroProposeBaseline, f.request("POST", "/baseline/candidates", map[string]any{"chapter": tt.chapter, "content_markdown": tt.content}, "session")).Want(tt.status), tt.code)
 	}
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", map[string]any{"action": "adopt", "decided_by_id": testUserID}, "task")).Want(400)
+	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroBaselineHistory, f.request("GET", "/baseline/revisions?chapter=wrong", nil, "session")).Want(400), "invalid_request")
+	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", map[string]any{"action": "adopt", "decided_by_id": testUserID}, "session")).Want(400)
+	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", "invalid body", "task")).Want(403), "baseline_human_required")
 }
 
 func TestLabrastroEngineeringWorkspaceDeleteAndOpenListBound(t *testing.T) {
@@ -466,6 +380,10 @@ func TestLabrastroEngineeringWorkspaceDeleteAndOpenListBound(t *testing.T) {
 	req = withURLParam(req, "id", project)
 	req.Header.Set("X-Workspace-ID", ws)
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, req).Want(200)
+	req = newRequest("POST", "/api/projects/"+project+"/baseline/candidates", map[string]any{"chapter": "overview", "content_markdown": "## Cleanup"})
+	req = withURLParam(req, "id", project)
+	req.Header.Set("X-Workspace-ID", ws)
+	testutil.Call(t, testHandler.LabrastroProposeBaseline, req).Want(201)
 	for _, table := range []string{"project_engineering", "project_baseline_doc", "project_baseline_revision"} {
 		if n := dbfx.Count(t, "SELECT count(*) FROM "+table+" WHERE workspace_id=$1", ws); n != 1 {
 			t.Fatalf("fixture %s: %d", table, n)
@@ -567,41 +485,6 @@ func TestLabrastroEngineeringProposalWaitsForProjectDelete(t *testing.T) {
 	}
 }
 
-func TestLabrastroEngineeringTaskWarningsRemainAdvisory(t *testing.T) {
-	f := newEngineeringFixture(t)
-	f.enable()
-	initial := f.propose("domain_rules", "### [Rule-1] Keep\n一二三四五六七八九十\n### [Rule-2] Remove\nRequired", nil, nil)
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", initial), "task")).Want(200)
-	var risk string
-	dbfx.QueryRow(t, `SELECT adopted_revision_id::text FROM project_baseline_doc WHERE project_id=$1 AND chapter='exclusions_and_risks'`, f.project).Scan(&risk)
-	exclusions := f.propose("exclusions_and_risks", baselinePATRisk+"\n### [Defer-1] Later\nRule-1 deferred without a pool", &risk, nil)
-	rules := f.propose("domain_rules", "### [Rule-1] Keep\n一二三", uuidToPtr(initial.ID), nil)
-	wantWarnings := map[string][]engineering.Warning{
-		"domain_rules":         {{Code: "rule_shrunk", Anchor: "Rule-1"}, {Code: "rule_removed", Anchor: "Rule-2"}, {Code: "rule_deferred", Anchor: "Rule-1"}},
-		"exclusions_and_risks": {{Code: "defer_missing_pool", Anchor: "Defer-1"}},
-	}
-	for _, revision := range []baselineRevisionResponse{rules, exclusions} {
-		var diff engineering.Diff
-		if err := json.Unmarshal(revision.AnchorsDiff, &diff); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(diff.Warnings, wantWarnings[revision.Chapter]) || revision.Status != "candidate" || revision.DecidedByID.Valid {
-			t.Fatalf("proposal must preserve warnings without adopting: %+v, %+v", revision, diff)
-		}
-	}
-	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", rules, exclusions), "task")).Want(200)
-	for _, candidate := range []baselineRevisionResponse{rules, exclusions} {
-		got := f.readRevision(uuidToString(candidate.ID))
-		var diff engineering.Diff
-		if err := json.Unmarshal(got.AnchorsDiff, &diff); err != nil {
-			t.Fatal(err)
-		}
-		if got.Status != "adopted" || got.DecisionCredential.String != "agent_task" || got.DecidedByID != parseUUID(f.agent) || got.DecidedByTaskID != parseUUID(f.task) || !reflect.DeepEqual(diff.Warnings, wantWarnings[candidate.Chapter]) {
-			t.Fatalf("adoption lost audit or warnings: %+v", got)
-		}
-	}
-}
-
 func TestLabrastroEngineeringTaskIsolationAndCapabilitySwitch(t *testing.T) {
 	f := newEngineeringFixture(t)
 	f.enable()
@@ -613,7 +496,7 @@ func TestLabrastroEngineeringTaskIsolationAndCapabilitySwitch(t *testing.T) {
 	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, req).Want(403), "baseline_credential_denied")
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"agent_decisions_enabled": true}, "session")).Want(400)
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"enabled": false}, "session")).Want(200)
-	for _, credential := range []string{"session", "pat", "task"} {
+	for _, credential := range []string{"session", "pat"} {
 		for _, action := range []string{"adopt", "reject"} {
 			wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision(action, candidate), credential)).Want(409), "engineering_disabled")
 		}
@@ -621,4 +504,98 @@ func TestLabrastroEngineeringTaskIsolationAndCapabilitySwitch(t *testing.T) {
 	if got := f.readRevision(uuidToString(candidate.ID)); got.Status != "candidate" || got.DecidedByID.Valid {
 		t.Fatal("denied decision changed the candidate")
 	}
+}
+
+func TestLabrastroEngineeringStages(t *testing.T) {
+	f := newEngineeringFixture(t)
+	read := func() engineeringConfigResponse {
+		var out struct {
+			Engineering engineeringConfigResponse `json:"engineering"`
+		}
+		testutil.Call(t, testHandler.LabrastroGetEngineering, f.request("GET", "/engineering", nil, "session")).Want(200).JSON(&out)
+		return out.Engineering
+	}
+	if got := read(); string(got.Stages) != "[]" {
+		t.Fatalf("unset stages=%s", got.Stages)
+	}
+	stages := []any{map[string]any{"stage": 9, "title": " 上线 ", "goal": " 验收 "}, map[string]any{"stage": 2, "title": "开发"}}
+	var patched struct {
+		Engineering engineeringConfigResponse `json:"engineering"`
+	}
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"stages": stages, "current_stage": 9}, "session")).Want(200).JSON(&patched)
+	want := `[{"stage":2,"title":"开发","goal":""},{"stage":9,"title":"上线","goal":"验收"}]`
+	equalJSON := func(got json.RawMessage) bool {
+		var a, b any
+		if json.Unmarshal(got, &a) != nil || json.Unmarshal([]byte(want), &b) != nil {
+			return false
+		}
+		return reflect.DeepEqual(a, b)
+	}
+	if patched.Engineering.CurrentStage != 9 || !equalJSON(patched.Engineering.Stages) {
+		t.Fatalf("patch=%+v", patched)
+	}
+	for _, body := range []any{map[string]any{"mode_summary": "Iterate"}, map[string]any{"stages": nil}} {
+		testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", body, "session")).Want(200)
+		if got := read(); got.CurrentStage != 9 || !equalJSON(got.Stages) {
+			t.Fatalf("partial update=%+v", got)
+		}
+	}
+	for _, tt := range []struct {
+		name        string
+		stage       any
+		title, goal string
+	}{
+		{"zero", 0, "valid", ""}, {"negative", -1, "valid", ""}, {"fraction", 1.5, "valid", ""},
+		{"string", "1", "valid", ""}, {"missing", nil, "valid", ""}, {"empty", 1, " \t ", ""},
+		{"long title", 1, strings.Repeat("字", 61), ""}, {"long goal", 1, "valid", strings.Repeat("字", 281)},
+		{"title newline", 1, "valid\n", ""}, {"title carriage", 1, "valid\r", ""}, {"title NUL", 1, "valid\x00", ""},
+		{"goal newline", 1, "valid", "\ngoal"}, {"goal carriage", 1, "valid", "goal\r"}, {"goal NUL", 1, "valid", "\x00"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := map[string]any{"stages": []any{map[string]any{"stage": tt.stage, "title": tt.title, "goal": tt.goal}}}
+			wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", body, "session")).Want(422), "invalid_request")
+		})
+	}
+	duplicate := []any{map[string]any{"stage": 1, "title": "one"}, map[string]any{"stage": 1, "title": "two"}}
+	tooMany := make([]any, 51)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"stage": i + 1, "title": "Stage"}
+	}
+	for _, invalid := range []any{duplicate, tooMany,
+		[]any{map[string]any{"stage": 1, "title": 42}},
+		[]any{map[string]any{"stage": 1, "title": "Title", "goal": false}},
+		[]any{map[string]any{"stage": 1, "title": "Title", "goal": nil}},
+	} {
+		wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"stages": invalid}, "session")).Want(422), "invalid_request")
+	}
+	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"stages": []any{map[string]any{"stage": 1, "title": "one", "extra": true}}}, "session")).Want(400), "invalid_request")
+	if got := read(); !equalJSON(got.Stages) {
+		t.Fatalf("invalid patch mutated stages=%s", got.Stages)
+	}
+	// Boundary lengths count characters, not UTF-8 bytes.
+	tooMany[0] = map[string]any{"stage": 1, "title": strings.Repeat("字", 60), "goal": strings.Repeat("字", 280)}
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"stages": tooMany[:50]}, "session")).Want(200)
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"stages": []any{}}, "session")).Want(200)
+	if got := read(); string(got.Stages) != "[]" {
+		t.Fatalf("clear=%s", got.Stages)
+	}
+}
+
+func TestLabrastroEngineeringDiffIgnoresOtherChaptersAndRechecksStoredDiff(t *testing.T) {
+	f := newEngineeringFixture(t)
+	f.enable()
+	initial := f.propose("domain_rules", "## Rules\n### [Rule-1] Verify\nAlways verify", nil, nil)
+	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", initial), "session")).Want(200)
+	cut := f.propose("domain_rules", "## Rules", uuidToPtr(initial.ID), nil)
+	f.propose("exclusions_and_risks", "## Later\nRule-1 deferred without issue", nil, nil)
+	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", cut), "session")).Want(200)
+	// Historical algorithm output must be reviewed again instead of silently adopted.
+	next := f.propose("domain_rules", "## Rules\nChanged", uuidToPtr(cut.ID), nil)
+	dbfx.Exec(t, `UPDATE project_baseline_revision SET anchors_diff=jsonb_set(anchors_diff,'{warnings}','[{"code":"rule_removed","anchor":"Rule-1"}]') WHERE id=$1`, uuidToString(next.ID))
+	wantEngineeringCode(t, testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", next), "pat")).Want(409), "baseline_base_stale")
+	if got := f.readRevision(uuidToString(next.ID)); got.Status != "candidate" || got.DecidedByID.Valid {
+		t.Fatal("stale diff changed candidate")
+	}
+	replacement := f.propose("domain_rules", next.ContentMarkdown, uuidToPtr(cut.ID), uuidToPtr(next.ID))
+	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", replacement), "pat")).Want(200)
 }

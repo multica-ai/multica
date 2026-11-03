@@ -116,6 +116,7 @@ func init() {
 	projectCmd.AddCommand(projectStatusCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 	projectCmd.AddCommand(newLabrastroProjectBaselineCmd())
+	projectCmd.AddCommand(newLabrastroProjectEngineeringCmd())
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
 	projectResourceCmd.AddCommand(projectResourceAddCmd)
