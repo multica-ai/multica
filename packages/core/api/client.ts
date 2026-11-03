@@ -1734,8 +1734,8 @@ export class ApiClient {
     });
   }
 
-  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
+  async getAssigneeFrequency(workspaceId: string): Promise<AssigneeFrequencyEntry[]> {
+    return this.fetch(`/api/assignee-frequency?workspace_id=${encodeURIComponent(workspaceId)}`);
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {

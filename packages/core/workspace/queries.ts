@@ -187,7 +187,7 @@ export function myInvitationListOptions() {
 export function assigneeFrequencyOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.assigneeFrequency(wsId),
-    queryFn: () => api.getAssigneeFrequency(),
+    queryFn: () => api.getAssigneeFrequency(wsId),
   });
 }
 

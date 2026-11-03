@@ -3205,3 +3205,21 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient assignee frequency", () => {
+  it("scopes the request to the requested workspace", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").getAssigneeFrequency("ws-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/assignee-frequency?workspace_id=ws-1",
+    );
+  });
+});
