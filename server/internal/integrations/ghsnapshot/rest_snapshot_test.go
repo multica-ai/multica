@@ -113,6 +113,7 @@ func TestFetchPRSnapshotRESTResults(t *testing.T) {
 		{"empty conclusion", `[{"id":1,"head_sha":"sha1","name":"ci","status":"completed","conclusion":null}]`, `[]`, "PENDING"},
 		{"unknown status", `[]`, `[{"context":"deploy","state":"future_state"}]`, "PENDING"},
 		{"failure before pending", `[{"id":1,"head_sha":"sha1","name":"ci","status":"completed","conclusion":"failure"}]`, `[{"context":"deploy","state":"pending"}]`, "FAILURE"},
+		{"superseded run", `[{"id":1,"head_sha":"sha1","name":"ci","status":"completed","conclusion":"cancelled"},{"id":2,"head_sha":"sha1","name":"ci","status":"completed","conclusion":"success"}]`, `[]`, "SUCCESS"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

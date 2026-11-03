@@ -114,6 +114,8 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 
 	snap := &PRSnapshot{HeadSHA: pr.Head.SHA}
 	seenRuns := make(map[int64]struct{}, len(runs))
+	latestByName := make(map[string]int, len(runs))
+	latestID := make(map[string]int64, len(runs))
 	for _, run := range runs {
 		if run.ID <= 0 || run.Name == "" || run.HeadSHA != snap.HeadSHA {
 			return nil, errors.New("ghsnapshot: invalid check run or mismatched head")
@@ -131,7 +133,17 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 			// refresh queue and the persisted running-check counts.
 			status, conclusion = "queued", ""
 		}
-		snap.Contexts = append(snap.Contexts, CheckContext{Name: run.Name, Status: status, Conclusion: conclusion, DetailsURL: run.DetailsURL})
+		cc := CheckContext{Name: run.Name, Status: status, Conclusion: conclusion, DetailsURL: run.DetailsURL}
+		if idx, ok := latestByName[run.Name]; ok {
+			if run.ID > latestID[run.Name] {
+				snap.Contexts[idx] = cc
+				latestID[run.Name] = run.ID
+			}
+			continue
+		}
+		latestByName[run.Name] = len(snap.Contexts)
+		latestID[run.Name] = run.ID
+		snap.Contexts = append(snap.Contexts, cc)
 	}
 	seenStatuses := make(map[string]struct{}, len(statuses))
 	for _, entry := range statuses {
