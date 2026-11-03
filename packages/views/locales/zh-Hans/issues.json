@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
   },
+  "unread_filter_error": {
+    "title": "无法加载未读任务"
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "加载状态后才能显示任务。",

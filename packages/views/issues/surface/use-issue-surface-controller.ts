@@ -152,6 +152,8 @@ export interface IssueSurfaceController {
   /** First-load failure while the working filter needs issue membership. */
   isWorkingFilterError: boolean;
   retryWorkingFilter: () => void;
+  isUnreadFilterError: boolean;
+  retryUnreadFilter: () => void;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -534,8 +536,10 @@ export function useIssueSurfaceController({
   // the filter is on stays in the set, so it keeps its place on screen (and
   // the query keeps its identity) until the filter turns off or the surface
   // unmounts; a newly unread issue grows the set and refetches.
-  const unreadIssueList = useIssueUnreadIds(wsId, unreadFilter);
+  const unreadProjection = useIssueUnreadIds(wsId, unreadFilter);
+  const unreadIssueList = unreadProjection.ids;
   const unreadFilterUnresolved = unreadFilter && unreadIssueList === undefined;
+  const unreadFilterError = unreadFilterUnresolved && unreadProjection.isError;
   const keptUnreadRef = useRef<Set<string>>(new Set());
   const unreadIssueIDs = useMemo<ReadonlySet<string>>(() => {
     if (!unreadFilter) {
@@ -1023,7 +1027,8 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
-    isLoading: data.isLoading || workingFilterPending || unreadFilterUnresolved,
+    isLoading:
+      data.isLoading || workingFilterPending || (unreadFilterUnresolved && !unreadFilterError),
     workingAgents,
     hasActiveFilters,
     statusPagination: usesServerStatusSurface
@@ -1051,6 +1056,10 @@ export function useIssueSurfaceController({
     isWorkingFilterError: workingFilterError,
     retryWorkingFilter: () => {
       void workingAgentsProjection.refetch();
+    },
+    isUnreadFilterError: unreadFilterError,
+    retryUnreadFilter: () => {
+      void unreadProjection.refetch();
     },
     sort,
     actions,

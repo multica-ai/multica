@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "에이전트가 작업 중인 태스크를 불러오지 못했습니다"
   },
+  "unread_filter_error": {
+    "title": "읽지 않은 태스크를 불러오지 못했습니다"
+  },
   "status_catalog_error": {
     "title": "상태 목록을 불러오지 못했습니다",
     "hint": "상태를 불러와야 태스크를 표시할 수 있습니다.",

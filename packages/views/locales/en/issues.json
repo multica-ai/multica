@@ -39,6 +39,9 @@
   "working_filter_error": {
     "title": "Couldn't load issues with working agents"
   },
+  "unread_filter_error": {
+    "title": "Couldn't load your unread issues"
+  },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
     "hint": "Issues can't be shown until statuses load.",

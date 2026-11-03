@@ -39,6 +39,9 @@
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
   },
+  "unread_filter_error": {
+    "title": "Impossible de charger vos tâches non lues"
+  },
   "status_catalog_error": {
     "title": "Impossible de charger la liste des états",
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",

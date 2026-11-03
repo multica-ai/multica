@@ -419,7 +419,7 @@ function SavedViewRow({
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const needsUnread = viewSidebarNeedsUnread(view);
-  const unreadIssueIds = useIssueUnreadIds(wsId, needsUnread);
+  const { ids: unreadIssueIds } = useIssueUnreadIds(wsId, needsUnread);
   const request =
     needsUnread && !unreadIssueIds ? undefined : viewSidebarRequest(view, todayDateOnly(), unreadIssueIds);
   const prefetch = usePrefetch(wsId, source, request);

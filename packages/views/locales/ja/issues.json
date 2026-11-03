@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"
   },
+  "unread_filter_error": {
+    "title": "未読のタスクを読み込めませんでした"
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "ステータスを読み込むまでタスクを表示できません。",

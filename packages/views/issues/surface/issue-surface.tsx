@@ -269,6 +269,8 @@ function IssueSurfaceContent({
           <FilterDependencyErrorState kind="status" onRetry={controller.retryStatusCatalog} />
         ) : controller.isWorkingFilterError ? (
           <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
+        ) : controller.isUnreadFilterError ? (
+          <FilterDependencyErrorState kind="unread" onRetry={controller.retryUnreadFilter} />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -383,7 +385,7 @@ function FilterDependencyErrorState({
   kind,
   onRetry,
 }: {
-  kind: "status" | "working";
+  kind: "status" | "working" | "unread";
   onRetry: () => void;
 }) {
   const { t } = useT("issues");
@@ -396,7 +398,9 @@ function FilterDependencyErrorState({
       <p className="text-body">
         {kind === "working"
           ? t(($) => $.working_filter_error.title)
-          : t(($) => $.status_catalog_error.title)}
+          : kind === "unread"
+            ? t(($) => $.unread_filter_error.title)
+            : t(($) => $.status_catalog_error.title)}
       </p>
       {kind === "status" && (
         <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>

@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "無法載入 AI 代理正在處理的任務"
   },
+  "unread_filter_error": {
+    "title": "無法載入未讀任務"
+  },
   "status_catalog_error": {
     "title": "狀態列表載入失敗",
     "hint": "載入狀態後才能顯示任務。",
