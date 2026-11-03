@@ -75,8 +75,8 @@ export interface RunTimeline {
   /** Oldest first. */
   runs: TimelineRun[];
   totalCost: number;
-  /** Provider credits across runs, or null when no run was billed in credits. */
-  totalCredits: number | null;
+  /** Credits across runs, kept in each provider's own unit. */
+  totalCredits: TaskUsageSummary["credits"];
   pricedCount: number;
   tokens: TokenTotals;
   /** What cache reads saved against paying the input rate for them. */
@@ -171,7 +171,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     .toSorted((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
 
   let totalCost = 0;
-  let totalCredits: number | null = null;
+  const totalCredits = new Map<string, number>();
   let pricedCount = 0;
   let cacheSavings = 0;
   let agentMs = 0;
@@ -187,7 +187,9 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
   for (const run of runs) {
     if (run.usage) {
       totalCost += run.usage.cost;
-      if (run.usage.credits !== null) totalCredits = (totalCredits ?? 0) + run.usage.credits;
+      for (const [provider, credits] of run.usage.credits) {
+        totalCredits.set(provider, (totalCredits.get(provider) ?? 0) + credits);
+      }
       pricedCount += 1;
       cacheSavings += run.usage.cacheSavings;
       maxRunCost = Math.max(maxRunCost, run.usage.cost);
@@ -437,8 +439,8 @@ export interface RunDayGroup {
   /** Newest first within the day. */
   runs: TimelineRun[];
   cost: number;
-  /** Provider credits, or null when no run that day was billed in credits. */
-  credits: number | null;
+  /** Credits for the day, kept in each provider's own unit. */
+  credits: Map<string, number>;
   tokens: number;
   agentMs: number;
 }
@@ -452,12 +454,14 @@ export function groupRunsByDay(runs: readonly TimelineRun[]): RunDayGroup[] {
     const key = day.getTime();
     let group = groups.get(key);
     if (!group) {
-      group = { dayMs: key, runs: [], cost: 0, credits: null, tokens: 0, agentMs: 0 };
+      group = { dayMs: key, runs: [], cost: 0, credits: new Map(), tokens: 0, agentMs: 0 };
       groups.set(key, group);
     }
     group.runs.push(run);
     group.cost += run.usage?.cost ?? 0;
-    if (run.usage && run.usage.credits !== null) group.credits = (group.credits ?? 0) + run.usage.credits;
+    for (const [provider, credits] of run.usage?.credits ?? []) {
+      group.credits.set(provider, (group.credits.get(provider) ?? 0) + credits);
+    }
     group.tokens += run.usage?.tokens ?? 0;
     group.agentMs += run.durationMs ?? 0;
   }

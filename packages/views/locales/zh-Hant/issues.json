@@ -869,7 +869,7 @@
     "col_tokens": "Token",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} Token",
-    "credits_count": "{{credits}} credits",
+    "credits_count": "{{credits}} {{provider}} 點數",
     "details_toggle": "執行詳情",
     "detail_breakdown": "費用明細",
     "detail_total": "合計",

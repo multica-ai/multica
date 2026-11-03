@@ -227,7 +227,7 @@ function RunTotals({ timeline }: { timeline: RunTimeline }) {
       {stats.map(([label, value]) => (
         <div key={label} className="flex min-w-0 flex-col-reverse">
           <dt className="truncate text-micro text-muted-foreground">{label}</dt>
-          <dd className="truncate text-label font-medium tabular-nums">{value}</dd>
+          <dd className="break-words text-label font-medium tabular-nums">{value}</dd>
         </div>
       ))}
     </dl>
@@ -412,7 +412,7 @@ export function IssueRunsTotal({
     <Tooltip>
       <TooltipTrigger
         render={<button type="button" onClick={onOpen} />}
-        className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption tabular-nums transition-colors hover:bg-accent/70 ${
+        className={`flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-caption tabular-nums transition-colors hover:bg-accent/70 ${
           alone ? "ml-auto" : ""
         }`}
       >
@@ -422,7 +422,7 @@ export function IssueRunsTotal({
         {total && (
           <>
             <span className={`text-faint-foreground ${narrowTier}`}>·</span>
-            <span className="font-medium">{formatSpend(total)}</span>
+            <span className="min-w-0 break-words text-right font-medium">{formatSpend(total)}</span>
           </>
         )}
       </TooltipTrigger>
@@ -694,7 +694,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             <TriggerText text={trigger} emphasis />
           )}
           <TaskCommentCoverage task={task} />
-          <RowStatus title={statusTitle}>
+          <RowStatus title={statusTitle} wrap={!!usage?.credits.size}>
             <TaskStatusIcon status={task.status} />
             <span className="sr-only">{[label, time].filter(Boolean).join(" · ")}</span>
             {usage ? (
@@ -821,14 +821,19 @@ export function TaskCommentCoverage({ task }: { task: AgentTask }) {
 function RowStatus({
   children,
   title,
+  wrap = false,
 }: {
   children: React.ReactNode;
   title?: string;
+  wrap?: boolean;
 }) {
   return (
     <div
       title={title}
-      className="flex h-6 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-caption [@media(hover:hover)]:group-hover/execution-log-row:hidden"
+      className={cn(
+        "flex shrink-0 items-center justify-end gap-1 text-caption [@media(hover:hover)]:group-hover/execution-log-row:hidden",
+        wrap ? "min-h-6 max-w-[60%] break-words text-right" : "h-6 overflow-hidden whitespace-nowrap",
+      )}
     >
       {children}
     </div>

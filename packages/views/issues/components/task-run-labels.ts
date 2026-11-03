@@ -1,4 +1,5 @@
 import type { AgentTask } from "@multica/core/types";
+import { providerDisplayName } from "@multica/core/runtimes";
 import { useT } from "../../i18n";
 import { formatSpend, type TaskUsageSummary } from "../../runtimes/utils";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
@@ -119,5 +120,8 @@ export function taskDurationMs(task: AgentTask): number | null {
 /** Formats a run's spend, labelling provider credits in the reader's locale. */
 export function useFormatSpend(): (usage: Pick<TaskUsageSummary, "cost" | "credits">) => string {
   const { t } = useT("issues");
-  return (usage) => formatSpend(usage, (credits) => t(($) => $.runs_timeline.credits_count, { credits }));
+  return (usage) => formatSpend(usage, (credits, provider) => t(($) => $.runs_timeline.credits_count, {
+    credits,
+    provider: providerDisplayName(provider),
+  }));
 }

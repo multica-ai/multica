@@ -2092,24 +2092,31 @@ describe("credits usage", () => {
     cache_write_tokens: 0,
     credits_micros: 1_250_000,
   };
-  const label = (credits: string) => `${credits} credits`;
+  const label = (credits: string, provider: string) => `${credits} ${provider} credits`;
 
   it("sums credits across slices and leaves token cost at zero", () => {
     const s = summarizeTaskUsage([qoder, { ...qoder, credits_micros: 500_000 }]);
-    expect(s?.credits).toBe(1.75);
+    expect(s?.credits).toEqual(new Map([["qoder_cloud", 1.75]]));
     expect(s?.cost).toBe(0);
     expect(s?.models).toEqual([]);
   });
 
   it("reports no credits when no slice was billed in credits", () => {
     const { credits_micros: _, ...tokensOnly } = qoder;
-    expect(summarizeTaskUsage([tokensOnly])?.credits).toBeNull();
+    expect(summarizeTaskUsage([tokensOnly])?.credits.size).toBe(0);
+  });
+
+  it("keeps different providers' credit units separate", () => {
+    const s = summarizeTaskUsage([qoder, { ...qoder, provider: "other", credits_micros: 500_000 }]);
+    expect(s?.credits).toEqual(new Map([["qoder_cloud", 1.25], ["other", 0.5]]));
+    expect(formatSpend(s!, label)).toBe("1.25 qoder_cloud credits + 0.5 other credits");
   });
 
   it("shows credits alone, USD alone, or both", () => {
-    expect(formatSpend({ cost: 0, credits: 1.75 }, label)).toBe("1.75 credits");
-    expect(formatSpend({ cost: 1.5, credits: null }, label)).toBe("$1.50");
-    expect(formatSpend({ cost: 1.5, credits: 2 }, label)).toBe("$1.50 + 2 credits");
+    expect(formatSpend({ cost: 0, credits: new Map([["qoder_cloud", 1.75]]) }, label)).toBe("1.75 qoder_cloud credits");
+    expect(formatSpend({ cost: 1.5, credits: new Map() }, label)).toBe("$1.50");
+    expect(formatSpend({ cost: 1.5, credits: new Map([["qoder_cloud", 2]]) }, label)).toBe("$1.50 + 2 qoder_cloud credits");
+    expect(formatSpend({ cost: 0, credits: new Map([["qoder_cloud", 0]]) }, label)).toBe("0 qoder_cloud credits");
   });
 
   it("formats credits by magnitude", () => {
@@ -2119,8 +2126,8 @@ describe("credits usage", () => {
   });
 
   it("hides the token figure only for credits-only usage", () => {
-    expect(hasTokenFigure({ tokens: 0, credits: 1 })).toBe(false);
-    expect(hasTokenFigure({ tokens: 10, credits: 1 })).toBe(true);
-    expect(hasTokenFigure({ tokens: 0, credits: null })).toBe(true);
+    expect(hasTokenFigure({ tokens: 0, credits: new Map([["qoder_cloud", 1]]) })).toBe(false);
+    expect(hasTokenFigure({ tokens: 10, credits: new Map([["qoder_cloud", 1]]) })).toBe(true);
+    expect(hasTokenFigure({ tokens: 0, credits: new Map() })).toBe(true);
   });
 });

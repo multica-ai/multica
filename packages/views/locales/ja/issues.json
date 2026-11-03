@@ -869,7 +869,7 @@
     "col_tokens": "トークン",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} トークン",
-    "credits_count": "{{credits}} credits",
+    "credits_count": "{{credits}} {{provider}} クレジット",
     "details_toggle": "実行の詳細",
     "detail_breakdown": "費用の内訳",
     "detail_total": "合計",

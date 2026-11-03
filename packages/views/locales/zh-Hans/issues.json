@@ -869,7 +869,7 @@
     "col_tokens": "Token",
     "col_cost": "费用",
     "tokens_count": "{{tokens}} Token",
-    "credits_count": "{{credits}} credits",
+    "credits_count": "{{credits}} {{provider}} 积分",
     "details_toggle": "运行详情",
     "detail_breakdown": "费用明细",
     "detail_total": "合计",

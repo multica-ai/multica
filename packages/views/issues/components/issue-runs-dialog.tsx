@@ -742,7 +742,7 @@ const COL = {
   model: "w-24 shrink-0",
   status: "w-20 shrink-0",
   tokens: "w-14 shrink-0 text-right",
-  cost: "w-14 shrink-0 text-right",
+  cost: "w-44 shrink-0 break-words whitespace-normal text-right",
   actions: "w-14 shrink-0",
   toggle: "w-6 shrink-0",
 } as const;
@@ -853,7 +853,7 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
 
   return (
     <div className={cn("border-b", expanded && "bg-accent/40")}>
-      <div className="group/run-row flex h-9 items-center gap-2 text-caption transition-colors hover:bg-accent/40">
+      <div className="group/run-row flex min-h-9 items-center gap-2 py-1 text-caption transition-colors hover:bg-accent/40">
         <span className={cn(COL.time, "font-mono text-micro tabular-nums text-muted-foreground")}>
           {time}
         </span>
@@ -1019,7 +1019,7 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
             <span />
             <span className="font-medium">{t(($) => $.runs_timeline.detail_total)}</span>
             <span className="text-right font-medium">{hasTokenFigure(usage) ? formatTokens(usage.tokens) : "—"}</span>
-            <span className="min-w-14 text-right font-semibold whitespace-nowrap">{formatSpend(usage)}</span>
+            <span className="min-w-14 max-w-64 break-words text-right font-semibold">{formatSpend(usage)}</span>
             <span />
           </div>
         </div>
