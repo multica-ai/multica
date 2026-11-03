@@ -130,7 +130,7 @@ func testUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T, hist
 	}
 	block := channelmedia.Block(attachmentID, "diagram.png", true)
 	if historical {
-		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: "+attachmentID+"] after\n>     </quoted_message>")
+		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n> ````\n> <quoted_message sender=\"Alice\">\n> before [Image 1: "+attachmentID+"] after\n> ```markdown\n> ![original](https://example.invalid/source.png)\n> ```\n> </quoted_message>\n> ````")
 	}
 	remoteDescription := channelmedia.Append("Original", block)
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1, updated_at = now() WHERE id = $2`, remoteDescription, created.ID); err != nil {
@@ -153,6 +153,29 @@ func testUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T, hist
 	}
 	if merged.Description == nil || !strings.Contains(*merged.Description, "Original with local edit") || !strings.Contains(*merged.Description, block) {
 		t.Fatalf("merged description = %#v", merged.Description)
+	}
+
+	if historical {
+		// The editor strips provenance comments while preserving the literal
+		// source block, including the original sender and nested code fences.
+		source := channelmedia.Sources(block)[0]
+		save := httptest.NewRecorder()
+		saveReq := newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
+			"description":      channelmedia.Append("Local edit after reload", source.Content),
+			"description_base": *merged.Description,
+		})
+		testHandler.UpdateIssue(save, withURLParam(saveReq, "id", created.ID))
+		if save.Code != http.StatusOK {
+			t.Fatalf("save source after editor reload: status %d: %s", save.Code, save.Body.String())
+		}
+		var persisted string
+		if err := testPool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, created.ID).Scan(&persisted); err != nil {
+			t.Fatalf("read saved source: %v", err)
+		}
+		if want := channelmedia.Append("Local edit after reload", block); persisted != want {
+			t.Fatalf("editor save lost or duplicated attributed source: got %q, want %q", persisted, want)
+		}
+		merged.Description = &persisted
 	}
 
 	// Once the client has adopted the media-bearing description as its base,
@@ -218,7 +241,7 @@ func testBatchUpdateIssuePreservesMarkedChannelMedia(t *testing.T, historical bo
 	}
 	block := channelmedia.Block(attachmentID, "diagram.png", true)
 	if historical {
-		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: "+attachmentID+"] after\n>     </quoted_message>")
+		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n> ````\n> <quoted_message sender=\"Alice\">\n> before [Image 1: "+attachmentID+"] after\n> ```markdown\n> ![original](https://example.invalid/source.png)\n> ```\n> </quoted_message>\n> ````")
 	}
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1 WHERE id = $2`, channelmedia.Append("Original", block), created.ID); err != nil {
 		t.Fatalf("append channel media: %v", err)
@@ -346,7 +369,7 @@ func TestDescriptionUpdateLockSerializesLaterChannelMediaAppend(t *testing.T) {
 
 func TestMergeIssueChannelMediaPreservesAttributedSource(t *testing.T) {
 	const id = "22222222-2222-4222-8222-222222222222"
-	content := "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: " + id + "] after\n>     </quoted_message>"
+	content := "Referenced channel context:\n\n> ````\n> <quoted_message sender=\"Alice\">\n> before [Image 1: " + id + "] after\n> ```markdown\n> ![original](https://example.invalid/source.png)\n> ```\n> </quoted_message>\n> ````"
 	block := channelmedia.SourceBlock([]string{id}, content)
 	current := channelmedia.Append("Original", block)
 	oldBase := "Original"
