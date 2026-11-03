@@ -396,7 +396,7 @@
       "preferences": "Préférences",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
-      "notifications": "Notifications",
+      "notifications": "Boîte de réception",
       "tokens": "Jetons d'API",
       "general": "Général",
       "github": "GitHub",
@@ -652,38 +652,61 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Tri des notifications",
+    "description": "Les changements s'appliquent aux nouvelles notifications.",
+    "reset": "Rétablir les valeurs par défaut",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
-    "groups": {
-      "assignments": {
-        "label": "Assignations",
-        "description": "Quand une tâche vous est assignée ou retirée"
+    "routes": {
+      "action": {
+        "label": "À traiter",
+        "description": "Compte comme non lu, peut envoyer une notification système"
       },
-      "status_changes": {
-        "label": "Changements de statut",
-        "description": "Quand une tâche que vous suivez change de statut (à faire, en cours, terminé…)"
+      "activity": {
+        "label": "Activité",
+        "description": "Consigné discrètement, jamais non lu"
       },
-      "comments": {
-        "label": "Commentaires",
-        "description": "Nouveaux commentaires sur les tâches que vous suivez"
+      "muted": {
+        "label": "Désactivé",
+        "description": "Hors de la boîte de réception ; toujours visible sur la tâche"
+      }
+    },
+    "kinds": {
+      "assigned": {
+        "label": "Assigné à moi",
+        "description": "Quand une tâche vous est assignée"
       },
       "mentions": {
         "label": "Mentions",
-        "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
+        "description": "Quand quelqu'un vous @mentionne, y compris @all et @squad"
+      },
+      "member_comments": {
+        "label": "Commentaires des membres",
+        "description": "Quand un membre commente une tâche que vous suivez"
+      },
+      "agent_failures": {
+        "label": "Erreurs d'agent",
+        "description": "Quand l'exécution d'un agent échoue ou est bloquée et requiert votre intervention"
+      },
+      "status_changes": {
+        "label": "Changements de statut",
+        "description": "Quand une tâche que vous suivez change de statut"
+      },
+      "assignee_changes": {
+        "label": "Changements d'assigné",
+        "description": "Quand une tâche change d'assigné, ou que vous n'êtes plus assigné"
       },
       "updates": {
-        "label": "Priorité et date d'échéance",
-        "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
+        "label": "Priorité et dates",
+        "description": "Quand la priorité, la date de début ou l'échéance change"
       },
-      "agent_activity": {
-        "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+      "agent_comments": {
+        "label": "Commentaires d'agent",
+        "description": "Quand un agent répond sur une tâche que vous suivez"
       }
     },
     "system": {
       "title": "Notifications système",
-      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
+      "label": "Envoyer une notification système pour les éléments « À traiter » quand Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",
@@ -1137,6 +1160,27 @@
     "byo_credentials_rejected": "WeCom a rejeté cet ID de bot et ce secret. Vérifiez les deux dans la console d'administration WeCom, et qu'il s'agit bien d'un bot intelligent avec la connexion longue activée.",
     "byo_credentials_unverifiable": "Impossible de joindre WeCom pour vérifier ce bot. Vos identifiants n'ont pas été modifiés — réessayez dans un instant.",
     "byo_install_failed": "Impossible d'enregistrer ce bot — une erreur est survenue de notre côté. Vos identifiants n'ont pas été modifiés ; réessayez, et contactez le support si le problème persiste.",
+    "scan_option_title": "Créer un nouveau bot",
+    "scan_option_description": "Scannez un code QR dans WeCom pour créer un nouveau bot intelligent et le connecter.",
+    "byo_option_title": "Connecter un bot existant",
+    "byo_option_description": "Saisissez l'ID du bot et le secret d'un bot intelligent que vous avez déjà créé.",
+    "scan_dialog_title": "Scanner pour créer un bot WeCom",
+    "scan_starting": "Préparation du code QR…",
+    "scan_hint": "Ouvrez WeCom sur votre téléphone et scannez ce code pour créer le bot.",
+    "scan_expires_in": "Expire dans {{seconds}} s",
+    "scan_success_toast": "Bot WeCom créé et connecté",
+    "scan_again": "Obtenir un nouveau code",
+    "scan_close": "Fermer",
+    "scan_error_expired": "Le code QR a expiré avant d'être scanné.",
+    "scan_error_generate_failed": "Impossible d'obtenir un code QR auprès de WeCom. Réessayez dans un instant.",
+    "scan_error_integration_unconfigured": "L'installation par code QR n'est pas activée sur ce serveur.",
+    "scan_error_installation_conflict": "Ce bot est déjà connecté ailleurs. Déconnectez-le là-bas, puis scannez à nouveau.",
+    "scan_error_bind_failed": "Le bot a été créé dans WeCom mais n'a pas pu être connecté à cet agent. Supprimez-le dans WeCom, puis scannez à nouveau.",
+    "scan_error_wecom_protocol_error": "WeCom a renvoyé une réponse inattendue.",
+    "scan_error_internal_error": "Un problème est survenu. Réessayez.",
+    "scan_error_session_lost": "Cette session d'installation n'est plus disponible. Obtenez un nouveau code.",
+    "scan_error_already_connected": "Cet agent a déjà un bot WeCom connecté. Déconnectez-le d'abord.",
+    "scan_error_rate_limited": "Trop de tentatives. Patientez quelques minutes, puis réessayez.",
     "byo_failed_toast": "Impossible de connecter le bot WeCom"
   },
   "telegram": {

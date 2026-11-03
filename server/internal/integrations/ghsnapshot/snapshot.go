@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // CheckContext is one normalized check for a PR head. Both check runs and commit
@@ -38,6 +39,15 @@ type PRSnapshot struct {
 	// as passed (acceptance criterion 5).
 	HasChecks bool
 	Contexts  []CheckContext
+	Reviews   []PRReview
+}
+
+// PRReview carries only submitted human decisions, without review bodies or
+// user metadata. Its ID survives pushes, webhook redelivery, and body edits.
+type PRReview struct {
+	ID          int64     `json:"id"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // Decided reports whether the snapshot has settled: no check is still running
@@ -72,6 +82,9 @@ type restPullRequest struct {
 	} `json:"head"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeableState string `json:"mergeable_state"`
+	User           struct {
+		Login string `json:"login"`
+	} `json:"user"`
 }
 
 type restCheckRun struct {
@@ -90,7 +103,7 @@ type restStatusContext struct {
 }
 
 // FetchPRSnapshot uses only Pull requests, Checks and Commit statuses read
-// permissions. Every page is pinned to one head; a final PR read detects pushes
+// permissions. CI pages are pinned to one head; a final PR read detects pushes
 // before the guarded atomic write in refresh.go.
 func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner, repo string, number int32) (*PRSnapshot, error) {
 	if !c.Enabled() {
@@ -111,8 +124,12 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 	if err != nil {
 		return nil, err
 	}
+	reviews, err := fetchPRReviews(ctx, c, installationID, prPath+"/reviews", pr.User.Login)
+	if err != nil {
+		return nil, err
+	}
 
-	snap := &PRSnapshot{HeadSHA: pr.Head.SHA}
+	snap := &PRSnapshot{HeadSHA: pr.Head.SHA, Reviews: reviews}
 	seenRuns := make(map[int64]struct{}, len(runs))
 	for _, run := range runs {
 		if run.ID <= 0 || run.Name == "" || run.HeadSHA != snap.HeadSHA {

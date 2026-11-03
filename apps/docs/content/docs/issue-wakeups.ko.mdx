@@ -56,11 +56,11 @@ import { WakeupDemo } from "@/components/demos/wakeup-demo";
 | 협업 | 필드가 특정 값으로 바뀜 | 태스크의 상태, 담당자, 라벨, 사용자 지정 속성이 정한 값이 되었을 때. |
 | 실행과 하위 태스크 | 에이전트 실행 종료 | 이 태스크에서 특정 에이전트(또는 아무 에이전트)의 실행이 성공, 실패, 취소되었을 때. |
 | 실행과 하위 태스크 | 하위 태스크 완료 | 모든 하위 태스크가 닫혔을 때(`done` 또는 `cancelled`), 또는 정한 단계까지가 모두 닫혔을 때. 하위 태스크가 없으면 트리거되지 않습니다. |
-| 연결 | 연결된 PR의 CI 종료 | PR 병합이나 병합 충돌도 고를 수 있습니다. 이 태스크에 직접 연결된 PR만 보며, 여러 개라면 하나만 맞아도 됩니다. CI와 충돌은 GitHub PR에서만 동작합니다. |
+| 연결 | 연결된 PR의 CI 종료 | PR 병합, 병합 충돌, 사람이 제출한 승인이나 변경 요청도 고를 수 있습니다. 이 태스크에 직접 연결된 PR만 보며, 여러 개라면 하나만 맞아도 됩니다. 충돌과 리뷰는 GitHub PR에서만 동작합니다. |
 | 연결 | 다른 태스크의 상태 | 다른 태스크가 완료, 완료 또는 취소, 검토 중이 되었을 때. |
 | | 사용자 지정 이벤트 | 반응, 첨부 파일, 댓글 수정, 스레드 해결 등 25가지 원본 이벤트 중에서 고릅니다. |
 
-필드, 하위 태스크, PR, 다른 태스크 조건은 Multica가 직접 확인합니다. 만들 때 이미 조건이 맞는다면 다음 확인(약 30초 이내)에서 깨웁니다. CI만 예외로, 규칙을 만든 뒤에 끝난 검사만 셉니다.
+필드, 하위 태스크, PR, 다른 태스크 조건은 Multica가 직접 확인합니다. 만들 때 이미 조건이 맞는다면 다음 확인(약 30초 이내)에서 깨웁니다. CI와 리뷰는 등록 이후의 새 결과를 기다립니다. 봇, PR 작성자 본인, 댓글만 있는 리뷰와 취소된 결정은 제외합니다. 다시 켜면 이전 리뷰를 무시하며, 새 커밋을 push해도 같은 리뷰로 다시 깨우지 않습니다. 승인 하나를 받았다고 병합에 필요한 모든 승인이 충족된 것은 아닙니다.
 
 시간 외의 조건은 "어떤 일이 생기기를 기다리는" 규칙이며, 설정이 세 가지 더 있습니다.
 
@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "결�
 
 - **시간**: `--kind at`에 `--after 10m` 또는 `--at <RFC3339 시간>`. `--kind every --every 1h`는 고정 간격(최소 1분). `--kind cron --cron "<5개 필드 표현식>"`에는 `--timezone`을 붙입니다(기본 UTC).
 - **이벤트**: `--event` 뒤에 이벤트 이름을 쉼표로 구분해 씁니다. `multica issue wakeup events`가 모든 이벤트와 필터를 보여 줍니다. `--mode continuous`는 반복 깨우기로 만듭니다.
-- **조건**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, `--until-issue <태스크> --until-issue-state done|ended|in_review|blocked`. 깨우기 하나에 `--until-*`는 하나만 쓸 수 있고 `--event`와 함께 쓸 수 없습니다.
+- **조건**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts|reviewed|approved|changes_requested`, `--until-issue <태스크> --until-issue-state done|ended|in_review|blocked`. 깨우기 하나에 `--until-*`는 하나만 쓸 수 있고 `--event`와 함께 쓸 수 없습니다.
 - **끝내는 방법**: CLI는 대기 기한을 자동으로 붙이지 않습니다. `--expires-in 72h`나 `--expires-at <RFC3339 시간>`으로 끝을 정하세요. `--on-timeout wake`를 붙이면 이벤트 규칙이 기한이 되었을 때 한 번 더 깨웁니다. `--max-fires N`(1–1000)은 반복 규칙의 실행 횟수에 상한을 둡니다.
 - **답이 남는 곳**: `--parent <댓글 ID>`를 붙이면 깨운 뒤의 답글이 원래 스레드에 남습니다.
 

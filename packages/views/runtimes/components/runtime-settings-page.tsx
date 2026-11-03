@@ -1,6 +1,7 @@
 "use client";
 
-import { Server } from "@multica/ui/icons";
+import { FileQuestion } from "@multica/ui/icons";
+import { buttonVariants } from "@multica/ui/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -9,6 +10,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { CollectionPageState } from "../../layout/collection-page";
+import { AppLink } from "../../navigation";
 import { OBJECT_PAGE_BODY, ObjectPage } from "../../layout/object-page";
 import { RuntimeDetail } from "./runtime-detail";
 import { buildRuntimeMachines } from "./runtime-machines";
@@ -71,9 +73,17 @@ export function RuntimeSettingsPage({
         }
       >
         <CollectionPageState
-          icon={Server}
+          icon={FileQuestion}
           title={t(($) => $.detail_page.not_found_title)}
           description={t(($) => $.detail_page.not_found_hint)}
+          actions={
+            <AppLink
+              href={paths.runtimes()}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              {t(($) => $.detail.all_runtimes)}
+            </AppLink>
+          }
         />
       </ObjectPage>
     );

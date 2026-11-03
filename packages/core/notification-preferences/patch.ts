@@ -5,11 +5,16 @@ import type {
 } from "../types";
 
 const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
-  "assignments",
-  "status_changes",
-  "comments",
+  "assigned",
   "mentions",
+  "member_comments",
+  "agent_failures",
+  "status_changes",
+  "assignee_changes",
   "updates",
+  "agent_comments",
+  "assignments",
+  "comments",
   "agent_activity",
   "system_notifications",
 ];
@@ -51,10 +56,10 @@ export function applyNotificationPreferencePatch(
 
   for (const key of NOTIFICATION_GROUP_KEYS) {
     const value = patch[key];
-    if (value === "muted") {
-      next[key] = value;
-    } else if (value === "all") {
+    if (value === "all") {
       delete next[key];
+    } else if (value !== undefined) {
+      next[key] = value;
     }
   }
 
@@ -63,7 +68,7 @@ export function applyNotificationPreferencePatch(
 
 /**
  * Roll back only values that still match this mutation's optimistic patch.
- * A later toggle that touched the same key wins.
+ * A later change that touched the same key wins.
  */
 export function rollbackNotificationPreferencePatch(
   current: NotificationPreferences,

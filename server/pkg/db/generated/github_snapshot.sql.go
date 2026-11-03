@@ -23,7 +23,7 @@ func (q *Queries) DeleteGitHubPRCheckRuns(ctx context.Context, prID pgtype.UUID)
 }
 
 const getGitHubPullRequestByID = `-- name: GetGitHubPullRequestByID :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request WHERE id = $1
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_snapshot FROM github_pull_request WHERE id = $1
 `
 
 func (q *Queries) GetGitHubPullRequestByID(ctx context.Context, id pgtype.UUID) (GithubPullRequest, error) {
@@ -58,6 +58,7 @@ func (q *Queries) GetGitHubPullRequestByID(ctx context.Context, id pgtype.UUID) 
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewSnapshot,
 	)
 	return i, err
 }
@@ -210,7 +211,7 @@ type ListGitHubPRRowsByAddressRow struct {
 // =====================
 // GitHub API snapshot (MUL-5265, Plan C)
 //
-// These queries back the API-snapshot refresh pipeline. The GitHub GraphQL
+// These queries back the API-snapshot refresh pipeline. The GitHub API
 // response is the single source of truth; each successful fetch is written as
 // one atomic batch replace (guarded update of the PR row + full replace of the
 // per-check rows) inside a single transaction.
@@ -261,7 +262,7 @@ WITH candidates AS (
           JOIN issue_pull_request AS ipr ON ipr.issue_id = w.issue_id
           WHERE w.enabled
             AND w.condition->>'type' = 'pull_request'
-            AND w.condition->>'event' = 'conflicts'
+            AND w.condition->>'event' IN ('conflicts', 'reviewed', 'approved', 'changes_requested')
       )
     GROUP BY pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
 )
@@ -296,8 +297,8 @@ type ListStaleConflictWatchedGitHubPRsRow struct {
 	PrNumber       int32  `json:"pr_number"`
 }
 
-// Second sweep source: open/draft PRs linked to an issue with an enabled
-// "wake on merge conflict" rule. A decided snapshot leaves the undecided sweep,
+// Second sweep source: open/draft PRs linked to an enabled conflict or review
+// condition. A decided snapshot leaves the undecided sweep,
 // but a base-branch move can turn it conflicting without any event for this
 // PR, so watched PRs are re-fetched on the TTL regardless. The candidate set
 // comes from the enabled rules, whose count is capped. Like the undecided
@@ -428,16 +429,18 @@ UPDATE github_pull_request
 SET api_mergeable          = $1,
     api_merge_state_status = $2,
     checks_rollup_state    = $3,
-    snapshot_head_sha      = $4,
-    snapshot_fetched_at    = $5,
+    review_snapshot        = $4,
+    snapshot_head_sha      = $5,
+    snapshot_fetched_at    = $6,
     updated_at             = now()
-WHERE id = $6 AND head_sha = $4
+WHERE id = $7 AND head_sha = $5
 `
 
 type UpdateGitHubPRSnapshotParams struct {
 	ApiMergeable        pgtype.Text        `json:"api_mergeable"`
 	ApiMergeStateStatus pgtype.Text        `json:"api_merge_state_status"`
 	ChecksRollupState   pgtype.Text        `json:"checks_rollup_state"`
+	ReviewSnapshot      []byte             `json:"review_snapshot"`
 	HeadSha             string             `json:"head_sha"`
 	FetchedAt           pgtype.Timestamptz `json:"fetched_at"`
 	PrID                pgtype.UUID        `json:"pr_id"`
@@ -453,6 +456,7 @@ func (q *Queries) UpdateGitHubPRSnapshot(ctx context.Context, arg UpdateGitHubPR
 		arg.ApiMergeable,
 		arg.ApiMergeStateStatus,
 		arg.ChecksRollupState,
+		arg.ReviewSnapshot,
 		arg.HeadSha,
 		arg.FetchedAt,
 		arg.PrID,

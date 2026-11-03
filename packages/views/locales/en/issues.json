@@ -119,6 +119,9 @@
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
+    "empty_description": "An issue is one concrete piece of work for a member or an agent. Assign it to an agent and it starts on your runtime.",
+    "break_down_with_chat": "Break down with chat",
+    "break_down_prompt": "I want to get the following done. Ask me what you need to know, then break it into issues in this workspace:\n\n",
     "move_failed": "Failed to move issue"
   },
   "status": {
@@ -412,7 +415,7 @@
       }
     },
     "search_placeholder": "Search issues...",
-    "search_empty": "No issues match your search."
+    "search_empty": "No issues match your search"
   },
   "list": {
     "empty_status": "No issues",
@@ -452,6 +455,7 @@
     "metadata_description": "Key-value data recorded by agents and integrations for workflow coordination.",
     "section_load_failed_retry": "Could not load. Retry",
     "not_found": "This issue does not exist or has been deleted in this workspace.",
+    "not_found_title": "Issue not found",
     "breadcrumb_project_unknown": "Unknown project",
     "back": "Back",
     "title_placeholder": "Issue title",
@@ -905,6 +909,7 @@
     "col_tokens": "Tokens",
     "col_cost": "Cost",
     "tokens_count": "{{tokens}} tokens",
+    "credits_count": "{{credits}} {{provider}} credits",
     "details_toggle": "Run details",
     "detail_breakdown": "Cost breakdown",
     "detail_total": "Total",
@@ -1318,6 +1323,9 @@
       "pr_checks": "CI finishes",
       "pr_merged": "It merges",
       "pr_conflicts": "It has merge conflicts",
+      "pr_reviewed": "It receives a review decision",
+      "pr_approved": "It receives an approval",
+      "pr_changes_requested": "Changes are requested",
       "choose_issue": "Choose an issue",
       "pick_issue_title": "Watch an issue",
       "pick_issue_description": "Wake the agent when this issue reaches the state you choose.",
@@ -1377,6 +1385,9 @@
       "pr_checks": "When a linked PR's CI finishes",
       "pr_merged": "When a linked PR merges",
       "pr_conflicts": "When a linked PR has merge conflicts",
+      "pr_reviewed": "When a linked PR receives a human review decision",
+      "pr_approved": "When a linked PR receives a human approval",
+      "pr_changes_requested": "When changes are requested on a linked PR",
       "other_done": "When {{issue}} is done",
       "other_ended": "When {{issue}} is done or cancelled",
       "other_in_review": "When {{issue}} moves to In Review",
@@ -1401,6 +1412,9 @@
       "pr_checks": "Waiting for CI",
       "pr_merged": "Waiting for the PR to merge",
       "pr_conflicts": "Watching for merge conflicts",
+      "pr_reviewed": "Waiting for a PR review decision",
+      "pr_approved": "Waiting for PR approval",
+      "pr_changes_requested": "Waiting for changes requested on the PR",
       "other_done": "Waiting for {{issue}}",
       "other_ended": "Waiting for {{issue}} to end",
       "other_in_review": "Waiting for {{issue}} to reach review",
@@ -1841,7 +1855,8 @@
       "star": "Add {{name}} to sidebar",
       "unstar": "Remove {{name}} from sidebar",
       "row_actions": "Actions for {{name}}",
-      "no_matches": "No views match"
+      "empty_title": "No saved views yet",
+      "empty_description": "Set up filters and display options in an issue list, then save them as a view."
     }
   }
 }

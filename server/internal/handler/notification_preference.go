@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -31,6 +32,27 @@ var validNotifGroups = map[string]bool{
 var validNotifValues = map[string]bool{
 	"all":   true,
 	"muted": true,
+}
+
+// validRouteValues is the set of allowed values for a routable kind's key (see
+// inbox.RouteKinds): which Inbox section it lands in, muted, or "all" for the
+// default. mentions, status_changes and updates are both routable kinds and
+// pre-routing groups, so older clients writing "all"/"muted" there stay valid.
+var validRouteValues = map[string]bool{
+	inbox.RouteDefault:  true,
+	inbox.RouteMuted:    true,
+	inbox.RouteAction:   true,
+	inbox.RouteActivity: true,
+}
+
+func validNotifPreference(key, value string) (validKey, validValue bool) {
+	if inbox.IsRouteKey(key) {
+		return true, validRouteValues[value]
+	}
+	if validNotifGroups[key] {
+		return true, validNotifValues[value]
+	}
+	return false, false
 }
 
 func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -85,11 +107,12 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	for k, v := range req.Preferences {
-		if !validNotifGroups[k] {
+		validKey, validValue := validNotifPreference(k, v)
+		if !validKey {
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
 		}
-		if !validNotifValues[v] {
+		if !validValue {
 			writeError(w, http.StatusBadRequest, "invalid preference value: "+v)
 			return nil, false
 		}

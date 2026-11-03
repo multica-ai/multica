@@ -326,6 +326,10 @@ func TestConflictWatchedGitHubPRQueries(t *testing.T) {
 	closed := seed(6, "closed", stale)
 	watch(closed, "conflicts", true)
 	seed(7, "open", stale)
+	for i, event := range []string{"reviewed", "approved", "changes_requested"} {
+		watch(seed(int32(8+i), "open", stale), event, true)
+	}
+	watch(seed(11, "open", stale), "reviewed", false)
 
 	rows, err := q.ListStaleConflictWatchedGitHubPRs(ctx, db.ListStaleConflictWatchedGitHubPRsParams{
 		OlderThan: tsFromTime(now.Add(-5 * time.Minute)),
@@ -341,8 +345,8 @@ func TestConflictWatchedGitHubPRQueries(t *testing.T) {
 		}
 	}
 	// Decided snapshots stay in this sweep; only stale, open, watched PRs.
-	if fmt.Sprint(swept) != "[1 2]" && fmt.Sprint(swept) != "[2 1]" {
-		t.Fatalf("watched sweep = %v, want PRs 1 and 2", swept)
+	if fmt.Sprint(swept) != "[1 2 8 9 10]" {
+		t.Fatalf("watched sweep = %v, want PRs 1, 2, 8, 9 and 10", swept)
 	}
 
 	numbers, err := q.ListConflictWatchedGitHubPRNumbersInRepo(ctx, db.ListConflictWatchedGitHubPRNumbersInRepoParams{
@@ -388,8 +392,8 @@ func TestConflictWatchedGitHubPRQueries(t *testing.T) {
 		t.Fatalf("merge refreshed %v, want PRs 1 and 3 once each", got)
 	}
 	m.sweepOnce(ctx)
-	if got := queued(); fmt.Sprint(got) != "[1 2]" && fmt.Sprint(got) != "[2 1]" {
-		t.Fatalf("sweep refreshed %v, want stale watched PRs 1 and 2", got)
+	if got := queued(); fmt.Sprint(got) != "[1 2 8 9 10]" {
+		t.Fatalf("sweep refreshed %v, want stale conflict and review watchers", got)
 	}
 }
 
@@ -605,6 +609,8 @@ func TestRESTSnapshotRefreshStoresResultsAndPreservesThemOnPermissionFailure(t *
 		switch r.URL.Path {
 		case "/repos/o/r/pulls/5":
 			writeTestPR(w, "sha1", true, "clean")
+		case "/repos/o/r/pulls/5/reviews":
+			_, _ = w.Write([]byte(`[]`))
 		case "/repos/o/r/commits/sha1/check-runs":
 			if phase.Load() == 2 {
 				w.WriteHeader(http.StatusForbidden)

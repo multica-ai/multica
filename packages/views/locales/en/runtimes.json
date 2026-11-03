@@ -165,6 +165,10 @@
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
+    "concurrency_title": "Concurrency",
+    "concurrency_none": "No limit",
+    "concurrency_hint": "Max runs at once across all agents on this runtime ({{min}}–{{max}}). Leave empty for no limit.",
+    "toast_concurrency_failed": "Failed to update concurrency limit",
     "visibility_label": {
       "private": "Private",
       "public": "Public",

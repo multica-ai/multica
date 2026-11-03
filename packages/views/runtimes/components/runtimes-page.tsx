@@ -62,6 +62,7 @@ import {
 } from "./mika-runtime-choice";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -571,7 +572,13 @@ export function RuntimesPage({
                 ? row.title
                 : undefined
           }
-          empty={t(($) => $.page.rows.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.rows.no_matches)}
+              onReset={() => setStatusFilter("all")}
+              hasFilters={filtering}
+            />
+          }
         />
         <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
           {!agentsLoading &&

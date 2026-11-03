@@ -53,6 +53,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   muse: "Muse Code",
   omp: "Oh-My-Pi",
   zeroclaw: "ZeroClaw",
+  zcode: "ZCode",
 };
 
 /**

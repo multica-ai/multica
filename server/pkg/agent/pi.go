@@ -1176,20 +1176,25 @@ var piCustomArgModes = map[string]blockedArgMode{
 	"--offline":              blockedStandalone,
 }
 
-// buildPiArgs assembles the argv for a one-shot Pi invocation.
+// buildPiArgs assembles the argv for a Pi task invocation.
 //
 // Flags:
 //
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
+//	--mode rpc                  use RPC instead when task supplements are enabled
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
-// The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
-// print/JSON mode; using that supported path prevents Windows PowerShell's npm
-// shim from re-tokenising prompt content into options.
+// The prompt is deliberately absent from argv. It arrives on stdin as text
+// in print/JSON mode or a prompt command in RPC mode, preventing Windows
+// PowerShell's npm shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
+	return buildPiArgsFor("pi", sessionPath, opts, logger)
+}
+
+func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"-p", "--mode", "json"}
 	if opts.EnableTaskSupplement {
 		args = []string{"--mode", "rpc"}
@@ -1212,6 +1217,14 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
+	// Explicitly load only this dispatch's managed skill files. Scanning the
+	// project directory would also opt user-owned skills into untrusted runs.
+	// OMP retains its native .omp/skills discovery.
+	if label == "pi" {
+		for _, path := range opts.PiSkillPaths {
+			args = append(args, "--skill", path)
+		}
 	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension

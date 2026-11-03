@@ -2,6 +2,7 @@ package ghsnapshot
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math/rand"
 	"sync"
@@ -40,7 +41,7 @@ var (
 	defaultSweepTTL      = 10 * time.Minute
 	defaultSweepInterval = 10 * time.Minute
 	defaultSweepMaxRows  = int32(200)
-	// PRs watched by a "wake on merge conflict" rule stay in the sweep even
+	// PRs watched by a conflict or review rule stay in the sweep even
 	// when decided, re-fetched once their snapshot is older than this.
 	defaultWatchTTL = 5 * time.Minute
 	// After a merge into a repository, GitHub recomputes the other PRs'
@@ -419,10 +420,20 @@ func (m *Manager) applySnapshot(ctx context.Context, prID pgtype.UUID, snap *PRS
 	if snap.HasChecks {
 		rollup = textOrNull(snap.RollupState)
 	}
+	// A successful empty fetch is distinct from reviews not fetched yet.
+	reviews := snap.Reviews
+	if reviews == nil {
+		reviews = []PRReview{}
+	}
+	reviewSnapshot, err := json.Marshal(reviews)
+	if err != nil {
+		return false, err
+	}
 	n, err := q.UpdateGitHubPRSnapshot(ctx, db.UpdateGitHubPRSnapshotParams{
 		ApiMergeable:        textOrNull(snap.Mergeable),
 		ApiMergeStateStatus: textOrNull(snap.MergeStateStatus),
 		ChecksRollupState:   rollup,
+		ReviewSnapshot:      reviewSnapshot,
 		HeadSha:             snap.HeadSHA,
 		FetchedAt:           tsFromTime(m.now()),
 		PrID:                prID,

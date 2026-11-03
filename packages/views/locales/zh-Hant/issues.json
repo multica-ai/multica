@@ -117,6 +117,9 @@
     "breadcrumb_title": "任務",
     "breadcrumb_workspace_fallback": "工作區",
     "empty_title": "還沒有任務",
+    "empty_description": "任務是交給成員或 AI 代理的一件具體工作。指派給 AI 代理後，它會在你的執行時上自己開始。",
+    "break_down_with_chat": "用聊天拆解需求",
+    "break_down_prompt": "我想完成下面這件事。先問清楚你需要了解的，然後在這個工作區裡把它拆成任務：\n\n",
     "move_failed": "移動任務失敗"
   },
   "status": {
@@ -406,7 +409,7 @@
       }
     },
     "search_placeholder": "搜尋任務...",
-    "search_empty": "沒有匹配的任務。"
+    "search_empty": "沒有匹配的任務"
   },
   "list": {
     "empty_status": "無任務",
@@ -446,6 +449,7 @@
     "metadata_description": "AI 代理和整合記錄的鍵值資料，用於銜接工作流程。",
     "section_load_failed_retry": "載入失敗，點選重試",
     "not_found": "這個任務不存在或已在該工作區被刪除。",
+    "not_found_title": "未找到該任務",
     "breadcrumb_project_unknown": "未知專案",
     "back": "返回",
     "title_placeholder": "任務標題",
@@ -865,6 +869,7 @@
     "col_tokens": "Token",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} Token",
+    "credits_count": "{{credits}} {{provider}} 點數",
     "details_toggle": "執行詳情",
     "detail_breakdown": "費用明細",
     "detail_total": "合計",
@@ -1272,6 +1277,9 @@
       "pr_checks": "CI 結束",
       "pr_merged": "合併",
       "pr_conflicts": "出現合併衝突",
+      "pr_reviewed": "收到審查決定",
+      "pr_approved": "收到批准",
+      "pr_changes_requested": "被要求修改",
       "choose_issue": "選擇任務",
       "pick_issue_title": "選擇要關注的任務",
       "pick_issue_description": "該任務達到所選狀態時喚醒 AI 代理。",
@@ -1329,6 +1337,9 @@
       "pr_checks": "當關聯 PR 的 CI 結束時",
       "pr_merged": "當關聯 PR 合併時",
       "pr_conflicts": "當關聯 PR 出現合併衝突時",
+      "pr_reviewed": "當關聯 PR 收到人工審查決定時",
+      "pr_approved": "當關聯 PR 收到人工批准時",
+      "pr_changes_requested": "當關聯 PR 被要求修改時",
       "other_done": "當 {{issue}} 完成時",
       "other_ended": "當 {{issue}} 完成或取消時",
       "other_in_review": "當 {{issue}} 進入審查中時",
@@ -1353,6 +1364,9 @@
       "pr_checks": "等 CI 結束",
       "pr_merged": "等 PR 合併",
       "pr_conflicts": "監視合併衝突",
+      "pr_reviewed": "等待 PR 審查決定",
+      "pr_approved": "等待 PR 批准",
+      "pr_changes_requested": "等待 PR 修改意見",
       "other_done": "等 {{issue}} 完成",
       "other_ended": "等 {{issue}} 結束",
       "other_in_review": "等 {{issue}} 進入審查",
@@ -1772,7 +1786,8 @@
       "star": "將{{name}}新增到側欄",
       "unstar": "將{{name}}從側欄移除",
       "row_actions": "{{name}} 的操作",
-      "no_matches": "沒有符合的檢視"
+      "empty_title": "還沒有儲存的檢視",
+      "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
     }
   }
 }

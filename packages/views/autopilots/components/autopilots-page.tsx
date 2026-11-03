@@ -30,6 +30,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
 import {
   CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -513,15 +514,12 @@ function AutopilotList() {
           }
         />
       ) : showEmpty ? (
-        <div className="flex flex-col items-center px-5 py-16">
-          <Zap className="mb-3 h-10 w-10 text-faint-foreground" />
-          <p className="text-body text-muted-foreground">
-            {t(($) => $.page.empty.title)}
-          </p>
-          <p className="mb-6 mt-1 text-caption text-muted-foreground">
-            {t(($) => $.page.empty.hint)}
-          </p>
-          <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <CollectionPageState
+          icon={Zap}
+          title={t(($) => $.page.empty.title)}
+          description={t(($) => $.page.empty.hint)}
+        >
+          <div className="grid w-full max-w-3xl grid-cols-1 gap-3 text-left sm:grid-cols-2 lg:grid-cols-3">
             {AUTOPILOT_TEMPLATES.map((tpl) => {
               const Icon = tpl.icon;
               return (
@@ -544,16 +542,11 @@ function AutopilotList() {
               );
             })}
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-4"
-            onClick={() => openCreate()}
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" />
+          <Button size="sm" variant="outline" onClick={() => openCreate()}>
+            <Plus aria-hidden="true" />
             {t(($) => $.page.start_blank)}
           </Button>
-        </div>
+        </CollectionPageState>
       ) : (
         <CollectionList
           label={scopeLabels[scope]}
@@ -567,7 +560,13 @@ function AutopilotList() {
           rowMenu={(a) => <AutopilotRowActions row={a} />}
           sort={sort}
           selection={{ selectedIds, onChange: setSelectedIds }}
-          empty={t(($) => $.page.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              onReset={clearFilters}
+              hasFilters={narrowed}
+            />
+          }
         />
       )}
 

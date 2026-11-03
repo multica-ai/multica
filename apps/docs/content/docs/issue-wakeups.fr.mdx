@@ -56,11 +56,11 @@ Dans la tâche ci-dessous, Assistant ops a demandé des devis et attend les rép
 | Collaboration | Un champ prend une valeur | Le statut, l'assigné, une étiquette ou une propriété personnalisée de la tâche prend la valeur choisie. |
 | Exécutions et sous-tâches | L’exécution d’un agent se termine | Une exécution d'un agent donné (ou de n'importe quel agent) sur cette tâche réussit, échoue ou est annulée. |
 | Exécutions et sous-tâches | Les sous-tâches se terminent | Toutes les sous-tâches sont closes (`done` ou `cancelled`), ou toutes celles jusqu'à l'étape choisie. Sans sous-tâche, la règle ne se déclenche jamais. |
-| Liés | La CI d’une PR liée se termine | Ou la PR est fusionnée, ou elle a des conflits de fusion. Seules les PR liées directement à cette tâche comptent ; s'il y en a plusieurs, une seule suffit. CI et conflits ne fonctionnent qu'avec les pull requests GitHub. |
+| Liés | La CI d’une PR liée se termine | Ou la PR est fusionnée, a des conflits de fusion ou reçoit une approbation ou une demande de modifications humaine. Seules les PR liées directement à cette tâche comptent ; s'il y en a plusieurs, une seule suffit. Conflits et revues ne fonctionnent qu'avec les pull requests GitHub. |
 | Liés | Le statut d’une autre tâche | Une autre tâche est terminée, terminée ou annulée, ou passe en revue. |
 | | Événements personnalisés | Choisissez parmi 25 événements bruts : réactions, pièces jointes, commentaires modifiés, fils résolus… |
 
-Multica vérifie lui-même les conditions sur un champ, les sous-tâches, les PR et les autres tâches. Si la condition est déjà remplie à la création, la vérification suivante (dans les 30 secondes environ) réveille l'agent. La CI fait exception : seules les vérifications terminées après la création de la règle comptent.
+Multica vérifie lui-même les conditions sur un champ, les sous-tâches, les PR et les autres tâches. Si la condition est déjà remplie à la création, la vérification suivante (dans les 30 secondes environ) réveille l'agent. La CI et les revues attendent de nouveaux résultats après l’inscription. Les revues des bots, de l’auteur de la PR, les simples commentaires et les décisions révoquées sont exclus. La réactivation ignore les revues antérieures ; pousser un commit ne rejoue pas une revue. Une approbation ne signifie pas que toutes les approbations requises pour fusionner sont réunies.
 
 Toutes les conditions autres que le temps attendent un événement et ont trois réglages de plus :
 
@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Véri
 
 - **Temps** : `--kind at` avec `--after 10m` ou `--at <heure RFC3339>` ; `--kind every --every 1h` pour un intervalle fixe d'au moins 1 minute ; `--kind cron --cron "<expression à 5 champs>"` avec `--timezone` (UTC par défaut).
 - **Événements** : indiquez les noms d'événements après `--event`, séparés par des virgules. `multica issue wakeup events` liste tous les événements et filtres. `--mode continuous` rend la règle répétée.
-- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
+- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts|reviewed|approved|changes_requested` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
 - **Fin** : le CLI n'ajoute pas d'échéance à votre place. Utilisez `--expires-in 72h` ou `--expires-at <heure RFC3339>` ; `--on-timeout wake` fait qu'une règle d'événement réveille l'agent une dernière fois à l'échéance. `--max-fires N` (1–1000) limite le nombre d'exécutions d'une règle répétée.
 - **Où va la réponse** : `--parent <id-de-commentaire>` garde la réponse de l'exécution réveillée dans le fil d'origine.
 

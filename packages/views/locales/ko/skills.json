@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
-      "description": "skill을 만들거나 가져오세요."
+      "description": "skill은 에이전트가 재사용하는 작업 방식입니다. 직접 만들거나 런타임에서 가져오세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",

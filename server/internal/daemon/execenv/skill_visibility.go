@@ -21,12 +21,9 @@ import (
 // each one consumes a slug. Filtering first would shift the suffixes and make
 // the listing disagree with the directories.
 //
-// Known gap: resolveSkillSlugs cannot see the filesystem, so a skill that
-// collides with a *user-installed* directory is still written to
-// `<slug>-multica` while the listing shows the bare slug. Closing that needs
-// the allocated slug threaded back from Prepare, which these renderers
-// deliberately cannot reach — they are pure so the brief stays byte-identical
-// across runs. Tracked in MUL-5550.
+// Prepare and Reuse also return filesystem-allocated names. Callers apply
+// those to the task before rendering, so user-installed directory collisions
+// are reflected without making this renderer read the filesystem.
 func modelVisibleSkills(skills []SkillContextForEnv) []SkillContextForEnv {
 	if len(skills) == 0 {
 		return nil
@@ -69,6 +66,20 @@ func resolveSkillSlugs(skills []SkillContextForEnv) []string {
 		slugs[i] = slug
 	}
 	return slugs
+}
+
+// ApplyPreparedSkillNames copies the task's skill slice and applies the names
+// returned by Prepare or Reuse. Names are positional so duplicate display names
+// and skills hidden from model invocation retain their original identities.
+func ApplyPreparedSkillNames(task TaskContextForEnv, names []string) TaskContextForEnv {
+	if len(names) == 0 || len(names) != len(task.AgentSkills) {
+		return task
+	}
+	task.AgentSkills = append([]SkillContextForEnv(nil), task.AgentSkills...)
+	for i, name := range names {
+		task.AgentSkills[i].Name = name
+	}
+	return task
 }
 
 func skillModelInvocationVisible(skill SkillContextForEnv) bool {
