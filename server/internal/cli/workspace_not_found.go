@@ -32,11 +32,11 @@ func (e *workspaceNotFoundError) Error() string { return e.err.Error() }
 func (e *workspaceNotFoundError) Unwrap() error { return e.err }
 
 func (c *APIClient) responseError(method, path string, resp *http.Response) error {
-	return c.withWorkspaceNotFoundContext(newHTTPError(method, path, resp), workspaceAPIPath(path, c.WorkspaceID != ""))
+	return c.withWorkspaceNotFoundContext(newHTTPError(method, path, resp), resp, workspaceAPIPath(path, c.WorkspaceID != ""))
 }
 
-func (c *APIClient) withWorkspaceNotFoundContext(err *HTTPError, workspaceScoped bool) error {
-	if err.StatusCode != http.StatusNotFound || c.InvocationContext == nil || !workspaceScoped {
+func (c *APIClient) withWorkspaceNotFoundContext(err *HTTPError, resp *http.Response, workspaceScoped bool) error {
+	if err.StatusCode != http.StatusNotFound || c.InvocationContext == nil || !workspaceScoped || !c.workspaceResponse(err, resp) {
 		return err
 	}
 	return &workspaceNotFoundError{
@@ -45,6 +45,25 @@ func (c *APIClient) withWorkspaceNotFoundContext(err *HTTPError, workspaceScoped
 		origin:      safeServerOrigin(c.BaseURL),
 		managedTask: c.InvocationContext.ManagedTask,
 	}
+}
+
+// Redirects can end at an object store or an account-level route. Only the
+// actual response request can establish that workspace guidance still applies.
+func (c *APIClient) workspaceResponse(err *HTTPError, resp *http.Response) bool {
+	if resp == nil || resp.Request == nil || resp.Request.URL == nil {
+		return false
+	}
+	finalURL := resp.Request.URL
+	origin := safeServerOrigin(finalURL.String())
+	selected := safeServerOrigin(c.BaseURL)
+	if origin == "[redacted]" || selected == "[redacted]" || !strings.EqualFold(origin, selected) {
+		return false
+	}
+	// Uploads carry workspace scope in their form fields, not their route.
+	if err.Path == "/api/upload-file" && finalURL.Path == "/api/upload-file" {
+		return true
+	}
+	return workspaceAPIPath(finalURL.RequestURI(), c.WorkspaceID != "")
 }
 
 // Only known workspace API families get routing guidance. A workspace header
@@ -63,6 +82,14 @@ func workspaceAPIPath(path string, hasWorkspace bool) bool {
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/api/"), "/")
 	if !strings.HasPrefix(u.Path, "/api/") {
 		return false
+	}
+	// Attachment object delivery does not require workspace membership; its 404 does not
+	// describe workspace routing, even when it stays on the API origin.
+	if parts[0] == "attachments" && len(parts) == 3 {
+		switch parts[2] {
+		case "download", "download-metadata", "signed-download":
+			return false
+		}
 	}
 	// These routes are protected by RequireWorkspaceMember in cmd/server/router.go.
 	switch parts[0] {

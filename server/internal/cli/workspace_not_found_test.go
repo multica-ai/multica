@@ -154,7 +154,7 @@ func TestWorkspaceNotFoundHelpersAndIsolation(t *testing.T) {
 		func() error { return c.PatchJSON(ctx, "/api/issues/synthetic", nil, &out) },
 		func() error { return c.DeleteJSON(ctx, "/api/issues/synthetic") },
 		func() error { return c.DeleteJSONWithBody(ctx, "/api/issues/synthetic", nil) },
-		func() error { _, e := c.DownloadFile(ctx, "/api/attachments/synthetic/download"); return e },
+		func() error { _, e := c.DownloadFile(ctx, "/api/attachments/synthetic"); return e },
 	}
 	for i, call := range calls {
 		if got := FormatError(call(), false); !strings.Contains(got, "profile=first") {

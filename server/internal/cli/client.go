@@ -543,7 +543,7 @@ func (c *APIClient) UploadIssueAttachment(ctx context.Context, fileData []byte, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), issueID != "" && c.WorkspaceID != "")
+		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), resp, issueID != "" && c.WorkspaceID != "")
 	}
 
 	var result AttachmentResponse
@@ -606,7 +606,7 @@ func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, f
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), taskID != "" && c.WorkspaceID != "")
+		return AttachmentResponse{}, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodPost, "/api/upload-file", resp), resp, taskID != "" && c.WorkspaceID != "")
 	}
 
 	var result AttachmentResponse
@@ -814,7 +814,7 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodGet, downloadURL, resp), workspaceAPIPath(requestPath, c.WorkspaceID != ""))
+		return nil, c.withWorkspaceNotFoundContext(newHTTPError(http.MethodGet, downloadURL, resp), resp, workspaceAPIPath(requestPath, c.WorkspaceID != ""))
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
