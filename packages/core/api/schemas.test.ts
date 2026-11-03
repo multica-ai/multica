@@ -1101,6 +1101,35 @@ describe("UserSchema timezone drift", () => {
   });
 });
 
+describe("UserSchema whats_new_seen_version drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("leaves the field undefined when an older server omits it", () => {
+    const parsed = UserSchema.parse(base);
+    expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+
+  it("keeps null and string values distinct from absence", () => {
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: null }).whats_new_seen_version).toBe(null);
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: "0.7.2" }).whats_new_seen_version).toBe("0.7.2");
+  });
+
+  it("degrades a wrong-type value to undefined without discarding the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, whats_new_seen_version: 7 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.email).toBe("ada@example.com");
+    expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+});
+
 describe("SquadListSchema member preview drift", () => {
   const baseSquad = {
     id: "squad-1",

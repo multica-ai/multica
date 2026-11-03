@@ -1719,6 +1719,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
+		r.Post("/api/me/whats-new/seen", h.MarkWhatsNewSeen)
 		// Credential minting is human-only (MUL-8154): an agent task token
 		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
 		// without this guard a prompt-injected agent could trade its scoped,

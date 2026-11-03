@@ -20,6 +20,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useAppForeground } from "../common/use-app-foreground";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
+import { WhatsNewLauncher } from "../whats-new/whats-new-launcher";
 import { AccountMenu } from "./account-menu";
 import { useAppShell } from "./app-shell-context";
 import { NewIssueButton, SearchButton } from "./global-actions";
@@ -246,6 +247,7 @@ export function AppRail({
         ))}
       </ul>
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
+        <WhatsNewLauncher />
         <HelpLauncher />
         <TooltipHint label={t(($) => $.nav.settings)} side="right">
           <AppLink

@@ -1097,6 +1097,16 @@ export class ApiClient {
     });
   }
 
+  async markWhatsNewSeen(version: string): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/whats-new/seen", {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/whats-new/seen",
+    });
+  }
+
   async updateMe(data: UpdateMeRequest): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",

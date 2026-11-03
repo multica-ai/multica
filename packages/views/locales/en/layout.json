@@ -38,6 +38,29 @@
     "feedback": "Feedback",
     "server_version": "Server version {{version}}"
   },
+  "whats_new": {
+    "trigger": "What's new",
+    "card": {
+      "eyebrow": "Multica updated · {{range}}",
+      "title_one": "{{count}} new feature since your last visit",
+      "title_other": "{{count}} new features since your last visit",
+      "dismiss": "Dismiss",
+      "view_details": "View details",
+      "got_it": "Got it"
+    },
+    "panel": {
+      "title": "What's new",
+      "close": "Close",
+      "new": "New",
+      "release_notes": "v{{version}} release notes",
+      "full_changelog": "Full changelog"
+    },
+    "action": {
+      "try": "Try it",
+      "open": "Open",
+      "learn_more": "Learn more"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"

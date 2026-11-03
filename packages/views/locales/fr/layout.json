@@ -38,6 +38,29 @@
     "feedback": "Faire un retour",
     "server_version": "Version du serveur {{version}}"
   },
+  "whats_new": {
+    "trigger": "Nouveautés",
+    "card": {
+      "eyebrow": "Multica mis à jour · {{range}}",
+      "title_one": "{{count}} nouveauté depuis votre dernière visite",
+      "title_other": "{{count}} nouveautés depuis votre dernière visite",
+      "dismiss": "Fermer",
+      "view_details": "Voir le détail",
+      "got_it": "Compris"
+    },
+    "panel": {
+      "title": "Nouveautés",
+      "close": "Fermer",
+      "new": "Nouveau",
+      "release_notes": "Journal des modifications v{{version}}",
+      "full_changelog": "Journal des modifications complet"
+    },
+    "action": {
+      "try": "Essayer",
+      "open": "Ouvrir",
+      "learn_more": "En savoir plus"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "Chargement de l'espace de travail…",
     "loading_named_prefix": "Chargement"
