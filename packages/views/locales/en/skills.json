@@ -384,7 +384,10 @@
       "local_skills": "Local skills",
       "private": "Private",
       "workspace_shared": "Workspace",
-      "all_agents": "Any agent can use it"
+      "all_agents": "Any agent can use it",
+      "role_reviewer": "Reviewer",
+      "role_fullstack": "Full stack",
+      "copy_to_workspace": "Copy to workspace"
     }
   }
 }

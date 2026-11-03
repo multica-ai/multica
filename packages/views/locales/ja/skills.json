@@ -371,7 +371,10 @@
       "local_skills": "ローカルのスキル",
       "private": "非公開",
       "workspace_shared": "ワークスペース",
-      "all_agents": "どのエージェントでも使用可"
+      "all_agents": "どのエージェントでも使用可",
+      "role_reviewer": "レビュー担当",
+      "role_fullstack": "フルスタック",
+      "copy_to_workspace": "ワークスペースにコピー"
     }
   }
 }

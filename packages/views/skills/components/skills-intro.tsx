@@ -133,10 +133,14 @@ function AssignArt() {
         <div className="px-1.5 pt-1 pb-1.5 font-medium text-muted-foreground">
           {t(($) => $.table.used_by)}
         </div>
-        {AGENTS.slice(0, 2).map((agent) => (
+        {[
+          { agent: AGENTS[0]!, role: t(($) => $.intro.art.role_reviewer) },
+          { agent: AGENTS[1]!, role: t(($) => $.intro.art.role_fullstack) },
+        ].map(({ agent, role }) => (
           <div key={agent.name} className="flex items-center gap-2 px-1.5 py-1">
             <ActorAvatar {...agent} size="sm" />
-            <span className="font-medium">{agent.name}</span>
+            <span className="flex-1 font-medium">{agent.name}</span>
+            <IntroArtTag>{role}</IntroArtTag>
           </div>
         ))}
         <div className="flex items-center gap-2 px-1.5 py-1 text-muted-foreground">
@@ -170,7 +174,7 @@ function ShareArt() {
           </div>
         ))}
       </IntroArtCard>
-      <IntroArtConnector />
+      <IntroArtConnector label={t(($) => $.intro.art.copy_to_workspace)} />
       <IntroArtCard highlighted>
         <div className="flex items-center gap-2">
           <span className={cn(mono, "flex-1 truncate font-medium")}>{LOCAL_SKILLS[0]}</span>

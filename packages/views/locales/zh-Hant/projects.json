@@ -182,9 +182,9 @@
         "title": "上下文自動帶給 AI 代理",
         "description": "寫一次專案描述、關聯一次倉庫，專案裡每個任務的執行都會帶上。"
       },
-      "pinned": {
+      "sidebar": {
         "title": "釘在側欄，隨手進入",
-        "description": "常用專案固定在側欄，一點就到。固定只對你自己生效，不影響其他人。"
+        "description": "常用專案固定在側欄，展開就能看到裡面的任務。"
       }
     },
     "art": {
@@ -195,7 +195,10 @@
       "context_body": "新版官網，Next.js + Tailwind。文案以 docs/brand 為準，所有頁面都要支援深色模式。",
       "run_started": "開始執行",
       "context_loaded": "已載入專案上下文和 2 個倉庫",
-      "pinned": "已固定"
+      "issue_count": "{{done}} / {{total}} 個任務",
+      "issue_hero": "首頁 Hero 動效",
+      "issue_pricing": "定價頁對比表",
+      "issue_blog": "部落格列表分頁"
     }
   }
 }

@@ -1,6 +1,14 @@
 "use client";
 
-import { Calendar, Check, FolderGit, FolderKanban, Pin, Plus } from "@multica/ui/icons";
+import {
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FolderGit,
+  FolderKanban,
+  Plus,
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { formatAvatarEmoji } from "@multica/ui/lib/avatar-emoji";
@@ -14,6 +22,7 @@ import {
   IntroArtTag,
 } from "../../layout/feature-intro";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { StatusIcon } from "../../issues/components/status-icon";
 import { useLocale, useT } from "../../i18n";
 import { useProjectPriorityLabels, useProjectStatusLabels } from "./labels";
 
@@ -64,10 +73,10 @@ export function ProjectsIntro({ onCreate }: { onCreate: () => void }) {
             art: <ContextArt />,
           },
           {
-            id: "pinned",
-            title: t(($) => $.intro.slides.pinned.title),
-            description: t(($) => $.intro.slides.pinned.description),
-            art: <PinnedArt />,
+            id: "sidebar",
+            title: t(($) => $.intro.slides.sidebar.title),
+            description: t(($) => $.intro.slides.sidebar.description),
+            art: <SidebarArt />,
           },
         ]}
       />
@@ -100,14 +109,18 @@ function ProgressArt() {
         </span>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full w-[62%] rounded-full bg-brand" />
+        <div
+          className="h-full rounded-full bg-brand"
+          style={{ width: `${(PROGRESS.done / PROGRESS.total) * 100}%` }}
+        />
       </div>
       <div className="mt-1.5 flex items-center justify-between text-muted-foreground tabular-nums">
-        <span>{t(($) => $.table.progress)}</span>
-        <span>{`${PROGRESS.done} / ${PROGRESS.total}`}</span>
+        <span>{t(($) => $.intro.art.issue_count, PROGRESS)}</span>
+        <span>{`${Math.round((PROGRESS.done / PROGRESS.total) * 100)}%`}</span>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-3 text-muted-foreground">
         <span className="flex items-center gap-1.5">
+          {t(($) => $.table.lead)}
           <ActorAvatar {...LEAD} size="xs" />
           <span className="text-foreground">{LEAD.name}</span>
         </span>
@@ -158,27 +171,48 @@ function ContextArt() {
   );
 }
 
-function PinnedArt() {
+function SidebarArt() {
   const { t } = useT("projects");
   const rows = [
-    { icon: "🚀", name: t(($) => $.intro.art.project_website), count: 21 },
-    { icon: "📱", name: t(($) => $.intro.art.project_mobile), count: 14 },
-    { icon: "🧭", name: t(($) => $.intro.art.project_onboarding), count: 5 },
+    { icon: "🚀", name: t(($) => $.intro.art.project_website), count: 8, open: true },
+    { icon: "📱", name: t(($) => $.intro.art.project_mobile), count: 14, open: false },
+    { icon: "🧭", name: t(($) => $.intro.art.project_onboarding), count: 5, open: false },
+  ];
+  const issues = [
+    { status: "in_progress", title: t(($) => $.intro.art.issue_hero) },
+    { status: "in_review", title: t(($) => $.intro.art.issue_pricing) },
+    { status: "todo", title: t(($) => $.intro.art.issue_blog) },
   ];
   return (
-    <IntroArtCard className="mx-auto w-4/5 p-1.5 text-label">
+    <IntroArtCard className="mx-auto w-[85%] p-1.5 text-label">
       <div className="flex items-center gap-1.5 px-2 pt-1 pb-1.5 text-caption font-medium text-muted-foreground">
-        <Pin className="size-3" />
-        {t(($) => $.intro.art.pinned)}
+        <span className="flex-1">{t(($) => $.page.title)}</span>
+        <Plus className="size-3" />
       </div>
-      {rows.map((row, i) => (
-        <div
-          key={row.icon}
-          className={cn("flex items-center gap-2 rounded-md px-2 py-1.5", i === 0 && "bg-muted")}
-        >
-          <span>{row.icon}</span>
-          <span className={cn("flex-1 truncate", i === 0 && "font-medium")}>{row.name}</span>
-          <span className="text-caption text-faint-foreground tabular-nums">{row.count}</span>
+      {rows.map((row) => (
+        <div key={row.icon}>
+          <div
+            className={cn("flex items-center gap-1.5 rounded-md px-2 py-1.5", row.open && "bg-muted")}
+          >
+            {row.open ? (
+              <ChevronDown className="size-3 shrink-0 text-faint-foreground" />
+            ) : (
+              <ChevronRight className="size-3 shrink-0 text-faint-foreground" />
+            )}
+            <span>{row.icon}</span>
+            <span className={cn("flex-1 truncate", row.open && "font-medium")}>{row.name}</span>
+            <span className="text-caption text-faint-foreground tabular-nums">{row.count}</span>
+          </div>
+          {row.open &&
+            issues.map((issue) => (
+              <div
+                key={issue.status}
+                className="flex items-center gap-2 py-1 pr-2 pl-8 text-caption text-muted-foreground"
+              >
+                <StatusIcon status={issue.status} className="size-3 shrink-0" />
+                <span className="truncate">{issue.title}</span>
+              </div>
+            ))}
         </div>
       ))}
     </IntroArtCard>

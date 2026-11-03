@@ -214,7 +214,7 @@ export function FeatureIntroCarousel({
               <div className="h-full overflow-hidden rounded-xl bg-surface shadow-[var(--menu-shadow)] ring-1 ring-surface-border">
                 <div
                   aria-hidden="true"
-                  className="flex h-60 items-center justify-center overflow-hidden border-b bg-brand/5 bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] px-5"
+                  className="flex h-64 items-center justify-center overflow-hidden border-b bg-brand/5 bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] px-5 py-4"
                 >
                   {slide.art}
                 </div>
@@ -297,8 +297,49 @@ export function IntroArtCard({
   );
 }
 
-export function IntroArtConnector() {
-  return <div className="mx-auto h-4 w-px shrink-0 bg-border" />;
+const WIRE = "border-dashed border-brand/50";
+
+function IntroArtArrowhead({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "block size-0 border-x-[4px] border-t-[5px] border-x-transparent border-t-brand/60",
+        className,
+      )}
+    />
+  );
+}
+
+/** A dashed arrow pointing down to the next card, with an optional label beside it. */
+export function IntroArtConnector({ label }: { label?: ReactNode }) {
+  return (
+    <div className="relative flex h-6 shrink-0 flex-col items-center">
+      <span className={cn("w-0 flex-1 border-l-[1.5px]", WIRE)} />
+      <IntroArtArrowhead />
+      {label && (
+        <span className="absolute top-1/2 left-1/2 ml-2.5 -translate-y-1/2 rounded-sm bg-brand/10 px-1.5 py-0.5 text-micro font-medium whitespace-nowrap text-brand">
+          {label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One card handing off to two side-by-side cards below it. */
+export function IntroArtFork() {
+  return (
+    <div className="relative h-6 shrink-0">
+      <span className={cn("absolute top-0 left-1/2 h-2.5 border-l-[1.5px]", WIRE)} />
+      <span
+        className={cn(
+          "absolute top-2.5 right-1/4 bottom-[5px] left-1/4 rounded-t-md border-x-[1.5px] border-t-[1.5px]",
+          WIRE,
+        )}
+      />
+      <IntroArtArrowhead className="absolute bottom-0 left-1/4 -translate-x-[3.25px]" />
+      <IntroArtArrowhead className="absolute right-1/4 bottom-0 translate-x-[3.25px]" />
+    </div>
+  );
 }
 
 export function IntroArtTag({

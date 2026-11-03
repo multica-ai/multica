@@ -371,7 +371,10 @@
       "local_skills": "本地 skill",
       "private": "私有",
       "workspace_shared": "工作區",
-      "all_agents": "所有 AI 代理可用"
+      "all_agents": "所有 AI 代理可用",
+      "role_reviewer": "審查者",
+      "role_fullstack": "全端",
+      "copy_to_workspace": "複製到工作區"
     }
   }
 }

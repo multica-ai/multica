@@ -147,6 +147,7 @@
       }
     },
     "art": {
+      "assignee": "負責人",
       "squad_name": "前端小隊",
       "issue_dark_mode": "設定頁支援深色模式切換",
       "issue_board_columns": "看板欄寬可拖曳調整",

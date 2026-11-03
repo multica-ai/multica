@@ -371,7 +371,10 @@
       "local_skills": "로컬 스킬",
       "private": "비공개",
       "workspace_shared": "워크스페이스",
-      "all_agents": "모든 에이전트가 사용 가능"
+      "all_agents": "모든 에이전트가 사용 가능",
+      "role_reviewer": "리뷰어",
+      "role_fullstack": "풀스택",
+      "copy_to_workspace": "워크스페이스로 복사"
     }
   }
 }

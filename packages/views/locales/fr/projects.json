@@ -182,9 +182,9 @@
         "title": "Le contexte suit chaque exécution",
         "description": "Rédigez la description et liez les dépôts une seule fois. Chaque exécution sur les tâches du projet les reprend."
       },
-      "pinned": {
-        "title": "Épinglez-le dans la barre latérale",
-        "description": "Gardez vos projets favoris à portée de clic. Les épingles sont personnelles et n'affectent personne d'autre."
+      "sidebar": {
+        "title": "Épinglé dans la barre latérale",
+        "description": "Épinglez vos projets favoris dans la barre latérale et dépliez-en un pour voir ses tâches."
       }
     },
     "art": {
@@ -195,7 +195,10 @@
       "context_body": "Nouveau site vitrine en Next.js et Tailwind. Les textes suivent docs/brand et chaque page gère le mode sombre.",
       "run_started": "a lancé une exécution",
       "context_loaded": "Contexte du projet et 2 dépôts chargés",
-      "pinned": "Épinglés"
+      "issue_count": "{{done}} / {{total}} tâches",
+      "issue_hero": "Animer le hero de la page d'accueil",
+      "issue_pricing": "Tableau comparatif des tarifs",
+      "issue_blog": "Paginer la liste du blog"
     }
   }
 }

@@ -149,6 +149,7 @@
       }
     },
     "art": {
+      "assignee": "Assignee",
       "squad_name": "Frontend squad",
       "issue_dark_mode": "Add a dark mode toggle to settings",
       "issue_board_columns": "Make board columns resizable",

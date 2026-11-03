@@ -147,6 +147,7 @@
       }
     },
     "art": {
+      "assignee": "담당",
       "squad_name": "프론트엔드 스쿼드",
       "issue_dark_mode": "설정에 다크 모드 전환 추가",
       "issue_board_columns": "보드 열 너비 조절 지원",

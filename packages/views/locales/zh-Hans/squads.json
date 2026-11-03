@@ -147,6 +147,7 @@
       }
     },
     "art": {
+      "assignee": "负责人",
       "squad_name": "前端小队",
       "issue_dark_mode": "设置页支持深色模式切换",
       "issue_board_columns": "看板列宽可拖拽调整",

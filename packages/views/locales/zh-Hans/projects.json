@@ -182,9 +182,9 @@
         "title": "上下文自动带给智能体",
         "description": "写一次项目描述、关联一次仓库，项目里每个任务的运行都会带上。"
       },
-      "pinned": {
+      "sidebar": {
         "title": "钉在侧栏，随手进入",
-        "description": "常用项目固定在侧栏，一点就到。固定只对你自己生效，不影响其他人。"
+        "description": "常用项目固定在侧栏，展开就能看到里面的任务。"
       }
     },
     "art": {
@@ -195,7 +195,10 @@
       "context_body": "新版官网，Next.js + Tailwind。文案以 docs/brand 为准，所有页面都要支持深色模式。",
       "run_started": "开始运行",
       "context_loaded": "已载入项目上下文和 2 个仓库",
-      "pinned": "已固定"
+      "issue_count": "{{done}} / {{total}} 个任务",
+      "issue_hero": "首页 Hero 动效",
+      "issue_pricing": "定价页对比表",
+      "issue_blog": "博客列表分页"
     }
   }
 }

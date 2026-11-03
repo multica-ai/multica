@@ -149,6 +149,7 @@
       }
     },
     "art": {
+      "assignee": "Assigné à",
       "squad_name": "Squad frontend",
       "issue_dark_mode": "Ajouter un mode sombre aux paramètres",
       "issue_board_columns": "Colonnes du tableau redimensionnables",

@@ -10,6 +10,7 @@ import {
   FeatureIntroCarousel,
   IntroArtCard,
   IntroArtConnector,
+  IntroArtFork,
   IntroArtTag,
 } from "../../layout/feature-intro";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -75,7 +76,7 @@ export function SquadsIntro({ onCreate }: { onCreate: () => void }) {
 function LeaderChip() {
   const { t } = useT("squads");
   return (
-    <IntroArtTag>
+    <IntroArtTag className="bg-warning/15 font-medium text-warning">
       <Crown className="size-3" />
       {t(($) => $.members_tab.leader_chip)}
     </IntroArtTag>
@@ -93,8 +94,11 @@ function RouteArt() {
           <span className="truncate font-medium">{t(($) => $.intro.art.issue_dark_mode)}</span>
         </div>
         <div className="mt-2 flex items-center gap-1.5 pl-5.5">
-          <ActorAvatar name={t(($) => $.intro.art.squad_name)} initials="F" isSquad size="xs" />
-          <span className="truncate font-medium">{t(($) => $.intro.art.squad_name)}</span>
+          <span className="text-muted-foreground">{t(($) => $.intro.art.assignee)}</span>
+          <span className="flex min-w-0 items-center gap-1 rounded-full bg-muted py-0.5 pr-2 pl-0.5">
+            <ActorAvatar name={t(($) => $.intro.art.squad_name)} initials="F" isSquad size="xs" />
+            <span className="truncate font-medium">{t(($) => $.intro.art.squad_name)}</span>
+          </span>
         </div>
       </IntroArtCard>
       <IntroArtConnector />
@@ -108,7 +112,7 @@ function RouteArt() {
           {t(($) => $.intro.art.delegating)}
         </div>
       </IntroArtCard>
-      <IntroArtConnector />
+      <IntroArtFork />
       <div className="grid grid-cols-2 gap-2">
         <MemberStatusCard
           member={TURING}

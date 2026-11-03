@@ -147,6 +147,7 @@
       }
     },
     "art": {
+      "assignee": "担当",
       "squad_name": "フロントエンドスクワッド",
       "issue_dark_mode": "設定画面にダークモード切替を追加",
       "issue_board_columns": "ボードの列幅をドラッグで調整",

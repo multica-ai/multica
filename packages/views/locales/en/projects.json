@@ -182,9 +182,9 @@
         "title": "Context travels with every run",
         "description": "Write the description and link repositories once. Every run on the project's issues picks them up."
       },
-      "pinned": {
-        "title": "Pin it to your sidebar",
-        "description": "Keep the projects you use most one click away. Pins are personal and don't affect anyone else."
+      "sidebar": {
+        "title": "Pinned to your sidebar",
+        "description": "Pin the projects you use most to the sidebar, and expand one to see its issues."
       }
     },
     "art": {
@@ -195,7 +195,10 @@
       "context_body": "New marketing site on Next.js and Tailwind. Copy follows docs/brand, and every page supports dark mode.",
       "run_started": "started a run",
       "context_loaded": "Loaded the project context and 2 repositories",
-      "pinned": "Pinned"
+      "issue_count": "{{done}} / {{total}} issues",
+      "issue_hero": "Animate the homepage hero",
+      "issue_pricing": "Pricing comparison table",
+      "issue_blog": "Paginate the blog list"
     }
   }
 }
