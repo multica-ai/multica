@@ -9,6 +9,8 @@ import {
   type AvatarSize,
 } from "@multica/ui/lib/avatar-size";
 import { parseAvatarEmoji } from "@multica/ui/lib/avatar-emoji";
+import { parseGeneratedSeed } from "@multica/ui/lib/avatar-seed";
+import { GeneratedAvatar } from "./generated-avatar";
 import { MulticaIcon } from "./multica-icon";
 
 interface ActorAvatarProps {
@@ -40,6 +42,11 @@ function ActorAvatar({
   const diameter = `var(--avatar-slot-size, ${AVATAR_SIZE_PX[size]}px)`;
   const scaled = (ratio: number) => `calc(${diameter} * ${ratio})`;
   const emoji = parseAvatarEmoji(avatarUrl);
+  // `gen:<seed>` display marker (MAKE-291): the server already resolved
+  // precedence — explicit image beats an existing emoji, which beats a
+  // generated seed — so the value here is the winner. A marker is never a
+  // renderable URL, so image URLs can't collide with this branch.
+  const seed = parseGeneratedSeed(avatarUrl);
 
   useEffect(() => {
     setImgError(false);
@@ -53,7 +60,7 @@ function ActorAvatar({
       data-slot="avatar"
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
+        (!avatarUrl || emoji || imgError) && !seed && "bg-muted text-muted-foreground",
         className,
         // rounded-full stays last so a call-site `className` can never override
         // the circle — avatar shape is a hard invariant, not a per-site choice.
@@ -61,7 +68,9 @@ function ActorAvatar({
       )}
       style={{ width: diameter, height: diameter, fontSize: scaled(0.45) }}
     >
-      {emoji ? (
+      {seed ? (
+        <GeneratedAvatar seed={seed} name={name} />
+      ) : emoji ? (
         <span
           role="img"
           aria-label={name}
