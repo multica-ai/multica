@@ -1394,12 +1394,13 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 	})
 
 	// Older sibling stays unread; newer sibling is read (the one "opening the
-	// issue" would have marked read).
+	// issue" would have marked read). Both are action rows: activity never
+	// takes part in the unread count.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, created_at)
 		VALUES
-			($1, 'member', $2, 'new_comment',    'older', $3, false, now() - interval '1 hour'),
-			($1, 'member', $2, 'status_changed', 'newer', $3, true,  now())
+			($1, 'member', $2, 'new_comment', 'older', $3, false, now() - interval '1 hour'),
+			($1, 'member', $2, 'mentioned',   'newer', $3, true,  now())
 	`, testWorkspaceID, testUserID, issueID); err != nil {
 		t.Fatalf("failed to seed inbox items: %v", err)
 	}

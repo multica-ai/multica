@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
-import { Globe, Lock, Users } from "@multica/ui/icons";
+import { ChevronRight, Globe, Lock, Settings2, Users } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import type {
   Agent,
   AgentRuntime,
@@ -48,6 +49,7 @@ export function AgentPropertiesPanel({
   canEdit,
   onUpdate,
   onEditAccess,
+  onOpenSettings,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -60,6 +62,7 @@ export function AgentPropertiesPanel({
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   /** Opens the full access form; access is a draft-and-save choice. */
   onEditAccess: () => void;
+  onOpenSettings: () => void;
 }) {
   const { t } = useT("agents");
   const { t: tl } = useT("layout");
@@ -198,6 +201,19 @@ export function AgentPropertiesPanel({
           </Value>
         </ObjectProperty>
       </ObjectPanelSection>
+
+      <div className="border-t pt-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 px-2"
+          onClick={onOpenSettings}
+        >
+          <Settings2 className="text-muted-foreground" />
+          {t(($) => $.panel.all_settings)}
+          <ChevronRight className="ml-auto text-faint-foreground" />
+        </Button>
+      </div>
 
       <ObjectPanelSection
         title={t(($) => $.tab_body.activity.section_last_30d)}

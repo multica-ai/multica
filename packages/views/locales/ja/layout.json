@@ -76,7 +76,12 @@
     "chat": "チャット",
     "autopilots": "自動化",
     "switch_workspace": "ワークスペースを切り替え",
-    "invitation_from": "{{name}} さんから招待されています"
+    "invitation_from": "{{name}} さんから招待されています",
+    "open_in_new_window": "新しいウィンドウで開く",
+    "open_in_new_window_click": "クリック",
+    "open_in_other_window": "別のウィンドウで開いています",
+    "in_other_window": "別ウィンドウ",
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
   },
   "panels": {
     "work": {
@@ -95,6 +100,7 @@
       "assignee_anyone": "全員",
       "assignee_me": "自分",
       "assignee_my_agents": "自分のエージェント",
+      "assignee_me_and_my_agents": "自分と自分のエージェント",
       "reset": "リセット",
       "load_more": "さらに表示",
       "show_less": "表示を減らす",
@@ -152,6 +158,9 @@
     "filter": "フィルター",
     "filter_count_other": "{{count}} 件のフィルター",
     "reset": "リセット",
+    "clear_search": "検索をクリア",
+    "clear_filters": "フィルターをクリア",
+    "clear_filters_and_search": "フィルターと検索をクリア",
     "display": "表示設定",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除",

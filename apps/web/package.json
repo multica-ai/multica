@@ -37,6 +37,7 @@
     "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",
     "tailwindcss": "catalog:",

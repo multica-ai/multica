@@ -2,7 +2,8 @@
   "page": {
     "title": "小隊",
     "new_button": "新建小隊",
-    "empty_no_squads": "暫無小隊。",
+    "empty_no_squads": "還沒有小隊",
+    "empty_description": "把 AI 代理和成員編成小隊，任務可以直接交給整個小隊。",
     "empty_no_match": "沒有匹配篩選條件的小隊。",
     "table": {
       "name": "小隊",
@@ -16,7 +17,7 @@
     "archive_action": "歸檔"
   },
   "member_type": {
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "member": "成員"
   },
   "archive_dialog": {
@@ -38,15 +39,15 @@
   },
   "add_member_dialog": {
     "title": "新增成員",
-    "description": "可選擇工作區成員或智慧體。",
+    "description": "可選擇工作區成員或 AI 代理。",
     "label_member": "成員",
     "label_role": "角色",
     "label_optional": "（可選）",
     "cancel": "取消",
-    "select_target": "選擇成員或智慧體",
-    "search_placeholder": "搜尋成員或智慧體...",
+    "select_target": "選擇成員或 AI 代理",
+    "search_placeholder": "搜尋成員或 AI 代理...",
     "members_section": "成員",
-    "agents_section": "智慧體",
+    "agents_section": "AI 代理",
     "role_placeholder": "例如：審查者、前端負責人",
     "add": "新增"
   },
@@ -64,9 +65,11 @@
   "members_tab": {
     "section_title": "成員",
     "add_member_button": "新增成員",
-    "create_agent_button": "建立智慧體",
+    "empty_title": "還沒有成員",
+    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。",
+    "create_agent_button": "建立 AI 代理",
     "leader_chip": "隊長",
-    "view_agent_tooltip": "開啟智慧體詳情",
+    "view_agent_tooltip": "開啟 AI 代理詳情",
     "make_leader_tooltip": "設為小隊負責人",
     "remove_member_tooltip": "從小隊移除",
     "status_working": "工作中",
@@ -82,6 +85,8 @@
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
     "not_found": "找不到該小隊",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部小隊",
     "instructions": "指引",
     "edit": "編輯",
     "cancel": "取消",

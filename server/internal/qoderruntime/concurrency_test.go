@@ -112,16 +112,7 @@ func setupMulti(t *testing.T, limit int, tasks ...*daemon.Task) *multiHarness {
 			h.sessions[parts[1]] = append(h.sessions[parts[1]], map[string]any{"id": fmt.Sprintf("evt_%s_%d", parts[1], len(h.sessions[parts[1]])), "type": "user.message", "content": []map[string]string{{"type": "text", "text": req.Events[0].text()}}})
 			io.WriteString(w, `{"data":[]}`)
 		case len(parts) == 3 && parts[2] == "events":
-			events := h.sessions[parts[1]]
-			if after := r.URL.Query().Get("after_id"); after != "" {
-				for i, e := range events {
-					if e["id"] == after {
-						events = events[i+1:]
-						break
-					}
-				}
-			}
-			json.NewEncoder(w).Encode(map[string]any{"data": events, "has_more": false})
+			json.NewEncoder(w).Encode(eventListPage(r, h.sessions[parts[1]]))
 		case len(parts) == 2 && r.Method == http.MethodGet:
 			status, ok := h.sessionStatus[parts[1]]
 			if !ok {

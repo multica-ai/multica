@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { renderWithI18n } from "../test/i18n";
 import { RailWorkspaces } from "./rail-workspaces";
 
@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   mutations: [] as Array<Record<string, unknown>>,
   workspaceCreationDisabled: false,
+  openWorkspaceInNewWindow: undefined as undefined | Mock<(slug: string) => void>,
+  workspacesInOtherWindows: undefined as undefined | (() => string[]),
 }));
 
 vi.mock("@multica/core/config", () => ({
@@ -28,7 +30,12 @@ vi.mock("../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ pathname: "/active/issues", push: vi.fn() }),
+  useNavigation: () => ({
+    pathname: "/active/issues",
+    push: vi.fn(),
+    openWorkspaceInNewWindow: state.openWorkspaceInNewWindow,
+    workspacesInOtherWindows: state.workspacesInOtherWindows,
+  }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
@@ -89,6 +96,8 @@ beforeEach(() => {
   state.summary = [];
   state.mutations.length = 0;
   state.workspaceCreationDisabled = false;
+  state.openWorkspaceInNewWindow = undefined;
+  state.workspacesInOtherWindows = undefined;
 });
 
 describe("RailWorkspaces", () => {
@@ -139,6 +148,70 @@ describe("RailWorkspaces", () => {
     state.workspaceCreationDisabled = true;
     renderWithI18n(<RailWorkspaces />);
     expect(within(await openMenu()).queryByRole("menuitem", { name: "Create workspace" })).toBeNull();
+  });
+
+  describe("new windows", () => {
+    const row = (menu: HTMLElement, name: RegExp) => within(menu).getByRole("menuitem", { name });
+
+    beforeEach(() => {
+      state.openWorkspaceInNewWindow = vi.fn();
+      state.workspaces = [ws(1), ws(2), ws(3)];
+    });
+
+    it("opens a workspace in a new window from its row button without following the row link", async () => {
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+      const button = within(row(menu, /WS 3/)).getByRole("button", { name: "Open in new window" });
+      const notPrevented = fireEvent.click(button);
+
+      expect(state.openWorkspaceInNewWindow).toHaveBeenCalledWith("ws3");
+      expect(notPrevented).toBe(false);
+    });
+
+    it("opens a workspace in a new window on shift-click", async () => {
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+      const target = row(menu, /WS 2/);
+      const notPrevented = fireEvent.click(target, { shiftKey: true });
+
+      expect(state.openWorkspaceInNewWindow).toHaveBeenCalledWith("ws2");
+      expect(notPrevented).toBe(false);
+    });
+
+    it("leaves a plain or cmd+shift click to the row link", async () => {
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+      fireEvent.click(row(menu, /WS 2/));
+      fireEvent.click(row(menu, /WS 2/), { shiftKey: true, metaKey: true });
+      expect(state.openWorkspaceInNewWindow).not.toHaveBeenCalled();
+    });
+
+    it("marks a workspace another window shows instead of offering a new window for it", async () => {
+      state.workspacesInOtherWindows = () => ["ws2"];
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+
+      const shown = row(menu, /WS 2/);
+      expect(within(shown).getByText("Other window")).toBeInTheDocument();
+      expect(within(row(menu, /WS 3/)).queryByText("Other window")).toBeNull();
+      expect(within(shown).queryByRole("button")).toBeNull();
+      expect(within(row(menu, /WS 3/)).getByRole("button", { name: "Open in new window" })).toBeInTheDocument();
+      fireEvent.click(shown, { shiftKey: true });
+      expect(state.openWorkspaceInNewWindow).not.toHaveBeenCalled();
+    });
+
+    it("offers no new window for the current workspace", async () => {
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+      expect(within(row(menu, /Active WS/)).queryByRole("button")).toBeNull();
+    });
+
+    it("offers no new windows on web", async () => {
+      state.openWorkspaceInNewWindow = undefined;
+      renderWithI18n(<RailWorkspaces />);
+      const menu = await openMenu();
+      expect(within(menu).queryByRole("button", { name: "Open in new window" })).toBeNull();
+    });
   });
 });
 

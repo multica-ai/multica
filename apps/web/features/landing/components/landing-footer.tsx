@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -28,11 +28,8 @@ export function LandingFooter() {
         <div className="flex flex-col gap-12 border-b border-white/10 py-16 sm:py-20 lg:flex-row lg:gap-20">
           {/* Left — newsletter / CTA */}
           <div className="lg:w-[340px] lg:shrink-0">
-            <Link href="#product" className="flex items-center gap-3">
-              <MulticaIcon className="size-5 text-white" noSpin />
-              <span className="text-title font-semibold tracking-[0.04em] lowercase">
-                multica
-              </span>
+            <Link href="#product" className="flex items-center">
+              <MulticaWordmark className="h-[22px] text-white" />
             </Link>
             <p className="mt-4 max-w-[300px] text-body leading-[1.7] text-white/50 sm:text-body-lg">
               {t.footer.tagline}
@@ -131,15 +128,7 @@ export function LandingFooter() {
 
         {/* Giant logo */}
         <div className="relative overflow-hidden pb-4">
-          <div className="flex items-end gap-6 sm:gap-8">
-            <MulticaIcon
-              className="size-[clamp(4rem,12vw,10rem)] shrink-0 text-white"
-              noSpin
-            />
-            <span className="landing-serif text-[clamp(6rem,22vw,16rem)] font-normal leading-[0.82] tracking-[-0.04em] text-white lowercase">
-              multica
-            </span>
-          </div>
+          <MulticaWordmark className="h-auto w-full text-white" />
         </div>
       </div>
     </footer>

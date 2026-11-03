@@ -2,6 +2,7 @@
   "page": {
     "title": "에이전트",
     "new_agent": "새 에이전트",
+    "search": "에이전트 검색",
     "show_archived": "보관된 에이전트 보기 ({{count}}) →",
     "of_total": "{{total}}개 중 {{visible}}개",
     "list_load_failed": "에이전트 목록을 불러오지 못했습니다",
@@ -45,11 +46,22 @@
   },
   "empty": {
     "title": "아직 에이전트가 없습니다",
-    "description": "에이전트를 만든 후 태스크를 할당하세요."
+    "description": "에이전트는 할당된 태스크를 맡아 런타임에서 스스로 처리합니다.",
+    "setup": {
+      "label": "설정 단계",
+      "runtime": "런타임 연결하기",
+      "agent": "에이전트 만들기",
+      "issue": "태스크 할당하기",
+      "done": "(완료)",
+      "connect_runtime": "연결"
+    }
   },
   "no_matches": {
     "title": "일치하는 결과 없음",
+    "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "no_archived": "아직 보관된 에이전트가 없습니다.",
+    "search_archived": "\"{{query}}\"와 일치하는 보관된 에이전트가 없습니다.",
     "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
     "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
@@ -154,7 +166,7 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "advanced_settings": "고급 설정",
+    "settings": "설정",
     "copy_link": "링크 복사",
     "copy_id": "에이전트 ID 복사",
     "link_copied_toast": "링크를 복사했습니다",
@@ -209,7 +221,8 @@
   "panel": {
     "status": "상태",
     "runs_7d": "실행 (7일)",
-    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경"
+    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
+    "all_settings": "모든 설정"
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
@@ -548,6 +561,7 @@
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
+      "open_settings": "설정 열기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
       "saving": "저장 중…",
@@ -928,6 +942,7 @@
       "switch_runtime_failed": "런타임을 전환하지 못했습니다. 대화는 이전 런타임에서 계속 실행됩니다.",
       "switch_runtime_pending": "현재 답변을 중지하면 런타임을 전환할 수 있습니다.",
       "switch_runtime_success": "런타임을 전환했습니다. 설정 초안은 유지되며, 이후 대화는 새 런타임에서 새로운 모델 세션으로 이어집니다.",
+      "conversation_tab": "대화",
       "chat_title": "Agent Builder",
       "runtime_online": "런타임 온라인",
       "runtime_offline": "런타임 오프라인",

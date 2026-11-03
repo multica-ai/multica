@@ -57,6 +57,7 @@ import { useIntentNavigate } from "../../navigation";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
@@ -611,9 +612,10 @@ export function SquadsPage() {
         <CollectionPageState
           icon={Users}
           title={t(($) => $.page.empty_no_squads)}
+          description={t(($) => $.page.empty_description)}
           actions={
-            <Button size="sm" variant="outline" onClick={openCreateSquad}>
-              <Plus aria-hidden="true" className="size-3.5" />
+            <Button size="sm" onClick={openCreateSquad}>
+              <Plus aria-hidden="true" />
               {t(($) => $.page.new_button)}
             </Button>
           }
@@ -634,7 +636,14 @@ export function SquadsPage() {
               : undefined
           }
           sort={sort}
-          empty={t(($) => $.page.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              description={hasActiveFilters ? t(($) => $.page.empty_no_match) : undefined}
+              onReset={clearFilters}
+              hasFilters={hasActiveFilters}
+            />
+          }
         />
       )}
     </div>

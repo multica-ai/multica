@@ -198,7 +198,7 @@ describe("IssueFilterMenu advanced mode", () => {
     });
   });
 
-  it("turns a row into a group and reads the tree as a sentence", async () => {
+  it("turns a row into a group", async () => {
     const store = renderFilterMenu((s) =>
       s.getState().setAdvancedFilter(
         createFilterGroup("all", [
@@ -209,7 +209,6 @@ describe("IssueFilterMenu advanced mode", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     await screen.findByTestId("advanced-filter-panel");
-    expect(screen.queryByTestId("advanced-filter-summary")).not.toBeInTheDocument();
 
     const rows = screen.getAllByTestId("advanced-filter-row");
     fireEvent.click(within(rows[1]!).getByRole("button", { name: "Condition actions" }));
@@ -219,11 +218,7 @@ describe("IssueFilterMenu advanced mode", () => {
       match: "any",
       children: [{ field: "priority", values: ["urgent"] }],
     });
-    await waitFor(() =>
-      expect(screen.getByTestId("advanced-filter-summary")).toHaveTextContent(
-        "Shows issues where Label includes any of Bug and Priority is Urgent",
-      ),
-    );
+    expect(await screen.findByTestId("advanced-filter-group")).toBeInTheDocument();
   });
 
   it("switches to advanced with the current filters and opens the panel", async () => {
@@ -243,7 +238,7 @@ describe("IssueFilterMenu advanced mode", () => {
     expect(screen.getByRole("button", { name: "Switch to simple filter" })).toBeEnabled();
   });
 
-  it("disables switching back with the reason when the tree has a group", async () => {
+  it("disables switching back when the tree has a group", async () => {
     renderFilterMenu((s) =>
       s.getState().setAdvancedFilter(
         createFilterGroup("all", [
@@ -259,7 +254,7 @@ describe("IssueFilterMenu advanced mode", () => {
     await screen.findByTestId("advanced-filter-panel");
     expect(screen.getByTestId("advanced-filter-group")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to simple filter" })).toBeDisabled();
-    expect(screen.getByText(/Simple filters can't show groups/)).toBeInTheDocument();
+    expect(screen.queryByText(/Simple filters can't show groups/)).not.toBeInTheDocument();
   });
 
   it("goes back to the simple menu with the same filters", async () => {

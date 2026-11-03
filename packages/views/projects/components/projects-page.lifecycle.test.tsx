@@ -178,7 +178,7 @@ describe("project lifecycle browse integration", () => {
     await scope("Closed projects 3");
     expect(screen.getByText("Project planned")).toBeVisible();
     expect(screen.queryByText("1 selected")).toBeNull();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("distinguishes workspace, lifecycle and filtered emptiness and preserves density and sorting", async () => {
@@ -216,4 +216,45 @@ describe("project lifecycle browse integration", () => {
       "Project planned", "Project paused", "Project in_progress",
     ]);
   });
+  it.each(["compact", "comfortable"] as const)("keeps lifecycle empty copy and the shared clear-filters action in %s", async (mode) => {
+    useProjectViewStore.getState().setViewMode(mode);
+    qc.setQueryData(projectKeys.list("ws-1"), { projects: [fixtures[3]], total: 1 });
+    renderWithI18n(page());
+    expect(screen.getByText("No active projects")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    await scope("Closed projects 1");
+    await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
+    expect(screen.getByText("No projects match")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Project completed")).toBeVisible();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("closed");
+  });
+
+  it("cancels batch deletion when part of the selection disappears, permissions change or density changes", async () => {
+    renderWithI18n(page());
+    const select = async (id: string) => {
+      const row = screen.getByText(`Project ${id}`).closest('[role="row"]')!;
+      await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
+    };
+    await select("planned");
+    await select("paused");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    await act(async () => qc.setQueryData<ListProjectsResponse>(projectKeys.list("ws-1"), (old) => ({
+      ...old!, projects: old!.projects.map((p) => p.id === "planned" ? { ...p, status: "completed" } : p),
+    })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("1 selected")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await act(async () => qc.setQueryData(["workspaces", "ws-1", "members"], [{ user_id: "user-1", role: "member", name: "Fixture Admin" }]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    await act(async () => qc.setQueryData(["workspaces", "ws-1", "members"], [{ user_id: "user-1", role: "admin", name: "Fixture Admin" }]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText("1 selected")).toBeNull();
+  });
+
 });

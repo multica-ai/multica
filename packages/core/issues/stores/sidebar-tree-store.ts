@@ -7,7 +7,7 @@ import { defaultStorage } from "../../platform/storage";
 import type { ProjectStatus } from "../../types";
 
 export type SidebarIssueSort = "updated_at" | "created_at" | "priority" | "status" | "title" | "due_date";
-export type SidebarIssueAssignee = "anyone" | "me" | "my_agents";
+export type SidebarIssueAssignee = "anyone" | "me" | "my_agents" | "me_and_my_agents";
 
 /** How expanded projects list their issues in the sidebar. */
 export interface SidebarIssueSettings {

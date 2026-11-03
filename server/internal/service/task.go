@@ -3660,6 +3660,42 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			return nil
 		}
 
+		// Runtime-wide cap (GitHub #9626): several agents can share one
+		// runtime (e.g. one local GPU), so the per-agent cap alone cannot
+		// keep their combined work bounded.
+		//
+		// The lock is taken before the cap is read, on every claim. The cap
+		// update (UpdateAgentRuntimeMaxConcurrentTasks in the handler) takes
+		// the same lock before committing, so once a PATCH returns, no claim
+		// can still commit against the old value: a claim either finished
+		// before the update got the lock, or reads the new value after it.
+		// Reading the cap first and locking only when it is set would let a
+		// claim that waited on the lock (or read NULL) dispatch against a
+		// stale cap. Claims on one runtime are already short and nearly
+		// serial (one daemon per runtime), so the extra lock is cheap.
+		if err := qtx.LockRuntimeClaimCapacity(ctx, claimRuntimeID); err != nil {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("lock runtime claim capacity: %w", err)
+		}
+		runtimeCap, err := qtx.GetAgentRuntimeMaxConcurrentTasks(ctx, claimRuntimeID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("get runtime concurrency cap: %w", err)
+		}
+		if err == nil && runtimeCap.Valid {
+			runtimeRunning, err := qtx.CountActiveTasksByRuntime(ctx, claimRuntimeID)
+			if err != nil {
+				outcome = claimOutcomeErrorCountRunning
+				return fmt.Errorf("count runtime running tasks: %w", err)
+			}
+			if runtimeRunning >= int64(runtimeCap.Int32) {
+				decisionDetail = claimDecisionDetail{running: runtimeRunning, maxConcurrent: int64(runtimeCap.Int32)}
+				outcome = claimOutcomeRuntimeNoCapacity
+				return nil
+			}
+		}
+		countRunningMs = time.Since(t0).Milliseconds()
+
 		t0 = time.Now()
 		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
@@ -6704,7 +6740,9 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		// Exhaustion deliberately does not @mention the coordinator agent: doing
 		// so would enqueue a fourth recovery run and defeat the attempt bound.
 		// Instead, create one durable action-required inbox item for the human
-		// who originated (or is accountable for) the delegated work.
+		// who originated (or is accountable for) the delegated work, routed by
+		// their agent-failure preference like every other task_failed. The
+		// system comment above explains the outcome either way.
 		_, recipient := delegatedFailureRecoveryAttribution(target)
 		if recipient.Valid {
 			_, err = qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
@@ -6716,6 +6754,22 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			}
 			if err != nil {
 				return fmt.Errorf("validate delegated failure exhaustion recipient: %w", err)
+			}
+
+			var prefs map[string]string
+			pref, err := qtx.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
+				WorkspaceID: target.issue.WorkspaceID,
+				UserID:      recipient,
+			})
+			if err == nil {
+				_ = json.Unmarshal(pref.Preferences, &prefs)
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("load delegated failure exhaustion recipient preferences: %w", err)
+			}
+			actorType := pgtype.Text{String: "system", Valid: true}
+			section, routed := inbox.Route(prefs, "task_failed", actorType)
+			if !routed {
+				return nil
 			}
 
 			details, err := json.Marshal(map[string]any{
@@ -6737,9 +6791,10 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				IssueID:       target.issue.ID,
 				Title:         target.issue.Title,
 				Body:          pgtype.Text{String: exhaustedComment.Content, Valid: true},
-				ActorType:     pgtype.Text{String: "system", Valid: true},
+				ActorType:     actorType,
 				ActorID:       pgtype.UUID{},
 				Details:       details,
+				Section:       inbox.SectionText(section),
 			})
 			if err != nil {
 				return fmt.Errorf("create delegated failure exhaustion inbox item: %w", err)
@@ -6776,6 +6831,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"recipient_id":   util.UUIDToString(exhaustedInbox.RecipientID),
 				"type":           exhaustedInbox.Type,
 				"severity":       exhaustedInbox.Severity,
+				"section":        inbox.ItemSection(exhaustedInbox.Section, exhaustedInbox.Type, exhaustedInbox.ActorType),
 				"issue_id":       util.UUIDToPtr(exhaustedInbox.IssueID),
 				"title":          exhaustedInbox.Title,
 				"body":           util.TextToPtr(exhaustedInbox.Body),
@@ -7397,6 +7453,13 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+}
+
+// NotifyRuntimeCapacityChanged wakes a runtime's daemon after its
+// runtime-wide concurrency cap was raised or removed (GitHub #9626), since
+// queued work held back by the old cap may now be claimable.
+func (s *TaskService) NotifyRuntimeCapacityChanged(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
 }
 
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
@@ -8315,6 +8378,7 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
+		"section":        inbox.ItemSection(item.Section, item.Type, item.ActorType),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

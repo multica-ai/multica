@@ -1,14 +1,20 @@
 package qoderruntime
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -83,6 +89,15 @@ type harness struct {
 	messages                []map[string]any
 	prompt                  string
 	sessionAgent            string
+	issue                   map[string]any
+	issueStatus             int
+	issueBody               string
+	issuePosts              int
+	issueGet                string
+	downloads               map[string]string
+	uploads                 map[string]string
+	sessionResources        []map[string]any
+	sentContent             []map[string]any
 }
 
 func setup(t *testing.T) *harness {
@@ -95,7 +110,7 @@ func setup(t *testing.T) *harness {
 			t.Error("missing workspace")
 		}
 		auth := "Bearer multica-secret"
-		if strings.HasPrefix(r.URL.Path, "/api/issues/") {
+		if strings.HasPrefix(r.URL.Path, "/api/issues") || strings.HasPrefix(r.URL.Path, "/api/attachments/") {
 			auth = "Bearer mat_task"
 		}
 		if r.Header.Get("Authorization") != auth {
@@ -108,8 +123,30 @@ func setup(t *testing.T) *harness {
 		case strings.HasSuffix(r.URL.Path, "/tasks/claim"):
 			json.NewEncoder(w).Encode(map[string]any{"task": h.task})
 			h.task = nil
+		case r.URL.Path == "/api/issues" && r.Method == http.MethodPost:
+			h.issuePosts++
+			json.NewDecoder(r.Body).Decode(&h.issue)
+			if h.issueStatus != 0 {
+				w.WriteHeader(h.issueStatus)
+			}
+			if h.issueBody != "" {
+				io.WriteString(w, h.issueBody)
+			} else {
+				io.WriteString(w, `{"identifier":"MUL-7"}`)
+			}
 		case strings.HasPrefix(r.URL.Path, "/api/issues/"):
-			io.WriteString(w, `{"title":"Fix bug","description":"Use repository context"}`)
+			if h.issueGet != "" {
+				io.WriteString(w, h.issueGet)
+			} else {
+				io.WriteString(w, `{"title":"Fix bug","description":"Use repository context"}`)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/attachments/"):
+			body, ok := h.downloads[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			io.WriteString(w, body)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			json.NewEncoder(w).Encode(map[string]string{"status": h.status})
 		case strings.HasSuffix(r.URL.Path, "/start"):
@@ -147,41 +184,57 @@ func setup(t *testing.T) *harness {
 		case r.URL.Path == "/sessions" && r.Method == "POST":
 			h.creates++
 			var input struct {
-				Agent string `json:"agent"`
+				Agent     string           `json:"agent"`
+				Resources []map[string]any `json:"resources"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Fatal(err)
 			}
 			h.sessionAgent = input.Agent
+			h.sessionResources = input.Resources
 			io.WriteString(w, `{"id":"sess_1","status":"idle"}`)
 		case r.URL.Path == "/sessions/sess_1/events" && r.Method == "POST":
 			h.sends++
+			raw, _ := io.ReadAll(r.Body)
 			var req struct {
 				Events []event `json:"events"`
 			}
-			json.NewDecoder(r.Body).Decode(&req)
+			json.Unmarshal(raw, &req)
+			var content struct {
+				Events []struct {
+					Content []map[string]any `json:"content"`
+				} `json:"events"`
+			}
+			json.Unmarshal(raw, &content)
+			h.sentContent = content.Events[0].Content
 			h.prompt = req.Events[0].text()
-			h.events = append(h.events, map[string]any{"id": "evt_user", "type": "user.message", "content": []map[string]string{{"type": "text", "text": h.prompt}}})
+			// Like Qoder, echo the full submitted content on send and in the event list.
+			userEvent := map[string]any{"id": "evt_user", "type": "user.message", "content": h.sentContent}
+			h.events = append(h.events, userEvent)
 			if h.lostSend {
 				http.Error(w, "unknown", 502)
 				return
 			}
-			io.WriteString(w, `{"data":[]}`)
+			json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{userEvent}})
 		case r.URL.Path == "/sessions/sess_1/events" && r.Method == "GET":
-			if r.URL.Query().Get("page") != "" {
+			if page := r.URL.Query().Get("page"); page != "" && !strings.HasPrefix(page, "next:") {
 				t.Error("event ID used as page cursor")
 			}
-			events := h.events
-			after := r.URL.Query().Get("after_id")
-			if after != "" {
-				for i, e := range events {
-					if e["id"] == after {
-						events = events[i+1:]
-						break
-					}
-				}
+			json.NewEncoder(w).Encode(eventListPage(r, h.events))
+		case r.URL.Path == "/files" && r.Method == "POST":
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Fatal(err)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"data": events, "has_more": false})
+			data, _ := io.ReadAll(file)
+			if r.FormValue("name") != header.Filename {
+				t.Error("upload name mismatch")
+			}
+			if h.uploads == nil {
+				h.uploads = map[string]string{}
+			}
+			h.uploads[header.Filename] = string(data)
+			fmt.Fprintf(w, `{"id":"file_%d","type":"file"}`, len(h.uploads))
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			h.cancels++
 			io.WriteString(w, `{"status":"canceling"}`)
@@ -233,6 +286,268 @@ func TestIssueRun(t *testing.T) {
 	}
 	if strings.Contains(string(data), "secret") {
 		t.Fatal("credential persisted")
+	}
+}
+func quickCreateTask(h *harness) {
+	h.task.IssueID = ""
+	h.task.QuickCreatePrompt = "fix the slow inbox"
+	h.task.QuickCreateDueDate = "2026-11-01"
+	h.task.ProjectID = "project-1"
+	h.task.Agent.ID = "agent-uuid"
+}
+func (h *harness) draft(text string) {
+	h.events = append(h.events, map[string]any{"id": "evt_reply", "type": "agent.message", "content": []map[string]string{{"type": "text", "text": text}}}, map[string]any{"id": "evt_idle", "type": "session.status_idle", "stop_reason": map[string]string{"type": "end_turn"}})
+}
+func TestQuickCreateRunCreatesIssue(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(h.prompt, "fix the slow inbox") {
+		t.Fatalf("incorrect quick-create prompt: %s (failure %#v)", h.prompt, h.failure)
+	}
+	h.draft("```json\n{\"title\":\"Speed up inbox\",\"description\":\"Inbox loads slowly\",\"priority\":\"high\"}\n```")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"title": "Speed up inbox", "description": "Inbox loads slowly", "priority": "high", "due_date": "2026-11-01", "project_id": "project-1", "assignee_type": "agent", "assignee_id": "agent-uuid", "origin_type": "quick_create", "origin_id": "task-1"}
+	for k, v := range want {
+		if h.issue[k] != v {
+			t.Fatalf("issue %s = %v, want %v (%#v)", k, h.issue[k], v, h.issue)
+		}
+	}
+	if !strings.Contains(fmt.Sprint(h.complete["output"]), "MUL-7") {
+		t.Fatalf("result: %#v", h.complete)
+	}
+}
+func TestQuickCreateWithoutDraftFails(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.draft("I could not do it")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.issue != nil || h.complete != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "issue draft") {
+		t.Fatalf("unexpected report: %#v", h.failure)
+	}
+}
+func TestQuickCreateCredentialIsNotPersisted(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.b.state = j
+	h.draft(`{"title":"Speed up inbox"}`)
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.issue != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "restarted") {
+		t.Fatalf("unexpected report: %#v", h.failure)
+	}
+}
+func TestQuickCreateAttachmentsFailBeforeExecution(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	h.task.QuickCreateAttachmentIDs = []string{"attachment-1"}
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 0 || h.issuePosts != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
+		t.Fatalf("quick-create attachment ignored: creates=%d posts=%d failure=%#v", h.creates, h.issuePosts, h.failure)
+	}
+}
+func testPNG(t *testing.T, width, height int, noise bool) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	if noise {
+		rand.New(rand.NewSource(1)).Read(img.Pix)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func (h *harness) attach(t *testing.T, files ...[3]string) {
+	t.Helper()
+	var atts []map[string]any
+	h.downloads = map[string]string{}
+	for i, f := range files {
+		u := fmt.Sprintf("/api/attachments/a%d/download", i)
+		atts = append(atts, map[string]any{"id": fmt.Sprint("a", i), "filename": f[0], "content_type": f[1], "size_bytes": len(f[2]), "download_url": u})
+		h.downloads[u] = f[2]
+	}
+	raw, _ := json.Marshal(map[string]any{"title": "Fix bug", "description": "See attachments", "attachments": atts})
+	h.issueGet = string(raw)
+}
+
+func TestIssueAttachmentsReachSession(t *testing.T) {
+	h := setup(t)
+	screen := testPNG(t, 4, 4, false)
+	h.attach(t,
+		[3]string{"notes.md", "text/markdown", "hello"},
+		[3]string{"screen.png", "image/png", screen},
+		[3]string{"spec.pdf", "application/pdf", "%PDF"},
+		[3]string{"notes.md", "text/plain", "bye"},
+		[3]string{"page.png", "image/png", testPNG(t, 400, 9000, false)},
+		[3]string{"broken.png", "image/png", "\x89PNG"})
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || h.sends != 1 {
+		t.Fatalf("run failed: %#v", h.failure)
+	}
+	if h.uploads["notes.md"] != "hello" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 2 {
+		t.Fatalf("uploads: %#v", h.uploads)
+	}
+	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/notes-2.md"}
+	var got []string
+	for _, res := range h.sessionResources {
+		if res["type"] == "file" {
+			got = append(got, fmt.Sprint(res["file_id"], " ", res["mount_path"]))
+		}
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("mounted resources: %v", h.sessionResources)
+	}
+	if len(h.sentContent) != 2 || h.sentContent[1]["type"] != "image" {
+		t.Fatalf("message content: %#v", h.sentContent)
+	}
+	source, _ := h.sentContent[1]["source"].(map[string]any)
+	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte(screen)) {
+		t.Fatalf("image source: %#v", source)
+	}
+	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
+		if !strings.Contains(h.prompt, s) {
+			t.Fatalf("prompt missing %q: %s", s, h.prompt)
+		}
+	}
+	if r := h.b.state.first(); r == nil || len(r.Images) != 0 {
+		t.Fatal("sent images kept in the journal")
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
+	}
+}
+
+// The submitted images come back in the send response and the event list;
+// both must stay readable for the run to be confirmed and completed.
+func TestIssueImagesFitEchoedEvents(t *testing.T) {
+	h := setup(t)
+	img := testPNG(t, 700, 700, true)
+	h.attach(t, [3]string{"a.png", "image/png", img}, [3]string{"b.png", "image/png", img}, [3]string{"c.png", "image/png", img})
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.b.state.first(); r == nil || r.Phase != "running" {
+		t.Fatalf("send not confirmed: %#v", r)
+	}
+	if len(h.sentContent) != 3 || !strings.Contains(h.prompt, "c.png (image too large): not available") {
+		t.Fatalf("image budget not applied: %d blocks, prompt %s", len(h.sentContent), h.prompt)
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
+	}
+}
+
+func TestWebPImageSize(t *testing.T) {
+	header := func(chunk string, body ...byte) []byte {
+		b := append([]byte("RIFF\x00\x00\x00\x00WEBP"+chunk+"\x00\x00\x00\x00"), body...)
+		return append(b, make([]byte, 32)...)
+	}
+	cases := map[string][]byte{
+		"VP8":  header("VP8 ", 0, 0, 0, 0x9d, 0x01, 0x2a, 0x90, 0x01, 0x28, 0x23), // 400x9000
+		"VP8L": header("VP8L", 0x2f, 0x8f, 0xc1, 0xc9, 0x08),                      // 400x9000
+		"VP8X": header("VP8X", 0, 0, 0, 0, 0x8f, 0x01, 0x00, 0x27, 0x23, 0x00),    // 400x9000
+	}
+	for name, data := range cases {
+		w, hgt, ok := imageSize("image/webp", data)
+		if !ok || w != 400 || hgt != 9000 {
+			t.Errorf("%s: got %dx%d ok=%v", name, w, hgt, ok)
+		}
+	}
+	if _, _, ok := imageSize("image/webp", []byte("RIFF")); ok {
+		t.Error("truncated WebP accepted")
+	}
+}
+
+// lostCreate leaves a quick-create run whose first create request failed
+// after it was marked submitted, as when the response is lost.
+func lostCreate(t *testing.T, h *harness) {
+	t.Helper()
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.issueStatus = http.StatusBadGateway
+	h.draft(`{"title":"Speed up inbox"}`)
+	h.b.step(ctx)
+	if h.issuePosts != 1 || h.complete != nil || h.failure != nil {
+		t.Fatalf("first create should be retried: posts=%d complete=%#v failure=%#v", h.issuePosts, h.complete, h.failure)
+	}
+}
+func TestQuickCreateRetryAcceptsOwnDuplicate(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	h.issueStatus = http.StatusConflict
+	h.issueBody = `{"code":"active_duplicate_issue","error":"duplicate"}`
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(fmt.Sprint(h.complete["output"]), "Speed up inbox") {
+		t.Fatalf("retry should complete: complete=%#v failure=%#v", h.complete, h.failure)
+	}
+}
+func TestQuickCreateRetryRejectsOtherConflict(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	h.issueStatus = http.StatusConflict
+	h.issueBody = `{"error":"the target status was archived"}`
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "rejected") {
+		t.Fatalf("non-duplicate conflict should fail: complete=%#v failure=%#v", h.complete, h.failure)
+	}
+}
+func TestQuickCreateRestartAfterSubmitAsksToCheck(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.b.state = j
+	h.issueStatus = 0
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.issuePosts != 1 || !strings.Contains(fmt.Sprint(h.failure["error"]), "check whether it was created") {
+		t.Fatalf("unexpected report: posts=%d failure=%#v", h.issuePosts, h.failure)
 	}
 }
 func TestChatRun(t *testing.T) {
@@ -729,5 +1044,147 @@ func TestJournalStorageConfig(t *testing.T) {
 		if _, err := New(cfg, nil); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// eventListPage serves GET /sessions/{id}/events from the full event list,
+// honouring after_id, order and limit, and the opaque "next:<id>" page cursor
+// it hands out itself.
+func eventListPage(r *http.Request, events []map[string]any) map[string]any {
+	q := r.URL.Query()
+	after := q.Get("after_id")
+	if page := q.Get("page"); page != "" {
+		after = strings.TrimPrefix(page, "next:")
+	}
+	if after != "" {
+		for i, e := range events {
+			if e["id"] == after {
+				events = events[i+1:]
+				break
+			}
+		}
+	}
+	if q.Get("order") == "desc" {
+		reversed := make([]map[string]any, 0, len(events))
+		for i := len(events) - 1; i >= 0; i-- {
+			reversed = append(reversed, events[i])
+		}
+		events = reversed
+	}
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+	response := map[string]any{"data": events, "has_more": false}
+	if len(events) > limit {
+		response["data"] = events[:limit]
+		response["has_more"] = true
+		response["next_page"] = fmt.Sprint("next:", events[limit-1]["id"])
+	}
+	return response
+}
+
+// Each event fits the response limit, but a full page of them does not; the
+// bridge must fall back to smaller pages instead of failing the run.
+func TestOversizedEventPageIsReadInSmallerPages(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("x", 5<<20)
+	for i := 0; i < 2; i++ {
+		h.events = append(h.events, map[string]any{"id": fmt.Sprint("evt_tool_", i), "type": "agent.tool_result", "content": []map[string]string{{"type": "text", "text": big}}})
+	}
+	h.finish("end_turn")
+	for i := 0; i < 5 && h.complete == nil; i++ {
+		if err := h.b.step(ctx); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	if h.complete == nil || h.failure != nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
+	}
+}
+
+// A follow-up on a session whose earlier turn carried images must read only
+// its own turn: the two turns' images together exceed the response limit.
+func TestImageFollowUpReadsOnlyItsOwnTurn(t *testing.T) {
+	h := setup(t)
+	img := testPNG(t, 700, 700, true)
+	h.attach(t, [3]string{"a.png", "image/png", img}, [3]string{"b.png", "image/png", img})
+	var events []map[string]any
+	var metadata map[string]string
+	creates, posts, fullReads := 0, 0, 0
+	q := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/sessions" && r.Method == http.MethodPost:
+			creates++
+			var req struct {
+				Metadata map[string]string `json:"metadata"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+			}
+			metadata = req.Metadata
+			json.NewEncoder(w).Encode(map[string]string{"id": "sess_1"})
+		case r.URL.Path == "/sessions/sess_1" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"status": "idle", "agent": "agent_1", "environment_id": "env_1", "metadata": metadata})
+		case r.URL.Path == "/sessions/sess_1/events" && r.Method == http.MethodPost:
+			var req struct {
+				Events []map[string]any `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+				return
+			}
+			posts++
+			req.Events[0]["id"] = fmt.Sprint("evt_user_", posts)
+			events = append(events, req.Events[0])
+			json.NewEncoder(w).Encode(map[string]any{"data": req.Events})
+		case r.URL.Path == "/sessions/sess_1/events" && r.Method == http.MethodGet:
+			if posts > 1 && r.URL.Query().Get("after_id") == "" && r.URL.Query().Get("page") == "" && r.URL.Query().Get("order") != "desc" {
+				fullReads++
+			}
+			json.NewEncoder(w).Encode(eventListPage(r, events))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer q.Close()
+	h.b.qoder.base = q.URL
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	events = append(events, map[string]any{"id": "evt_idle_1", "type": "session.status_idle", "stop_reason": map[string]string{"type": "end_turn"}})
+	if err := h.b.step(ctx); err != nil {
+		t.Fatalf("finish first turn: %v", err)
+	}
+	if h.complete == nil || h.b.state.first() != nil {
+		t.Fatal("first turn did not complete")
+	}
+
+	h.task = newTask("task-2", "sess_1")
+	h.task.IssueID = "issue-1"
+	h.status, h.complete = "dispatched", nil
+	if err := h.b.step(ctx); err != nil {
+		t.Fatalf("follow-up: %v", err)
+	}
+	run := h.b.state.first()
+	if creates != 1 || posts != 2 || run == nil || !run.Continued || !run.Started {
+		t.Fatalf("follow-up not continued and confirmed: creates=%d posts=%d run=%#v", creates, posts, run)
+	}
+	if fullReads != 0 {
+		t.Fatalf("follow-up re-read the session history %d times", fullReads)
+	}
+	events = append(events, map[string]any{"id": "evt_idle_2", "type": "session.status_idle", "stop_reason": map[string]string{"type": "end_turn"}})
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil || h.failure != nil {
+		t.Fatalf("follow-up did not complete: %#v", h.failure)
 	}
 }

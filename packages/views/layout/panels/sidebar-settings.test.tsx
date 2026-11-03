@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IssueViewPreference } from "@multica/core/api/schemas";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
@@ -97,6 +98,23 @@ describe("ProjectsSectionSettings", () => {
     fireEvent.click(chip("Todo"));
     await waitFor(() => expect(chip("Todo")).toHaveAttribute("aria-pressed", "false"));
     expect(lastSaved().issues.hiddenStatuses).toEqual(expect.arrayContaining(["todo", "done"]));
+  });
+
+  it("saves me and my agents and keeps it once the saved document is read back", async () => {
+    const user = userEvent.setup();
+    openSettings();
+
+    const assignee = screen.getByRole("combobox", { name: "Assignee" });
+    expect(assignee).toHaveTextContent("Anyone");
+    await user.click(assignee);
+    await user.click(await screen.findByRole("option", { name: "Me and my agents" }));
+
+    await waitFor(() => expect(server.putIssueViewPreference).toHaveBeenCalled());
+    expect(lastSaved().issues.assignee).toBe("me_and_my_agents");
+    await waitFor(() => expect(server.doc.prefs.issues).toMatchObject({ assignee: "me_and_my_agents" }));
+    await act(() => qc.refetchQueries());
+    expect(server.getIssueViewPreference).toHaveBeenCalled();
+    expect(assignee).toHaveTextContent("Me and my agents");
   });
 
   it("toggles a project status and resets everything at once", async () => {

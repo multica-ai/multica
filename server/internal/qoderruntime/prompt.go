@@ -16,8 +16,9 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		return nil, fmt.Errorf("claim identity does not match bridge")
 	}
 	chat := t.ChatSessionID != ""
-	if (t.IssueID != "") == chat || t.IsLeaderTask {
-		return nil, fmt.Errorf("Qoder bridge currently supports issue and chat runs only")
+	quickCreate := !chat && t.IssueID == "" && t.QuickCreatePrompt != ""
+	if (t.IssueID != "") == (chat || quickCreate) || t.IsLeaderTask {
+		return nil, fmt.Errorf("Qoder bridge currently supports issue, chat and quick-create runs only")
 	}
 	if !strings.HasPrefix(t.AuthToken, "mat_") {
 		return nil, fmt.Errorf("claim is missing a task-scoped credential")
@@ -36,6 +37,13 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		return nil, err
 	}
 	r.AgentID = binding.AgentID
+	if quickCreate {
+		// Quick-create attachments stay blocked, matching the modal and API guards.
+		if len(t.QuickCreateAttachmentIDs) > 0 {
+			return nil, fmt.Errorf("attachments are not supported by the Qoder bridge; create the issue without them")
+		}
+		return prepareQuickCreate(t, r), nil
+	}
 	var p strings.Builder
 	if chat {
 		if len(t.ChatAttachments) > 0 {
@@ -127,13 +135,10 @@ func (b *Bridge) issuePrompt(ctx context.Context, t *claimedTask, r *run, p *str
 	var issue struct {
 		Title       string            `json:"title"`
 		Description string            `json:"description"`
-		Attachments []json.RawMessage `json:"attachments"`
+		Attachments []issueAttachment `json:"attachments"`
 	}
 	if err := taskAPI.call(ctx, http.MethodGet, "/api/issues/"+url.PathEscape(t.IssueID), nil, &issue); err != nil {
 		return fmt.Errorf("read issue: %w", err)
-	}
-	if len(issue.Attachments) > 0 {
-		return fmt.Errorf("issue attachments are not supported by the Qoder bridge")
 	}
 	p.WriteString("Complete the following Multica issue in your Qoder environment. Return a final summary including code changes, tests and branch/PR/MR links when available. This bridge does not expose a local Multica daemon.\n")
 	if t.PriorSessionID != "" {
@@ -144,7 +149,7 @@ func (b *Bridge) issuePrompt(ctx context.Context, t *claimedTask, r *run, p *str
 	if t.IssueIdentifier != "" {
 		fmt.Fprintf(p, "\nWhen you change code, push a new branch named %s (never the default branch), open a pull request whose title starts with \"%s: \", and put the pull request link in your final summary. Multica links the pull request to this issue through that identifier.\n", BranchName(t.IssueIdentifier, issue.Title), t.IssueIdentifier)
 	}
-	return nil
+	return b.attachIssueFiles(ctx, &taskAPI, issue.Attachments, r, p)
 }
 
 // Repository is a GitHub repository and optional branch mounted into a session.

@@ -11,6 +11,10 @@ import { defaultStorage } from "../platform/storage";
 // Shared view preferences for the collection list pages (agents, skills,
 // autopilots, projects, squads): sort, column visibility and multi-select
 // filters, persisted per workspace. Row selection stays session-local.
+//
+// The list search lives here too but is never persisted: it has to survive
+// opening a row and coming back to the list, yet a query restored days later
+// would read as "my rows vanished".
 
 export type CollectionSortDirection = "asc" | "desc";
 
@@ -25,6 +29,10 @@ export interface CollectionViewCore<
   sortDirection: CollectionSortDirection;
   hiddenColumns: Column[];
   filters: Filters;
+  /** Free-text list search. Session-only: excluded from persistence and
+   *  cleared on workspace switch. */
+  search: string;
+  setSearch: (search: string) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
   toggleSort: (field: Sort) => void;
@@ -101,6 +109,7 @@ export function createCollectionViewStore<
     sortDirection: options.sortDefaultDirection[options.defaultSortField],
     hiddenColumns: options.defaultHiddenColumns,
     filters: options.emptyFilters,
+    search: "",
     ...extraState,
   };
   const extraKeys = Object.keys(extraState) as (keyof ExtraState)[];
@@ -110,6 +119,7 @@ export function createCollectionViewStore<
       (set, get) =>
         ({
           ...defaults,
+          setSearch: (search: string) => set({ search } as Partial<State>),
           toggleSort: (field: Sort) =>
             set((state) =>
               state.sortField === field
@@ -184,7 +194,9 @@ export function createCollectionViewStore<
         // A workspace with nothing persisted resets to the defaults instead
         // of keeping the previous workspace's in-memory state. Filters are
         // deep-merged so a payload saved before a filter dimension existed
-        // still gets that key's empty default.
+        // still gets that key's empty default. Every rehydrate is a workspace
+        // switch, and the search must not follow the user into another
+        // workspace.
         merge: (persisted, current) => {
           if (!persisted) return { ...current, ...defaults };
           const p = persisted as Partial<State>;
@@ -192,6 +204,7 @@ export function createCollectionViewStore<
             ...current,
             ...p,
             filters: { ...options.emptyFilters, ...(p.filters ?? {}) },
+            search: "",
           };
         },
       },

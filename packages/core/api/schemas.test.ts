@@ -45,6 +45,8 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  MarkIssueInboxReadResultSchema,
+  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -68,13 +70,65 @@ import {
   EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema, SidebarProjectPrefsDocSchema } from "./schemas";
+import type { SidebarIssueAssignee } from "../issues/stores/sidebar-tree-store";
 import {
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
+import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("MarkIssueInboxReadResultSchema", () => {
+  const endpoint = { endpoint: "POST /api/inbox/issues/:id/read" };
+
+  it("keeps the server's count", () => {
+    expect(
+      parseWithFallback({ count: 3 }, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
+    ).toEqual({ count: 3 });
+  });
+
+  it("reports an unknown count for a malformed reply", () => {
+    for (const raw of [null, "<html>", { count: "3" }, {}]) {
+      expect(
+        parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
+      ).toEqual({ count: null });
+    }
+  });
+});
+
+describe("IssueUnreadPageSchema", () => {
+  const endpoint = "GET /api/issues/unread";
+
+  it("defaults a missing agent_id and next_cursor to null", () => {
+    const parsed = parseWithFallback(
+      {
+        items: [
+          { issue_id: "i-1", outcome: "completed", agent_id: "a-1", created_at: "2026-01-01T00:00:00Z" },
+          { issue_id: "i-2", outcome: "manual", created_at: "2026-01-01T00:00:00Z", extra: true },
+        ],
+      },
+      IssueUnreadPageSchema,
+      EMPTY_ISSUE_UNREAD_PAGE,
+      { endpoint },
+    );
+    expect(parsed.items.map((u) => [u.issue_id, u.agent_id])).toEqual([
+      ["i-1", "a-1"],
+      ["i-2", null],
+    ]);
+    expect(parsed.next_cursor).toBeNull();
+  });
+
+  it("falls back to an empty last page for a malformed body", () => {
+    expect(parseWithFallback({ items: "nope" }, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
+    expect(parseWithFallback(null, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
+  });
+});
 
 const baseIssue = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -1943,6 +1997,13 @@ describe("SidebarProjectPrefsDocSchema", () => {
     };
     expect(SidebarProjectPrefsDocSchema.parse(doc)).toEqual(doc);
   });
+
+  it.each(["anyone", "me", "my_agents", "me_and_my_agents"] satisfies SidebarIssueAssignee[])(
+    "keeps the %s assignee setting",
+    (assignee) => {
+      expect(SidebarProjectPrefsDocSchema.parse({ issues: { assignee } }).issues.assignee).toBe(assignee);
+    },
+  );
 
   it("drops settings saved by another client version instead of failing the document", () => {
     const parsed = SidebarProjectPrefsDocSchema.parse({

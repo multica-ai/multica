@@ -152,6 +152,9 @@ func (b *repairingBackend) Execute(_ context.Context, prompt string, opts agent.
 	msgCh := make(chan agent.Message)
 	resCh := make(chan agent.Result, 1)
 	close(msgCh)
+	if opts.OnUsage != nil {
+		opts.OnUsage(map[string]agent.TokenUsage{"m": {InputTokens: 7}})
+	}
 	resCh <- agent.Result{Status: "completed", Output: "moved the work back onto the branch", SessionID: "sess-repair",
 		Usage: map[string]agent.TokenUsage{"m": {InputTokens: 7}}}
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
@@ -223,10 +226,15 @@ func TestRepairWorktreeDeliveryLetsTheAgentFixItsBranch(t *testing.T) {
 
 	d, _ := newPinRecorder(t)
 	backend := &repairingBackend{worktree: wt, problem: problem, comply: true}
-	original := agent.Result{Status: "completed", Output: "the real reply", SessionID: "sess-1"}
+	original := agent.Result{Status: "completed", Output: "the real reply", SessionID: "sess-1", Usage: map[string]agent.TokenUsage{"m": {InputTokens: 100}}}
 	env := &execenv.Environment{LocalWorktree: wt}
 
-	got, _ := d.repairWorktreeDelivery(context.Background(), backend, agent.ExecOptions{Timeout: time.Hour}, original, 1, problem, env, slog.Default(), "task-repair", new(atomic.Int32))
+	var liveUsage map[string]agent.TokenUsage
+	opts := agent.ExecOptions{Timeout: time.Hour, OnUsage: func(usage map[string]agent.TokenUsage) { liveUsage = usage }}
+	got, _ := d.repairWorktreeDelivery(context.Background(), backend, opts, original, 1, problem, env, slog.Default(), "task-repair", new(atomic.Int32))
+	if liveUsage["m"].InputTokens != 107 || liveUsage["m"] != got.Usage["m"] {
+		t.Errorf("repair's live usage = %v, want terminal task total %v", liveUsage, got.Usage)
+	}
 	if backend.runErr != nil {
 		t.Fatalf("the repair prompt's commands failed: %v", backend.runErr)
 	}

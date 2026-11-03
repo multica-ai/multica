@@ -1,6 +1,8 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { AppCrashBoundary } from "./components/app-crash-boundary";
+import { launchWorkspaceSlug } from "./platform/workspace-windows";
+import { useTabStore } from "./stores/tab-store";
 // Inter variable font covers all weights (100-900) in a single file.
 // CJK is handled by system font fallback (see globals.css --font-sans chain).
 // Keep font stack in sync with apps/web/app/layout.tsx.
@@ -40,6 +42,11 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_GRAB) {
   grab.crossOrigin = "anonymous";
   document.head.appendChild(grab);
 }
+
+// A window opened for a workspace starts on it rather than on whichever
+// workspace was last active in any window.
+const launchSlug = launchWorkspaceSlug();
+if (launchSlug) useTabStore.getState().switchWorkspace(launchSlug);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AppCrashBoundary>
