@@ -3,10 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
-import { localV2ClientMessageSchema, localV2ServerMessageSchema, localV2SnapshotSchema } from "./v2";
+import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema } from "./v2";
 
 const root = join(__dirname, "../../../server/internal/localconversation/protocol/testdata/local-v2");
-const schemas: Record<string, ZodType> = { server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema };
+const schemas: Record<string, ZodType> = { server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema };
 
 describe("local conversation v2 wire schemas", () => {
   const valid = readdirSync(join(root, "valid")).filter((file) => file.endsWith(".json"));
@@ -31,6 +31,12 @@ describe("local conversation v2 wire schemas", () => {
       events: [{ seq: 1, turn_id: null, turn_seq: null, item_id: null, type: "future.event", final: false, created_at: "2026-10-29T00:00:00Z", payload: {} }],
     });
     expect(parsed.type === "conversation.events" && parsed.events[0]!.type).toBe("future.event");
+  });
+
+  it("rejects malformed page cursors and negative folder counts", () => {
+    expect(localV2SessionPageSchema.safeParse({ scope_seq: 1, summaries: [], has_more: true, next_cursor: null }).success).toBe(false);
+    expect(localV2SessionPageSchema.safeParse({ scope_seq: 1, summaries: [], has_more: false, next_cursor: "stale" }).success).toBe(false);
+    expect(localV2SessionGroupsSchema.safeParse({ scope_seq: 1, groups: [{ id: "", title: "", path: "", total: -1 }] }).success).toBe(false);
   });
 
   it("rejects a message from another protocol version", () => {

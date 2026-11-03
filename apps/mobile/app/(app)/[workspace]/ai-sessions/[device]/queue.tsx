@@ -1,16 +1,37 @@
-import { useCallback, useState } from "react";
-import { ActionSheetIOS, ActivityIndicator, Alert, FlatList, Pressable, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { ActionSheetIOS, ActivityIndicator, Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, useAnimatedValue, useWindowDimensions, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { localMessageDisplayContent } from "@multica/core/local-conversation/protocol";
 import { useAIConnection, useAISessionScope } from "@/data/ai-sessions/hooks";
 import { aiKeys } from "@/data/ai-sessions/client";
 import { queueItemSchema, queueSchema, type AIQueue } from "@/data/ai-sessions/schemas";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
+import { AIMessageContent } from "@/components/ai-sessions/reference-chips";
+import { AISheet } from "@/components/ai-sessions/sheet";
+import { SessionAttachment } from "@/components/ai-sessions/session-attachment";
+import { IconButton } from "@/components/ui/icon-button";
+import { cn } from "@/lib/utils";
 
 export default function AIQueueScreen() {
   const { t } = useT("aiSessions");
+  const { height } = useWindowDimensions();
+  const offset = useAnimatedValue(0);
+  const drag = useMemo(() => {
+    const reset = () => Animated.spring(offset, { toValue: 0, useNativeDriver: true }).start();
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 8 && gesture.dy > Math.abs(gesture.dx),
+      onPanResponderMove: (_, gesture) => offset.setValue(Math.max(0, gesture.dy)),
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy > 80 || gesture.vy > 0.7) {
+          Animated.timing(offset, { toValue: height, duration: 180, useNativeDriver: true }).start(({ finished }) => { if (finished) router.back(); });
+        } else reset();
+      },
+      onPanResponderTerminate: reset,
+    });
+  }, [height, offset]);
   const { session } = useLocalSearchParams<{ session: string }>();
   const { client, connected } = useAIConnection();
   const scope = useAISessionScope();
@@ -24,18 +45,37 @@ export default function AIQueueScreen() {
     onSuccess: (queue) => { qc.setQueryData(key, queue); void qc.invalidateQueries({ queryKey: aiKeys.snapshot(scope, session) }); },
     onError: () => { Alert.alert(t("error_title"), t("operation_failed")); void query.refetch(); },
   });
-  const choose = (requestId: string) => ActionSheetIOS.showActionSheetWithOptions({ options: [t("cancel"), t("send_now"), t("remove")], cancelButtonIndex: 0, destructiveButtonIndex: 2 }, (index) => {
+  const choose = (requestId: string) => ActionSheetIOS.showActionSheetWithOptions({ options: [t("cancel"), t("send_now_interrupt"), t("remove")], cancelButtonIndex: 0, destructiveButtonIndex: 2 }, (index) => {
     if (index === 1) update.mutate({ action: "send_now", requestId });
     if (index === 2) update.mutate({ action: "remove", requestId });
   });
-  return <View className="flex-1 bg-background px-4 pt-4 gap-3">
-    <View className="flex-row items-center"><Text className="text-lg font-semibold flex-1">{t("queue")}</Text><Button variant="ghost" onPress={() => router.back()}><Text>{t("done")}</Text></Button></View>
-    <Text className="text-sm text-muted-foreground">{t("queue_help")}</Text>
-    <Button variant="outline" disabled={!connected || !query.data || update.isPending} onPress={() => update.mutate({ action: query.data?.paused ? "resume" : "pause" })}><Text>{t(query.data?.paused ? "resume_queue" : "pause_queue")}</Text></Button>
-    {!!query.data?.error && <Text accessibilityRole="alert" className="text-sm text-destructive">{query.data.error}</Text>}
-    {(query.isPending || update.isPending) && connected && <ActivityIndicator />}
-    {(query.isError || !connected) && <Button variant="outline" disabled={!connected} onPress={() => void query.refetch()}><Text>{t("retry")}</Text></Button>}
-    <FlatList data={query.data?.items ?? []} keyExtractor={(item, index) => queueItemSchema.safeParse(item).data?.requestId ?? String(index)} ListEmptyComponent={!query.isPending ? <Text className="py-6 text-muted-foreground">{t("queue_empty")}</Text> : null}
-      renderItem={({ item, index }) => { const parsed = queueItemSchema.safeParse(item); return <Pressable disabled={!parsed.success || !connected || update.isPending} accessibilityRole="button" onPress={() => parsed.success && choose(parsed.data.requestId)} className="py-4 border-b border-border flex-row gap-3"><Text className="text-muted-foreground">{index + 1}</Text><Text className="flex-1" numberOfLines={3}>{parsed.success ? parsed.data.content : t("operation_failed")}</Text><Text>⋯</Text></Pressable>; }} />
+  return <View className="flex-1 justify-end" accessibilityViewIsModal>
+    <Pressable style={StyleSheet.absoluteFill} className="bg-black/40" accessibilityRole="button" accessibilityLabel={t("cancel")} onPress={() => router.back()} />
+    <Animated.View {...drag.panHandlers} style={{ transform: [{ translateY: offset }] }} className="shrink overflow-hidden rounded-t-3xl bg-background">
+      <AISheet title={t("queue")} maxHeight={height * 0.8}>
+        <Text style={{ lineHeight: undefined }} className="text-sm text-muted-foreground">{t("queue_help")}</Text>
+        <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" disabled={!connected || !query.data || update.isPending} onPress={() => update.mutate({ action: query.data?.paused ? "resume" : "pause" })}><Text style={{ lineHeight: undefined }}>{t(query.data?.paused ? "resume_queue" : "pause_queue")}</Text></Button>
+        {!!query.data?.error && <Text style={{ lineHeight: undefined }} accessibilityRole="alert" className="text-sm text-destructive">{query.data.error}</Text>}
+        {(query.isPending || update.isPending) && connected && <ActivityIndicator />}
+        {(query.isError || !connected) && <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" disabled={!connected} onPress={() => void query.refetch()}><Text style={{ lineHeight: undefined }}>{t("retry")}</Text></Button>}
+        <ScrollView style={{ flexGrow: 0, flexShrink: 1 }} contentInsetAdjustmentBehavior="never" keyboardShouldPersistTaps="handled">
+          {!query.data?.items.length && !query.isPending && <Text style={{ lineHeight: undefined }} className="py-6 text-muted-foreground">{t("queue_empty")}</Text>}
+          {query.data?.items.map((item, index, items) => {
+            const parsed = queueItemSchema.safeParse(item);
+            return <View key={parsed.success ? parsed.data.requestId : index} className={cn("py-4 flex-row gap-3", index < items.length - 1 && "border-b border-border")}>
+              <Text style={{ lineHeight: undefined }} className="text-muted-foreground">{index + 1}</Text>
+              <View className="flex-1">
+                {parsed.success ? <>
+                  <AIMessageContent content={localMessageDisplayContent({ role: "user", content: parsed.data.content, attachmentIds: parsed.data.attachmentIds })} />
+                  {parsed.data.attachmentIds.map((id) => <SessionAttachment key={id} id={id} />)}
+                </> : <Text style={{ lineHeight: undefined }}>{t("operation_failed")}</Text>}
+              </View>
+              <IconButton name="ellipsis-horizontal" hitSlop={4} accessibilityLabel={t("more_actions")} disabled={!parsed.success || !connected || update.isPending} onPress={() => parsed.success && choose(parsed.data.requestId)} />
+            </View>;
+          })}
+        </ScrollView>
+      </AISheet>
+      <View pointerEvents="none" className="absolute top-1 self-center h-1 w-10 rounded-full bg-muted-foreground/40" />
+    </Animated.View>
   </View>;
 }

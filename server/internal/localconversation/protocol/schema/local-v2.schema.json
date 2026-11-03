@@ -4,6 +4,9 @@
   "title": "Local conversation wire protocol v2",
   "description": "Daemon <-> Desktop messages for local conversations. Draft for P0 review; see docs/engineering/local-conversation-go-sqlite-plan.md sections 5 and 7.",
   "$defs": {
+    "hello": {"type": "object", "required": ["version", "store_generation", "capabilities"], "properties": {"version": {"const": 2}, "store_generation": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "scope_seq": {"type": "integer", "minimum": 0}}},
+    "session_groups": {"type": "object", "required": ["scope_seq", "groups"], "properties": {"scope_seq": {"type": "integer", "minimum": 0}, "groups": {"type": "array", "items": {"type": "object", "required": ["id", "title", "path", "total"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "path": {"type": "string"}, "total": {"type": "integer", "minimum": 0}}}}}},
+    "session_page": {"type": "object", "required": ["scope_seq", "summaries", "has_more", "next_cursor"], "properties": {"scope_seq": {"type": "integer", "minimum": 0}, "summaries": {"type": "array", "items": {"$ref": "#/$defs/conversation_summary"}}, "has_more": {"type": "boolean"}, "next_cursor": {"type": ["string", "null"], "minLength": 1}}, "allOf": [{"if": {"properties": {"has_more": {"const": true}}}, "then": {"properties": {"next_cursor": {"type": "string"}}}, "else": {"properties": {"next_cursor": {"type": "null"}}}}]},
     "id": { "type": "string", "minLength": 1, "maxLength": 200 },
     "seq": { "type": "integer", "minimum": 1 },
     "timestamp": { "type": "string", "format": "date-time" },

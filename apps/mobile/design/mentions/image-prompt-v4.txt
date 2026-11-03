@@ -1,0 +1,7 @@
+Use case: precise-object-edit / ui-mockup. Edit the provided Multica iOS UI design board with these exact changes ONLY, preserving all other design and contents.
+1. In ALL THREE phones, REMOVE the "全部" segment entirely. Each segmented control must have EXACTLY THREE equally wide segments, labeled left to right "会话", "任务", "智能体". No fourth segment, no All category anywhere. LEFT phone highlights "会话" in blue, MIDDLE highlights "任务", RIGHT highlights "智能体".
+2. Each phone/category must KEEP its own visible blue "加载更多" action directly below its fourth result. Keep EXACTLY FOUR result rows in each phone. Three separate actions, one for each category, independent pagination.
+3. Update top-right version label to "UI 设计稿 · 04".
+4. Replace the external bottom annotation with exactly: "每类首次加载 4 条，独立加载更多；切换分类保留已选项。"
+5. Keep board title "iOS AI 会话 · @ 引用" and subtitle "会话、任务、智能体各首次加载 4 条，分别加载更多". Keep the three phone captions "01 会话 · 首次 4 条", "02 任务 · 首次 4 条", "03 智能体 · 首次 4 条".
+Preserve all row labels, secondary metadata, first-row selected checkmarks, disabled test agent styling, sheet header "引用上下文", "取消", "完成 (3)", fixed footer "已选 3 / 5", underlying dimmed conversation header, native phone chrome, composition, colors, Chinese typography and spacing. Match the reference's crisp professional iOS UI mockup fidelity. Do not change the rest of the design. No "全部" category or annotation remains anywhere.

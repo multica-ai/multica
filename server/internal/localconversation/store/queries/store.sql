@@ -265,3 +265,37 @@ UPDATE turn SET remote = ? WHERE id = ?;
 
 -- name: ListConversationTurns :many
 SELECT * FROM turn WHERE conversation_id = ? ORDER BY turn_index;
+
+-- name: CountSessionBrowseGroups :many
+SELECT CAST(COALESCE(f.id, '') AS TEXT) AS group_id, COUNT(*) AS total
+FROM conversation AS c
+LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
+  AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
+  AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
+WHERE c.scope_id = sqlc.arg(scope_id) AND c.archived = sqlc.arg(archived)
+  AND (sqlc.arg(search) = ''
+    OR instr(lower(c.title), lower(sqlc.arg(search))) > 0
+    OR instr(lower(c.last_message_preview), lower(sqlc.arg(search))) > 0
+    OR instr(lower(COALESCE(f.title, '')), lower(sqlc.arg(search))) > 0
+    OR instr(lower(COALESCE(f.path, '')), lower(sqlc.arg(search))) > 0)
+GROUP BY CAST(COALESCE(f.id, '') AS TEXT);
+
+-- name: BrowseSessionPage :many
+SELECT c.* FROM conversation AS c
+LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
+  AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
+  AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
+WHERE c.scope_id = sqlc.arg(scope_id) AND c.archived = sqlc.arg(archived)
+  AND (sqlc.arg(filter_group) = 0 OR COALESCE(f.id, '') = sqlc.arg(group_id))
+  AND c.id <> sqlc.arg(exclude_id)
+  AND (sqlc.arg(source_id) = '' OR c.side_source_id = sqlc.arg(source_id))
+  AND (sqlc.arg(search) = ''
+    OR instr(lower(c.title), lower(sqlc.arg(search))) > 0
+    OR instr(lower(c.last_message_preview), lower(sqlc.arg(search))) > 0
+    OR instr(lower(COALESCE(f.title, '')), lower(sqlc.arg(search))) > 0
+    OR instr(lower(COALESCE(f.path, '')), lower(sqlc.arg(search))) > 0)
+  AND (sqlc.arg(cursor_id) = '' OR c.pinned < sqlc.arg(cursor_pinned)
+    OR (c.pinned = sqlc.arg(cursor_pinned) AND c.updated_at < sqlc.arg(cursor_updated_at))
+    OR (c.pinned = sqlc.arg(cursor_pinned) AND c.updated_at = sqlc.arg(cursor_updated_at) AND c.id > sqlc.arg(cursor_id)))
+ORDER BY c.pinned DESC, c.updated_at DESC, c.id
+LIMIT sqlc.arg(row_limit);

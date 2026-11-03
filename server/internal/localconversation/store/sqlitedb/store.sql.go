@@ -38,6 +38,106 @@ func (q *Queries) AdvanceTurnSeq(ctx context.Context, arg AdvanceTurnSeqParams) 
 	return err
 }
 
+const browseSessionPage = `-- name: BrowseSessionPage :many
+SELECT c.id, c.scope_id, c.provider, c.provider_session_id, c.title, c.title_mode, c.title_generation, c.cwd, c.model, c.reasoning_effort, c.permission_mode, c.project_id, c.side_source_id, c.side, c.forked_from_id, c.forked_from_turn_id, c.imported_from_session_id, c.pinned, c.archived, c.status, c.last_seq, c.turn_count, c.summary_seq, c.last_message_preview, c.pending_interactions, c.queue_count, c.created_at, c.updated_at, c.background_tasks FROM conversation AS c
+LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
+  AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
+  AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
+WHERE c.scope_id = ?1 AND c.archived = ?2
+  AND (?3 = 0 OR COALESCE(f.id, '') = ?4)
+  AND c.id <> ?5
+  AND (?6 = '' OR c.side_source_id = ?6)
+  AND (?7 = ''
+    OR instr(lower(c.title), lower(?7)) > 0
+    OR instr(lower(c.last_message_preview), lower(?7)) > 0
+    OR instr(lower(COALESCE(f.title, '')), lower(?7)) > 0
+    OR instr(lower(COALESCE(f.path, '')), lower(?7)) > 0)
+  AND (?8 = '' OR c.pinned < ?9
+    OR (c.pinned = ?9 AND c.updated_at < ?10)
+    OR (c.pinned = ?9 AND c.updated_at = ?10 AND c.id > ?8))
+ORDER BY c.pinned DESC, c.updated_at DESC, c.id
+LIMIT ?11
+`
+
+type BrowseSessionPageParams struct {
+	ScopeID         int64
+	Archived        int64
+	FilterGroup     interface{}
+	GroupID         string
+	ExcludeID       string
+	SourceID        interface{}
+	Search          interface{}
+	CursorID        interface{}
+	CursorPinned    int64
+	CursorUpdatedAt string
+	RowLimit        int64
+}
+
+func (q *Queries) BrowseSessionPage(ctx context.Context, arg BrowseSessionPageParams) ([]Conversation, error) {
+	rows, err := q.db.QueryContext(ctx, browseSessionPage,
+		arg.ScopeID,
+		arg.Archived,
+		arg.FilterGroup,
+		arg.GroupID,
+		arg.ExcludeID,
+		arg.SourceID,
+		arg.Search,
+		arg.CursorID,
+		arg.CursorPinned,
+		arg.CursorUpdatedAt,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Conversation{}
+	for rows.Next() {
+		var i Conversation
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Provider,
+			&i.ProviderSessionID,
+			&i.Title,
+			&i.TitleMode,
+			&i.TitleGeneration,
+			&i.Cwd,
+			&i.Model,
+			&i.ReasoningEffort,
+			&i.PermissionMode,
+			&i.ProjectID,
+			&i.SideSourceID,
+			&i.Side,
+			&i.ForkedFromID,
+			&i.ForkedFromTurnID,
+			&i.ImportedFromSessionID,
+			&i.Pinned,
+			&i.Archived,
+			&i.Status,
+			&i.LastSeq,
+			&i.TurnCount,
+			&i.SummarySeq,
+			&i.LastMessagePreview,
+			&i.PendingInteractions,
+			&i.QueueCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BackgroundTasks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const bumpScopeSeq = `-- name: BumpScopeSeq :one
 UPDATE scope SET scope_seq = scope_seq + 1 WHERE id = ? RETURNING scope_seq
 `
@@ -105,6 +205,55 @@ func (q *Queries) CountPendingInteractions(ctx context.Context, conversationID s
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSessionBrowseGroups = `-- name: CountSessionBrowseGroups :many
+SELECT CAST(COALESCE(f.id, '') AS TEXT) AS group_id, COUNT(*) AS total
+FROM conversation AS c
+LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
+  AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
+  AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
+WHERE c.scope_id = ?1 AND c.archived = ?2
+  AND (?3 = ''
+    OR instr(lower(c.title), lower(?3)) > 0
+    OR instr(lower(c.last_message_preview), lower(?3)) > 0
+    OR instr(lower(COALESCE(f.title, '')), lower(?3)) > 0
+    OR instr(lower(COALESCE(f.path, '')), lower(?3)) > 0)
+GROUP BY CAST(COALESCE(f.id, '') AS TEXT)
+`
+
+type CountSessionBrowseGroupsParams struct {
+	ScopeID  int64
+	Archived int64
+	Search   interface{}
+}
+
+type CountSessionBrowseGroupsRow struct {
+	GroupID string
+	Total   int64
+}
+
+func (q *Queries) CountSessionBrowseGroups(ctx context.Context, arg CountSessionBrowseGroupsParams) ([]CountSessionBrowseGroupsRow, error) {
+	rows, err := q.db.QueryContext(ctx, countSessionBrowseGroups, arg.ScopeID, arg.Archived, arg.Search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSessionBrowseGroupsRow{}
+	for rows.Next() {
+		var i CountSessionBrowseGroupsRow
+		if err := rows.Scan(&i.GroupID, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteAttachment = `-- name: DeleteAttachment :exec

@@ -205,7 +205,21 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"version": V2Version, "store_generation": v.svc.Generation(), "capabilities": capabilities})
+		body := map[string]any{"version": V2Version, "store_generation": v.svc.Generation(), "capabilities": capabilities}
+		if r.URL.Query().Get("scoped") == "true" {
+			scopeID, err := v.scope(r)
+			if err != nil {
+				writeV2Error(w, err)
+				return
+			}
+			_, seq, err := v.svc.Store().SummariesAfter(r.Context(), scopeID, 0, 0)
+			if err != nil {
+				writeV2Error(w, err)
+				return
+			}
+			body["scope_seq"] = seq
+		}
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	// Desktop stops provider processes before an update replaces the app.
@@ -258,6 +272,10 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		v.listSessions(w, r, scopeID)
 	case path == "/sessions" && r.Method == http.MethodPost:
 		v.createSession(w, r, scopeID)
+	case path == "/session-groups" && r.Method == http.MethodGet:
+		v.sessionGroups(w, r, scopeID)
+	case path == "/sessions/browse" && r.Method == http.MethodGet:
+		v.browseSessions(w, r, scopeID)
 	case path == "/folder-projects" && r.Method == http.MethodGet:
 		v.listFolderProjects(w, r, scopeID)
 	case path == "/folder-projects" && r.Method == http.MethodPost:

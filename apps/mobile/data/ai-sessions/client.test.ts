@@ -13,7 +13,7 @@ const summary = (id = "session-a", seq = 1) => localV2SummarySchema.parse({ conv
 const snapshot = () => localV2SnapshotSchema.parse({ version: 2, store_generation: "generation-a", snapshot_seq: 0, conversation: summary(), turns: [] });
 const event = (seq: number, type: string, payload: Record<string, unknown>, item: string | null = null) => localV2EventSchema.parse({ seq, type, payload, turn_id: "turn-a", item_id: item, final: type.endsWith("completed"), created_at: "2026-10-30T12:00:00Z" });
 const unusedSocket = () => { throw new Error("Unexpected socket in a cache test"); };
-const hello = () => Response.json({ version: 2, store_generation: "generation-a", capabilities: ["device-link"] });
+const hello = () => Response.json({ version: 2, store_generation: "generation-a", scope_seq: 0, capabilities: ["device-link"] });
 
 class FakeSocket {
   readyState = 0;
@@ -32,7 +32,7 @@ class FakeSocket {
 function linkedClient(read: typeof fetch = vi.fn<typeof fetch>(async () => Response.json({}))) {
   const sockets: FakeSocket[] = [];
   const qc = new QueryClient();
-  const fetcher = vi.fn<typeof fetch>(async (input, init) => String(input).endsWith("/hello") ? hello() : read(input, init));
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => String(input).includes("/hello") ? hello() : read(input, init));
   const factory = () => { const socket = new FakeSocket(); sockets.push(socket); return socket as unknown as WebSocket; };
   const client = new AISessionClient({ url: "http://127.0.0.1:1234", token: "loopback" }, scope, qc, factory, fetcher);
   const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -42,7 +42,7 @@ function linkedClient(read: typeof fetch = vi.fn<typeof fetch>(async () => Respo
 afterEach(() => vi.useRealTimers());
 
 describe("mobile AI session focus", () => {
-  const focusHello = () => Response.json({ version: 2, store_generation: "generation-a", capabilities: ["device-link", "conversation-focus-v1"] });
+  const focusHello = () => Response.json({ version: 2, store_generation: "generation-a", scope_seq: 0, capabilities: ["device-link", "conversation-focus-v1"] });
   const focusMessages = (socket: FakeSocket) => socket.sent.filter((message) => message.type === "conversation.focus");
 
   function focusClient(respond = focusHello) {
@@ -185,14 +185,39 @@ describe("mobile AI session transport and caches", () => {
     for (const changed of [{ userId: "b" }, { workspaceId: "b" }, { deviceId: "b" }]) expect(aiKeys.snapshot({ ...scope, ...changed }, "same-session")).not.toEqual(base);
   });
 
-  it("reads every list page and uses only the native loopback credential", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ summaries: [summary()], scope_seq: 1, has_more: true }))
-      .mockResolvedValueOnce(Response.json({ summaries: [summary("session-b", 2)], scope_seq: 2, has_more: false }));
-    const client = new AISessionClient({ url: "http://127.0.0.1:1234", token: "loopback" }, scope, new QueryClient(), unusedSocket, fetcher);
-    expect(await client.list()).toHaveLength(2);
-    expect(fetcher.mock.calls[1][0]).toContain("after_scope_seq=1");
+  it("starts scope updates from the current checkpoint without fetching the directory", async () => {
+    const { client, sockets, fetcher } = linkedClient();
+    fetcher.mockResolvedValue(Response.json({ version: 2, store_generation: "generation-a", scope_seq: 900, capabilities: ["device-link"] }));
+    await client.connect(); sockets[0].open();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(String(fetcher.mock.calls[0][0])).toContain("/hello?scoped=true");
+    expect(sockets[0].sent).toContainEqual({ version: 2, type: "subscribe_scope", after_scope_seq: 900 });
     expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({ Authorization: "Bearer loopback", "X-Workspace-ID": "workspace-a" });
     client.close();
+  });
+
+  it("requires a paginated-capable daemon instead of replaying an old full directory", async () => {
+    const { client, sockets, fetcher } = linkedClient();
+    fetcher.mockResolvedValue(Response.json({ version: 2, store_generation: "old", capabilities: ["device-link"] }));
+    await client.connect();
+    expect(sockets).toHaveLength(0);
+    expect(client.connectionError).toBe("incompatible");
+    expect(fetcher).toHaveBeenCalledOnce();
+    client.close();
+  });
+
+  it("coalesces scope updates into paged-list invalidation", async () => {
+    vi.useFakeTimers();
+    const { client, qc } = linkedClient();
+    const key = [...aiKeys.browse(scope), "groups", false, ""];
+    qc.setQueryData(key, { scope_seq: 1, groups: [] });
+    const update = { version: 2, type: "scope.summaries", scope_seq: 2, summaries: [summary("new", 2)] };
+    client.receive(update); client.receive(update);
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(qc.getQueriesData({ queryKey: aiKeys.scope(scope) })).toHaveLength(1);
+    client.close(); qc.clear();
   });
 
   it("rejects malformed successes and forwards caller cancellation", async () => {
@@ -208,12 +233,11 @@ describe("mobile AI session transport and caches", () => {
   it("ignores stale summary echoes and applies events only to the matching device cache", () => {
     const qc = new QueryClient();
     const client = new AISessionClient({ url: "http://127.0.0.1:1234", token: "loopback" }, scope, qc, unusedSocket);
-    qc.setQueryData(aiKeys.list(scope), [summary("session-a", 3)]);
-    qc.setQueryData(aiKeys.snapshot(scope, "session-a"), snapshot());
+    qc.setQueryData(aiKeys.snapshot(scope, "session-a"), { ...snapshot(), conversation: summary("session-a", 3) });
     const other = { ...scope, deviceId: "other-peer" };
     qc.setQueryData(aiKeys.snapshot(other, "session-a"), snapshot());
     client.receive({ version: 2, type: "scope.summaries", scope_seq: 1, summaries: [summary("session-a", 1)] });
-    expect(qc.getQueryData(aiKeys.list(scope))).toEqual([summary("session-a", 3)]);
+    expect(qc.getQueryData(aiKeys.snapshot(scope, "session-a"))).toMatchObject({ conversation: summary("session-a", 3) });
     client.receive({ version: 2, type: "conversation.events", conversation_id: "session-a", from_seq: 1, to_seq: 1, events: [event(1, "turn.started", {})] });
     expect(qc.getQueryData(aiKeys.snapshot(other, "session-a"))).toEqual(snapshot());
     expect(qc.getQueryData(aiKeys.snapshot(scope, "session-a"))).toMatchObject({ snapshot_seq: 1 });
@@ -481,7 +505,7 @@ describe("mobile AI session transport and caches", () => {
 });
 
 describe("mobile AI session timing", () => {
-  const reportingHello = () => Response.json({ version: 2, store_generation: "generation-a", capabilities: ["device-link", "timing-report-v1"] });
+  const reportingHello = () => Response.json({ version: 2, store_generation: "generation-a", scope_seq: 0, capabilities: ["device-link", "timing-report-v1"] });
   const stagesOf = (timing: MobileTimingBuffer) => (timing.batch({ deviceId: scope.deviceId, workspaceId: scope.workspaceId })?.records ?? []).map((record) => record.stage);
 
   function timedClient(capable = true, read: typeof fetch = async () => Response.json({ accepted: 1 })) {
@@ -490,7 +514,7 @@ describe("mobile AI session timing", () => {
     const timing = new MobileTimingBuffer();
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
-      if (url.endsWith("/hello")) return capable ? reportingHello() : hello();
+      if (url.includes("/hello")) return capable ? reportingHello() : hello();
       if (url.includes("/diagnostics")) return Response.json({ records: [], next: 0 });
       return read(input, init);
     });
@@ -505,7 +529,7 @@ describe("mobile AI session timing", () => {
     const go = { version: 2, source: "mobile", at: "2026-11-02T10:00:00.000Z", stage: "connection.direct", event: "mark", elapsedMs: 0 };
     fetcher.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.endsWith("/hello")) return reportingHello();
+      if (url.includes("/hello")) return reportingHello();
       if (url.endsWith("/diagnostics/ack")) return new Response(null, { status: 204 });
       if (url.includes("after=0")) return Response.json({ records: [go], next: 1 });
       if (url.includes("/diagnostics")) return Response.json({ records: [], next: 1 });

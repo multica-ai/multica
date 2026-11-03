@@ -1,0 +1,37 @@
+Use case: ui-mockup, targeted design revision from provided reference image. Create version 03 of the Multica iOS @ reference design board. Keep EXACTLY the reference image's clean native iOS typography, white background, blue accent, three straight-on equal-size iPhones, slim black frames, native status bars, alignment and restrained visual quality. Change the board to focus exclusively on the three CATEGORY picker states, to illustrate independent initial page sizes and independent Load more actions. All three phones now show the native "引用上下文" formSheet, not composers. Use landscape framing with ample readable text.
+
+Board title "iOS AI 会话 · @ 引用".
+Board subtitle, prominent but short: "会话、任务、智能体各首次加载 4 条，分别加载更多".
+Top right small version label "UI 设计稿 · 03".
+A small bottom board annotation OUTSIDE the phones: "全部视图按分类分组滚动；每组首屏 4 条，各自分页，已选项跨页保留。"
+
+All three phone backgrounds show the same dimmed conversation header "适配 iOS AI 会话" and "MacBook Pro · 已连接". Native sheet starts below that header, grabber, "取消" on left, centered bold "引用上下文", blue "完成 (3)" on right. Search field placeholder "搜索名称或任务编号". Segmented tabs are exactly "全部", "会话", "任务", "智能体". Fixed bottom footer "已选 3 / 5". Scrollable result area between tabs and footer. Each phone shows EXACTLY FOUR result rows, followed by its own tappable blue "加载更多" row, then generous clean white whitespace, then fixed selected footer. IMPORTANT: do not add any fifth result, do not use one global Load more shared between groups, do not cram 12 rows into one phone. These are three alternative tab states of ONE picker. Comfortable ~60pt row heights, subtle borders, readable type icon, primary name, muted secondary metadata, circular selection checkmark aligned right. Across all three screens the first result is selected, other three unselected. Total selected 3 in every footer. No actual agent invocation is happening.
+
+LEFT PHONE: active segment "会话" (blue or native selected treatment); group heading "会话 · MacBook Pro".
+Exactly four conversation rows:
+1 "iOS AI 会话交互讨论" / "multica · Codex · 今天" (selected)
+2 "检查 P2P 连接" / "multica · Claude Code · 昨天"
+3 "完善消息渲染" / "multica · Codex · 昨天"
+4 "梳理输入框交互" / "multica · Codex · 10月30日"
+Blue "加载更多" directly follows fourth row.
+Outside phone bottom caption "01  会话 · 首次 4 条".
+
+MIDDLE PHONE: active segment "任务"; group heading "任务 · 当前工作区".
+Exactly four task rows:
+1 "支持 iOS 中的 @ 引用" / "CHOV-128 · in_progress" (selected)
+2 "完善会话输入框" / "CHOV-116 · todo"
+3 "修复键盘遮挡" / "CHOV-109 · todo"
+4 "优化会话列表" / "CHOV-102 · in_review"
+Blue "加载更多" directly follows fourth row.
+Outside phone bottom caption "02  任务 · 首次 4 条".
+
+RIGHT PHONE: active segment "智能体"; group heading "智能体 · 发送后调用".
+Exactly four agent rows with robot icon:
+1 "交互审查助手" / "可调用" (selected)
+2 "代码审查助手" / "可调用"
+3 "文档助手" / "可调用"
+4 "测试助手" / "未绑定运行时" (disabled muted gray)
+Blue "加载更多" directly follows fourth row.
+Outside phone bottom caption "03  智能体 · 首次 4 条".
+
+Keep selected-count footer fixed separate from the list. All Load more rows belong to list content, not pinned beside footer. Consistent comfortable spacing, no overlapping UI, crisp accurate simplified Chinese. Do not add marketing elements, extraneous callouts, new product features or unrelated controls.

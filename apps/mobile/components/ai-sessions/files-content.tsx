@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useTheme } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { useAIConnection, useAISessionScope } from "@/data/ai-sessions/hooks";
@@ -18,6 +19,7 @@ const fileSchema = z.object({ root: z.string(), path: z.string(), name: z.string
 
 export function AIFilesContent({ initialPath, onLocation }: { initialPath?: string; onLocation?: (root: string, path: string, kind: "file" | "directory") => void }) {
   const { t } = useT("aiSessions");
+  const { colors } = useTheme();
   const { session } = useLocalSearchParams<{ session: string }>();
   const { client, connected } = useAIConnection();
   const scope = useAISessionScope();
@@ -58,12 +60,12 @@ export function AIFilesContent({ initialPath, onLocation }: { initialPath?: stri
   const parent = folder.slice(0, Math.max(folder.lastIndexOf("/"), folder.lastIndexOf("\\")));
   const failure = preview.isError || entries.isError || locate.isError || snapshot.isError;
   return <View className="flex-1 bg-background p-4 gap-3">
-    <View className="flex-row items-center gap-2"><Text className="text-xs text-muted-foreground flex-1" selectable>{file ?? folder}</Text>{file && <IconButton name="share-outline" accessibilityLabel={t("share")} disabled={!preview.data || !connected} onPress={() => open(true)} />}</View>
-    {(file || (folder !== root && parent)) && <Button variant="ghost" onPress={() => { opened.current = ""; setLocation({ root, folder: file ? folder : parent, file: null }); }}><Text>↑ {t("parent")}</Text></Button>}
-    {!file && <TextField value={search} onChangeText={setSearch} placeholder={t("search_files")} accessibilityLabel={t("search_files")} />}
+    <View className="flex-row items-center gap-2"><Text style={{ lineHeight: undefined }} className="text-xs text-muted-foreground flex-1" selectable>{file ?? folder}</Text>{file && <IconButton name="share-outline" accessibilityLabel={t("share")} disabled={!preview.data || !connected} onPress={() => open(true)} />}</View>
+    {(file || (folder !== root && parent)) && <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="ghost" onPress={() => { opened.current = ""; setLocation({ root, folder: file ? folder : parent, file: null }); }}><Ionicons name="arrow-up" size={16} color={colors.text} /><Text style={{ lineHeight: undefined }}>{t("parent")}</Text></Button>}
+    {!file && <TextField className="h-auto min-h-10 py-2" value={search} onChangeText={setSearch} placeholder={t("search_files")} accessibilityLabel={t("search_files")} />}
     {(file ? preview.isLoading : entries.isLoading) && <ActivityIndicator />}
-    {failure && <View className="gap-2"><Text>{t("preview_error")}</Text><Button variant="outline" disabled={!connected} onPress={() => { void snapshot.refetch(); if (initialPath) void locate.refetch(); void (file ? preview.refetch() : entries.refetch()); }}><Text>{t("retry")}</Text></Button></View>}
-    {file && preview.data ? preview.data.metadata.mime_type.startsWith("image/") ? <Image source={{ uri: client!.url(preview.data.path), headers: client!.headers() }} resizeMode="contain" style={{ width: "100%", flex: 1 }} /> : preview.data.content !== null ? <ScrollView><Text selectable className="font-mono text-sm">{preview.data.content}</Text></ScrollView> : <Button variant="outline" disabled={!connected} onPress={() => open()}><Text>{t("open_file")}</Text></Button>
-      : <FlatList data={entries.data?.entries.filter((entry) => entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={(entry) => entry.path} renderItem={({ item }) => <Pressable accessibilityRole="button" className="py-4 border-b border-border active:bg-secondary" onPress={() => { opened.current = ""; setLocation({ root, folder: item.kind === "directory" ? item.path : folder, file: item.kind === "directory" ? null : item.path }); }}><Text>{item.kind === "directory" ? "▸ " : ""}{item.name}</Text></Pressable>} />}
+    {failure && <View className="gap-2"><Text style={{ lineHeight: undefined }} accessibilityRole="alert" className="text-sm text-destructive">{t("preview_error")}</Text><Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" disabled={!connected} onPress={() => { void snapshot.refetch(); if (initialPath) void locate.refetch(); void (file ? preview.refetch() : entries.refetch()); }}><Text style={{ lineHeight: undefined }}>{t("retry")}</Text></Button></View>}
+    {file && preview.data ? preview.data.metadata.mime_type.startsWith("image/") ? <Image source={{ uri: client!.url(preview.data.path), headers: client!.headers() }} resizeMode="contain" style={{ width: "100%", flex: 1 }} /> : preview.data.content !== null ? <ScrollView><Text style={{ lineHeight: undefined }} selectable className="font-mono text-sm">{preview.data.content}</Text></ScrollView> : <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" disabled={!connected} onPress={() => open()}><Text style={{ lineHeight: undefined }}>{t("open_file")}</Text></Button>
+      : <FlatList data={entries.data?.entries.filter((entry) => entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={(entry) => entry.path} ListEmptyComponent={entries.isSuccess && !failure ? <Text style={{ lineHeight: undefined }} className="py-6 text-center text-muted-foreground">{t(search.trim() ? "empty_files_search" : "empty_files")}</Text> : null} renderItem={({ item }) => <Pressable accessibilityRole="button" className="min-h-12 py-3 flex-row items-center gap-3 border-b border-border active:bg-secondary" onPress={() => { opened.current = ""; setLocation({ root, folder: item.kind === "directory" ? item.path : folder, file: item.kind === "directory" ? null : item.path }); }}><Text style={{ lineHeight: undefined }} className="flex-1" numberOfLines={2}>{item.name}</Text>{item.kind === "directory" && <Ionicons name="chevron-forward" size={16} color={colors.text} />}</Pressable>} />}
   </View>;
 }

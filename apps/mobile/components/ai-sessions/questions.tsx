@@ -16,26 +16,26 @@ export function SessionQuestions({ interaction, disabled, onAnswer }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
   const parsed = questionsSchema.safeParse(interaction.request);
-  if (interaction.kind !== "question" || !parsed.success) return <Text className="p-4 text-muted-foreground">{t("question_unsupported")}</Text>;
+  if (interaction.kind !== "question" || !parsed.success) return <Text style={{ lineHeight: undefined }} className="p-4 text-muted-foreground">{t("question_unsupported")}</Text>;
   const questions = parsed.data.questions;
-  return <View className="m-4 p-4 rounded-lg bg-secondary gap-3">
-    <Text className="font-semibold">{t("pending_question")}</Text>
+  return <View className="my-4 p-4 rounded-xl bg-surface-1 gap-3">
+    <Text style={{ lineHeight: undefined }} className="font-semibold">{t("pending_question")}</Text>
     {questions.map((q) => <View key={q.id} className="gap-2">
-      <Text>{q.question}</Text>
+      <Text style={{ lineHeight: undefined }}>{q.question}</Text>
       {q.options.map((option) => {
         const selected = Array.isArray(answers[q.id]) ? answers[q.id].includes(option.label) : answers[q.id] === option.label;
-        return <Button key={option.label} variant={selected ? "default" : "outline"} disabled={disabled || saving} onPress={() => setAnswers((old) => {
+        return <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} key={option.label} variant={selected ? "default" : "outline"} disabled={disabled || saving} onPress={() => setAnswers((old) => {
           const answer = old[q.id];
           const values = Array.isArray(answer) ? answer : [];
           return { ...old, [q.id]: q.multi_select ? selected ? values.filter((v) => v !== option.label) : [...values, option.label] : option.label };
-        })}><Text>{option.label}</Text></Button>;
+        })}><Text style={{ lineHeight: undefined }}>{option.label}</Text></Button>;
       })}
-      {q.allow_free_text && <TextField accessibilityLabel={q.question} editable={!disabled && !saving} value={typeof answers[q.id] === "string" ? String(answers[q.id]) : ""} onChangeText={(value) => setAnswers((old) => ({ ...old, [q.id]: value }))} />}
+      {q.allow_free_text && <TextField className="h-auto min-h-10 py-2" accessibilityLabel={q.question} editable={!disabled && !saving} value={typeof answers[q.id] === "string" ? String(answers[q.id]) : ""} onChangeText={(value) => setAnswers((old) => ({ ...old, [q.id]: value }))} />}
     </View>)}
-    {error && <Text className="text-destructive">{t("operation_failed")}</Text>}
-    <Button disabled={disabled || saving || questions.some((q) => !answers[q.id]?.length)} onPress={() => {
+    {error && <Text style={{ lineHeight: undefined }} className="text-destructive">{t("operation_failed")}</Text>}
+    <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} disabled={disabled || saving || questions.some((q) => !answers[q.id]?.length)} onPress={() => {
       setSaving(true); setError(false);
       void onAnswer(answers).catch(() => setError(true)).finally(() => setSaving(false));
-    }}><Text>{t("submit_answer")}</Text></Button>
+    }}><Text style={{ lineHeight: undefined }}>{t("submit_answer")}</Text></Button>
   </View>;
 }

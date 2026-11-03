@@ -42,7 +42,8 @@ export function AIConnectionProvider({ children }: { children: ReactNode }) {
 export function useAIConnection() {
   const client = useContext(Context);
   const connected = useSyncExternalStore((listener) => client?.onConnection(listener) ?? (() => {}), () => client?.connected ?? false);
-  return { client, connected };
+  const error = useSyncExternalStore((listener) => client?.onConnection(listener) ?? (() => {}), () => client?.connectionError ?? null);
+  return { client, connected, error };
 }
 export function useAISubscriptionRejected(sessionId: string) {
   const client = useContext(Context);

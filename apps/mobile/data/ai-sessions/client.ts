@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
-import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionListSchema, localV2SnapshotSchema, type LocalV2Snapshot, type LocalV2Summary } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { LOCAL_TIMING_REPORT_CAPABILITY, LOCAL_TIMING_REQUEST_HEADER, isLocalTimingModelOutput, localTimingCloseReason, localTimingFailure, localTimingRequestId, type LocalTimingRecord } from "@multica/core/local-conversation/timing";
 import { createRequestId } from "@/lib/request-id";
@@ -13,11 +13,12 @@ export interface SessionScope { userId: string; workspaceId: string; deviceId: s
 export const aiKeys = {
   devices: (userId: string) => ["ai-devices", userId] as const,
   scope: (s: SessionScope) => ["ai-sessions", s.userId, s.workspaceId, s.deviceId] as const,
-  list: (s: SessionScope) => [...aiKeys.scope(s), "list"] as const,
+  browse: (s: SessionScope) => [...aiKeys.scope(s), "browse"] as const,
   snapshot: (s: SessionScope, id: string) => [...aiKeys.scope(s), "snapshot", id] as const,
 };
 
 export type SocketFactory = (url: string, headers: Record<string, string>) => WebSocket;
+export interface SessionPageFilter { groupId?: string; archived?: boolean; search?: string; excludeId?: string; sourceId?: string; cursor?: string; limit?: number }
 
 const REQUEST_TIMEOUT_MS = 30_000;
 // Matches desktop: a send waits for thread setup, which can take up to a minute.
@@ -71,6 +72,8 @@ export class AISessionClient {
   private reconnected = false;
   private retryDelay?: number;
   private sendAttempts = new Map<string, number>();
+  private browseRefreshTimer?: ReturnType<typeof setTimeout>;
+  connectionError: "incompatible" | null = null;
   /** Stays true through the short reconnect window, so a brief drop shows nothing. */
   connected = false;
   readonly clientId = createRequestId();
@@ -112,19 +115,28 @@ export class AISessionClient {
     } finally { clearTimeout(timeout); signal?.removeEventListener("abort", abort); }
   }
 
-  async list(signal?: AbortSignal): Promise<LocalV2Summary[]> {
-    let after = 0;
-    const items = new Map<string, LocalV2Summary>();
-    while (true) {
-      const page = await this.request("GET", `/sessions?after_scope_seq=${after}`, localV2SessionListSchema, undefined, signal);
-      for (const summary of page.summaries) items.set(summary.conversation_id, summary);
-      const cursor = Math.max(page.scope_seq, ...page.summaries.map((s) => s.summary_seq));
-      if (!page.has_more) break;
-      if (cursor <= after) throw new Error("invalid_response");
-      after = cursor;
-    }
-    return [...items.values()];
+  sessionGroups(archived: boolean, search: string, signal?: AbortSignal) {
+    return this.request("GET", `/session-groups?${new URLSearchParams({ archived: String(archived), q: search })}`, localV2SessionGroupsSchema, undefined, signal);
   }
+
+  sessionPage(filter: SessionPageFilter, signal?: AbortSignal) {
+    const params = new URLSearchParams({ limit: String(filter.limit ?? 8), archived: String(filter.archived ?? false), q: filter.search ?? "" });
+    if (filter.groupId !== undefined) params.set("folder_id", filter.groupId);
+    if (filter.excludeId) params.set("exclude_id", filter.excludeId);
+    if (filter.sourceId) params.set("side_source_id", filter.sourceId);
+    if (filter.cursor) params.set("cursor", filter.cursor);
+    return this.request("GET", `/sessions/browse?${params}`, localV2SessionPageSchema, undefined, signal);
+  }
+
+  private refreshBrowse() {
+    if (this.browseRefreshTimer) return;
+    this.browseRefreshTimer = setTimeout(() => {
+      this.browseRefreshTimer = undefined;
+      if (!this.stopped) void this.qc.invalidateQueries({ queryKey: aiKeys.browse(this.scope) }, { cancelRefetch: false });
+    }, 200);
+  }
+
+  retryConnection() { this.connectionError = null; this.notify(); void this.connect(); }
 
   async snapshot(id: string, signal?: AbortSignal) {
     const next = await this.request("GET", `/sessions/${encodeURIComponent(id)}/snapshot`, localV2SnapshotSchema, undefined, signal, REQUEST_TIMEOUT_MS, id);
@@ -201,11 +213,12 @@ export class AISessionClient {
   async connect() {
     if (this.stopped || this.socket || this.connecting) return;
     this.connecting = true;
+    this.connectionError = null;
     try {
       const asked = Date.now();
-      const hello = await this.request("GET", "/hello", localV2HelloSchema);
+      const hello = await this.request("GET", "/hello?scoped=true", localV2HelloSchema);
       this.mark("ws.hello", { event: "end", durationMs: Date.now() - asked, outcome: "completed" });
-      if (hello.version !== LOCAL_V2_VERSION || !hello.capabilities.includes("device-link")) throw new Error("incompatible");
+      if (hello.version !== LOCAL_V2_VERSION || !hello.capabilities.includes("device-link") || hello.scope_seq === undefined) throw new Error("incompatible");
       if (this.stopped) return;
       this.focusSupported = hello.capabilities.includes(LOCAL_V2_FOCUS_CAPABILITY);
       this.reportSupported = hello.capabilities.includes(LOCAL_TIMING_REPORT_CAPABILITY);
@@ -225,9 +238,9 @@ export class AISessionClient {
         this.rejected.clear();
         this.status(true);
         this.settleRecovery(true);
-        ws.send(JSON.stringify({ version: 2, type: "subscribe_scope", after_scope_seq: 0 }));
+        ws.send(JSON.stringify({ version: 2, type: "subscribe_scope", after_scope_seq: hello.scope_seq }));
         this.focused.reconnected();
-        void this.qc.invalidateQueries({ queryKey: aiKeys.list(this.scope) });
+        void this.qc.invalidateQueries({ queryKey: aiKeys.browse(this.scope) });
         if (!this.selected) return;
         // The daemon answers snapshot_required when a cached position is unusable.
         const cached = this.qc.getQueryData<LocalV2Snapshot>(aiKeys.snapshot(this.scope, this.selected));
@@ -248,7 +261,8 @@ export class AISessionClient {
       };
     } catch (error) {
       console.warn("[ai-session] connect failed", { device: this.scope.deviceId, error });
-      this.linkLost();
+      if (error instanceof Error && error.message === "incompatible") { this.connectionError = "incompatible"; this.status(false); this.settleRecovery(false); }
+      else this.linkLost();
     }
     finally { this.connecting = false; }
   }
@@ -355,11 +369,7 @@ export class AISessionClient {
     if (!result.success) return;
     const message = result.data;
     if (message.type === "scope.summaries") {
-      this.qc.setQueryData<LocalV2Summary[]>(aiKeys.list(this.scope), (old) => {
-        const summaries = new Map((old ?? []).map((s) => [s.conversation_id, s]));
-        for (const summary of message.summaries) if ((summaries.get(summary.conversation_id)?.summary_seq ?? -1) < summary.summary_seq) summaries.set(summary.conversation_id, summary);
-        return [...summaries.values()];
-      });
+      this.refreshBrowse();
       for (const summary of message.summaries) {
         this.qc.setQueryData<LocalV2Snapshot>(aiKeys.snapshot(this.scope, summary.conversation_id), (old) =>
           old && old.conversation.summary_seq < summary.summary_seq ? { ...old, conversation: summary } : old);
@@ -394,7 +404,7 @@ export class AISessionClient {
       const id = message.conversation_id;
       if (message.status === "resubscribe" || message.status === "snapshot_required") {
         if (id) void this.resync(id);
-        else void this.qc.invalidateQueries({ queryKey: aiKeys.list(this.scope) });
+        else { this.refreshBrowse(); this.socket?.close(); }
       } else if (message.status === "rejected") {
         if (id) { this.rejected.add(id); this.notify(); }
         // The session list has no notice of its own; a new socket retries it.
@@ -415,7 +425,7 @@ export class AISessionClient {
     }
   }
   close() {
-    this.stopped = true; clearTimeout(this.timer); clearTimeout(this.handshake); clearTimeout(this.reportTimer);
+    this.stopped = true; clearTimeout(this.timer); clearTimeout(this.handshake); clearTimeout(this.reportTimer); clearTimeout(this.browseRefreshTimer);
     this.focused.dispose();
     this.cancelReads(); this.settleRecovery(false);
     if (this.socket) { this.socket.onclose = null; this.socket.onmessage = null; this.socket.onopen = null; this.socket.onerror = null; this.socket.close(); }

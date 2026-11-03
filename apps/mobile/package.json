@@ -78,6 +78,7 @@
     "react-native-shiki-engine": "^0.3.10",
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
+    "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.1",
     "rn-emoji-keyboard": "^1.7.0",
     "tailwind-merge": "^2.5.4",

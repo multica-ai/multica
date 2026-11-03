@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "store_generation": "store-a",
+  "capabilities": [
+    "device-link"
+  ],
+  "scope_seq": 10
+}

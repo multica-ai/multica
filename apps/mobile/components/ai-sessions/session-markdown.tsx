@@ -19,13 +19,13 @@ export function SessionImage({ path, session, label }: { path: string; session: 
   const route = attachment ? `/attachments/${encodeURIComponent(attachment[1])}` : `/sessions/${encodeURIComponent(session)}/image?${new URLSearchParams({ path: path.replace(/^sandbox:/, "") })}`;
   const source = external ? { uri: path } : client ? { uri: client.url(route), headers: client.headers() } : undefined;
   const openFile = (share = false) => { if (client) void openDeviceFile(client, route, "", share).catch(() => Alert.alert(t("error_title"), t("preview_error"))); };
-  if (failed || !source) return <Button variant="outline" disabled={!client} onPress={() => openFile()}><Text numberOfLines={1}>{label || t("open_file")}</Text></Button>;
+  if (failed || !source) return <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" disabled={!client} onPress={() => openFile()}><Text style={{ lineHeight: undefined }} numberOfLines={1}>{label || t("open_file")}</Text></Button>;
   return <>
     <Pressable accessibilityRole="button" accessibilityLabel={label || t("open_file")} onPress={() => setOpen(true)} onLongPress={() => !external && ActionSheetIOS.showActionSheetWithOptions({ options: [t("cancel"), t("share")], cancelButtonIndex: 0 }, (index) => { if (index === 1) openFile(true); })}>
       <Image source={source} resizeMode="contain" style={{ width: "100%", height: 200 }} onError={() => setFailed(true)} />
     </Pressable>
     <Modal visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
-      <View className="flex-1 bg-background pt-16 px-4 pb-8"><Button variant="ghost" onPress={() => setOpen(false)}><Text>{t("cancel")}</Text></Button><Image source={source} resizeMode="contain" style={{ flex: 1, width: "100%" }} /></View>
+      <View className="flex-1 bg-background pt-16 px-4 pb-8"><Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="ghost" onPress={() => setOpen(false)}><Text style={{ lineHeight: undefined }}>{t("cancel")}</Text></Button><Image source={source} resizeMode="contain" style={{ flex: 1, width: "100%" }} /></View>
     </Modal>
   </>;
 }

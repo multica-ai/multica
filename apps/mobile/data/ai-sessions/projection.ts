@@ -61,7 +61,23 @@ function structuredSnapshot(snapshot: LocalV2Snapshot): LocalV2Snapshot {
   return { ...snapshot, turns: snapshot.turns.map((turn) => ({ ...turn, messages: [...turn.messages], events: [...turn.events] })), pending_interactions: [...snapshot.pending_interactions] };
 }
 
-export interface TranscriptRow { id: string; turnId?: string; role: "user" | "assistant" | "tool" | "reasoning"; content: string; running?: boolean; attachmentIds?: string[] }
+export interface TranscriptRow { id: string; turnId?: string; role: "user" | "assistant" | "tool" | "reasoning"; content: string; running?: boolean; attachmentIds?: string[]; error?: boolean }
+export type ConversationRow = (Omit<TranscriptRow, "role"> & { role: "user" | "assistant" | "error" }) | { id: string; turnId?: string; role: "activity"; items: TranscriptRow[] };
+
+/** Keep user/assistant boundaries and failures visible while compacting diagnostics. */
+export function groupTranscriptActivities(rows: TranscriptRow[]): ConversationRow[] {
+  const out: ConversationRow[] = [];
+  for (const row of rows) {
+    if (row.role === "user" || row.role === "assistant" || row.error) {
+      out.push({ ...row, role: row.error ? "error" : row.role === "user" ? "user" : "assistant" });
+      continue;
+    }
+    const previous = out.at(-1);
+    if (previous?.role === "activity" && previous.turnId === row.turnId) previous.items.push(row);
+    else out.push({ id: `${row.id}:activity`, turnId: row.turnId, role: "activity", items: [row] });
+  }
+  return out;
+}
 
 export function transcript(snapshot: LocalV2Snapshot): TranscriptRow[] {
   return snapshot.turns.flatMap((turn) => {
@@ -92,7 +108,7 @@ export function transcript(snapshot: LocalV2Snapshot): TranscriptRow[] {
       rows.push({ id, role, content: item.content });
     }
     if (!hasAssistant) rows.push(...turn.messages.filter((m) => m.role !== "user").map((m) => ({ id: m.id, role: "assistant" as const, content: m.content })));
-    if (turn.error) rows.push({ id: `${turn.id}:error`, role: "tool", content: turn.error.message });
+    if (turn.error) rows.push({ id: `${turn.id}:error`, role: "tool", content: turn.error.message, error: true });
     return rows.map((row) => ({ ...row, turnId: turn.id }));
   });
 }

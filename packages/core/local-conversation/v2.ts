@@ -84,6 +84,7 @@ export const localV2HelloSchema = z.object({
   version: z.number().int(),
   store_generation: z.string(),
   capabilities: z.array(z.string()).default([]),
+  scope_seq: z.number().int().nonnegative().optional(),
 });
 
 const snapshotMessageSchema = z.object({
@@ -126,6 +127,20 @@ export const localV2SessionListSchema = z.object({
   summaries: z.array(localV2SummarySchema),
   has_more: z.boolean().default(false),
 });
+
+export const localV2SessionGroupsSchema = z.object({
+  scope_seq: z.number().int().nonnegative(),
+  groups: z.array(z.object({ id: z.string(), title: z.string(), path: z.string(), total: z.number().int().nonnegative() })),
+});
+export type LocalV2SessionGroup = z.infer<typeof localV2SessionGroupsSchema>["groups"][number];
+
+export const localV2SessionPageSchema = z.object({
+  scope_seq: z.number().int().nonnegative(),
+  summaries: z.array(localV2SummarySchema),
+  has_more: z.boolean(),
+  next_cursor: z.string().min(1).nullable(),
+}).refine((page) => page.has_more === (page.next_cursor !== null), { message: "A further session page requires a cursor" });
+export type LocalV2SessionPage = z.infer<typeof localV2SessionPageSchema>;
 
 export const localV2ErrorSchema = z.object({ error: errorSchema });
 

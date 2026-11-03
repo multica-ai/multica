@@ -1,0 +1,11 @@
+Use case: precise-object-edit / ui-mockup.
+Edit the attached Multica iOS @ reference picker UI design board, preserving the design except for the exact requested refinement.
+REMOVE the LEFT-SIDE ICON COLUMN from ALL FOUR RESULT ROWS in EACH of the THREE phones (12 row-leading icons total). Remove both the symbol and its rounded blue/gray tile background entirely. Specifically: left phone's four speech-bubble tiles, middle phone's four square task/status tiles, right phone's four robot tiles must all disappear.
+After removing each row icon, move that row's PRIMARY NAME and SECONDARY METADATA left into the freed space, aligning at the list's left content inset (matching the section heading's left inset). Do not leave an empty reserved icon gutter. Text-only row leading content, ample horizontal space. Preserve original row height and vertical spacing.
+KEEP the RIGHT-SIDE circular selection checkmarks and unselected circles in every row. Keep first row selected in each phone. Preserve disabled text styling on the fourth agent "测试助手".
+KEEP the small icons inside the SECTION HEADINGS "会话 · MacBook Pro", "任务 · 当前工作区", "智能体 · 发送后调用": user asked only to remove icons from result rows, not headers.
+KEEP search magnifying glasses, phone status icons, back chevrons, folder/sidebar icons in the dimmed underlying conversation header, home indicators and all phone chrome.
+KEEP exactly three category segments "会话", "任务", "智能体", with left phone selecting 会话, middle 任务, right 智能体. Never add 全部.
+KEEP exactly four result rows per category, one independent blue "加载更多" after the fourth row in each phone, fixed footer "已选 3 / 5", "取消", "引用上下文", "完成 (3)", all Chinese row names and metadata, top title/subtitle and bottom captions.
+Change only board version label from "UI 设计稿 · 04" to "UI 设计稿 · 05".
+Landscape composition, same resolution, precise layout, crisp readable Chinese, native iOS appearance. No red boxes or annotations should be added. No extra elements.

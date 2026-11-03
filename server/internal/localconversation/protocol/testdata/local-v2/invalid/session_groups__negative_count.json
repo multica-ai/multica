@@ -1,0 +1,11 @@
+{
+  "scope_seq": 10,
+  "groups": [
+    {
+      "id": "folder",
+      "title": "Repository",
+      "path": "/repo",
+      "total": -1
+    }
+  ]
+}
