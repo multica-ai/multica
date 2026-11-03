@@ -98,6 +98,12 @@ type harness struct {
 	uploads                 map[string]string
 	sessionResources        []map[string]any
 	sentContent             []map[string]any
+	usage                   []map[string]any
+	usageAfterFinish        bool
+	sessionUsage            string
+	usageStatus             int
+	cancelAcks              int
+	cancelAckStatus         int
 }
 
 func setup(t *testing.T) *harness {
@@ -167,7 +173,26 @@ func setup(t *testing.T) *harness {
 			json.NewDecoder(r.Body).Decode(&req)
 			h.messages = append(h.messages, req.Messages...)
 			io.WriteString(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/session"), strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			if h.usageStatus != 0 {
+				w.WriteHeader(h.usageStatus)
+				return
+			}
+			var req struct {
+				Usage []map[string]any `json:"usage"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			h.usage = append(h.usage, req.Usage...)
+			h.usageAfterFinish = h.usageAfterFinish || h.complete != nil || h.failure != nil
+			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			h.cancelAcks++
+			if h.cancelAckStatus != 0 {
+				w.WriteHeader(h.cancelAckStatus)
+				return
+			}
+			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/session"):
 			io.WriteString(w, `{}`)
 		default:
 			t.Errorf("unexpected Multica request %s", r.URL)
@@ -239,6 +264,10 @@ func setup(t *testing.T) *harness {
 			h.cancels++
 			io.WriteString(w, `{"status":"canceling"}`)
 		case r.URL.Path == "/sessions/sess_1":
+			if h.sessionUsage != "" {
+				io.WriteString(w, `{"status":"idle","usage":`+h.sessionUsage+`}`)
+				return
+			}
 			io.WriteString(w, `{"status":"idle"}`)
 		default:
 			t.Errorf("unexpected Qoder request %s", r.URL)
@@ -719,6 +748,10 @@ func TestOpaquePaginationWithEmptyProjectedPage(t *testing.T) {
 	}
 	requests := 0
 	q := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sessions/sess_1" {
+			io.WriteString(w, `{"status":"idle"}`)
+			return
+		}
 		requests++
 		if requests == 1 {
 			if r.URL.Query().Get("after_id") != "evt_user" {
@@ -871,12 +904,14 @@ func TestRunDeadlineReleasesQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.b.state.first().Deadline = time.Now().Add(-time.Second)
+	h.sessionUsage = `{"total_credits":0.4}`
 	if err := h.b.step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if h.failure == nil || h.b.state.first() != nil || h.cancels != 1 {
 		t.Fatal("expired run did not cancel and finish")
 	}
+	h.wantCredits(t, 400000)
 }
 
 func TestAmbiguousCreationIsNotRepeated(t *testing.T) {
