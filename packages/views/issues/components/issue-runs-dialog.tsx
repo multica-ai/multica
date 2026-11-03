@@ -742,7 +742,7 @@ const COL = {
   model: "w-24 shrink-0",
   status: "w-20 shrink-0",
   tokens: "w-14 shrink-0 text-right",
-  cost: "w-44 shrink-0 break-words whitespace-normal text-right",
+  cost: "shrink-0 break-words whitespace-normal text-right",
   actions: "w-14 shrink-0",
   toggle: "w-6 shrink-0",
 } as const;
@@ -752,6 +752,7 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
   const formatSpend = useFormatSpend();
   const locale = useLocale();
   const groups = useMemo(() => groupRunsByDay(timeline.runs), [timeline.runs]);
+  const costWidth = timeline.totalCredits.size > 0 ? "w-44" : "w-14";
 
   const dayLabel = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(locale, { weekday: "short", month: "short", day: "numeric" });
@@ -780,7 +781,7 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
         <span className={COL.model}>{t(($) => $.runs_timeline.col_model)}</span>
         <span className={COL.status}>{t(($) => $.runs_timeline.col_duration)}</span>
         <span className={COL.tokens}>{t(($) => $.runs_timeline.col_tokens)}</span>
-        <span className={COL.cost}>{t(($) => $.runs_timeline.col_cost)}</span>
+        <span className={cn(COL.cost, costWidth)}>{t(($) => $.runs_timeline.col_cost)}</span>
         <span className={COL.actions} />
         <span className={COL.toggle} />
       </div>
@@ -806,7 +807,7 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
               </span>
             </div>
             {group.runs.map((run) => (
-              <RunListRow key={run.task.id} run={run} issueId={issueId} />
+              <RunListRow key={run.task.id} run={run} issueId={issueId} costWidth={costWidth} />
             ))}
           </section>
         );
@@ -827,7 +828,7 @@ function useStatusReason(task: AgentTask): string | null {
   return [cancelledBy, reason].filter(Boolean).join(" · ") || null;
 }
 
-function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
+function RunListRow({ run, issueId, costWidth }: { run: TimelineRun; issueId: string; costWidth: string }) {
   const { t } = useT("issues");
   const formatSpend = useFormatSpend();
   const locale = useLocale();
@@ -923,13 +924,13 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
             <span className={cn(COL.tokens, "tabular-nums text-muted-foreground")}>
               {hasTokenFigure(run.usage) ? formatTokens(run.usage.tokens) : "—"}
             </span>
-            <span className={cn(COL.cost, "font-medium tabular-nums")}>{formatSpend(run.usage)}</span>
+            <span className={cn(COL.cost, costWidth, "font-medium tabular-nums")}>{formatSpend(run.usage)}</span>
           </>
         ) : (
           // No figure is not zero: a run without usage data was not free.
           <>
             <span className={cn(COL.tokens, "text-faint-foreground")}>—</span>
-            <span className={cn(COL.cost, "text-faint-foreground")} title={t(($) => $.runs_timeline.no_usage)}>
+            <span className={cn(COL.cost, costWidth, "text-faint-foreground")} title={t(($) => $.runs_timeline.no_usage)}>
               —
             </span>
           </>
