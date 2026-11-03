@@ -361,7 +361,12 @@ func writeIssueBodyFormatting(b *strings.Builder) {
 // shell is a wrong comment), while the receipt mode only decides how much of
 // an already-correct comment is echoed back, so it must not displace the
 // guardrail from the section lede.
-const commentReceiptRule = "For final-result comments, use `--output table` to confirm success without echoing the body. Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields. Gate the cleanup on the post succeeding (`&&` in bash or Git Bash, an `$LASTEXITCODE` check in PowerShell): a cleanup command run unconditionally succeeds after a failed post and makes the whole shell call exit 0, and under `--output table` empty stdout alone does not prove success.\n\n"
+const commentReceiptRule = "For final-result comments, use `--output table` to confirm success without echoing the body. Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields. Gate the cleanup on the post succeeding (`&&` in bash or Git Bash, an `$LASTEXITCODE` check in PowerShell): a cleanup command run unconditionally succeeds after a failed post and makes the whole shell call exit 0, and under `--output table` empty stdout alone does not prove success.\n\n" +
+	// The post-then-verify habit is what turns one ambiguous result into two
+	// comments: a run checked whether its hand-off had sent, judged that it had
+	// not, and posted it again (five issues, 2026-11-03). Verification is still
+	// right — re-sending on what it finds is not.
+	"**Post each comment once.** Never issue the same `comment add` twice in one turn, and never run two of them concurrently for the same body — a second call is a second comment on the issue, and it wakes every recipient again. If you do verify a post landed, a comment that is already there means the post SUCCEEDED: say so and move on, do not re-send it. Re-send only when the body is genuinely absent from the thread.\n\n"
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
 // The Windows branch carries the `$OutputEncoding` rationale: Windows

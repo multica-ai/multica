@@ -226,6 +226,15 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 			CommentID: comment.ID, AuthorID: comment.AuthorID, ClientRequestID: comment.ID,
 		})
 		if err != nil {
+			// A comment binds to one turn at most once (task_supplement_pkey is
+			// (comment_id, task_id)). A re-sent post replays against the comment
+			// already written, so its bind collides with the first one: the turn
+			// was steered, and the collision is the receipt. Any other failure
+			// falls back to the comment's normal trigger so the mention is not lost.
+			if isUniqueViolation(err) {
+				steered[agentID] = commentEnqueueResult{status: DispatchSteered, reason: ReasonSteered}
+				continue
+			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				slog.Warn("steer comment into running turn failed",
 					"issue_id", uuidToString(issue.ID), "comment_id", uuidToString(comment.ID), "task_id", uuidToString(taskID), "error", err)
