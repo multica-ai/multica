@@ -490,6 +490,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		args = append(args, value)
 		return "$" + strconv.Itoa(len(args))
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, util.UUIDToString(workspaceUUID))
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	if ids := hidden.Param(); ids != nil {
+		where = append(where, hiddenProjectPredicate("i.project_id", addArg(ids)))
+	}
 
 	negated := make(map[string]bool, len(spec.Filters.Negate))
 	for _, field := range spec.Filters.Negate {
