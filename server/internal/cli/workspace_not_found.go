@@ -59,9 +59,10 @@ func (c *APIClient) workspaceResponse(err *HTTPError, resp *http.Response) bool 
 	if origin == "[redacted]" || selected == "[redacted]" || !strings.EqualFold(origin, selected) {
 		return false
 	}
-	// Uploads carry workspace scope in their form fields, not their route.
-	if err.Path == "/api/upload-file" && finalURL.Path == "/api/upload-file" {
-		return true
+	// Upload scope lives in the POST form. 301/302/303 redirects drop that
+	// form when switching to GET; 307/308 preserve the scoped POST.
+	if finalURL.Path == "/api/upload-file" {
+		return err.Path == "/api/upload-file" && err.Method == http.MethodPost && resp.Request.Method == http.MethodPost
 	}
 	return workspaceAPIPath(finalURL.RequestURI(), c.WorkspaceID != "")
 }

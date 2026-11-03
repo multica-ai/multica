@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -108,6 +109,48 @@ func TestWorkspaceNotFoundMissingFinalRequest(t *testing.T) {
 		resp := &http.Response{StatusCode: 404, Request: req, Body: http.NoBody}
 		if got := FormatError(c.responseError(http.MethodGet, "/api/issues/synthetic", resp), false); strings.Contains(got, "server=") {
 			t.Errorf("unknown final origin got workspace context: %s", got)
+		}
+	}
+}
+
+func TestWorkspaceNotFoundUploadRedirectMethod(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	t.Setenv("MULTICA_DEBUG", "")
+	for _, helper := range []string{"issue", "chat"} {
+		for _, status := range []int{301, 302, 303, 307, 308} {
+			t.Run(fmt.Sprintf("%s/%d", helper, status), func(t *testing.T) {
+				calls := 0
+				finalMethod := ""
+				api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					if r.URL.RawQuery == "" {
+						http.Redirect(w, r, "/api/upload-file?final=1", status)
+						return
+					}
+					finalMethod = r.Method
+					w.WriteHeader(http.StatusNotFound)
+				}))
+				defer api.Close()
+				c := NewAPIClient(api.URL, "synthetic-workspace", "synthetic-token")
+				c.InvocationContext = &InvocationContext{Profile: "fixture"}
+				var err error
+				if helper == "issue" {
+					_, err = c.UploadIssueAttachment(context.Background(), []byte("fixture"), "fixture.txt", "synthetic-issue")
+				} else {
+					_, err = c.UploadChatAttachment(context.Background(), []byte("fixture"), "fixture.txt", "synthetic-task")
+				}
+				var he *HTTPError
+				if !errors.As(err, &he) || he.StatusCode != 404 || he.Method != http.MethodPost || ExitCodeFor(err) != 4 || calls != 2 {
+					t.Fatalf("upload error contract changed: err=%v calls=%d", err, calls)
+				}
+				wantMethod, wantContext := http.MethodGet, false
+				if status == 307 || status == 308 {
+					wantMethod, wantContext = http.MethodPost, true
+				}
+				if finalMethod != wantMethod || strings.Contains(FormatError(err, false), "server=") != wantContext {
+					t.Fatalf("wrong final upload scope: method=%s error=%s", finalMethod, FormatError(err, false))
+				}
+			})
 		}
 	}
 }
