@@ -1,5 +1,8 @@
 "use client";
 
+import { weixinKeys } from "../weixin/queries";
+
+
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
@@ -979,6 +982,10 @@ export function useRealtimeSync(
       wecom_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
+      },
+      weixin_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: weixinKeys.installations(wsId) });
       },
       telegram_installation: () => {
         const wsId = getCurrentWsId();

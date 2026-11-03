@@ -169,6 +169,12 @@ vi.mock("../../../settings/components/telegram-tab", () => ({
   ),
 }));
 
+vi.mock("../../../settings/components/weixin-tab", () => ({
+  WeixinAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="weixin-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 const TEST_RESOURCES = {
@@ -275,6 +281,8 @@ describe("IntegrationsTab", () => {
     expect(screen.getByText("Lark")).toBeTruthy();
     expect(screen.getByText("Slack")).toBeTruthy();
     expect(screen.getByText("Telegram")).toBeTruthy();
+    expect(screen.getByText("WeChat")).toBeTruthy();
+    expect(screen.getByTestId("weixin-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("lark-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("slack-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("telegram-bind-button").getAttribute("data-agent-id")).toBe(

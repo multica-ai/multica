@@ -43,6 +43,7 @@ vi.mock("./lark-tab", () => ({ LarkTab: () => <div>Lark detail</div> }));
 vi.mock("./slack-tab", () => ({ SlackTab: () => <div>Slack detail</div> }));
 vi.mock("./dingtalk-tab", () => ({ DingTalkTab: () => <div>DingTalk detail</div> }));
 vi.mock("./wecom-tab", () => ({ WecomTab: () => <div>WeCom detail</div> }));
+vi.mock("./weixin-tab", () => ({ WeixinTab: () => <div>WeChat detail</div> }));
 vi.mock("./telegram-tab", () => ({ TelegramTab: () => <div>Telegram detail</div> }));
 
 import { ChannelsTab } from "./channels-tab";

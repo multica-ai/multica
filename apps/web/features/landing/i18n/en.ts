@@ -193,6 +193,7 @@ export function createEnDict(
     label: "FAQ",
     headline: "Questions & answers.",
     items: [
+      { question: "Can I chat with an agent from WeChat?", answer: "Yes. A workspace admin can connect an agent by scanning a WeChat QR code from its Integrations tab. Private messages from the scanning account run with that admin’s workspace permissions. Replies and supported attachments return to the same conversation. Group chats are not supported; self-hosted servers must enable the WeChat integration." },
       {
         question: "What coding agents does Multica support?",
         answer:

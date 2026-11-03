@@ -10,6 +10,7 @@ import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
+import { weixinInstallationsOptions } from "@multica/core/weixin";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -17,6 +18,7 @@ import { LarkTab } from "./lark-tab";
 import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { WecomTab } from "./wecom-tab";
+import { WeixinTab } from "./weixin-tab";
 import { TelegramTab } from "./telegram-tab";
 import { SettingsCard, SettingsTab } from "./settings-layout";
 import { IntegrationChannelIcon } from "./integration-channel-icon";
@@ -94,7 +96,19 @@ export function ChannelsTab() {
     enabled: canView,
     select: hasActiveInstallation,
   });
+  const weixin = useQuery({
+    ...weixinInstallationsOptions(wsId),
+    enabled: canView,
+    select: hasActiveInstallation,
+  });
   const channels: ChannelEntry[] = [
+    {
+      id: "weixin",
+      label: t(($) => $.weixin.section_title),
+      description: t(($) => $.weixin.page_description),
+      content: <WeixinTab />,
+      state: weixin,
+    },
     {
       id: "lark",
       label: t(($) => $.lark.section_title),

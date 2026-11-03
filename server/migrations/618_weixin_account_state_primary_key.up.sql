@@ -1,0 +1,1 @@
+ALTER TABLE weixin_account_state ADD CONSTRAINT weixin_account_state_pkey PRIMARY KEY USING INDEX weixin_account_state_pkey;

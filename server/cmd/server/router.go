@@ -37,6 +37,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -1239,6 +1240,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
+	// WeChat iLink needs only an at-rest key; users authorize their bot by QR.
+	if key, err := secretbox.LoadKey("MULTICA_WEIXIN_SECRET_KEY"); err == nil {
+		box, boxErr := secretbox.New(key)
+		if boxErr != nil {
+			slog.Error("weixin: encryption setup failed", "error", boxErr)
+		} else if install, installErr := weixin.NewInstallService(queries, pool, box); installErr != nil {
+			slog.Error("weixin: install service setup failed", "error", installErr)
+		} else {
+			outbound := weixin.NewOutbound(queries, box, slog.Default())
+			media := weixin.NewMediaResolver(nil, nil)
+			if store != nil {
+				media = weixin.NewMediaResolver(store, engine.NewDBMediaIntentLedger(queries))
+				outbound.EnableFileDelivery(store)
+				h.DeclareChannelFileDelivery(string(weixin.TypeWeixin))
+			}
+			channelRouter.Register(weixin.TypeWeixin, weixin.NewWeixinResolverSet(queries, pool, outbound, nil, media))
+			weixin.RegisterWeixin(channelRegistry, weixin.ChannelDeps{Queries: queries, Box: box, Logger: slog.Default()})
+			outbound.Register(bus)
+			h.WeixinInstall, h.WeixinOutbound = install, outbound
+			slog.Info("weixin integration enabled (QR login and long polling)")
+		}
+	} else {
+		slog.Info("weixin integration disabled (MULTICA_WEIXIN_SECRET_KEY not set)")
+	}
+
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
 	// install, one getUpdates long-polling loop per active installation
 	// supervised by the shared engine.Supervisor, resolvers on the generic
@@ -1931,6 +1957,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/dingtalk/installations/{installationId}/groups/{conversationId}", h.ForgetDingTalkGroup)
 					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
+				})
+
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/weixin/installations", h.ListWeixinInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Post("/weixin/logins", h.BeginWeixinLogin)
+					r.Post("/weixin/logins/{loginId}/poll", h.PollWeixinLogin)
+					r.Delete("/weixin/logins/{loginId}", h.CancelWeixinLogin)
+					r.Delete("/weixin/installations/{installationId}", h.RevokeWeixinInstallation)
 				})
 
 				// Telegram integration. Same admin/member split as Slack:

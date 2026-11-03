@@ -193,6 +193,7 @@ export function createZhDict(
     label: "\u5e38\u89c1\u95ee\u9898",
     headline: "\u95ee\u4e0e\u7b54\u3002",
     items: [
+      { question: "可以在微信里与智能体聊天吗？", answer: "可以。工作区管理员在智能体的「集成」页签中用自己的微信扫码连接，扫码账号的私聊消息会按该管理员的工作区权限执行，回复和支持的附件会返回同一会话。暂不支持群聊；自托管服务需先启用微信集成。" },
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:

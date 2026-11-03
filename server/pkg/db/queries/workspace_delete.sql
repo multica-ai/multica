@@ -493,6 +493,13 @@ deleted_channel_binding_tokens AS (
 deleted_wecom_install_sessions AS (
     DELETE FROM wecom_install_session WHERE workspace_id = $1
 ),
+deleted_weixin_login_sessions AS (
+    DELETE FROM weixin_login_session WHERE workspace_id = $1
+),
+deleted_weixin_account_states AS (
+    DELETE FROM weixin_account_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)
