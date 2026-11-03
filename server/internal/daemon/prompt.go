@@ -72,6 +72,37 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	b.WriteString(buildProjectWorkflowBlock(task))
+	b.WriteString(buildParentIssueBlock(task))
+	return b.String()
+}
+
+// buildParentIssueBlock points a sub-issue's run at its parent. The sub-issue's
+// description is only what its author handed down; the decisions behind it stay
+// on the parent. A resumed session may already have read the parent, so it gets
+// the pointer without the full instruction. It still names the commands,
+// because a session resumed from before this block existed never saw them.
+func buildParentIssueBlock(task Task) string {
+	p := task.ParentIssue
+	if p == nil || p.ID == "" || task.IssueID == "" || task.ChatSessionID != "" {
+		return ""
+	}
+	name := p.ID
+	if p.Identifier != "" {
+		name = p.Identifier
+	}
+	getCmd := fmt.Sprintf("`multica issue get %s --output json`", p.ID)
+	scanCmd := fmt.Sprintf("`multica issue comment list %s --roots-only --summary --compact --output json`", p.ID)
+
+	var b strings.Builder
+	b.WriteString("[Parent issue]\n")
+	fmt.Fprintf(&b, "This issue is a sub-issue of %s \"%s\" (status: %s).", name, p.Title, p.Status)
+	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
+		fmt.Fprintf(&b, " If you have not read the parent in this session, read it before starting work: %s, then %s.\n\n", getCmd, scanCmd)
+		return b.String()
+	}
+	b.WriteString(" The discussion that produced this sub-issue — decisions, trade-offs, mockups — lives on the parent; this issue's description is only the part handed to you.\n")
+	fmt.Fprintf(&b, "Before starting work, read the parent: %s, then scan its threads with %s and expand the ones that shaped this sub-issue. `multica issue children %s --output json` shows what your sibling sub-issues cover.\n", getCmd, scanCmd, p.ID)
+	b.WriteString("This issue's description defines your scope; the parent is context. If they conflict, ask on this issue instead of picking one.\n\n")
 	return b.String()
 }
 

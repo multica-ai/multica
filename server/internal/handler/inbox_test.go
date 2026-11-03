@@ -129,7 +129,7 @@ func TestArchiveAllReadInboxUsesNewestIssueRow(t *testing.T) {
 			"workspace_id":   workspaceID,
 			"recipient_type": "member",
 			"recipient_id":   testUserID,
-			"type":           "issue_assigned",
+			"type":           "status_changed",
 			"severity":       "info",
 			"issue_id":       issueID,
 			"title":          title,

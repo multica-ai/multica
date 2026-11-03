@@ -3,12 +3,6 @@
     "title": "Inbox",
     "back": "Inbox"
   },
-  "sections": {
-    "action": "Needs action",
-    "activity": "Activity",
-    "action_empty": "Nothing needs your attention",
-    "activity_empty": "No recent activity"
-  },
   "menu": {
     "mark_all_read": "Mark all as read",
     "archive_all": "Archive all",

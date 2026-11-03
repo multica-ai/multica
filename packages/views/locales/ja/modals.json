@@ -61,6 +61,12 @@
     "toast_failed": "サブタスクを追加できませんでした",
     "toast_success": "{{identifier}} をサブタスクとして追加しました"
   },
+  "add_project_issue": {
+    "title": "既存のタスクを追加",
+    "description": "このプロジェクトに移すタスクを検索します",
+    "toast_success": "{{identifier}} をプロジェクトに移しました",
+    "toast_failed": "タスクを移動できませんでした"
+  },
   "run_confirm": {
     "title_assign": "割り当てを確認しますか？",
     "assign_single": "このタスクを {{name}} に割り当てます。実行条件を満たす場合はすぐに作業を開始します。",

@@ -394,7 +394,7 @@
       "preferences": "환경설정",
       "shortcuts": "단축키",
       "issue": "태스크",
-      "notifications": "인박스",
+      "notifications": "알림",
       "tokens": "API 토큰",
       "general": "일반",
       "github": "GitHub",
@@ -647,61 +647,38 @@
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
-    "title": "알림 분류",
-    "description": "변경 사항은 이후 새 알림에 적용됩니다.",
-    "reset": "기본값 복원",
+    "title": "인박스 알림",
+    "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
-    "routes": {
-      "action": {
-        "label": "처리 필요",
-        "description": "읽지 않음으로 집계, 시스템 알림 가능"
-      },
-      "activity": {
-        "label": "활동",
-        "description": "조용히 기록, 읽지 않음 아님"
-      },
-      "muted": {
-        "label": "끄기",
-        "description": "인박스에 들어오지 않음. 이슈에서는 계속 표시"
-      }
-    },
-    "kinds": {
-      "assigned": {
-        "label": "나에게 할당",
-        "description": "이슈가 나에게 할당될 때"
-      },
-      "mentions": {
-        "label": "멘션",
-        "description": "누군가 나를 @ 멘션할 때(@all, @squad 포함)"
-      },
-      "member_comments": {
-        "label": "멤버 댓글",
-        "description": "팔로우 중인 이슈에 멤버가 댓글을 달 때"
-      },
-      "agent_failures": {
-        "label": "에이전트 오류",
-        "description": "에이전트 실행이 실패하거나 막혀 내 개입이 필요할 때"
+    "groups": {
+      "assignments": {
+        "label": "할당",
+        "description": "태스크에 할당되거나 할당 해제될 때"
       },
       "status_changes": {
         "label": "상태 변경",
-        "description": "팔로우 중인 이슈의 상태가 바뀔 때"
+        "description": "팔로우 중인 태스크의 상태가 바뀔 때(예: 할 일, 진행 중, 완료)"
       },
-      "assignee_changes": {
-        "label": "담당자 변경",
-        "description": "이슈 담당자가 바뀌거나 내 할당이 해제될 때"
+      "comments": {
+        "label": "댓글",
+        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+      },
+      "mentions": {
+        "label": "멘션",
+        "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
       "updates": {
-        "label": "우선순위와 날짜",
-        "description": "우선순위, 시작일, 마감일이 바뀔 때"
+        "label": "우선순위 및 마감일",
+        "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
       },
-      "agent_comments": {
-        "label": "에이전트 댓글",
-        "description": "팔로우 중인 이슈에 에이전트가 답할 때"
+      "agent_activity": {
+        "label": "에이전트 활동",
+        "description": "에이전트 실행이 실패할 때"
       }
     },
     "system": {
       "title": "시스템 알림",
-      "label": "Multica가 백그라운드에 있을 때 '처리 필요' 알림을 시스템 알림으로 보내기"
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",

@@ -61,6 +61,12 @@
     "toast_failed": "添加子任务失败",
     "toast_success": "已添加 {{identifier}} 为子任务"
   },
+  "add_project_issue": {
+    "title": "添加已有任务",
+    "description": "搜索要移入这个项目的任务",
+    "toast_success": "已把 {{identifier}} 移入项目",
+    "toast_failed": "移动任务失败"
+  },
   "run_confirm": {
     "title_assign": "确认指派？",
     "assign_single": "将这个任务指派给 {{name}}；符合运行条件时会立即开始处理。",

@@ -375,6 +375,16 @@ type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
 }
 
+// ClaimParentIssue points a sub-issue's run at its parent issue, where the
+// discussion that produced the sub-issue lives. Identifier is empty when the
+// workspace prefix could not be loaded; the daemon then names the parent by ID.
+type ClaimParentIssue struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+}
+
 // TaskCancellationActor is the point-in-time actor snapshot attached to a
 // cancelled run. Type stays open for forward compatibility; current producers
 // emit member, agent, or system.
@@ -565,6 +575,12 @@ type AgentTaskResponse struct {
 	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
 	ParentIssueID            string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	// ParentIssue is the parent of the issue this run works on, for issue-bound
+	// runs on a sub-issue. Unrelated to ParentIssueID above, which is where a
+	// quick-create run must file the issue it is about to create. Omitted when
+	// the issue has no parent or the parent cannot be read in this workspace;
+	// the daemon then renders no parent block.
+	ParentIssue *ClaimParentIssue `json:"parent_issue,omitempty"`
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -798,6 +814,9 @@ type CoalescedCommentData struct {
 // from its rate table. A pointer, not a zero value: 0 ticks is a real answer
 // ("the provider says this was free") and must stay distinguishable from
 // "the provider said nothing".
+//
+// CreditsMicros is the provider's charge in millionths of its own credit unit,
+// nil for token-metered providers. It is never converted to USD.
 type TaskUsageData struct {
 	Provider         string `json:"provider,omitempty"`
 	Model            string `json:"model"`
@@ -806,6 +825,7 @@ type TaskUsageData struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	CostUsdTicks     *int64 `json:"cost_usd_ticks,omitempty"`
+	CreditsMicros    *int64 `json:"credits_micros,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

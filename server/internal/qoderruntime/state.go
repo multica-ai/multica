@@ -47,6 +47,7 @@ type run struct {
 	Failure     string              `json:"failure,omitempty"`
 	Outcome     string              `json:"outcome,omitempty"`
 	QuickCreate *quickCreate        `json:"quick_create,omitempty"`
+	Credits     runCredits          `json:"credits"`
 }
 
 func save(path string, j *journal) error {
