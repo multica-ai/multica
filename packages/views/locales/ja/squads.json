@@ -2,7 +2,8 @@
   "page": {
     "title": "スクワッド",
     "new_button": "新規スクワッド",
-    "empty_no_squads": "スクワッドはありません。",
+    "empty_no_squads": "スクワッドはまだありません",
+    "empty_description": "エージェントとメンバーをスクワッドにまとめると、タスクをスクワッド全体に任せられます。",
     "empty_no_match": "フィルターに一致するスクワッドはありません。",
     "table": {
       "name": "スカッド",
@@ -64,6 +65,8 @@
   "members_tab": {
     "section_title": "メンバー",
     "add_member_button": "メンバーを追加",
+    "empty_title": "メンバーはまだいません",
+    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。",
     "create_agent_button": "エージェントを作成",
     "leader_chip": "リーダー",
     "view_agent_tooltip": "エージェントの詳細を開く",
@@ -82,6 +85,8 @@
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "not_found": "スクワッドが見つかりません",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのスクワッド",
     "instructions": "指示",
     "edit": "編集",
     "cancel": "キャンセル",

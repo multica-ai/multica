@@ -236,6 +236,15 @@ describe("ThinkingPropRow", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
+  it("lets a ZCode model without reasoning metadata clear an old level", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    const { onChange } = renderRow({ provider: "zcode", model: NO_THINKING_MODEL.id, value: "max" });
+    await screen.findByText("max");
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "Follow CLI config" }));
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
   it("renders the row with the matched label when the model still advertises the value", async () => {
     renderRow({ value: "high" });
 

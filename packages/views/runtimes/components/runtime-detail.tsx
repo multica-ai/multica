@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bot,
   ChevronRight,
   Lock,
   MoreHorizontal,
@@ -46,6 +47,7 @@ import {
   ObjectProperty,
   ObjectSection,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
@@ -410,9 +412,7 @@ export function ServingAgentList({
   const { t: tAgents } = useT("agents");
   if (agents.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.no_agents)}
-      </p>
+      <ObjectSectionEmpty icon={Bot} description={t(($) => $.detail.no_agents)} />
     );
   }
   return (

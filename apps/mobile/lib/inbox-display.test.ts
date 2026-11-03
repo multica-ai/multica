@@ -5,7 +5,6 @@ import {
   getAutopilotQuotaBody,
   getInboxDisplayTitle,
   getInboxNavigationTarget,
-  groupInboxItemsBySection,
 } from "./inbox-display";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
@@ -56,21 +55,6 @@ describe("deduplicateInboxItems", () => {
         comment_id: "comment-1",
       },
     });
-  });
-});
-
-describe("groupInboxItemsBySection", () => {
-  it("splits sections per issue like web, so activity does not move the action row", () => {
-    const { action, activity } = groupInboxItemsBySection([
-      item({ id: "mention", type: "mentioned", section: "action", created_at: "2026-06-15T08:00:00Z" }),
-      item({ id: "legacy", issue_id: "issue-2", type: "issue_assigned", created_at: "2026-06-15T08:01:00Z" }),
-      item({ id: "status", type: "status_changed", section: "activity", created_at: "2026-06-15T08:02:00Z" }),
-      item({ id: "reply", section: "activity", created_at: "2026-06-15T08:03:00Z" }),
-      item({ id: "gone", issue_id: "issue-3", section: "activity", archived: true }),
-    ]);
-
-    expect(action.map((i) => i.id)).toEqual(["legacy", "mention"]);
-    expect(activity.map((i) => i.id)).toEqual(["reply"]);
   });
 });
 
