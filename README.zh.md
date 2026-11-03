@@ -1,12 +1,11 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Multica" src="docs/assets/logo-light.svg" width="160">
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/logo-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.gif">
+  <img alt="Multica" src="docs/assets/logo-light.gif" width="240">
 </picture>
-
-# Multica
 
 **智能体，也在看板上。**
 
