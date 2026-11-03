@@ -2556,7 +2556,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.Queries.ClearAgentQueuedTTLSeconds(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent queued_ttl_seconds failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear queued_ttl_seconds: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear queued_ttl_seconds")
 			return
 		}
 	}
