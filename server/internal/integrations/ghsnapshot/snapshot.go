@@ -94,6 +94,18 @@ type restCheckRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	DetailsURL string `json:"details_url"`
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
+	App struct {
+		ID int64 `json:"id"`
+	} `json:"app"`
+}
+
+type restCheckSuite struct {
+	ID         int64  `json:"id"`
+	HeadSHA    string `json:"head_sha"`
+	Conclusion string `json:"conclusion"`
 }
 
 type restStatusContext struct {
@@ -139,6 +151,15 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 			return nil, errors.New("ghsnapshot: duplicate check run during pagination")
 		}
 		seenRuns[run.ID] = struct{}{}
+	}
+	superseded, err := fetchSupersededSuites(ctx, c, installationID, commitPath, snap.HeadSHA, runs)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if _, drop := superseded[run.CheckSuite.ID]; drop {
+			continue
+		}
 		status := normalizeRunStatus(run.Status)
 		conclusion := strings.ToLower(run.Conclusion)
 		if status != "completed" {
@@ -187,6 +208,60 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 		snap.RollupState = rollupContexts(snap.Contexts)
 	}
 	return snap, nil
+}
+
+// fetchSupersededSuites returns the check suites on this head that a newer run
+// has replaced, so their check runs stay out of the rollup. `filter=latest`
+// only drops older attempts inside one suite; a second workflow run on the same
+// head (cancel-in-progress, a manual re-run of the workflow) is a separate
+// suite, and its cancelled predecessor would otherwise fail the rollup forever.
+//
+// A suite is superseded only when GitHub concluded the whole suite as cancelled
+// and a newer suite from the same app reports at least one check with the same
+// name. A suite that failed is never dropped, and a cancellation with no
+// replacement still fails. The suites list is fetched only when some check name
+// repeats across suites of one app, which is the only case a drop can apply.
+func fetchSupersededSuites(ctx context.Context, c *Client, installationID int64, commitPath, headSHA string, runs []restCheckRun) (map[int64]struct{}, error) {
+	type appCheck struct {
+		app  int64
+		name string
+	}
+	newestSuite := make(map[appCheck]int64, len(runs))
+	for _, run := range runs {
+		if run.App.ID <= 0 || run.CheckSuite.ID <= 0 {
+			continue
+		}
+		key := appCheck{run.App.ID, run.Name}
+		newestSuite[key] = max(newestSuite[key], run.CheckSuite.ID)
+	}
+	replaced := make(map[int64]struct{})
+	for _, run := range runs {
+		if run.App.ID > 0 && run.CheckSuite.ID > 0 && newestSuite[appCheck{run.App.ID, run.Name}] > run.CheckSuite.ID {
+			replaced[run.CheckSuite.ID] = struct{}{}
+		}
+	}
+	if len(replaced) == 0 {
+		return nil, nil
+	}
+	suites, err := fetchSnapshotPages[restCheckSuite](ctx, c, installationID, commitPath+"/check-suites", "check_suites")
+	if err != nil {
+		return nil, err
+	}
+	superseded := make(map[int64]struct{}, len(replaced))
+	seenSuites := make(map[int64]struct{}, len(suites))
+	for _, suite := range suites {
+		if suite.ID <= 0 || suite.HeadSHA != headSHA {
+			return nil, errors.New("ghsnapshot: invalid check suite or mismatched head")
+		}
+		if _, seen := seenSuites[suite.ID]; seen {
+			return nil, errors.New("ghsnapshot: duplicate check suite during pagination")
+		}
+		seenSuites[suite.ID] = struct{}{}
+		if _, ok := replaced[suite.ID]; ok && strings.EqualFold(suite.Conclusion, "cancelled") {
+			superseded[suite.ID] = struct{}{}
+		}
+	}
+	return superseded, nil
 }
 
 func fetchSnapshotPR(ctx context.Context, c *Client, installationID int64, path string) (*restPullRequest, error) {
