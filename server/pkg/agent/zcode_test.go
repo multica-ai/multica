@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -555,15 +556,45 @@ func TestZcodeUnknownNotificationDoesNotBreakFlow(t *testing.T) {
 // handshake completes fails the run with the stderr tail attached.
 func TestZcodeStderrFailurePromotion(t *testing.T) {
 	t.Parallel()
+	stderrStarted := make(chan struct{})
+	stderrRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseStderr := func() { releaseOnce.Do(func() { close(stderrRelease) }) }
+	defer releaseStderr()
 	bin := writeFakeZcodeScript(t, `#!/bin/sh
 echo "zcode: authentication failed: invalid api key" >&2
 exit 1
 `)
 
-	session, err := newZcodeTestBackend(t, bin).Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
+	backend, err := New("zcode", Config{
+		ExecutablePath: bin,
+		Logger: slog.New(&zcodeStderrGate{
+			Handler: slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
+			started: stderrStarted,
+			release: stderrRelease,
+		}),
+		TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
+	select {
+	case <-stderrStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stderr copier did not start")
+	}
+	// Hold the copier after reading the diagnostic but before retaining its
+	// tail. stdout EOF must not publish a failure before stderr is drained.
+	select {
+	case res := <-session.Result:
+		t.Fatalf("published failure before stderr drained: %q", res.Error)
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseStderr()
 	_, res := collectZcodeSession(t, session)
 	if res.Status != "failed" {
 		t.Fatalf("expected failed, got %q", res.Status)
@@ -571,6 +602,21 @@ exit 1
 	if !strings.Contains(res.Error, "authentication failed") {
 		t.Fatalf("expected the stderr tail in the error, got %q", res.Error)
 	}
+}
+
+type zcodeStderrGate struct {
+	slog.Handler
+	started chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (w *zcodeStderrGate) Handle(ctx context.Context, record slog.Record) error {
+	if strings.HasPrefix(record.Message, "[zcode:stderr]") {
+		w.once.Do(func() { close(w.started) })
+		<-w.release
+	}
+	return w.Handler.Handle(ctx, record)
 }
 
 // TestZcodeThinkingDeltas covers T19: reasoning deltas map to MessageThinking.

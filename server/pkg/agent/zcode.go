@@ -379,6 +379,21 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			handshakeTimeout = defaultZcodeHandshakeTimeout
 		}
 
+		failureWithStderr := func(msg string) string {
+			// A failed stdin write or stdout EOF can precede the stderr
+			// copier. Stop the failed session and drain before reading its
+			// diagnostic; descendants holding the pipe must not block forever.
+			stdin.Close()
+			stopProcess()
+			timer := time.NewTimer(defaultZcodeInterruptGrace)
+			defer timer.Stop()
+			select {
+			case <-stderrDone:
+			case <-timer.C:
+			}
+			return withAgentStderr(msg, "zcode", stderrBuf.Tail())
+		}
+
 		classifyStartupFailure := func(err error, what string) (string, string) {
 			switch {
 			case ctx.Err() != nil:
@@ -437,7 +452,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				status, msg := classifyStartupFailure(err, "session/resume")
 				resCh <- Result{
 					Status:     status,
-					Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+					Error:      failureWithStderr(msg),
 					DurationMs: time.Since(startTime).Milliseconds(),
 					SessionID:  opts.ResumeSessionID,
 				}
@@ -497,7 +512,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				status, msg := classifyStartupFailure(err, "session/create")
 				resCh <- Result{
 					Status:     status,
-					Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+					Error:      failureWithStderr(msg),
 					DurationMs: time.Since(startTime).Milliseconds(),
 				}
 				return
@@ -506,7 +521,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			if sessionID == "" {
 				resCh <- Result{
 					Status:     "failed",
-					Error:      withAgentStderr("zcode session/create returned no sessionId", "zcode", stderrBuf.Tail()),
+					Error:      failureWithStderr("zcode session/create returned no sessionId"),
 					DurationMs: time.Since(startTime).Milliseconds(),
 				}
 				return
@@ -525,7 +540,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			status, msg := classifyStartupFailure(err, "session/subscribe")
 			resCh <- Result{
 				Status:     status,
-				Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+				Error:      failureWithStderr(msg),
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  sessionID,
 			}
@@ -546,7 +561,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			status, msg := classifyStartupFailure(err, "session/send")
 			resCh <- Result{
 				Status:     status,
-				Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+				Error:      failureWithStderr(msg),
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  sessionID,
 			}
@@ -586,7 +601,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		} else {
 			// stdout EOF or process exit without a terminal event.
 			finalStatus = "failed"
-			finalError = withAgentStderr("zcode process exited before the turn completed", "zcode", stderrBuf.Tail())
+			finalError = failureWithStderr("zcode process exited before the turn completed")
 		}
 
 		terminalObserved.Store(true)
