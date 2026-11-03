@@ -605,7 +605,7 @@ observe individual submissions, not whether branch-protection approval gates
 are satisfied. Review-watched PRs remain in the bounded TTL refresh sweep even
 after checks settle, so missed webhooks can recover.
 
-Apply additive migration 608, complete the backend rollout, then deploy the
+Apply additive migration 609, complete the backend rollout, then deploy the
 web/Desktop and CLI. Disable review conditions before rolling the backend back;
 keep the nullable column and re-enable the rules after upgrading again.
 The GitHub App should subscribe to `pull_request_review` for prompt refreshes;
