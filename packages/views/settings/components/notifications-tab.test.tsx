@@ -52,7 +52,8 @@ describe("NotificationsTab", () => {
     expect(select(kinds.assigned.label)).toHaveTextContent(routes.action.label);
     expect(select(kinds.mentions.label)).toHaveTextContent(routes.action.label);
     expect(select(kinds.status_changes.label)).toHaveTextContent(routes.activity.label);
-    expect(select(kinds.agent_comments.label)).toHaveTextContent(routes.activity.label);
+    expect(select(kinds.comments_without_mentions.label)).toHaveTextContent(routes.action.label);
+    expect(select(kinds.comments_mentioning_others.label)).toHaveTextContent(routes.activity.label);
     expect(screen.getByRole("button", { name: enSettings.notifications.reset })).toBeDisabled();
   });
 
@@ -60,8 +61,8 @@ describe("NotificationsTab", () => {
     prefs.current = { comments: "muted" };
     render(<NotificationsTab />, { wrapper: Wrapper });
 
-    expect(select(kinds.member_comments.label)).toHaveTextContent(routes.muted.label);
-    expect(select(kinds.agent_comments.label)).toHaveTextContent(routes.muted.label);
+    expect(select(kinds.comments_without_mentions.label)).toHaveTextContent(routes.muted.label);
+    expect(select(kinds.comments_mentioning_others.label)).toHaveTextContent(routes.muted.label);
     expect(select(kinds.mentions.label)).toHaveTextContent(routes.action.label);
   });
 
@@ -82,11 +83,11 @@ describe("NotificationsTab", () => {
     prefs.current = { comments: "muted" };
     render(<NotificationsTab />, { wrapper: Wrapper });
 
-    await user.click(select(kinds.member_comments.label));
+    await user.click(select(kinds.comments_without_mentions.label));
     await user.click(await screen.findByRole("option", { name: new RegExp(`^${routes.action.label}`) }));
 
     await waitFor(() =>
-      expect(mutate).toHaveBeenCalledWith({ agent_comments: "muted" }, expect.anything()),
+      expect(mutate).toHaveBeenCalledWith({ comments_mentioning_others: "muted" }, expect.anything()),
     );
   });
 

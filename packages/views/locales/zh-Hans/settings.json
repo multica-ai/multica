@@ -675,9 +675,9 @@
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
       },
-      "member_comments": {
-        "label": "成员评论",
-        "description": "成员在你订阅的任务里发表评论时"
+      "comments_without_mentions": {
+        "label": "未 @ 任何人的评论",
+        "description": "有人在你订阅的任务里评论，且没有 @ 任何人时"
       },
       "agent_failures": {
         "label": "智能体出错",
@@ -695,9 +695,9 @@
         "label": "优先级与日期",
         "description": "优先级、开始日期或截止日期变化时"
       },
-      "agent_comments": {
-        "label": "智能体评论",
-        "description": "智能体在你订阅的任务里回复时"
+      "comments_mentioning_others": {
+        "label": "@ 了其他人的评论",
+        "description": "你订阅的任务里的评论 @ 了其他成员或智能体、但没有 @ 你时"
       }
     },
     "system": {
