@@ -1588,6 +1588,21 @@ type TaskToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type TaskToolConfirmation struct {
+	TaskID        pgtype.UUID        `json:"task_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CallID        string             `json:"call_id"`
+	ToolName      string             `json:"tool_name"`
+	McpServerName pgtype.Text        `json:"mcp_server_name"`
+	Input         []byte             `json:"input"`
+	Status        string             `json:"status"`
+	DenyMessage   pgtype.Text        `json:"deny_message"`
+	DecidedBy     pgtype.UUID        `json:"decided_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
+}
+
 type TaskUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	TaskID           pgtype.UUID        `json:"task_id"`

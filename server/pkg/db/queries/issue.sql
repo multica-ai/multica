@@ -493,6 +493,9 @@ cleared_task_supplements AS (
 cleared_task_supplement_capabilities AS (
  DELETE FROM task_supplement_capability WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_task_tool_confirmations AS (
+ DELETE FROM task_tool_confirmation WHERE issue_id IN (SELECT target.id FROM target)
+),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
 ),

@@ -31,6 +31,9 @@ deleted_task_supplements AS (
 deleted_task_supplement_capabilities AS (
     DELETE FROM task_supplement_capability WHERE task_id IN (SELECT id FROM batch)
 ),
+deleted_task_tool_confirmations AS (
+    DELETE FROM task_tool_confirmation WHERE task_id IN (SELECT id FROM batch)
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message WHERE task_id IN (SELECT id FROM batch)
 ),
@@ -315,6 +318,9 @@ deleted_orphan_task_supplements AS (
 ),
 deleted_orphan_task_supplement_capabilities AS (
     DELETE FROM task_supplement_capability WHERE workspace_id = $1
+),
+deleted_orphan_task_tool_confirmations AS (
+    DELETE FROM task_tool_confirmation WHERE workspace_id = $1
 ),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1

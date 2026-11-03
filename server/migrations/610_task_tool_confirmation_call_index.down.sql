@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS task_tool_confirmation_task_call_uidx;
