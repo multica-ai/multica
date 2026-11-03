@@ -103,7 +103,7 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 			var file struct {
 				ID string `json:"id"`
 			}
-			if err := b.qoder.upload(ctx, "/files", name, data, &file); err != nil {
+			if err := b.qoder.upload(ctx, "/files", name, data, nil, &file); err != nil {
 				var rejected *apiError
 				if errors.As(err, &rejected) && (rejected.Status == 400 || rejected.Status == 413 || rejected.Status == 415) {
 					skipped = append(skipped, name+" (rejected by Qoder Files)")

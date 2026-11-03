@@ -616,6 +616,11 @@ func (b *Bridge) deliver(ctx context.Context, r *run) error {
 			return err
 		}
 	}
+	if r.Reply != nil && r.Outcome == "completed" {
+		if pending, err := b.attachReplyFile(ctx, r); err != nil || pending {
+			return err
+		}
+	}
 	if err := b.reportCredits(ctx, r); err != nil {
 		return err
 	}
