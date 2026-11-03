@@ -112,6 +112,21 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   `--runtime-config`), or with `agent env set` after the copy exists.
 - `--no-skills` skips copying the source's skill bindings.
 
+## Codex native configuration
+
+Codex tasks inherit byte-for-byte copies of global `AGENTS.md`,
+`AGENTS.override.md`, and direct `agents/*.toml` definitions from the daemon's
+`CODEX_HOME` (default `~/.codex`) into an isolated task home. Codex retains control
+of instruction precedence. Prepare/reuse refreshes shared files and removes
+missing global instructions. `.multica-inherited-agents.json` tracks inherited
+role names so stale host roles are removed while unrelated task roles survive;
+same-name host roles are authoritative. These are copies, not shared symlinks.
+Source errors or an invalid manifest fail preparation. This does not install
+hooks or recursively inherit role-referenced assets. Native multi-agent policy
+is unchanged: set `MULTICA_CODEX_MULTI_AGENT=1` in the daemon environment to
+preserve the user's Codex multi-agent setting, and have the parent await child
+completion before concluding its task.
+
 ## Field contracts
 
 | Field | Stored as | Validated? | Consumed by |
