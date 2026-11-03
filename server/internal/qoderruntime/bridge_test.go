@@ -98,6 +98,9 @@ type harness struct {
 	uploads                 map[string]string
 	sessionResources        []map[string]any
 	sentContent             []map[string]any
+	usage                   []map[string]any
+	usageAfterFinish        bool
+	sessionUsage            string
 }
 
 func setup(t *testing.T) *harness {
@@ -166,6 +169,14 @@ func setup(t *testing.T) *harness {
 			}
 			json.NewDecoder(r.Body).Decode(&req)
 			h.messages = append(h.messages, req.Messages...)
+			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			var req struct {
+				Usage []map[string]any `json:"usage"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			h.usage = append(h.usage, req.Usage...)
+			h.usageAfterFinish = h.usageAfterFinish || h.complete != nil || h.failure != nil
 			io.WriteString(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/session"), strings.HasSuffix(r.URL.Path, "/cancel-ack"):
 			io.WriteString(w, `{}`)
@@ -239,6 +250,10 @@ func setup(t *testing.T) *harness {
 			h.cancels++
 			io.WriteString(w, `{"status":"canceling"}`)
 		case r.URL.Path == "/sessions/sess_1":
+			if h.sessionUsage != "" {
+				io.WriteString(w, `{"status":"idle","usage":`+h.sessionUsage+`}`)
+				return
+			}
 			io.WriteString(w, `{"status":"idle"}`)
 		default:
 			t.Errorf("unexpected Qoder request %s", r.URL)
@@ -719,6 +734,10 @@ func TestOpaquePaginationWithEmptyProjectedPage(t *testing.T) {
 	}
 	requests := 0
 	q := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sessions/sess_1" {
+			io.WriteString(w, `{"status":"idle"}`)
+			return
+		}
 		requests++
 		if requests == 1 {
 			if r.URL.Query().Get("after_id") != "evt_user" {
