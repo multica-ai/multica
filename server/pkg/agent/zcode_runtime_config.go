@@ -9,11 +9,22 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	zcodePersonalConfigEnv   = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
 	zcodeProvidersTempPrefix = "multica-zcode-providers-"
+	// zcodeSnapshotOwnerFile is locked by the process using a snapshot for
+	// the snapshot's whole lifetime (lockZcodeProviderSnapshot).
+	zcodeSnapshotOwnerFile = "owner"
+	// zcodeSnapshotMinAge keeps the startup sweep away from snapshots still
+	// being written: a directory exists briefly before its owner lock does.
+	zcodeSnapshotMinAge = time.Minute
+	// zcodeUnownedSnapshotMaxAge retires snapshots that carry no owner file
+	// (written before the lock existed, or where locking failed). Their
+	// writer cannot be checked, so they must outlive any plausible run.
+	zcodeUnownedSnapshotMaxAge = 24 * time.Hour
 )
 
 type zcodeDesktopProvider struct {
@@ -63,8 +74,9 @@ func readZcodeConfig(path string, into any) error {
 // temp dir (multica-zcode-providers-*). It reads Desktop's enabled connections
 // to build that snapshot, but never edits Desktop's repositories or converts
 // Start Plan identity tokens into API keys. Explicit native repositories remain
-// authoritative. Call CleanupStaleZcodeProviderSnapshots on daemon startup so
-// crash leftovers do not linger.
+// authoritative. The snapshot carries an owner lock held until cleanup, so
+// CleanupStaleZcodeProviderSnapshots on daemon startup removes crash leftovers
+// without touching snapshots other daemons on the machine are still using.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
 	noop := func() {}
 	if zcodeEnvValue(env, zcodePersonalConfigEnv) != "" {
@@ -192,7 +204,11 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 	if err != nil {
 		return nil, noop, err
 	}
-	cleanup := func() { _ = os.RemoveAll(temp) }
+	owner := lockZcodeProviderSnapshot(temp)
+	cleanup := func() {
+		releasePiSessionFileLock(owner)
+		_ = os.RemoveAll(temp)
+	}
 	file := filepath.Join(temp, "providers.json")
 	if err := os.WriteFile(file, data, 0o600); err != nil {
 		cleanup()
@@ -202,23 +218,64 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 	return append(env, zcodePersonalConfigEnv+"="+file), cleanup, nil
 }
 
+// lockZcodeProviderSnapshot marks a snapshot directory as in use by this
+// process: it creates the owner file and holds an exclusive lock on it until
+// the snapshot's cleanup releases it. The kernel drops the lock when the
+// process dies, which is how CleanupStaleZcodeProviderSnapshots tells a crash
+// leftover from a snapshot another daemon on this machine is still using.
+//
+// The lock reuses the Pi transcript lock (flock on Unix, a LockFileEx sidecar
+// on Windows). When the filesystem refuses the lock, the owner file is
+// removed again, so the snapshot counts as unowned and the sweep retires it
+// only by age; the run itself goes ahead as before.
+func lockZcodeProviderSnapshot(dir string) *os.File {
+	path := filepath.Join(dir, zcodeSnapshotOwnerFile)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	_ = file.Close()
+	lock, locked, err := tryLockPiSessionFile(path)
+	if err != nil || !locked {
+		_ = os.Remove(path)
+		return nil
+	}
+	return lock
+}
+
 // CleanupStaleZcodeProviderSnapshots removes orphaned process-private provider
-// repository directories left under the process temp dir when a prior daemon
-// exited without running the per-session cleanup defer (crash / SIGKILL).
+// repository directories left under the process temp dir when the process that
+// wrote them exited without running the per-session cleanup (crash / SIGKILL).
+//
+// Several daemons (Desktop's profile and a CLI profile, say) can share one
+// temp dir, so a directory is only removed once its writer is gone: its owner
+// lock can be taken. A directory without an owner file, written by a daemon
+// that predates the lock, cannot be checked and is removed only after
+// zcodeUnownedSnapshotMaxAge. Nothing younger than zcodeSnapshotMinAge is
+// touched, which covers the moment between creating a directory and locking
+// it.
+//
 // Best-effort: failures to remove individual matches are ignored; the count of
 // removed directories is returned for logging.
 func CleanupStaleZcodeProviderSnapshots() int {
-	matches, err := filepath.Glob(filepath.Join(os.TempDir(), zcodeProvidersTempPrefix+"*"))
+	return cleanupStaleZcodeProviderSnapshots(os.TempDir(), time.Now())
+}
+
+func cleanupStaleZcodeProviderSnapshots(tempDir string, now time.Time) int {
+	matches, err := filepath.Glob(filepath.Join(tempDir, zcodeProvidersTempPrefix+"*"))
 	if err != nil {
 		return 0
 	}
 	removed := 0
 	for _, dir := range matches {
-		info, err := os.Stat(dir)
+		info, err := os.Lstat(dir)
 		if err != nil || !info.IsDir() {
 			continue
 		}
 		if !strings.HasPrefix(filepath.Base(dir), zcodeProvidersTempPrefix) {
+			continue
+		}
+		if !zcodeProviderSnapshotStale(dir, now.Sub(info.ModTime())) {
 			continue
 		}
 		if err := os.RemoveAll(dir); err == nil {
@@ -226,4 +283,25 @@ func CleanupStaleZcodeProviderSnapshots() int {
 		}
 	}
 	return removed
+}
+
+// zcodeProviderSnapshotStale reports whether no live process owns the
+// snapshot in dir, last modified age ago.
+func zcodeProviderSnapshotStale(dir string, age time.Duration) bool {
+	if age < zcodeSnapshotMinAge {
+		return false
+	}
+	owner := filepath.Join(dir, zcodeSnapshotOwnerFile)
+	if _, err := os.Lstat(owner); err != nil {
+		return errors.Is(err, os.ErrNotExist) && age >= zcodeUnownedSnapshotMaxAge
+	}
+	lock, locked, err := tryLockPiSessionFile(owner)
+	if err != nil || !locked {
+		return false
+	}
+	// Released before removal: Windows cannot remove a directory while a
+	// handle inside it is open. No process adopts an existing snapshot, so
+	// nothing can take the lock in between.
+	releasePiSessionFileLock(lock)
+	return true
 }
