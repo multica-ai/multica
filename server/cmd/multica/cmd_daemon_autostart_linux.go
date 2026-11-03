@@ -263,11 +263,12 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 			// next login — boot autostart is off — while the current
 			// session keeps its restart policy.
 			if systemdUnitLinkedAnywhere(path) {
-				if _, err := exec.Command("systemctl", "--user", "disable", systemdUnitName(profile)).CombinedOutput(); err != nil {
-					// A missing user bus must not strand the links: unlink
-					// every wants entry directly.
-					removeSystemdWantsLinks(path)
-				}
+				// systemctl can succeed without touching a link it does not
+				// know about, and fails outright without a user bus. Unlink
+				// our own wants entries directly either way, so the unit
+				// cannot start at the next login whatever systemctl reports.
+				_ = exec.Command("systemctl", "--user", "disable", systemdUnitName(profile)).Run()
+				removeSystemdWantsLinks(path)
 				_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 				changed = true
 			}
