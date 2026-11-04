@@ -55,6 +55,8 @@ import {
   type IconComponent,
 } from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
+import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
@@ -416,6 +418,7 @@ export function AttachmentPreviewModal({
   onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const shouldReduceMotion = useReducedMotion() ?? false;
   const state = normalize(source);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
@@ -489,11 +492,15 @@ export function AttachmentPreviewModal({
   const kind = state.kind;
 
   // Download dispatcher: re-sign through `getAttachment` when an id is
-  // available; otherwise fall back to opening the (possibly stale) URL
-  // externally — same tradeoff as the file-card NodeView's download path.
+  // available (from the record, or parsed out of a CDN storage URL that
+  // didn't resolve to a record); otherwise fall back to opening the
+  // (possibly stale) URL externally — same tradeoff as the file-card
+  // NodeView's download path.
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
+    const attachmentId =
+      state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
+    if (attachmentId) {
+      download(attachmentId);
     } else {
       openExternal(state.mediaUrl);
     }

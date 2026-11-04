@@ -5,8 +5,6 @@
     "scope_all": "All projects",
     "scope_active": "Active projects",
     "scope_closed": "Closed projects",
-    "empty": "No projects yet",
-    "empty_description": "Group related issues into a project to track progress and owners.",
     "view_compact": "Compact",
     "view_comfortable": "Comfortable",
     "no_search_results": "No results match your search",
@@ -174,5 +172,36 @@
     "section_priority": "Priority",
     "section_lead": "Lead",
     "view": "View"
+  },
+  "intro": {
+    "title": "Break big work into projects",
+    "description": "A project groups related issues so you can track them together. Its description and linked repositories go along as context on every agent run.",
+    "slides": {
+      "progress": {
+        "title": "See progress at a glance",
+        "description": "Status, lead, target date, and completion sit on one card, so you don't have to open every issue."
+      },
+      "context": {
+        "title": "Context travels with every run",
+        "description": "Write the description and link repositories once. Every run on the project's issues picks them up."
+      },
+      "sidebar": {
+        "title": "Pinned to your sidebar",
+        "description": "Pin the projects you use most to the sidebar, and expand one to see its issues."
+      }
+    },
+    "art": {
+      "project_website": "Website redesign",
+      "project_mobile": "Mobile 1.0",
+      "project_onboarding": "Onboarding",
+      "context_label": "Project description",
+      "context_body": "New marketing site on Next.js and Tailwind. Copy follows docs/brand, and every page supports dark mode.",
+      "run_started": "started a run",
+      "context_loaded": "Loaded the project context and 2 repositories",
+      "issue_count": "{{done}} / {{total}} issues",
+      "issue_hero": "Animate the homepage hero",
+      "issue_pricing": "Pricing comparison table",
+      "issue_blog": "Paginate the blog list"
+    }
   }
 }

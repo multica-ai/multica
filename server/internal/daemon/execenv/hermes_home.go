@@ -30,13 +30,12 @@ import (
 // Setup does not modify the shared home. Mirrored auth and other entries remain
 // writable symlinks, so runtime updates through them intentionally reach the host.
 
-// hermesOverriddenEntries are the fixed top-level entries of the shared
-// ~/.hermes/ that the overlay supplies its own task-local version of, so they
-// are NOT mirrored from the shared home and are preserved across reuse
-// reconciliation:
+// hermesOverriddenEntries are the fixed top-level entries managed explicitly by
+// the overlay, outside generic shared-home mirroring and reuse reconciliation:
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
 //   - memories/     link to the agent's persistent store, isolated from the host
+//   - installs/     managed separately: reuse source dependencies or retain local ones
 //   - marker below  records that legacy shared SQLite state was detached
 //
 // The state.db SQLite family is classified dynamically by
@@ -66,6 +65,7 @@ var hermesOverriddenEntries = map[string]struct{}{
 	"skills":                   {},
 	"config.yaml":              {},
 	"memories":                 {},
+	"installs":                 {},
 	"active_profile":           {},
 	"profiles":                 {},
 	".env":                     {},
@@ -76,8 +76,8 @@ var hermesOverriddenEntries = map[string]struct{}{
 	hermesTaskLocalStateMarker: {},
 }
 
-// isHermesOverlayOwnedEntry reports whether name belongs to the per-task
-// overlay rather than the shared Hermes home. Hermes' state.db is the canonical
+// isHermesOverlayOwnedEntry reports whether name is explicitly managed by the
+// overlay rather than generic shared-home mirroring. Hermes' state.db is the canonical
 // session store and uses WAL mode; mirroring its main file and journal sidecars
 // separately can produce an inconsistent snapshot, exposes host conversation
 // history, and fails on Windows when SQLite byte-range-locks state.db-shm.
@@ -365,6 +365,9 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := os.Chmod(hermesHome, 0o700); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("chmod hermes-home dir: %w", err)
 	}
+	if err := prepareHermesInstalls(sharedHome, hermesHome); err != nil {
+		return hermesSessionMount{}, fmt.Errorf("prepare hermes installs: %w", err)
+	}
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("prepare task-local state: %w", err)
 	}
@@ -395,6 +398,46 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 		return hermesSessionMount{}, err
 	}
 	return sessions, nil
+}
+
+// Reuse the source environment when available, including links created by older
+// daemons. Without one, preserve PM's local environment across preparation.
+func prepareHermesInstalls(sharedHome, hermesHome string) error {
+	src := filepath.Join(sharedHome, "installs")
+	dst := filepath.Join(hermesHome, "installs")
+	if fi, err := os.Stat(src); err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("source installs is not a directory: %s", src)
+		}
+		// Source dependencies take precedence even if PM initialized a local
+		// directory first. The linking helper intentionally removes that local
+		// directory before replacing it with a link to the source environment.
+		return linkSharedHermesEntry(src, dst)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat source installs: %w", err)
+	}
+
+	// Preserve a working directory link even if it points to another home;
+	// PM updates through that link intentionally reach the target home.
+	if fi, err := os.Stat(dst); err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("installs is not a directory: %s", dst)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat installs: %w", err)
+	}
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("installs is not a directory link: %s", dst)
+		}
+		// Only unlink a dangling entry; never remove its shared target. PM can
+		// then initialize this home normally on the next launch.
+		return os.Remove(dst)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat installs: %w", err)
+	}
+	return nil
 }
 
 // writeDerivedHermesEnv writes the task-local .env: the source home's .env

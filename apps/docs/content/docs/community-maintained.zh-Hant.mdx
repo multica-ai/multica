@@ -1,0 +1,41 @@
+---
+title: 社群維護的功能區域
+description: Multica 中哪些部分由社群貢獻者維護、這對支援意味著什麼，以及在這些區域遇到問題該怎麼反饋。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 的大部分功能由核心團隊構建和支援。有少數功能區域由社群志願者貢獻，他們在合入後繼續作為這些區域的社群維護者。這些區域會隨每個版本釋出，但不附帶官方支援 SLA。
+
+這一頁是權威列表。你在把工作流搭在某個區域上之前，可以先在這裡查清自己依賴的是什麼；貢獻這些工作的人也在這裡具名記錄。
+
+## "社群維護"是什麼意思
+
+**我們承諾什麼。** 該區域隨每個版本釋出。共享層重構時，核心團隊負責讓它繼續編譯、測試保持透過，並把該區域的問題路由給對應維護者。
+
+**我們無法承諾什麼。** 我們自己不日常使用這些平臺，無法對著真實環境驗證行為。需要真實平臺權限才能定位的問題取決於志願者的時間，因此沒有響應時效保證。
+
+**區域如何退役。** 如果某個區域壞在我們沒有真實權限就修不了的地方，並且幾個版本都沒有修復出現，我們會把它標記為廢棄，不讓它悄悄壞著。這條規則既是對你的保護，也是對維護者的保護：志願者哪天忙了或者離開了，不欠任何人一個修復。
+
+## 功能區域
+
+| 區域 | 程式碼 | 維護者 | 起始 | 狀態 |
+| --- | --- | --- | --- | --- |
+| [釘釘聊天整合](/dingtalk-bot-integration) | `server/internal/integrations/dingtalk` | [@yyclaw](https://github.com/yyclaw) | 2026-08 | 活躍 |
+| [企業微信聊天整合](/channels) | `server/internal/integrations/wecom` | [@leroy-chen](https://github.com/leroy-chen)、[@seacen](https://github.com/seacen) | 2026-08 | 活躍 |
+| [Telegram 聊天整合](/telegram-bot-integration) | `server/internal/integrations/telegram` | [@leonzone](https://github.com/leonzone) | 2026-08 | 活躍 |
+| [紛享銷客聊天整合](/sharecrm-bot-integration) | `server/internal/integrations/sharecrm` | [@zhls-ayl](https://github.com/zhls-ayl) | 2026-08 | 活躍 |
+
+只有當某個區域的歸屬發生變化時，這個列表才會更新。未列出的部分都由核心團隊維護。
+
+## 在這些區域遇到問題怎麼反饋
+
+<Callout type="warning">
+請提 [GitHub issue](https://github.com/multica-ai/multica/issues)，不要直接私信或 @ 維護者本人。他們同意的是成為**我們**轉過去的問題的第一介面，而不是任何人都可以呼叫的客服臺。
+</Callout>
+
+issue 表單裡有一個 **Area** 欄位。填上它，我們才能把反饋路由給對應的維護者。
+
+## 成為維護者
+
+如果你貢獻了一個新的整合或者其他成規模的功能區域，我們會在合入前和你聊清楚這幾件事：我們承諾什麼、希望你承擔什麼，以及上面那條退役規則。拒絕完全沒問題，它只影響這個區域怎麼標註，不影響這份工作能不能合入。

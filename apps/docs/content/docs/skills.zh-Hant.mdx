@@ -1,0 +1,117 @@
+---
+title: Skills
+description: 把常用的指令、步驟和資料整理成可供多個 AI 代理重複使用的 skill。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { SkillDemo } from "@/components/demos/skill-demo";
+
+Skill 是工作區中可以重複使用的一組工作方法。它以 `SKILL.md` 為主檔案，也可以附帶指令碼、模板和參考資料。
+
+把 skill 新增到[AI 代理](/agents)後，AI 代理會在執行相關工作時使用其中的說明。相同的方法不必分別複製到每個 AI 代理的指令中，修改時也只需要維護一份。
+
+## Skill 與 AI 代理指令
+
+| | AI 代理指令 | Skill |
+|---|---|---|
+| **適合儲存** | 這名 AI 代理長期不變的職責、邊界和交付要求 | 某類工作可重複使用的步驟、資料和工具 |
+| **使用範圍** | 只屬於一名 AI 代理，每次執行都會提供 | 可以新增給多名 AI 代理，並單獨啟用或停用 |
+| **例子** | "只審查前端程式碼，不直接修改" | 一套無障礙檢查清單和報告模板 |
+
+## 建立或匯入 skill
+
+在工作區的 **Skills** 頁面選擇"新建 skill"，可以使用四種方式：
+
+| 方式 | 適合什麼情況 |
+|---|---|
+| **手動建立** | 從空白的 `SKILL.md` 開始編寫。 |
+| **從本地匯入** | 選擇包含 `SKILL.md` 的資料夾，或這臺電腦上的 `.skill` / `.zip` 壓縮包。 |
+| **從 URL 匯入** | 從 GitHub、ClawHub 或 Skills.sh 匯入已經發布的 skill。 |
+| **從執行時複製** | 掃描連線電腦上的 skill，並把選中的內容複製到工作區。 |
+
+從執行時複製的是當時的檔案快照。之後本地檔案發生變化，不會自動更新工作區中的版本；需要重新匯入或在 Multica 中編輯。
+
+同一套壓縮包格式也可以用 CLI 匯入：
+
+```bash
+multica skill import --file ./review-helper.skill
+```
+
+匯入時如果工作區已經存在同名 skill，可以停止匯入、覆蓋原內容、使用新名稱儲存，或跳過。透過匯入覆蓋僅限該 skill 的建立者本人；工作區 `admin` 即使可以在應用內編輯它，也不能用匯入的方式覆蓋。要為已在工作區裡的 skill 拉取新版本，請改用[更新已匯入的 skill](#更新已匯入的-skill)。
+
+## 更新已匯入的 skill
+
+從 GitHub、ClawHub 或 Skills.sh 匯入的 skill 會記住它的來源。要拉取最新版本，在 skill 頁面點選**更新**（或在列表行選單裡選"從來源更新"），也可以用 CLI：
+
+```bash
+multica skill refresh <skill-id>
+```
+
+Skill 會從來源重新下載並就地替換：
+
+- **保留**：skill 的身份，包括 AI 代理分配、標籤、建立者和建立時間。AI 代理無需重新新增。
+- **替換**：名稱（來源改名時跟隨）、描述、`SKILL.md` 和全部支援檔案。對 skill 的本地修改會被覆蓋。
+
+Skill 的建立者以及工作區 `owner`、`admin` 都可以從來源更新。手動建立、從壓縮包匯入或從執行時複製的 skill 沒有託管來源，不能這樣更新，只能重新匯入。
+
+要一次更新多個 skill，在列表中選中它們，然後在選擇工具欄中點選**更新**。所有選中的、有託管來源的 skill 都會從來源重新下載；沒有託管來源的會被跳過。
+
+## Skill 的內容
+
+每個 skill 都包含一個主檔案 `SKILL.md`。在這裡寫清：
+
+- 這個 skill 的適用場景；
+- 開始前需要檢查什麼；
+- 執行步驟；
+- 結果應以什麼形式提交；
+- 哪些情況需要停止並向成員確認。
+
+還可以新增支援檔案，例如：
+
+```text
+SKILL.md
+references/api-conventions.md
+templates/review-report.md
+scripts/check.sh
+```
+
+`SKILL.md` 是保留路徑，不能再建立同名支援檔案。支援檔案會和主檔案一起提供給 AI 代理。
+
+## 新增到 AI 代理
+
+建立或匯入 skill 後，還要把它新增到具體的 AI 代理：在 skill 頁面選擇 **新增到 AI 代理**，或開啟 AI 代理的 **Skills** 標籤頁點 **新增 skill**。AI 代理按 skill 的描述判斷什麼時候載入它。
+
+<SkillDemo />
+
+- 一名 AI 代理可以使用多個 skill；
+- 同一個 skill 可以供多名 AI 代理使用；
+- 暫時不需要時，可以停用繫結，而不必刪除 skill；
+- 修改後的內容從後續執行開始生效，不會改變已經開始的執行。
+
+只有有權修改該 AI 代理的成員，才能為它新增、移除或停用 skill。
+
+## 工作區 skill 和倉庫中的 skill
+
+工作區 skill 儲存在 Multica 中，適合由團隊共同維護，並新增給不同 AI 代理。
+
+部分 AI 程式設計工具也會直接讀取程式碼倉庫中的專案級 skill，例如 `.claude/skills/` 或 `.agents/skills/`。這些檔案仍由倉庫管理，Multica 不會自動把它們登記為工作區 skill。具體支援方式取決於使用的工具，見 [AI 程式設計工具對照](/providers)。
+
+連線電腦上已安裝的執行時本地 skill（Claude Code 和 Codex）會顯示在 AI 代理的 **Skills** 標籤頁中，可以按 AI 代理單獨停用。停用同樣需要有權修改該 AI 代理。
+
+對於 Oh-My-Pi，繼承列表和從執行時複製的操作會遵循啟動命令選定的 profile 及生效的 skill 篩選配置。發現過程在空目錄中執行，讀取使用者級配置；專案配置和顯式分配的 Multica skill 單獨處理。如果 OMP 無法返回 skill 清單，重新整理會報錯。
+
+## 修改權限
+
+任何工作區成員都可以建立或匯入 skill。建立者和工作區 `owner`、`admin` 可以修改或刪除它；其他成員可以檢視和使用，但不能覆蓋內容。
+
+刪除是永久操作，同時會從所有 AI 代理上移除該 skill。
+
+<Callout type="warning">
+從外部匯入的 skill 可能包含指令碼、命令或不安全的指令。Multica 不會替你審查、簽名或隔離這些內容。匯入的內容會原樣提供給 AI 代理執行，來源需要可信。
+</Callout>
+
+## 接下來
+
+- [小隊](/squads) — 讓 leader 根據工作內容選擇合適的成員。
+- [守護程序與執行時](/daemon-runtimes) — 瞭解 skill 如何進入實際執行環境。
+- [AI 程式設計工具對照](/providers) — 檢視不同工具對 skill 的支援方式。
