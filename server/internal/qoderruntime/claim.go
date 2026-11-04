@@ -13,6 +13,7 @@ type claimedTask struct {
 	ChatMessage           string              `json:"chat_message,omitempty"`
 	ChatAttachments       []claimedAttachment `json:"chat_message_attachments,omitempty"`
 	ChatChannelType       string              `json:"chat_channel_type,omitempty"`
+	ChatNoticeLocale      string              `json:"chat_notice_locale,omitempty"`
 	ChatType              string              `json:"chat_type,omitempty"`
 	IsLeaderTask          bool                `json:"is_leader_task,omitempty"`
 	AuthToken             string              `json:"auth_token,omitempty"`

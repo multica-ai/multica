@@ -52,6 +52,7 @@ type run struct {
 	Failure      string              `json:"failure,omitempty"`
 	Outcome      string              `json:"outcome,omitempty"`
 	QuickCreate  *quickCreate        `json:"quick_create,omitempty"`
+	Reply        *replyFiles         `json:"reply,omitempty"`
 	Credits      runCredits          `json:"credits"`
 }
 

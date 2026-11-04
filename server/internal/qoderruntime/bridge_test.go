@@ -96,6 +96,9 @@ type harness struct {
 	issueGet                string
 	downloads               map[string]string
 	uploads                 map[string]string
+	qoderFiles              map[string]qoderFile
+	replyUploads            []replyUpload
+	replyUploadStatus       []int
 	rejectUploads           map[string]int
 	sessionResources        []map[string]any
 	sentContent             []map[string]any
@@ -117,7 +120,7 @@ func setup(t *testing.T) *harness {
 			t.Error("missing workspace")
 		}
 		auth := "Bearer multica-secret"
-		if strings.HasPrefix(r.URL.Path, "/api/issues") || strings.HasPrefix(r.URL.Path, "/api/attachments/") {
+		if strings.HasPrefix(r.URL.Path, "/api/issues") || strings.HasPrefix(r.URL.Path, "/api/attachments/") || r.URL.Path == "/api/upload-file" {
 			auth = "Bearer mat_task"
 		}
 		if r.Header.Get("Authorization") != auth {
@@ -154,6 +157,21 @@ func setup(t *testing.T) *harness {
 				return
 			}
 			io.WriteString(w, body)
+		case r.URL.Path == "/api/upload-file" && r.Method == http.MethodPost:
+			if len(h.replyUploadStatus) > 0 {
+				status := h.replyUploadStatus[0]
+				h.replyUploadStatus = h.replyUploadStatus[1:]
+				w.WriteHeader(status)
+				io.WriteString(w, `{"error":"refused"}`)
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(file)
+			h.replyUploads = append(h.replyUploads, replyUpload{header.Filename, r.FormValue("task_id"), string(data), h.complete != nil})
+			io.WriteString(w, `{"id":"att-1"}`)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			json.NewEncoder(w).Encode(map[string]string{"status": h.status})
 		case strings.HasSuffix(r.URL.Path, "/start"):
@@ -203,7 +221,7 @@ func setup(t *testing.T) *harness {
 	t.Cleanup(m.Close)
 	q := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Header.Get("Authorization") != "Bearer qoder-secret" {
+		if r.Header.Get("Authorization") != "Bearer qoder-secret" && !strings.HasPrefix(r.URL.Path, "/blob/") {
 			t.Error("wrong Qoder credential")
 		}
 		switch {
@@ -266,6 +284,32 @@ func setup(t *testing.T) *harness {
 			}
 			h.uploads[header.Filename] = string(data)
 			fmt.Fprintf(w, `{"id":"file_%d","type":"file"}`, len(h.uploads))
+		case strings.HasPrefix(r.URL.Path, "/files/") && r.Method == "GET":
+			id, content := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/files/"), "/content")
+			f, ok := h.qoderFiles[id]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			if !content {
+				scope := f.scope
+				if scope == "" {
+					scope = "sess_1"
+				}
+				json.NewEncoder(w).Encode(map[string]any{"id": id, "downloadable": f.downloadable, "scope": map[string]string{"id": scope, "type": "session"}})
+				return
+			}
+			if !f.downloadable {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"url": "http://" + r.Host + "/blob/" + id, "expires_at": "2026-11-04T00:00:00Z"})
+		case strings.HasPrefix(r.URL.Path, "/blob/"):
+			// A presigned URL carries no credential.
+			if r.Header.Get("Authorization") != "" {
+				t.Error("credential sent to presigned download")
+			}
+			io.WriteString(w, h.qoderFiles[strings.TrimPrefix(r.URL.Path, "/blob/")].data)
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			h.cancels++
 			io.WriteString(w, `{"status":"canceling"}`)

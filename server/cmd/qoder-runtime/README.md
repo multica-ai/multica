@@ -120,6 +120,28 @@ GitHub integration links the pull request back to the issue.
   images over the limits, and chat attachments deleted before the run are
   listed in the prompt as unavailable; the run does not fail. Uploaded Qoder
   files are not deleted by the bridge.
+- Files returned in chat: files the agent delivers with `DeliverArtifacts`
+  during a chat turn (up to 10 MB each) are downloaded from Qoder Files and
+  uploaded to Multica with the task credential, which attaches them to the
+  agent's reply. Only files Qoder scopes to the run's session are passed on.
+  Each file transfer gets its own guarded poll, alternating with normal run
+  polling so other runs and heartbeats continue. Transfers do not share the
+  event poll's deadline, and the task status check is limited to 5 seconds.
+  One file is transferred per poll, before the reply is completed, with a
+  20-second budget per attempt and at most three attempts for reads. Uploads
+  are never automatically replayed: a timeout, 5xx, or unreadable response
+  may mean the file was saved, so the reply asks the user to check its
+  attachments before retrying. A successful upload must return a non-empty
+  attachment ID. Larger files, files of another session, files Qoder does
+  not offer for download, files Multica refuses, and files not yet attached
+  when the bridge restarts are logged and skipped. Delivery notices name
+  files not attached or whose delivery could not be confirmed; the reply
+  still completes. Notices survive journal reloads and completion retries.
+  Notices use the direct chat reader's profile language (English, simplified
+  or traditional Chinese, Japanese, Korean, or French). IM rooms use the
+  channel's default language, including WeCom's deployment setting. Missing
+  locale metadata defaults to English; task credentials are never persisted.
+  Issue runs do not return delivered files.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without
@@ -154,7 +176,7 @@ GitHub integration links the pull request back to the issue.
 This is a PoC for issue runs and chat turns. Squad coordination, local
 directories, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
-file transfer and billing/usage conversion are not implemented. Set up a Qoder
+files delivered by issue runs and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
 implicitly.
