@@ -99,6 +99,7 @@ type harness struct {
 	qoderFiles              map[string]qoderFile
 	replyUploads            []replyUpload
 	replyUploadStatus       []int
+	rejectUploads           map[string]int
 	sessionResources        []map[string]any
 	sentContent             []map[string]any
 	usage                   []map[string]any
@@ -272,6 +273,11 @@ func setup(t *testing.T) *harness {
 			data, _ := io.ReadAll(file)
 			if r.FormValue("name") != header.Filename {
 				t.Error("upload name mismatch")
+			}
+			if status := h.rejectUploads[header.Filename]; status != 0 {
+				w.WriteHeader(status)
+				io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"unsupported file"}}`)
+				return
 			}
 			if h.uploads == nil {
 				h.uploads = map[string]string{}
@@ -484,10 +490,10 @@ func TestIssueAttachmentsReachSession(t *testing.T) {
 	if h.failure != nil || h.sends != 1 {
 		t.Fatalf("run failed: %#v", h.failure)
 	}
-	if h.uploads["notes.md"] != "hello" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 2 {
+	if h.uploads["notes.md"] != "hello" || h.uploads["spec.pdf"] != "%PDF" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 3 {
 		t.Fatalf("uploads: %#v", h.uploads)
 	}
-	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/notes-2.md"}
+	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/spec.pdf", "file_3 /data/attachments/notes-2.md"}
 	var got []string
 	for _, res := range h.sessionResources {
 		if res["type"] == "file" {
@@ -504,7 +510,7 @@ func TestIssueAttachmentsReachSession(t *testing.T) {
 	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte(screen)) {
 		t.Fatalf("image source: %#v", source)
 	}
-	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
+	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "/data/attachments/spec.pdf (mounted file)", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
 		if !strings.Contains(h.prompt, s) {
 			t.Fatalf("prompt missing %q: %s", s, h.prompt)
 		}
@@ -655,18 +661,68 @@ func TestChatAudience(t *testing.T) {
 		}
 	}
 }
-func TestChatAttachmentsFailBeforeExecution(t *testing.T) {
+
+// chatAttach puts files on the chat message the way the claim does: IDs and
+// names only, with metadata and content behind /api/attachments. A file with
+// no content was deleted before the run read it.
+func chatAttach(downloads map[string]string, task *daemon.Task, files ...[3]string) {
+	for i, f := range files {
+		id := fmt.Sprint("c", i)
+		task.ChatMessageAttachments = append(task.ChatMessageAttachments, daemon.ChatAttachmentMeta{ID: id, Filename: f[0], ContentType: f[1]})
+		if f[2] == "" {
+			continue
+		}
+		u := "/api/attachments/" + id + "/download"
+		meta, _ := json.Marshal(map[string]any{"id": id, "filename": f[0], "content_type": f[1], "size_bytes": len(f[2]), "download_url": u})
+		downloads["/api/attachments/"+id] = string(meta)
+		downloads[u] = f[2]
+	}
+}
+
+func TestChatAttachmentsReachSession(t *testing.T) {
 	h := setup(t)
 	h.task.IssueID = ""
 	h.task.ChatSessionID = "chat-1"
-	h.task.ChatMessageAttachments = []daemon.ChatAttachmentMeta{{ID: "att-1"}}
-	if err := h.b.step(context.Background()); err != nil {
+	h.task.ChatMessage = "What is in these?"
+	screen := testPNG(t, 4, 4, false)
+	h.downloads = map[string]string{}
+	chatAttach(h.downloads, h.task,
+		[3]string{"notes.md", "text/markdown", "hello"},
+		[3]string{"screen.png", "image/png", screen},
+		[3]string{"report.pdf", "application/pdf", "%PDF"},
+		[3]string{"setup.exe", "application/octet-stream", "MZ"},
+		[3]string{"old.txt", "text/plain", ""})
+	h.rejectUploads = map[string]int{"setup.exe": 400}
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if h.creates != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
-		t.Fatalf("chat attachment ignored: %#v", h.failure)
+	if h.failure != nil || h.sends != 1 {
+		t.Fatalf("run failed: %#v", h.failure)
+	}
+	if h.uploads["notes.md"] != "hello" || h.uploads["report.pdf"] != "%PDF" || len(h.uploads) != 2 {
+		t.Fatalf("uploads: %#v", h.uploads)
+	}
+	if len(h.sessionResources) != 2 || h.sessionResources[0]["mount_path"] != "/data/attachments/task-1/notes.md" || h.sessionResources[1]["mount_path"] != "/data/attachments/task-1/report.pdf" {
+		t.Fatalf("mounted resources: %v", h.sessionResources)
+	}
+	if len(h.sentContent) != 2 || h.sentContent[1]["type"] != "image" {
+		t.Fatalf("message content: %#v", h.sentContent)
+	}
+	for _, s := range []string{"What is in these?", "Message attachments:", "/data/attachments/task-1/notes.md (mounted file)", "screen.png (image attached", "/data/attachments/task-1/report.pdf (mounted file)", "setup.exe (rejected by Qoder Files): not available", "old.txt (deleted): not available"} {
+		if !strings.Contains(h.prompt, s) {
+			t.Fatalf("prompt missing %q: %s", s, h.prompt)
+		}
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
 	}
 }
+
 func TestAmbiguousSubmitReconcilesAfterRestart(t *testing.T) {
 	h := setup(t)
 	h.lostSend = true

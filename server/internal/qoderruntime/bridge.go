@@ -424,7 +424,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 		}
 		fingerprint := resourceFingerprint(resources)
 		resources = append(resources, r.Files...)
-		if r.PriorSessionID != "" && len(r.Files) == 0 {
+		if r.PriorSessionID != "" && (len(r.Files) == 0 || r.MountFiles) {
 			continued, err := b.continueSession(ctx, r, fingerprint)
 			if err != nil {
 				return err
@@ -460,6 +460,33 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return err
 		}
 		r.Cursor = latest
+	}
+	if r.Phase == "created" && r.Continued {
+		// A continued session lacks this message's files; mount them before the
+		// message that names them. The cursor is already set, and events before
+		// the message are skipped, so the mounts do not read as this turn.
+		for r.MountedFiles < len(r.Files) {
+			err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/resources", r.Files[r.MountedFiles], nil)
+			if rateLimited(err) {
+				r.RetryAt = time.Now().Add(30 * time.Second)
+				return b.persist()
+			}
+			if definitelyRejected(err) {
+				// Nothing was sent yet; start a fresh session with the files instead.
+				r.SessionID, r.PriorSessionID, r.Continued, r.Cursor = "", "", false, ""
+				r.Credits = runCredits{}
+				r.MountedFiles = 0
+				r.Phase = "prepared"
+				return b.persist()
+			}
+			if err != nil {
+				return err
+			}
+			r.MountedFiles++
+			if err := b.persist(); err != nil {
+				return err
+			}
+		}
 	}
 	if r.Phase == "created" {
 		// Save intent before POST. After an ambiguous response/restart, never resend automatically.

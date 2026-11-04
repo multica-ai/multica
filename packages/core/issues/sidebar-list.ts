@@ -142,12 +142,22 @@ function viewTableSort(display: Record<string, unknown>): IssueTableQuerySpec["s
   return { field, direction: display.sortDirection === "desc" ? "desc" : "asc" };
 }
 
+/** Whether listing the view needs the viewer's unread issues. */
+export function viewSidebarNeedsUnread(view: SidebarViewFields): boolean {
+  return baselineFromQuery(view.query).raw.unreadFilter;
+}
+
 /**
  * The request for an expanded saved view: its scope, filters and ordering,
  * so the sidebar lists what opening the view shows. `null` when the view's
- * scope cannot be listed.
+ * scope cannot be listed. A view filtered to unread needs `unreadIssueIds`
+ * (see `viewSidebarNeedsUnread`); without them it lists nothing.
  */
-export function viewSidebarRequest(view: SidebarViewFields, today: string): SidebarTableRequest | null {
+export function viewSidebarRequest(
+  view: SidebarViewFields,
+  today: string,
+  unreadIssueIds: readonly string[] = [],
+): SidebarTableRequest | null {
   const scope = viewTableScope(view);
   if (!scope) return null;
   const { raw } = baselineFromQuery(view.query);
@@ -183,6 +193,7 @@ export function viewSidebarRequest(view: SidebarViewFields, today: string): Side
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
         ...(fields.agentRunningFilter ? { working_only: true } : {}),
+        ...(fields.unreadFilter ? { unread_issue_ids: [...unreadIssueIds].sort() } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },
       sort: viewTableSort(display),

@@ -8,7 +8,6 @@ import {
   HardDrive,
   Lock,
   Pencil,
-  Plus,
 } from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
@@ -53,6 +52,7 @@ import {
   type CollectionSort,
 } from "../../layout/collection-list";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
+import { SkillsIntro } from "./skills-intro";
 import { originSourceUrl, readOrigin } from "../lib/origin";
 import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 import {
@@ -233,31 +233,6 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
       />
       <span className="min-w-0 truncate">{creator.name}</span>
     </>
-  );
-}
-
-// Empty state
-
-function EmptyState({ onCreate }: { onCreate: (method: CreateSkillMethod) => void }) {
-  const { t } = useT("skills");
-  return (
-    <CollectionPageState
-      icon={SkillIcon}
-      title={t(($) => $.page.empty.title)}
-      description={t(($) => $.page.empty.description)}
-      actions={
-        <>
-          <Button type="button" size="sm" onClick={() => onCreate("manual")}>
-            <Plus aria-hidden="true" />
-            {t(($) => $.page.new_skill)}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => onCreate("runtime")}>
-            <HardDrive aria-hidden="true" />
-            {t(($) => $.create.method.runtime.title)}
-          </Button>
-        </>
-      }
-    />
   );
 }
 
@@ -563,9 +538,7 @@ export default function SkillsPage() {
       )}
 
       {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={setCreateMethod} />
-        </div>
+        <SkillsIntro onCreate={setCreateMethod} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}

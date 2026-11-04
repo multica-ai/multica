@@ -382,6 +382,9 @@ export interface IssueTableFilters {
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
+  /** Match the viewer's unread issues as the client holds them
+   *  (`/api/issues/unread`). An explicit empty list matches nothing. */
+  unread_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 

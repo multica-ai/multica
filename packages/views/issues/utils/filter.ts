@@ -54,6 +54,11 @@ export interface IssueFilters {
   // `/api/working-agents` projection so filter.ts stays free of fetching.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
+  // When `unreadFilter` is true, only keep issues whose id is in
+  // `unreadIssueIds` — the viewer's unread list, plus any the surface keeps on
+  // screen after they were read.
+  unreadFilter?: boolean;
+  unreadIssueIds?: ReadonlySet<string>;
   // "Show sub-issues" display toggle. When explicitly `false`, hide issues
   // that have a parent so only top-level issues remain. Undefined / true keeps
   // the default behaviour of showing everything, so existing callers that omit
@@ -82,6 +87,8 @@ export interface IssueFilterState {
   negatedFilters?: readonly NegatableFilterDimension[];
   propertyFilters?: Record<string, PropertyFilterValue[]>;
   workingOnly: boolean;
+  /** Only issues in `IssueFilterContext.unreadIssueIds`. */
+  unreadOnly?: boolean;
   /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
   showSubIssues?: boolean;
 }
@@ -89,6 +96,9 @@ export interface IssueFilterState {
 export interface IssueFilterContext {
   activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
   runningIssueIds?: ReadonlySet<string>;
+  /** See IssueFilters.unreadIssueIds. A missing set with `unreadOnly` on
+   *  matches nothing. */
+  unreadIssueIds?: ReadonlySet<string>;
   /** Project id → its lifecycle status, from the workspace project list.
    *  Absent on surfaces that never load it, which makes the project-status
    *  filter a no-op there rather than blanking the surface. */
@@ -257,6 +267,7 @@ export function applyIssueFilters(
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
   const applyWorkingOnly = workingOnly === true;
+  const applyUnreadOnly = filters.unreadOnly === true;
   const hideSubIssues = filters.showSubIssues === false;
 
   const relationFilters = filters.relationFilters ?? [];
@@ -274,6 +285,8 @@ export function applyIssueFilters(
 
   return issues.filter((issue) => {
     if (applyWorkingOnly && !issueIsWorking(issue.id, context))
+      return false;
+    if (applyUnreadOnly && context.unreadIssueIds?.has(issue.id) !== true)
       return false;
 
     if (hideSubIssues && issue.parent_issue_id) return false;
@@ -482,10 +495,12 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       negatedFilters: filters.negatedFilters,
       propertyFilters: filters.propertyFilters,
       workingOnly: filters.agentRunningFilter === true,
+      unreadOnly: filters.unreadFilter === true,
       showSubIssues: filters.showSubIssues,
     },
     {
       runningIssueIds: filters.runningIssueIds,
+      unreadIssueIds: filters.unreadIssueIds,
       projectStatusById: filters.projectStatusById,
       relation: filters.relationContext,
       today: filters.today,
@@ -507,21 +522,26 @@ export function filterAssigneeGroups(
     showSubIssues?: boolean;
     agentRunningFilter?: boolean;
     runningIssueIds?: ReadonlySet<string>;
+    unreadFilter?: boolean;
+    unreadIssueIds?: ReadonlySet<string>;
     propertyFilters?: Record<string, PropertyFilterValue[]>;
   },
 ): IssueAssigneeGroup[] | undefined {
   const applyRunning = filters.agentRunningFilter === true;
+  const applyUnread = filters.unreadFilter === true;
   const hideSubIssues = filters.showSubIssues === false;
   const hasPropertyFilters = Object.values(filters.propertyFilters ?? {}).some(
     (selected) => selected.length > 0,
   );
-  if (!groups || (!applyRunning && !hideSubIssues && !hasPropertyFilters)) return groups;
+  if (!groups || (!applyRunning && !applyUnread && !hideSubIssues && !hasPropertyFilters)) return groups;
 
   const { runningIssueIds } = filters;
   return groups
     .map((group) => {
       const issues = group.issues.filter((issue) => {
         if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
+          return false;
+        if (applyUnread && !(filters.unreadIssueIds?.has(issue.id) ?? false))
           return false;
         if (hideSubIssues && issue.parent_issue_id) return false;
         if (hasPropertyFilters && !issueMatchesPropertyFilters(issue, filters.propertyFilters))
