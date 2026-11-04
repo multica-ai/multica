@@ -2590,18 +2590,6 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// commentAddFailureHint is the localized replacement for the generic
-// "try again later" copy on a failed comment post. It names the one safe next
-// step: read the thread back and only re-post if the comment is absent.
-func commentAddFailureHint() string {
-	if cli.DetectLanguage() == cli.LangZH {
-		return "评论未确认发送成功。不要直接重试：这次写入可能已经成功，重试会在 issue 上留下两条相同评论。" +
-			"请先用 `multica issue comment list <issue-id> --recent 3 --output json` 确认；评论已存在就当作成功，继续后面的工作，只有确实没有时才重新发送。"
-	}
-	return "The comment post was not confirmed. Do NOT simply retry: the write may have succeeded, and retrying would leave two identical comments on the issue. " +
-		"Verify first with `multica issue comment list <issue-id> --recent 3 --output json`; if the comment is there, treat the post as done and move on — re-send only if it is genuinely absent."
-}
-
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	content, hasContent, err := resolveTextFlag(cmd, "content")
 	if err != nil {
@@ -2690,15 +2678,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
-		// The generic 5xx and transport copy both end in "try again later",
-		// which is wrong advice here: this POST is not idempotent from the
-		// caller's side, and the write may well have landed — a request that
-		// timed out client-side can still be committing server-side. Agents
-		// took that hint literally and double-posted (five issues on
-		// 2026-11-03). The server now collapses an identical re-send from the
-		// same run, but that guard is best-effort and newer than deployed
-		// clients, so the instruction here is to verify rather than retry.
-		return cli.WithUserMessage(commentAddFailureHint(), fmt.Errorf("add comment: %w", err))
+		return fmt.Errorf("add comment: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
