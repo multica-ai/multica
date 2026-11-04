@@ -42,6 +42,13 @@ function defaultsForSurface(
   set: StoreApi<IssueViewState>["setState"],
 ): IssueViewState {
   const defaults = viewStoreSlice(set);
+  if (surfaceKey.startsWith("my:")) {
+    return {
+      ...defaults,
+      sortBy: "updated_at",
+      sortDirections: { ...defaults.sortDirections, updated_at: "desc" },
+    };
+  }
   if (!surfaceKey.startsWith("project:")) return defaults;
   return {
     ...defaults,
@@ -72,7 +79,7 @@ function migrateLegacySurfaceState(
     (state.sortBy === undefined || state.sortBy === "position") &&
     (state.sortDirection === undefined || state.sortDirection === "asc")
   ) {
-    next.sortBy = "created_at";
+    next.sortBy = surfaceKey.startsWith("my:") ? "updated_at" : "created_at";
     next.sortDirection = "desc";
   }
   if (isLegacyCardDefault(state.cardProperties)) {
