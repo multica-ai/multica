@@ -226,6 +226,61 @@ describe("useCreateAgentForm skill reconciliation", () => {
     expect(result.current.draft).toBe(draft);
   });
 
+  it.each(["success", "failure", "unchanged"] as const)(
+    "keeps restored selections until a stale catalog refresh settles (%s)",
+    async (outcome) => {
+      const addedSkill = { ...skill, id: "valid-new-skill" };
+      const key = workspaceKeys.skills(workspace.id);
+      qc.setQueryData(key, [skill]);
+      const cachedSkills = qc.getQueryData(key);
+      await qc.invalidateQueries({ queryKey: key });
+
+      let resolveSkills!: (skills: SkillSummary[]) => void;
+      let rejectSkills!: (error: Error) => void;
+      api.listSkills.mockReturnValue(new Promise<SkillSummary[]>((resolve, reject) => {
+        resolveSkills = resolve;
+        rejectSkills = reject;
+      }));
+      const restoredDraft = {
+        ...staleDraft(),
+        skillIds: new Set([skill.id, addedSkill.id]),
+      };
+      useManualAgentDraftStore.getState().setDraft({
+        byOwner: {
+          blank: {
+            runtimeId: restoredDraft.runtimeId,
+            draft: toStoredAgentDraft(restoredDraft, null),
+          },
+        },
+      });
+      const { result } = renderHook(() => {
+        const form = useCreateAgentForm();
+        useManualDraftSync({ duplicateId: null, ...form, ready: true });
+        return form;
+      }, { wrapper: Wrapper });
+
+      expect(qc.getQueryState(key)?.status).toBe("success");
+      expect(qc.getQueryState(key)?.fetchStatus).toBe("fetching");
+      expect.soft([...result.current.draft.skillIds]).toEqual([skill.id, addedSkill.id]);
+      expect.soft(useManualAgentDraftStore.getState().draft.byOwner.blank?.draft.skill_ids)
+        .toEqual([skill.id, addedSkill.id]);
+
+      await act(async () => {
+        if (outcome === "failure") rejectSkills(new Error("Offline"));
+        else resolveSkills(outcome === "unchanged" ? [skill] : [skill, addedSkill]);
+      });
+      await waitFor(() => expect(qc.getQueryState(key)?.fetchStatus).toBe("idle"));
+      const expectedIds = outcome === "unchanged" ? [skill.id] : [skill.id, addedSkill.id];
+      await waitFor(() => expect([...result.current.draft.skillIds]).toEqual(expectedIds));
+      expect(useManualAgentDraftStore.getState().draft.byOwner.blank?.draft.skill_ids)
+        .toEqual(expectedIds);
+      expect(result.current.draft.name).toBe(restoredDraft.name);
+
+      // Structural sharing keeps data unchanged; fetch status must trigger reconciliation.
+      if (outcome === "unchanged") expect(qc.getQueryData(key)).toBe(cachedSkills);
+    },
+  );
+
   it("waits for the current workspace catalog after switching workspaces", async () => {
     qc.setQueryData(workspaceKeys.skills("ws-1"), []);
     let resolveSkills!: (skills: SkillSummary[]) => void;
