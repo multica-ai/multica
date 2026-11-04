@@ -29,6 +29,55 @@ func TestAgentEnvNotesPersistOnReopen(t *testing.T) {
 	}
 }
 
+func TestAgentEnvSpecialKeysRoundTrip(t *testing.T) {
+	id := dbfx.Agent(t, "env-special-keys", "")
+	put := func(body any) {
+		t.Helper()
+		req := withURLParam(newRequest(http.MethodPut, "/env", body), "id", id)
+		testutil.Call(t, testHandler.UpdateAgentEnv, req).Want(http.StatusOK)
+	}
+	get := func() AgentEnvResponse {
+		t.Helper()
+		var got AgentEnvResponse
+		req := withURLParam(newRequest(http.MethodGet, "/env", nil), "id", id)
+		testutil.Call(t, testHandler.GetAgentEnv, req).Want(http.StatusOK).JSON(&got)
+		return got
+	}
+	env := map[string]string{"__proto__": "special-value", "constructor": "constructor-value", "prototype": "prototype-value", "SAFE": "safe-value"}
+	notes := map[string]string{"__proto__": "special-note", "constructor": "constructor-note", "prototype": "prototype-note"}
+	put(map[string]any{"custom_env": env, "custom_env_notes": notes})
+	// A legacy client omits or sends null metadata while editing another value.
+	for _, explicitNull := range []bool{false, true} {
+		env["SAFE"] = "edited-safe"
+		body := map[string]any{"custom_env": env}
+		if explicitNull {
+			body["custom_env_notes"] = nil
+		}
+		put(body)
+		got := get()
+		for key, value := range env {
+			if got.CustomEnv[key] != value {
+				t.Fatalf("value for %q did not round-trip", key)
+			}
+		}
+		for key, note := range notes {
+			if got.CustomEnvNotes[key] != note {
+				t.Fatalf("note for %q did not round-trip", key)
+			}
+		}
+	}
+	delete(notes, "__proto__")
+	put(map[string]any{"custom_env": env, "custom_env_notes": notes})
+	if got := get(); got.CustomEnv["__proto__"] != "special-value" || len(got.CustomEnvNotes) != 2 {
+		t.Fatal("clearing the special key's note changed its value")
+	}
+	delete(env, "__proto__")
+	put(map[string]any{"custom_env": env, "custom_env_notes": notes})
+	if _, exists := get().CustomEnv["__proto__"]; exists {
+		t.Fatal("explicit key deletion was not persisted")
+	}
+}
+
 func TestAgentEnvNotesCompatibleUpdates(t *testing.T) {
 	id := dbfx.Agent(t, "env-notes-compat", "")
 	put := func(body any) {

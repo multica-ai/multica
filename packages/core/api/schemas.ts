@@ -4030,9 +4030,21 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
 };
 
 
+// z.record strips own __proto__ keys while copying a successful result. Validate
+// without rebuilding the map so legal stored environment keys survive a save.
+const AgentEnvStringMapSchema = z.custom<Record<string, string>>(
+  (value) =>
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every((entry) => typeof entry === "string"),
+);
+
 /** Env values and notes must stay on the dedicated, audited endpoint. */
 export const AgentEnvResponseSchema = z.object({
   agent_id: z.string().default(""),
-  custom_env: z.record(z.string(), z.string()),
-  custom_env_notes: z.record(z.string(), z.string()).optional(),
+  custom_env: AgentEnvStringMapSchema,
+  custom_env_notes: AgentEnvStringMapSchema.nullish().transform(
+    (notes) => notes ?? undefined,
+  ),
 });
