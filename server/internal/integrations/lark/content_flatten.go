@@ -60,9 +60,8 @@ func flattenContent(msgType, rawContent string) string {
 }
 
 // larkPostContent mirrors the RECEIVE-side shape of a `post` rich-text
-// body.content. Crucially this is NOT the locale-wrapped form the SEND
-// API takes ({"zh_cn": {...}}): an inbound post body.content unmarshals
-// directly into {title, content}. content is a 2-D array — the outer
+// body.content after normalization. This is not the locale-wrapped form
+// the SEND API takes ({"zh_cn": {...}}). Content is a 2-D array — the outer
 // array is the ordered list of paragraphs, each inner array the ordered
 // spans of that paragraph; the newline between paragraphs is implicit in
 // the array boundary, not a span.
@@ -71,11 +70,63 @@ type larkPostContent struct {
 	Content [][]larkPostSpan `json:"content"`
 }
 
+// decodePostContent normalizes the receive-side variants for both text and
+// attachment discovery. Prefer legacy paragraphs when present; content_v2 may
+// be a paragraph array or a JSON-encoded paragraph array.
+func decodePostContent(raw string) (larkPostContent, error) {
+	var payload struct {
+		Title     string          `json:"title"`
+		Content   json.RawMessage `json:"content"`
+		ContentV2 json.RawMessage `json:"content_v2"`
+		Files     []larkPostSpan  `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return larkPostContent{}, err
+	}
+	doc := larkPostContent{Title: payload.Title}
+	for _, content := range []json.RawMessage{payload.Content, payload.ContentV2} {
+		var encoded string
+		if json.Unmarshal(content, &encoded) == nil {
+			content = json.RawMessage(encoded)
+		}
+		var paragraphs [][]larkPostSpan
+		if json.Unmarshal(content, &paragraphs) == nil && len(paragraphs) > 0 {
+			doc.Content = paragraphs
+			break
+		}
+	}
+	seen := make(map[string]*larkPostSpan)
+	for _, para := range doc.Content {
+		for i := range para {
+			span := &para[i]
+			if (span.Tag == "file" || span.Tag == "media") && !span.IsFolder && seen[span.FileKey] == nil {
+				seen[span.FileKey] = span
+			}
+		}
+	}
+	for _, file := range payload.Files {
+		if file.IsFolder || file.FileKey == "" {
+			continue
+		}
+		if span := seen[file.FileKey]; span != nil {
+			span.FileName = firstNonEmpty(span.FileName, span.Name, file.FileName, file.Name)
+			span.MimeType = firstNonEmpty(span.MimeType, file.MimeType)
+			continue
+		}
+		file.Tag = "file"
+		para := []larkPostSpan{file}
+		doc.Content = append(doc.Content, para)
+		seen[file.FileKey] = &para[0]
+	}
+	return doc, nil
+}
+
 // larkPostSpan is one node inside a post paragraph. Only the fields that
 // carry renderable text are modelled; the tag set is extensible, so the
 // flattener emits `text` for any unrecognized tag and skips it otherwise
 // rather than failing.
 type larkPostSpan struct {
+	IsFolder bool   `json:"is_folder"`
 	Tag      string `json:"tag"`
 	Text     string `json:"text"`
 	Href     string `json:"href"`
@@ -101,11 +152,15 @@ type larkPostSpan struct {
 // Media spans degrade to the same bracketed placeholders flattenContent
 // uses.
 func flattenPostContent(raw string) string {
+	return flattenPostContentWithMedia(raw, nil)
+}
+
+func flattenPostContentWithMedia(raw string, mediaMarker func(larkMediaResource) string) string {
 	if raw == "" {
 		return ""
 	}
-	var doc larkPostContent
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	doc, err := decodePostContent(raw)
+	if err != nil {
 		return ""
 	}
 
@@ -120,14 +175,20 @@ func flattenPostContent(raw string) string {
 		write(doc.Title)
 	}
 	for _, para := range doc.Content {
-		write(flattenPostParagraph(para))
+		write(flattenPostParagraphWithMedia(para, mediaMarker))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func flattenPostParagraph(spans []larkPostSpan) string {
+func flattenPostParagraphWithMedia(spans []larkPostSpan, mediaMarker func(larkMediaResource) string) string {
 	parts := make([]string, 0, len(spans))
 	for _, s := range spans {
+		if mediaMarker != nil {
+			if res, ok := postSpanMediaResource(s, ""); ok {
+				parts = append(parts, mediaMarker(res))
+				continue
+			}
+		}
 		switch s.Tag {
 		case "text", "code_block":
 			if s.Text != "" {
@@ -154,9 +215,26 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, "@"+s.UserName)
 			}
 		case "img":
-			parts = append(parts, "[Image]")
+			if mediaMarker != nil {
+				parts = append(parts, "[Image: unavailable]")
+			} else {
+				parts = append(parts, "[Image]")
+			}
+		case "file":
+			if s.IsFolder || s.FileKey == "" {
+				continue
+			}
+			if name := firstNonEmpty(s.FileName, s.Name); name != "" {
+				parts = append(parts, "[File: "+name+"]")
+			} else {
+				parts = append(parts, "[File]")
+			}
 		case "media":
-			parts = append(parts, "[Video]")
+			if mediaMarker != nil {
+				parts = append(parts, "[Video: unavailable]")
+			} else {
+				parts = append(parts, "[Video]")
+			}
 		case "emotion":
 			// emoji_type is an enum key (e.g. "SMILE"), not display
 			// text — skip it rather than leak the key.

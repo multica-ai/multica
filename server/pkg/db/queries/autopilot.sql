@@ -426,26 +426,18 @@ SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAutopilotRunDispatchTask :execrows
+-- Records the agent task a create_issue run actually enqueued, so lifecycle
+-- sync can tell the run's own dispatch apart from mention/comment tasks on
+-- the same issue. Status stays issue_created; only an unlinked active run is
+-- written. (MUL-8200)
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL;
+
 -- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunCompleted :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunFailed :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = $2,
-    reason_code = sqlc.narg('reason_code')
 WHERE id = $1
 RETURNING *;
 
@@ -522,17 +514,6 @@ WITH updated_run AS (
     RETURNING p.workspace_id
 )
 SELECT * FROM updated_run;
-
--- name: UpdateAutopilotRunSkippedWithResult :one
--- Quota safety: legacy no-reservation helper. New terminal paths must call
--- UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'skipped',
-    completed_at = now(),
-    failure_reason = $2,
-    result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
 
 -- =====================
 -- Scheduler Queries

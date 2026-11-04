@@ -158,6 +158,55 @@ func TestWakeupConditionOtherIssueUsesScheduledChecks(t *testing.T) {
 	}
 }
 
+// A coordinator can wait for a child's blocker handoff: state=blocked matches
+// only the blocked status, so a review handoff on the same child does not fire it.
+func TestWakeupConditionOtherIssueBlocked(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	workspace := parseTestUUID(t, f.WorkspaceID)
+	other := f.Issue(t, "Child that may block", testutil.Cols{"status": "in_progress"})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Resolve the child's blocker",
+		Condition: condition(t, map[string]any{"type": "other_issue", "issue_id": other, "state": "blocked"})})
+	tick := func() db.IssueWakeup {
+		t.Helper()
+		f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second' WHERE id=$1 AND next_fire_at IS NOT NULL", w.ID)
+		if err := s.TickWorkspaces(ctx, workspace); err != nil {
+			t.Fatal(err)
+		}
+		got, err := f.q.LocklessWakeup(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	wakeSetStatus(t, f, parseTestUUID(t, other), "in_review")
+	if got := tick(); !got.Enabled || got.FireCount != 0 || wakeRuns(t, f, w.ID) != 0 {
+		t.Fatalf("in_review fired a blocked rule: enabled=%t fire_count=%d", got.Enabled, got.FireCount)
+	}
+	wakeSetStatus(t, f, parseTestUUID(t, other), "blocked")
+	got := tick()
+	if got.Enabled || got.FireCount != 1 || wakeRuns(t, f, w.ID) != 1 {
+		t.Fatalf("blocked child: enabled=%t fire_count=%d last_error=%+v", got.Enabled, got.FireCount, got.LastError)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, other) || !strings.Contains(task.HandoffNote.String, `"status":"blocked"`) {
+		t.Fatalf("blocked observation missing from the run: %s", task.HandoffNote.String)
+	}
+}
+
+func TestWakeupConditionOtherIssueRejectsUnknownState(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	other := f.Issue(t, "Watched", testutil.Cols{"status": "todo"})
+	_, err := s.Create(context.Background(), issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, WakeupInput{AgentID: agent, Kind: "event", Instruction: "x",
+		Condition: condition(t, map[string]any{"type": "other_issue", "issue_id": other, "state": "in_progress"})})
+	if err == nil || !strings.Contains(err.Error(), "state must be done, ended, in_review or blocked") {
+		t.Fatalf("unknown state error = %v", err)
+	}
+}
+
 func TestWakeupConditionRepeatsOnlyWhenItBecomesTrueAgain(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
 	label := f.Insert(t, "issue_label", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "approved", "color": "#123456"})

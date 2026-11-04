@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Users } from "lucide-react";
+import { Bot, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AVATAR_SIZE_PX,
@@ -78,7 +78,8 @@ function ActorAvatar({
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
-        <MulticaIcon noSpin style={{ width: scaled(0.55), height: scaled(0.55) }} />
+        // `size` only sets the edge thickness; the slot decides the rendered size.
+        <MulticaIcon shape="circle" size={AVATAR_SIZE_PX[size]} style={{ width: "100%", height: "100%" }} />
       ) : isAgent ? (
         <Bot style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : isSquad ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Clock } from "lucide-react";
+import { Clock } from "@multica/ui/icons";
 
 import { cn } from "@multica/ui/lib/utils";
 

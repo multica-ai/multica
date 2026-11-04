@@ -32,7 +32,7 @@ import {
   Link as LinkIcon,
   Maximize2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -40,6 +40,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
+import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -348,8 +349,14 @@ export function Attachment({
   };
 
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
+    // A CDN storage URL that didn't resolve against this surface's
+    // attachments (e.g. an image quoted from another comment) still names
+    // its attachment id, so re-sign it instead of opening the bare URL,
+    // which a signed CDN rejects outside the app.
+    const attachmentId =
+      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+    if (attachmentId) {
+      download(attachmentId);
       return;
     }
     if (shareUrl) openByUrl(shareUrl);

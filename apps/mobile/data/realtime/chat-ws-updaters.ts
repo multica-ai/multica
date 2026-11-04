@@ -319,3 +319,11 @@ export function appendTaskMessage(
     },
   );
 }
+
+export async function refreshTaskMessages(qc: QueryClient, taskId: string) {
+  const queryKey = chatKeys.taskMessages(taskId);
+  // Invalidation alone reuses an unfinished first load. Cancel it first,
+  // retaining any WS rows received since it began instead of reverting them.
+  await qc.cancelQueries({ queryKey }, { revert: false, silent: true });
+  await qc.invalidateQueries({ queryKey });
+}

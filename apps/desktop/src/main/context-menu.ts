@@ -28,6 +28,8 @@ export function installContextMenu(webContents: WebContents): void {
       linkURL,
       mediaType,
       hasImageContents,
+      misspelledWord,
+      dictionarySuggestions,
     } = params;
     const hasSelection = selectionText.trim().length > 0;
     // params.linkURL is the resolved absolute URL of the anchor under the
@@ -42,6 +44,26 @@ export function installContextMenu(webContents: WebContents): void {
     const labels = pickLabels();
 
     const menu = new Menu();
+
+    // Spelling: suggestions first, like Chrome. Only in editable fields.
+    if (isEditable && misspelledWord) {
+      for (const suggestion of dictionarySuggestions) {
+        menu.append(
+          new MenuItem({
+            label: suggestion,
+            click: () => webContents.replaceMisspelling(suggestion),
+          }),
+        );
+      }
+      menu.append(
+        new MenuItem({
+          label: labels.addToDictionary,
+          click: () =>
+            webContents.session.addWordToSpellCheckerDictionary(misspelledWord),
+        }),
+      );
+      menu.append(new MenuItem({ type: "separator" }));
+    }
 
     if (isEditable && editFlags.canCut) {
       menu.append(new MenuItem({ role: "cut" }));
@@ -122,11 +144,12 @@ export function installContextMenu(webContents: WebContents): void {
 // with English as the fallback. Kept inline because the main process has
 // no shared i18n loader (the renderer's i18next is per-window and not
 // reachable from here), and pulling one in for three strings would be
-// more rope than payload. Matches the four locales the renderer ships.
+// more rope than payload. Matches the five locales the renderer ships.
 type ContextMenuLabels = {
   openLink: string;
   copyLinkAddress: string;
   copyImage: string;
+  addToDictionary: string;
 };
 
 const labelsByLocale: Record<string, ContextMenuLabels> = {
@@ -134,25 +157,41 @@ const labelsByLocale: Record<string, ContextMenuLabels> = {
     openLink: "Open Link in Browser",
     copyLinkAddress: "Copy Link Address",
     copyImage: "Copy Image",
+    addToDictionary: "Add to Dictionary",
   },
   "zh-Hans": {
     openLink: "在浏览器中打开链接",
     copyLinkAddress: "复制链接地址",
     copyImage: "复制图片",
+    addToDictionary: "添加到词典",
+  },
+  "zh-Hant": {
+    openLink: "在瀏覽器中開啟連結",
+    copyLinkAddress: "複製連結網址",
+    copyImage: "複製圖片",
+    addToDictionary: "加入字典",
   },
   ja: {
     openLink: "ブラウザでリンクを開く",
     copyLinkAddress: "リンクのアドレスをコピー",
     copyImage: "画像をコピー",
+    addToDictionary: "辞書に追加",
   },
   ko: {
     openLink: "브라우저에서 링크 열기",
     copyLinkAddress: "링크 주소 복사",
     copyImage: "이미지 복사",
+    addToDictionary: "사전에 추가",
+  },
+  es: {
+    openLink: "Abrir enlace en el navegador",
+    copyLinkAddress: "Copiar dirección del enlace",
+    copyImage: "Copiar imagen",
+    addToDictionary: "Añadir al diccionario",
   },
 };
 
-// pickLabels resolves the OS-preferred language to one of the four
+// pickLabels resolves the OS-preferred language to one of the five
 // locales we ship copy for. We say "Open Link in Browser" rather than
 // "Open Link in New Window" because the link is opened via
 // shell.openExternal — it lands in the user's default browser, not in
@@ -161,12 +200,14 @@ const labelsByLocale: Record<string, ContextMenuLabels> = {
 function pickLabels(): ContextMenuLabels {
   const preferred = app.getPreferredSystemLanguages()[0]?.toLowerCase() ?? "";
   if (preferred.startsWith("zh")) {
-    // All Chinese variants get the Simplified copy — Multica only
-    // ships zh-Hans, and zh-Hant users falling through to en would be
-    // worse than reading Simplified Chinese.
-    return labelsByLocale["zh-Hans"];
+    // Traditional-script and Taiwan/Hong Kong/Macau tags get zh-Hant; every
+    // other Chinese variant gets the Simplified copy.
+    return /^zh-(hant|tw|hk|mo)\b/.test(preferred)
+      ? labelsByLocale["zh-Hant"]
+      : labelsByLocale["zh-Hans"];
   }
   if (preferred.startsWith("ja")) return labelsByLocale.ja;
   if (preferred.startsWith("ko")) return labelsByLocale.ko;
+  if (preferred.startsWith("es")) return labelsByLocale.es;
   return labelsByLocale.en;
 }

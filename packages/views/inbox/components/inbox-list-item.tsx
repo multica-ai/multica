@@ -7,7 +7,7 @@ import {
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
-import { Archive, ArchiveRestore } from "lucide-react";
+import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
@@ -126,7 +126,7 @@ export function InboxListItem({
       onContextMenu={
         openContextMenu ? (e) => openContextMenu(item, e) : undefined
       }
-      className={`group flex w-full cursor-default select-none items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
+      className={`group flex w-full cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
         isSelected
           ? "bg-accent"
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
@@ -172,23 +172,6 @@ export function InboxListItem({
               }
             />
             <InboxRowMenu item={item} view={view} />
-            {item.issue_status && (
-              // Icon-only, like every other issue row — but a colour is not a
-              // name, and this row has no space for the CustomStatusChip the
-              // board card and list row carry. `title` is that name.
-              <span
-                title={statusLabelOf(item.issue_status)}
-                className="flex shrink-0 items-center"
-              >
-                <StatusIcon
-                  status={item.issue_status}
-                  category={statusCategoryOf(item.issue_status)}
-                  color={statusColor}
-                  icon={item.issue_status ? statusIconOf(item.issue_status) : null}
-                  className="h-3.5 w-3.5 shrink-0"
-                />
-              </span>
-            )}
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -206,6 +189,25 @@ export function InboxListItem({
                 issueId={item.issue_id}
                 hoverCard={false}
               />
+            )}
+            {/* On the detail line rather than the title's, so the title keeps
+                the whole first line to itself. */}
+            {item.issue_status && (
+              // Icon-only, like every other issue row — but a colour is not a
+              // name, and this row has no space for the CustomStatusChip the
+              // board card and list row carry. `title` is that name.
+              <span
+                title={statusLabelOf(item.issue_status)}
+                className="flex shrink-0 items-center"
+              >
+                <StatusIcon
+                  status={item.issue_status}
+                  category={statusCategoryOf(item.issue_status)}
+                  color={statusColor}
+                  icon={item.issue_status ? statusIconOf(item.issue_status) : null}
+                  className="h-3.5 w-3.5 shrink-0"
+                />
+              </span>
             )}
             <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
               {timeAgo(item.created_at)}

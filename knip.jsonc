@@ -74,6 +74,7 @@
     },
 
     "packages/eslint-config": {},
-    "packages/tsconfig": {}
+    "packages/tsconfig": {},
+    "packages/vitest-setup": {}
   }
 }

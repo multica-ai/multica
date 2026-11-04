@@ -158,7 +158,7 @@ describe("SourceContextBadge", () => {
     expect(screen.getByText("Captured comment").closest('[data-slot="source-context-content"]')).toBeInTheDocument();
     const openCurrent = screen.getByRole("button", { name: "Go to source comment" });
     expect(openCurrent.closest('[data-slot="dialog-header"]')).toBeInTheDocument();
-    expect(openCurrent.querySelector(".lucide-locate-fixed")).toBeInTheDocument();
+    expect(openCurrent.querySelector(".icon-locate-fixed")).toBeInTheDocument();
     const expand = screen.getByRole("button", { name: "Expand captured context" });
     expect(expand.closest('[data-slot="dialog-header"]')).toBeInTheDocument();
     fireEvent.click(expand);

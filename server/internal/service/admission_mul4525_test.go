@@ -66,7 +66,7 @@ func TestRerunIssueBlockedBeforeMutationWhenInvokeDenied(t *testing.T) {
 		return false
 	}
 
-	_, err = svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(creatorID), deny)
+	_, err = svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(creatorID), false, deny)
 	if !errors.Is(err, ErrRerunInvokeNotAllowed) {
 		t.Fatalf("RerunIssue with denying gate: err = %v, want ErrRerunInvokeNotAllowed", err)
 	}
@@ -83,7 +83,7 @@ func TestRerunIssueBlockedBeforeMutationWhenInvokeDenied(t *testing.T) {
 
 	// A permitting gate reruns normally (cancels the original, enqueues fresh).
 	allow := func(db.Agent) bool { return true }
-	rerun, err := svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(creatorID), allow)
+	rerun, err := svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(creatorID), false, allow)
 	if err != nil {
 		t.Fatalf("RerunIssue with permitting gate: %v", err)
 	}

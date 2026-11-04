@@ -29,6 +29,12 @@ import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import {
+  launchWorkspaceSlug,
+  otherWindowWorkspaces,
+  resolveWindowWorkspace,
+} from "./platform/workspace-windows";
 import {
   tearDownOnLogout,
   tearDownOnSessionExpiry,
@@ -43,9 +49,11 @@ import {
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  "zh-Hant": "zh-TW",
   ko: "ko-KR",
   ja: "ja-JP",
   fr: "fr-FR",
+  es: "es",
 };
 
 
@@ -95,7 +103,7 @@ function IssueWindowContent() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="launch" size={40} />
       </div>
     );
   }
@@ -286,12 +294,17 @@ function AppContent() {
   // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
     if (!workspaceListReady) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const slugs = workspaces.map((w) => w.slug);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
     const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
-    if (!activeWorkspaceSlug && workspaces.length > 0) {
-      switchWorkspace(workspaces[0].slug);
-    }
+    if (slugs.length === 0) return;
+    const target = resolveWindowWorkspace(
+      slugs,
+      activeWorkspaceSlug,
+      launchWorkspaceSlug(),
+      otherWindowWorkspaces(),
+    );
+    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
   }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)
@@ -320,7 +333,7 @@ function AppContent() {
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="launch" size={40} />
       </div>
     );
   }
@@ -470,6 +483,7 @@ export default function App() {
         >
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

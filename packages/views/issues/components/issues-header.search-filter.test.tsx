@@ -213,13 +213,18 @@ describe("IssueFilterMenu list-section search", () => {
     expect(seen).toHaveLength(1);
   });
 
-  it("still hands ArrowDown to the menu to step into the filtered list", async () => {
+  it("still hands ArrowDown to the menu to step into the submenu items", async () => {
     renderFilterMenu();
     const { user } = await openSubmenu(/^Assignee/, /Grace Hopper/);
+    const input = screen.getByPlaceholderText("Filter...");
 
     await user.keyboard("grace{ArrowDown}");
 
-    expect(screen.getByRole("menuitemcheckbox", { name: /Grace Hopper/ })).toHaveFocus();
+    // The menu's list navigation moved focus off the search box onto a menu
+    // item (which one depends on the submenu layout, e.g. the is / is not
+    // switch above the search box), so the guard did not swallow the key.
+    expect(input).not.toHaveFocus();
+    expect(document.activeElement?.getAttribute("role")).toMatch(/^menuitem/);
   });
 
   it("still lets Escape close the menu from the search", async () => {

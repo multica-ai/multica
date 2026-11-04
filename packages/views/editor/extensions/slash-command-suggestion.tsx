@@ -11,6 +11,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
+import { closeHistory } from "@tiptap/pm/history";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { getCurrentWsId } from "@multica/core/platform";
@@ -319,23 +320,15 @@ export function buildBuiltinCommandItems(
 export interface BuiltinCommandSuggestionOptions {
   /**
    * Configured quick actions offered alongside the built-ins. Read lazily on
-   * every keystroke so a newly created action shows up without remounting the
-   * editor.
+   * every keystroke and catalog notification without remounting the editor.
    */
   getQuickActions?: () => { id: string; name: string; description?: string }[];
+  subscribeQuickActions?: (refresh: () => void) => () => void;
   /**
-   * Resolves a quick action to the text it would post. Server-rendered, so the
-   * inserted body is byte-identical to what clicking the sidebar button sends.
-   * Returning "" (or throwing) must leave the composer untouched rather than
-   * inserting a half-rendered prompt.
+   * Builds draft text synchronously from the cached catalog. Returning ""
+   * leaves the composer untouched when an action or its target is unavailable.
    */
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  /**
-   * Called when renderQuickAction rejects. The extension cannot show UI of its
-   * own — a ProseMirror command runs outside React's tree — so the host turns
-   * this into a toast. Without it a failed pick is completely silent.
-   */
-  onRenderError?: (error: unknown) => void;
+  getQuickActionContent?: (quickActionId: string) => string;
 }
 
 export function createBuiltinCommandSuggestion(
@@ -352,53 +345,20 @@ export function createBuiltinCommandSuggestion(
     items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
     command: ({ editor, range, props }) => {
       if (isQuickActionItem(props)) {
-        const render = options.renderQuickAction;
-        if (!render) return;
-        const id = quickActionIdFromItem(props);
-
-        // The "/query" text is deliberately left in place while the request
-        // is in flight. Deleting first meant a failed or slow render destroyed
-        // what the user typed with nothing to show for it, and the insert then
-        // landed wherever the caret happened to be by the time it resolved.
-        //
-        // Snapshot the EXACT text under the range, not just its shape. A
-        // prefix check ("does it still start with /") passes when the user
-        // rewrote `/review` into `/fix` mid-request, and the stale response
-        // would then overwrite the new command.
-        const originalText = editor.state.doc.textBetween(range.from, range.to);
-
-        void render(id)
-          .then((content) => {
-            if (!content) return;
-            const withinDoc = range.to <= editor.state.doc.content.size;
-            const unchanged =
-              withinDoc && editor.state.doc.textBetween(range.from, range.to) === originalText;
-            if (!unchanged) {
-              // The command was edited, moved, or removed while the request
-              // was outstanding. Inserting anywhere now would either clobber
-              // the user's newer text or drop the body in an unrelated spot,
-              // so this pick is simply abandoned.
-              return;
-            }
-            editor
-              .chain()
-              .focus()
-              // contentType: "markdown" is load-bearing. Without it Tiptap
-              // inserts the string as literal TEXT, so the server-rendered
-              // `[@Name](mention://agent/…)` never becomes a mention node —
-              // it serialises back out with the brackets escaped
-              // (`\[@Name\](…)`) and renders as raw markup in the thread.
-              .insertContentAt({ from: range.from, to: range.to }, content, {
-                contentType: "markdown",
-              })
-              .run();
-            window.getSelection()?.collapseToEnd();
+        const content = options.getQuickActionContent?.(quickActionIdFromItem(props));
+        if (!content) return;
+        editor
+          .chain()
+          .focus()
+          .command(({ tr }) => {
+            // Undoing a synchronous pick must preserve the preceding draft.
+            closeHistory(tr);
+            return true;
           })
-          .catch((error: unknown) => {
-            // The command text is still there, so the user can retry or edit
-            // it by hand; the host surfaces why nothing was inserted.
-            options.onRenderError?.(error);
-          });
+          // Parse the mention markup into a node, rather than literal text.
+          .insertContentAt(range, content, { contentType: "markdown" })
+          .run();
+        window.getSelection()?.collapseToEnd();
         return;
       }
 
@@ -417,8 +377,11 @@ export function createBuiltinCommandSuggestion(
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,
       component: SlashCommandList,
+      subscribe: options.subscribeQuickActions,
       getProps: (props) => ({
-        items: props.items,
+        // Read the current catalog even when Tiptap finishes an older items
+        // request after a catalog notification.
+        items: buildBuiltinCommandItems(props.query, options.getQuickActions?.() ?? []),
         query: props.query,
         command: props.command,
         hideOnEmpty: true,

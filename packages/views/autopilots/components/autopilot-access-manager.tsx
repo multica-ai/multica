@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, Users, X } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -21,6 +21,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { ObjectSectionEmpty } from "../../layout/object-page";
 
 // Grant / revoke explicit write access to an autopilot. Members-only, mirroring
 // the subscriber picker. Creators and workspace admins always have access and
@@ -125,9 +126,7 @@ export function AutopilotAccessManager({
       </div>
 
       {collaborators.length === 0 ? (
-        <p className="rounded-md border border-dashed px-3 py-4 text-center text-body text-muted-foreground">
-          {t(($) => $.access.empty)}
-        </p>
+        <ObjectSectionEmpty icon={Users} description={t(($) => $.access.empty)} />
       ) : (
         <ul className="space-y-1">
           {collaborators.map((c) => (

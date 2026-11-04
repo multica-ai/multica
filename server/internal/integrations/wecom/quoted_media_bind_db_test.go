@@ -249,17 +249,18 @@ func runQuotedBindScenario(t *testing.T, sc quotedBindScenario, streaming bool, 
 	var attachments int
 	deadline := time.Now().Add(20 * time.Second)
 	for {
+		// Body and attachment count in ONE statement, so both come from the
+		// same snapshot. Read separately, the bind transaction could commit
+		// between them: the count then says binding is done while the body
+		// read just before it still carries the unbound markers.
 		err := pool.QueryRow(ctx, `
-			SELECT cm.id, cm.content
+			SELECT cm.id, cm.content,
+				(SELECT count(*) FROM attachment a WHERE a.chat_message_id = cm.id)
 			FROM chat_message cm
 			JOIN chat_session cs ON cs.id = cm.chat_session_id
 			WHERE cs.workspace_id = $1 AND cm.role = 'user'
-			ORDER BY cm.created_at DESC LIMIT 1`, fixture.workspaceID).Scan(&chatMessageID, &body)
+			ORDER BY cm.created_at DESC LIMIT 1`, fixture.workspaceID).Scan(&chatMessageID, &body, &attachments)
 		if err == nil {
-			if err := pool.QueryRow(ctx,
-				`SELECT count(*) FROM attachment WHERE chat_message_id = $1`, chatMessageID).Scan(&attachments); err != nil {
-				t.Fatalf("count attachments: %v", err)
-			}
 			if (attachments >= len(sc.wantAttachments) && tasks.promotions() > 0) || time.Now().After(deadline) {
 				break
 			}

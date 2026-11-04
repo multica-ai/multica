@@ -123,6 +123,14 @@ use S3-compatible object storage instead.
 | `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
 | `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
 
+Uploads support files up to **100 MiB**. The backend allows an additional
+1 MiB for multipart boundaries and metadata, and returns HTTP 413 for oversized
+files or requests. The web upload route streams the body to the backend, so
+Next Proxy's body-buffer limit does not truncate uploads, including requests
+without `Content-Length`. If you deploy your own reverse proxy or ingress,
+allow request bodies of at least **101 MiB** there too. The upload limit is fixed;
+no upload-size environment variable is supported.
+
 #### S3 / CloudFront
 
 | Variable | Description |
@@ -327,6 +335,15 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter keeps normal polls at `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
+Browser login callbacks accept only `localhost`, `127.0.0.1`, and RFC 1918
+IPv4 addresses. If route detection selects an unsupported virtual-adapter
+address (for example `198.18.0.1`), login stops before opening the browser.
+When the browser and CLI run on the same machine, retry with
+`multica login --callback-host 127.0.0.1`. For a browser on another LAN machine,
+use `--callback-host <CLI-machine-LAN-IPv4>`; SSH-only machines can use token
+login or the printed SSH tunnel instructions. The login page reports invalid
+callback links instead of treating them as ordinary web sign-ins.
+
 Agent-specific overrides:
 
 | Variable | Description |
@@ -342,7 +359,7 @@ Agent-specific overrides:
 | `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
 | `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_MODEL` | Select the registered OpenClaw agent ID used by default; the agent's `runtime_config.model_override` persistently overrides its underlying model for all newly claimed runs until changed or cleared |
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |

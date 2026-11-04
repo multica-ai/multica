@@ -69,7 +69,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
-				"read `references/issues.md` in the `multica-platform` skill",
+				"read `references/sub-issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -1083,6 +1083,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
@@ -1146,6 +1147,17 @@ func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
 	}
 	if claudePath == codebuddyPath {
 		t.Fatal("claude and codebuddy must not share a runtime config path")
+	}
+}
+
+func TestRuntimeConfigPathDevinUsesAgentsMd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	got := runtimeConfigPath(dir, "devin")
+	want := filepath.Join(dir, "AGENTS.md")
+	if got != want {
+		t.Fatalf("devin runtime config path = %q, want %q", got, want)
 	}
 }
 
@@ -1464,6 +1476,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
@@ -2329,18 +2342,8 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	}
 }
 
-// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
-// index of invocable names, with no descriptions and no per-provider branch.
-//
-// Descriptions were removed because every runtime CLI already builds its own
-// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
-// was the same routing signal paid for twice — ~3,100 tokens per brief on a
-// real task, 40% of the whole brief (MUL-5529).
-//
-// The provider branch was removed because its fallback was wrong: it told
-// providers outside a hardcoded list to look in `.agent_context/skills/`, but
-// the only providers that ever reached it — grok and traecli — have their files
-// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+// TestBriefSkillsListIsNamesOnly pins the native-discovery Skills section
+// byte-for-byte. TRAE's file-loading index has separate coverage.
 func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2357,26 +2360,46 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		},
 	}
 
-	// grok and traecli are the providers that used to take the removed branch;
-	// the rest are a spread across the native-discovery list.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "some-unknown-provider"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			_, section, ok := strings.Cut(out, "## Skills\n\n")
+			if !ok {
+				t.Fatal("brief has no Skills section")
 			}
-			if strings.Contains(out, "Use when reviewing a pull request") {
-				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
-			}
-			if strings.Contains(out, ".agent_context/skills/") {
-				t.Errorf("brief still points at the removed fallback path:\n%s", out)
-			}
-			if !strings.Contains(out, "discovered automatically") {
-				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			section, _, _ = strings.Cut(section, "## Mentions\n\n")
+			const want = "You have the following skills installed (discovered automatically):\n\n- **pr-review**\n\n"
+			if section != want {
+				t.Errorf("native-discovery Skills section changed:\ngot  %q\nwant %q", section, want)
 			}
 		})
+	}
+}
+
+// TestBriefCarriesTheWhenToSplitRule pins the two halves of MUL-8441 that live
+// in the cached brief: the default against splitting a feature into sub-issues,
+// and the step-1 hook that makes reading a sub-issue's parent part of reading
+// the issue. Both must hold without the platform skill installed.
+func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"Default to one issue, one PR.",
+		"slice by user-visible behavior, never by layer",
+		"A PR that is large to review is not a reason to split",
+		"When the per-turn message carries a `[Parent issue]` block, this issue is a sub-issue",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief lost %q:\n%s", want, out)
+		}
+	}
+	rule := strings.Index(out, "Default to one issue, one PR.")
+	flags := strings.Index(out, "`--status todo` starts an agent-assigned child immediately")
+	if rule < 0 || flags < 0 || rule > flags {
+		t.Errorf("the split rule must come before the sub-issue flags it gates:\n%s", out)
 	}
 }
 
@@ -2398,7 +2421,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "current backend",
 			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "retired legacy skill alone has no pointer",
@@ -2408,7 +2431,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "platform pointer ignores the retired legacy skill",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "neither installed",

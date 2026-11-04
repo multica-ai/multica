@@ -108,13 +108,13 @@ type HTTPClientConfig struct {
 	// stripped.
 	BaseURL string
 
-	// HTTPClient is the transport used for every outbound call. Tests
+	// HTTPClient is the transport used for JSON API calls. Tests
 	// substitute an *http.Client whose Transport routes to an
 	// httptest.Server. Empty defaults to a fresh http.Client with
 	// defaultRequestTimeout.
 	HTTPClient *http.Client
 
-	// ResourceHTTPClient is used only for message resource downloads. It
+	// ResourceHTTPClient is used for resource downloads and media uploads. It
 	// deliberately does not share HTTPClient's shorter timeout: image/video
 	// resource transfers are bounded by ResourceDownloadTimeout instead.
 	ResourceHTTPClient *http.Client
@@ -415,6 +415,31 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	return resp.Data.MessageID, nil
 }
 
+func markdownCardContent(markdown, summary string) (string, error) {
+	return markdownCardJSON(markdownImageLinks(markdown), summary)
+}
+
+// Only callers holding uploaded image keys may bypass URL-image degradation.
+func markdownCardJSON(markdown, summary string) (string, error) {
+	card := map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"update_multi": true},
+		"body": map[string]any{
+			"elements": []any{
+				map[string]any{"tag": "markdown", "content": markdown},
+			},
+		},
+	}
+	if summary != "" {
+		card["config"].(map[string]any)["summary"] = map[string]any{"content": summary}
+	}
+	cardBytes, err := json.Marshal(card)
+	if err != nil {
+		return "", fmt.Errorf("lark http client: encode markdown card: %w", err)
+	}
+	return string(cardBytes), nil
+}
+
 // SendMarkdownCard posts the agent's reply as an interactive card
 // using Lark's schema-2.0 envelope with a single `tag: "markdown"`
 // body element. Lark's client renders the markdown into formatted
@@ -437,24 +462,11 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	if p.Markdown == "" {
 		return "", errors.New("lark http client: missing markdown body")
 	}
-	card := map[string]any{
-		"schema": "2.0",
-		"body": map[string]any{
-			"elements": []any{
-				map[string]any{"tag": "markdown", "content": p.Markdown},
-			},
-		},
-	}
-	if p.Summary != "" {
-		card["config"] = map[string]any{
-			"summary": map[string]any{"content": p.Summary},
-		}
-	}
-	cardBytes, err := json.Marshal(card)
+	content, err := markdownCardContent(p.Markdown, p.Summary)
 	if err != nil {
-		return "", fmt.Errorf("lark http client: encode markdown card: %w", err)
+		return "", err
 	}
-	path, body := outboundMessageRequest(p.ChatID, "interactive", string(cardBytes), p.ReplyTarget)
+	path, body := outboundMessageRequest(p.ChatID, "interactive", content, p.ReplyTarget)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -497,7 +509,7 @@ func (c *httpAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardPar
 		if isTokenError(resp.Code) {
 			c.invalidateToken(p.InstallationID.AppID)
 		}
-		return fmt.Errorf("lark http client: patch interactive card: code=%d msg=%q", resp.Code, resp.Msg)
+		return &APIError{Op: "patch interactive card", Code: resp.Code, Msg: resp.Msg}
 	}
 	return nil
 }

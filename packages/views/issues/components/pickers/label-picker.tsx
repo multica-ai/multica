@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Tag, Plus, Settings2 } from "lucide-react";
+import { Tag, Plus, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Label } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -229,6 +229,7 @@ export function LabelPicker({
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
         triggerRender={resolvedTriggerRender}
+        nativeButton={!!triggerRender || !hasLabels}
         tooltip={tooltip}
         trigger={
           hasLabels ? (

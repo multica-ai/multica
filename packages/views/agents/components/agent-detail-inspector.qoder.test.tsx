@@ -91,7 +91,7 @@ describe("AgentDetailInspector and the Qoder runtime", () => {
     expect(picker.props?.canEdit).toBe(false);
     expect(screen.queryByText("Model")).toBeNull();
     expect(
-      screen.getByText("Model, tools and skills are set on the QCA agent in Qoder."),
+      screen.getByText("Model, tools and skills are set on the agent in Qoder Cloud Agents."),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Concurrency")).toHaveValue(6);
     expect(mockInitiateListModels).not.toHaveBeenCalled();

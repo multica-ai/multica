@@ -40,8 +40,10 @@ var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
-// opencodeBackend implements Backend by spawning `opencode run --format json`
-// and reading streaming JSON events from stdout — the same pattern as Claude.
+// opencodeBackend implements Backend for OpenCode. Built-in 1.15+ and 2.x
+// runtimes are driven over ACP (`opencode acp`, opencode_acp.go); everything
+// else spawns `opencode run --format json` and reads streaming JSON events from
+// stdout — the same pattern as Claude.
 type opencodeBackend struct {
 	cfg Config
 	// session is per-run state, set by Execute on the copy it scans with, so
@@ -142,6 +144,14 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	execPath, err := resolveOpenCodeExecutable(b.cfg)
 	if err != nil {
 		return nil, err
+	}
+	// ACP streams tool starts, which the daemon needs to tell a long tool from
+	// a hang; see opencode_acp.go. Everything below is the run transport, kept
+	// as the fallback.
+	if useACP, reason := opencodeUsesACP(b.cfg, opts); useACP {
+		return b.executeACP(ctx, execPath, prompt, opts)
+	} else {
+		b.cfg.Logger.Info("opencode: using the run transport", "reason", reason)
 	}
 
 	timeout := opts.Timeout
@@ -481,6 +491,10 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	stepProducedOutput := false // current step emitted text, a tool call, or reported usage
 	lastStepVoid := false       // the most recently closed step produced nothing at all
 
+	// exitIsTerminal: on 2.x the process outcome, not step bracketing, is the
+	// terminal signal. See the EOF check below for why.
+	exitIsTerminal := opencodeUsesV2Contract(b.cfg)
+
 	scanner := newAgentStreamScanner(r)
 
 	for scanner.Scan() {
@@ -506,10 +520,20 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			b.handleTextEvent(event, ch, &output)
 			if event.Part.Text != "" {
 				stepProducedOutput = true
+				// On 2.x the step this text belongs to may never close, so the
+				// void-step guard would otherwise keep judging the run by an
+				// earlier empty step it already recovered from. 1.x still waits
+				// for that step's step_finish to clear the flag.
+				if exitIsTerminal {
+					lastStepVoid = false
+				}
 			}
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
 			stepProducedOutput = true
+			if exitIsTerminal {
+				lastStepVoid = false // same recovery rule as text above
+			}
 			if event.Part.Metadata == nil || !event.Part.Metadata.ProviderExecuted {
 				stepHasContinuationTool = true
 			}
@@ -564,14 +588,30 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	// all means the run did not finish: its provider stream died and
 	// `opencode run` exited without emitting an error event. Fail closed on
 	// that structural evidence rather than reporting a false-green completion.
+	//
+	// OpenCode 2.x changes which of these shapes are evidence. Its CLI stops
+	// consuming step events as soon as the session settles, so the final step's
+	// step_finish is routinely never written (GH #8892, #9456): a completed
+	// text-only turn arrives as `step_start, text` → EOF, and a tool turn can
+	// end as `…, step_finish(tool-calls), text` → EOF with no new step_start.
+	// At the same time 2.x no longer exits quietly on a dead provider stream: a
+	// reset, truncated or empty stream surfaces an `error` event and a non-zero
+	// exit. So on 2.x the process outcome is the terminal signal — the caller
+	// already fails a non-zero exit, a cancellation/timeout and a failed prompt
+	// write, and error events / scanner errors fail it here. Only the two
+	// step-bracketing guards are waived; the void-step guard still applies,
+	// because a step that actually closed with nothing in it is no less dead
+	// on 2.x — unless later text or a tool call shows the run recovered from
+	// it (cleared in the loop above). 1.x and custom runtimes keep every guard
+	// unchanged.
 	noTerminalSignal := false
 	if finalStatus == "completed" {
 		switch {
-		case openStep:
+		case openStep && !exitIsTerminal:
 			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
 			noTerminalSignal = true
-		case awaitingContinuation:
+		case awaitingContinuation && !exitIsTerminal:
 			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (last step required a continuation that never started)"
 			noTerminalSignal = true
@@ -583,13 +623,17 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	}
 
 	return eventResult{
-		status:            finalStatus,
-		errMsg:            finalError,
-		output:            output.String(),
-		sessionID:         sessionID,
-		usage:             usage,
-		noTerminalSignal:  noTerminalSignal,
-		sawTerminalSignal: sawStepFinish && !noTerminalSignal,
+		status:           finalStatus,
+		errMsg:           finalError,
+		output:           output.String(),
+		sessionID:        sessionID,
+		usage:            usage,
+		noTerminalSignal: noTerminalSignal,
+		// On 2.x a step_finish proves only that an intermediate step closed —
+		// the final one routinely never reports — so the stream never carries
+		// positive proof of completion there, and a failed prompt write must
+		// keep failing the run (Execute keys that on this field).
+		sawTerminalSignal: sawStepFinish && !noTerminalSignal && !exitIsTerminal,
 	}
 }
 
@@ -639,11 +683,13 @@ func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Mess
 		_ = json.Unmarshal(event.Part.State.Input, &input)
 	}
 
+	callID := event.Part.toolCallID()
+
 	// Emit the tool-use message.
 	trySend(ch, Message{
 		Type:   MessageToolUse,
 		Tool:   event.Part.Tool,
-		CallID: event.Part.CallID,
+		CallID: callID,
 		Input:  input,
 	})
 
@@ -659,7 +705,7 @@ func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Mess
 		trySend(ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
-			CallID: event.Part.CallID,
+			CallID: callID,
 			Output: outputStr,
 		})
 	}
@@ -758,7 +804,8 @@ func extractToolOutput(output any) string {
 //
 //	"step_start"  — agent step begins
 //	"text"        — text output from agent (part.text)
-//	"tool_use"    — tool invocation with call and result (part.tool, part.callID, part.state)
+//	"tool_use"    — tool invocation with call and result (part.tool, part.state, and
+//	                the call id in part.callID on 1.x or part.id on 2.x)
 //	"error"       — error from opencode (error.name, error.data.message)
 //	"step_finish" — agent step completes (includes token usage)
 type opencodeEvent struct {
@@ -800,6 +847,21 @@ type opencodeEventPart struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// toolCallID returns the provider call id of a tool part. 1.x reports it as
+// `callID` next to a part id in `id`; 2.x dropped `callID`, moved the part id
+// to `partID`, and reports the call id as `id`. Reading only `callID` left
+// every 2.x tool message with an empty CallID, so the transcript could not
+// pair a call with its result.
+func (p opencodeEventPart) toolCallID() string {
+	if p.CallID != "" {
+		return p.CallID
+	}
+	if p.Type == "tool" {
+		return p.ID
+	}
+	return ""
+}
+
 type opencodePartMetadata struct {
 	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
@@ -829,9 +891,16 @@ type opencodeToolState struct {
 }
 
 // opencodeError represents an error event from opencode.
+//
+// 1.x reports `{"name": …, "data": {"message": …}}`; 2.x reports a flat
+// `{"type": "provider.invalid-output", "message": …}`. Both are decoded so a
+// 2.x failure surfaces its real cause instead of "unknown opencode error".
 type opencodeError struct {
 	Name string           `json:"name,omitempty"`
 	Data *opencodeErrData `json:"data,omitempty"`
+	// 2.x shape.
+	Type string `json:"type,omitempty"`
+	Msg  string `json:"message,omitempty"`
 }
 
 // Message returns the human-readable error message.
@@ -839,10 +908,16 @@ func (e *opencodeError) Message() string {
 	if e.Data != nil && e.Data.Message != "" {
 		return e.Data.Message
 	}
+	if e.Msg != "" {
+		if e.Type != "" {
+			return e.Type + ": " + e.Msg
+		}
+		return e.Msg
+	}
 	if e.Name != "" {
 		return e.Name
 	}
-	return ""
+	return e.Type
 }
 
 type opencodeErrData struct {

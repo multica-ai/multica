@@ -900,7 +900,82 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listWecomInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    // The settings tab shows the QR install entry point only when this is
+    // exactly true, so the flag has to survive parsing.
+    it("keeps both install flags, and treats a missing one as off", async () => {
+      stubFetchJson({
+        installations: [{ id: "wc-1", status: "active" }],
+        configured: true,
+        install_supported: true,
+        scan_install_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.install_supported).toBe(true);
+      expect(res.scan_install_supported).toBe(true);
+
+      // A server that predates the scan flow sends neither, and must not be
+      // read as "scanning is available".
+      stubFetchJson({ installations: [], configured: true });
+      const older = await client.listWecomInstallations("ws-1");
+      expect(older.scan_install_supported).toBeUndefined();
+      expect(older.scan_install_supported === true).toBe(false);
+    });
+
+    // The flag has to be VALIDATED, not merely passed through: this object is
+    // loose, so an undeclared key would survive parsing untouched.
+    it("does not let a non-boolean scan flag through unvalidated", async () => {
+      stubFetchJson({
+        installations: [],
+        configured: true,
+        scan_install_supported: "yes",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.scan_install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
+    it("preserves an omitted daemon setup target for legacy self-host detection", async () => {
+      stubFetchJson({
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBeUndefined();
+      expect(config.daemon_server_url).toBe("https://api.example.com");
+      expect(config.daemon_app_url).toBe("https://app.example.com");
+    });
+
+    it.each([null, 123, {}, "unexpected", "unknown"])(
+      "does not infer Cloud from an unrecognized daemon setup target: %j",
+      async (target) => {
+        stubFetchJson({
+          daemon_setup_target: target,
+          daemon_server_url: "https://api.example.com",
+          daemon_app_url: "https://app.example.com",
+        });
+        const config = await new ApiClient("https://api.example.test").getConfig();
+        expect(config.daemon_setup_target).toBe("unknown");
+      },
+    );
+
+    it.each(["cloud", "self_host"])("preserves the confirmed daemon setup target %s", async (target) => {
+      stubFetchJson({ cdn_domain: "", daemon_setup_target: target });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBe(target);
+    });
+
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",

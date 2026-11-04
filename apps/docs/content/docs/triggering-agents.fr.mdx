@@ -3,7 +3,11 @@ title: Mettre les agents au travail
 description: Choisissez comment commencer un travail, le transmettre ou demander de l’aide.
 ---
 
+import { TriggerChooserDemo } from "@/components/demos/trigger-chooser-demo";
+
 Partez de ce que vous attendez d’un agent : lui confier une tâche, lui demander une aide ponctuelle ou organiser un travail récurrent.
+
+<TriggerChooserDemo />
 
 | Votre besoin | Fonction à utiliser |
 |---|---|
@@ -13,6 +17,7 @@ Partez de ce que vous attendez d’un agent : lui confier une tâche, lui demand
 | Transmettre le travail selon des étapes répétées | Choisissez un [workflow](/workflows) de projet avec un responsable par étape. |
 | Poser une question sans créer de tâche | Démarrez une [discussion](/chat) avec l’agent. |
 | Commencer un travail récurrent selon une date ou un événement extérieur | Créez une [automatisation](/autopilots). |
+| Faire revenir un agent sur une tâche plus tard | Ajoutez à la tâche un [réveil](/issue-wakeups) avec l’heure ou l’événement à attendre. |
 
 Vous ne pouvez appeler que les agents que vous avez le droit d’exécuter. Avant d’envoyer un commentaire, vérifiez l’aperçu sous le champ ; utilisez `/note` pour laisser un message sans réveiller d’agent. Une tâche en `backlog` attend que vous soyez prêt à la commencer.
 
