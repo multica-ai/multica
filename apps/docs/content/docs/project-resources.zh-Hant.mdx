@@ -122,7 +122,7 @@ AI 代理看到什麼、你拿回什麼：
 
 `<agent>` 由 AI 代理名字得來：轉成小寫後只保留英文字母和數字，其餘字元換成 `-`，最長 30 個字元；名字裡沒有英文字母和數字時寫作 `agent`。所以"運營助手"處理 OPS-21 時，分支是 `agent/agent/ops-21`。`<issue>` 是小寫的任務編號。
 
-中途失敗的執行同樣會報告它的分支，因為它已經把 AI 代理做出來的部分提交進去了。
+中途失敗的執行同樣會報告它的分支：AI 代理的提交都在上面，沒提交的部分按[不會靜默丟東西](#nothing-is-silently-lost)裡的方式保留。
 
 </Accordion>
 <Accordion title="後續對話接著上一輪繼續" id="follow-ups-continue-the-branch">
@@ -157,9 +157,16 @@ AI 代理看到什麼、你拿回什麼：
 </Accordion>
 <Accordion title="不會靜默丟東西" id="nothing-is-silently-lost">
 
-AI 代理留下的未提交改動，會在 worktree 被移除前提交到那個分支上，執行中途失敗時同樣如此。
+AI 代理留下的未提交改動不會隨 worktree 一起刪除，執行中途失敗時同樣如此。它們去哪裡，取決於 AI 代理這次執行有沒有自己提交：
 
-極少數情況下連這次提交都做不了，例如倉庫開了 `commit.gpgSign` 而執行時拿不到簽名金鑰。這時 worktree 會被刻意保留，執行標記為失敗，在你倉庫裡執行 `git worktree list` 就能看到存放這些改動的目錄。
+- **AI 代理沒有提交過：** 所有沒被 gitignore 的檔案都會提交到分支上。這次提交不會執行倉庫的提交鉤子。
+- **AI 代理自己提交過：** 只交付它的提交。沒提交的部分（生成的產物、臨時檔案、沒提交的修改）存到隱藏 ref `refs/multica/leftovers/<branch>/<task>` 下，不進分支。每次執行開始時都會把這條規則告訴 AI 代理，所以自己提交的 AI 代理決定交付哪些內容。
+
+例外：一開始要先和你的本地改動完成 merge 的執行（見[衝突處理](#conflicts-are-resolved-by-the-agent)）會提交它留下的全部內容，因為這些未提交的改動裡有你的修改。
+
+想看某次執行存下了什麼，用 `git for-each-ref refs/multica/leftovers` 列出這些 ref，再用 `git show --stat <ref>` 檢視。`git restore --source=<ref> -- <path>` 可以把某個檔案取回到你的工作目錄。
+
+極少數情況下連這次提交或儲存都做不了，例如倉庫開了 `commit.gpgSign` 而執行時拿不到簽名金鑰。這時 worktree 會被刻意保留，執行標記為失敗，在你倉庫裡執行 `git worktree list` 就能看到存放這些改動的目錄。
 
 </Accordion>
 <Accordion title="沒有產生改動的執行不留下任何東西" id="no-changes-leave-nothing">
@@ -169,7 +176,7 @@ AI 代理留下的未提交改動，會在 worktree 被移除前提交到那個�
 </Accordion>
 <Accordion title="留在你倉庫裡的分支和隱藏 ref" id="what-stays-in-your-repo">
 
-worktree 位於執行時的工作區目錄內，會按[正常的清理週期](/daemon-runtimes#cleanup)回收。留在你倉庫裡的有兩樣東西：分支，以及每條分支對應的一個隱藏 ref（在 `refs/multica/local-state/` 下），記錄這條分支歸誰所有、以及上次續接時你目錄裡的內容。
+worktree 位於執行時的工作區目錄內，會按[正常的清理週期](/daemon-runtimes#cleanup)回收。留在你倉庫裡的有：分支；每條分支對應的一個隱藏 ref（在 `refs/multica/local-state/` 下），記錄這條分支歸誰所有、以及上次續接時你目錄裡的內容；以及 AI 代理自己提交後又留下未提交改動的每次執行，各對應一個隱藏 ref（在 `refs/multica/leftovers/` 下）。
 
 隱藏 ref 不會出現在 `git branch` 裡，可以用 `git for-each-ref refs/multica` 檢視。Multica 刪除分支時會一併刪掉它；你自己刪掉的分支所對應的 ref，會在下一次該倉庫上有執行開始時被清理。也可以用 `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d` 一次性清掉。
 

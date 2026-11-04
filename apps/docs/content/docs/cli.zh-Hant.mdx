@@ -294,6 +294,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `project` | 管理專案、專案資源和專案使用的工作流 |
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
+| `view` | 讀取儲存的檢視，列出檢視裡的任務 |
 | `agent`、`skill`、`squad` | 管理 AI 代理、skill 和小隊 |
 | `autopilot` | 管理自動化、觸發器和執行歷史 |
 | `workspace` | 建立、檢視、切換工作區和邀請成員 |
@@ -349,6 +350,12 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 
 下表覆蓋當前全部頂層命令，按 CLI 自身的分組排列。所有命令都接受全域性 flag `--server-url`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令註冊的 flag，預設格式因命令而異：`list` 類預設表格，`get`、`create` 類多預設 JSON。完整引數以 `multica <command> --help` 為準。
 
+### 任務附件
+
+`issue create`、`issue update` 和 `issue comment add` 的每個 `--attachment` 接受一個完整檔案路徑，保留檔名中的逗號和雙引號。多個檔案須重複 flag，例如 `--attachment 'report,final.csv' --attachment notes.txt`。省略 flag 時不新增附件；顯式傳入空路徑會報錯。所有本地路徑都通過檢查後才開始上傳。
+
+從舊 CSV 解析方式遷移：要新增兩個檔案，將 `--attachment a,b` 改為 `--attachment a --attachment b`。前一種寫法現在只選擇名為 `a,b` 的單個檔案。舊用法 `--attachment '"report,final.csv"'` 中額外的 CSV 雙引號也須移除，改用 `--attachment 'report,final.csv'`；只有檔名本身包含雙引號時才保留。
+
 ### Core
 
 | 命令 | 子命令 | 用途 | 關鍵 flag |
@@ -383,6 +390,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `handoff set <workflow> <status-key>` | 設定單個步驟的處理人、說明和下一步/退回狀態，未指定的欄位保持不變 | `--handler`（`none`、`project_lead`、`creator`，或成員/ AI 代理/小隊的名稱或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
 | `label` | `list/get/create/update/delete` | 管理工作區標籤 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作區自定義屬性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重複，僅 select 型別）；`list`：`--include-archived`；型別建立後不可修改 |
+| `view` | `list/get/issues` | 讀取你能開啟的檢視（自己的和工作區共享的）；`issues` 按檢視儲存的排序列出檢視裡的任務，檢視儲存的全部篩選條件都由服務端執行。在 AI 代理執行中，看到的檢視和其中「我的」條件都屬於執行時的所有者 | `<view>` 接受 ID、ID 字首或完整名稱；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一頁的 `next_cursor`）、`--today`（相對到期日篩選按哪一天計算，預設今天）、`--fields`（僅 JSON）、`--full-id` |
 | `agent` | `list/get/create/update/archive/restore` | 管理 AI 代理 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（僅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（舊寫法）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 複製為新 AI 代理，原 AI 代理不受影響 | `--name`（預設為原名加 ` (copy)`）、`--runtime-id`（複製到其他執行時時必須同時指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等機密配置不會複製，需用與 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 檢視 AI 代理的執行 | |

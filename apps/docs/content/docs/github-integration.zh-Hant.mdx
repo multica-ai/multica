@@ -152,13 +152,14 @@ Repository permissions：
 | Pull requests | Read-only |
 | Checks | Read-only；用於顯示 CI 狀態 |
 | Commit statuses | Read-only；用於彙總 legacy status 形式的 CI |
+| Actions | 可選，Read-only；同一提交上，被同一工作流的新執行取代的已取消執行不再計入 CI 狀態 |
 
 訂閱以下事件：
 
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用於觸發 CI 與可合併性重新整理。
 
-PR 快照透過 Pull requests、Checks 和 Commit statuses 的 REST API 獲取，不需要 Contents 權限。
+PR 快照透過 Pull requests、Checks 和 Commit statuses 的 REST API 獲取，不需要 Contents 權限。授予可選的 Actions 權限後，還會讀取該提交的工作流執行記錄；未授予時，即使同一工作流的新執行已通過，被取消的舊執行仍按失敗計算。
 
 <Callout type="warning">
 這裡需要的是 **Webhook secret**，不是 OAuth Client secret。兩邊填寫的 Webhook secret 不一致時，GitHub delivery 會返回 `401 invalid signature`。

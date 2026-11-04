@@ -295,7 +295,7 @@ Qoder Cloud Agents 透過遠端會話執行分配的任務。Multica 服務端�
 
 超出併發上限的任務會排隊等待。同一任務的後續執行會在上一會話空閒時繼續使用該 Qoder 會話。AI 代理可以設定預設倉庫，在任務所屬專案未繫結倉庫時使用。AI 代理會被要求以任務標識命名分支，並在 PR 標題前加上任務標識，以便 PR 自動關聯到任務。
 
-首版支援任務執行、聊天、進度同步、取消和基於持久化記錄的恢復。模型、工具和 skill 在 Qoder 中配置；暫不支援本地目錄、附件，也不支援從 Multica 建立遠端 Qoder Cloud Agents AI 代理。執行時頁面分別展示遠端執行時和電腦。
+首版支援任務執行、聊天、擔任小隊隊長、透過 AI 代理建立任務、進度同步、取消和基於持久化記錄的恢復。模型、工具和 skill 在 Qoder 中配置。任務和聊天訊息裡的附件和圖片會交給遠端會話，包括 PDF 和 Office 文件，每個檔案不超過 5 MB；更大的檔案不會傳過去，AI 代理只知道有這些檔案。聊天中 AI 代理用 DeliverArtifacts 交付的檔案（每個不超過 10 MB）會作為附件隨回覆發出。暫不支援本地目錄，也不支援從 Multica 建立遠端 Qoder Cloud Agents AI 代理。執行時頁面分別展示遠端執行時和電腦。
 
 獨立橋接程序的配置與限制見 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
 
