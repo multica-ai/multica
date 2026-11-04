@@ -358,11 +358,12 @@ func TestChannelDisplayName(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		ChannelTypeSlack:  "Slack",
-		ChannelTypeFeishu: "Feishu/Lark",
-		"":                "",
+		ChannelTypeSlack:   "Slack",
+		ChannelTypeFeishu:  "Feishu/Lark",
+		ChannelTypeDiscord: "Discord",
+		"":                 "",
 		// An unmapped channel names itself rather than reading as "unknown".
-		"discord": "discord",
+		"matrix": "matrix",
 	}
 	for in, want := range cases {
 		if got := ChannelDisplayName(in); got != want {

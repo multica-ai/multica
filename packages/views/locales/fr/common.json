@@ -135,5 +135,20 @@
   },
   "navigation": {
     "open_in_new_tab": "Ouvrir dans un nouvel onglet"
+  },
+  "discord_bind": {
+    "page_title": "Lier votre compte Discord",
+    "redeeming": "Liaison de votre compte…",
+    "needs_auth_description": "Connectez-vous à Multica pour terminer la liaison. Le jeton du lien associe votre compte Discord à cet utilisateur Multica, vous devez donc d'abord être connecté.",
+    "sign_in": "Se connecter",
+    "done_title": "Votre compte est lié.",
+    "done_description": "Votre prochain message au bot dans Discord ira directement à l'agent. Vous pouvez fermer cet onglet.",
+    "error_title": "Impossible de terminer la liaison",
+    "error_admin_hint": "Si le problème persiste, renvoyez un message au bot dans Discord pour obtenir un nouveau lien.",
+    "error_missing_token": "Le lien n'a pas de jeton. Renvoyez un message au bot dans Discord pour en obtenir un nouveau.",
+    "error_expired": "Ce lien est invalide ou expiré (les liens sont valables 15 minutes). Renvoyez un message au bot pour en obtenir un nouveau.",
+    "error_already_bound": "Ce compte Discord est déjà lié à un autre utilisateur Multica. Un transfert de compte exige d'abord une dissociation explicite.",
+    "error_not_member": "Le compte Multica connecté n'est pas membre de cet espace de travail.",
+    "error_unknown": "Une erreur est survenue. Réessayez, puis contactez l'administrateur de l'espace de travail si le problème persiste."
   }
 }
