@@ -145,7 +145,7 @@ func TestLabrastroEngineeringClaimProjectDescription(t *testing.T) {
 		t.Fatalf("unconfigured description=%q, want original", got)
 	}
 	f.enable()
-	if got := resolve(); !strings.Contains(got, "当前尚未建立生效基线") || !strings.Contains(got, "Stage 1") {
+	if got := resolve(); !strings.Contains(got, "当前尚未建立生效基线") || !strings.Contains(got, "Stage 1") || strings.Contains(got, "待审候选") {
 		t.Fatalf("empty baseline context=%q", got)
 	}
 	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{
@@ -170,7 +170,7 @@ func TestLabrastroEngineeringClaimProjectDescription(t *testing.T) {
 		"overview v1：overview 标题", "domain_rules v2：新规则", "验收边界",
 		"architecture v1：architecture 标题", "exclusions_and_risks v1：exclusions_and_risks 标题",
 		"待审候选（candidate，尚未生效）：domain_rules",
-		"Project ID: " + f.project, "multica project baseline get --project " + f.project, "strixnova-*",
+		"Project ID: " + f.project, "`multica project baseline get " + f.project + "`", "strixnova-*",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("context missing %q: %s", want, got)
@@ -211,7 +211,10 @@ func TestLabrastroEngineeringClaimDescriptionBounded(t *testing.T) {
 	if !utf8.ValidString(got.Description) || utf8.RuneCountInString(got.Description) > 2000 || len(strings.Split(got.Description, "\n")) > 14 {
 		t.Fatalf("summary exceeded its context budget: %s", got.Description)
 	}
-	if !strings.Contains(got.Description, "...") || !strings.Contains(got.Description, "multica project baseline get --project "+f.project) {
+	if !strings.Contains(got.Description, strings.Repeat("阶", 60)) || !strings.Contains(got.Description, strings.Repeat("标", 280)) {
+		t.Fatalf("stage text at its length limit was truncated: %s", got.Description)
+	}
+	if !strings.Contains(got.Description, "...") || !strings.Contains(got.Description, "`multica project baseline get "+f.project+"`") {
 		t.Fatalf("truncated summary lost its full-baseline guidance: %s", got.Description)
 	}
 }

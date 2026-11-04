@@ -94,7 +94,7 @@ func (h *Handler) appendEngineeringProjectDescription(ctx context.Context, works
 		lines = append(lines, "待审候选（candidate，尚未生效）："+strings.Join(candidates, "、"))
 	}
 	lines = append(lines,
-		fmt.Sprintf("本项目已启用工程管理（Project ID: %s）。在规划、拆单、编码或审阅前，请运行 `multica project baseline get --project %s` 查阅完整项目基线与契约。", uuidToString(projectID), uuidToString(projectID)),
+		fmt.Sprintf("本项目已启用工程管理（Project ID: %s）。在规划、拆单、编码或审阅前，请运行 `multica project baseline get %s` 查阅完整项目基线与契约。", uuidToString(projectID), uuidToString(projectID)),
 		"如已绑定 strixnova-* 系列工程 skill，请按对应 skill 规程调用相关能力。")
 	summary := strings.Join(lines, "\n")
 	if baseDescription == "" {
