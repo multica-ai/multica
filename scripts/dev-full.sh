@@ -122,24 +122,32 @@ compose() {
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile knowledge "$@"
 }
 
-knowledge_postgres_exists() {
-  [ -n "$(compose ps -a -q knowledge-postgres 2>/dev/null)" ]
-}
-
 # ---------- Knowledge secrets: generated only where the env file is empty ----------
 fill_knowledge_secrets() {
   set_if_empty KNOWLEDGE_SYSTEM_AES_KEY "$(openssl rand -hex 16)"
   set_if_empty KNOWLEDGE_JWT_SECRET "$(openssl rand -hex 32)"
   set_if_empty MULTICA_KNOWLEDGE_SECRET_KEY "$(openssl rand -base64 32)"
   set_if_empty KNOWLEDGE_REDIS_PASSWORD "$(openssl rand -hex 16)"
-  # Postgres reads its password only when its data volume is first created. A new
-  # value would lock the existing knowledge-app out, so an existing container keeps
-  # the password it was created with (the compose default unless it was changed).
-  if [ -z "$(env_value "$ENV_FILE" KNOWLEDGE_DB_PASSWORD)" ] && knowledge_postgres_exists; then
-    echo "! knowledge-postgres already exists, so its password cannot change. KNOWLEDGE_DB_PASSWORD stays empty and compose uses its default (weknora). If you chose another password when the volume was created, set it in $ENV_FILE."
-  else
-    set_if_empty KNOWLEDGE_DB_PASSWORD "$(openssl rand -hex 16)"
-  fi
+  set_if_empty KNOWLEDGE_DB_PASSWORD "$(openssl rand -hex 16)"
+}
+
+# Postgres applies POSTGRES_PASSWORD only when its data volume is created, and the
+# volume outlives containers. Set the role's password to KNOWLEDGE_DB_PASSWORD so
+# the volume and the env file agree. The local socket is trust-authenticated inside
+# the container, so the password is sent on stdin, never on a command line.
+sync_knowledge_db_password() {
+  local cid pw i
+  cid=$(compose ps -q knowledge-postgres)
+  [ -n "$cid" ] || fail "knowledge-postgres is not running, so its password cannot be set."
+  pw=$(env_value "$ENV_FILE" KNOWLEDGE_DB_PASSWORD)
+  pw=${pw//\'/\'\'}
+  for i in $(seq 1 60); do
+    docker exec "$cid" pg_isready -q && break
+    sleep 2
+  done
+  printf "ALTER USER weknora WITH PASSWORD '%s';\n" "$pw" \
+    | docker exec -i "$cid" sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d postgres -f -' >/dev/null \
+    || fail "Could not set the WeKnora database password. Logs: $(compose_cli_hint) logs --tail 100 knowledge-postgres"
 }
 
 # ---------- Values this script cannot invent ----------
@@ -263,6 +271,9 @@ start_knowledge() {
   url=$(env_value "$ENV_FILE" KNOWLEDGE_URL)
   info "Starting WeKnora: ${KNOWLEDGE_SERVICES[*]}"
   info "The first start pulls the pinned WeKnora images, which can take several minutes."
+  # The database goes first so its password is in place before knowledge-app connects.
+  compose up -d knowledge-postgres knowledge-redis knowledge-docreader
+  sync_knowledge_db_password
   compose up -d "${KNOWLEDGE_SERVICES[@]}"
   wait_for_url "WeKnora" "$url/health" || fail "WeKnora is not healthy. Logs: $(compose_cli_hint) logs --tail 100 knowledge-app. Troubleshooting: $GUIDE#troubleshooting"
   register_knowledge_service_user
@@ -430,24 +441,32 @@ setup_hermes() {
   fi
 }
 
-### Daemon: started only when the local CLI profile has a login. Profile names match
-### the runbook (`--profile local`), which is what make daemon uses.
+### Daemon: started only when the default CLI profile has a login. The default profile
+### is the one the web app's CLI and the daemon already use on this machine, so the
+### daemon serves the same workspaces the web app shows.
 
-MULTICA_PROFILE_CONFIG="$HOME/.multica/profiles/local/config.json"
+MULTICA_PROFILE_CONFIG="$HOME/.multica/config.json"
 
 multica_logged_in() {
   [ -f "$MULTICA_PROFILE_CONFIG" ] && grep -q -E '"token"[[:space:]]*:[[:space:]]*"[^"]' "$MULTICA_PROFILE_CONFIG"
 }
 
-# The local profile records the two addresses this stack answers on. `config set` writes
-# them without signing in. `setup self-host` is not used: it opens a browser for a login.
+# Writes a profile address only where the profile has none, so an address that already
+# works (for example a LAN address) is kept. `config set` does not sign in;
+# `setup self-host` is not used because it opens a browser for a login.
+set_profile_value_if_absent() {
+  local key="$1" value="$2"
+  if grep -q -E "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]" "$MULTICA_PROFILE_CONFIG" 2>/dev/null; then
+    return 0
+  fi
+  if ! make cli ARGS="config set $key $value" >/dev/null; then
+    echo "! Could not set $key in the CLI profile. Run make cli ARGS=\"config set $key $value\" by hand." >&2
+  fi
+}
+
 setup_multica_profile() {
-  if ! make cli ARGS="--profile local config set server_url http://localhost:${PORT}" >/dev/null; then
-    echo "! Could not set server_url in the local CLI profile. Run make cli ARGS=\"--profile local config set server_url http://localhost:${PORT}\" by hand." >&2
-  fi
-  if ! make cli ARGS="--profile local config set app_url http://localhost:${FRONTEND_PORT}" >/dev/null; then
-    echo "! Could not set app_url in the local CLI profile. Run make cli ARGS=\"--profile local config set app_url http://localhost:${FRONTEND_PORT}\" by hand." >&2
-  fi
+  set_profile_value_if_absent server_url "http://localhost:${PORT}"
+  set_profile_value_if_absent app_url "http://localhost:${FRONTEND_PORT}"
 }
 
 start_daemon() {
@@ -455,11 +474,11 @@ start_daemon() {
     DAEMON_STATUS="not started: no Multica login yet (see the next steps)"
     return 0
   fi
-  info "Starting the daemon: make daemon"
-  if make daemon; then
-    DAEMON_STATUS="running (profile local); status: make cli ARGS=\"--profile local daemon status\""
+  info "Starting the daemon: make cli ARGS=\"daemon restart\""
+  if make cli ARGS="daemon restart"; then
+    DAEMON_STATUS="running (default profile); status: make cli ARGS=\"daemon status\""
   else
-    DAEMON_STATUS="failed to start (see the make daemon output above)"
+    DAEMON_STATUS="failed to start (see the output above)"
   fi
 }
 
@@ -480,15 +499,15 @@ print_summary() {
     echo "Next steps. Full steps: $GUIDE#first-run-in-the-ui"
     echo "  1. In the web app, create the account and the first workspace."
     echo "  2. Sign the CLI in, then start the daemon (it registers Hermes):"
-    echo "       make cli ARGS=\"--profile local login\""
-    echo "       make daemon"
+    echo "       make cli ARGS=\"login\""
+    echo "       make cli ARGS=\"daemon restart\""
     echo "     Running make dev-full again also starts the daemon once the login exists."
     echo "  3. Knowledge: enable knowledge, then check Setup > Models."
     echo "  4. Office: Set up your company, then Build your company."
     echo ""
   fi
   echo "Ctrl-C stops Multica. The daemon and WeKnora keep running. To stop them:"
-  echo "  make cli ARGS=\"--profile local daemon stop\""
+  echo "  make cli ARGS=\"daemon stop\""
   echo "  $(compose_cli_hint) stop ${KNOWLEDGE_SERVICES[*]}"
   echo ""
 }

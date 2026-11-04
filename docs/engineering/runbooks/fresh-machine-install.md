@@ -203,23 +203,22 @@ file overrides the location if you need one.
 ## Multica daemon
 
 The daemon runs the agents on this machine and registers the runtimes, Hermes included,
-with Multica. The `make daemon` target uses the `local` profile, so the login must use the
-same profile.
-
-`make dev-full` points the local profile at this stack on every run, and starts the daemon once
-the profile has a login. Until then it prints the steps. By hand:
+with Multica. `make dev-full` uses the default CLI profile (`~/.multica/config.json`), the
+same profile the web app's CLI uses on this machine. It sets `server_url` and `app_url` to
+this stack only when the profile has none, so an address that already works is kept. It
+starts the daemon once the profile has a login. Until then it prints the steps. By hand:
 
 ```bash
-make cli ARGS="--profile local config set server_url http://localhost:8080"   # dev-full runs these two
-make cli ARGS="--profile local config set app_url http://localhost:3000"
-make cli ARGS="--profile local login"             # opens the browser to sign in
-make daemon                                       # starts or restarts the local profile's daemon
-make cli ARGS="--profile local daemon status"     # confirms it is running
+make cli ARGS="config set server_url http://localhost:8080"   # only where the profile has none
+make cli ARGS="config set app_url http://localhost:3000"      # only where the profile has none
+make cli ARGS="login"                                         # opens the browser to sign in
+make cli ARGS="daemon restart"                                # starts the daemon (restarts it if running)
+make cli ARGS="daemon status"                                 # confirms it is running
 ```
 
 Run the login once, after the account and the first workspace exist, because the login
-registers the workspaces it can see. `make daemon` is safe to run again. Stop it with
-`make cli ARGS="--profile local daemon stop"`.
+registers the workspaces it can see. `make cli ARGS="daemon restart"` is safe to run again.
+Stop it with `make cli ARGS="daemon stop"`.
 
 ## First run in the UI
 
@@ -260,8 +259,8 @@ Run each check. A step passes only when its "Passes when" column holds.
 | 2 | Web app | open `http://localhost:3000` | sign-in page loads |
 | 3 | WeKnora API | `curl -fsS http://localhost:8090/health` | exit 0. This is the route the `knowledge-app` healthcheck uses |
 | 4 | WeKnora UI | open `http://localhost:8085` | WeKnora login page loads |
-| 5 | Daemon | `make cli ARGS="--profile local daemon status"` | reports running |
-| 6 | Hermes registered | Settings > Runtimes, or `make cli ARGS="--profile local runtime list"` | a Hermes runtime is listed as online |
+| 5 | Daemon | `make cli ARGS="daemon status"` | reports running |
+| 6 | Hermes registered | Settings > Runtimes, or `make cli ARGS="runtime list"` | a Hermes runtime is listed as online |
 | 6a | Hermes replies | `hermes -z "Reply with the word ok."` | prints a reply (`make dev-full` runs this check and prints the reply) |
 | 7 | Knowledge enabled | Knowledge page, or `make cli ARGS="knowledge health"` | state **Ready**; the command returns without error |
 | 8 | Upload a document | Knowledge > Library > **Add a file**, then publish the draft. CLI: `make cli ARGS="knowledge add --kb company --title 'Smoke test' --text 'Fresh machine check.'"`, then `make cli ARGS="knowledge publish <id>"` | the document shows as published in the library |
@@ -330,7 +329,7 @@ resetting the `knowledge-postgres-data` volume, which deletes WeKnora's data.
 **Hermes is not registered, or the daemon log shows "version detection failed: signal:
 killed".** The daemon bounds each `--version` probe at 60 seconds. Hermes is a Python CLI
 and its first start can take 30 to 40 seconds of CPU, so a cold start can hit the bound.
-Run `time hermes --version` once, then run `make daemon`. If it still times out, check the
+Run `time hermes --version` once, then run `make cli ARGS="daemon restart"`. If it still times out, check the
 Hermes install.
 
 **Hermes replies "No LLM provider configured".** Hermes did not find the provider. Check that
