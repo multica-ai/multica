@@ -139,7 +139,9 @@
     "running": "En cours",
     "skipped": "Ignorée",
     "completed": "Terminée",
-    "failed": "En échec"
+    "failed": "En échec",
+    "deferred": "Différée",
+    "held": "Retenue"
   },
   "run_source": {
     "schedule": "Planification",
@@ -150,6 +152,11 @@
   },
   "run": {
     "issue_linked": "Tâche liée",
+    "held_reason": {
+      "company_paused": "En attente : l'entreprise est en pause",
+      "budget_hold": "En attente : le budget est atteint",
+      "quiet_hours": "En attente : heures calmes"
+    },
     "view_log": "Voir le journal d'exécution",
     "skipped_group": {
       "label": "Ignorées",

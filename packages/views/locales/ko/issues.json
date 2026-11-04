@@ -2139,7 +2139,12 @@
         "name": "인재 & 성과",
         "description": "각 스쿼드의 실적을 헌장과 비교해 매주 검토하고, 지연되거나 침묵하는 항목을 보고합니다."
       }
-    }
+    },
+    "decision_change_instructions": "지침",
+    "decision_change_charter": "헌장",
+    "decision_change_unreadable": "비교할 현재 버전을 불러올 수 없습니다.",
+    "decision_change_removed": "삭제됨",
+    "decision_change_added": "추가됨"
   },
   "views": {
     "builtin": {

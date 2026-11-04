@@ -27,6 +27,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./office": "./office/index.ts",
     "./pipeline": "./pipeline/index.ts",
+    "./governance": "./governance/index.ts",
     "./skills": "./skills/index.ts",
     "./knowledge": "./knowledge/index.ts",
     "./agents": "./agents/index.ts",

@@ -2213,7 +2213,12 @@
         "name": "Personnes & performance",
         "description": "Suit chaque semaine le bilan de chaque équipe au regard de sa charte, et signale ce qui est en retard ou silencieux."
       }
-    }
+    },
+    "decision_change_instructions": "Instructions",
+    "decision_change_charter": "Charte",
+    "decision_change_unreadable": "Impossible de charger la version actuelle pour la comparer.",
+    "decision_change_removed": "Supprimé",
+    "decision_change_added": "Ajouté"
   },
   "views": {
     "builtin": {

@@ -1112,6 +1112,14 @@
         "people_performance": {
           "name": "人材リード",
           "description": "各チームの実績をチャーターと照らし合わせて確認し、遅れや沈黙を報告します。目標は設定しません。"
+        },
+        "people_reviewer": {
+          "name": "人材レビュアー",
+          "description": "採点のある各チームやエージェントについて毎月レビューを公開し、ボスが判断する提案を添えます。目標は設定しません。"
+        },
+        "floor_chief": {
+          "name": "フロアチーフ",
+          "description": "フロアのダイジェストから、秘書向けの日次フロアレポートを書きます。決定はせず、チームも変更しません。"
         }
       }
     },
@@ -1167,5 +1175,28 @@
       "next": "次へ"
     }
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "修正履歴",
+    "show": "履歴を表示",
+    "hide": "履歴を隠す",
+    "loading": "修正を読み込み中…",
+    "load_failed": "修正履歴を読み込めませんでした。",
+    "empty": "保存された修正はまだありません。",
+    "revision_label": "修正 {{revision}}",
+    "current": "現在",
+    "source": {
+      "human": "編集",
+      "proposal": "承認された提案による変更",
+      "rollback": "復元",
+      "unknown": "変更"
+    },
+    "show_text": "本文を表示",
+    "hide_text": "本文を隠す",
+    "restore": "復元",
+    "restore_named": "修正 {{revision}} を復元",
+    "restored": "修正 {{revision}} を復元しました",
+    "restore_failed": "この修正を復元できませんでした。もう一度お試しください。",
+    "restore_unchanged": "エージェントには既にこの指示があります。"
+  }
 }

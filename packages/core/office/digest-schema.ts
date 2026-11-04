@@ -110,11 +110,26 @@ export interface DigestKnowledgeDocument {
   published_at: string;
 }
 
+/** A document Multica published without a person pressing publish (spec 3.3). */
+export interface DigestAutoPublish {
+  link_id: string;
+  title: string;
+  knowledge_base: string;
+  kind: string;
+  /** `auto_after_review` or `auto`. */
+  mode: string;
+  author_squad_id: string;
+  critic_squad_id: string;
+  published_at: string;
+}
+
 export interface DigestKnowledge {
   /** Published documents not republished for 90 days, oldest first, at most 10. */
   stale_published: DigestList<DigestKnowledgeDocument>;
   /** Drafts awaiting publishing across the knowledge bases. */
   pending_drafts: number;
+  /** Automatic publishes since the last brief, newest first, at most 20. */
+  auto_published: DigestList<DigestAutoPublish>;
 }
 
 /** A question the Secretary put to a squad leader (`multica brief ask`). */
@@ -147,6 +162,24 @@ export interface DigestPipelineInitiative {
   pending_gate_proposal_id: string | null;
 }
 
+/** One goal the brief reports: a change since the last brief, or at risk or off track (spec 4.1). */
+export interface DigestGoal {
+  id: string;
+  title: string;
+  scope_type: string;
+  scope_id: string | null;
+  status: string;
+  /** The effective confidence: the owner's override when one is set. */
+  confidence: string;
+  overridden: boolean;
+  /** 0 to 1, or null when no key result has a reading. */
+  progress: number | null;
+  /** The key result that holds the goal back, in words; empty when there is none to name. */
+  cause: string;
+  recommendation: string;
+  changed_since: boolean;
+}
+
 /** A squad request its receiving squad has not answered in time. */
 export interface DigestOverdueRequest {
   issue_id: string;
@@ -169,7 +202,50 @@ export interface Digest {
   /** The Secretary's questions asked today or yesterday, newest first. */
   inquiries: DigestInquiry[];
   pipeline: DigestPipelineInitiative[];
+  /** Goals that changed since the last brief, and those at risk or off track. */
+  goals: DigestGoal[];
   overdue_requests: DigestOverdueRequest[];
+  /** Proposals a standing approval approved in the window; the brief's FYI names them (spec 4.4). */
+  auto_approved: DigestAutoApproval[];
+  /** The brief's Budget section: budgets at or above their soft line, and the holds in force (spec 4.2). */
+  budget: DigestBudget;
+}
+
+/** One proposal a standing approval approved. */
+export interface DigestAutoApproval {
+  proposal_id: string;
+  identifier: string;
+  title: string;
+  squad_id: string;
+  policy_id: string;
+  policy_name: string;
+  decided_at: string;
+}
+
+/** One budget at or above its soft line in the current period. */
+export interface DigestBudgetScope {
+  budget_id: string;
+  scope_type: string;
+  scope_id: string;
+  spent_micros: number;
+  limit_micros: number;
+  state: string;
+  mode: string;
+}
+
+/** One run held for its budget. */
+export interface DigestBudgetHold {
+  task_id: string;
+  run_class: string;
+  scope_type: string;
+  scope_id: string;
+  held_at: string;
+}
+
+export interface DigestBudget {
+  scopes: DigestBudgetScope[];
+  holds_in_force: number;
+  holds: DigestBudgetHold[];
 }
 
 export interface DigestParams {
@@ -305,10 +381,24 @@ const DigestKnowledgeDocumentSchema = z
   })
   .loose();
 
+const DigestAutoPublishSchema = z
+  .object({
+    link_id: z.string().default(""),
+    title: z.string().default(""),
+    knowledge_base: z.string().default(""),
+    kind: z.string().default(""),
+    mode: z.string().default(""),
+    author_squad_id: z.string().default(""),
+    critic_squad_id: z.string().default(""),
+    published_at: z.string().default(""),
+  })
+  .loose();
+
 // Same reason as emptyDigestWorkspace: no DigestKnowledge annotation.
 const emptyDigestKnowledge = {
   stale_published: { count: 0, items: [] },
   pending_drafts: 0,
+  auto_published: { count: 0, items: [] },
 };
 export const EMPTY_DIGEST_KNOWLEDGE: DigestKnowledge = emptyDigestKnowledge;
 
@@ -316,9 +406,43 @@ const DigestKnowledgeSchema = z
   .object({
     stale_published: listSchema(DigestKnowledgeDocumentSchema),
     pending_drafts: num,
+    auto_published: listSchema(DigestAutoPublishSchema),
   })
   .loose()
   .default(emptyDigestKnowledge);
+
+const DigestBudgetScopeSchema = z
+  .object({
+    budget_id: z.string().default(""),
+    scope_type: z.string().default(""),
+    scope_id: z.string().default(""),
+    spent_micros: num,
+    limit_micros: num,
+    state: z.string().default(""),
+    mode: z.string().default(""),
+  })
+  .loose();
+
+const DigestBudgetHoldSchema = z
+  .object({
+    task_id: z.string().default(""),
+    run_class: z.string().default(""),
+    scope_type: z.string().default(""),
+    scope_id: z.string().default(""),
+    held_at: z.string().default(""),
+  })
+  .loose();
+
+// An unreadable budget section reads as no budgets and no holds.
+const DigestBudgetSchema = z
+  .object({
+    scopes: listOfItems(DigestBudgetScopeSchema),
+    holds_in_force: num,
+    holds: listOfItems(DigestBudgetHoldSchema),
+  })
+  .loose()
+  .catch({ scopes: [], holds_in_force: 0, holds: [] })
+  .default({ scopes: [], holds_in_force: 0, holds: [] });
 
 // An unreadable initiative is dropped alone; the others and the digest still load.
 const DigestPipelineInitiativeSchema = z
@@ -338,6 +462,34 @@ const DigestPipelineInitiativeSchema = z
     blockers: z.array(z.string()).nullable().catch([]).default([]).transform((v) => v ?? []),
     next_gate: z.string().catch("").default(""),
     pending_gate_proposal_id: z.string().nullable().catch(null).default(null),
+  })
+  .loose();
+
+const DigestGoalSchema = z
+  .object({
+    id: z.string().default(""),
+    title: z.string().default(""),
+    scope_type: z.string().default(""),
+    scope_id: z.string().nullable().catch(null).default(null),
+    status: z.string().default(""),
+    confidence: z.string().catch("unknown").default("unknown"),
+    overridden: z.boolean().catch(false).default(false),
+    progress: z.number().nullable().catch(null).default(null),
+    cause: z.string().catch("").default(""),
+    recommendation: z.string().catch("").default(""),
+    changed_since: z.boolean().catch(false).default(false),
+  })
+  .loose();
+
+const DigestAutoApprovalSchema = z
+  .object({
+    proposal_id: z.string().default(""),
+    identifier: z.string().default(""),
+    title: z.string().default(""),
+    squad_id: z.string().default(""),
+    policy_id: z.string().default(""),
+    policy_name: z.string().default(""),
+    decided_at: z.string().default(""),
   })
   .loose();
 
@@ -382,7 +534,13 @@ export const DigestSchema = z
     inquiries: listOfItems(DigestInquirySchema),
     // An older server sends neither list; both read as none.
     pipeline: listOfItems(DigestPipelineInitiativeSchema),
+    // An older server sends no goals; that reads as none.
+    goals: listOfItems(DigestGoalSchema),
     overdue_requests: listOfItems(DigestOverdueRequestSchema),
+    // An older server sends no standing approvals; that reads as none.
+    auto_approved: listOfItems(DigestAutoApprovalSchema),
+    // An older server sends no budget section; it reads as none.
+    budget: DigestBudgetSchema,
   })
   .loose();
 
@@ -397,5 +555,8 @@ export const FALLBACK_DIGEST: Digest = {
   knowledge: EMPTY_DIGEST_KNOWLEDGE,
   inquiries: [],
   pipeline: [],
+  goals: [],
   overdue_requests: [],
+  auto_approved: [],
+  budget: { scopes: [], holds_in_force: 0, holds: [] },
 };

@@ -269,10 +269,20 @@ function charterRequest(charter: SquadCharterTemplate): UpdateSquadCharterReques
 }
 
 /**
+ * Whether a squad with the template's name was made by the quickstart itself:
+ * it has the template's leader and the template's instructions, both written
+ * by the first run. Matching on the name alone would charter a hand-made squad.
+ */
+function isQuickstartSquad(squad: Squad, leaderId: string, template: SquadTemplate): boolean {
+  return squad.leader_id === leaderId && squad.instructions.trim() === template.instructions.trim();
+}
+
+/**
  * Creates the agents a squad template needs (reusing agents that already have
  * the template's names), the squad with its instructions and roster, and
  * optionally its workflow and routine. It never edits something that already
- * exists, so running it again after a partial failure finishes the job.
+ * exists, except the charter of a squad that an earlier run made and left
+ * without one. Running it again after a partial failure finishes the job.
  */
 export async function runSquadQuickstart(
   client: SquadQuickstartClient,
@@ -340,6 +350,21 @@ export async function runSquadQuickstart(
     const found = squads.find((s) => !s.archived_at && s.name === template.name);
     if (found) {
       outcome.squad = { id: found.id, status: "existing" };
+      // A run that stopped after the squad was made (for example, at the
+      // charter save) leaves it without a charter, so the finishing run sends
+      // the revision-0 save here. A hand-made squad with the same name is
+      // neither led by the template's leader nor carries its instructions, so
+      // it is left as it is.
+      if (isQuickstartSquad(found, leaderId, template)) {
+        try {
+          await client.updateSquadCharter(found.id, charterRequest(template.charter));
+        } catch (err) {
+          // A charter that already exists refuses a revision-0 save: already chartered.
+          if (errorCode(err) !== "charter_revision_conflict") {
+            outcome.squad.error = `charter: ${errorMessage(err)}`;
+          }
+        }
+      }
     } else {
       const failures: string[] = [];
       // Set up the floor first. If that fails the squad is still created, and

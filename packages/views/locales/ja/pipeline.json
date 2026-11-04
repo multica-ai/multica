@@ -171,7 +171,6 @@
     "title_required": "タイトルは必須です。",
     "title_too_long": "タイトルは200文字以内にしてください。",
     "thesis_label": "仮説",
-    "thesis_required": "仮説は必須です。なぜ取り組む価値があるかを書いてください。",
     "thesis_too_long": "仮説が長すぎます。",
     "pipeline_label": "パイプライン",
     "no_pipeline": "このワークスペースにはイニシアチブを開始できるパイプラインがありません。",

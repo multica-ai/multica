@@ -139,7 +139,9 @@
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
-    "failed": "Failed"
+    "failed": "Failed",
+    "deferred": "Deferred",
+    "held": "Held"
   },
   "run_source": {
     "schedule": "Schedule",
@@ -150,6 +152,11 @@
   },
   "run": {
     "issue_linked": "Issue linked",
+    "held_reason": {
+      "company_paused": "Held: the company is paused",
+      "budget_hold": "Held: the budget is at its limit",
+      "quiet_hours": "Held: quiet hours"
+    },
     "view_log": "View execution log",
     "skipped_group": {
       "label": "Skipped",

@@ -2213,7 +2213,12 @@
         "name": "People & Performance",
         "description": "Reviews each squad's record against its charter each week, and reports what is late or silent."
       }
-    }
+    },
+    "decision_change_instructions": "Instructions",
+    "decision_change_charter": "Charter",
+    "decision_change_unreadable": "Couldn't load the current version to compare.",
+    "decision_change_removed": "Removed",
+    "decision_change_added": "Added"
   },
   "views": {
     "builtin": {

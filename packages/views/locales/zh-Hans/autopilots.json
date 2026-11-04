@@ -139,7 +139,9 @@
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
-    "failed": "失败"
+    "failed": "失败",
+    "deferred": "已延后",
+    "held": "已保留"
   },
   "run_source": {
     "schedule": "时间表",
@@ -150,6 +152,11 @@
   },
   "run": {
     "issue_linked": "已关联任务",
+    "held_reason": {
+      "company_paused": "已保留：公司已暂停",
+      "budget_hold": "已保留：预算已达上限",
+      "quiet_hours": "已保留：安静时段"
+    },
     "view_log": "查看执行日志",
     "skipped_group": {
       "label": "已跳过",

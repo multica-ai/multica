@@ -1,4 +1,5 @@
 import type { ZodType } from "zod";
+import { parseDigestMode, type DigestSetting, type DigestModeInfo } from "../governance/digest-mode";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -276,6 +277,22 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  parseInstructionRevisions,
+  type InstructionRevision,
+} from "../agents/instruction-revisions";
+import {
+  EMPTY_REVIEW_LIST,
+  EMPTY_SCORECARD_LIST,
+  ReviewListSchema,
+  ScorecardListSchema,
+  type Review,
+  type ReviewFilters,
+  type Scorecard,
+} from "../governance/reviews-schema";
+
+export type ScorecardList = { scorecards: Scorecard[] };
+export type ReviewList = { reviews: Review[] };
+import {
   BriefListSchema,
   BriefSchema,
   FALLBACK_BRIEF,
@@ -351,11 +368,13 @@ import {
   FALLBACK_KNOWLEDGE_BASE_SETTINGS,
   FALLBACK_KNOWLEDGE_MODEL_CHECKS,
   FALLBACK_KNOWLEDGE_OWNER_LOGIN,
+  FALLBACK_KNOWLEDGE_REPO_SYNC,
   FALLBACK_KNOWLEDGE_SOURCES,
   KnowledgeAccessSchema,
   KnowledgeBaseSettingsSchema,
   KnowledgeModelChecksSchema,
   KnowledgeOwnerLoginSchema,
+  KnowledgeRepoSyncSchema,
   KnowledgeSourcesSchema,
 } from "../knowledge/platform-schemas";
 import type {
@@ -364,6 +383,8 @@ import type {
   KnowledgeBaseSettingsPatch,
   KnowledgeModelChecks,
   KnowledgeOwnerLogin,
+  KnowledgeRepoSync,
+  KnowledgeRepoSyncRequest,
   KnowledgeSources,
   KnowledgeSubjectType,
   UploadKnowledgeDocumentParams,
@@ -431,6 +452,73 @@ import type {
   Pipeline,
   ForceInitiativeRequest,
 } from "../pipeline/types";
+import {
+  FALLBACK_GOAL,
+  FALLBACK_GOAL_DETAIL,
+  FALLBACK_GOAL_LIST,
+  FALLBACK_METRIC_LIST,
+  FALLBACK_READING,
+  GoalDetailSchema,
+  GoalResponseSchema,
+  GoalsResponseSchema,
+  MetricReadingsResponseSchema,
+  MetricsResponseSchema,
+  ReadingResponseSchema,
+} from "../governance/goals-schemas";
+import type {
+  CreateGoalRequest,
+  Goal,
+  GoalConfidence,
+  GoalDetail,
+  GoalFilters,
+  Metric,
+  MetricReading,
+  MetricReadingFilters,
+  ReportReadingRequest,
+  UpdateGoalRequest,
+} from "../governance/goals-types";
+import {
+  EMPTY_GOVERNANCE_EVENT_PAGE,
+  FALLBACK_COMPANY_STATE,
+  CompanyStateSchema,
+  GovernanceEventPageSchema,
+} from "../governance/schemas";
+import { governanceEventSearch } from "../governance/params";
+import { parseHealthReport, type HealthReport } from "../governance/health";
+import { parseSquadAutonomy, type SetSquadAutonomyRequest, type SquadAutonomy } from "../governance/autonomy";
+import {
+  parseApprovalPolicies,
+  parseApprovalPolicy,
+  parsePolicyAutoApprovals,
+  type ApprovalPolicy,
+  type CreateApprovalPolicyRequest,
+  type PolicyAutoApprovalHistory,
+} from "../governance/approval-policy";
+import { parseOfficePulse, type OfficePulse } from "../governance/scale";
+import {
+  BudgetHoldListSchema,
+  BudgetListSchema,
+  BudgetPeriodListSchema,
+  FALLBACK_BUDGET_HOLDS,
+  FALLBACK_BUDGET_LIST,
+  FALLBACK_BUDGET_PERIODS,
+  parseBudget,
+} from "../governance/budgets-schemas";
+import type {
+  Budget,
+  BudgetHold,
+  BudgetList,
+  BudgetPeriodRow,
+  CreateBudgetRequest,
+  UpdateBudgetRequest,
+} from "../governance/budgets-types";
+import type {
+  CompanyStateInfo,
+  GovernanceEventFilters,
+  GovernanceEventPage,
+  QuietHours,
+  SetCompanyStateRequest,
+} from "../governance/types";
 import {
   FALLBACK_PROPOSAL,
   ProposalListSchema,
@@ -2070,6 +2158,20 @@ export class ApiClient {
 
   async getAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`);
+  }
+
+  /** An agent's instruction history, newest first (spec 4.6). */
+  async listAgentInstructionRevisions(id: string): Promise<InstructionRevision[]> {
+    const raw = await this.fetch<unknown>(`/api/agents/${encodeURIComponent(id)}/instruction-revisions`);
+    return parseInstructionRevisions(raw);
+  }
+
+  /** Restores an earlier revision. The server answers with the new revision, which the caller does not read. */
+  async restoreAgentInstructionRevision(id: string, revision: number): Promise<void> {
+    await this.fetch<unknown>(
+      `/api/agents/${encodeURIComponent(id)}/instruction-revisions/${revision}/restore`,
+      { method: "POST" },
+    );
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
@@ -6046,6 +6148,30 @@ export class ApiClient {
     });
   }
 
+  async getKnowledgeRepoSync(): Promise<KnowledgeRepoSync> {
+    const raw = await this.fetch<unknown>("/api/knowledge/repo-sync");
+    return parseWithFallback(raw, KnowledgeRepoSyncSchema, FALLBACK_KNOWLEDGE_REPO_SYNC, {
+      endpoint: "GET /api/knowledge/repo-sync",
+    });
+  }
+
+  async updateKnowledgeRepoSync(req: KnowledgeRepoSyncRequest): Promise<KnowledgeRepoSync> {
+    const raw = await this.fetch<unknown>("/api/knowledge/repo-sync", {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+    return parseWithFallback(raw, KnowledgeRepoSyncSchema, FALLBACK_KNOWLEDGE_REPO_SYNC, {
+      endpoint: "PUT /api/knowledge/repo-sync",
+    });
+  }
+
+  async runKnowledgeRepoSync(): Promise<KnowledgeRepoSync> {
+    const raw = await this.fetch<unknown>("/api/knowledge/repo-sync/run", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeRepoSyncSchema, FALLBACK_KNOWLEDGE_REPO_SYNC, {
+      endpoint: "POST /api/knowledge/repo-sync/run",
+    });
+  }
+
   async getKnowledgeBaseAccess(key: string): Promise<KnowledgeAccess> {
     const raw = await this.fetch<unknown>(`/api/knowledge/bases/${encodeURIComponent(key)}/access`);
     return parseWithFallback(raw, KnowledgeAccessSchema, FALLBACK_KNOWLEDGE_ACCESS, {
@@ -6254,6 +6380,286 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/proposals/${id}/revisions`);
     return parseWithFallback<ProposalRevision[]>(raw, ProposalRevisionListSchema, [], {
       endpoint: "GET /api/proposals/:id/revisions",
+    });
+  }
+
+  // Governance (phase 4): the company state, its quiet hours and the log. The
+  // two writes return the whole company state, so the caller reflects what the
+  // server kept rather than what it sent.
+  async getCompanyState(): Promise<CompanyStateInfo> {
+    const raw = await this.fetch<unknown>("/api/office/company-state");
+    return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
+      endpoint: "GET /api/office/company-state",
+    });
+  }
+
+  async setCompanyState(data: SetCompanyStateRequest): Promise<CompanyStateInfo> {
+    const raw = await this.fetch<unknown>("/api/office/company-state", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
+      endpoint: "PUT /api/office/company-state",
+    });
+  }
+
+  /** The Secretary's digest source and what it resolves to (spec 4.8). */
+  async getDigestMode(): Promise<DigestModeInfo> {
+    return parseDigestMode(await this.fetch<unknown>("/api/office/digest-mode"));
+  }
+
+  async setDigestMode(mode: DigestSetting): Promise<DigestModeInfo> {
+    const raw = await this.fetch<unknown>("/api/office/digest-mode", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+    return parseDigestMode(raw);
+  }
+
+  async setQuietHours(data: QuietHours): Promise<CompanyStateInfo> {
+    const raw = await this.fetch<unknown>("/api/office/quiet-hours", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
+      endpoint: "PUT /api/office/quiet-hours",
+    });
+  }
+
+  /** A squad's autonomy level and the reason of its last change (spec 4.3). */
+  async getSquadAutonomy(squadId: string): Promise<SquadAutonomy> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/autonomy`);
+    return parseSquadAutonomy(raw, "GET /api/squads/:id/autonomy");
+  }
+
+  /** Changes a squad's level. Owners and admins only; the reason is required. */
+  async setSquadAutonomy(squadId: string, data: SetSquadAutonomyRequest): Promise<SquadAutonomy> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/autonomy`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseSquadAutonomy(raw, "PUT /api/squads/:id/autonomy");
+  }
+
+  /** The workspace's standing approvals, with this week's counts and flags (spec 4.4). */
+  async listApprovalPolicies(): Promise<ApprovalPolicy[]> {
+    const raw = await this.fetch<unknown>("/api/approval-policies");
+    return parseApprovalPolicies(raw, "GET /api/approval-policies");
+  }
+
+  /** Creates a standing approval. Owners and admins only. */
+  async createApprovalPolicy(data: CreateApprovalPolicyRequest): Promise<ApprovalPolicy> {
+    const raw = await this.fetch<unknown>("/api/approval-policies", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseApprovalPolicy(raw, "POST /api/approval-policies");
+  }
+
+  /** Revokes a standing approval in one step. Owners and admins only. */
+  async revokeApprovalPolicy(policyId: string): Promise<ApprovalPolicy> {
+    const raw = await this.fetch<unknown>(`/api/approval-policies/${policyId}/revoke`, { method: "POST" });
+    return parseApprovalPolicy(raw, "POST /api/approval-policies/:id/revoke");
+  }
+
+  /** A policy's recent auto-approvals, newest first, with the reversal flags. */
+  async listPolicyAutoApprovals(policyId: string): Promise<PolicyAutoApprovalHistory> {
+    const raw = await this.fetch<unknown>(`/api/approval-policies/${policyId}/auto-approvals`);
+    return parsePolicyAutoApprovals(raw, "GET /api/approval-policies/:id/auto-approvals");
+  }
+
+  /** The office pulse strip's read. The server caches it for a minute. */
+  async getOfficePulse(): Promise<OfficePulse> {
+    const raw = await this.fetch<unknown>("/api/office/pulse");
+    return parseOfficePulse(raw);
+  }
+
+  /** System health for the Controls tab (spec 4.9). */
+  async getGovernanceHealth(): Promise<HealthReport> {
+    const raw = await this.fetch<unknown>("/api/governance/health");
+    return parseHealthReport(raw);
+  }
+
+  /** Budgets of the workspace with their current period (spec 4.2). */
+  async listBudgets(): Promise<BudgetList> {
+    const raw = await this.fetch<unknown>("/api/budgets");
+    return parseWithFallback<BudgetList>(raw, BudgetListSchema, FALLBACK_BUDGET_LIST, {
+      endpoint: "GET /api/budgets",
+    });
+  }
+
+  async createBudget(data: CreateBudgetRequest): Promise<Budget> {
+    const raw = await this.fetch<unknown>("/api/budgets", { method: "POST", body: JSON.stringify(data) });
+    return parseBudget(raw, "POST /api/budgets");
+  }
+
+  async updateBudget(id: string, patch: UpdateBudgetRequest): Promise<Budget> {
+    const raw = await this.fetch<unknown>(`/api/budgets/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    return parseBudget(raw, "PATCH /api/budgets/{id}");
+  }
+
+  async extendBudget(id: string, amountMicros: number): Promise<Budget> {
+    const raw = await this.fetch<unknown>(`/api/budgets/${encodeURIComponent(id)}/extend`, {
+      method: "POST",
+      body: JSON.stringify({ amount_micros: amountMicros }),
+    });
+    return parseBudget(raw, "POST /api/budgets/{id}/extend");
+  }
+
+  async releaseBudgetHolds(id: string): Promise<{ released: number }> {
+    const raw = await this.fetch<{ released?: unknown }>(`/api/budgets/${encodeURIComponent(id)}/release-holds`, {
+      method: "POST",
+    });
+    const released = Number(raw?.released);
+    return { released: Number.isFinite(released) ? released : 0 };
+  }
+
+  /** One budget's periods, newest first. */
+  async listBudgetPeriods(id: string): Promise<BudgetPeriodRow[]> {
+    const raw = await this.fetch<unknown>(`/api/budgets/${encodeURIComponent(id)}/periods`);
+    return parseWithFallback<{ periods: BudgetPeriodRow[] }>(raw, BudgetPeriodListSchema, FALLBACK_BUDGET_PERIODS, {
+      endpoint: "GET /api/budgets/{id}/periods",
+    }).periods;
+  }
+
+  /** The holds in force across the workspace. */
+  async listBudgetHolds(): Promise<BudgetHold[]> {
+    const raw = await this.fetch<unknown>("/api/budget-holds?status=in_force");
+    return parseWithFallback<{ holds: BudgetHold[] }>(raw, BudgetHoldListSchema, FALLBACK_BUDGET_HOLDS, {
+      endpoint: "GET /api/budget-holds",
+    }).holds;
+  }
+
+  async listGovernanceEvents(
+    filters: GovernanceEventFilters = {},
+    paging: { cursor?: string | null; limit?: number } = {},
+  ): Promise<GovernanceEventPage> {
+    const qs = governanceEventSearch(filters, paging).toString();
+    const raw = await this.fetch<unknown>(`/api/governance/events${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<GovernanceEventPage>(raw, GovernanceEventPageSchema, EMPTY_GOVERNANCE_EVENT_PAGE, {
+      endpoint: "GET /api/governance/events",
+    });
+  }
+
+  // Scorecards and reviews (spec 4.6). The server filters what each caller may
+  // read; an empty list is the answer for a caller who sees none.
+  async listScorecards(filters: ReviewFilters = {}): Promise<ScorecardList> {
+    const qs = new URLSearchParams();
+    if (filters.subject_type) qs.set("subject_type", filters.subject_type);
+    if (filters.subject_id) qs.set("subject_id", filters.subject_id);
+    const suffix = qs.toString();
+    const raw = await this.fetch<unknown>(`/api/scorecards${suffix ? `?${suffix}` : ""}`);
+    return parseWithFallback<ScorecardList>(raw, ScorecardListSchema, EMPTY_SCORECARD_LIST, {
+      endpoint: "GET /api/scorecards",
+    });
+  }
+
+  async listReviews(filters: ReviewFilters = {}): Promise<ReviewList> {
+    const qs = new URLSearchParams();
+    if (filters.subject_type) qs.set("subject_type", filters.subject_type);
+    if (filters.subject_id) qs.set("subject_id", filters.subject_id);
+    const suffix = qs.toString();
+    const raw = await this.fetch<unknown>(`/api/reviews${suffix ? `?${suffix}` : ""}`);
+    return parseWithFallback<ReviewList>(raw, ReviewListSchema, EMPTY_REVIEW_LIST, {
+      endpoint: "GET /api/reviews",
+    });
+  }
+
+  // The CSV export of the same filtered log, read with the standard headers
+  // (a bearer token in token mode, which a plain link cannot send) and handed
+  // back as bytes for the caller to save.
+  async exportGovernanceEventsCsv(filters: GovernanceEventFilters = {}): Promise<Blob> {
+    const qs = governanceEventSearch(filters).toString();
+    const res = await this.fetchRaw(`/api/governance/events.csv${qs ? `?${qs}` : ""}`);
+    return res.blob();
+  }
+
+  // Goals and metrics (spec 4.1). Progress and confidence are computed by the
+  // server from readings; the client only shows them.
+  async listGoals(filters: GoalFilters = {}): Promise<Goal[]> {
+    const search = new URLSearchParams();
+    if (filters.scope_type) search.set("scope_type", filters.scope_type);
+    if (filters.scope_id) search.set("scope_id", filters.scope_id);
+    if (filters.status) search.set("status", filters.status);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/goals${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Goal[]>(raw, GoalsResponseSchema, FALLBACK_GOAL_LIST, {
+      endpoint: "GET /api/goals",
+    });
+  }
+
+  async getGoal(id: string): Promise<GoalDetail> {
+    const raw = await this.fetch<unknown>(`/api/goals/${id}`);
+    return parseWithFallback<GoalDetail>(raw, GoalDetailSchema, FALLBACK_GOAL_DETAIL, {
+      endpoint: "GET /api/goals/:id",
+    });
+  }
+
+  async createGoal(data: CreateGoalRequest): Promise<Goal> {
+    const raw = await this.fetch<unknown>("/api/goals", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback<Goal>(raw, GoalResponseSchema, FALLBACK_GOAL, { endpoint: "POST /api/goals" });
+  }
+
+  async updateGoal(id: string, data: UpdateGoalRequest): Promise<Goal> {
+    const raw = await this.fetch<unknown>(`/api/goals/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    return parseWithFallback<Goal>(raw, GoalResponseSchema, FALLBACK_GOAL, { endpoint: "PATCH /api/goals/:id" });
+  }
+
+  async activateGoal(id: string): Promise<Goal> {
+    const raw = await this.fetch<unknown>(`/api/goals/${id}/activate`, { method: "POST" });
+    return parseWithFallback<Goal>(raw, GoalResponseSchema, FALLBACK_GOAL, { endpoint: "POST /api/goals/:id/activate" });
+  }
+
+  async setGoalStatus(id: string, status: "achieved" | "missed" | "dropped"): Promise<Goal> {
+    const raw = await this.fetch<unknown>(`/api/goals/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+    return parseWithFallback<Goal>(raw, GoalResponseSchema, FALLBACK_GOAL, { endpoint: "POST /api/goals/:id/status" });
+  }
+
+  async deleteGoal(id: string): Promise<void> {
+    await this.fetch(`/api/goals/${id}`, { method: "DELETE" });
+  }
+
+  async setGoalConfidence(id: string, confidence: GoalConfidence | null, note: string): Promise<Goal> {
+    const raw = await this.fetch<unknown>(`/api/goals/${id}/confidence`, {
+      method: "PUT",
+      body: JSON.stringify({ confidence, note }),
+    });
+    return parseWithFallback<Goal>(raw, GoalResponseSchema, FALLBACK_GOAL, { endpoint: "PUT /api/goals/:id/confidence" });
+  }
+
+  async listMetrics(): Promise<Metric[]> {
+    const raw = await this.fetch<unknown>("/api/metrics");
+    return parseWithFallback<Metric[]>(raw, MetricsResponseSchema, FALLBACK_METRIC_LIST, {
+      endpoint: "GET /api/metrics",
+    });
+  }
+
+  async listMetricReadings(key: string, filters: MetricReadingFilters = {}): Promise<MetricReading[]> {
+    const search = new URLSearchParams();
+    if (filters.scope_type) search.set("scope_type", filters.scope_type);
+    if (filters.scope_id) search.set("scope_id", filters.scope_id);
+    if (filters.since) search.set("since", filters.since);
+    if (filters.limit) search.set("limit", String(filters.limit));
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/metrics/${encodeURIComponent(key)}/readings${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<MetricReading[]>(raw, MetricReadingsResponseSchema, [], {
+      endpoint: "GET /api/metrics/:key/readings",
+    });
+  }
+
+  async reportMetricReading(key: string, data: ReportReadingRequest): Promise<MetricReading> {
+    const raw = await this.fetch<unknown>(`/api/metrics/${encodeURIComponent(key)}/readings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<MetricReading>(raw, ReadingResponseSchema, FALLBACK_READING, {
+      endpoint: "POST /api/metrics/:key/readings",
     });
   }
 

@@ -27,6 +27,8 @@ export interface Squad {
   floor_id?: string | null;
   /** The room slot (0 to 5) on that floor. Set exactly when `floor_id` is. */
   office_slot?: number | null;
+  /** The squad's autonomy level, 0 (Suggest) to 3 (Autonomous). Older backends omit it: the default is 1. */
+  autonomy_level?: number;
 }
 
 export interface SquadMember {

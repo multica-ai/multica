@@ -86,6 +86,7 @@ import {
   isAdvancedSection,
   type AdvancedSection,
 } from "./agent-advanced-settings";
+import { AgentInstructionRevisions } from "./agent-instruction-revisions";
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
@@ -672,6 +673,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
           />
+
+          <AgentInstructionRevisions agent={agent} canEdit={canEdit.allowed} />
 
           {/* Qoder agents take their skills from Qoder Cloud Agents. */}
           {runtime?.provider === "qoder_cloud" ? null : (

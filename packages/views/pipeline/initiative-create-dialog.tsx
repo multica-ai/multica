@@ -31,8 +31,8 @@ const TITLE_MAX_CHARS = 200;
 const THESIS_MAX_BYTES = 4000;
 
 /**
- * Starts an initiative at its pipeline's first stage. The thesis is required,
- * as the server requires it. Rendered for owners and admins only.
+ * Starts an initiative at its pipeline's first stage. The thesis is optional
+ * (spec 3.1); the server bounds its length. Rendered for owners and admins only.
  */
 export function InitiativeCreateDialog({
   open,
@@ -79,11 +79,8 @@ function CreateInitiativeForm({ onCreated }: { onCreated: () => void }) {
     : Array.from(trimmedTitle).length > TITLE_MAX_CHARS
       ? t(($) => $.create.title_too_long)
       : null;
-  const thesisError = !trimmedThesis
-    ? t(($) => $.create.thesis_required)
-    : new TextEncoder().encode(trimmedThesis).length > THESIS_MAX_BYTES
-      ? t(($) => $.create.thesis_too_long)
-      : null;
+  const thesisError =
+    new TextEncoder().encode(trimmedThesis).length > THESIS_MAX_BYTES ? t(($) => $.create.thesis_too_long) : null;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();

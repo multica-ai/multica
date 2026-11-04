@@ -1,0 +1,447 @@
+{
+  "title": "Governance",
+  "tabs": {
+    "goals": "Goals",
+    "budgets": "Budgets",
+    "autonomy": "Autonomy",
+    "reviews": "Reviews",
+    "log": "Log",
+    "controls": "Controls"
+  },
+  "placeholder": {
+    "title": "Nothing to show yet"
+  },
+  "autonomy": {
+    "note": "The honest limit: Multica cannot inspect what a runtime does inside a run, so a level cannot stop an agent from calling an external API its credentials allow. Multica controls what passes through it: which routines run, what is published into the shared record, which proposals are decided without you, which initiatives are created, how much is spent, and the boundaries in each charter. Anything with outside effects stays behind a gate the platform owns, such as the Launch gate, or behind the agent's own permission settings. L3 does not mean unsupervised.",
+    "levels_heading": "What each level allows",
+    "levels": {
+      "suggest": {
+        "name": "Suggest",
+        "body": "Routine runs are held. The squad runs when someone assigns or mentions it, and it can still file proposals."
+      },
+      "work": {
+        "name": "Work",
+        "body": "Routines run. The squad researches, analyses, writes knowledge drafts and files proposals. Every decision is the boss's."
+      },
+      "trusted": {
+        "name": "Trusted",
+        "body": "As Work, and its knowledge drafts may publish after review. Standing approvals can approve its proposals."
+      },
+      "autonomous": {
+        "name": "Autonomous",
+        "body": "As Trusted, and standing approvals may create initiatives from its own opportunities at the first stage, within caps and budget."
+      }
+    },
+    "boss_only_note": "Launches and organisation changes are always the boss's decision, at every level. Money is bounded by budgets at every level.",
+    "squads_heading": "Squad levels",
+    "squads_empty": "No squads yet.",
+    "read_only": "Only owners and admins can change levels.",
+    "level_tag": "L{{level}}",
+    "default_level": "Still at the default level. No change yet.",
+    "level_label": "Level",
+    "reason_label": "Reason",
+    "reason_placeholder": "Why this level? The reason stays in the governance log.",
+    "save_level": "Save level",
+    "level_saved": "Autonomy level saved",
+    "level_save_failed": "Could not change the level. Try again.",
+    "panel_heading": "Autonomy",
+    "policies_heading": "Standing approvals",
+    "policies_note": "A standing approval approves a narrow class of proposals from squads at the right level, and you see them afterwards in the brief. It never covers organisation changes, launch gates, budget raises, urgent proposals or other standing approvals.",
+    "policies_empty": "No standing approvals yet.",
+    "policies_load_failed": "Could not load the standing approvals.",
+    "policy_kind": {
+      "decision": "Decision",
+      "opportunity": "Opportunity"
+    },
+    "policy_active": "Active",
+    "policy_revoked": "Revoked",
+    "policy_flagged": "A review reversed one of its approvals",
+    "policy_scope_squads": "{{count}} squads",
+    "policy_scope_any": "Any squad at the right level",
+    "policy_week": "{{count}} of {{max}} approvals this week",
+    "policy_until": "Until {{date}}",
+    "policy_history": "History",
+    "policy_history_hide": "Hide history",
+    "policy_revoke": "Revoke",
+    "policy_revoked_toast": "Standing approval revoked",
+    "policy_revoke_failed": "Could not revoke the standing approval. Try again.",
+    "history_empty": "No proposals approved by this standing approval yet.",
+    "history_load_failed": "Could not load the history.",
+    "history_reversed": "Reversed on review: {{note}}",
+    "create_heading": "New standing approval",
+    "create_name": "Name",
+    "create_kind": "Kind",
+    "create_squads": "Squads",
+    "create_squads_hint": "Leave all unchecked for any squad at the right level.",
+    "create_max_per_week": "Most approvals per week",
+    "create_max_cost": "Largest cost, in micro-units (optional)",
+    "create_submit": "Create standing approval",
+    "create_done": "Standing approval created",
+    "create_failed": "Could not create the standing approval. Check the fields and try again."
+  },
+  "controls": {
+    "state_heading": "Company state",
+    "state": {
+      "running": "Running",
+      "paused": "Paused",
+      "quiet": "Quiet",
+      "unknown": "Unknown"
+    },
+    "in_force": "In effect now: {{state}}",
+    "pause": "Pause",
+    "resume": "Resume",
+    "pause_hint": "Routine and delegated runs wait. Chat and the Secretary keep working.",
+    "stop_work": "Pause and stop running work",
+    "stop_confirm_title": "Pause and stop running work?",
+    "stop_confirm_description": "Running routine and delegated tasks are cancelled. Queued ones wait until you resume.",
+    "stop_confirm_action": "Pause and stop",
+    "cancel": "Cancel",
+    "state_save_failed": "Could not change the company state. Try again.",
+    "quiet_heading": "Quiet hours",
+    "quiet_enabled": "Enabled",
+    "quiet_from": "From",
+    "quiet_until": "Until",
+    "quiet_timezone": "Timezone",
+    "quiet_hint": "Routine runs wait until the window ends. Runs a person starts are not held.",
+    "quiet_save": "Save quiet hours",
+    "quiet_saved": "Quiet hours saved",
+    "quiet_save_failed": "Could not save quiet hours. Try again.",
+    "state_load_failed": "Could not load the company state.",
+    "read_only": "Only owners and admins can change these settings.",
+    "quiet_hour": "Hour",
+    "quiet_minute": "Minute",
+    "digest_heading": "Digest source",
+    "digest_mode": {
+      "auto": "Automatic",
+      "squads": "Squads",
+      "floors": "Floors"
+    },
+    "digest_note": "Automatic reads floor briefs above {{threshold}} active squads. You have {{count}}, so the Secretary reads {{resolved}} now.",
+    "digest_save_failed": "Could not change the digest source. Try again."
+  },
+  "log": {
+    "filter_kind": "Kind",
+    "filter_actor": "Actor type",
+    "filter_subject": "Subject type",
+    "all": "All",
+    "column_kind": "Kind",
+    "column_actor": "Actor",
+    "column_subject": "Subject",
+    "column_summary": "Summary",
+    "column_time": "Time",
+    "kind": {
+      "policy_auto_approve": "Auto-approved by policy",
+      "policy_created": "Policy created",
+      "policy_revoked": "Policy revoked",
+      "budget_set": "Budget set",
+      "budget_extended": "Budget extended",
+      "budget_hold": "Run held by budget",
+      "budget_release": "Budget hold released",
+      "autonomy_changed": "Autonomy changed",
+      "org_change_applied": "Organization change applied",
+      "org_change_reverted": "Organization change reverted",
+      "auto_publish": "Published automatically",
+      "initiative_forced": "Initiative moved by override",
+      "company_paused": "Company paused",
+      "company_resumed": "Company resumed",
+      "goal_activated": "Goal activated",
+      "goal_imported": "Goal imported",
+      "review_published": "Review published",
+      "unknown": "Unknown event"
+    },
+    "actor_type": {
+      "member": "Member",
+      "agent": "Agent",
+      "system": "System",
+      "policy": "Policy",
+      "unknown": "Unknown"
+    },
+    "subject_type": {
+      "company": "Company",
+      "floor": "Floor",
+      "squad": "Squad",
+      "agent": "Agent",
+      "initiative": "Initiative",
+      "budget": "Budget",
+      "approval_policy": "Approval policy",
+      "proposal": "Proposal",
+      "goal": "Goal",
+      "review": "Review"
+    },
+    "empty": "No governance events match these filters.",
+    "load_failed": "Could not load the governance log.",
+    "load_more": "Load more",
+    "export": "Export CSV",
+    "export_failed": "Could not export the log."
+  },
+  "pulse": {
+    "label": "Company pulse",
+    "decisions": "{{count}} waiting for you",
+    "goals_at_risk": "{{count}} goals at risk",
+    "budgets": "{{count}} budgets over the soft line",
+    "holds": "{{count}} budget holds",
+    "stalled": "{{count}} stalled initiatives",
+    "routines_late": "{{count}} routines late",
+    "runtimes_offline": "{{count}} runtimes offline",
+    "quiet": "Nothing needs you"
+  },
+  "health": {
+    "heading": "System health",
+    "unreadable": "The system health could not be read.",
+    "nothing_at_risk": "Nothing needs attention.",
+    "risks_label": "Risks",
+    "jobs_heading": "Scheduled jobs",
+    "no_jobs": "No scheduled job has run yet.",
+    "col_job": "Job",
+    "col_last_success": "Last success",
+    "col_state": "State",
+    "never_succeeded": "Never",
+    "stuck": "Stuck",
+    "ok": "OK",
+    "deliveries_label": "Failed deliveries, last 24 hours",
+    "deliveries_value": "{{count}}",
+    "knowledge_label": "Knowledge base",
+    "knowledge_not_offered": "Not enabled on this deployment",
+    "knowledge_state": {
+      "ready": "Ready",
+      "offline": "Offline",
+      "provisioning": "Setting up",
+      "failed": "Failed",
+      "disabled": "Off",
+      "unknown": "Unknown"
+    },
+    "budget_gate_label": "Budget gate",
+    "budget_gate_not_reported": "Not reported yet",
+    "budget_gate_no_cache": "No counters cached yet",
+    "budget_gate_age": "Counters refreshed {{seconds}} s ago"
+  },
+  "reviews_tab": {
+    "empty": "No reviews are visible to you yet. Reviews show to owners, admins, and the leader of the squad reviewed.",
+    "loading": "Loading reviews",
+    "rating": {
+      "exceeds": "Exceeds",
+      "meets": "Meets",
+      "below": "Below",
+      "at_risk": "At risk",
+      "unknown": "Unrated"
+    },
+    "subject": {
+      "agent": "Agent",
+      "squad": "Squad",
+      "company": "Company",
+      "unknown": "Subject"
+    },
+    "period": {
+      "week": "Week of {{start}}",
+      "month": "Month of {{start}}",
+      "unknown": "Period {{start}}"
+    },
+    "recommendation": {
+      "observe": "Noted, no change",
+      "filed": "Filed for the boss's decision",
+      "refused": "Not filed"
+    },
+    "change": {
+      "instruction_change": "Instruction change",
+      "skill_change": "Skill change",
+      "charter_change": "Charter change",
+      "autonomy_change": "Autonomy change",
+      "hire": "Hire",
+      "retire": "Retire",
+      "move": "Move",
+      "merge_squads": "Merge squads",
+      "unretire": "Unretire",
+      "unmerge": "Unmerge squads",
+      "observe": "Observation"
+    },
+    "proposal": "Proposal {{id}}",
+    "figures": "Scorecard figures",
+    "generic": "Recommendations",
+    "no_recommendations": "No recommendations"
+  },
+  "goals": {
+    "loading": "Loading goals…",
+    "load_failed": "Could not load goals.",
+    "tree": {
+      "company": "Company",
+      "unnamed": "{{scope}} (not in the lists)"
+    },
+    "scope": {
+      "company": "Company",
+      "floor": "Floor",
+      "squad": "Squad",
+      "initiative": "Initiative"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "achieved": "Achieved",
+      "missed": "Missed",
+      "dropped": "Dropped",
+      "unknown": "Unknown"
+    },
+    "confidence": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "off_track": "Off track",
+      "unknown": "No reading yet",
+      "overridden": "(owner's call)"
+    },
+    "progress": "{{percent}}%",
+    "progress_none": "No reading yet",
+    "no_reading": "No reading",
+    "detail": {
+      "load_failed": "Could not load this goal.",
+      "action_failed": "Could not change the goal. Try again.",
+      "close": "Close",
+      "period": "{{start}} to {{end}}",
+      "override_note": "Readings give {{derived}}. The owner set this instead: {{note}}",
+      "key_results": "Key results",
+      "kr_title": "Key result",
+      "kr_range": "From → target",
+      "kr_now": "Latest",
+      "kr_progress": "Progress",
+      "kr_trend": "Readings",
+      "kr_from_to": "{{start}} → {{target}}",
+      "kr_trend_label": "Readings of {{title}}",
+      "child_goals": "Goals under this one",
+      "source_proposal": "Set by proposal {{id}}",
+      "activate": "Activate",
+      "close_as": {
+        "achieved": "Mark achieved",
+        "missed": "Mark missed",
+        "dropped": "Drop"
+      },
+      "override_heading": "Owner's confidence",
+      "override_clear": "Use the readings",
+      "override_why": "Why this confidence",
+      "override_save": "Save confidence",
+      "override_saved": "Confidence saved"
+    },
+    "create": {
+      "button": "New goal",
+      "title": "New goal",
+      "scope": "Scope",
+      "target_floor": "Floor",
+      "target_initiative": "Initiative",
+      "target_required": "Choose what this goal is for.",
+      "title_label": "Title",
+      "title_required": "Give the goal a title.",
+      "title_too_long": "Keep the title to 200 characters.",
+      "why_label": "Why (optional)",
+      "period_start": "Starts",
+      "period_end": "Ends",
+      "period_required": "Set both dates of the period.",
+      "period_order": "The end must come after the start.",
+      "owner": "Owner",
+      "owner_type": "Owner type",
+      "owner_types": {
+        "squad": "Squad",
+        "member": "Member",
+        "agent": "Agent"
+      },
+      "owner_required": "Choose an owner.",
+      "key_results": "Key results",
+      "kr_title": "Key result",
+      "kr_metric": "Metric",
+      "kr_start": "Start value",
+      "kr_target": "Target value",
+      "kr_add": "Add key result",
+      "kr_remove": "Remove",
+      "kr_title_required": "Give each key result a title.",
+      "kr_metric_required": "Choose a metric for each key result.",
+      "kr_values_required": "Enter a start and a target value.",
+      "kr_values_equal": "The target must differ from the start.",
+      "submit": "Create goal",
+      "cancel": "Cancel",
+      "created": "Goal created",
+      "failed": "Couldn't create the goal. Check the fields and try again."
+    }
+  },
+  "reading": {
+    "title": "Add a reading",
+    "metric": "Metric",
+    "value": "Value",
+    "note": "Note",
+    "submit": "Add reading",
+    "saved": "Reading added",
+    "failed": "Could not add the reading.",
+    "no_metrics": "No metrics yet",
+    "scope_note": "The reading is for the {{scope}} this goal reads."
+  },
+  "budgets": {
+    "title": "Budgets",
+    "read_only": "Only an owner or an admin changes a budget.",
+    "scope": {
+      "company": "Company",
+      "floor": "Floor",
+      "squad": "Squad",
+      "initiative": "Initiative"
+    },
+    "period": {
+      "week": "Weekly",
+      "month": "Monthly",
+      "quarter": "Quarterly"
+    },
+    "mode": {
+      "warn": "warns only",
+      "hold": "holds runs at the limit"
+    },
+    "state": {
+      "ok": "Within budget",
+      "soft": "Near the limit",
+      "hard": "At the limit",
+      "unknown": "Unknown"
+    },
+    "spent": "{{spent}} of {{limit}} spent",
+    "spent_label": "Spend against the limit",
+    "elapsed": "{{percent}}% of the period has passed",
+    "overrun": "At this pace the limit is reached on {{date}}",
+    "no_overrun": "At this pace the limit holds for the period",
+    "holds_count": "{{count}} held",
+    "history": "History",
+    "history_empty": "No period has been recorded yet.",
+    "columns": {
+      "period": "Period",
+      "spent": "Spent",
+      "extended": "Extended",
+      "runs": "Runs",
+      "state": "State"
+    },
+    "amount_label": "New amount per period, in dollars",
+    "amount_placeholder": "Amount",
+    "set_amount": "Set amount",
+    "save_failed": "The budget could not be saved. Try again.",
+    "holds_title": "Runs held for a budget",
+    "holds_empty": "No run is held for a budget.",
+    "release": "Release holds",
+    "release_hint": "Lets the held runs start once, even at the limit.",
+    "extend": "Extend",
+    "extend_amount": "Amount to add to this period, in dollars",
+    "extended": "The period's limit was extended.",
+    "released": "Released {{count}} held runs.",
+    "create": {
+      "button": "New budget",
+      "title": "New budget",
+      "scope": "Scope",
+      "target_required": "Choose the {{scope}} this budget covers.",
+      "period": "Period",
+      "amount": "Amount per period, in dollars",
+      "amount_required": "Enter an amount of zero or more.",
+      "soft_percent": "Warn at this share of the limit (%)",
+      "soft_invalid": "Enter a whole percentage from 1 to 100.",
+      "mode": "When the limit is reached",
+      "classes": "Runs it applies to",
+      "class": {
+        "routine": "Routine",
+        "delegated": "Delegated"
+      },
+      "classes_required": "Choose at least one kind of run.",
+      "submit": "Create budget",
+      "cancel": "Cancel",
+      "created": "Budget created",
+      "failed": "Couldn't create the budget. Check the fields and try again.",
+      "exists": "A budget already exists for this scope and period."
+    }
+  }
+}

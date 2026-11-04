@@ -173,7 +173,6 @@
     "title_required": "A title is required.",
     "title_too_long": "The title must be at most 200 characters.",
     "thesis_label": "Thesis",
-    "thesis_required": "A thesis is required: say why this is worth doing.",
     "thesis_too_long": "The thesis is too long.",
     "pipeline_label": "Pipeline",
     "no_pipeline": "This workspace has no pipeline to start an initiative in.",

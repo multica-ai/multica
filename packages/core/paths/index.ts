@@ -3,8 +3,10 @@ export {
   isGlobalPath,
   isMyAgentsSearch,
   AGENT_FOCUS_CONVERSATION_STARTERS,
+  GOVERNANCE_TABS,
+  parseGovernanceTab,
 } from "./paths";
-export type { WorkspacePaths } from "./paths";
+export type { WorkspacePaths, GovernanceTab } from "./paths";
 export { RESERVED_SLUGS, isReservedSlug } from "./reserved-slugs";
 export {
   WORKSPACE_PAGES,

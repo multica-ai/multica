@@ -123,7 +123,7 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
 // the reader's zone (no timeZone passed). A run that is still to come belongs to
 // the schedule that will fire it — see the trigger row, which passes the
 // trigger's own timezone.
-type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
+type RunStatus = "issue_created" | "running" | "skipped" | "deferred" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { color: "text-info", icon: Clock },
@@ -132,6 +132,8 @@ const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; 
   // MUL-1899) is muted so it doesn't read as a failure-ratio inflator.
   // The row still shows failure_reason which carries the skip context.
   skipped: { color: "text-muted-foreground", icon: Ban },
+  // Quiet hours hold the run until the window closes; the sweep then dispatches it.
+  deferred: { color: "text-muted-foreground", icon: Clock },
   completed: { color: "text-success", icon: CheckCircle2 },
   failed: { color: "text-destructive", icon: XCircle },
 };
@@ -160,7 +162,18 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
-  const statusLabel = t(($) => $.run_status[status]);
+  // A held run is waiting on the company controls or a budget. A scheduled run is
+  // skipped with that reason, and failure_reason says so. A webhook run keeps its
+  // issue or task and the server marks it held while the claim gate refuses it.
+  const held = run.held === true || (run.status === "skipped" && (run.reason_code === "company_paused" || run.reason_code === "budget_hold"));
+  const statusLabel = held ? t(($) => $.run_status.held) : t(($) => $.run_status[status]);
+  const heldText = !held || !run.issue_id
+    ? null
+    : run.reason_code === "budget_hold"
+      ? t(($) => $.run.held_reason.budget_hold)
+      : run.reason_code === "quiet_hours"
+        ? t(($) => $.run.held_reason.quiet_hours)
+        : t(($) => $.run.held_reason.company_paused);
 
   // For runs with a task_id (run_only mode), build a minimal AgentTask so
   // TranscriptButton can lazy-load the execution transcript.
@@ -200,9 +213,9 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           !run.issue_id && run.failure_reason ? "text-destructive" : "text-foreground",
         )}
       >
-        {run.issue_id
+        {heldText ?? (run.issue_id
           ? t(($) => $.run.issue_linked)
-          : run.failure_reason || statusLabel}
+          : run.failure_reason || statusLabel)}
       </span>
       <span className="shrink-0 text-caption text-muted-foreground">
         {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api" | "catchup"]) ?? run.source}

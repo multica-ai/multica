@@ -25,6 +25,12 @@ import enUsage from "./en/usage.json";
 import enUi from "./en/ui.json";
 import enSquads from "./en/squads.json";
 import enPipeline from "./en/pipeline.json";
+import enGovernance from "./en/governance.json";
+import zhHansGovernance from "./zh-Hans/governance.json";
+import zhHantGovernance from "./zh-Hant/governance.json";
+import koGovernance from "./ko/governance.json";
+import jaGovernance from "./ja/governance.json";
+import frGovernance from "./fr/governance.json";
 import enBilling from "./en/billing.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
@@ -193,6 +199,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: enUi,
     squads: enSquads,
     pipeline: enPipeline,
+    governance: enGovernance,
     billing: enBilling,
   },
   "zh-Hans": {
@@ -222,6 +229,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: zhHansUi,
     squads: zhHansSquads,
     pipeline: zhHansPipeline,
+    governance: zhHansGovernance,
     billing: zhHansBilling,
   },
   "zh-Hant": {
@@ -251,6 +259,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: zhHantUi,
     squads: zhHantSquads,
     pipeline: zhHantPipeline,
+    governance: zhHantGovernance,
     billing: zhHantBilling,
   },
   ko: {
@@ -280,6 +289,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: koUi,
     squads: koSquads,
     pipeline: koPipeline,
+    governance: koGovernance,
     billing: koBilling,
   },
   ja: {
@@ -309,6 +319,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     pipeline: jaPipeline,
+    governance: jaGovernance,
     billing: jaBilling,
   },
   fr: {
@@ -338,6 +349,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: frUi,
     squads: frSquads,
     pipeline: frPipeline,
+    governance: frGovernance,
     billing: frBilling,
   },
 };

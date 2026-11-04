@@ -139,7 +139,9 @@
     "running": "実行中",
     "completed": "完了",
     "failed": "失敗",
-    "skipped": "スキップ済み"
+    "skipped": "スキップ済み",
+    "deferred": "延期",
+    "held": "保留"
   },
   "run_source": {
     "schedule": "スケジュール",
@@ -150,6 +152,11 @@
   },
   "run": {
     "issue_linked": "タスクをリンク済み",
+    "held_reason": {
+      "company_paused": "保留中：会社は一時停止中です",
+      "budget_hold": "保留中：予算が上限に達しています",
+      "quiet_hours": "保留中：静穏時間"
+    },
     "view_log": "実行ログを表示",
     "skipped_group": {
       "label": "スキップ済み",
