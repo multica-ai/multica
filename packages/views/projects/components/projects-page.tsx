@@ -28,10 +28,10 @@ import {
   useDeletePin,
 } from "@multica/core/pins";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCanManageProjects } from "@multica/core/projects/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
 import { AppLink, useIntentNavigate } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -59,7 +59,6 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import type {
-  MemberWithUser,
   Project,
   ProjectPriority,
   ProjectStatus,
@@ -500,18 +499,13 @@ export function ProjectsPage() {
   const formatRelativeDate = useFormatRelativeDate();
 
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),
     enabled: !!wsId && !!currentUser?.id,
   });
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
-  const isWorkspaceAdmin = useMemo(() => {
-    if (!currentUser) return false;
-    const me = members.find((m: MemberWithUser) => m.user_id === currentUser.id);
-    return me?.role === "owner" || me?.role === "admin";
-  }, [members, currentUser]);
+  const canManage = useCanManageProjects(wsId);
 
   const pinnedProjectIds = useMemo(() => {
     const s = new Set<string>();
@@ -837,16 +831,18 @@ export function ProjectsPage() {
                 </div>
               }
             />
-            <CollectionCreateButton
-              label={t(($) => $.page.new_project)}
-              onClick={openCreateProject}
-            />
+            {canManage && (
+              <CollectionCreateButton
+                label={t(($) => $.page.new_project)}
+                onClick={openCreateProject}
+              />
+            )}
           </>
         }
       />
 
       {showEmpty ? (
-        <ProjectsIntro onCreate={openCreateProject} />
+        <ProjectsIntro onCreate={canManage ? openCreateProject : undefined} />
       ) : (
         <>
           {isCompact ? (
@@ -863,7 +859,7 @@ export function ProjectsPage() {
                 <ProjectRowActions
                   project={project}
                   pinned={pinnedProjectIds.has(project.id)}
-                  canDelete={isWorkspaceAdmin}
+                  canDelete={canManage}
                 />
               )}
               sort={sort}
@@ -892,7 +888,7 @@ export function ProjectsPage() {
                     key={project.id}
                     project={project}
                     pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
+                    canDelete={canManage}
                   />
                 ))}
               </div>
@@ -902,7 +898,7 @@ export function ProjectsPage() {
           <ProjectBatchToolbar
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
-            canDelete={isWorkspaceAdmin}
+            canDelete={canManage}
             onClear={() => setSelectedIds(new Set())}
           />
         </>

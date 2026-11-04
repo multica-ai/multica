@@ -378,6 +378,24 @@ describe("ProjectsPage compact row navigation", () => {
   });
 });
 
+describe("ProjectsPage project permissions", () => {
+  it.each(["member", undefined])("hides header creation for role %s", (role) => {
+    mocks.members = role ? [{ user_id: "user-1", name: "User One", role }] : [];
+    renderProjects();
+    expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
+    expect(screen.getByText(PROJECT.title)).toBeInTheDocument();
+  });
+
+  it("keeps the member intro without offering creation", () => {
+    mocks.members = [{ user_id: "user-1", name: "User One", role: "member" }];
+    mocks.projects = [];
+    renderProjects();
+    expect(screen.getByRole("region", { name: "Break big work into projects" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
+    expect(screen.getByText("Only workspace owners and admins can create projects.")).toBeInTheDocument();
+  });
+});
+
 describe("ProjectsPage header", () => {
   const CLOSED: Project = {
     ...PROJECT,

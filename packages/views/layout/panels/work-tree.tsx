@@ -23,6 +23,7 @@ import { openCreateIssueWithPreference } from "@multica/core/issues/stores/creat
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore, type SidebarIssueSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useModalStore } from "@multica/core/modals";
+import { useCanManageProjects } from "@multica/core/projects/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Issue, ListIssuesResponse, Project } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -113,6 +114,7 @@ export function ProjectsSection({
 }: ProjectsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
+  const canManage = useCanManageProjects(wsId);
   const collapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setProjectsCollapsed);
   const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
@@ -144,14 +146,16 @@ export function ProjectsSection({
       action={
         <>
           <ProjectsSectionSettings wsId={wsId} className="opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(pointer:coarse)]:opacity-100" />
-          <IconButton
-            label={t(($) => $.panels.work.new_project)}
-            size="icon-xs"
-            className="text-muted-foreground"
-            onClick={() => useModalStore.getState().open("create-project")}
-          >
-            <Plus />
-          </IconButton>
+          {canManage && (
+            <IconButton
+              label={t(($) => $.panels.work.new_project)}
+              size="icon-xs"
+              className="text-muted-foreground"
+              onClick={() => useModalStore.getState().open("create-project")}
+            >
+              <Plus />
+            </IconButton>
+          )}
         </>
       }
     >
@@ -174,7 +178,7 @@ export function ProjectsSection({
         </SortableContext>
       </DndContext>
       <PanelList className="mt-px">
-        {totalProjects === 0 ? (
+        {totalProjects === 0 && canManage ? (
           <li>
             <button
               type="button"

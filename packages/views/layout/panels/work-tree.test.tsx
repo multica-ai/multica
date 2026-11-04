@@ -16,6 +16,11 @@ import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { ProjectsSection } from "./work-tree";
 
+const permissions = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/projects/hooks", () => ({
+  useCanManageProjects: () => permissions.allowed,
+}));
+
 const apiMock = vi.hoisted(() => ({ putIssueViewPreference: vi.fn() }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
@@ -68,6 +73,7 @@ const project = (id: string, title: string): Project =>
 const PROJECTS = [project("p1", "Desktop"), project("p2", "Mobile"), project("p3", "Web")];
 
 beforeEach(() => {
+  permissions.allowed = true;
   useSidebarTreeStore.setState({ expanded: [], projectsCollapsed: false });
   apiMock.putIssueViewPreference
     .mockReset()
@@ -81,7 +87,7 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection() {
+function renderSection(projects = PROJECTS, totalProjects = 4) {
   const qc = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
   qc.setQueryData(
     issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey,
@@ -97,8 +103,8 @@ function renderSection() {
         wsId="ws-1"
         userId="u1"
         pathname="/acme/issues"
-        projects={PROJECTS}
-        totalProjects={4}
+        projects={projects}
+        totalProjects={totalProjects}
         plainRowsLit
         activeIssueId={null}
       />
@@ -107,6 +113,20 @@ function renderSection() {
 }
 
 describe("ProjectsSection", () => {
+  it.each([true, false])("gates both empty-workspace create entries: canManage=%s", (allowed) => {
+    permissions.allowed = allowed;
+    renderSection([], 0);
+    expect(screen.queryAllByRole("button", { name: "New project" })).toHaveLength(allowed ? 2 : 0);
+    if (!allowed) expect(screen.getByRole("link", { name: /All .*projects/ })).toBeInTheDocument();
+  });
+
+  it("hides the header create entry but keeps project navigation for members", () => {
+    permissions.allowed = false;
+    renderSection();
+    expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Mobile" })).toBeInTheDocument();
+  });
+
   it("expands a project in place, keeping its count", () => {
     renderSection();
     expect(screen.getAllByText("3")).toHaveLength(3);

@@ -17,6 +17,8 @@ import type { CommandBarContext } from "@multica/core/command-bar";
 import { useArchiveAllReadInbox, useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
+import { useCanManageProjects } from "@multica/core/projects/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useShortcut } from "@multica/core/shortcuts";
 import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
@@ -34,6 +36,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
   const { t: tInbox } = useT("inbox");
   const palette = usePalette();
   const p = useWorkspacePaths();
+  const canManage = useCanManageProjects(useWorkspaceId());
   const navigation = useNavigation();
   const createIssueShortcut = useShortcut("createIssue");
   const toggleChatShortcut = useShortcut("toggleChat");
@@ -76,13 +79,13 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         },
         primary: true,
       },
-      {
+      ...(canManage ? [{
         id: "new-project",
         label: t(($) => $.commands.new_project),
         icon: FolderPlus,
         keywords: ["new", "project", "create", "add", "新建", "项目"],
         run: () => useModalStore.getState().open("create-project"),
-      },
+      }] : []),
       {
         id: "new-autopilot",
         label: t(($) => $.commands.new_autopilot),
@@ -144,6 +147,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
       },
     ];
   }, [
+    canManage,
     archiveAllRead,
     createIssueShortcut,
     inbox,

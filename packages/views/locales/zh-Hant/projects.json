@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "只有工作區 owner 和 admin 可以建立專案。"
+  },
   "page": {
     "title": "專案",
     "new_project": "新建專案",

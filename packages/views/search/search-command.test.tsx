@@ -379,7 +379,7 @@ describe("SearchCommand", () => {
     mockResolvedCollapseAll.mockReset();
     mockResolvedExpandAll.mockReset();
 
-    seed(memberListOptions("ws-test"), [makeMember(ME, "Me Myself", "me@example.com")]);
+    seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "admin" }]);
     seed(agentListOptions("ws-test"), []);
     seed(squadListOptions("ws-test"), []);
 
@@ -411,6 +411,16 @@ describe("SearchCommand", () => {
   });
 
   describe("pages and global commands", () => {
+    it.each(["member", undefined])("hides project creation from commands for role %s", async (role) => {
+      seed(memberListOptions("ws-test"), role ? [{ ...makeMember(ME, "Me Myself", "me@example.com"), role }] : []);
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), ">new");
+      await rowText("New issue");
+      expect(renderedValues()).not.toContain("command:new-project");
+      expect(screen.queryByText("New project")).not.toBeInTheDocument();
+    });
+
     it("filters navigation pages by query", async () => {
       const user = userEvent.setup();
       renderSearch();

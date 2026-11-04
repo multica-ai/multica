@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "Only workspace owners and admins can create projects."
+  },
   "page": {
     "title": "Projects",
     "new_project": "New project",

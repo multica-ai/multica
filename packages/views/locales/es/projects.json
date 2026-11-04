@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "Solo los propietarios y administradores del espacio de trabajo pueden crear proyectos."
+  },
   "page": {
     "title": "Proyectos",
     "new_project": "Nuevo proyecto",

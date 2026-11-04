@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "워크스페이스의 owner와 admin만 프로젝트를 만들 수 있습니다."
+  },
   "page": {
     "title": "프로젝트",
     "new_project": "새 프로젝트",

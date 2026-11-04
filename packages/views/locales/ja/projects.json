@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "プロジェクトを作成できるのはワークスペースの owner と admin だけです。"
+  },
   "page": {
     "title": "プロジェクト",
     "new_project": "新規プロジェクト",

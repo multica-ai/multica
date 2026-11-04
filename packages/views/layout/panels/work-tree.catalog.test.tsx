@@ -12,6 +12,10 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ProjectsSection } from "./work-tree";
 
+vi.mock("@multica/core/projects/hooks", () => ({
+  useCanManageProjects: () => false,
+}));
+
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
   PointerSensor: vi.fn(),

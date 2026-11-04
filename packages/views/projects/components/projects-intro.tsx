@@ -32,7 +32,7 @@ const LEAD = { name: "Mia", initials: "M" };
 const AGENT = { name: "Turing", initials: "T", avatarUrl: formatAvatarEmoji("🧩"), isAgent: true };
 const REPOS = ["acme/website", "acme/brand"];
 
-export function ProjectsIntro({ onCreate }: { onCreate: () => void }) {
+export function ProjectsIntro({ onCreate }: { onCreate?: () => void }) {
   const { t } = useT("projects");
 
   return (
@@ -51,10 +51,14 @@ export function ProjectsIntro({ onCreate }: { onCreate: () => void }) {
         t(($) => $.table.issues),
       ]}
       action={
-        <Button onClick={onCreate}>
-          <Plus aria-hidden="true" />
-          {t(($) => $.page.new_project)}
-        </Button>
+        onCreate ? (
+          <Button onClick={onCreate}>
+            <Plus aria-hidden="true" />
+            {t(($) => $.page.new_project)}
+          </Button>
+        ) : (
+          <p className="text-caption text-muted-foreground">{t(($) => $.permissions.create)}</p>
+        )
       }
     >
       <FeatureIntroCarousel
