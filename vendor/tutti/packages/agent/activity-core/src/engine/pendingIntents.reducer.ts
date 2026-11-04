@@ -7,7 +7,6 @@ import {
   type PendingIntentsState,
   type SessionActivationRequestedIntent
 } from "./pendingIntents.types.ts";
-import { reconcilePendingIntentsFromAuthoritativeHistory } from "./pendingIntents.authoritativeHistory.ts";
 import {
   pendingActivationRailSectionKeyFields
 } from "./pendingIntents.activationExtras.ts";
@@ -87,8 +86,6 @@ export function pendingIntentsReducer(
       return requestUnactivation(state, intent);
     case "session/stopRequested":
       return stopPendingActivation(state, intent);
-    case "session/historyAuthoritativeSnapshotReceived":
-      return reconcilePendingIntentsFromAuthoritativeHistory(state, intent);
     case "session/snapshotReceived":
       return receiveSessionSnapshot(
         state,

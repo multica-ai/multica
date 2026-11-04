@@ -35,6 +35,7 @@ export {
 } from "./engine/createAgentSessionEngine.ts";
 export type {
   AgentSessionActivateEffectInput,
+  AgentSessionActivationInput,
   AgentSessionEffectPort,
   AgentSessionEngine,
   AgentSessionEngineState,

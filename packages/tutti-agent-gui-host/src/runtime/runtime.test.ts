@@ -741,6 +741,29 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(engine.getSnapshot().sessionReconcile.recordsBySessionId[session.id]).toMatchObject({ inFlightCommandId: null, pendingState: false, pendingMessages: false });
     expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(1);
   });
+  it("does not read a conversation while its creation is unanswered", async () => {
+    const { handle, request } = await setup();
+    const original = request.getMockImplementation()!;
+    let answer!: () => void;
+    const created = new Promise<void>((resolve) => { answer = resolve; });
+    request.mockImplementation(async (method, params) => {
+      if (method === "session.create") await created;
+      return original(method, params);
+    });
+    const engine = handle.runtime.getSessionEngine(init.workspaceId);
+    expect(engine.activateSession({ mode: "new", agentSessionId: "gui-new", agentTargetId: agent.id, requestId: "creating", clientSubmitId: "submit-new" })).toBe(true);
+    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.create")).toBe(true));
+    const reads = () => request.mock.calls.filter(([method]) => method === "session.load").length;
+    const before = reads();
+    engine.dispatch({ type: "session/reconcileRequested", workspaceId: init.workspaceId, agentSessionId: "gui-new", needsState: true, needsMessages: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(reads()).toBe(before);
+    expect(engine.getSnapshot().pendingIntents.activationsByRequestId.creating).toMatchObject({ status: "requested", mode: "new" });
+    answer();
+    await vi.waitFor(() => expect(engine.getSnapshot().pendingIntents.activationsByRequestId.creating?.status).toBe("confirmed"));
+    expect(handle.toServerSessionId("gui-new")).toBe("server-session");
+  });
+
   it("creates a real server session while retaining the source GUI identity and confirms the real turn", async () => {
     const { handle, request, storage } = await setup();
     const engine = handle.runtime.getSessionEngine(init.workspaceId);

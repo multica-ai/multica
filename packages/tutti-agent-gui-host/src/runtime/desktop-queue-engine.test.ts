@@ -14,7 +14,7 @@ function setup(running = false, pendingStore?: DesktopPendingStore) {
   base.dispatch({ type: "session/snapshotReceived", sessions: [{ agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurnId: running ? "active" : null,
     ...(running ? { activeTurn: { agentSessionId: "session", turnId: "active", origin: "user_prompt", phase: "running", startedAtUnixMs: 1, updatedAtUnixMs: 1 } } : {}), pendingInteractions: [], latestTurnInteractions: [] }] });
   const messages: { role: string; turnId: string; payload: Record<string, unknown> }[] = [];
-  const options = { pendingStore, enabled: () => true, messages: () => messages, enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),
+  const options = { pendingStore, enabled: () => true, messages: () => messages, activate: vi.fn(async () => undefined), applyActivationResult: vi.fn(), updateActivationSettings: vi.fn(async () => {}), describeActivationError: () => ({ code: null, message: null }), enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),
     update: vi.fn(async (): Promise<LocalPromptQueue> => ({ revision: 2, paused: true, items: [] })), error: vi.fn(),
     respondToInteraction: vi.fn(async () => ({ session: { agentSessionId: "session", workspaceId: "ws" } })), editRetry: vi.fn(), recoverEditRetry: vi.fn(), reconcileWorkspace: vi.fn() };
   const adapter = createDesktopQueueEngine(base, options);
@@ -337,8 +337,7 @@ describe("desktop queue presentation", () => {
       messages.push({ role: "user", turnId: "started", payload: { clientSubmitId: "first" } });
       const turn = { agentSessionId: "session", turnId: "started", origin: "user_prompt" as const, phase: "running" as const, startedAtUnixMs: 2, updatedAtUnixMs: 2 };
       engine.dispatch({ type: "session/historyAuthoritativeSnapshotReceived", workspaceId: "ws", agentSessionId: "session", childSessions: [], historyRevision: 1, turns: [turn],
-        session: { agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurn: turn, activeTurnId: "started", latestTurn: turn, pendingInteractions: [], latestTurnInteractions: [] },
-        messages: [{ agentSessionId: "session", kind: "user_prompt", messageId: "m", occurredAtUnixMs: 2, payload: { clientSubmitId: "first" }, role: "user", sequence: 1, turnId: "started", version: 1 }] });
+        session: { agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurn: turn, activeTurnId: "started", latestTurn: turn, pendingInteractions: [], latestTurnInteractions: [] } });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(options.update.mock.calls).toEqual([["session", "stop", undefined], ["session", "stop", undefined]]);
       expect(prompts.cancelRecord("session")).toMatchObject({ status: "accepted", turnId: "started" });

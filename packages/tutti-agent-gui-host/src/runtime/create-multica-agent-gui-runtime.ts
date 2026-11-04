@@ -10,6 +10,7 @@ import {
   type AgentActivitySession,
   type AgentActivitySnapshot,
   type AgentSessionActivateEffectInput,
+  type AgentSessionActivationInput,
   type AgentSessionEngine,
   type EngineExtensionCommand,
   type EngineTypedCommandPort,
@@ -112,13 +113,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   const commandPort: EngineTypedCommandPort = {
     kind: "typed",
     effects: {
-      activateSession: (input, options) => activate(input, options.signal),
-      // Only a new conversation's patch reaches the engine's port; later choices go straight to the composer.
-      updateSessionSettings: async (input) => {
-        scope(input.workspaceId);
-        await composer.applyActivationSettings(input.agentSessionId, input.settings);
-        return { agentSessionId: input.agentSessionId, session: projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === input.agentSessionId) };
-      },
+      activateSession: async () => unsupported("session/activate"),
+      updateSessionSettings: async () => unsupported("session/updateSettings"),
     },
     execute: executeExtension,
   };
@@ -206,6 +202,16 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     commandPort,
   });
   const desktopQueue = createDesktopQueueEngine(baseEngine, {
+    activate: (request, signal) => activate(activationEffectInput(request), signal),
+    applyActivationResult(target, request, result) {
+      if (result.activation.mode === "new") target.dispatch({ type: "session/upserted", session: result.session });
+      else if (result.detail) target.dispatch({ type: "session/detailSnapshotReceived", childSessions: result.detail.childSessions, session: result.detail.session, turns: result.detail.turns, workspaceId });
+    },
+    updateActivationSettings: async (id, settings) => { await composer.applyActivationSettings(id, settings); },
+    describeActivationError: (error) => ({
+      code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.trim() || null : null,
+      message: error instanceof Error ? error.message : String(error),
+    }),
     messages: (id) => transcriptModel.messages(id),
     // A stop or an answer decides against turn state, which must not be behind what has arrived.
     beforeTurnOperation: () => commits.flush(),
@@ -518,8 +524,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       type: "session/historyAuthoritativeSnapshotReceived", workspaceId,
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
       session: withModel(result.session), turns: result.turns,
-      // Confirming a submit needs only the user's messages; the transcript reads the model.
-      messages: result.messages.filter((message) => message.role === "user"),
     }));
     // A same-timestamp terminal result can leave the engine's previous active
     // pointer intact. Fence that specific transition once: replaying every
@@ -537,6 +541,22 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     markAvailability(result.session);
     schedulePersist();
     return withModel(result.session);
+  }
+
+  function activationEffectInput(request: AgentSessionActivationInput): AgentSessionActivateEffectInput {
+    const initialContent = request.runtimeContent ?? request.initialContent;
+    const shared = {
+      activationId: request.requestId, workspaceId, agentSessionId: request.agentSessionId,
+      ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+      ...(initialContent?.length ? { initialContent: [...initialContent] } : {}),
+      ...(request.initialDisplayPrompt ? { initialDisplayPrompt: request.initialDisplayPrompt } : {}),
+      ...(request.isolation ? { isolation: request.isolation } : {}),
+      ...(request.settings ? { settings: request.settings } : {}),
+      ...(request.title ? { title: request.title } : {}),
+    };
+    return request.mode === "new"
+      ? { ...shared, mode: "new", agentTargetId: request.agentTargetId, clientSubmitId: request.clientSubmitId }
+      : { ...shared, mode: "existing", ...(request.agentTargetId ? { agentTargetId: request.agentTargetId } : {}) };
   }
 
   async function activate(input: AgentSessionActivateEffectInput, signal?: AbortSignal) {
@@ -686,8 +706,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
 
   async function executeExtension(command: EngineExtensionCommand, options?: { signal?: AbortSignal }): Promise<unknown> {
     switch (command.type) {
-      case "session/reconcile": await loadSession(command.agentSessionId); return { status: "applied" };
-      case "session/unactivate": return undefined;
+      case "session/reconcile":
+        // Nothing can be read for a conversation still being created; its answer brings the state.
+        if (!desktopQueue.activations.isCreating(command.agentSessionId)) await loadSession(command.agentSessionId);
+        return { status: "applied" };
       default: return unsupported(command.type);
     }
   }

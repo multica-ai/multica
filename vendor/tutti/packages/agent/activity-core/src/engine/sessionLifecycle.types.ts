@@ -117,7 +117,6 @@ export interface SessionHistoryAuthoritativeSnapshotReceivedIntent {
   agentSessionId: string;
   childSessions: readonly AgentActivitySessionInput[];
   historyRevision: number;
-  messages: readonly AgentActivityDurableMessage[];
   session: AgentActivitySessionInput;
   liveTurnId?: string;
   turns: readonly AgentActivityTurn[];

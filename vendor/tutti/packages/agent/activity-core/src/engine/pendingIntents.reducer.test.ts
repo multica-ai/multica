@@ -191,31 +191,6 @@ test("a stale pre-admitted binding without post-request update stays requested",
   );
 });
 
-test("authoritative history retracts only the optimistic initial prompt", () => {
-  let state = reduce(createInitialPendingIntentsState(), activation()).state;
-  state = reduce(state, {
-    sessions: [session("session-new")],
-    type: "session/snapshotReceived"
-  }).state;
-
-  const result = reduce(state, {
-    agentSessionId: "session-new",
-    childSessions: [],
-    historyRevision: 1,
-    messages: [],
-    session: session("session-new"),
-    turns: [],
-    type: "session/historyAuthoritativeSnapshotReceived",
-    workspaceId: "workspace-1"
-  });
-
-  const retained = result.state.activationsByRequestId["activation-1"];
-  assert.equal(retained?.status, "confirmed");
-  assert.equal(retained?.initialPromptRetracted, true);
-  assert.equal(retained?.clientSubmitId, "submit-new");
-  assert.deepEqual(retained?.settings, { model: "model-1" });
-});
-
 test("authoritative activation failure is retained for the view to dismiss", () => {
   let state = reduce(createInitialPendingIntentsState(), activation()).state;
   state = reduce(state, {
