@@ -22,12 +22,14 @@ WHERE id = $1 AND user_id = $2
 RETURNING token_hash;
 
 -- name: UpdatePersonalAccessTokenLastUsed :exec
--- Callers fire this on every PAT cache miss, and without Redis every
--- request misses. Skipping a stamp within a minute of now() keeps that
--- path a read instead of rewriting one hot row per request. A stamp more
--- than a minute ahead (the clock stepped back) is rewritten; the minute
--- of slack stops concurrent callers, whose now() is their own statement
--- start, from re-stamping each other.
+-- Callers run this on a PAT cache miss, and only when the stamp they just
+-- read is stale (auth.PATLastUsedStale); without Redis every request
+-- misses. The guard repeats that check against now() so concurrent
+-- callers that read the same stale stamp write once: each waiter
+-- re-checks the row the first writer committed and skips it. A stamp
+-- more than a minute ahead (the clock stepped back) is rewritten; the
+-- minute of slack stops concurrent callers, whose now() is their own
+-- statement start, from re-stamping each other.
 UPDATE personal_access_token
 SET last_used_at = now()
 WHERE id = $1

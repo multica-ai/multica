@@ -96,6 +96,27 @@ func TTLForExpiry(now, expiresAt time.Time) time.Duration {
 	return AuthCacheTTL
 }
 
+// PATLastUsedResolution is how far last_used_at may drift from now before
+// a PAT lookup refreshes it. It must match the interval in the
+// UpdatePersonalAccessTokenLastUsed guard.
+const PATLastUsedResolution = time.Minute
+
+// PATLastUsedStale reports whether a PAT's last_used_at, as just read,
+// needs a refresh: it is unset, or more than PATLastUsedResolution from
+// now in either direction. Callers skip the UPDATE otherwise, so a fresh
+// stamp costs no statement at all; the query's own guard still settles
+// concurrent callers that all read the same stale stamp.
+//
+// Pass time.Time{} when the token has never been used (pgtype.Timestamptz
+// with Valid=false maps to a zero Time).
+func PATLastUsedStale(now, lastUsedAt time.Time) bool {
+	if lastUsedAt.IsZero() {
+		return true
+	}
+	age := now.Sub(lastUsedAt)
+	return age > PATLastUsedResolution || age < -PATLastUsedResolution
+}
+
 // Invalidate removes the entry for hash. Called on PAT revocation so the
 // revoke takes effect immediately rather than waiting for the TTL.
 func (c *PATCache) Invalidate(ctx context.Context, hash string) {

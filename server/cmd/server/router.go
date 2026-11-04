@@ -2582,9 +2582,11 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 	}
 	pr.cache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
-	// Cache miss = first WS auth in this TTL window. Refresh last_used_at;
-	// subsequent connects within the window skip the write.
-	go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+	// Cache miss = first WS auth in this TTL window. Refresh a stale
+	// last_used_at; subsequent connects within the window skip the write.
+	if auth.PATLastUsedStale(time.Now(), pat.LastUsedAt.Time) {
+		go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+	}
 
 	return userID, true
 }
