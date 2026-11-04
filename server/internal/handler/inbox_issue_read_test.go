@@ -161,7 +161,7 @@ func (f issueInboxFixture) openIssue() int64 {
 }
 
 // openInInbox is selecting the issue's row in the inbox: it renders the
-// group's newest row and marks that one read.
+// group's newest row and marks that one read, which reads the whole issue.
 func (f issueInboxFixture) openInInbox() {
 	f.t.Helper()
 	var items []InboxItemResponse
@@ -172,10 +172,30 @@ func (f issueInboxFixture) openInInbox() {
 	if len(items) == 0 {
 		f.t.Fatal("the inbox lists nothing for the issue")
 	}
-	newest := items[0].ID
+	f.markRead(items[0].ID)
+}
+
+func (f issueInboxFixture) markRead(id string) {
+	f.t.Helper()
 	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.MarkInboxRead),
-		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+newest+"/read", f.workspaceID), "id", newest)).
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+id+"/read", f.workspaceID), "id", id)).
 		Want(http.StatusOK)
+}
+
+func (f issueInboxFixture) markUnread(id string) {
+	f.t.Helper()
+	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.MarkInboxUnread),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+id+"/unread", f.workspaceID), "id", id)).
+		Want(http.StatusOK)
+}
+
+// rawUnread is every unread active row the caller has in the workspace, the
+// count GET /api/inbox/unread-count reports.
+func (f issueInboxFixture) rawUnread() int64 {
+	f.t.Helper()
+	return int64(dbfx.Count(f.t,
+		"SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND recipient_id = $2 AND archived = false AND read = false",
+		f.workspaceID, testUserID))
 }
 
 // unreadRows is the issue's row in the unread badge: 1 while its newest
@@ -202,69 +222,125 @@ func (f issueInboxFixture) read(id string) bool {
 	return read
 }
 
-func TestMarkIssueInboxReadKeepsPendingItemsThatNeedHandling(t *testing.T) {
-	for _, kept := range []struct{ notifType, severity string }{
+// Items that need handling are read with the rest: opening the issue shows
+// all of it (MUL-8618).
+func TestMarkIssueInboxReadReadsItemsThatNeedHandling(t *testing.T) {
+	for _, pending := range []struct{ notifType, severity string }{
 		{"issue_assigned", "action_required"},
 		{"task_failed", "action_required"},
 		{"autopilot_paused", "attention"},
 		{"mentioned", "info"},
 	} {
-		t.Run(kept.notifType, func(t *testing.T) {
-			f := newIssueInboxFixture(t, "keeps "+kept.notifType)
-			keptID := f.notify(kept.notifType, kept.severity, 2)
+		t.Run(pending.notifType, func(t *testing.T) {
+			f := newIssueInboxFixture(t, "reads "+pending.notifType)
+			pendingID := f.notify(pending.notifType, pending.severity, 2)
 			comment := f.notify("new_comment", "info", 1)
 
-			// The comment is the row the inbox shows: reading it would turn the
-			// row read with the kept item still waiting behind it.
-			if got := f.openIssue(); got != 0 {
-				t.Fatalf("count = %d, want nothing read while %s is pending", got, kept.notifType)
+			if got := f.openIssue(); got != 2 {
+				t.Fatalf("count = %d, want both rows read", got)
 			}
-			if f.read(keptID) || f.read(comment) || f.unreadRows() != 1 {
-				t.Fatalf("opening the issue read past a pending %s", kept.notifType)
+			if !f.read(pendingID) || !f.read(comment) || f.unreadRows() != 0 || f.rawUnread() != 0 {
+				t.Fatalf("opening the issue left %s unread", pending.notifType)
 			}
 		})
 	}
-
-	t.Run("kept row is the newest", func(t *testing.T) {
-		f := newIssueInboxFixture(t, "keeps the newest row")
-		comment := f.notify("new_comment", "info", 2)
-		assigned := f.notify("issue_assigned", "action_required", 1)
-		if got := f.openIssue(); got != 0 || f.read(comment) || f.read(assigned) {
-			t.Fatalf("count = %d, want the assignment row left unread as it is", got)
-		}
-	})
 }
 
-func TestMarkIssueInboxReadIsNotBlockedByAnAssignmentTheInboxReadPast(t *testing.T) {
-	f := newIssueInboxFixture(t, "assignment the inbox read past")
+// The MUL-8618 report: an assignment under a later comment. Opening the row
+// in the inbox reads the comment it shows and the assignment under it, so no
+// unread row is left behind where the inbox never shows it again.
+func TestMarkInboxReadReadsEveryActiveRowOnTheIssue(t *testing.T) {
+	f := newIssueInboxFixture(t, "inbox read reads the issue")
 	assigned := f.notify("issue_assigned", "action_required", 3)
-	f.notify("new_comment", "info", 2)
+	comment := f.notify("new_comment", "info", 2)
+	archived := f.notify("new_comment", "info", 4)
+	dbfx.Exec(t, `UPDATE inbox_item SET archived = true WHERE id = $1`, archived)
+	otherIssueID := dbfx.Issue(t, "Other issue", testutil.Cols{"workspace_id": f.workspaceID})
+	other := dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   f.workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "new_comment",
+		"severity":       "info",
+		"issue_id":       otherIssueID,
+		"title":          "another issue",
+	})
+	someoneElses := dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   f.workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   uuid.NewString(),
+		"type":           "issue_assigned",
+		"severity":       "action_required",
+		"issue_id":       f.issueID,
+		"title":          "someone else's",
+	})
 
-	// The inbox shows and reads only the newest comment; the assignment under
-	// it stays unread for good.
-	f.openInInbox()
-	if f.read(assigned) || f.unreadRows() != 0 {
-		t.Fatal("setup: want the inbox row read with the assignment still unread under it")
+	f.markRead(comment)
+	if !f.read(comment) || !f.read(assigned) {
+		t.Fatal("reading the row the inbox shows left the assignment under it unread")
+	}
+	if f.read(archived) {
+		t.Fatal("reading the row read an archived row on the issue")
+	}
+	if f.read(other) {
+		t.Fatal("reading the row read another issue's row")
+	}
+	if f.read(someoneElses) {
+		t.Fatal("reading the row read another recipient's row")
+	}
+	if got := f.rawUnread(); got != 1 {
+		t.Fatalf("raw unread = %d, want only the other issue's row", got)
 	}
 
-	next := f.notify("new_comment", "info", 1)
-	if f.unreadRows() != 1 {
-		t.Fatal("setup: a new comment should make the issue's row unread again")
+	// Mark as unread flips only the row the inbox shows; reading it again
+	// reads it, and a pending row that arrived since is read with it.
+	f.markUnread(comment)
+	if f.read(comment) || !f.read(assigned) {
+		t.Fatal("mark as unread should flip only the shown row")
 	}
-	if got := f.openIssue(); got != 1 || !f.read(next) {
-		t.Fatalf("count = %d, want the new comment read", got)
+	reassigned := f.notify("issue_assigned", "action_required", 1)
+	f.markRead(comment)
+	if !f.read(comment) || !f.read(reassigned) {
+		t.Fatal("reading the row again left a newer assignment unread")
 	}
-	if f.unreadRows() != 0 {
-		t.Fatal("the issue's inbox row is still unread after opening the issue")
-	}
-	if f.read(assigned) {
-		t.Fatal("opening the issue read the assignment")
-	}
+}
 
-	// An assignment that arrives after that is pending again.
-	reassigned := f.notify("issue_assigned", "action_required", 0)
-	f.notify("new_comment", "info", 0)
-	if got := f.openIssue(); got != 0 || f.read(reassigned) || f.unreadRows() != 1 {
-		t.Fatalf("count = %d, want a new assignment to keep the row unread", got)
+// Opening an archived row reads that row and the issue's active rows, the same
+// set opening the issue anywhere else reads.
+func TestMarkInboxReadOnAnArchivedRowReadsTheIssuesActiveRows(t *testing.T) {
+	f := newIssueInboxFixture(t, "inbox read on an archived row")
+	archivedOlder := f.notify("new_comment", "info", 3)
+	archivedNewest := f.notify("new_comment", "info", 2)
+	dbfx.Exec(t, `UPDATE inbox_item SET archived = true WHERE id = ANY($1::uuid[])`, []string{archivedOlder, archivedNewest})
+	active := f.notify("issue_assigned", "action_required", 1)
+
+	f.markRead(archivedNewest)
+	if !f.read(archivedNewest) || !f.read(active) {
+		t.Fatal("want the archived row and the issue's active row read")
+	}
+	if f.read(archivedOlder) {
+		t.Fatal("an archived sibling should be left as it is")
+	}
+}
+
+func TestMarkInboxReadWithoutAnIssueReadsOnlyTheItem(t *testing.T) {
+	f := newIssueInboxFixture(t, "inbox read without an issue")
+	insert := func(title string) string {
+		t.Helper()
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id":   f.workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"type":           "autopilot_paused",
+			"severity":       "attention",
+			"title":          title,
+		})
+	}
+	first := insert("first")
+	second := insert("second")
+
+	f.markRead(first)
+	if !f.read(first) || f.read(second) {
+		t.Fatal("reading an item without an issue should read only that item")
 	}
 }
