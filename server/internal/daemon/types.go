@@ -76,16 +76,18 @@ type ProjectWorkflowData struct {
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
 	// StartClaimSupported gates retries when talking to older servers.
-	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
-	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
+	CodexRetryMustResume     bool                   `json:"codex_retry_must_resume,omitempty"`
+	CodexRetryExpectedBranch string                 `json:"codex_retry_expected_branch,omitempty"`
+	DispatchedAt             string                 `json:"dispatched_at,omitempty"`
+	ID                       string                 `json:"id"`
+	AgentID                  string                 `json:"agent_id"`
+	RuntimeID                string                 `json:"runtime_id"`
+	IssueID                  string                 `json:"issue_id"`
+	WorkspaceID              string                 `json:"workspace_id"`
+	WorkspaceSlug            string                 `json:"workspace_slug,omitempty"`
+	IssueIdentifier          string                 `json:"issue_identifier,omitempty"`
+	RemoteMCPConnections     []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
 	// broker's credential-resolution calls. It must never enter agent env/config.
 	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
@@ -314,6 +316,7 @@ type TaskResult struct {
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	EnvRoot        string `json:"-"` // env root dir for writing GC metadata (not sent to server)
 	FailureReason  string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	SelectedModel  string `json:"-"` // exact model used for a structured Codex overload
 	// SessionRolloutMissing is set when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the

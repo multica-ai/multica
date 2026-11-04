@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -4476,129 +4475,10 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
-func TestCodexExecuteRetriesTransientCapacityInSameSession(t *testing.T) {
+func TestCodexStructuredOverloadEvidence(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
-	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
-	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
-	fakePath := writeFakeCodexAppServer(t, ""+
-		`DIR="$(dirname "$0")"`+"\n"+
-		`if [ -e "$DIR/live" ]; then echo overlap > "$DIR/overlap"; fi`+"\n"+
-		`echo $$ > "$DIR/live"`+"\n"+
-		`trap 'rm -f "$DIR/live"' EXIT`+"\n"+
-		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
-		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
-		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
-		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
-		`pwd > "$DIR/cwd-$ATTEMPT"`+"\n"+
-		`read line; echo "$line" >> "$LOG"`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-		`read line; echo "$line" >> "$LOG"`+"\n"+
-		`read line; echo "$line" >> "$LOG"`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
-		`read line; echo "$line" >> "$LOG"`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
-		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
-		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"userMessage","id":"input-1","content":[{"type":"text","text":"prompt"}]}}}'`+"\n"+
-		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"failed","error":{"message":"Selected model is at capacity. Please try a different model.","codexErrorInfo":"serverOverloaded"}}}}'`+"\n"+
-		`else`+"\n"+
-		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered"}}}'`+"\n"+
-		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"completed"}}}'`+"\n"+
-		`fi`+"\n")
-	cwd := t.TempDir()
-	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
-		Cwd: cwd, Model: "gpt-6-sol", Timeout: 10 * time.Second,
-	}, 10*time.Second)
-	if result.Status != "completed" || result.Output != "Recovered" || result.SessionID != "thr-capacity" {
-		t.Fatalf("capacity retry result = %+v", result)
-	}
-	dir := filepath.Dir(fakePath)
-	if attempts, err := os.ReadFile(filepath.Join(dir, "attempts")); err != nil || strings.TrimSpace(string(attempts)) != "2" {
-		t.Fatalf("launch count = %q, err = %v; want 2", attempts, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "overlap")); !os.IsNotExist(err) {
-		t.Fatalf("Codex attempts overlapped: stat err=%v", err)
-	}
-	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(first), "thread/start") || !strings.Contains(string(first), "gpt-6-sol") ||
-		!strings.Contains(string(second), "thread/resume") || !strings.Contains(string(second), "thr-capacity") {
-		t.Fatalf("retry did not keep model and session: first=%s second=%s", first, second)
-	}
-	for i := 1; i <= 2; i++ {
-		got, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("cwd-%d", i)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		gotInfo, err := os.Stat(strings.TrimSpace(string(got)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		wantInfo, err := os.Stat(cwd)
-		if err != nil || !os.SameFile(gotInfo, wantInfo) {
-			t.Fatalf("attempt %d cwd = %q, err = %v; want %q", i, got, err, cwd)
-		}
-	}
-}
-
-func TestCodexCapacityRetryStopsAfterSuccessfulTurn(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond}
-	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
-	for _, successLaunch := range []int{2, 3, 6} {
-		t.Run(fmt.Sprintf("success_on_launch_%d", successLaunch), func(t *testing.T) {
-			fakePath := writeFakeCodexAppServer(t, ""+
-				fmt.Sprintf("SUCCESS_LAUNCH=%d\n", successLaunch)+
-				`DIR="$(dirname "$0")"`+"\n"+
-				`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
-				`ATTEMPT=$((ATTEMPT+1))`+"\n"+
-				`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
-				`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-				`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
-				`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-				`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
-				`if [ "$ATTEMPT" -lt "$SUCCESS_LAUNCH" ]; then`+"\n"+
-				`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"usage":{"input_tokens":10,"output_tokens":1}}}}'`+"\n"+
-				`else`+"\n"+
-				`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"answer","text":"Recovered"}}}'`+"\n"+
-				`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"completed","usage":{"input_tokens":20,"output_tokens":2}}}}'`+"\n"+
-				`fi`+"\n")
-			result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 10 * time.Second})
-			if result.Status != "completed" || result.Output != "Recovered" {
-				t.Fatalf("success result = %+v", result)
-			}
-			attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
-			if err != nil || strings.TrimSpace(string(attempts)) != strconv.Itoa(successLaunch) {
-				t.Fatalf("launches = %q, err=%v; want %d", attempts, err, successLaunch)
-			}
-			usage := result.Usage["gpt-6-sol"]
-			if usage.InputTokens != int64((successLaunch-1)*10+20) ||
-				usage.OutputTokens != int64((successLaunch-1)+2) {
-				t.Fatalf("merged usage on launch %d = %+v", successLaunch, usage)
-			}
-		})
-	}
-}
-
-func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
-	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
 	cases := []struct {
 		name         string
 		errorMessage string
@@ -4609,7 +4489,8 @@ func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
 		noModel      bool
 		wantLaunches string
 	}{
-		{"capacity budget exhausted", "selected model unavailable", "serverOverloaded", false, false, false, false, "6"},
+		{"confirmed overload", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
+		{"userMessage ack", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
 		{"capacity text without code", "Selected model is at capacity. Please try a different model.", "", false, false, false, false, "1"},
 		{"unknown code", "Selected model is at capacity. Please try a different model.", "futureCode", false, false, false, false, "1"},
 		{"quota", "Selected model is at capacity. Please try a different model.", "usageLimitExceeded", false, false, false, false, "1"},
@@ -4649,6 +4530,9 @@ func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
 			if tc.name == "unknown item" {
 				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"futureAgentAction","id":"item-1"}}}'` + "\n"
 			}
+			if tc.name == "userMessage ack" {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"userMessage","id":"input-1","content":[{"type":"text","text":"prompt"}]}}}'` + "\n"
+			}
 			fakePath := writeFakeCodexAppServer(t, ""+
 				`DIR="$(dirname "$0")"`+"\n"+
 				`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
@@ -4671,44 +4555,17 @@ func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
 			if result.Status != "failed" {
 				t.Fatalf("terminal result = %+v", result)
 			}
-			if tc.name == "capacity budget exhausted" {
-				if !strings.Contains(result.Error, tc.errorMessage) ||
-					!strings.Contains(result.Error, "capacity retry limit exhausted after 5 retries") {
-					t.Fatalf("exhaustion result = %+v", result)
-				}
-			} else if result.Error != tc.errorMessage {
+			if result.Error != tc.errorMessage {
 				t.Fatalf("terminal result = %+v", result)
+			}
+			if got, want := result.CodexServerOverloaded, tc.name == "confirmed overload" || tc.name == "userMessage ack"; got != want {
+				t.Fatalf("structured overload = %v, want %v", got, want)
 			}
 			attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
 			if err != nil || strings.TrimSpace(string(attempts)) != tc.wantLaunches {
 				t.Fatalf("launch count = %q, err = %v; want %s", attempts, err, tc.wantLaunches)
 			}
 		})
-	}
-}
-
-func TestCodexCapacityRetrySchedule(t *testing.T) {
-	want := [5]time.Duration{time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}
-	if codexCapacityRetryBackoffs != want {
-		t.Fatalf("capacity schedule = %v, want %v", codexCapacityRetryBackoffs, want)
-	}
-	if codexCapacityRetryWindow != 30*time.Minute {
-		t.Fatalf("capacity recovery window = %s", codexCapacityRetryWindow)
-	}
-	var total time.Duration
-	for _, wait := range want {
-		total += wait
-	}
-	if total != 21*time.Minute {
-		t.Fatalf("five nominal waits total %s, want 21m", total)
-	}
-	for _, base := range want {
-		for i := 0; i < 100; i++ {
-			delay := codexCapacityRetryDelay(base)
-			if delay < base-base/10 || delay > base {
-				t.Fatalf("jittered delay %s outside [%s, %s]", delay, base-base/10, base)
-			}
-		}
 	}
 }
 
@@ -4729,90 +4586,6 @@ func TestCodexStructuredErrorInfoCompletionWins(t *testing.T) {
 	c2.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-2","status":"failed","error":{"message":"capacity text without code"}}}}`)
 	if got := c2.getTurnErrorInfo(); got != "" {
 		t.Fatalf("missing terminal code inherited transient notification: %q", got)
-	}
-}
-
-func TestCodexCapacityRetryRespectsRunTimeout(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{20 * time.Second, 20 * time.Second, 20 * time.Second, 20 * time.Second, 20 * time.Second}
-	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
-	fakePath := writeFakeCodexAppServer(t, ""+
-		`DIR="$(dirname "$0")"`+"\n"+
-		`N=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
-		`echo $((N+1)) > "$DIR/attempts"`+"\n"+
-		`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-		`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
-		`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"}}}}'`+"\n")
-	result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 5 * time.Second})
-	if result.Status != "failed" || !strings.Contains(result.Error, "insufficient time") {
-		t.Fatalf("short timeout result = %+v", result)
-	}
-	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
-	if err != nil || strings.TrimSpace(string(attempts)) != "1" {
-		t.Fatalf("short timeout launched %q attempts, err=%v; want 1", attempts, err)
-	}
-}
-
-func TestCodexCapacityRetryCancelDuringWait(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{time.Second, time.Second, time.Second, time.Second, time.Second}
-	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
-	fakePath := writeFakeCodexAppServer(t, ""+
-		`DIR="$(dirname "$0")"`+"\n"+
-		`N=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
-		`echo $((N+1)) > "$DIR/attempts"`+"\n"+
-		`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-		`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
-		`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"}}}}'`+"\n")
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	session, err := backend.Execute(ctx, "prompt", ExecOptions{Model: "gpt-6-sol"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-	deadline := time.After(2 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "attempts")); err == nil {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("first attempt did not start")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	// Let the first process exit and the backoff begin before cancelling.
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	select {
-	case result := <-session.Result:
-		if result.Status != "aborted" {
-			t.Fatalf("cancelled retry = %+v", result)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("cancelled retry did not return")
-	}
-	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
-	if err != nil || strings.TrimSpace(string(attempts)) != "1" {
-		t.Fatalf("cancelled retry launched %q attempts, err=%v; want 1", attempts, err)
 	}
 }
 

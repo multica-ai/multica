@@ -2,14 +2,193 @@ package service
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestCodexOverloadTaskRetryEndToEnd(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	if _, err := pool.Exec(ctx, `UPDATE issue SET status='in_progress' WHERE id=$1`, issueID); err != nil {
+		t.Fatal(err)
+	}
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `UPDATE agent SET model='gpt-6-sol' WHERE id=$1 RETURNING runtime_id::text`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+		VALUES ($1,$2,$3,'running',0,1,2,'codex-session','/tmp/codex-work') RETURNING id`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
+	})
+	svc := NewTaskService(q, pool, nil, events.New())
+	failed, transitioned, err := svc.FailTaskWithTransition(ctx, parentID, "busy", "codex-session", "/tmp/codex-work", "", "agent_error.codex_server_overloaded", false, "", "", "gpt-6-sol")
+	if err != nil || !transitioned || failed == nil || failed.Status != "failed" {
+		t.Fatalf("fail parent: task=%v transitioned=%v err=%v", failed, transitioned, err)
+	}
+	var childID pgtype.UUID
+	var childStatus string
+	var fireAt time.Time
+	var attempt, maxAttempts int32
+	var sessionID string
+	if err := pool.QueryRow(ctx, `SELECT id,status,fire_at,attempt,max_attempts,session_id FROM agent_task_queue WHERE retry_of_task_id=$1`, parentID).Scan(&childID, &childStatus, &fireAt, &attempt, &maxAttempts, &sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if childStatus != "deferred" || attempt != 2 || maxAttempts != 2 || sessionID != "codex-session" ||
+		fireAt.Before(time.Now().Add(45*time.Second)) || fireAt.After(time.Now().Add(75*time.Second)) {
+		t.Fatalf("child = status:%s attempt:%d/%d session:%s fire_at:%s", childStatus, attempt, maxAttempts, sessionID, fireAt)
+	}
+	child, err := q.GetAgentTask(ctx, childID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentAgent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, currentAgent); !codex || problem != "" {
+		t.Fatalf("valid child claim: codex=%v problem=%q", codex, problem)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent SET model='gpt-6-other' WHERE id=$1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	changedAgent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, changedAgent); !codex || problem == "" {
+		t.Fatalf("changed model claim: codex=%v problem=%q", codex, problem)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent SET model='gpt-6-sol' WHERE id=$1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.MaybeRetryFailedTask(ctx, *failed); err != nil {
+		t.Fatalf("repeat sweeper: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id=$1`, parentID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("retry children=%d err=%v", count, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET fire_at=now()-interval '1 second' WHERE id=$1`, childID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil || claimed == nil || claimed.ID != childID {
+		t.Fatalf("claim due retry=%v err=%v", claimed, err)
+	}
+	secondClaim, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil || secondClaim != nil {
+		t.Fatalf("duplicate claim=%v err=%v", secondClaim, err)
+	}
+}
+
+func TestCodexOverloadRetryDisabledAndModelChange(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		max         int32
+		model       string
+		expired     bool
+		issueStatus string
+	}{
+		{name: "max_attempts_1", max: 1, model: "gpt-6-sol"},
+		{name: "selected_model_changed", max: 2, model: "gpt-6-other"},
+		{name: "recovery_window_expired", max: 2, model: "gpt-6-sol", expired: true},
+		{name: "issue_cancelled", max: 2, model: "gpt-6-sol", issueStatus: "cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newResolveOriginatorPool(t)
+			ctx := context.Background()
+			q := db.New(pool)
+			_, _, agentID, issueID := seedAttributionFixture(t, pool)
+			if _, err := pool.Exec(ctx, `UPDATE issue SET status='in_progress' WHERE id=$1`, issueID); err != nil {
+				t.Fatal(err)
+			}
+			if tc.issueStatus != "" {
+				if _, err := pool.Exec(ctx, `UPDATE issue SET status=$2 WHERE id=$1`, issueID, tc.issueStatus); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var runtimeID string
+			if err := pool.QueryRow(ctx, `UPDATE agent SET model=$2 WHERE id=$1 RETURNING runtime_id::text`, agentID, tc.model).Scan(&runtimeID); err != nil {
+				t.Fatal(err)
+			}
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id,runtime_id,issue_id,status,priority,attempt,max_attempts,session_id)
+				VALUES ($1,$2,$3,'running',0,1,$4,'codex-session') RETURNING id`, agentID, runtimeID, issueID, tc.max).Scan(&parentID); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
+			})
+			if tc.expired {
+				if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET context=jsonb_build_object('codex_retry_model','gpt-6-sol','codex_retry_deadline',to_jsonb(now()-interval '1 minute') #>> '{}') WHERE id=$1`, parentID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc := NewTaskService(q, pool, nil, events.New())
+			if _, _, err := svc.FailTaskWithTransition(ctx, parentID, "busy", "codex-session", "", "", "agent_error.codex_server_overloaded", false, "", "", "gpt-6-sol"); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id=$1`, parentID).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("children=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
+func TestCodexRetryOneChildWithoutIssueSlot(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, _ := seedAttributionFixture(t, pool)
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `UPDATE agent SET model='gpt-6-sol' WHERE id=$1 RETURNING runtime_id::text`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id,runtime_id,status,priority,attempt,max_attempts,failure_reason,context)
+		VALUES ($1,$2,'failed',0,1,2,'agent_error.codex_server_overloaded',jsonb_build_object('codex_retry_model','gpt-6-sol','codex_retry_deadline',to_jsonb(now()+interval '30 minutes') #>> '{}')) RETURNING id`, agentID, runtimeID).Scan(&parentID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
+	})
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parentID})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id=$1`, parentID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("retry children=%d err=%v", count, err)
+	}
+}
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
 // three-tier provider_network schedule (MUL-4910): CreateRetryTask inserts a

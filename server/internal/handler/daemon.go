@@ -2912,6 +2912,24 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
 		)
 	}
+	codexRetry, problem := h.TaskService.CodexRetryClaimProblem(r.Context(), *task, agent)
+	if problem != "" {
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+			r.Context(), task, problem, taskfailure.ReasonInvalidTaskIdentity,
+			"error_codex_retry_unavailable", http.StatusConflict, "Codex retry unavailable",
+		)
+	}
+	resp.CodexRetryMustResume = codexRetry
+	if codexRetry {
+		parent, err := h.Queries.GetAgentTask(r.Context(), task.RetryOfTaskID)
+		if err != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task, "Codex retry source is unavailable.", taskfailure.ReasonInvalidTaskIdentity,
+				"error_codex_retry_unavailable", http.StatusConflict, "Codex retry unavailable",
+			)
+		}
+		resp.CodexRetryExpectedBranch = parent.BranchName.String
+	}
 	if runtime.Visibility == "private" && runtime.OwnerID.Valid && !service.RuntimeAllowsUser(runtime, agent.OwnerID) {
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if !agent.OwnerID.Valid {
@@ -4196,6 +4214,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.InitiatorEmail = originator.Email
 	}
 
+	if resp.CodexRetryMustResume {
+		resp.PriorSessionID = task.SessionID.String
+		resp.PriorSessionResumeUnavailable = false
+	}
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
 }
 
@@ -4842,6 +4864,7 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
+	req.SelectedModel = util.SanitizeTextForPostgres(req.SelectedModel)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 }
@@ -5600,6 +5623,7 @@ type TaskFailRequest struct {
 	WorkDir        string `json:"work_dir,omitempty"`
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	FailureReason  string `json:"failure_reason,omitempty"`
+	SelectedModel  string `json:"selected_model,omitempty"`
 	// BranchName: a failed run can still have produced a branch — worktree mode
 	// commits whatever the agent left before tearing the worktree down. Report
 	// it so a partially-successful run is still findable.
@@ -5648,7 +5672,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, req.SelectedModel)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the

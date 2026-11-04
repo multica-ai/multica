@@ -2892,10 +2892,15 @@ SELECT
     COALESCE($6::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
+  AND NOT EXISTS (SELECT 1 FROM agent_task_queue child WHERE child.retry_of_task_id = p.id)
+  AND (p.failure_reason IS DISTINCT FROM 'agent_error.codex_server_overloaded' OR (
+    p.context->>'codex_retry_model' IS NOT NULL
+    AND (p.context->>'codex_retry_deadline')::timestamptz > COALESCE($2::timestamptz, now())
+    AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
+    AND (p.issue_id IS NULL OR EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status IN ('todo', 'in_progress') AND i.assignee_type = 'agent' AND i.assignee_id = p.agent_id))
+  ))
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
-ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
-       OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
@@ -3366,12 +3371,18 @@ SET status = 'failed',
     completed_at = now(),
     error = $2,
     failure_reason = COALESCE($3, 'agent_error'),
-    session_id = CASE WHEN $4 THEN NULL ELSE COALESCE($5, session_id) END,
-    work_dir = COALESCE($6, work_dir),
-    durable_work_dir = COALESCE($7, durable_work_dir),
-    branch_name = COALESCE($8, branch_name),
-    session_rollout_missing = $4,
-    retired_session_id = COALESCE($9, retired_session_id),
+    context = CASE WHEN $3::text = 'agent_error.codex_server_overloaded'
+      AND NULLIF($4::text, '') IS NOT NULL THEN
+      COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+        'codex_retry_model', $4::text,
+        'codex_retry_deadline', COALESCE(context->>'codex_retry_deadline', to_jsonb(now() + interval '30 minutes') #>> '{}'))
+      ELSE context END,
+    session_id = CASE WHEN $5 THEN NULL ELSE COALESCE($6, session_id) END,
+    work_dir = COALESCE($7, work_dir),
+    durable_work_dir = COALESCE($8, durable_work_dir),
+    branch_name = COALESCE($9, branch_name),
+    session_rollout_missing = $5,
+    retired_session_id = COALESCE($10, retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
@@ -3381,6 +3392,7 @@ type FailAgentTaskParams struct {
 	ID                    pgtype.UUID `json:"id"`
 	Error                 pgtype.Text `json:"error"`
 	FailureReason         pgtype.Text `json:"failure_reason"`
+	SelectedModel         pgtype.Text `json:"selected_model"`
 	SessionRolloutMissing bool        `json:"session_rollout_missing"`
 	SessionID             pgtype.Text `json:"session_id"`
 	WorkDir               pgtype.Text `json:"work_dir"`
@@ -3409,6 +3421,7 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		arg.ID,
 		arg.Error,
 		arg.FailureReason,
+		arg.SelectedModel,
 		arg.SessionRolloutMissing,
 		arg.SessionID,
 		arg.WorkDir,
