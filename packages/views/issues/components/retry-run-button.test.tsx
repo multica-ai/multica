@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
-const rerunIssue = vi.fn(async () => ({ id: "new-task" }));
+const rerunIssue = vi.fn(async (_issueId: string, _taskId: string, _fresh: boolean) => ({
+  id: "new-task",
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: { rerunIssue: (...args: [string, string, boolean]) => rerunIssue(...args) },
@@ -31,7 +33,7 @@ async function openMenu(): Promise<[HTMLElement, HTMLElement]> {
   fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
   const items = await screen.findAllByRole("menuitem");
   expect(items).toHaveLength(2);
-  return [items[0], items[1]];
+  return [items[0]!, items[1]!];
 }
 
 describe("RetryRunButton", () => {
