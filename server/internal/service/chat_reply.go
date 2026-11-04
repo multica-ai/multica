@@ -123,6 +123,8 @@ type ChatReplyParams struct {
 type ChatReplyResult struct {
 	Message db.ChatMessage
 	OwnerID pgtype.UUID
+	// Run is the Secretary's run that wrote the reply.
+	Run db.AgentTaskQueue
 }
 
 // CreateChatReply writes the Secretary's reply and returns it. The message has no
@@ -198,5 +200,36 @@ func CreateChatReply(ctx context.Context, tx TxStarter, q *db.Queries, p ChatRep
 	if err := dbTx.Commit(ctx); err != nil {
 		return ChatReplyResult{}, fmt.Errorf("commit chat reply: %w", err)
 	}
-	return ChatReplyResult{Message: msg, OwnerID: session.CreatorID}, nil
+	return ChatReplyResult{Message: msg, OwnerID: session.CreatorID, Run: run}, nil
+}
+
+// ChatReplyRoute gives a Secretary reply the channel route of the session. A
+// run that wrote a reply later (after a child issue closed) has no delivery
+// snapshot of its own, and an external channel only forwards a reply whose run
+// has one (see the channel outbound). The route is copied from the session's
+// latest channel-bound run, and only then. It reports whether the run has a
+// route, so the caller knows whether to announce the reply on the chat-done path.
+func ChatReplyRoute(ctx context.Context, q *db.Queries, sessionID, runID pgtype.UUID) (bool, error) {
+	if _, err := q.GetChannelTaskDelivery(ctx, runID); err == nil {
+		return true, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return false, fmt.Errorf("load run route: %w", err)
+	}
+	parent, err := q.GetLatestChannelDeliveryTaskInSession(ctx, db.GetLatestChannelDeliveryTaskInSessionParams{
+		ChatSessionID: sessionID,
+		RunID:         runID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("find session route: %w", err)
+	}
+	if err := q.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
+		ChildTaskID:  runID,
+		ParentTaskID: parent,
+	}); err != nil {
+		return false, fmt.Errorf("copy session route: %w", err)
+	}
+	return true, nil
 }

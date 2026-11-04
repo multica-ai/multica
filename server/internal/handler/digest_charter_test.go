@@ -149,7 +149,7 @@ func TestDigest_CharterSectionAndWorkspaceCounts(t *testing.T) {
 	// system_risks) are spec-intended; see digest.go's Digest struct.
 	assertDigestKeys(t, "digest", d,
 		"since", "until", "workspace", "squads", "omitted_squad_count", "quiet", "knowledge",
-		"inquiries", "pipeline", "goals", "overdue_requests", "people", "auto_approved", "budget",
+		"inquiries", "pipeline", "goals", "overdue_requests", "blocked_directives", "people", "auto_approved", "budget",
 		"mode", "scope", "floors", "system_risks")
 
 	ws := digestObjectAt(t, "workspace", d["workspace"])

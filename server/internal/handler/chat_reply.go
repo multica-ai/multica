@@ -119,5 +119,14 @@ func (h *Handler) ReplyChatSession(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:     res.Message.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 		},
 	})
+	// A session bound to an external channel hears the reply through the chat-done
+	// path, on the run that wrote it. The reply is already stored, so a failure to
+	// set the route is logged, not returned.
+	routed, err := service.ChatReplyRoute(r.Context(), h.Queries, sessionUUID, runUUID)
+	if err != nil {
+		slog.Warn("chat reply route failed", append(logger.RequestAttrs(r), "error", err, "session_id", sessionID)...)
+	} else if routed {
+		h.TaskService.PublishChatReplyDone(r.Context(), res.Run, res.Message)
+	}
 	writeJSON(w, http.StatusCreated, chatMessageToResponse(res.Message, nil))
 }

@@ -1711,6 +1711,25 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
+	// The Secretary's challenges are its comments on a child of a request. Each
+	// child takes at most service.MaxChallengesPerChildIssue, so a runaway
+	// loop stops with a plain message the Secretary can explain.
+	if authorType == "agent" && issue.ParentIssueID.Valid && h.isWorkspaceSecretary(r, uuidToString(issue.WorkspaceID), authorID) {
+		posted, err := h.Queries.CountAgentCommentsOnIssue(r.Context(), db.CountAgentCommentsOnIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			AuthorID:    parseUUID(authorID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to count challenges")
+			return
+		}
+		if err := service.CheckGuardrail(service.GuardrailChallenges, int(posted)+1); err != nil {
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
+	}
+
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
 	// originator inheritance chain (resolveOriginatorFromTriggerComment →

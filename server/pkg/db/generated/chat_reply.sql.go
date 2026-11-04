@@ -33,3 +33,27 @@ func (q *Queries) CountRecentChatAssistantMessages(ctx context.Context, arg Coun
 	err := row.Scan(&column_1)
 	return column_1, err
 }
+
+const getLatestChannelDeliveryTaskInSession = `-- name: GetLatestChannelDeliveryTaskInSession :one
+SELECT t.id
+FROM agent_task_queue t
+JOIN channel_task_delivery d ON d.task_id = t.id
+WHERE t.chat_session_id = $1 AND t.id <> $2
+ORDER BY t.created_at DESC, t.id DESC
+LIMIT 1
+`
+
+type GetLatestChannelDeliveryTaskInSessionParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	RunID         pgtype.UUID `json:"run_id"`
+}
+
+// The most recent chat run in this session that carries a channel delivery
+// snapshot. A Secretary reply from a later run takes its route from here, so an
+// external channel bound to the session hears the reply.
+func (q *Queries) GetLatestChannelDeliveryTaskInSession(ctx context.Context, arg GetLatestChannelDeliveryTaskInSessionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestChannelDeliveryTaskInSession, arg.ChatSessionID, arg.RunID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}

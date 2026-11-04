@@ -2415,6 +2415,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/company/digest", h.GetCompanyDigest)
 			// The org map: floors, chiefs, squads, leaders, members and open work. Any member.
 			r.Get("/api/company/org-map", h.GetCompanyOrgMap)
+			r.Get("/api/company/requests/{id}/usage", h.GetCompanyRequestUsage)
 			// Floor chiefs (spec 4.8): one agent per floor publishes its brief. Reads
 			// for members; changes for owners and admins, decided in the handler.
 			r.Get("/api/company/floors/{id}/chief", h.GetFloorChief)

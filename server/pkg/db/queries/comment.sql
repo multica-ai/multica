@@ -890,3 +890,7 @@ FROM comment c
 JOIN ancestor_ids path ON path.id = c.id
 ORDER BY c.id
 FOR UPDATE OF c;
+
+-- name: CountAgentCommentsOnIssue :one
+SELECT count(*) FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND author_type = 'agent' AND author_id = $3 AND type = 'comment';

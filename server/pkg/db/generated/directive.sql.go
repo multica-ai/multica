@@ -29,3 +29,54 @@ func (q *Queries) CountDirectiveIssuesForMessage(ctx context.Context, arg CountD
 	err := row.Scan(&column_1)
 	return column_1, err
 }
+
+const listBlockedDirectivesPastDue = `-- name: ListBlockedDirectivesPastDue :many
+SELECT id, number, title, due_date
+FROM issue
+WHERE workspace_id = $1::uuid
+  AND origin_type = 'directive'
+  AND status = 'blocked'
+  AND due_date IS NOT NULL
+  AND due_date < $2::timestamptz
+ORDER BY due_date ASC, id ASC
+LIMIT 50
+`
+
+type ListBlockedDirectivesPastDueParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Now         pgtype.Timestamptz `json:"now"`
+}
+
+type ListBlockedDirectivesPastDueRow struct {
+	ID      pgtype.UUID `json:"id"`
+	Number  int32       `json:"number"`
+	Title   string      `json:"title"`
+	DueDate pgtype.Date `json:"due_date"`
+}
+
+// Directives the leader has marked blocked after their due date. The digest
+// reads them so the boss sees a stuck directive without opening each one.
+func (q *Queries) ListBlockedDirectivesPastDue(ctx context.Context, arg ListBlockedDirectivesPastDueParams) ([]ListBlockedDirectivesPastDueRow, error) {
+	rows, err := q.db.Query(ctx, listBlockedDirectivesPastDue, arg.WorkspaceID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBlockedDirectivesPastDueRow{}
+	for rows.Next() {
+		var i ListBlockedDirectivesPastDueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Number,
+			&i.Title,
+			&i.DueDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
