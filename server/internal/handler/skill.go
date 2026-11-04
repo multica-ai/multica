@@ -995,6 +995,13 @@ func parseClawHubSlug(raw string) (string, error) {
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	// Some configured registries expose web links as /space/{namespace}/{slug}.
+	if registryHostAllowed(parsed.Host) && len(parts) == 3 && parts[0] == "space" && parts[1] != "" && parts[2] != "" {
+		if parts[1] == "global" {
+			return parts[2], nil
+		}
+		return parts[1] + "--" + parts[2], nil
+	}
 	// /{owner}/{slug} — take the last segment as the slug
 	if len(parts) == 2 {
 		return parts[1], nil

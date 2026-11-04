@@ -59,6 +59,29 @@ func registryFixture(t *testing.T, zipMode string) (*httptest.Server, *int) {
 	return srv, calls
 }
 
+func TestRegistryWebURLSlug(t *testing.T) {
+	t.Setenv("MULTICA_SKILL_REGISTRY_HOSTS", "registry.example.com")
+	for _, tc := range []struct {
+		name, raw, want string
+		invalid         bool
+	}{
+		{"global", "https://registry.example.com/space/global/grilling", "grilling", false},
+		{"namespace", "https://registry.example.com/space/github/ask-matt", "github--ask-matt", false},
+		{"single", "https://registry.example.com/grilling", "grilling", false},
+		{"owner", "https://registry.example.com/owner/grilling", "grilling", false},
+		{"unlisted", "https://other.example.com/space/github/ask-matt", "", true},
+		{"extra", "https://registry.example.com/space/github/ask-matt/more", "", true},
+		{"empty", "https://registry.example.com/space//ask-matt", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseClawHubSlug(tc.raw)
+			if (err != nil) != tc.invalid || (!tc.invalid && got != tc.want) {
+				t.Fatalf("slug=%q error=%v, want %q invalid=%v", got, err, tc.want, tc.invalid)
+			}
+		})
+	}
+}
+
 func TestRegistryHostImportAndRefresh(t *testing.T) {
 	for _, mode := range []string{"files", "listing", "file"} {
 		t.Run(mode, func(t *testing.T) {
