@@ -133,6 +133,7 @@ export const FolderOpen = /* @__PURE__ */ createIcon("FolderOpen", glyph.FolderO
 export const FolderPlus = /* @__PURE__ */ createIcon("FolderPlus", glyph.FolderPlus);
 export const Frame = /* @__PURE__ */ createIcon("Frame", glyph.Frame);
 export const Gauge = /* @__PURE__ */ createIcon("Gauge", glyph.Gauge);
+export const Gift = /* @__PURE__ */ createIcon("Gift", glyph.Gift);
 export const GitBranch = /* @__PURE__ */ createIcon("GitBranch", glyph.GitBranch);
 export const GitMerge = /* @__PURE__ */ createIcon("GitMerge", glyph.GitMerge);
 export const GitPullRequest = /* @__PURE__ */ createIcon("GitPullRequest", glyph.GitPullRequest);

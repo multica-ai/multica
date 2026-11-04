@@ -2729,6 +2729,9 @@ export const UserSchema = z.object({
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
+  // No default: absence is the "server cannot track" signal. A malformed
+  // value degrades to that state instead of discarding the whole user.
+  whats_new_seen_version: z.string().nullable().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
