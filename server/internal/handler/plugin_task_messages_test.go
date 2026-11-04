@@ -345,9 +345,7 @@ func TestPluginTaskMessagesLookupFailuresAreRetryable(t *testing.T) {
 			fault := &lookupFaultPool{DBTX: testPool, query: query}
 			h := *testHandler
 			h.Queries = db.New(fault)
-			taskService := *testHandler.TaskService
-			taskService.Queries = h.Queries
-			h.TaskService = &taskService
+			h.TaskService = &service.TaskService{Queries: h.Queries}
 			testutil.Call(t, h.ListPluginTaskMessages, pluginTaskMessagesRequest(token, taskID, "")).Want(http.StatusInternalServerError)
 			if !fault.called {
 				t.Fatal("lookup fault was not exercised")
