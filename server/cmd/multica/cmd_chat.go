@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -152,4 +154,71 @@ func numVal(m map[string]any, key string) string {
 		return strconv.Itoa(int(v))
 	}
 	return ""
+}
+
+var chatReplyCmd = &cobra.Command{
+	Use:   "reply",
+	Short: "Write the Secretary's reply into a chat session (Secretary only)",
+	Long: `Write an assistant message into a chat session from a run that is not a chat turn,
+for example when a later run has the answer to a question the boss asked in chat.
+
+The run must be the Secretary's, live, and linked to the session (its chat_session_id
+names the session), and the run's originator must own the session. An archived
+session refuses the reply: report through the inbox instead. A session takes at most
+10 replies a minute.
+
+The reply is Markdown, read from --file (a path inside the working directory) or,
+when --file is omitted, from stdin.`,
+	Args: cobra.NoArgs,
+	RunE: runChatReply,
+}
+
+func init() {
+	chatReplyCmd.Flags().String("session", "", "Chat session id to reply in (required)")
+	chatReplyCmd.Flags().String("file", "", "Markdown file with the reply (default: read stdin)")
+	chatCmd.AddCommand(chatReplyCmd)
+}
+
+func runChatReply(cmd *cobra.Command, _ []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if strings.TrimSpace(session) == "" {
+		return fmt.Errorf("--session is required")
+	}
+	filePath, _ := cmd.Flags().GetString("file")
+
+	var data []byte
+	if filePath != "" {
+		if err := ensureFileFlagWithinWorkdir(cmd, "file", "content", filePath); err != nil {
+			return err
+		}
+		read, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read file for --file: %w", err)
+		}
+		data = read
+	} else {
+		read, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		data = read
+	}
+	content := strings.TrimSuffix(string(data), "\n")
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("reply content is empty: pass --file or pipe the reply on stdin")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp map[string]any
+	path := "/api/chat/sessions/" + url.PathEscape(strings.TrimSpace(session)) + "/reply"
+	if err := client.PostJSON(ctx, path, map[string]string{"content": content}, &resp); err != nil {
+		return fmt.Errorf("reply in chat: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, resp)
 }

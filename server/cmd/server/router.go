@@ -2413,6 +2413,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Put("/api/company/seats", h.PutCompanySeats)
 			// The Secretary's digest: facts about the company, any member.
 			r.Get("/api/company/digest", h.GetCompanyDigest)
+			// The org map: floors, chiefs, squads, leaders, members and open work. Any member.
+			r.Get("/api/company/org-map", h.GetCompanyOrgMap)
 			// Floor chiefs (spec 4.8): one agent per floor publishes its brief. Reads
 			// for members; changes for owners and admins, decided in the handler.
 			r.Get("/api/company/floors/{id}/chief", h.GetFloorChief)
@@ -2740,6 +2742,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					// The Secretary answers in its chat from a later run (WS13 G1).
+					r.Post("/reply", h.ReplyChatSession)
 					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).
