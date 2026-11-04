@@ -667,3 +667,92 @@ func formatRosterRow(name, kind, role, skills, mention string) string {
 func formatMention(name, mentionType, id string) string {
 	return "[@" + name + "](mention://" + mentionType + "/" + id + ")"
 }
+
+// Secretary-issue names, as the skills are named in the workspace. The block
+// names a skill only when the leader has it attached (spec 13.5.1).
+const (
+	squadReportingSkill      = "squad-reporting"
+	directiveExecutionSkill  = "directive-execution"
+	secretaryDirectiveOrigin = "directive"
+	secretaryRequestOrigin   = "squad_request"
+)
+
+// secretaryIssueKind says how a leader should treat an issue the Secretary
+// created: a directive from the boss, a request filed by the Secretary, or
+// neither (in which case no block is written).
+type secretaryIssueKind int
+
+const (
+	secretaryIssueNone secretaryIssueKind = iota
+	secretaryIssueRequest
+	secretaryIssueDirective
+)
+
+// secretaryIssueKindOf is the pure decision behind the leader note. parentCreatedBySecretary
+// is true when the issue's parent request was created by the workspace Secretary agent.
+func secretaryIssueKindOf(originType string, parentCreatedBySecretary bool) secretaryIssueKind {
+	switch {
+	case originType == secretaryDirectiveOrigin:
+		return secretaryIssueDirective
+	case originType == secretaryRequestOrigin && parentCreatedBySecretary:
+		return secretaryIssueRequest
+	}
+	return secretaryIssueNone
+}
+
+// secretaryDirectiveBlock renders the "Reporting/Directive for the Secretary"
+// block. installedSkills is the set of skill names attached to the leader; a
+// skill is named only when it is in that set.
+func secretaryDirectiveBlock(kind secretaryIssueKind, installedSkills map[string]bool) string {
+	if kind == secretaryIssueNone {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Reporting for the Secretary\n\n")
+	if kind == secretaryIssueDirective {
+		sb.WriteString("This issue is a directive. The Secretary created it from the boss's own words in chat, quoted in the issue metadata. The boss gave the objective; the Secretary wrote the issue for you.\n\n")
+	} else {
+		sb.WriteString("The Secretary, the workspace's chief of staff, filed this request to answer a question for the boss.\n\n")
+	}
+	sb.WriteString("- Your answer is for the Secretary, not for the boss. Post it as a comment on this issue and lead with the answer.\n")
+	sb.WriteString("- For this issue only, you analyse the question yourself, or have members gather the facts, and then write the assessment yourself. The usual rule that a leader does not do the work itself does not apply here.\n")
+	sb.WriteString("- When you need a decision, a fact your squad cannot get, or a change of scope, ask the Secretary in a comment on this issue, addressed to it by name. Do not ask the boss directly: the Secretary decides what reaches the boss.\n")
+	if kind == secretaryIssueDirective && installedSkills[directiveExecutionSkill] {
+		sb.WriteString("- The `" + directiveExecutionSkill + "` skill sets out how to acknowledge, plan, decompose and close a directive. Follow it.\n")
+	}
+	if installedSkills[squadReportingSkill] {
+		sb.WriteString("- The `" + squadReportingSkill + "` skill sets out what a good report contains and how to state your confidence. Follow it.\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// secretaryDirectiveBriefing returns the leader note for an issue, or "" when
+// the issue is not one the Secretary created. A failed lookup leaves the note
+// out, as the other briefing blocks do: the leader works as before.
+func secretaryDirectiveBriefing(ctx context.Context, q *db.Queries, issue db.Issue, leaderAgentID pgtype.UUID) string {
+	parentCreatedBySecretary := false
+	if issue.OriginType.String == secretaryRequestOrigin && issue.OriginID.Valid {
+		if parent, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+			ID: issue.OriginID, WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			if ws, err := q.GetWorkspace(ctx, issue.WorkspaceID); err == nil &&
+				ws.SecretaryAgentID.Valid && parent.CreatorType == "agent" &&
+				parent.CreatorID == ws.SecretaryAgentID {
+				parentCreatedBySecretary = true
+			}
+		}
+	}
+	kind := secretaryIssueKindOf(issue.OriginType.String, parentCreatedBySecretary)
+	if kind == secretaryIssueNone {
+		return ""
+	}
+	installed := map[string]bool{}
+	if leaderAgentID.Valid {
+		if rows, err := q.ListAgentSkillNamesByAgentIDs(ctx, []pgtype.UUID{leaderAgentID}); err == nil {
+			for _, row := range rows {
+				installed[row.Name] = true
+			}
+		}
+	}
+	return secretaryDirectiveBlock(kind, installed)
+}

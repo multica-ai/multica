@@ -8,7 +8,7 @@
 // Run via `pnpm generate:company-template`. A core test compares the committed
 // JSON with the TypeScript constants, so the two cannot drift silently.
 
-import { writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -41,6 +41,26 @@ const result = await build({
 const code = result.outputFiles[0].text;
 const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 
+// The starter skills: each folder under packages/core/squads/skills holds a
+// SKILL.md (its frontmatter gives the name and description) and any reference
+// files. The apply service installs them as workspace skills.
+const skillsDir = resolve(coreDir, "squads/skills");
+const starterSkills = readdirSync(skillsDir, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort()
+  .map((name) => {
+    const dir = resolve(skillsDir, name);
+    const content = readFileSync(resolve(dir, "SKILL.md"), "utf8");
+    const description = /^description: "(.*)"$/m.exec(content)?.[1];
+    if (!description) throw new Error(`${name}/SKILL.md has no description in its frontmatter`);
+    const files = readdirSync(dir)
+      .filter((file) => file !== "SKILL.md" && file.endsWith(".md"))
+      .sort()
+      .map((file) => ({ path: file, content: readFileSync(resolve(dir, file), "utf8") }));
+    return { name, description, content, files };
+  });
+
 const data = {
   generated_by: "scripts/generate-company-template.mjs",
   floor_keys: [...mod.COMPANY_FLOOR_KEYS],
@@ -49,7 +69,8 @@ const data = {
   squads: mod.COMPANY_SQUAD_CARDS,
   stage_owners: mod.COMPANY_STAGE_OWNERS,
   instruction_templates: mod.AGENT_INSTRUCTION_TEMPLATES.map(({ id, instructions }) => ({ id, instructions })),
+  starter_skills: starterSkills,
 };
 
 writeFileSync(outPath, `${JSON.stringify(data, null, 2)}\n`);
-console.log(`wrote ${outPath} (${data.squads.length} squads, ${data.instruction_templates.length} instruction templates)`);
+console.log(`wrote ${outPath} (${data.squads.length} squads, ${data.instruction_templates.length} instruction templates, ${data.starter_skills.length} starter skills)`);

@@ -77,6 +77,10 @@ type IssueCreateParams struct {
 	DueDate       pgtype.Date
 	OriginType    pgtype.Text
 	OriginID      pgtype.UUID
+	// Metadata is the issue's metadata JSON, written in the create statement.
+	// Only the origin-stamped create path reads it (a directive's quote); nil
+	// keeps the column default.
+	Metadata      []byte
 	AttachmentIDs []pgtype.UUID
 	// LabelIDs are the issue-scoped labels to attach to the new issue. They
 	// are validated and written inside the create transaction (see Create),
@@ -397,6 +401,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			OriginID:      p.OriginID,
 			Stage:         p.Stage,
 			Properties:    properties,
+			Metadata:      p.Metadata,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{

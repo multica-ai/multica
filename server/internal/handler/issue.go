@@ -1676,6 +1676,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("top_level_only") == "true" {
 		where = append(where, "i.parent_issue_id IS NULL")
 	}
+	// origin_type narrows to one provenance label (e.g. "directive" or
+	// "squad_request"). Bound as a parameter, so any value only matches rows.
+	if originType := r.URL.Query().Get("origin_type"); originType != "" {
+		where = append(where, fmt.Sprintf("i.origin_type = %s", addArg(originType)))
+	}
 	where = appendIssueTableSearchFilter(where, addArg, r.URL.Query().Get("q"))
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
@@ -3198,6 +3203,68 @@ func duplicateIssueMessage(issue IssueResponse) string {
 	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
 }
 
+// authorizeDirectiveCreate verifies a directive create (origin_type =
+// "directive") and writes the refusal itself when it fails. Only the workspace
+// Secretary may create one, from a live run whose trigger is a chat message
+// from an owner or admin (see service.AuthorizeDirective).
+func (h *Handler) authorizeDirectiveCreate(w http.ResponseWriter, r *http.Request, workspaceID, creatorType, creatorID string, requestedOriginID *string, parentIssueID pgtype.UUID) (service.DirectiveGrant, bool) {
+	if creatorType != "agent" || !h.isWorkspaceSecretary(r, workspaceID, creatorID) {
+		writeError(w, http.StatusForbidden, "only the workspace's secretary agent may create a directive")
+		return service.DirectiveGrant{}, false
+	}
+	taskHeader := r.Header.Get("X-Task-ID")
+	taskID, err := util.ParseUUID(taskHeader)
+	if taskHeader == "" || err != nil {
+		writeError(w, http.StatusForbidden, "a directive must be created from a live run triggered by a boss chat message")
+		return service.DirectiveGrant{}, false
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return service.DirectiveGrant{}, false
+	}
+	agentUUID, err := util.ParseUUID(creatorID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "only the workspace's secretary agent may create a directive")
+		return service.DirectiveGrant{}, false
+	}
+	in := service.DirectiveAuthorityInput{
+		WorkspaceID:   wsUUID,
+		AgentID:       agentUUID,
+		TaskID:        taskID,
+		ParentIssueID: parentIssueID,
+	}
+	if requestedOriginID != nil {
+		oid, ok := parseUUIDOrBadRequest(w, *requestedOriginID, "origin_id")
+		if !ok {
+			return service.DirectiveGrant{}, false
+		}
+		in.RequestedOriginID = oid
+	}
+
+	grant, err := service.AuthorizeDirective(r.Context(), h.Queries, in)
+	if err == nil {
+		return grant, true
+	}
+	var guard *service.GuardrailError
+	switch {
+	case errors.As(err, &guard):
+		writeError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, service.ErrDirectiveMessageMismatch), errors.Is(err, service.ErrDirectiveTargetNotFound):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrDirectiveProposal), errors.Is(err, service.ErrDirectiveStageGate):
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, service.ErrDirectiveRunNotLive), errors.Is(err, service.ErrDirectiveNotChatTriggered),
+		errors.Is(err, service.ErrDirectiveSessionNotLive), errors.Is(err, service.ErrDirectiveOriginatorNotAdmin),
+		errors.Is(err, service.ErrDirectiveNotOriginatorMsg):
+		writeError(w, http.StatusForbidden, err.Error())
+	default:
+		slog.Error("authorize directive", "error", err, "task_id", taskHeader)
+		writeError(w, http.StatusInternalServerError, "failed to check the directive")
+	}
+	return service.DirectiveGrant{}, false
+}
+
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	r = h.withWakeupActor(r)
 	var req CreateIssueRequest
@@ -3393,7 +3460,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// be provided together.
 	var originType pgtype.Text
 	var originID pgtype.UUID
-	if req.OriginType != nil || req.OriginID != nil {
+	var originMetadata []byte
+	if req.OriginType != nil && *req.OriginType == "directive" {
+		// The Secretary's directive from a live boss chat message (spec P4). The
+		// helper writes any refusal itself.
+		grant, ok := h.authorizeDirectiveCreate(w, r, workspaceID, creatorType, actualCreatorID, req.OriginID, parentIssueID)
+		if !ok {
+			return
+		}
+		metadata, err := grant.Metadata()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record the directive quote")
+			return
+		}
+		originType = pgtype.Text{String: "directive", Valid: true}
+		originID = grant.MessageID
+		originMetadata = metadata
+	} else if req.OriginType != nil || req.OriginID != nil {
 		if req.OriginType == nil || req.OriginID == nil {
 			writeError(w, http.StatusBadRequest, "origin_type and origin_id must be provided together")
 			return
@@ -3494,6 +3577,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:        dueDate,
 		OriginType:     originType,
 		OriginID:       originID,
+		Metadata:       originMetadata,
 		Stage:          ptrToInt4(req.Stage),
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,

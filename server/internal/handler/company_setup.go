@@ -34,7 +34,10 @@ type CompanySetupReadinessResponse struct {
 	ExecutiveFloor        bool    `json:"executive_floor"`
 	AutopilotDaily        bool    `json:"autopilot_daily"`
 	AutopilotWeeklyPaused bool    `json:"autopilot_weekly_paused"`
-	Ready                 bool    `json:"ready"`
+	// SecretaryDeskProjectID is the project the Secretary files its requests in;
+	// null until setup has made it.
+	SecretaryDeskProjectID *string `json:"secretary_desk_project_id"`
+	Ready                  bool    `json:"ready"`
 }
 
 type companySetupRequest struct {
@@ -57,6 +60,10 @@ func companySetupReadinessToResponse(r service.CompanySetupReadiness) CompanySet
 	if r.SecretaryID != "" {
 		id := r.SecretaryID
 		resp.SecretaryID = &id
+	}
+	if r.SecretaryDeskProjectID != "" {
+		id := r.SecretaryDeskProjectID
+		resp.SecretaryDeskProjectID = &id
 	}
 	return resp
 }
@@ -214,6 +221,12 @@ func (h *Handler) publishCompanySetup(ctx context.Context, workspaceID, userID s
 		h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{
 			"workspace": h.workspaceToResponse(*created.Workspace),
 		})
+	}
+	for _, skill := range created.Skills {
+		h.publish(protocol.EventSkillCreated, workspaceID, "member", userID, map[string]any{"skill": skillToResponse(skill)})
+	}
+	if created.Desk != nil {
+		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": projectToResponse(*created.Desk)})
 	}
 	for _, ap := range []*db.Autopilot{created.DailyAutopilot, created.WeeklyAutopilot} {
 		if ap != nil {

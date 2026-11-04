@@ -39,6 +39,7 @@ type companyData struct {
 	Squads               []companySquad               `json:"squads"`
 	StageOwners          []companyStageOwner          `json:"stage_owners"`
 	InstructionTemplates []companyInstructionTemplate `json:"instruction_templates"`
+	StarterSkills        []companyStarterSkill        `json:"starter_skills"`
 }
 
 type companySquad struct {
@@ -101,6 +102,20 @@ type companyStageOwner struct {
 type companyInstructionTemplate struct {
 	ID           string `json:"id"`
 	Instructions string `json:"instructions"`
+}
+
+// companyStarterSkill is a skill the starter company installs: Content is the
+// SKILL.md with its frontmatter, Files the reference files beside it.
+type companyStarterSkill struct {
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Content     string               `json:"content"`
+	Files       []companyStarterFile `json:"files"`
+}
+
+type companyStarterFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 var loadCompanyData = sync.OnceValues(func() (companyData, error) {

@@ -3244,6 +3244,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						issue.AssigneeType.String == "squad" &&
 						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus, leaderWorkflow, requestHasClientCapability(r, protocol.DaemonCapabilityCLICommentSteerV1))
+					// The Secretary's leader note (spec P5): only on directive and
+					// Secretary-request issues, empty otherwise.
+					if note := secretaryDirectiveBriefing(r.Context(), h.Queries, issue, squad.LeaderID); note != "" {
+						briefing += "\n\n" + note
+					}
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {

@@ -26,6 +26,7 @@ function respond(body: unknown, status = 200) {
 const complete: CompanySetupReadiness = {
   runtime_online: true,
   secretary_id: "agent-1",
+  secretary_desk_project_id: "desk-1",
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,

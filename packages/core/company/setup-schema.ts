@@ -12,6 +12,8 @@ export interface CompanySetupReadiness {
   runtime_online: boolean;
   /** The workspace's live Secretary agent, or null when none is named. */
   secretary_id: string | null;
+  /** The "Secretary desk" project the Secretary files its requests in, or null until setup makes it. */
+  secretary_desk_project_id: string | null;
   /** A floor named Executive exists. */
   executive_floor: boolean;
   /** The Secretary's daily brief autopilot exists and is active. */
@@ -48,6 +50,11 @@ export const CompanySetupReadinessSchema = z
       .nullable()
       .default(null)
       .transform((v) => (v ? v : null)),
+    secretary_desk_project_id: z
+      .string()
+      .nullable()
+      .default(null)
+      .transform((v) => (v ? v : null)),
     executive_floor: z.boolean().default(false),
     autopilot_daily: z.boolean().default(false),
     autopilot_weekly_paused: z.boolean().default(false),
@@ -59,6 +66,7 @@ export const CompanySetupReadinessSchema = z
 export const FALLBACK_COMPANY_SETUP_READINESS: CompanySetupReadiness = {
   runtime_online: false,
   secretary_id: null,
+  secretary_desk_project_id: null,
   executive_floor: false,
   autopilot_daily: false,
   autopilot_weekly_paused: false,
