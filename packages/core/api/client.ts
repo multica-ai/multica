@@ -280,6 +280,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { EMPTY_ORG_MAP, OrgMapSchema, type OrgMap } from "../company/org-map-schema";
 import {
   parseInstructionRevisions,
   type InstructionRevision,
@@ -1404,6 +1405,7 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.top_level_only) search.set("top_level_only", "true");
+    if (params?.origin_type) search.set("origin_type", params.origin_type);
     // No `.length` guard on purpose: an empty ids array must still send
     // `ids=` — the server treats a PRESENT-but-empty list as an empty window
     // (nothing running), while an absent param means no restriction.
@@ -5125,6 +5127,15 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // The org map: floors, squads, leaders and open work (any member may read it).
+  async getCompanyOrgMap(params?: { floorId?: string }): Promise<OrgMap> {
+    const search = new URLSearchParams();
+    if (params?.floorId) search.set("floor_id", params.floorId);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/company/org-map${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, OrgMapSchema, EMPTY_ORG_MAP, { endpoint: "GET /api/company/org-map" });
   }
 
   // Company floors and squad seats (the digital company).

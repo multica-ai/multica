@@ -8446,3 +8446,11 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
 }
+
+// PublishChatReplyDone announces a Secretary reply on the run that wrote it, so
+// the channels bound to the session (Telegram, WeCom and the rest) deliver it.
+// Only the caller decides that a route exists (see ChatReplyRoute); a reply to a
+// session with no channel binding is not announced here.
+func (s *TaskService) PublishChatReplyDone(ctx context.Context, run db.AgentTaskQueue, msg db.ChatMessage) {
+	s.broadcastChatDone(ctx, run, &msg, false)
+}

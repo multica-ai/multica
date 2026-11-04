@@ -186,6 +186,8 @@ export interface ListIssuesParams {
   label_ids?: string[];
   /** Restrict the window to root issues instead of filtering loaded pages. */
   top_level_only?: boolean;
+  /** Exact provenance label, e.g. "directive" or "squad_request". */
+  origin_type?: string;
   /**
    * Hard restriction of the window to the given issue ids (the table's
    * agents-working facet sends the live running-issue set). An EMPTY array is

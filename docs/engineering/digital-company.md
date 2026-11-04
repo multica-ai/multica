@@ -599,6 +599,11 @@ the leader through the existing path. At most three per brief; the reply is
 read in the next run or in chat. This is the only time a department spends effort
 on the Secretary's behalf.
 
+On demand (phase 5), the Secretary asks in its own words on request issues, one child
+per addressee in the Secretary desk project, and reads the answers before it replies in
+chat. Its challenges are comments on those children, capped at eight per child. The
+daily-brief inquiry above is kept as it was.
+
 ### Authority
 
 | The Secretary may | The Secretary may not |
@@ -606,7 +611,9 @@ on the Secretary's behalf.
 | Read the whole workspace through the CLI | Decide a proposal (the endpoint refuses an agent) |
 | Publish briefs | Change an issue's status or assignee, or delete anything |
 | Comment on an issue to ask a leader (3 per brief) | Create work unprompted |
-| Create an issue for a squad when the boss asks in chat | Contact anything outside the workspace |
+| Create an issue for a squad when the boss asks in chat, as a directive | Contact anything outside the workspace |
+| Ask a squad on request issues, and challenge answers (8 per child), on the boss's question | Decide a proposal or a Launch stage gate through a directive |
+| Reply in the boss's chat from the run it was given, and in a channel bound to that chat | Speak in a chat that is not linked to its run |
 
 Decisions stay the boss's: in chat the Secretary answers "approve it" with a
 link to the brief or the Decisions dialog. Letting it decide on the boss's

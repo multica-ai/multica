@@ -102,16 +102,23 @@ type CompanySetupCreated struct {
 	Workspace       *db.Workspace
 	DailyAutopilot  *db.Autopilot
 	WeeklyAutopilot *db.Autopilot
+	// Skills are the starter skills this call installed; Desk is the Secretary
+	// desk project when this call made it.
+	Skills []db.Skill
+	Desk   *db.Project
 }
 
 // CompanySetupReadiness is the checklist the first-run card shows.
 type CompanySetupReadiness struct {
-	RuntimeOnline         bool
-	SecretaryID           string // empty when the workspace names no live Secretary
-	ExecutiveFloor        bool
-	AutopilotDaily        bool
-	AutopilotWeeklyPaused bool
-	Ready                 bool
+	RuntimeOnline bool
+	SecretaryID   string // empty when the workspace names no live Secretary
+	// SecretaryDeskProjectID is empty until the workspace has the Secretary desk.
+	// The Secretary files its request issues there.
+	SecretaryDeskProjectID string
+	ExecutiveFloor         bool
+	AutopilotDaily         bool
+	AutopilotWeeklyPaused  bool
+	Ready                  bool
 }
 
 // Setup creates whatever the workspace is missing and reuses the rest.
@@ -151,6 +158,29 @@ func (s *CompanySetupService) Setup(ctx context.Context, in CompanySetupInput) (
 		return out, err
 	}
 	out.Squad = createdSquad
+
+	data, err := loadCompanyData()
+	if err != nil {
+		return out, err
+	}
+	for _, sk := range data.StarterSkills {
+		skill, created, _, err := ensureStarterSkill(ctx, q, in.WorkspaceID, in.Actor.UserID, sk)
+		if err != nil {
+			return out, err
+		}
+		if created {
+			out.Skills = append(out.Skills, skill)
+		}
+	}
+	if _, err := attachStarterSkills(ctx, q, in.WorkspaceID, secretary.ID, []string{StarterSkillSecretaryAnalysis}); err != nil {
+		return out, err
+	}
+
+	_, createdDesk, err := ensureSecretaryDesk(ctx, q, in.WorkspaceID)
+	if err != nil {
+		return out, err
+	}
+	out.Desk = createdDesk
 
 	if !ws.SecretaryAgentID.Valid || ws.SecretaryAgentID != secretary.ID {
 		updated, err := q.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{
@@ -440,6 +470,14 @@ func (s *CompanySetupService) Readiness(ctx context.Context, workspaceID pgtype.
 		if f.Name == ExecutiveFloorName {
 			out.ExecutiveFloor = true
 		}
+	}
+
+	deskID, err := findSecretaryDesk(ctx, s.q, workspaceID)
+	if err != nil {
+		return out, err
+	}
+	if deskID.Valid {
+		out.SecretaryDeskProjectID = util.UUIDToString(deskID)
 	}
 
 	if secretaryID.Valid {

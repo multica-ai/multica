@@ -291,6 +291,9 @@ func (r *companyRun) apply(ctx context.Context) {
 			}
 		}
 	}
+	if !r.installStarterSkills(ctx) {
+		return
+	}
 	if !r.run("pipeline", func() (string, string, error) { return r.ensurePipeline(ctx) }) {
 		return
 	}

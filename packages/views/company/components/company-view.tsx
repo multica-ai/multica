@@ -33,6 +33,7 @@ import { CompanyCanvas, type WorkerSession } from "./company-canvas";
 import { CompanyBoardButton } from "./company-board-button";
 import { CompanyBoardDialog } from "./company-board-dialog";
 import { CompanyBriefButton } from "./company-brief-button";
+import { SecretaryDeskButton } from "./secretary-desk-dialog";
 import { CompanySetupCard } from "./company-setup-card";
 import { CompanyRoomOverlays } from "./company-room-overlays";
 import { CompanySeatBanner, CompanyUnseatedTray } from "./company-unseated-tray";
@@ -274,6 +275,7 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       >
         <CompanySetupCard />
         <CompanyBriefButton focusBriefId={briefFocus} />
+        <SecretaryDeskButton />
         {pendingAll.length > 0 ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
             {t(($) => $.company.decisions_open)}

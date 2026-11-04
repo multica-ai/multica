@@ -337,6 +337,72 @@ describe("secretary template", () => {
   });
 });
 
+describe("secretary v2: chief of staff", () => {
+  const instructionsOf = (id: AgentInstructionTemplate["id"]) =>
+    AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === id)?.instructions ?? "";
+  const secretary = instructionsOf("secretary");
+
+  it("states the role in a short opening paragraph", () => {
+    expect(secretary.startsWith("You are the Secretary:")).toBe(true);
+    expect(secretary.slice(0, secretary.indexOf("Feedback first:"))).toContain("chief of staff");
+  });
+
+  it("delegates analysis by issue, to squads and to people, with a written ask", () => {
+    expect(secretary).toContain("multica issue create --assignee-squad <squad-id> --parent <request-id>");
+    expect(secretary).toContain("Write each ask for its addressee in your own words");
+    expect(secretary).toContain("Do not pre-digest facts for them");
+  });
+
+  it("files request issues in the Secretary desk project", () => {
+    expect(secretary).toContain('"Secretary desk"');
+    expect(secretary).toContain("multica project list");
+  });
+
+  it("points to the analysis skill rather than carrying the whole method", () => {
+    expect(secretary).toContain("`secretary-analysis` skill");
+  });
+
+  it("reads answers critically and challenges them in comments under a cap", () => {
+    expect(secretary).toContain("Read every answer critically");
+    expect(secretary).toContain("Challenge a weak answer with a comment");
+    expect(secretary).toContain("At most eight challenges per child");
+  });
+
+  it("writes the assessment with ranked risks and numbered decisions with a recommendation", () => {
+    expect(secretary).toContain("publish it as an ad hoc brief");
+    expect(secretary).toContain("Number each decision the boss must make, D1 to Dn");
+    expect(secretary).toContain("Recommend; do not decide.");
+  });
+
+  it("answers the boss in chat with chat reply and ends the turn quickly", () => {
+    expect(secretary).toContain("multica chat reply --session <id> --file <md>");
+    expect(secretary).toContain("Then end the turn; do not wait.");
+  });
+
+  it("allows directives only from the boss's confirmed decision in chat", () => {
+    expect(secretary).toContain("create work nobody asked for");
+    expect(secretary).toContain("a directive needs the boss's confirmed decision in chat");
+    expect(secretary).toContain("refuses a directive without one");
+  });
+
+  it("answers quick factual questions from the digest", () => {
+    expect(secretary).toContain("Answer a quick factual question from the digest");
+  });
+
+  it("keeps the daily brief procedure, which the autopilot relies on", () => {
+    expect(secretary).toContain("Publish it with `multica brief publish`");
+  });
+
+  it("has the floor chief answer the Secretary and roll up its squads", () => {
+    const chief = instructionsOf("floor_chief");
+
+    expect(chief).toContain("When the Secretary asks about your floor");
+    expect(chief).toContain("Roll up one floor answer");
+    expect(chief).toContain("`squad-reporting` skill");
+    expect(chief).toContain("You do not speak in the boss's chat.");
+  });
+});
+
 describe("market research templates", () => {
   const instructionsOf = (id: AgentInstructionTemplate["id"]) =>
     AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === id)?.instructions ?? "";
@@ -484,6 +550,7 @@ describe("company role templates", () => {
       "brief ask",
       "brief digest",
       "brief feedback",
+      "brief list",
       "brief publish",
       "initiative advance",
       "initiative attest",
@@ -491,6 +558,7 @@ describe("company role templates", () => {
       "initiative show",
       "issue create",
       "issue status",
+      "issue wakeup",
       "knowledge add",
       "knowledge list",
       "knowledge publish",

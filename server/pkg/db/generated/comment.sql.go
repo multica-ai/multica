@@ -167,6 +167,24 @@ func (q *Queries) CommentHasReplies(ctx context.Context, arg CommentHasRepliesPa
 	return has_replies, err
 }
 
+const countAgentCommentsOnIssue = `-- name: CountAgentCommentsOnIssue :one
+SELECT count(*) FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND author_type = 'agent' AND author_id = $3 AND type = 'comment'
+`
+
+type CountAgentCommentsOnIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AuthorID    pgtype.UUID `json:"author_id"`
+}
+
+func (q *Queries) CountAgentCommentsOnIssue(ctx context.Context, arg CountAgentCommentsOnIssueParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentCommentsOnIssue, arg.IssueID, arg.WorkspaceID, arg.AuthorID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countComments = `-- name: CountComments :one
 SELECT count(*) FROM comment
 WHERE issue_id = $1 AND workspace_id = $2

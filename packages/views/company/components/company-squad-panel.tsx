@@ -7,6 +7,7 @@ import {
   companyFloorsOptions,
   companySquadMembersOptions,
   proposalListOptions,
+  squadOpenItemsOptions,
   squadRoutinesOptions,
   type FloorRoom,
 } from "@multica/core/company";
@@ -28,6 +29,7 @@ import { CompanySquadAttention } from "./company-squad-attention";
 import { CompanySquadSeatMenu } from "./company-squad-seat-menu";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useAddSquadToCompany } from "../lib/use-add-squad-to-company";
+import { useIssuePeekActions } from "../../issues/surface/peek-context";
 
 const STATUS_KEYS = {
   working: "status_working",
@@ -104,6 +106,8 @@ function PanelBody({
   const { data: autopilots = [] } = useQuery(autopilotListOptions(wsId));
   const { data: proposals = [] } = useQuery(proposalListOptions(wsId, { state: "pending", squad_id: squadId }));
   const { data: routines = [] } = useQuery(squadRoutinesOptions(wsId, squadId));
+  const { data: openItems } = useQuery(squadOpenItemsOptions(wsId, squadId));
+  const peek = useIssuePeekActions();
   const { data: autonomy } = useQuery(squadAutonomyOptions(wsId, squadId));
   const { data: floors = [] } = useQuery(companyFloorsOptions(wsId));
   const { addSquad, pending: adding } = useAddSquadToCompany(floors, squads);
@@ -226,6 +230,28 @@ function PanelBody({
           </p>
           {autonomy?.reason ? <p className="text-caption text-muted-foreground">{autonomy.reason}</p> : null}
         </section>
+        {openItems && openItems.issues.length > 0 ? (
+          <section aria-label={t(($) => $.company.squad_open_items)} className="flex flex-col gap-1">
+            <h3 className="flex items-center gap-2 text-caption font-medium text-muted-foreground">
+              {t(($) => $.company.squad_open_items)}
+              {openItems.total > openItems.issues.length ? (
+                <span className="rounded-full bg-muted px-1.5 py-0.5 tabular-nums">{`+${openItems.total - openItems.issues.length}`}</span>
+              ) : null}
+            </h3>
+            {openItems.issues.map((issue) => (
+              <button
+                key={issue.id}
+                type="button"
+                onClick={() => peek?.open(issue.id)}
+                disabled={!peek}
+                className="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-body hover:bg-accent disabled:hover:bg-transparent"
+              >
+                <span className="shrink-0 text-caption text-muted-foreground">{issue.identifier}</span>
+                <span className="min-w-0 flex-1 truncate">{issue.title}</span>
+              </button>
+            ))}
+          </section>
+        ) : null}
         <CompanyRoutines squadId={squadId} canManage={canManage} />
         {squadAutopilots.length > 0 ? (
           <section aria-label={t(($) => $.company.squad_autopilots)} className="flex flex-col gap-1">

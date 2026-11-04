@@ -273,6 +273,8 @@ type Digest struct {
 	// OverdueRequests are squad requests the receiving squad has not answered
 	// within its response_hours (spec 3.5).
 	OverdueRequests []DigestOverdueRequest `json:"overdue_requests"`
+	// BlockedDirectives are directives blocked past their due date (spec 13.7.3).
+	BlockedDirectives []DigestBlockedDirective `json:"blocked_directives"`
 	// People lists the reviews published since the window opened, with the
 	// organisation changes they recommended (spec 4.6).
 	People DigestPeople `json:"people"`
@@ -382,6 +384,14 @@ type DigestOverdueRequest struct {
 	Title        string `json:"title"`
 	SquadID      string `json:"squad_id"`
 	HoursOverdue int    `json:"hours_overdue"`
+}
+
+// DigestBlockedDirective is a directive the leader marked blocked after its due date.
+type DigestBlockedDirective struct {
+	IssueID     string `json:"issue_id"`
+	Identifier  string `json:"identifier"`
+	Title       string `json:"title"`
+	DaysOverdue int    `json:"days_overdue"`
 }
 
 // DigestService computes the digest.
@@ -697,6 +707,10 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		}
 	}
 	risks := s.systemRisks(ctx, now)
+	blockedDirectives, err := s.computeBlockedDirectives(ctx, workspaceID, now, issuePrefix)
+	if err != nil {
+		return Digest{}, err
+	}
 
 	mode := DigestModeSquads
 	if floorsMode {
@@ -725,6 +739,7 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		Inquiries:         inquiries,
 		Pipeline:          pipeline,
 		OverdueRequests:   overdue,
+		BlockedDirectives: blockedDirectives,
 		People:            people,
 		AutoApproved:      autoApproved,
 		Budget:            budget,
@@ -874,6 +889,26 @@ func (s *DigestService) computeOverdueRequests(ctx context.Context, workspaceID 
 			Title:        r.Title,
 			SquadID:      util.UUIDToString(r.SquadID),
 			HoursOverdue: int(now.Sub(deadline).Hours()),
+		})
+	}
+	return out, nil
+}
+
+// computeBlockedDirectives lists directives blocked after their due date.
+func (s *DigestService) computeBlockedDirectives(ctx context.Context, workspaceID pgtype.UUID, now time.Time, prefix string) ([]DigestBlockedDirective, error) {
+	rows, err := s.Queries.ListBlockedDirectivesPastDue(ctx, db.ListBlockedDirectivesPastDueParams{
+		WorkspaceID: workspaceID, Now: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("digest blocked directives: %w", err)
+	}
+	out := make([]DigestBlockedDirective, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DigestBlockedDirective{
+			IssueID:     util.UUIDToString(r.ID),
+			Identifier:  IssueIdentifier(prefix, r.Number),
+			Title:       r.Title,
+			DaysOverdue: int(now.Sub(r.DueDate.Time).Hours() / 24),
 		})
 	}
 	return out, nil

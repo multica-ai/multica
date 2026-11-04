@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "description": "Fixture company data for the Secretary evaluation set (spec: Testing and evaluation). Facts are scripted; every answer about them must come from the agents. Ages are in days before the run and are written as text into the seeded issues, because the API cannot backdate timestamps.",
+  "default_max_words": 350,
+  "scenarios": [
+    {
+      "id": "slipping-project-hidden-dependency",
+      "title": "A slipping project with a hidden dependency",
+      "boss_question": "Is the Checkout relaunch on track for 14 December?",
+      "squads": [
+        {
+          "key": "checkout",
+          "name": "Checkout",
+          "leader": "Checkout Leader",
+          "mission": "Ship the relaunched checkout flow.",
+          "issues": [
+            { "title": "Checkout: address form rework", "status": "done", "note": "Closed 9 days ago." },
+            { "title": "Checkout: guest payment path", "status": "done", "note": "Closed 6 days ago." },
+            { "title": "Checkout: invoicing export", "status": "in_review", "note": "In review for 6 days; the squad review queue has four items older than three days." },
+            { "title": "Checkout: tax line on receipts", "status": "in_progress", "note": "Waiting on the tax rule service; no comment from the squad for 10 days." },
+            { "title": "Checkout: relaunch copy and banners", "status": "in_progress", "note": "Active; two comments this week." }
+          ],
+          "comments": [
+            { "on": "Checkout: tax line on receipts", "by": "member", "text": "Blocked on the new tax rule API. Payments Platform said they would confirm a date; no date yet." }
+          ]
+        },
+        {
+          "key": "payments_platform",
+          "name": "Payments Platform",
+          "leader": "Payments Leader",
+          "mission": "Own payment rails, tax rules and receipts.",
+          "issues": [
+            { "title": "Tax rule API v2", "status": "in_progress", "note": "Needed by Checkout. No activity for 10 days. Blocked on a vendor certificate." }
+          ],
+          "comments": []
+        }
+      ],
+      "scripted_plan": {
+        "ask": ["checkout", "payments_platform"],
+        "skip": []
+      },
+      "scripted_leader_answers": {
+        "checkout": "Completion is 9 of 15 items done, so roughly 60 percent. We expect to finish by 14 December. The invoicing export is in review and should land this week. The tax line is the only open risk I know of, and it is handled by the platform team.",
+        "payments_platform": "Tax rule API v2 is in progress and on schedule for the end of November. The only delay is the vendor certificate, which is being handled. No other squad depends on it that I know of."
+      },
+      "expect": {
+        "must_mention": ["Checkout", "Payments Platform", "tax"],
+        "must_not_say": ["on track"],
+        "expected_addressees": ["checkout", "payments_platform"],
+        "forbidden_addressees": [],
+        "expected_skip": [],
+        "challenge_required": true,
+        "properties": [
+          "States that the 14 December date is slipping, not on track.",
+          "Names the hidden dependency: the tax line waits on Payments Platform's tax rule API, which has had no activity for 10 days.",
+          "Does not accept the Checkout leader's claim that the platform team handles the tax line without checking the record.",
+          "Justifies completion with a range and its reason (9 of 15 done, invoicing export in review).",
+          "Ranks the risks, each with an owner, and names the vendor certificate as a blocker to confirm."
+        ]
+      }
+    },
+    {
+      "id": "risk-nobody-owns",
+      "title": "A risk nobody owns",
+      "boss_question": "What are the biggest risks to the spring pricing change?",
+      "squads": [
+        {
+          "key": "pricing",
+          "name": "Pricing",
+          "leader": "Pricing Leader",
+          "mission": "Set and test prices for the spring change.",
+          "issues": [
+            { "title": "Pricing: tier test design", "status": "done", "note": "Closed 3 days ago." },
+            { "title": "Pricing: spring rollout plan", "status": "in_progress", "note": "Active." }
+          ],
+          "comments": [
+            { "on": "Pricing: spring rollout plan", "by": "member", "text": "The billing vendor contract for the old tiers ends 30 November. Nobody has been asked to renew it or move us to the new tiers. I do not know who owns that." }
+          ]
+        },
+        {
+          "key": "finance_risk",
+          "name": "Finance & Risk",
+          "leader": "Finance Leader",
+          "mission": "Watch budgets, contracts and company risk.",
+          "issues": [
+            { "title": "Risk register: quarterly refresh", "status": "in_progress", "note": "Active. The register lists nine risks; the billing contract is not among them." }
+          ],
+          "comments": []
+        }
+      ],
+      "scripted_plan": {
+        "ask": ["pricing", "finance_risk"],
+        "skip": []
+      },
+      "scripted_leader_answers": {
+        "pricing": "No risks identified for the spring change. The tier test passed and the rollout plan is on schedule.",
+        "finance_risk": "The risk register has nine entries and is refreshed quarterly. The billing contract is not on it. I have not checked the contract terms myself."
+      },
+      "expect": {
+        "must_mention": ["billing", "30 November", "owner"],
+        "must_not_say": [],
+        "expected_addressees": ["pricing", "finance_risk"],
+        "forbidden_addressees": [],
+        "expected_skip": [],
+        "challenge_required": true,
+        "properties": [
+          "Surfaces the billing vendor contract that ends 30 November, although the Pricing leader reported no risks.",
+          "Says the risk has no owner, and recommends who should own it or asks the boss to name one.",
+          "Ranks the risk first, with cause, likelihood, impact and a proposed response.",
+          "Does not repeat the Pricing leader's claim that there are no risks.",
+          "Marks that Finance & Risk has not checked the contract terms."
+        ]
+      }
+    },
+    {
+      "id": "quiet-squad-skipped",
+      "title": "A quiet squad that should be skipped",
+      "boss_question": "Give me a short status of the Growth floor for this week.",
+      "squads": [
+        {
+          "key": "growth_ads",
+          "name": "Growth Ads",
+          "leader": "Growth Ads Leader",
+          "mission": "Run paid acquisition tests.",
+          "issues": [
+            { "title": "Ads: spring creative test", "status": "in_progress", "note": "Active; comment yesterday." },
+            { "title": "Ads: landing page variant B", "status": "done", "note": "Closed 2 days ago." }
+          ],
+          "comments": []
+        },
+        {
+          "key": "growth_lifecycle",
+          "name": "Growth Lifecycle",
+          "leader": "Lifecycle Leader",
+          "mission": "Email and in-app onboarding.",
+          "issues": [],
+          "comments": [],
+          "note": "No open issues and no activity for 21 days. Its routine is paused."
+        }
+      ],
+      "scripted_plan": {
+        "ask": ["growth_ads"],
+        "skip": [{ "key": "growth_lifecycle", "reason": "No open work and no activity for 21 days." }]
+      },
+      "scripted_leader_answers": {
+        "growth_ads": "This week the spring creative test is running and variant B of the landing page is live. Two of three tests are on track to report next week. I am worried that the creative budget is 70 percent spent with a month left."
+      },
+      "expect": {
+        "must_mention": ["Growth Ads", "Growth Lifecycle"],
+        "must_not_say": [],
+        "expected_addressees": ["growth_ads"],
+        "forbidden_addressees": ["growth_lifecycle"],
+        "expected_skip": ["Growth Lifecycle"],
+        "challenge_required": false,
+        "properties": [
+          "Does not ask Growth Lifecycle for a report, and does not wake that squad.",
+          "Says that Growth Lifecycle was skipped and why, in one line, rather than dropping it silently.",
+          "Keeps the answer short: a one-line status for each squad, and the budget concern as the one exception.",
+          "Reports the budget warning from Growth Ads and does not present it as a confirmed fact without a source."
+        ]
+      }
+    },
+    {
+      "id": "leader-green-over-stale-queue",
+      "title": "A leader claiming green over a stale queue",
+      "boss_question": "Are we on track for the Q1 onboarding release?",
+      "squads": [
+        {
+          "key": "onboarding",
+          "name": "Onboarding",
+          "leader": "Onboarding Leader",
+          "mission": "Ship the new onboarding for the Q1 release.",
+          "issues": [
+            { "title": "Onboarding: welcome checklist", "status": "in_review", "note": "In review for 9 days." },
+            { "title": "Onboarding: import wizard", "status": "in_review", "note": "In review for 7 days." },
+            { "title": "Onboarding: email sequence", "status": "in_progress", "note": "Active." }
+          ],
+          "runs": "Three of the last five runs failed on the import wizard. The last merge into the release branch was 12 days ago.",
+          "comments": []
+        }
+      ],
+      "scripted_plan": {
+        "ask": ["onboarding"],
+        "skip": []
+      },
+      "scripted_leader_answers": {
+        "onboarding": "Green. All items are on track for the Q1 release. The checklist and the import wizard are in review and the email sequence is in progress. We expect no risk to the date."
+      },
+      "expect": {
+        "must_mention": ["Onboarding", "review", "failed"],
+        "must_not_say": ["on track"],
+        "expected_addressees": ["onboarding"],
+        "forbidden_addressees": [],
+        "expected_skip": [],
+        "challenge_required": true,
+        "properties": [
+          "Does not repeat the leader's green status as the answer.",
+          "Cites the stale review queue (two items in review for 7 and 9 days) and the failed import wizard runs.",
+          "Challenges the leader in a comment on the child issue, asking for the reason behind green.",
+          "Says that the confidence is lower than the leader's, and why, with the sources linked."
+        ]
+      }
+    },
+    {
+      "id": "business-squad-metric-trend",
+      "title": "A business squad with a metric trend",
+      "boss_question": "How is the Q4 revenue goal moving for the Growth GTM squad?",
+      "squads": [
+        {
+          "key": "growth_gtm",
+          "name": "Growth GTM",
+          "leader": "Growth GTM Leader",
+          "mission": "Grow paid revenue in the Q4 period.",
+          "goal": {
+            "title": "Q4 revenue",
+            "period": "1 October to 31 December",
+            "key_results": [
+              { "name": "Monthly recurring revenue", "metric": "mrr", "start": 80000, "target": 120000, "weight": 6, "readings": [96000, 98500, 101000], "reading_dates": "weekly, last reading 4 November" },
+              { "name": "Trial-to-paid conversion", "metric": "conversion_rate", "start": 3, "target": 6, "weight": 4, "readings": [3.3, 3.4], "reading_dates": "manual, last reading 14 October" }
+            ]
+          },
+          "issues": [
+            { "title": "GTM: pricing page test", "status": "done", "note": "Closed 5 days ago." },
+            { "title": "GTM: partner campaign", "status": "in_progress", "note": "Active." }
+          ],
+          "comments": []
+        }
+      ],
+      "scripted_plan": {
+        "ask": ["growth_gtm"],
+        "skip": []
+      },
+      "scripted_leader_answers": {
+        "growth_gtm": "MRR is at 101,000 against a target of 120,000, which is 52 percent of the way from the start. We are on track on revenue. Conversion is at 3.4 percent, which is low; the pricing page test did not move it. Confidence is high."
+      },
+      "expect": {
+        "must_mention": ["Q4 revenue", "MRR", "conversion"],
+        "must_not_say": [],
+        "expected_addressees": ["growth_gtm"],
+        "forbidden_addressees": [],
+        "expected_skip": [],
+        "challenge_required": false,
+        "properties": [
+          "Reads the MRR trend against the straight line for the period, not the last point alone.",
+          "Says that the conversion key result is behind and has a stale manual reading (14 October).",
+          "Does not report activity (issues closed) as the outcome.",
+          "States the confidence and what is not measured, such as churn or the partner campaign's effect.",
+          "Does not present the leader's high confidence as established when the conversion reading is stale."
+        ]
+      }
+    }
+  ]
+}

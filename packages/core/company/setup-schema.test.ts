@@ -10,6 +10,7 @@ import {
 const complete: CompanySetupReadiness = {
   runtime_online: true,
   secretary_id: "agent-1",
+  secretary_desk_project_id: "project-1",
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,
@@ -25,11 +26,19 @@ describe("CompanySetupReadinessSchema", () => {
     expect(CompanySetupReadinessSchema.parse({ runtime_online: true })).toEqual({
       runtime_online: true,
       secretary_id: null,
+      secretary_desk_project_id: null,
       executive_floor: false,
       autopilot_daily: false,
       autopilot_weekly_paused: false,
       ready: false,
     });
+  });
+
+  it("reads the Secretary desk id, and an empty one as not set up", () => {
+    expect(CompanySetupReadinessSchema.parse(complete).secretary_desk_project_id).toBe("project-1");
+    expect(
+      CompanySetupReadinessSchema.parse({ secretary_desk_project_id: "" }).secretary_desk_project_id,
+    ).toBeNull();
   });
 
   it("reads an empty secretary id as no secretary", () => {
@@ -54,6 +63,7 @@ describe("CompanySetupReadinessSchema", () => {
     expect(FALLBACK_COMPANY_SETUP_READINESS).toEqual({
       runtime_online: false,
       secretary_id: null,
+      secretary_desk_project_id: null,
       executive_floor: false,
       autopilot_daily: false,
       autopilot_weekly_paused: false,
