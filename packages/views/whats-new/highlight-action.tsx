@@ -2,6 +2,8 @@
 
 import { ArrowRight, ArrowUpRight } from "@multica/ui/icons";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
@@ -15,6 +17,7 @@ export function HighlightActionButton({ action, onDone }: { action: HighlightAct
   const { t } = useT("layout");
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
+  const searchShortcut = useShortcut("openSearch");
 
   if (action.kind === "external") {
     return (
@@ -36,13 +39,25 @@ export function HighlightActionButton({ action, onDone }: { action: HighlightAct
     if (action.kind === "command-palette") useSearchStore.getState().setOpen(true);
     else navigation.push(action.to(paths));
   };
+  if (action.kind === "command-palette") {
+    return (
+      <button
+        type="button"
+        onClick={run}
+        className="inline-flex cursor-pointer items-center gap-1 text-label font-medium text-brand hover:underline"
+      >
+        {t(($) => $.whats_new.action.try)}
+        {searchShortcut && <ShortcutKeycaps shortcut={searchShortcut} decorative />}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       onClick={run}
       className="inline-flex cursor-pointer items-center gap-0.5 text-label font-medium text-brand hover:underline"
     >
-      {action.kind === "command-palette" ? t(($) => $.whats_new.action.try) : t(($) => $.whats_new.action.open)}
+      {t(($) => $.whats_new.action.open)}
       <ArrowRight className="size-3.5" />
     </button>
   );

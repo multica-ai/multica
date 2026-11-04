@@ -115,12 +115,16 @@ function signIn(user: Partial<User>) {
   authStore.setState({ user: { id: "u-1", created_at: "2026-01-15T08:00:00Z", ...user } });
 }
 
-function openFromHelpMenu() {
+function openHelpMenu() {
   fireEvent.click(screen.getByRole("button", { name: "Help" }));
   act(() => {
     vi.runAllTimers();
   });
-  fireEvent.click(screen.getByRole("menuitem", { name: "What's new" }));
+  return screen.getByRole("menuitem", { name: /What's new/ });
+}
+
+function openFromHelpMenu() {
+  fireEvent.click(openHelpMenu());
   act(() => {
     vi.runAllTimers();
   });
@@ -179,11 +183,38 @@ describe("What's new from the Help menu", () => {
     );
   });
 
-  it("marks nothing as new once everything is read", () => {
+  it("tags the menu entry with the newest unread version until the panel is opened", () => {
+    signIn({ whats_new_seen_version: "0.1.0" });
+    render(<HelpLauncher />);
+
+    expect(openHelpMenu()).toHaveTextContent("v0.3.0");
+    fireEvent.click(screen.getByRole("menuitem", { name: /What's new/ }));
+    act(() => {
+      vi.runAllTimers();
+    });
+    closePanel();
+
+    expect(openHelpMenu()).not.toHaveTextContent("v0.3.0");
+  });
+
+  it("shows the server version next to the changelog link when it is known", () => {
+    configStore.getState().setServerVersion("v0.3.0");
     signIn({ whats_new_seen_version: "0.3.0" });
     render(<HelpLauncher />);
 
     openFromHelpMenu();
+    expect(screen.getByText("Server version v0.3.0", { selector: "[data-slot=whats-new-panel] span" })).toBeInTheDocument();
+  });
+
+  it("marks nothing as new once everything is read", () => {
+    signIn({ whats_new_seen_version: "0.3.0" });
+    render(<HelpLauncher />);
+
+    expect(openHelpMenu()).not.toHaveTextContent("v0.3.0");
+    fireEvent.click(screen.getByRole("menuitem", { name: /What's new/ }));
+    act(() => {
+      vi.runAllTimers();
+    });
     expect(release("0.3.0")).not.toHaveTextContent("New");
     expect(mocks.markWhatsNewSeen).not.toHaveBeenCalled();
   });

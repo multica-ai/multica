@@ -21,7 +21,16 @@ export function useWhatsNewMenuPanel() {
     setOpen(true);
     markSeen();
   }, [unread, markSeen]);
-  return { available: visible.length > 0, releases: visible, open, setOpen, unreadVersions, show };
+  return {
+    available: visible.length > 0,
+    /** The newest release the user hasn't seen, for the menu entry's tag. */
+    newestUnread: unread[0]?.version,
+    releases: visible,
+    open,
+    setOpen,
+    unreadVersions,
+    show,
+  };
 }
 
 export function WhatsNewMenuPanel({

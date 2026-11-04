@@ -99,6 +99,14 @@ export function HelpLauncher() {
             <DropdownMenuItem onClick={whatsNew.show}>
               <Megaphone className="h-3.5 w-3.5" />
               {t(($) => $.whats_new.trigger)}
+              {whatsNew.newestUnread && (
+                <span
+                  data-slot="whats-new-tag"
+                  className="ml-auto text-caption font-medium text-brand tabular-nums"
+                >
+                  {`v${whatsNew.newestUnread}`}
+                </span>
+              )}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
