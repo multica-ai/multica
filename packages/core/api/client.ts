@@ -2964,8 +2964,11 @@ export class ApiClient {
     return parsed.issue_ids;
   }
 
-  async markIssueRead(issueId: string): Promise<void> {
-    await this.fetch(`/api/issues/${issueId}/read`, { method: "POST" });
+  /** `inboxRead` is how many of the issue's Inbox notifications the write read;
+   *  0 from a server that does not report it. */
+  async markIssueRead(issueId: string): Promise<{ inboxRead: number }> {
+    const res = await this.fetch<{ inbox_read?: unknown } | null>(`/api/issues/${issueId}/read`, { method: "POST" });
+    return { inboxRead: typeof res?.inbox_read === "number" ? res.inbox_read : 0 };
   }
 
   async markIssueUnread(issueId: string): Promise<void> {

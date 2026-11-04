@@ -179,6 +179,23 @@ FROM (
 WHERE newest.read = false
 GROUP BY newest.workspace_id;
 
+-- name: MarkIssueInfoInboxRead :execrows
+-- Opening an issue reads its informational notifications: severity info, minus
+-- mentions, which are addressed to the reader and stay until handled like
+-- action_required and attention items. The inbox shows one row per issue with
+-- its newest item, so clearing the info items around an unread kept item could
+-- turn that row read and hide the kept item; an issue with one is left as is.
+UPDATE inbox_item i SET read = true
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.issue_id = $3
+  AND i.archived = false AND i.read = false
+  AND i.severity = 'info' AND i.type <> 'mentioned'
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_item kept
+    WHERE kept.workspace_id = $1 AND kept.recipient_type = 'member' AND kept.recipient_id = $2 AND kept.issue_id = $3
+      AND kept.archived = false AND kept.read = false
+      AND (kept.severity <> 'info' OR kept.type = 'mentioned')
+  );
+
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;

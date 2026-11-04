@@ -190,6 +190,34 @@ export function useInboxUnreadCount(
 }
 
 /**
+ * The ids of the notifications that opening `issueId` marks read — the client
+ * copy of the server's MarkIssueInfoInboxRead. Informational items are read;
+ * action_required, attention and mentions stay until handled, and while one of
+ * those is unread nothing is read: the Inbox row shows the issue's newest item,
+ * so reading the info items around it could turn the row read and bury it.
+ */
+export function inboxItemsReadOnIssueOpen(items: InboxItem[], issueId: string): string[] {
+  const unread = items.filter((item) => item.issue_id === issueId && !item.archived && !item.read);
+  const kept = (item: InboxItem) => item.severity !== "info" || item.type === "mentioned";
+  if (unread.some(kept)) return [];
+  return unread.map((item) => item.id);
+}
+
+/**
+ * Whether opening `issueId` may read Inbox notifications, so the open is worth
+ * a write. Answered from the Inbox list when it is cached and current, else
+ * from the unread summary: with nothing unread in the workspace, no Inbox row
+ * can change. Unknown counts as yes; the server decides.
+ */
+export function issueOpenMayReadInbox(qc: QueryClient, wsId: string, issueId: string): boolean {
+  const list = qc.getQueryState<InboxItem[]>(inboxKeys.list(wsId));
+  if (list?.data && !list.isInvalidated) return inboxItemsReadOnIssueOpen(list.data, issueId).length > 0;
+  const summary = qc.getQueryState<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary());
+  if (summary?.data && !summary.isInvalidated) return unreadCountForWorkspace(summary.data, wsId) > 0;
+  return true;
+}
+
+/**
  * Deduplicate inbox items by issue_id (one entry per issue, Linear-style).
  * Exported for consumers to use in useMemo — not in queryOptions select
  * (to avoid new array references on every cache update).

@@ -75,7 +75,10 @@ func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor})
 }
 
-// MarkIssueRead clears the caller's unread mark on an issue.
+// MarkIssueRead clears the caller's unread mark on an issue, along with the
+// issue's informational Inbox notifications (see MarkIssueInfoInboxRead), so
+// the sidebar and the Inbox read as one state. inbox_read in the response is
+// how many notifications that read.
 func (h *Handler) MarkIssueRead(w http.ResponseWriter, r *http.Request) {
 	h.setIssueUnread(w, r, false)
 }
@@ -112,8 +115,8 @@ func (h *Handler) setIssueUnread(w http.ResponseWriter, r *http.Request, unread 
 		return
 	}
 
+	workspaceID := uuidToString(issue.WorkspaceID)
 	if changed > 0 {
-		workspaceID := uuidToString(issue.WorkspaceID)
 		h.publish(protocol.EventIssueUnreadChanged, workspaceID, "member", userID, map[string]any{
 			"workspace_id": workspaceID,
 			"recipient_id": userID,
@@ -121,5 +124,26 @@ func (h *Handler) setIssueUnread(w http.ResponseWriter, r *http.Request, unread 
 			"unread":       unread,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"unread": unread})
+	if unread {
+		writeJSON(w, http.StatusOK, map[string]bool{"unread": unread})
+		return
+	}
+
+	inboxRead, err := h.Queries.MarkIssueInfoInboxRead(r.Context(), db.MarkIssueInfoInboxReadParams{
+		WorkspaceID: issue.WorkspaceID,
+		RecipientID: params.UserID,
+		IssueID:     issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update inbox read state")
+		return
+	}
+	if inboxRead > 0 {
+		h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+			"recipient_id": userID,
+			"issue_id":     uuidToString(issue.ID),
+			"count":        inboxRead,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"unread": false, "inbox_read": inboxRead})
 }

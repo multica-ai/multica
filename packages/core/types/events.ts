@@ -249,6 +249,8 @@ export interface IssueUnreadChangedPayload {
 export interface InboxBatchReadPayload {
   recipient_id: string;
   count: number;
+  /** Set when opening one issue read its notifications. */
+  issue_id?: string;
 }
 
 export interface InboxBatchArchivedPayload {
