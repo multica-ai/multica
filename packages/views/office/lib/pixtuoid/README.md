@@ -12,6 +12,7 @@ The office on the Office page is the pixtuoid engine, compiled to WebAssembly.
 - The web shim forces clear weather, so the window shows day or night by the clock.
 - The same patch exports the changed rects of the last written frame (`dirty_full`, `dirty_ptr`, `dirty_len`). `step` expands only those rects into its RGBA buffer, and `office.worker.ts` puts only those rects on the canvas. A frame that changed everywhere, or a resized canvas, still repaints whole.
 - The same patch hashes a window's glass one cell per word, not one `Option<Rgb>` at a time. A window is fingerprinted every frame, and this cut that cost by about four fifths. The fingerprint only tells frames apart, so the drawn frame does not change.
+- The same patch resolves a window's sky row by row: the dither band and seam of a row are worked out once, each cell then takes one table lookup, and a run of equal cells blazes once (`nearest_split` in `dither.rs` is the row form of `nearest`, tested cell by cell). The frames are identical to the per-cell form, and the disc's own pane still resolves each cell in full.
 - The same patch raises the cutaway's repaint pass cap from 8 to 70 (`MAX_PASSES` in `cutaway/canvas.rs`). Fewer merged boxes repaint fewer pixels, and each frame stays identical.
 - The same patch sets `wanders: false` in `pixtuoid-scene/src/sim/mod.rs`, so idle workers stay at their desks.
 

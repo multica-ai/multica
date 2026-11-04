@@ -257,6 +257,143 @@ index 00000000..e598e602
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
+diff --git a/crates/pixtuoid-scene/src/celestial.rs b/crates/pixtuoid-scene/src/celestial.rs
+index 5e1278a8..65a2ec25 100644
+--- a/crates/pixtuoid-scene/src/celestial.rs
++++ b/crates/pixtuoid-scene/src/celestial.rs
+@@ -292,10 +292,24 @@ impl SkyView {
+             glass_rows(rows.end.saturating_sub(rows.start)),
+             d,
+         );
++        // The blaze is one tint over every cell, and neighbouring cells often share a colour:
++        // the last colour and its blazed tone are kept, so a run of equal cells blazes once.
++        let blaze = self.blaze;
++        let last: std::cell::Cell<Option<(Rgb, Rgb)>> = std::cell::Cell::new(None);
+         WindowView::new(bay, rows, d, |cell| {
+             front(cell).unwrap_or_else(|| {
+                 let open = pane.colour(cell.at, cell.glass_offset.1);
+-                self.blaze.map_or(open, |b| b.over(open))
++                let Some(b) = blaze else {
++                    return open;
++                };
++                match last.get() {
++                    Some((from, to)) if from == open => to,
++                    _ => {
++                        let to = b.over(open);
++                        last.set(Some((open, to)));
++                        to
++                    }
++                }
+             })
+         })
+     }
+@@ -309,6 +323,7 @@ impl SkyView {
+             glass_h,
+             clear_rows: crate::skyline::clear_sky_rows(glass_h),
+             d,
++            row: std::cell::Cell::new(None),
+         }
+     }
+ }
+@@ -321,14 +336,70 @@ struct PaneSky<'a> {
+     glass_h: u16,
+     clear_rows: u16,
+     d: Density,
++    /// The last row resolved: a window's cells come row by row, and everything
++    /// here that depends on the row alone is worked out once for it.
++    row: std::cell::Cell<Option<SkyRow>>,
++}
++
++/// What a pane's row of glass shows, whatever its column: the solid sky band, the
++/// dither level of its seam, and whether a star may shine on it.
++#[derive(Clone, Copy)]
++struct SkyRow {
++    glass_dy: u16,
++    band: u8,
++    seam: Option<u8>,
++    star_row: bool,
+ }
+ 
+ impl PaneSky<'_> {
++    /// The row `glass_dy` cells down the glass, resolved once for its cells.
++    fn row(&self, glass_dy: u16) -> SkyRow {
++        if let Some(row) = self.row.get()
++            && row.glass_dy == glass_dy
++        {
++            return row;
++        }
++        let dy = crate::display::pen::layout_point(crate::display::pen::ArtPx(glass_dy), self.d);
++        let share = crate::atmosphere::sky_share(dy, self.glass_h);
++        let (band, seam) = crate::dither::nearest_split(share * (SKY_BANDS - 1) as f32);
++        let row = SkyRow {
++            glass_dy,
++            band,
++            seam,
++            star_row: self.view.stars && dy < f32::from(self.clear_rows),
++        };
++        self.row.set(Some(row));
++        row
++    }
++
++    /// The colour of grid cell `g`, on the row `glass_dy` cells down the glass.
++    /// The disc's own pane resolves each cell in full; every other pane takes the
++    /// row's band, dithered per cell, and a star where the row allows one.
++    fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
++        let v = self.view;
++        if v.disc.is_some() && self.hosts_disc {
++            return self.colour_in_full(g, glass_dy);
++        }
++        let row = self.row(glass_dy);
++        let i = usize::from(
++            row.band + u8::from(row.seam.is_some_and(|level| crate::dither::below_at(g.0, g.1, level))),
++        );
++        let d = self.d.get();
++        if row.star_row && (g.0 % d, g.1 % d) == (d / 2, d / 2) {
++            let (sx, sy) = (g.0 / d, g.1 / d);
++            if star_exists(sx, sy) && star_twinkle(sx, sy, v.beat) {
++                return v.star[i];
++            }
++        }
++        v.sky[i]
++    }
++
++    /// [`Self::colour`] as the disc's pane resolves it: the disc first, then the row.
+     /// The colour of grid cell `g`, `glass_dy` cells down this pane's glass.
+     /// A cell is sampled at its centre
+     /// ([`layout_point`](crate::display::pen::layout_point)). A star is the one
+     /// cell at its unit's centre.
+-    fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
++    fn colour_in_full(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
+         let v = self.view;
+         let d = self.d;
+         let unit = |c: u16| crate::display::pen::layout_point(crate::display::pen::ArtPx(c), d);
+@@ -553,6 +624,26 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn the_row_path_matches_the_full_colour_everywhere() {
++        for hour in [6, 12, 19, 22] {
++            let v = view(hour);
++            for d in [1u16, 2, 4] {
++                for hosts in [false, true] {
++                    let mut pane = v.pane(0, 160, 30, test_density(d));
++                    pane.hosts_disc = hosts;
++                    for y in 0..(30 * d) {
++                        for x in 0..(160 * d) {
++                            let fast = pane.colour((x, y), y);
++                            let full = pane.colour_in_full((x, y), y);
++                            assert_eq!(fast, full, "{hour}h d{d} hosts {hosts} ({x},{y})");
++                        }
++                    }
++                }
++            }
++        }
++    }
++
+     #[test]
+     fn the_window_sky_paints_only_its_resolved_tones() {
+         for hour in [6, 12, 19, 22] {
 diff --git a/crates/pixtuoid-scene/src/cutaway/canvas.rs b/crates/pixtuoid-scene/src/cutaway/canvas.rs
 index c668e632..fc60cbf4 100644
 --- a/crates/pixtuoid-scene/src/cutaway/canvas.rs
@@ -270,6 +407,58 @@ index c668e632..fc60cbf4 100644
  
  /// `rects` merged into at most `max` disjoint boxes that cover them all, each
  /// merge the pair whose box adds the least area: Mozilla's
+diff --git a/crates/pixtuoid-scene/src/dither.rs b/crates/pixtuoid-scene/src/dither.rs
+index 52cd0df7..eda69a27 100644
+--- a/crates/pixtuoid-scene/src/dither.rs
++++ b/crates/pixtuoid-scene/src/dither.rs
+@@ -117,6 +117,22 @@ pub(crate) fn step(stops: f32, x: u16, y: u16) -> u8 {
+     whole as u8 + u8::from(into_seam > 0.0 && takes_next(x, y, into_seam))
+ }
+ 
++/// [`nearest`] split for a whole row of pixels that share one `stops`: the solid tone,
++/// and the dither level its seam takes (`None` where the row has no seam). Then
++/// `nearest(stops, x, y)` is `tone + u8::from(seam.is_some_and(|l| below_at(x, y, l)))`,
++/// exactly; the split only moves the per-row arithmetic out of the per-pixel loop.
++pub(crate) fn nearest_split(stops: f32) -> (u8, Option<u8>) {
++    let stops = stops + 0.5;
++    let whole = stops.max(0.0).floor();
++    let into_seam = (stops - whole - (1.0 - SEAM)) / SEAM;
++    (whole as u8, (into_seam > 0.0).then(|| level(into_seam)))
++}
++
++/// Whether the pixel at `(x, y)` takes the next tone at dither `level`, as [`nearest_split`] gives it.
++pub(crate) fn below_at(x: u16, y: u16, level: u8) -> bool {
++    below(x, y, level)
++}
++
+ /// [`step`], rounding to the nearer tone: the [`SEAM`] sits just below the
+ /// midpoint between two, so a falloff keeps the reach its level gives it, where
+ /// flooring would shave its faint outer ring off.
+@@ -248,3 +264,24 @@ mod tests {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod split_tests {
++    use super::*;
++
++    /// The split is the same function as [`nearest`], for every stop and every pixel of a period.
++    #[test]
++    fn the_row_split_matches_nearest_at_every_pixel() {
++        let mut stops = -0.5f32;
++        while stops < 6.0 {
++            let (tone, seam) = nearest_split(stops);
++            for y in 0..PERIOD * 3 {
++                for x in 0..PERIOD * 3 {
++                    let split = tone + u8::from(seam.is_some_and(|l| below_at(x, y, l)));
++                    assert_eq!(split, nearest(stops, x, y), "stops {stops} at ({x}, {y})");
++                }
++            }
++            stops += 0.0137;
++        }
++    }
++}
 diff --git a/crates/pixtuoid-scene/src/floor/mod.rs b/crates/pixtuoid-scene/src/floor/mod.rs
 index 1d91f6ac..eedcb614 100644
 --- a/crates/pixtuoid-scene/src/floor/mod.rs
@@ -1081,6 +1270,30 @@ index 461e4772..c1ca6b0b 100644
                  },
              );
              (a.agent_id, p)
+diff --git a/crates/pixtuoid-web/examples/cb.rs b/crates/pixtuoid-web/examples/cb.rs
+new file mode 100644
+index 00000000..50c8edd3
+--- /dev/null
++++ b/crates/pixtuoid-web/examples/cb.rs
+@@ -0,0 +1,18 @@
++use pixtuoid_web::Office;
++fn main() {
++    let (w, h) = (416u32, 255u32);
++    let mut o = Office::new(2).expect("office");
++    o.clear_script();
++    o.set_weather(Some("clear".to_string()));
++    let base = 1_793_760_000_000.0;
++    o.step(base, w, h);
++    for i in 0..30u32 { let k = format!("k{i}"); o.issue_start(&k, i % 4, true); if i % 3 == 0 { o.issue_working(&k, true); } }
++    let t0 = std::time::Instant::now();
++    for i in 0..600 { o.step(base + 33.0 * (i as f64 + 1.0), w, h); }
++    println!("avg_step_ms={:.3}", t0.elapsed().as_secs_f64() * 1000.0 / 600.0);
++    println!("{}", pixtuoid_scene::cutaway::canvas::rg_report());
++    println!("{}", pixtuoid_scene::outside::rg2_report());
++    println!("{}", pixtuoid_scene::clouds::cp_report());
++    println!("{}", pixtuoid_scene::outside::rg3_report());
++    println!("{}", pixtuoid_scene::celestial::cc_report());
++}
 diff --git a/crates/pixtuoid-web/src/lib.rs b/crates/pixtuoid-web/src/lib.rs
 index 14fd1b18..4004e139 100644
 --- a/crates/pixtuoid-web/src/lib.rs
