@@ -487,3 +487,56 @@ it("keeps delayed main-transcript callbacks under the supplied source conversati
   expect(screen.getByRole("tab", { name: "a.example" })).toBeVisible();
   expect(screen.getByRole("tab", { name: /旁支/ })).toBeVisible();
 });
+
+// A hidden panel reports zero geometry. The resize library must not treat the
+// space between it and the visible panel as a separator outside the workspace.
+it("leaves outside inputs clickable when only one workspace pane is visible", () => {
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.hidden) return new DOMRect();
+    if (this.id === "side-main") return new DOMRect(500, 40, document.getElementById("side-resources")?.hidden ? 900 : 600, 800);
+    if (this.id === "side-resources") return new DOMRect(1100, 40, 300, 800);
+    if (this.getAttribute("role") === "separator") return new DOMRect(1100, 40, 0, 800);
+    if (this.hasAttribute("data-group")) return new DOMRect(500, 40, 900, 800);
+    return new DOMRect();
+  });
+  const offset = vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) {
+    return this.hidden ? 0 : this.getBoundingClientRect().left;
+  });
+  const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.getBoundingClientRect().width;
+  });
+  const input = document.createElement("input");
+  input.setAttribute("aria-label", "Search conversations");
+  document.body.append(input);
+  const clickSearch = () => {
+    const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, clientX: 300, clientY: 116, button: 0 });
+    fireEvent(input, event);
+    fireEvent.pointerUp(input);
+    expect(event.defaultPrevented).toBe(false);
+  };
+  const dragSeparator = () => {
+    const separator = screen.getByRole("separator", { name: "调整右侧面板宽度" });
+    const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, clientX: 1100, clientY: 116, button: 0 });
+    fireEvent(separator, event);
+    fireEvent.pointerUp(separator);
+    expect(event.defaultPrevented).toBe(true);
+  };
+  let view: ReturnType<typeof setup> | undefined;
+  try {
+    view = setup();
+    clickSearch();
+    act(() => view!.ref.current!.toggle());
+    clickSearch();
+    dragSeparator();
+    fireEvent.click(screen.getByRole("button", { name: "展开右侧面板" }));
+    clickSearch();
+    fireEvent.click(screen.getByRole("button", { name: "恢复并排显示" }));
+    dragSeparator();
+    fireEvent.click(screen.getByRole("button", { name: "关闭右侧面板" }));
+    clickSearch();
+  } finally {
+    view?.unmount();
+    input.remove();
+    bounds.mockRestore(); offset.mockRestore(); width.mockRestore();
+  }
+});

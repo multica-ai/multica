@@ -235,7 +235,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
   const title = (tab: Tab) => tab.kind === "side" ? `${props.chinese ? "旁支" : "Side"} · ${sessions.find((entry) => entry.id === tab.sessionId)?.title.replace(/ · Side$/, "") ?? (props.chinese ? "新对话" : "New chat")}` : tab.kind === "web" ? tab.title || new URL(tab.url).hostname : (tab.selected ?? tab.location).name;
   const activeTab = layout.tabs.find((tab) => tab.id === layout.selected);
   return <div ref={root} className="flex h-full min-h-0 min-w-0 flex-col [&_[data-panel][hidden]]:hidden!" data-testid="local-side-workspace">
-    <ResizablePanelGroup orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup orientation="horizontal" disabled={!sideVisible || !mainVisible} defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="side-main" minSize="32%" hidden={!mainVisible}><div className="h-full min-w-0">{props.children(mainVisible)}</div></ResizablePanel>
       {sideVisible && mainVisible && <ResizableHandle aria-label={props.chinese ? "调整右侧面板宽度" : "Resize right workspace"} onPointerDown={() => { document.documentElement.dataset.sideDragging = "true"; const end = () => { delete document.documentElement.dataset.sideDragging; window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); window.removeEventListener("blur", end); }; window.addEventListener("pointerup", end, { once: true }); window.addEventListener("pointercancel", end, { once: true }); window.addEventListener("blur", end, { once: true }); }} />}
       <ResizablePanel id="side-resources" defaultSize="46%" minSize="30%" hidden={!sideVisible}>
