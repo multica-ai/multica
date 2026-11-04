@@ -208,3 +208,15 @@ it("marks a retained weekly-only observation", async () => {
   await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 확인 불가/7d 18%"));
   vi.unstubAllGlobals();
 });
+
+
+it("retains only a future Claude reset received with the last observation", () => {
+  const future = new Date(Date.now() + 86400000).toISOString();
+  const past = new Date(Date.now() - 1000).toISOString();
+  const previous = llmLimitStatusSchema.parse({five_hour_pct: 19, seven_day_pct: 83, seven_day_resets_at: future});
+  const unavailable = llmLimitStatusSchema.parse({claude_status: "unavailable"});
+  expect(retainKnownQuota(previous, unavailable).seven_day_resets_at).toBe(future);
+  expect(retainKnownQuota({...previous,seven_day_resets_at:past}, unavailable).seven_day_resets_at).toBeNull();
+  expect(retainKnownQuota(undefined,unavailable).seven_day_resets_at).toBeNull();
+  expect(llmLimitStatusSchema.parse({claude_status:"stale",seven_day_resets_at:future}).seven_day_resets_at).toBe(future);
+});

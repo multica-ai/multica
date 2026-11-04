@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export function futureResetAt(value: string | null | undefined, now = Date.now()): string | null {
+  return value && Date.parse(value) > now ? value : null;
+}
+
 const resetAt = z.string().datetime({ offset: true }).nullable().optional().catch(null);
 const quotaPct = z.number().min(0).max(100).nullable().optional().default(null);
 export const llmLimitStatusSchema = z.object({
@@ -31,7 +35,9 @@ export const llmLimitStatusSchema = z.object({
   claude_last_seven_day_pct: quotaPct,
 }).transform((data) => {
   if (data.claude_status && data.claude_status !== "available") {
-    data.five_hour_resets_at = data.seven_day_resets_at = data.sonnet_resets_at = null;
+    data.five_hour_resets_at = futureResetAt(data.five_hour_resets_at);
+    data.seven_day_resets_at = futureResetAt(data.seven_day_resets_at);
+    data.sonnet_resets_at = futureResetAt(data.sonnet_resets_at);
     data.five_hour_pct = data.seven_day_pct = data.sonnet_pct = null;
   }
   if (data.gpt_status && data.gpt_status !== "available") {

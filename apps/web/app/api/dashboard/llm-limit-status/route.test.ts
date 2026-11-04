@@ -156,3 +156,15 @@ describe("NEX-1332 freshness contract", () => {
 		expect(await (await GET()).json()).toMatchObject({five_hour_pct: null, seven_day_pct: null, claude_status: "unavailable", claude_last_observed_at: "2026-10-01T18:27:57.000Z", gpt_five_hour_pct: 0, gpt_seven_day_pct: 10});
 	});
 });
+
+
+it("keeps a known future reset from the same Claude observation when quota freshness expires", async () => {
+  snapshotDir = await mkdtemp(path.join(tmpdir(), "llm-limit-status-"));
+  process.env.NEXAI_TOKEN_SNAPSHOT_PATH = path.join(snapshotDir,"token.json");
+  process.env.NEXAI_CLAUDE_RUNTIME_SNAPSHOT_PATH = path.join(snapshotDir,"missing-runtime.json");
+  process.env.NEXAI_CODEX_STATUS_SNAPSHOT_PATH = path.join(snapshotDir,"missing-codex.json");
+  const reset = new Date(Date.now()+86400000).toISOString();
+  await writeFile(process.env.NEXAI_TOKEN_SNAPSHOT_PATH,JSON.stringify({timestamp:new Date(Date.now()-31*60000).toISOString(),five_hour_utilization:19,seven_day_utilization:83,seven_day_resets_at:reset}));
+  const {GET}=await import("./route");
+  expect(await (await GET()).json()).toMatchObject({claude_status:"stale",seven_day_pct:null,seven_day_resets_at:reset});
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { parseWithFallback } from "@multica/core/api/schema";
-import { llmLimitStatusSchema, unavailableLlmLimitStatus, type LlmLimitStatus } from "@multica/core/api/schemas";
+import { futureResetAt, llmLimitStatusSchema, unavailableLlmLimitStatus, type LlmLimitStatus } from "@multica/core/api/schemas";
 
 
 import { useEffect, useState } from "react";
@@ -73,8 +73,9 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
   }, []);
   const sonnetLimits = remainingFromUsage(data.sonnet_pct) !== null &&
     (remainingFromUsage(data.seven_day_pct) === null || data.sonnet_pct! > data.seven_day_pct!);
+  const claudeReset = sonnetLimits ? data.sonnet_resets_at : data.seven_day_resets_at;
   const resets = [
-    ["C", sonnetLimits ? data.sonnet_resets_at : data.seven_day_resets_at],
+    ["C", data.claude_status && data.claude_status !== "available" ? futureResetAt(claudeReset, now) : claudeReset],
     ["G", data.gpt_seven_resets_at],
   ] as const;
   return <div data-testid="chat-reset-countdown" className="@container max-w-full pb-0.5 text-[10px] leading-4 tabular-nums" aria-label={t($ => $.limit_reset.countdown_label)}>
@@ -96,6 +97,9 @@ export function retainKnownQuota(previous: LlmLimitStatus | undefined, current: 
     result.seven_day_pct ??= current.claude_last_seven_day_pct ?? previous?.seven_day_pct ?? null;
     result.sonnet_pct ??= previous?.sonnet_pct ?? null;
     result.claude_last_observed_at ??= previous?.claude_last_observed_at;
+    result.five_hour_resets_at = futureResetAt(current.five_hour_resets_at) ?? futureResetAt(previous?.five_hour_resets_at);
+    result.seven_day_resets_at = futureResetAt(current.seven_day_resets_at) ?? futureResetAt(previous?.seven_day_resets_at);
+    result.sonnet_resets_at = futureResetAt(current.sonnet_resets_at) ?? futureResetAt(previous?.sonnet_resets_at);
     if (result.five_hour_pct !== null || result.seven_day_pct !== null) result.claude_status = current.claude_status === "available" ? "stale" : current.claude_status ?? "unavailable";
   }
   if (current.gpt_five_hour_pct === null || current.gpt_seven_day_pct === null) {

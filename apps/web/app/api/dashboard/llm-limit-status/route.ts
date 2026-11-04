@@ -142,11 +142,15 @@ export async function GET() {
 	const sevenDayResetsAt = optionalStringFrom(snapshot, ["seven_day_resets_at"]);
 	const sonnetResetsAt = optionalStringFrom(snapshot, ["seven_day_sonnet_resets_at"]);
 	const weekly = weeklyResetStatus(sevenDayResetsAt);
+	const knownClaudeReset = (value: string | undefined) => {
+		const reset = resetTimestamp(value);
+		return snapshot.invalid !== true && observedAt(snapshot) && reset && Date.parse(reset) > Date.now() ? reset : null;
+	};
 
 	return NextResponse.json({
-		five_hour_resets_at: claudeAvailable ? resetTimestamp(fiveHourResetsAt) : null,
-		seven_day_resets_at: claudeAvailable ? resetTimestamp(sevenDayResetsAt) : null,
-		sonnet_resets_at: claudeAvailable ? resetTimestamp(sonnetResetsAt) : null,
+		five_hour_resets_at: claudeAvailable ? resetTimestamp(fiveHourResetsAt) : knownClaudeReset(fiveHourResetsAt),
+		seven_day_resets_at: claudeAvailable ? resetTimestamp(sevenDayResetsAt) : knownClaudeReset(sevenDayResetsAt),
+		sonnet_resets_at: claudeAvailable ? resetTimestamp(sonnetResetsAt) : knownClaudeReset(sonnetResetsAt),
 		gpt_five_resets_at: codexStatusFresh ? resetTimestamp(codexStatus.five_hour_reset_at) : null,
 		gpt_seven_resets_at: codexStatusFresh ? resetTimestamp(codexStatus.seven_day_reset_at) : null,
 		five_hour_pct: claudeAvailable ? claudeFive : null,
