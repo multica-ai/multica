@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { viewSidebarSource } from "@multica/core/issues/sidebar-list";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
@@ -110,6 +111,7 @@ beforeEach(() => {
     getIssueViewPreference: vi.fn(() => new Promise(() => {})),
   } as unknown as ApiClient);
   useActiveIssueViewStore.setState({ active: {} });
+  useSidebarKeptStore.setState({ held: {} });
   actions.sidebar.items = [{ id: "view:v1", kind: "view", view: UNREAD_VIEW }];
   useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [viewSidebarSource("v1")] });
 });
