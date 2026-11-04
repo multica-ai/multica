@@ -39,6 +39,7 @@ export function SideEntryProvider({ children, root, ...entry }: Entry & { root: 
     const open = (event: MouseEvent | KeyboardEvent) => {
       if (event.defaultPrevented || (event instanceof KeyboardEvent && event.key !== "Enter") || (event instanceof MouseEvent && event.button !== 0) || !current.current.sessionId || !(event.target instanceof Element)) return;
       const element = event.target.closest("a[href],[data-agent-link-href]");
+      if (!element || !root.contains(element)) return;
       const url = element?.getAttribute("data-agent-link-href") ?? element?.getAttribute("href");
       if (!url || !previewResourceHref(url)) return;
       event.preventDefault(); event.stopPropagation();
@@ -47,6 +48,7 @@ export function SideEntryProvider({ children, root, ...entry }: Entry & { root: 
     const contextMenu = (event: MouseEvent) => {
       if (event.defaultPrevented || !current.current.sessionId || !(event.target instanceof Element) || event.target.closest('input,textarea,[contenteditable="true"],img')) return;
       const link = event.target.closest("a[href]");
+      if (!link || !root.contains(link)) return;
       const url = link?.getAttribute("data-agent-link-href") ?? link?.getAttribute("href");
       if (!url || !localResourceTarget(url)) return;
       event.preventDefault(); event.stopPropagation();

@@ -2,11 +2,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentGuiInitSnapshot, AgentGuiRpcClient } from "@multica/tutti-agent-gui-host/protocol";
+import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient } from "@multica/tutti-agent-gui-host/protocol";
 import { TuttiAgentGuiPanel } from "./tutti-agent-gui-panel";
 import { NavigationProvider } from "../navigation";
 
-type Service = { load: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; publish: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; subscribe: () => () => void; reconnect: ReturnType<typeof vi.fn> };
+type Service = { load: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; publish: ReturnType<typeof vi.fn<(event: AgentGuiHostEvent) => void>>; dispose: ReturnType<typeof vi.fn>; subscribe: (listener: (event: AgentGuiHostEvent) => void) => () => void; reconnect: ReturnType<typeof vi.fn> };
 const mock = vi.hoisted(() => ({
   foreground: true,
   create: vi.fn(),
@@ -58,8 +58,10 @@ beforeEach(() => {
   mock.services.length = 0;
   mock.create.mockReset();
   mock.create.mockImplementation(() => {
+    const listeners = new Set<(event: AgentGuiHostEvent) => void>();
     const service: Service = { load: vi.fn().mockResolvedValue({ agents: [], sessions: [] }), request: vi.fn().mockResolvedValue(undefined),
-      publish: vi.fn(), dispose: vi.fn(), subscribe: () => () => {}, reconnect: vi.fn() };
+      publish: vi.fn((event: AgentGuiHostEvent) => listeners.forEach((listener) => listener(event))), dispose: vi.fn(),
+      subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, reconnect: vi.fn() };
     mock.services.push(service);
     return service;
   });
@@ -67,6 +69,27 @@ beforeEach(() => {
 afterEach(() => { cleanup(); clients.splice(0).forEach((qc) => qc.clear()); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("Agent GUI lifetime", () => {
+  it("recovers a failed initial workspace read when the service becomes ready without replacing it", async () => {
+    const create = mock.create.getMockImplementation()!;
+    mock.create.mockImplementation(() => {
+      const service = create() as Service;
+      service.load.mockRejectedValueOnce(new Error("daemon_offline: Runtime starting"));
+      return service;
+    });
+    render(<TuttiAgentGuiPanel {...props} />, { wrapper: TestProvider });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+    const service = services()[0]!;
+    await act(async () => service.publish({ type: "invalidate", scope: "workspace" }));
+    await mounted();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(mock.create).toHaveBeenCalledOnce();
+    expect(service.dispose).not.toHaveBeenCalled();
+    const reads = service.load.mock.calls.length;
+    await act(async () => service.publish({ type: "invalidate", scope: "workspace" }));
+    expect(service.load).toHaveBeenCalledTimes(reads);
+    expect(mock.mounts).toHaveLength(1);
+  });
+
   it("dismisses GUI popovers on pointer actions outside it without intercepting them or leaking listeners", async () => {
     const view = render(<TuttiAgentGuiPanel {...props} />, { wrapper: TestProvider });
     await mounted();

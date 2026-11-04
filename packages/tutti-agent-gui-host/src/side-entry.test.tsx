@@ -28,7 +28,7 @@ function deferred() {
 
 async function mount(chinese = true) {
   await act(async () => root.render(
-    <SideEntryProvider root={document.body} client={client} handle={handle} sessionId="session-a" chinese={chinese} enabled>
+    <SideEntryProvider root={container} client={client} handle={handle} sessionId="session-a" chinese={chinese} enabled>
       <article data-multica-turn-id="turn-a"><p>Selected reply text</p></article>
     </SideEntryProvider>,
   ));
@@ -137,6 +137,59 @@ it("forwards the right-clicked local href and source session without using the s
   expect(request).toHaveBeenCalledExactlyOnceWith("host.showFileContextMenu", {
     sessionId: "session-a", url: "/tmp/测试%20build.dmg", hasSelection: true,
   });
+});
+
+it.each(["click", "keydown", "contextmenu"])("leaves %s on links outside the GUI to their own handler", async (type) => {
+  await mount();
+  const link = document.createElement("a");
+  link.href = type === "contextmenu" ? "/project/file.ts" : "https://multica.ai/workspace/conversations?provider=codex&session=other";
+  link.innerHTML = "<span>Another conversation</span>";
+  document.body.append(link);
+  const navigate = vi.fn((event: Event) => event.preventDefault());
+  link.addEventListener(type, navigate);
+  try {
+    const event = type === "keydown"
+      ? new KeyboardEvent(type, { key: "Enter", bubbles: true, cancelable: true })
+      : new MouseEvent(type, { button: 0, bubbles: true, cancelable: true });
+    await act(async () => { link.firstElementChild!.dispatchEvent(event); });
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalled();
+  } finally { link.remove(); }
+});
+
+it.each(["click", "keydown"])("previews a resource inside the GUI on %s", async (type) => {
+  await mount();
+  const link = document.createElement("a");
+  link.href = "https://example.com/document";
+  link.innerHTML = "<span>Documentation</span>";
+  container.querySelector("article")!.append(link);
+  const event = type === "keydown"
+    ? new KeyboardEvent(type, { key: "Enter", bubbles: true, cancelable: true })
+    : new MouseEvent(type, { button: 0, bubbles: true, cancelable: true });
+  await act(async () => { link.firstElementChild!.dispatchEvent(event); });
+  expect(event.defaultPrevented).toBe(true);
+  expect(request).toHaveBeenCalledExactlyOnceWith("host.openResource", { sessionId: "session-a", url: link.href });
+});
+
+it("routes a resource to its own GUI when two conversation panels are mounted", async () => {
+  await mount();
+  const otherContainer = document.createElement("div");
+  document.body.append(otherContainer);
+  const otherRoot = createRoot(otherContainer);
+  const otherRequest = vi.fn<AgentGuiRpcClient["request"]>().mockResolvedValue(undefined);
+  try {
+    await act(async () => otherRoot.render(
+      <SideEntryProvider root={otherContainer} client={{ request: otherRequest, subscribe: () => () => {} }} handle={handle} sessionId="session-b" chinese enabled>
+        <a href="https://example.com/document"><span>Documentation</span></a>
+      </SideEntryProvider>,
+    ));
+    await act(async () => { otherContainer.querySelector("span")!.click(); });
+    expect(request).not.toHaveBeenCalled();
+    expect(otherRequest).toHaveBeenCalledExactlyOnceWith("host.openResource", { sessionId: "session-b", url: "https://example.com/document" });
+  } finally {
+    await act(async () => otherRoot.unmount());
+    otherContainer.remove();
+  }
 });
 
 it.each(["https://example.com/download", "mention://issue/abc"])("leaves non-local context menus intact: %s", async (href) => {

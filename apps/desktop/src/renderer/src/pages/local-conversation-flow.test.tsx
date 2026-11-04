@@ -212,6 +212,32 @@ describe("provider detection recovery", () => {
     await waitFor(() => expect(createButton).not.toHaveAttribute("aria-disabled", "true"));
     expect(reads()).toBeGreaterThan(before);
   });
+
+  it("recovers the first conversation list after the daemon becomes available before any socket connects", async () => {
+    const original = mock.request.getMockImplementation()!;
+    let offline = true;
+    mock.request.mockImplementation((scope, method, params) => offline && (method === "listPage" || method === "providers")
+      ? Promise.reject(new Error("daemon_offline: Runtime starting")) : original(scope, method, params));
+    mock.folderError = new Error("daemon_offline: Runtime starting");
+    publishAvailability({ state: "unavailable", reason: "daemon_offline" });
+    render(page());
+    const list = within(screen.getByTestId("local-conversation-sessions"));
+    expect(await list.findByRole("alert")).toBeVisible();
+    expect(await screen.findByRole("status", { name: "运行器检测失败" })).toBeVisible();
+    const draft = screen.getByRole("textbox", { name: "Conversation draft" });
+    fireEvent.change(draft, { target: { value: "Keep my draft" } });
+
+    offline = false;
+    mock.folderError = null;
+    await act(async () => publishAvailability({ state: "connected" }));
+
+    expect(await screen.findByRole("link", { name: /Original/ })).toBeVisible();
+    expect(list.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "运行器检测失败" })).not.toBeInTheDocument();
+    expect(screen.queryByText("本地项目加载失败")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Conversation draft" })).toBe(draft);
+    expect(draft).toHaveValue("Keep my draft");
+  });
 });
 
 describe("reading only what the page needs", () => {

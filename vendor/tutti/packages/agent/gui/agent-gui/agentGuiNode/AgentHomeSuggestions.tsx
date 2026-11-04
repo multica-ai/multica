@@ -3,11 +3,11 @@ import {
   ArrowLeftRight,
   Code,
   Compass,
-  Github,
   Import,
   Pencil,
   X
 } from "lucide-react";
+import { GitHubBrandIcon } from "@tutti-os/ui-system/icons";
 import styles from "./AgentGUINode.styles";
 import type {
   AgentHomeSuggestionAction,
@@ -100,7 +100,7 @@ const CATEGORY_ICON = {
   breakdown: TaskBreakdownIcon,
   review: QualityReviewIcon,
   interaction: BattleIcon,
-  github: Github,
+  github: GitHubBrandIcon,
   about: TuttiIcon,
   import: Import
 } as const satisfies Record<

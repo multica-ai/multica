@@ -3,6 +3,7 @@ import type { LocalFolderProject } from "@multica/core/local-conversation/protoc
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { groupLocalConversations, sessionEntry, type LocalConversationProjectGroup, type LocalSessionEntry } from "./local-conversation-projects";
 import { conversationStore } from "./conversation-store";
+import type { DirectLocalV2Transport } from "./local-v2-transport";
 
 const PAGE = 8;
 
@@ -17,7 +18,7 @@ export interface ConversationPageGroup extends LocalConversationProjectGroup {
  * comes from the scope's v2 summaries and stays current with them; groups
  * show eight conversations per page, pinned first, then most recent.
  */
-export function useLocalConversationPages(transport: LocalV2Transport, scope: LocalV2Scope, projects: LocalFolderProject[], hidden: string[], archived: boolean, search: string, enabled: boolean) {
+export function useLocalConversationPages(transport: LocalV2Transport & Pick<DirectLocalV2Transport, "availability" | "onAvailability">, scope: LocalV2Scope, projects: LocalFolderProject[], hidden: string[], archived: boolean, search: string, enabled: boolean) {
   const client = conversationStore(transport, scope);
   const [status, setStatus] = useState<{ pending: boolean; error: Error | null; fetching: boolean }>({ pending: true, error: null, fetching: false });
   const [pages, setPages] = useState(new Map<string | null, number>());
@@ -29,9 +30,16 @@ export function useLocalConversationPages(transport: LocalV2Transport, scope: Lo
   useEffect(() => {
     if (!enabled) return;
     load();
-    return transport.onConnection((value, connected) => {
+    let available = transport.availability()?.state === "connected";
+    const stopAvailability = transport.onAvailability((value) => {
+      const next = value.state === "connected";
+      if (next && !available) load();
+      available = next;
+    });
+    const stopConnection = transport.onConnection((value, connected) => {
       if (connected && value.userId === scope.userId && value.workspaceId === scope.workspaceId) load();
     });
+    return () => { stopAvailability(); stopConnection(); };
   }, [enabled, load, transport, scope.userId, scope.workspaceId]);
   // Sides open beside their source; a conversation joins the list with its first message.
   const sessions: LocalSessionEntry[] = version.filter((summary) => !summary.side_source_id && summary.turn_count > 0).map(sessionEntry)

@@ -124,15 +124,32 @@ export function TuttiAgentGuiPanel(props: Props) {
       }
     };
     document.addEventListener("pointerdown", dismissPopovers, true);
-    clearTimeout(renderTimer.current);
-    renderTimer.current = setTimeout(() => { if (alive) setStatus("error"); }, 25_000);
-    snapshot().then(
-      (initial) => { if (current()) setConnection({ client: inProcess.client, initial }); },
-      () => { if (alive) setStatus("error"); },
-    );
+    let initializing = false;
+    let initialized = false;
+    const initialize = () => {
+      if (!current() || initializing || initialized) return;
+      initializing = true;
+      setStatus("loading");
+      clearTimeout(renderTimer.current);
+      renderTimer.current = setTimeout(() => { if (alive) setStatus("error"); }, 25_000);
+      void snapshot().then(
+        (initial) => {
+          if (!current()) return;
+          initialized = true;
+          setConnection({ client: inProcess.client, initial });
+        },
+        () => { if (current()) setStatus("error"); },
+      ).finally(() => { initializing = false; });
+    };
+    // Before the first snapshot there is no mounted GUI to consume recovery events.
+    const stopInitializationRecovery = service.subscribe((event) => {
+      if ((event.type === "invalidate" && event.scope === "workspace") || (event.type === "connection" && event.connected)) initialize();
+    });
+    initialize();
     return () => {
       alive = false;
       clearTimeout(renderTimer.current);
+      stopInitializationRecovery();
       document.removeEventListener("pointerdown", dismissPopovers, true);
       inProcess.dispose();
       service.dispose();

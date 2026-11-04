@@ -122,6 +122,7 @@ html.multica-agent-gui .agent-gui-node__composer[data-layout="dock"] .agent-gui-
 }
 
 html.multica-agent-gui .agent-gui-node__composer[data-layout="dock"] .agent-gui-node__composer-prompt-input-area,
+html.multica-agent-gui .agent-gui-node__composer[data-layout="dock"] .agent-gui-node__composer-prompt-input-area:hover,
 html.multica-agent-gui .agent-gui-node__composer[data-layout="dock"] .agent-gui-node__composer-prompt-input-area:focus-within {
   border-color: transparent;
   border-radius: 0;
