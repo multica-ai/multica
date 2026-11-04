@@ -8,7 +8,6 @@
     ".": "./index.ts",
     "./agent-gui": "./AgentGUI.tsx",
     "./startup-shell": "./AgentGUIStartupShell.tsx",
-    "./side-conversation/controller": "./agentSideConversationController.ts",
     "./agents": "./agents.ts",
     "./dock-icons": "./dockIcons.ts",
     "./mention-search": "./agent-gui/agentGuiNode/AgentMentionSearchController.ts",
