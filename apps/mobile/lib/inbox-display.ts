@@ -72,7 +72,7 @@ export function getInboxDisplayTitle(item: InboxItem): string {
       return i18n.t("inbox:type.autopilot_quota_exceeded");
   }
   if (item.type === "quick_create_done") {
-    const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
+    const cleanedTitle = stripQuickCreatePrefix(item.issue_title || item.title, details.identifier);
     if (cleanedTitle) return cleanedTitle;
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
@@ -84,7 +84,9 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
   }
-  return item.title;
+  // Prefer the issue's current title: `title` is the snapshot written with the
+  // notification and goes stale on rename. Mirrors packages/views inbox-display.
+  return item.issue_title || item.title;
 }
 
 export function getInboxNavigationTarget(

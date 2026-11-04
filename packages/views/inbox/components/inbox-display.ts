@@ -24,11 +24,18 @@ export function stripQuickCreatePrefix(title: string, identifier?: string): stri
   return normalized.replace(/^Created\s+[A-Z][A-Z0-9]*-\d+:\s*/i, "").trim();
 }
 
+// The issue's current title when the server sent one, else the snapshot the
+// notification was written with. Issue-backed notification titles are that
+// issue's title, so a rename must not wait for the next notification.
+function currentTitle(item: InboxItem): string {
+  return item.issue_title || item.title;
+}
+
 export function getInboxDisplayTitle(item: InboxItem): string {
   const details = item.details ?? {};
 
   if (item.type === "quick_create_done") {
-    const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
+    const cleanedTitle = stripQuickCreatePrefix(currentTitle(item), details.identifier);
     if (cleanedTitle) return cleanedTitle;
 
     const prompt = singleLine(details.original_prompt);
@@ -40,7 +47,7 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     if (prompt) return prompt;
   }
 
-  return item.title;
+  return currentTitle(item);
 }
 
 /**

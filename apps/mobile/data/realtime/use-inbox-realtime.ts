@@ -70,6 +70,7 @@ export function useInboxRealtime() {
             wsId,
             payload.issue.id,
             payload.issue.status,
+            payload.issue.title,
           );
         }),
         ws.on("issue:deleted", (payload) => {

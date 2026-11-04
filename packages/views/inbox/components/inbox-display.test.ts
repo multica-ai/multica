@@ -33,6 +33,31 @@ function item(overrides: Partial<InboxItem>): InboxItem {
 }
 
 describe("inbox display helpers", () => {
+  it("shows the issue's current title once it has been renamed", () => {
+    // `title` is the snapshot written with the notification; `issue_title`
+    // follows the issue, so a rename shows without a new notification.
+    expect(
+      getInboxDisplayTitle(item({ title: "Before rename", issue_title: "After rename" })),
+    ).toBe("After rename");
+    expect(getInboxDisplayTitle(item({ title: "Before rename" }))).toBe("Before rename");
+    expect(
+      getInboxDisplayTitle(item({ title: "Before rename", issue_title: null })),
+    ).toBe("Before rename");
+  });
+
+  it("cleans a renamed quick-create issue title too", () => {
+    expect(
+      getInboxDisplayTitle(
+        item({
+          type: "quick_create_done",
+          title: "Created MUL-1: Old",
+          issue_title: "New name",
+          details: { identifier: "MUL-1" },
+        }),
+      ),
+    ).toBe("New name");
+  });
+
   it("removes legacy quick-create created prefixes from list titles", () => {
     expect(
       stripQuickCreatePrefix(

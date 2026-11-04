@@ -106,6 +106,17 @@ describe("refreshInboxUnreadSummary", () => {
 });
 
 describe("patchInboxIssueStatus", () => {
+  it("follows a rename so the row shows the issue's current title", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [item("n1", "issue-a")]);
+
+    patchInboxIssueStatus(qc, wsId, "issue-a", "todo", "Renamed issue");
+
+    const row = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0];
+    expect(row?.issue_title).toBe("Renamed issue");
+    expect(row?.title).toBe("Issue title");
+  });
+
   it("updates the row's status without touching the badge", () => {
     // A status change moves no notification in or out of the unread set, so
     // it must NOT invalidate the summary — that would refetch on every
