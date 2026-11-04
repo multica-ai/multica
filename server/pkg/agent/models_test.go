@@ -1023,6 +1023,28 @@ bareword
 	}
 }
 
+func TestParsePiModelsRejectsProseAlongsideCatalog(t *testing.T) {
+	input := `Some random log lines printed at the starting of the sandbox
+Disallowing sandbox creation from $HOME
+provider model context max-out thinking images
+custom my/model:version 128K 8K yes no
+Some random log lines printed at the starting of the sandbox
+/private/config: permission denied
+custom/legacy-model
+custom/legacy:version
+custom:legacy-colon
+`
+	models := parsePiModels(input)
+	want := []string{"custom/my/model:version", "custom/legacy-model", "custom/legacy:version", "custom/legacy-colon"}
+	var got []string
+	for _, model := range models {
+		got = append(got, model.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+}
+
 func TestParsePiModelsTableFormat(t *testing.T) {
 	input := `provider             model                   context  max-out  thinking  images
 bailian-coding-plan  glm-4.7                 202.8K   16.4K    no        no
