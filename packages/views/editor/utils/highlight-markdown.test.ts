@@ -39,6 +39,12 @@ describe("highlightToHtml", () => {
     expect(highlightToHtml(md)).toBe(md);
   });
 
+  it("ignores == inside a longer fence that contains a nested fence", () => {
+    // The editor saves a block containing ``` with a ```` outer fence.
+    const md = '````markdown\n```js\nconst a = "==keep==";\n```\n````';
+    expect(highlightToHtml(md)).toBe(md);
+  });
+
   it("ignores == inside inline math", () => {
     expect(highlightToHtml("$a ==b== c$")).toBe("$a ==b== c$");
   });

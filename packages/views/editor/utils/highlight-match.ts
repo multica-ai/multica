@@ -15,6 +15,8 @@
  *     literal paragraphs, matching how the editor lexes it)
  */
 
+import { findFencedCodeRanges } from "@multica/ui/markdown/linkify";
+
 export interface Range {
   start: number;
   end: number;
@@ -35,7 +37,9 @@ const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
  * a fenced block is not also counted as inline.
  */
 export function findLiteralRanges(text: string): Range[] {
-  const ranges: Range[] = [];
+  // Fenced code uses linkify's scanner so longer outer fences, tilde fences and
+  // unclosed fences match the editor's serialized Markdown.
+  const ranges: Range[] = findFencedCodeRanges(text);
   const add = (re: RegExp) => {
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
@@ -45,7 +49,6 @@ export function findLiteralRanges(text: string): Range[] {
       ranges.push({ start, end: start + m[0].length });
     }
   };
-  add(/```[\s\S]*?```/g); // fenced code
   add(/\$\$[\s\S]*?\$\$/g); // display math
   add(/(?<!\$)\$(?!\$)[^$\n]+\$(?!\$)/g); // inline math
   add(/(?<!`)`(?!`)[^`\n]+`(?!`)/g); // inline code
