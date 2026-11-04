@@ -117,12 +117,17 @@ GitHub integration links the pull request back to the issue.
   during a chat turn (up to 10 MB each) are downloaded from Qoder Files and
   uploaded to Multica with the task credential, which attaches them to the
   agent's reply. Only files Qoder scopes to the run's session are passed on.
-  One file is transferred per poll, before the reply is completed. Larger
-  files, files of another session, files Qoder does not offer for download,
-  files Multica refuses, and files not yet attached when the bridge restarts
-  are logged and skipped; the reply still completes. The chat prompt states
-  the limit, so the agent tells the user when a file is too large instead of
-  saying it was sent. Issue runs do not return delivered files.
+  One file is transferred per poll, before the reply is completed, with a
+  20-second budget per attempt and at most three attempts for reads. Uploads
+  are never automatically replayed: a timeout, 5xx, or unreadable response
+  may mean the file was saved, so the reply asks the user to check its
+  attachments before retrying. A successful upload must return a non-empty
+  attachment ID. Larger files, files of another session, files Qoder does
+  not offer for download, files Multica refuses, and files not yet attached
+  when the bridge restarts are logged and skipped. Delivery notices name
+  files not attached or whose delivery could not be confirmed; the reply
+  still completes. Notices survive journal reloads and completion retries.
+  Issue runs do not return delivered files.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without

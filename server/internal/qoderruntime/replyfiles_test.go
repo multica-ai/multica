@@ -2,9 +2,14 @@ package qoderruntime
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type qoderFile struct {
@@ -78,7 +83,7 @@ func TestChatReplyCarriesDeliveredFiles(t *testing.T) {
 	}
 }
 
-func TestReplyFileUploadIsRetriedThenRefusalIsSkipped(t *testing.T) {
+func TestReplyFileUploadFailuresAreNotRetried(t *testing.T) {
 	h := setup(t)
 	chatTask(h)
 	if err := h.b.step(context.Background()); err != nil {
@@ -86,12 +91,18 @@ func TestReplyFileUploadIsRetriedThenRefusalIsSkipped(t *testing.T) {
 	}
 	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
 	h.deliver("evt_a2", "file_data", "data.csv", "a,b", 3, true)
-	// A 502 is retried on the next step; a 400 is a refusal and skips the file.
+	h.deliver("evt_a3", "file_notes", "notes.txt", "notes", 5, true)
+	// Neither an ambiguous 502 nor a definite 400 replays the upload. The
+	// next file must still arrive, with notices for both skipped files.
 	h.replyUploadStatus = []int{502, 400}
 	h.finish("end_turn")
 	h.stepUntilDone(t)
-	if len(h.replyUploads) != 1 || h.replyUploads[0].name != "data.csv" {
+	if len(h.replyUploads) != 1 || h.replyUploads[0].name != "notes.txt" {
 		t.Fatalf("reply uploads: %#v", h.replyUploads)
+	}
+	output := fmt.Sprint(h.complete["output"])
+	if !strings.Contains(output, "report.pdf") || !strings.Contains(output, "data.csv") || strings.Contains(output, "notes.txt") {
+		t.Fatalf("wrong failed-file notice: %s", output)
 	}
 }
 
@@ -113,6 +124,9 @@ func TestReplyFilesAfterRestartCompleteWithoutThem(t *testing.T) {
 	if len(h.replyUploads) != 0 {
 		t.Fatalf("uploaded without the task credential: %#v", h.replyUploads)
 	}
+	if output := fmt.Sprint(h.complete["output"]); !strings.Contains(output, "report.pdf") || !strings.Contains(output, "not attached") {
+		t.Fatalf("restart did not disclose missing file: %s", output)
+	}
 }
 
 func TestIssueRunDoesNotAttachDeliveredFiles(t *testing.T) {
@@ -128,5 +142,265 @@ func TestIssueRunDoesNotAttachDeliveredFiles(t *testing.T) {
 	h.stepUntilDone(t)
 	if len(h.replyUploads) != 0 {
 		t.Fatalf("issue run uploaded reply files: %#v", h.replyUploads)
+	}
+}
+
+type replyTransport func(*http.Request) (*http.Response, error)
+
+func (f replyTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func replyResponse(r *http.Request, status int, body string) *http.Response {
+	if r.Body != nil {
+		r.Body.Close()
+	}
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}
+}
+
+func TestReplyFileReadFailuresAreBounded(t *testing.T) {
+	for _, stage := range []string{"metadata", "content", "download", "timeout"} {
+		t.Run(stage, func(t *testing.T) {
+			h := setup(t)
+			chatTask(h)
+			if err := h.b.step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+			h.deliver("evt_a2", "file_data", "data.csv", "a,b", 3, true)
+			h.finish("end_turn")
+			upstream := h.b.qoder.client.Transport
+			attempts := 0
+			h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+				if stage == "metadata" && req.URL.Path == "/files/file_report" || stage == "content" && req.URL.Path == "/files/file_report/content" || (stage == "download" || stage == "timeout") && req.URL.Path == "/blob/file_report" {
+					attempts++
+					if stage == "timeout" {
+						return nil, context.DeadlineExceeded
+					}
+					return replyResponse(req, 502, `{}`), nil
+				}
+				return upstream.RoundTrip(req)
+			})
+			// Enter final first, then expire the execution deadline: attachment
+			// failures need their own bound even after remote execution has ended.
+			_ = h.b.step(context.Background())
+			h.b.state.Runs[0].Deadline = time.Now().Add(-time.Hour)
+			h.stepUntilDone(t)
+			if attempts != 3 || len(h.replyUploads) != 1 || h.replyUploads[0].name != "data.csv" {
+				t.Fatalf("attempts=%d uploads=%v", attempts, h.replyUploads)
+			}
+			if !strings.Contains(fmt.Sprint(h.complete["output"]), "report.pdf") {
+				t.Fatalf("missing failed-file notice: %v", h.complete)
+			}
+		})
+	}
+}
+
+func TestReplyFileLostUploadAcknowledgementIsNotReplayed(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	h.deliver("evt_a2", "file_data", "data.csv", "a,b", 3, true)
+	h.finish("end_turn")
+	upstream := h.b.multica.client.Transport
+	lost := false
+	h.b.multica.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		resp, err := upstream.RoundTrip(req)
+		if err == nil && req.URL.Path == "/api/upload-file" && !lost {
+			lost = true
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return nil, errors.New("lost acknowledgement after upload committed")
+		}
+		return resp, err
+	})
+	h.stepUntilDone(t)
+	if len(h.replyUploads) != 2 || h.replyUploads[0].name != "report.pdf" || h.replyUploads[1].name != "data.csv" {
+		t.Fatalf("upload replayed or next file lost: %v", h.replyUploads)
+	}
+	output := fmt.Sprint(h.complete["output"])
+	if !strings.Contains(output, "report.pdf") || !strings.Contains(output, "could not be confirmed") {
+		t.Fatalf("missing ambiguous-delivery notice: %s", output)
+	}
+}
+
+func TestReplyFileUploadRequiresAttachmentID(t *testing.T) {
+	for _, body := range []string{`{"id":"","url":"https://storage.example/report.pdf"}`, `{"id":" "}`, `{}`, `not json`} {
+		t.Run(body, func(t *testing.T) {
+			h := setup(t)
+			chatTask(h)
+			if err := h.b.step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+			h.finish("end_turn")
+			upstream := h.b.multica.client.Transport
+			attempts := 0
+			h.b.multica.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/api/upload-file" {
+					attempts++
+					return replyResponse(req, 200, body), nil
+				}
+				return upstream.RoundTrip(req)
+			})
+			h.stepUntilDone(t)
+			if attempts != 1 || !strings.Contains(fmt.Sprint(h.complete["output"]), "report.pdf") {
+				t.Fatalf("attempts=%d complete=%v", attempts, h.complete)
+			}
+		})
+	}
+}
+
+func TestReplyFileRefusalAddsDeliveryNotice(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, false)
+	h.finish("end_turn")
+	h.events[len(h.events)-2]["content"] = []map[string]string{{"type": "text", "text": "Report attached."}}
+	h.stepUntilDone(t)
+	output := fmt.Sprint(h.complete["output"])
+	if len(h.replyUploads) != 0 || !strings.HasPrefix(output, "Report attached.") || !strings.Contains(output, "report.pdf") || !strings.Contains(output, "not attached") {
+		t.Fatalf("missing truthful delivery notice: %s", output)
+	}
+}
+
+func TestReplyFileReadRecoversWithoutDeliveryNotice(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	h.finish("end_turn")
+	upstream := h.b.qoder.client.Transport
+	attempts := 0
+	h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/files/file_report" {
+			attempts++
+			if attempts == 1 {
+				return replyResponse(req, 502, `{}`), nil
+			}
+		}
+		return upstream.RoundTrip(req)
+	})
+	h.stepUntilDone(t)
+	if attempts != 2 || len(h.replyUploads) != 1 || h.complete["output"] != "Tests passed. PR: https://example.com/pr/1" {
+		t.Fatalf("read recovery: attempts=%d uploaded=%v complete=%v", attempts, h.replyUploads, h.complete)
+	}
+}
+
+func TestReplyFileTransferSharesOneTimeBudget(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	h.finish("end_turn")
+	var deadlines []time.Time
+	for _, api := range []*api{h.b.qoder, h.b.multica} {
+		upstream := api.client.Transport
+		api.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+			if strings.HasPrefix(req.URL.Path, "/files/") || strings.HasPrefix(req.URL.Path, "/blob/") || req.URL.Path == "/api/upload-file" {
+				deadline, ok := req.Context().Deadline()
+				if !ok || time.Until(deadline) > 20*time.Second {
+					t.Errorf("file request has no 20-second budget: %v %v", deadline, ok)
+				}
+				deadlines = append(deadlines, deadline)
+			}
+			return upstream.RoundTrip(req)
+		})
+	}
+	h.stepUntilDone(t)
+	if len(deadlines) != 4 || len(h.replyUploads) != 1 {
+		t.Fatalf("file requests=%d uploads=%v", len(deadlines), h.replyUploads)
+	}
+	for _, deadline := range deadlines {
+		if !deadline.Equal(deadlines[0]) {
+			t.Fatalf("transfer reset its time budget: %v", deadlines)
+		}
+	}
+}
+
+func TestReplyFileParentDeadlineStillBoundsReadRetries(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r := h.b.state.Runs[0]
+	upstream := h.b.qoder.client.Transport
+	attempts := 0
+	h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/files/file_report" {
+			attempts++
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}
+		return upstream.RoundTrip(req)
+	})
+	// A busy poll can have less time left than the file's own budget. These
+	// deadlines must count as failed attempts too, or a slow file retries forever.
+	for i := 0; i < 3; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		_, err := h.b.attachReplyFile(ctx, r)
+		cancel()
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal(err)
+		}
+	}
+	if attempts != 3 || r.Reply.Handled != 1 {
+		t.Fatalf("parent deadlines not bounded: attempts=%d handled=%d", attempts, r.Reply.Handled)
+	}
+	h.finish("end_turn")
+	h.stepUntilDone(t)
+	if !strings.Contains(fmt.Sprint(h.complete["output"]), "report.pdf") {
+		t.Fatalf("missing timeout notice: %v", h.complete)
+	}
+}
+
+func TestReplyFileNoticeSurvivesRestartAndCompletionRetry(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, false)
+	h.finish("end_turn")
+	upstream := h.b.multica.client.Transport
+	var first map[string]any
+	h.b.multica.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/complete") {
+			if err := json.NewDecoder(req.Body).Decode(&first); err != nil {
+				t.Error(err)
+			}
+			return replyResponse(req, 502, `{}`), nil
+		}
+		return upstream.RoundTrip(req)
+	})
+	if err := h.b.step(context.Background()); err == nil {
+		t.Fatal("completion failure was not injected")
+	}
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Runs[0].Reply.token != "" {
+		t.Fatal("task credential persisted")
+	}
+	h.b.state = j
+	h.b.multica.client.Transport = upstream
+	h.stepUntilDone(t)
+	output := fmt.Sprint(h.complete["output"])
+	if output != first["output"] || strings.Count(output, "Attachment delivery notice:") != 1 || !strings.Contains(output, "report.pdf") || len(h.replyUploads) != 0 {
+		t.Fatalf("notice changed after retry/restart: first=%v final=%v uploads=%v", first, h.complete, h.replyUploads)
 	}
 }

@@ -628,6 +628,9 @@ func (b *Bridge) deliver(ctx context.Context, r *run) error {
 	suffix := "/complete"
 	if r.Outcome == "completed" {
 		body["output"] = r.Output
+		if r.Reply != nil {
+			body["output"] = r.Reply.output(r.Output)
+		}
 	} else {
 		suffix = "/fail"
 		body["error"] = r.Failure
