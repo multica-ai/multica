@@ -92,6 +92,14 @@ var notifyArgs = map[string]bool{
 	"notify": true, "notify_users": true, "send_notification_email": true,
 }
 
+// Flags that turn an update into a delete: Notion's UPDATE_PAGE with
+// archived=true (or in_trash=true) and Drive's file update with trashed=true
+// move the item to trash. Setting them false restores it, which stays a write.
+var deleteArgs = map[string]bool{
+	"archived": true, "archive": true, "is_archived": true, "in_trash": true,
+	"trashed": true, "deleted": true, "is_deleted": true,
+}
+
 // Classify returns the action class of a tool. Curated overrides win; then the
 // first verb in the tool slug decides, with nouns upgrading a write to share or
 // delete. MCP annotations break the tie for slugs without a known verb. A tool
@@ -163,11 +171,17 @@ func objectAfter(tokens []string, verbAt int) string {
 }
 
 // ClassifyCall refines a tool's class with the arguments of one call: a write
-// addressed to other people, or asking the app to notify them, is a send.
-// Drafts stay writes; they reach nobody until sent.
+// that archives or trashes its target is a delete, and a write addressed to
+// other people, or asking the app to notify them, is a send. Drafts are never
+// sends; they reach nobody until sent.
 func ClassifyCall(class, toolSlug string, args map[string]any) string {
 	if class != ClassWrite || len(args) == 0 {
 		return class
+	}
+	for key, value := range args {
+		if deleteArgs[strings.ToLower(strings.TrimSpace(key))] && truthy(value) {
+			return ClassDelete
+		}
 	}
 	if isDraft(strings.Split(strings.ToUpper(toolSlug), "_")) {
 		return class
@@ -177,7 +191,7 @@ func ClassifyCall(class, toolSlug string, args map[string]any) string {
 		if recipientArgs[k] && hasValue(value) {
 			return ClassSend
 		}
-		if notifyArgs[k] && notifies(value) {
+		if notifyArgs[k] && truthy(value) {
 			return ClassSend
 		}
 	}
@@ -199,13 +213,15 @@ func hasValue(v any) bool {
 	}
 }
 
-func notifies(v any) bool {
+func truthy(v any) bool {
 	switch t := v.(type) {
 	case bool:
 		return t
+	case float64:
+		return t != 0
 	case string:
 		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "", "none", "false", "no":
+		case "", "none", "false", "no", "0":
 			return false
 		}
 		return true

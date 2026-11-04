@@ -143,6 +143,12 @@ func TestClassifyCallArguments(t *testing.T) {
 		{"drafts reach nobody", ClassWrite, "GMAIL_CREATE_EMAIL_DRAFT", map[string]any{"to": "a@example.com"}, ClassWrite},
 		{"reads stay reads", ClassRead, "GMAIL_FETCH_EMAILS", map[string]any{"to": "a@example.com"}, ClassRead},
 		{"a delete is not softened", ClassDelete, "GMAIL_DELETE_MESSAGE", map[string]any{"to": "a@example.com"}, ClassDelete},
+		{"archiving a page is a delete", ClassWrite, "NOTION_UPDATE_PAGE", map[string]any{"page_id": "p", "archived": true}, ClassDelete},
+		{"moving a page to trash", ClassWrite, "NOTION_UPDATE_PAGE", map[string]any{"in_trash": "true"}, ClassDelete},
+		{"trashing a file", ClassWrite, "GOOGLEDRIVE_EDIT_FILE", map[string]any{"trashed": 1.0}, ClassDelete},
+		{"restoring a page stays a write", ClassWrite, "NOTION_UPDATE_PAGE", map[string]any{"archived": false}, ClassWrite},
+		{"editing a page stays a write", ClassWrite, "NOTION_UPDATE_PAGE", map[string]any{"properties": map[string]any{"archived": true}}, ClassWrite},
+		{"trashing a draft is a delete", ClassWrite, "GMAIL_UPDATE_DRAFT", map[string]any{"trashed": true}, ClassDelete},
 	} {
 		if got := ClassifyCall(tc.class, tc.tool, tc.args); got != tc.want {
 			t.Errorf("%s: ClassifyCall = %s, want %s", tc.name, got, tc.want)

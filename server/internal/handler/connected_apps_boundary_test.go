@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -177,6 +178,96 @@ func TestConnectedApps_ApprovedCallsRespectRateLimit(t *testing.T) {
 	}
 	if got := f.requestStatus(t, req.ID); got != "pending" {
 		t.Fatalf("request after a rate-limited approval = %s, want pending", got)
+	}
+}
+
+const notionUpdatePage = "NOTION_UPDATE_PAGE"
+
+// withNotionDeleteBlocked attaches Notion at level with the personal account's
+// delete rule set to block. NOTION_UPDATE_PAGE also takes archived=true, which
+// moves the page to trash.
+func (f *appsFixture) withNotionDeleteBlocked(t *testing.T, level string) {
+	t.Helper()
+	ctx := context.Background()
+	old := appsFakeGmailTools
+	appsFakeGmailTools = append(append([]sdk.Tool(nil), old...), sdk.Tool{
+		Slug: notionUpdatePage, Name: "Update Page", Toolkit: sdk.Toolkit{Slug: "notion"},
+		Description: "Update page properties, icon, cover, or archive status.",
+	})
+	t.Cleanup(func() { appsFakeGmailTools = old })
+	account := "ca_notion_" + f.taskID
+	if _, err := f.h.Queries.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
+		UserID: parseUUID(testUserID), ToolkitSlug: "notion", AuthConfigID: "ac_notion",
+		ConnectedAccountID: account, ComposioUserID: testUserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id=$1`, account)
+	})
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "notion", "account_scope": "personal", "level": level}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	w := httptest.NewRecorder()
+	f.h.UpdateAppRules(w, appsReqAs(t, testUserID, http.MethodPut, "/api/apps/rules?toolkit_slug=notion&scope=personal", map[string]any{
+		"rules": []map[string]string{{"action_class": "delete", "policy": "block"}},
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("set delete rule: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Archiving through an update tool is a delete and obeys the delete rule;
+// ordinary edits and restores through the same tool still run.
+func TestConnectedApps_ArchiveViaUpdateObeysDeleteRule(t *testing.T) {
+	f := newAppsFixture(t)
+	f.withNotionDeleteBlocked(t, "write")
+	run := func(args map[string]any) (bool, string) {
+		_, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": notionUpdatePage, "arguments": args})
+		return isErr, response
+	}
+	if isErr, response := run(map[string]any{"page_id": "p1", "archived": true}); !isErr || len(f.sdk.executions()) != 0 {
+		t.Fatalf("archive bypassed delete=block: isError=%v executions=%d response=%s", isErr, len(f.sdk.executions()), response)
+	}
+	if isErr, response := run(map[string]any{"page_id": "p1", "in_trash": "true"}); !isErr || len(f.sdk.executions()) != 0 {
+		t.Fatalf("in_trash bypassed delete=block: isError=%v response=%s", isErr, response)
+	}
+	if isErr, response := run(map[string]any{"page_id": "p1", "properties": map[string]any{"title": "Q3"}}); isErr {
+		t.Fatalf("plain edit refused: %s", response)
+	}
+	if isErr, response := run(map[string]any{"page_id": "p1", "archived": false}); isErr {
+		t.Fatalf("restore refused: %s", response)
+	}
+	if n := len(f.sdk.executions()); n != 2 {
+		t.Fatalf("executions = %d, want the edit and the restore", n)
+	}
+}
+
+// An approver who edits a confirmed update into an archive gets the delete
+// rule, not the class the request was submitted under.
+func TestConnectedApps_ApprovalWithEditedArchiveObeysDeleteRule(t *testing.T) {
+	f := newAppsFixture(t)
+	f.withNotionDeleteBlocked(t, "confirm_writes")
+	_, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{
+		"tool": notionUpdatePage, "arguments": map[string]any{"page_id": "p1", "properties": map[string]any{"title": "Q3"}},
+	})
+	if isErr || !strings.HasPrefix(response, "submitted") {
+		t.Fatalf("submit: %s", response)
+	}
+	requests := f.listRequests(t, testUserID)
+	if len(requests) != 1 {
+		t.Fatalf("requests: %d", len(requests))
+	}
+	id := requests[0].ID
+	w := httptest.NewRecorder()
+	f.h.ApproveAppRequest(w, withURLParam(appsReqAs(t, testUserID, http.MethodPost, "/api/app-requests/"+id+"/approve", map[string]any{
+		"arguments": map[string]any{"page_id": "p1", "archived": true},
+	}), "id", id))
+	if n := len(f.sdk.executions()); n != 0 {
+		t.Fatalf("edited archive ran despite delete=block: HTTP %d executions=%d %s", w.Code, n, w.Body.String())
+	}
+	if got := f.requestStatus(t, id); got != "failed" {
+		t.Fatalf("request = %s, want failed", got)
 	}
 }
 
