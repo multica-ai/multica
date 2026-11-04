@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Bot,
   Lock,
-  Plus,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -176,6 +175,7 @@ export function rowMatchesFilters(
  */
 import { isAccessChangeReady } from "@multica/core/agents";
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
+import { AgentsIntro } from "./agents-intro";
 export { isAccessChangeReady };
 
 export interface AgentsPageProps {
@@ -214,37 +214,6 @@ function ListError({
         </Button>
       }
     />
-  );
-}
-
-function EmptyState({
-  onCreate,
-  runtimesLoaded,
-  hasRuntime,
-  runtimesHref,
-}: {
-  onCreate: () => void;
-  runtimesLoaded: boolean;
-  hasRuntime: boolean;
-  runtimesHref: string;
-}) {
-  const { t } = useT("agents");
-  return (
-    <CollectionPageState
-      icon={Bot}
-      title={t(($) => $.empty.title)}
-      description={t(($) => $.empty.description)}
-      actions={
-        <Button type="button" onClick={onCreate} size="sm">
-          <Plus aria-hidden="true" />
-          {t(($) => $.page.new_agent)}
-        </Button>
-      }
-    >
-      {runtimesLoaded ? (
-        <AgentSetupChecklist hasRuntime={hasRuntime} runtimesHref={runtimesHref} />
-      ) : null}
-    </CollectionPageState>
   );
 }
 
@@ -770,14 +739,17 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       {listError ? (
         <ListError listError={listError} onRetry={() => refetchList()} />
       ) : showEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState
-            onCreate={openCreate}
-            runtimesLoaded={runtimesLoaded}
-            hasRuntime={runtimes.length > 0}
-            runtimesHref={paths.runtimes()}
-          />
-        </div>
+        <AgentsIntro
+          onCreate={openCreate}
+          checklist={
+            runtimesLoaded ? (
+              <AgentSetupChecklist
+                hasRuntime={runtimes.length > 0}
+                runtimesHref={paths.runtimes()}
+              />
+            ) : null
+          }
+        />
       ) : (
         <CollectionList
           label={scopeTitles[scope]}

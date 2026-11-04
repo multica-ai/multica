@@ -31,6 +31,14 @@ export async function refreshIssueUnread(qc: QueryClient, wsId: string) {
   await qc.invalidateQueries({ queryKey });
 }
 
+/**
+ * The timeline item an unread mark points at: the last comment its run left,
+ * or the run itself when it left none. `null` for a manual mark.
+ */
+export function issueUnreadTarget(unread: IssueUnread | null): string | null {
+  return unread?.comment_id ?? unread?.task_id ?? null;
+}
+
 /** The viewer's unread mark on one issue, or `null` when it is read. */
 export function useIssueUnread(wsId: string, issueId: string): IssueUnread | null {
   const select = useCallback(
@@ -74,7 +82,10 @@ function useSetIssueUnread(wsId: string, unread: boolean) {
         const has = old.some((item) => item.issue_id === issueId);
         if (!unread) return has ? old.filter((item) => item.issue_id !== issueId) : old;
         if (has) return old;
-        return [{ issue_id: issueId, outcome: "manual", agent_id: null, created_at: new Date().toISOString() }, ...old];
+        return [{
+          issue_id: issueId, outcome: "manual", agent_id: null, task_id: null, comment_id: null,
+          created_at: new Date().toISOString(),
+        }, ...old];
       });
       return { prev };
     },

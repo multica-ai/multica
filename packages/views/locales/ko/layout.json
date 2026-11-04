@@ -38,6 +38,28 @@
     "feedback": "피드백",
     "server_version": "서버 버전 {{version}}"
   },
+  "whats_new": {
+    "trigger": "새 기능",
+    "card": {
+      "eyebrow": "Multica 업데이트 · {{range}}",
+      "title_other": "마지막 방문 이후 새 기능 {{count}}개가 추가되었습니다",
+      "dismiss": "닫기",
+      "view_details": "자세히 보기",
+      "got_it": "확인"
+    },
+    "panel": {
+      "title": "새 기능",
+      "close": "닫기",
+      "new": "읽지 않음",
+      "release_notes": "v{{version}} 변경 로그",
+      "full_changelog": "전체 변경 로그"
+    },
+    "action": {
+      "try": "사용해 보기",
+      "open": "열기",
+      "learn_more": "자세히 알아보기"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",
     "loading_named_prefix": "로딩 중"
@@ -179,5 +201,14 @@
   "object_page": {
     "toggle_panel": "오른쪽 사이드바 전환",
     "properties": "속성"
+  },
+  "feature_intro": {
+    "read_docs": "문서 읽기",
+    "carousel": "캐러셀",
+    "slide": "슬라이드",
+    "slide_position": "{{total}}개 중 {{current}}번째",
+    "go_to_slide": "{{index}}번째 슬라이드로 이동",
+    "previous": "이전",
+    "next": "다음"
   }
 }

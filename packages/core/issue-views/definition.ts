@@ -157,6 +157,23 @@ export function modifiedFilterDimensions(
   return modified;
 }
 
+/**
+ * A view that saves nothing of its own: no narrower scope, no conditions, the
+ * default display. It shows exactly what its page shows, so it is waiting to
+ * be defined.
+ */
+export function isIssueViewUndefined(
+  view: Pick<IssueView, "query" | "display" | "scope_variant">,
+): boolean {
+  if (view.scope_variant && view.scope_variant !== "any") return false;
+  const seed = issueViewSeedDefinition(view);
+  const blank = issueViewSeedDefinition({ query: {}, display: {} });
+  return (
+    sameFilterMeaning(seed.query, blank.query) &&
+    stableStringify(seed.display) === stableStringify(blank.display)
+  );
+}
+
 /** Whether the live state drifted from what the view saves. */
 export function isIssueViewModified(
   view: Pick<IssueView, "query" | "display">,

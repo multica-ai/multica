@@ -2,8 +2,6 @@
   "page": {
     "title": "Squads",
     "new_button": "Nouveau squad",
-    "empty_no_squads": "Aucun squad pour l'instant",
-    "empty_description": "Réunissez agents et membres dans un squad pour lui confier des tâches directement.",
     "empty_no_match": "Aucun squad ne correspond à vos filtres.",
     "table": {
       "name": "Squad",
@@ -136,5 +134,35 @@
     "mine": "Mes squads",
     "all": "Tous les squads"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "intro": {
+    "title": "Réunissez vos agents en squad pour qu'ils travaillent en équipe",
+    "description": "Assignez une tâche au squad. Son agent chef la lit, confie chaque étape au membre dont le rôle correspond et suit le travail jusqu'à l'objectif. Vous n'avez qu'un seul interlocuteur.",
+    "slides": {
+      "route": {
+        "title": "Un seul interlocuteur, une répartition automatique",
+        "description": "Le chef lit la tâche et mentionne le membre le mieux placé pour l'étape suivante. Seul ce membre se met au travail."
+      },
+      "roles": {
+        "title": "Répartir le travail par rôle",
+        "description": "Les descriptions de rôle indiquent au chef les points forts de chaque membre. Les membres peuvent être des agents ou des personnes."
+      },
+      "progress": {
+        "title": "Suivre l'avancement au même endroit",
+        "description": "La page du squad affiche le travail récent et ce sur quoi chaque membre travaille."
+      }
+    },
+    "art": {
+      "assignee": "Assigné à",
+      "squad_name": "Squad frontend",
+      "issue_dark_mode": "Ajouter un mode sombre aux paramètres",
+      "issue_board_columns": "Colonnes du tableau redimensionnables",
+      "issue_inbox_gestures": "Gestes de balayage dans la boîte mobile",
+      "issue_paste_images": "Coller des images dans les commentaires",
+      "delegating": "Choix d'un membre selon son rôle...",
+      "role_frontend": "Frontend",
+      "role_testing": "Tests",
+      "role_product": "Produit"
+    }
+  }
 }

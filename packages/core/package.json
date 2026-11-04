@@ -154,6 +154,7 @@
     "./navigation": "./navigation/index.ts",
     "./modals": "./modals/index.ts",
     "./onboarding": "./onboarding/index.ts",
+    "./whats-new": "./whats-new/index.ts",
     "./paths": "./paths/index.ts",
     "./hooks": "./hooks.tsx",
     "./hooks/*": "./hooks/*.ts",
