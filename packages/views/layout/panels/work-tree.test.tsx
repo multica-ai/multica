@@ -63,8 +63,8 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
 
-const project = (id: string, title: string): Project =>
-  ({ id, title, status: "in_progress", issue_count: 4, done_count: 1 }) as Project;
+const project = (id: string, title: string, icon: string | null = null): Project =>
+  ({ id, title, icon, status: "in_progress", issue_count: 4, done_count: 1 }) as Project;
 const PROJECTS = [project("p1", "Desktop"), project("p2", "Mobile"), project("p3", "Web")];
 
 beforeEach(() => {
@@ -81,7 +81,7 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection() {
+function renderSection(projects = PROJECTS) {
   const qc = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
   qc.setQueryData(
     issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey,
@@ -97,16 +97,28 @@ function renderSection() {
         wsId="ws-1"
         userId="u1"
         pathname="/acme/issues"
-        projects={PROJECTS}
+        projects={projects}
         totalProjects={4}
         plainRowsLit
         activeIssueId={null}
+        litSource={null}
+        locatedProjectId={null}
       />
     </QueryClientProvider>,
   );
 }
 
 describe("ProjectsSection", () => {
+  it("shows the project's chosen icon, keeping the folder when it has none", () => {
+    renderSection([project("p1", "Desktop", "🚀"), project("p2", "Mobile")]);
+    const iconSlot = (name: string) =>
+      screen.getByRole("button", { name: `Issues in ${name}` }).previousElementSibling;
+    expect(iconSlot("Desktop")).toHaveTextContent("🚀");
+    expect(iconSlot("Desktop")?.querySelector("svg")).toBeNull();
+    expect(iconSlot("Mobile")).toHaveTextContent("");
+    expect(iconSlot("Mobile")?.querySelector("svg")).not.toBeNull();
+  });
+
   it("expands a project in place, keeping its count", () => {
     renderSection();
     expect(screen.getAllByText("3")).toHaveLength(3);

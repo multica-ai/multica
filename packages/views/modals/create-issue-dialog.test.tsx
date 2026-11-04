@@ -98,6 +98,7 @@ vi.mock("./create-issue", () => ({
   }) => (
     <div>
       manual panel · {String(data?.anchor_comment_id ?? "ordinary")} · {data?.source_context_expanded ? "expanded" : "collapsed"}
+      <span data-testid="manual-owner">{String(data?.assignee_id ?? "draft")}</span>
       <button type="button" onClick={() => onSwitchMode?.({ parent_issue_id: data?.parent_issue_id })}>
         switch agent
       </button>
@@ -139,6 +140,15 @@ describe("CreateIssueDialog sizing", () => {
     expect(mockBeginIsolatedDraft).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "switch manual" }));
     expect(screen.getByText(/manual panel · ordinary/)).toBeInTheDocument();
+  });
+
+  it("seeds the parent owner on the first agent-to-manual switch only", () => {
+    render(<CreateIssueDialog onClose={vi.fn()} initialMode="agent" data={{ parent_issue_id: "parent", assignee_type: "member", assignee_id: "parent-owner" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "switch manual" }));
+    expect(screen.getByTestId("manual-owner")).toHaveTextContent("parent-owner");
+    fireEvent.click(screen.getByRole("button", { name: "switch agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "switch manual" }));
+    expect(screen.getByTestId("manual-owner")).toHaveTextContent("draft");
   });
 
   it("isolates source-context drafts and preserves source identity across mode switches", () => {

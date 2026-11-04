@@ -38,6 +38,7 @@ import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useLocale, useT } from "../../i18n";
+import { SessionHistoryList } from "./session-history-list";
 
 const apiLogger = createLogger("chat.api");
 
@@ -482,11 +483,11 @@ export function ChatThreadList({
   // here (via each row's hover actions).
   if (view === "archived") {
     return (
-      <>
+      <div className="flex h-full min-h-0 flex-col">
         <button
           type="button"
           onClick={() => setView("history")}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full shrink-0 items-center gap-1.5 rounded-md px-2 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
@@ -494,8 +495,10 @@ export function ChatThreadList({
             {archivedSessions.length}
           </span>
         </button>
-        {archivedSessions.map(renderRow)}
-      </>
+        <div className="min-h-0 flex-1">
+          <SessionHistoryList sessions={archivedSessions} renderRow={renderRow} />
+        </div>
+      </div>
     );
   }
 
@@ -527,10 +530,11 @@ export function ChatThreadList({
   }
 
   return (
-    <>
-      {historySessions.map(renderRow)}
-      {archivedEntry}
-    </>
+    <SessionHistoryList
+      sessions={historySessions}
+      renderRow={renderRow}
+      footer={archivedEntry}
+    />
   );
 }
 

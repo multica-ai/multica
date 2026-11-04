@@ -1783,6 +1783,160 @@ func TestCreateWorktreePathCollisionDoesNotLeakBranch(t *testing.T) {
 	}
 }
 
+func worktreeRegistration(t *testing.T, worktreePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read .git file: %v", err)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(string(data), "gitdir:"))
+}
+
+// A checkout whose registration git dropped, and later gave to another
+// checkout with the same directory name, makes `git status` read the other
+// checkout's index. CreateWorktree must replace it instead of failing on every
+// retry, and must leave the other checkout working.
+func TestCreateWorktreeReplacesCheckoutWhoseRegistrationWasReused(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	checkout := func(workDir, taskID string) (*WorktreeResult, error) {
+		return cache.CreateWorktree(WorktreeParams{
+			WorkspaceID: "ws-1",
+			RepoURL:     sourceRepo,
+			WorkDir:     workDir,
+			AgentName:   "agent",
+			TaskID:      taskID,
+		})
+	}
+
+	orphanWorkDir := t.TempDir()
+	orphan, err := checkout(orphanWorkDir, "a1111111-0000-0000-0000-00000000000a")
+	if err != nil {
+		t.Fatalf("first checkout failed: %v", err)
+	}
+	registration := worktreeRegistration(t, orphan.Path)
+	if err := os.RemoveAll(registration); err != nil {
+		t.Fatal(err)
+	}
+	other, err := checkout(t.TempDir(), "b2222222-0000-0000-0000-00000000000b")
+	if err != nil {
+		t.Fatalf("other checkout failed: %v", err)
+	}
+	if got := worktreeRegistration(t, other.Path); got != registration {
+		t.Fatalf("git did not reuse the registration: got %s, want %s", got, registration)
+	}
+
+	result, err := checkout(orphanWorkDir, "c3333333-0000-0000-0000-00000000000c")
+	if err != nil {
+		t.Fatalf("checkout over the orphaned tree failed: %v", err)
+	}
+	if got := currentBranchName(t, result.Path); got != result.BranchName {
+		t.Errorf("replaced checkout is on %q, want %q", got, result.BranchName)
+	}
+	if got := currentBranchName(t, other.Path); got != other.BranchName {
+		t.Errorf("other checkout is on %q, want %q", got, other.BranchName)
+	}
+	moved, err := filepath.Glob(orphan.Path + ".orphaned-*")
+	if err != nil || len(moved) != 1 {
+		t.Fatalf("orphaned tree not moved aside: %v, %v", moved, err)
+	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git")); !os.IsNotExist(err) {
+		t.Errorf("moved-aside tree still has a .git file pointing at the reused registration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git.orphaned")); err != nil {
+		t.Errorf("moved-aside tree lost its .git contents: %v", err)
+	}
+}
+
+// Two repos with the same basename have separate bare caches and locks, so a
+// checkout from one can land on the path the other just failed to create.
+// Cleanup for one cache must not delete a tree registered in the other.
+func TestRemovePartialWorktreeKeepsCheckoutOfAnotherCache(t *testing.T) {
+	t.Parallel()
+	repoA, repoB := createTestRepo(t), createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: repoA}, {URL: repoB}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	other, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     repoB,
+		WorkDir:     t.TempDir(),
+		AgentName:   "agent",
+		TaskID:      "e5555555-0000-0000-0000-00000000000e",
+	})
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	removePartialWorktree(cache.Lookup("ws-1", repoA), other.Path)
+
+	if got := currentBranchName(t, other.Path); got != other.BranchName {
+		t.Errorf("other cache's checkout is on %q, want %q", got, other.BranchName)
+	}
+}
+
+// A `git worktree add` cancelled before it returns must not leave its tree or
+// registration behind; the next checkout then starts clean. The slow
+// post-checkout hook runs after git has written both, so this covers cleanup
+// after a cancelled add rather than a half-written tree.
+func TestCreateWorktreeContextRemovesPartialCheckoutWhenCancelled(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hook := filepath.Join(barePath, "hooks", "post-checkout")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workDir := t.TempDir()
+	params := WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "d4444444-0000-0000-0000-000000000000",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := cache.CreateWorktreeContext(ctx, params); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CreateWorktreeContext error = %v, want deadline exceeded", err)
+	}
+	worktreePath := filepath.Join(workDir, repoNameFromURL(sourceRepo))
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("partial checkout left at %s, stat error = %v", worktreePath, err)
+	}
+	out, err := exec.Command("git", "-C", barePath, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("worktree list failed: %v", err)
+	}
+	if strings.Contains(string(out), worktreePath) {
+		t.Fatalf("registration for the partial checkout survived:\n%s", out)
+	}
+
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("checkout after cancellation failed: %v", err)
+	}
+	if got := currentBranchName(t, result.Path); got != result.BranchName {
+		t.Errorf("checkout is on %q, want %q", got, result.BranchName)
+	}
+}
+
 // TestGetRemoteDefaultBranchScansForCustomDefault verifies fallback (3) of
 // getRemoteDefaultBranch: when the cache has refs/remotes/origin/<custom>
 // (e.g. develop, trunk) but no refs/remotes/origin/HEAD and no main/master,

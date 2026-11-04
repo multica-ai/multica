@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "New autopilot",
-    "start_blank": "Start from scratch",
     "table": {
       "name": "Name",
       "agent": "Agent",
@@ -15,10 +14,6 @@
       "created": "Created"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "No autopilots yet",
-      "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
-    },
     "no_matches": "No automations match",
     "retry": "Retry"
   },
@@ -152,6 +147,8 @@
   "run": {
     "issue_linked": "Issue linked",
     "view_log": "View execution log",
+    "stop": "Stop run",
+    "stop_failed": "Could not stop the run.",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"
@@ -487,8 +484,6 @@
     "select_page": "Select all enabled wakeups",
     "load_error": "Could not load wakeups",
     "loading": "Loading wakeups…",
-    "empty": "No wakeup rules yet",
-    "empty_description": "Schedules, PR waits, and reply waits that agents set on issues show up here.",
     "disable_selected": "Turn off selected",
     "confirm_title": "Turn off {{count}} wakeups?",
     "confirm_body": "Future wakeups will stop. Runs still queued and not handed to an agent will be withdrawn. Dispatched runs will continue; stop them from the execution log.",
@@ -525,6 +520,37 @@
     "banner_view": "View",
     "create": "New wakeup",
     "create_pick_issue": "Choose the issue to add a wakeup to",
-    "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
+    "create_pick_issue_description": "The wakeup belongs to this issue and ends with it.",
+    "intro": {
+      "title": "Bring agents back at the right moment",
+      "description": "Wakeups live on issues: when a PR merges, someone replies, or the time comes, the agent comes back to pick up the work. When the issue ends, its wakeups stop.",
+      "slides": {
+        "event": {
+          "title": "Wait for something to happen",
+          "description": "No need to keep an agent spinning while it waits. When the condition is met, Multica wakes it up."
+        },
+        "time": {
+          "title": "Or pick a time",
+          "description": "A one-time wakeup suits \"check again tomorrow afternoon\"; a recurring one suits a daily check."
+        },
+        "ends": {
+          "title": "Stops when the issue ends",
+          "description": "Wakeups belong to their issue. Once it's done or cancelled they turn off, so no stray rules are left behind."
+        }
+      },
+      "art": {
+        "issue_inbox": "Empty state for inbox groups",
+        "issue_board": "Resizable board columns",
+        "issue_paste": "Paste images into comments",
+        "reply": "\"The PR is merged. Updating the docs and closing the issue.\"",
+        "event_examples": "PR merged, new comment"
+      }
+    }
+  },
+  "intro": {
+    "label": "Autopilot",
+    "title": "Let agents start work on their own",
+    "description": "Set a schedule or a webhook. Each time it fires, Multica creates an issue for an agent, or runs the agent directly. Pick a template and adjust it.",
+    "templates": "Start from a template"
   }
 }

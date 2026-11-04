@@ -109,11 +109,15 @@ type issueTableFiltersRequest struct {
 	Advanced *issueTableFilterNode `json:"advanced,omitempty"`
 	// Members are raw JSON so operator objects ({op, value}) and plain
 	// strings both survive the round-trip into parsePropertiesFilterParam.
-	Properties       map[string][]json.RawMessage `json:"properties,omitempty"`
-	Date             *issueTableDateFilterRequest `json:"date,omitempty"`
-	WorkingOnly      bool                         `json:"working_only,omitempty"`
-	WorkingIssueIDs  []string                     `json:"working_issue_ids,omitempty"`
-	IncludeSubIssues *bool                        `json:"include_sub_issues,omitempty"`
+	Properties      map[string][]json.RawMessage `json:"properties,omitempty"`
+	Date            *issueTableDateFilterRequest `json:"date,omitempty"`
+	WorkingOnly     bool                         `json:"working_only,omitempty"`
+	WorkingIssueIDs []string                     `json:"working_issue_ids,omitempty"`
+	// UnreadIssueIDs is the viewer's unread issues as the client holds them
+	// (`/api/issues/unread`, plus any it keeps on screen after reading). An
+	// explicit empty list matches nothing.
+	UnreadIssueIDs   []string `json:"unread_issue_ids,omitempty"`
+	IncludeSubIssues *bool    `json:"include_sub_issues,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -270,6 +274,8 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		spec.Filters.Assignees != nil && len(spec.Filters.Assignees) == 0
 	explicitEmptyWorkingIssues :=
 		spec.Filters.WorkingIssueIDs != nil && len(spec.Filters.WorkingIssueIDs) == 0
+	explicitEmptyUnreadIssues :=
+		spec.Filters.UnreadIssueIDs != nil && len(spec.Filters.UnreadIssueIDs) == 0
 	normalized := spec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
@@ -284,6 +290,7 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.Advanced = canonicalIssueTableFilterNode(normalized.Filters.Advanced)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
 	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
+	normalized.Filters.UnreadIssueIDs = sortedUniqueStrings(normalized.Filters.UnreadIssueIDs)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
 	for key, values := range normalized.Filters.Properties {
 		normalized.Filters.Properties[key] = sortedUniqueRawJSON(values)
@@ -293,11 +300,13 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		Query                      issueTableQuerySpec `json:"query"`
 		ExplicitEmptyAssignees     bool                `json:"explicit_empty_assignees,omitempty"`
 		ExplicitEmptyWorkingIssues bool                `json:"explicit_empty_working_issues,omitempty"`
+		ExplicitEmptyUnreadIssues  bool                `json:"explicit_empty_unread_issues,omitempty"`
 	}{
 		WorkspaceID:                workspaceID,
 		Query:                      normalized,
 		ExplicitEmptyAssignees:     explicitEmptyAssignees,
 		ExplicitEmptyWorkingIssues: explicitEmptyWorkingIssues,
+		ExplicitEmptyUnreadIssues:  explicitEmptyUnreadIssues,
 	})
 	if err != nil {
 		return "", err
@@ -413,7 +422,7 @@ func parseIssueTableActor(w http.ResponseWriter, actor issueTableActorRef, field
 }
 
 // issueTableRelations are the viewer relations `filters.relations` accepts.
-var issueTableRelations = []string{"assigned", "created", "my_agents"}
+var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed"}
 
 // issueTableNegatableFilters are the `filters` fields `filters.negate` may name.
 var issueTableNegatableFilters = []string{
@@ -428,6 +437,14 @@ func issueTableRelationPredicate(relation string, userRef string) string {
 		return fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id = %s::uuid)", userRef)
 	case "created":
 		return fmt.Sprintf("(i.creator_type = 'member' AND i.creator_id = %s::uuid)", userRef)
+	case "subscribed":
+		return fmt.Sprintf(`EXISTS (
+    SELECT 1 FROM issue_subscriber isub
+     WHERE isub.issue_id  = i.id
+       AND isub.user_type = 'member'
+       AND isub.user_id   = %s::uuid
+       AND isub.unsubscribed_at IS NULL
+  )`, userRef)
 	default: // my_agents
 		return fmt.Sprintf(`(i.assignee_type = 'agent' AND i.assignee_id IN (
        SELECT a.id FROM agent a
@@ -836,6 +853,20 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			where = append(where, fmt.Sprintf(
 				"i.id = ANY(%s::uuid[])",
 				addArg(workingIssueIDs),
+			))
+		}
+	}
+	unreadIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.UnreadIssueIDs, "filters.unread_issue_ids")
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	if spec.Filters.UnreadIssueIDs != nil {
+		if len(unreadIssueIDs) == 0 {
+			where = append(where, "FALSE")
+		} else {
+			where = append(where, fmt.Sprintf(
+				"i.id = ANY(%s::uuid[])",
+				addArg(unreadIssueIDs),
 			))
 		}
 	}

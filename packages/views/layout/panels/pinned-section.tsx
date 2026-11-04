@@ -29,6 +29,7 @@ import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
 import {
@@ -38,6 +39,7 @@ import {
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
+  unreadIssueHref,
   useIssueAgentState,
 } from "./sidebar-tree";
 
@@ -341,7 +343,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={href}
+        href={unreadIssueHref(href, unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}
@@ -372,7 +374,9 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
-      iconNode={<Folder className="size-4 shrink-0" />}
+      iconNode={
+        project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+      }
     />
   );
 }

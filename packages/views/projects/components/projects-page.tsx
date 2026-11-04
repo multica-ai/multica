@@ -7,7 +7,6 @@ import {
   LayoutGrid,
   Pin,
   PinOff,
-  Plus,
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
@@ -17,6 +16,7 @@ import {
   projectListOptions,
   useUpdateProject,
   useDeleteProject,
+  ProjectDeletionOfflineError,
   useProjectViewStore,
   type ProjectColumnKey,
   type ProjectListFilters,
@@ -32,13 +32,18 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { useModalStore } from "@multica/core/modals";
 import { AppLink, useIntentNavigate } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -71,7 +76,6 @@ import {
   CollectionFilterButton,
   CollectionNoMatches,
   CollectionPageHeader,
-  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -86,6 +90,7 @@ import {
   type CollectionSort,
 } from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
+import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
@@ -146,6 +151,82 @@ function ProgressRing({ project }: { project: Project }) {
   );
 }
 
+function DeleteProjectsDialog({
+  rows,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  rows: Project[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted?: () => void;
+}) {
+  const { t } = useT("projects");
+  const deleteProject = useDeleteProject();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      for (const project of rows) {
+        await deleteProject.mutateAsync(project.id);
+      }
+      onOpenChange(false);
+      onDeleted?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ProjectDeletionOfflineError
+          ? t(($) => $.delete_dialog.offline_error)
+          : err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!deleting) onOpenChange(nextOpen);
+      }}
+    >
+      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.delete_dialog.description)}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={deleting}
+            onClick={() => onOpenChange(false)}
+          >
+            {t(($) => $.delete_dialog.cancel)}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={deleting}
+            aria-busy={deleting}
+            onClick={handleDelete}
+          >
+            {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
+            {t(($) => $.delete_dialog.confirm)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // Shared by table rows (⋯ and right-click) and cards.
 function ProjectRowActions({
   project,
@@ -162,7 +243,6 @@ function ProjectRowActions({
   const intentNavigate = useIntentNavigate();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
-  const deleteProject = useDeleteProject();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const togglePin = () => {
@@ -208,42 +288,11 @@ function ProjectRowActions({
         )}
       </CollectionRowMenu>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteOpen(false)}
-            >
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                deleteProject.mutate(project.id, {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error ? err.message : String(err),
-                    ),
-                });
-                setDeleteOpen(false);
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={[project]}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
   );
 }
@@ -395,7 +444,7 @@ function countActiveFilters(f: ProjectListFilters): number {
 }
 
 // Batch toolbar — page-anchored (not viewport). Pin all selected (any
-// member) + Delete (workspace admin). Mirrors the other lists.
+// member) + Delete (only when every selected project is deletable).
 function ProjectBatchToolbar({
   rows,
   pinnedIds,
@@ -409,7 +458,6 @@ function ProjectBatchToolbar({
 }) {
   const { t } = useT("projects");
   const createPin = useCreatePin();
-  const deleteProject = useDeleteProject();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
@@ -447,31 +495,12 @@ function ProjectBatchToolbar({
         )}
       </CollectionBatchBar>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>{t(($) => $.delete_dialog.description)}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                for (const p of rows) deleteProject.mutate(p.id);
-                setConfirmDelete(false);
-                onClear();
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={rows}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        onDeleted={onClear}
+      />
     </>
   );
 }
@@ -502,17 +531,16 @@ export function ProjectsPage() {
 
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),
     enabled: !!wsId && !!currentUser?.id,
   });
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
-  const isWorkspaceAdmin = useMemo(() => {
-    if (!currentUser) return false;
-    const me = members.find((m: MemberWithUser) => m.user_id === currentUser.id);
-    return me?.role === "owner" || me?.role === "admin";
-  }, [members, currentUser]);
+  const role = members.find((m: MemberWithUser) => m.user_id === currentUser?.id)?.role ?? null;
+  const mayDelete = (project: Project) =>
+    canDeleteProject(project, currentUser?.id ?? null, role, agents);
 
   const pinnedProjectIds = useMemo(() => {
     const s = new Set<string>();
@@ -847,17 +875,7 @@ export function ProjectsPage() {
       />
 
       {showEmpty ? (
-        <CollectionPageState
-          icon={FolderKanban}
-          title={t(($) => $.page.empty)}
-          description={t(($) => $.page.empty_description)}
-          actions={
-            <Button size="sm" onClick={openCreateProject}>
-              <Plus aria-hidden="true" />
-              {t(($) => $.page.new_project)}
-            </Button>
-          }
-        />
+        <ProjectsIntro onCreate={openCreateProject} />
       ) : (
         <>
           {isCompact ? (
@@ -874,7 +892,7 @@ export function ProjectsPage() {
                 <ProjectRowActions
                   project={project}
                   pinned={pinnedProjectIds.has(project.id)}
-                  canDelete={isWorkspaceAdmin}
+                  canDelete={mayDelete(project)}
                 />
               )}
               sort={sort}
@@ -903,7 +921,7 @@ export function ProjectsPage() {
                     key={project.id}
                     project={project}
                     pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
+                    canDelete={mayDelete(project)}
                   />
                 ))}
               </div>
@@ -913,7 +931,7 @@ export function ProjectsPage() {
           <ProjectBatchToolbar
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
-            canDelete={isWorkspaceAdmin}
+            canDelete={selectedProjects.length > 0 && selectedProjects.every(mayDelete)}
             onClear={() => setSelectedIds(new Set())}
           />
         </>

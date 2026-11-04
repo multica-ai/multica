@@ -44,7 +44,7 @@ import { WindowOverlay } from "./window-overlay";
 import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 
 const TOP_BAR_HEIGHT_CLASS = "h-10";
-const RAIL_WIDTH = 64;
+const RAIL_WIDTH = 56;
 const TITLE_BAR_ACTION_CLASS =
   "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 [&_svg]:size-4";
 
@@ -101,10 +101,13 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
+      {/* pr-6 is the canvas's mr-2 plus the page header's PAGE_GUTTER (px-4),
+          and gap-1 is the page header's action gap, so each icon here stands
+          on the same column as a trailing icon of the page header below. */}
       {railMounted && (
         <div
           data-slot="title-bar-actions"
-          className="relative z-10 ml-auto flex shrink-0 items-center gap-2 pr-3"
+          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-6"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />

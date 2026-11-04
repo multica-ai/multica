@@ -646,6 +646,32 @@ WHERE issue_id = $1 AND agent_id = $2
   AND comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(sqlc.narg('thread_comment_id')::uuid)
 RETURNING *;
 
+-- name: ReassignPendingAgentTasksToRuntime :one
+-- Moves an agent's not-yet-dispatched tasks to the runtime it was just rebound
+-- to. Claims fence on agent.runtime_id = task.runtime_id (MUL-6697), so a
+-- queued or deferred row left on the old runtime is claimable by neither
+-- daemon. Deferred rows move too: promotion is per runtime and would otherwise
+-- strand them later. Dispatched, running and waiting rows are already held by
+-- the old runtime's daemon and stay. Callers hold the agent row FOR UPDATE.
+--
+-- Same fence-verdict shape as ReassignTasksToRuntime: FenceOk = false must
+-- abort the rebind rather than commit a binding with stranded rows.
+WITH fence AS MATERIALIZED (
+    SELECT lock_task_owner_rows(@agent_id, NULL, @new_runtime_id) AS ok
+),
+reassigned AS (
+    UPDATE agent_task_queue
+    SET runtime_id = @new_runtime_id
+    WHERE agent_id = @agent_id
+      AND status IN ('queued', 'deferred')
+      AND runtime_id IS DISTINCT FROM @new_runtime_id
+      AND (SELECT ok FROM fence)
+    RETURNING id
+)
+SELECT
+    (SELECT ok FROM fence) AS fence_ok,
+    (SELECT count(*) FROM reassigned) AS reassigned_tasks;
+
 -- name: CancelAgentTasksByAgent :many
 -- Bulk-cancel every active (queued/dispatched/running) task for an agent.
 -- Returns the affected rows so callers can broadcast task:cancelled events.
@@ -2653,6 +2679,26 @@ ORDER BY a.created_at ASC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListTasksByIssueSubtree :many
+-- UNION deduplicates IDs, so even a corrupt parent cycle terminates.
+-- Constrain every recursive step to the authorized root's workspace.
+WITH RECURSIVE subtree(id) AS (
+    SELECT root.id FROM issue root
+    WHERE root.id = sqlc.arg(root_issue_id) AND root.workspace_id = sqlc.arg(workspace_id)
+    UNION
+    SELECT child.id FROM issue child
+    JOIN subtree parent ON child.parent_issue_id = parent.id
+    WHERE child.workspace_id = sqlc.arg(workspace_id)
+)
+SELECT sqlc.embed(atq), i.title AS issue_title, i.number AS issue_number, w.issue_prefix
+FROM agent_task_queue atq
+JOIN subtree ON subtree.id = atq.issue_id
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE NOT sqlc.arg(active_only)::boolean
+   OR atq.status IN ('queued', 'dispatched', 'waiting_local_directory', 'running')
+ORDER BY atq.created_at DESC, atq.id;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()

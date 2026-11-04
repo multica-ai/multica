@@ -39,10 +39,17 @@
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
   },
+  "unread_filter_error": {
+    "title": "Impossible de charger vos tâches non lues"
+  },
   "status_catalog_error": {
     "title": "Impossible de charger la liste des états",
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",
     "retry": "Réessayer"
+  },
+  "relation_filter_error": {
+    "title": "Impossible de charger le filtre « Lien avec moi »",
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
@@ -181,8 +188,11 @@
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Assignés à mes agents",
+    "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "section_read_state": "État de lecture",
+    "read_state_unread": "Non lu",
     "operator_label": "Condition",
     "operator_is": "est",
     "operator_is_not": "n'est pas",
@@ -455,6 +465,8 @@
     "metadata_description": "Données clé-valeur enregistrées par les agents et les intégrations pour poursuivre le workflow.",
     "section_load_failed_retry": "Échec du chargement. Réessayer",
     "not_found": "Cette tâche n'existe pas ou a été supprimée dans cet espace de travail.",
+    "load_failed": "Impossible de charger la tâche.",
+    "load_retry": "Réessayer",
     "not_found_title": "Tâche introuvable",
     "breadcrumb_project_unknown": "Projet inconnu",
     "back": "Retour",
@@ -536,7 +548,6 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Marquer comme terminé",
     "archive_tooltip": "Archiver",
-    "restore_to_inbox_tooltip": "Restaurer dans la boîte de réception",
     "pin_tooltip": "Épingler à la barre latérale",
     "unpin_tooltip": "Détacher de la barre latérale",
     "quick_jump_label": "Navigation rapide",
@@ -784,6 +795,7 @@
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",
+    "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
   "agent_live": {
@@ -800,6 +812,11 @@
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
   "execution_log": {
+    "latest": "Récentes",
+    "include_children": "Inclure les sous-tâches",
+    "loading": "Chargement des exécutions...",
+    "load_failed_retry": "Impossible de charger les exécutions. Réessayer",
+    "empty": "Aucune exécution dans ce périmètre.",
     "section": "Journal d'exécution",
     "cancel_task_tooltip": "Annuler l'exécution",
     "cancel_task_aria": "Annuler l'exécution",
@@ -928,6 +945,7 @@
     "confirm": "Arrêter l'exécution"
   },
   "batch": {
+    "delete_restricted": "Vous pouvez supprimer les tâches créées par vous ou par vos agents. Les propriétaires et administrateurs peuvent supprimer toute tâche.",
     "selected": "{{count}} sélectionnés",
     "status": "Statut",
     "priority": "Priorité",
@@ -945,7 +963,6 @@
     "delete_dialog_title_other": "Supprimer {{count}} tâches ?",
     "delete_dialog_desc_one": "Cette action est irréversible. La tâche sélectionnée et toutes ses données associées seront définitivement supprimées.",
     "delete_dialog_desc_other": "Cette action est irréversible. Les tâches sélectionnées et toutes leurs données associées seront définitivement supprimées.",
-    "delete_dialog_warning": "Tout membre de l'espace de travail peut supprimer des tâches.",
     "cancel": "Annuler"
   },
   "card": {
@@ -970,7 +987,9 @@
     "unassigned": "Non assigné",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
     "pin_to_sidebar": "Épingler à la barre latérale",
+    "locate_in_sidebar": "Afficher dans la barre latérale",
     "unpin_from_sidebar": "Détacher de la barre latérale",
+    "restore_to_inbox": "Restaurer dans la boîte de réception",
     "mark_read": "Marquer comme lu",
     "mark_unread": "Marquer comme non lu",
     "copy_link": "Copier le lien",
@@ -1790,7 +1809,8 @@
     "builtin": {
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches"
+      "all_issues": "Toutes les tâches",
+      "unread": "Non lues"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",
@@ -1823,6 +1843,9 @@
     "save_as_new": "Enregistrer comme nouvelle vue",
     "save_as_new_hint": "« {{name}} » reste inchangée",
     "save_as_view": "Enregistrer comme vue",
+    "save_view": "Enregistrer la vue",
+    "add_filter": "Ajouter un filtre",
+    "setup_hint": "Aucune condition pour l'instant : cette vue affiche toutes les tâches",
     "set_by_view": "Défini par cette vue",
     "new_issue": "Nouvelle tâche",
     "unavailable": "Cette vue n'est plus disponible",

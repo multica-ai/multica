@@ -168,6 +168,61 @@ func TestPrivateProjectHiddenFromLists(t *testing.T) {
 	testutil.Call(t, testHandler.GetProject, projectReq).Want(http.StatusNotFound)
 }
 
+func TestPrivateProjectSearchProjectFilter(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	commentIssue := dbfx.Issue(t, "comment-only search hit", testutil.Cols{"project_id": f.projectID})
+	dbfx.Comment(t, commentIssue, f.marker+" matching comment")
+	for _, includeClosed := range []string{"false", "true"} {
+		for _, userID := range []string{f.insider, f.outsider, testUserID} {
+			req := asUser(newRequest(http.MethodGet, "/api/issues/search?q="+f.marker+"&project_id="+f.projectID+"&include_closed="+includeClosed, nil), userID)
+			var resp struct {
+				Issues []SearchIssueResponse `json:"issues"`
+			}
+			testutil.Call(t, testHandler.SearchIssues, req).Want(http.StatusOK).JSON(&resp)
+			if userID == f.outsider {
+				if len(resp.Issues) != 0 {
+					t.Fatalf("outsider project search (include_closed=%s) exposed %+v", includeClosed, resp.Issues)
+				}
+				continue
+			}
+			if len(resp.Issues) != 2 {
+				t.Fatalf("authorized project search (include_closed=%s) = %+v, want title and comment hits", includeClosed, resp.Issues)
+			}
+			for _, issue := range resp.Issues {
+				if issue.ID != f.secretIssue && issue.ID != commentIssue {
+					t.Fatalf("project search returned an issue outside the selected project: %+v", issue)
+				}
+			}
+		}
+	}
+}
+
+func TestPrivateProjectSubtreeRunsAreRedacted(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Exec(t, "UPDATE issue SET parent_issue_id=$1 WHERE id=$2", f.publicIssue, f.secretIssue)
+	agentID := dbfx.Agent(t, f.marker+" subtree agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": f.secretIssue, "runtime_id": testRuntimeID, "status": "completed",
+		"result": testutil.Raw(`'{"output":"private subtree result"}'::jsonb`),
+	})
+	for _, userID := range []string{f.outsider, f.insider, testUserID} {
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+f.publicIssue+"/task-runs?scope=subtree", nil), userID), "id", f.publicIssue)
+		var runs []AgentTaskResponse
+		testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusOK).JSON(&runs)
+		if len(runs) != 1 || runs[0].ID != taskID {
+			t.Fatalf("subtree runs = %+v, want descendant run %s", runs, taskID)
+		}
+		run := runs[0]
+		if userID == f.outsider {
+			if !run.Restricted || run.IssueID != "" || run.IssueTitle != "" || run.IssueIdentifier != "" || run.Result != nil {
+				t.Fatalf("private descendant run exposed to outsider: %+v", run)
+			}
+		} else if run.Restricted || run.IssueID != f.secretIssue || run.IssueTitle == "" || run.Result == nil {
+			t.Fatalf("authorized viewer lost descendant run content: %+v", run)
+		}
+	}
+}
+
 func TestPrivateProjectCommentAndAttachmentByID(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	react := func(userID string) int {
@@ -406,6 +461,46 @@ func removeProjectMemberAsOwner(t *testing.T, f privateProjectFixture, userID st
 	t.Helper()
 	req := testutil.WithURLParams(newRequest(http.MethodDelete, "/api/projects/"+f.projectID+"/members/"+userID, nil), "id", f.projectID, "userId", userID)
 	testutil.Call(t, testHandler.RemoveProjectMember, req).Want(http.StatusNoContent)
+}
+
+func TestPrivateProjectIssueUnreadRunReferencesAfterRevocation(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	agentID := dbfx.Agent(t, f.marker+" unread agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
+	secretTask := dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID, "status": "completed"})
+	publicTask := dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.publicIssue, "runtime_id": testRuntimeID, "status": "completed"})
+	secretResult := dbfx.Comment(t, f.secretIssue, "private run result", testutil.Cols{"source_task_id": secretTask})
+	publicResult := dbfx.Comment(t, f.publicIssue, "public run result", testutil.Cols{"source_task_id": publicTask})
+	dbfx.Cleanup(t, `DELETE FROM issue_unread WHERE user_id = $1`, f.insider)
+	dbfx.Exec(t, `
+INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, agent_id, task_id)
+VALUES ($1, $2, $3, 'completed', $4, $5), ($1, $2, $6, 'completed', $4, $7)`,
+		testWorkspaceID, f.insider, f.secretIssue, agentID, secretTask, f.publicIssue, publicTask)
+
+	before := listIssueUnreadAs(t, f.insider)
+	if len(before) != 2 {
+		t.Fatalf("member should see both unread issues, got %+v", before)
+	}
+	for _, item := range before {
+		wantTask, wantComment := publicTask, publicResult
+		if item.IssueID == f.secretIssue {
+			wantTask, wantComment = secretTask, secretResult
+		} else if item.IssueID != f.publicIssue {
+			t.Fatalf("unexpected unread issue: %+v", item)
+		}
+		if item.TaskID == nil || *item.TaskID != wantTask || item.CommentID == nil || *item.CommentID != wantComment {
+			t.Fatalf("unread issue should link to task %s and comment %s, got %+v", wantTask, wantComment, item)
+		}
+	}
+
+	removeProjectMemberAsOwner(t, f, f.insider)
+
+	after := listIssueUnreadAs(t, f.insider)
+	if len(after) != 1 || after[0].IssueID != f.publicIssue {
+		t.Fatalf("revoked member should only see the public unread issue, got %+v", after)
+	}
+	if after[0].TaskID == nil || *after[0].TaskID != publicTask || after[0].CommentID == nil || *after[0].CommentID != publicResult {
+		t.Fatalf("public unread issue should retain its run references after revocation, got %+v", after[0])
+	}
 }
 
 func TestPrivateProjectArchivedInboxAndUnreadAfterRevocation(t *testing.T) {

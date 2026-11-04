@@ -205,6 +205,8 @@ type Attachment struct {
 	ChatMessageID   pgtype.UUID        `json:"chat_message_id"`
 	TaskID          pgtype.UUID        `json:"task_id"`
 	SourceContextID pgtype.UUID        `json:"source_context_id"`
+	Width           pgtype.Int4        `json:"width"`
+	Height          pgtype.Int4        `json:"height"`
 }
 
 type Autopilot struct {
@@ -1229,6 +1231,7 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
 }
 
 type MemberDelegationDay struct {
@@ -1382,6 +1385,8 @@ type Project struct {
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	CreatorType pgtype.Text        `json:"creator_type"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
 	Visibility  string             `json:"visibility"`
 }
 
@@ -1498,6 +1503,22 @@ type SkillToLabel struct {
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillVersion struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Content             string             `json:"content"`
+	Files               []byte             `json:"files"`
+	ContentHash         string             `json:"content_hash"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type Squad struct {
@@ -1672,7 +1693,8 @@ type User struct {
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone pgtype.Text `json:"timezone"`
+	Timezone            pgtype.Text `json:"timezone"`
+	WhatsNewSeenVersion pgtype.Text `json:"whats_new_seen_version"`
 }
 
 type UserComposioConnection struct {

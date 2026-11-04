@@ -370,6 +370,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"CUSTOM_FLAG":              "enabled",
 			"UNAUTHORIZED_TOKEN":       "daemon-secret",
 			"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+			"MULTICA_CLI_PATH":         "/task/bin/multica",
 			"MULTICA_SERVER_URL":       "https://task.example",
 			"MULTICA_TOKEN":            "mat_task",
 		}
@@ -385,7 +386,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_CLI_PATH", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}

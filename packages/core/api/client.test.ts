@@ -959,6 +959,21 @@ describe("ApiClient Inbox response schemas", () => {
 });
 
 describe("ApiClient", () => {
+  it("requests recursive issue history and tolerates malformed issue labels", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: "child-run", issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child", usage: [{ model: "test", input_tokens: 10 }] },
+      { id: "deep-run", issue_id: "grandchild", issue_identifier: 42, issue_title: { malformed: true } },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("parent", true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/parent/task-runs?scope=subtree");
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toMatchObject({ issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child" });
+    expect(tasks[0]?.usage?.[0]?.input_tokens).toBe(10);
+    expect(tasks[1]?.issue_identifier).toBeUndefined();
+    expect(tasks[1]?.issue_title).toBeUndefined();
+  });
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1671,6 +1686,26 @@ describe("ApiClient", () => {
       // surface a user-facing error instead of opening `undefined`.
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
+    });
+  });
+
+  describe("attachment dimensions", () => {
+    it.each([
+      [{ width: 3200, height: 2000 }, [3200, 2000]],
+      [{ width: "wide", height: -1 }, [undefined, undefined]],
+      [{ width: null, height: 0.5 }, [undefined, undefined]],
+      [{}, [undefined, undefined]],
+    ])("preserves the attachment with optional metadata %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect([att.width, att.height]).toEqual(expected);
     });
   });
 
@@ -2568,6 +2603,66 @@ describe("ApiClient refreshSkill response schema", () => {
       content: "",
       files: [],
     });
+  });
+});
+
+describe("ApiClient skill version response schemas", () => {
+  function stubJSON(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const summary = {
+    id: "ver-2",
+    skill_id: "skill-1",
+    version: 2,
+    name: "review-helper",
+    source: "restore",
+    restored_from_version: 1,
+    created_by: "user-1",
+    created_at: "2026-01-02T00:00:00Z",
+  };
+
+  it("parses the version list and maps unknown sources to update", async () => {
+    stubJSON([summary, { ...summary, id: "ver-1", version: 1, source: "future-kind" }]);
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result.map((v) => [v.version, v.source])).toEqual([
+      [2, "restore"],
+      [1, "update"],
+    ]);
+  });
+
+  it("falls back to an empty list when the response is malformed", async () => {
+    stubJSON({ versions: 42 });
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result).toEqual([]);
+  });
+
+  it("parses a version snapshot and defaults omitted fields", async () => {
+    const fetchMock = stubJSON({ ...summary, content: "# v2", files: [{ path: "a.md" }] });
+    const result = await new ApiClient("https://api.example.test").getSkillVersion("skill-1", 2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/skills/skill-1/versions/2");
+    expect(result).toMatchObject({
+      version: 2,
+      description: "",
+      content: "# v2",
+      files: [{ path: "a.md", content: "" }],
+    });
+  });
+
+  it("restores through POST and falls back to the empty skill on a malformed body", async () => {
+    const fetchMock = stubJSON({ skill: 42 });
+    const result = await new ApiClient("https://api.example.test").restoreSkillVersion("skill-1", 1);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/skills/skill-1/versions/1/restore");
+    expect((init as RequestInit | undefined)?.method).toBe("POST");
+    expect(result).toMatchObject({ id: "", files: [] });
   });
 });
 

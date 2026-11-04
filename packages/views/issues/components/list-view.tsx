@@ -631,7 +631,7 @@ function StatusAccordionItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
                   onClick={() => {
                     const defaults = {
                       status: status,
@@ -656,6 +656,16 @@ function StatusAccordionItem({
           ) : (
             rows
           )
+        ) : page.isError ? (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError
+            onRetry={page.retry}
+            errorLabel={t(($) => $.detail.section_load_failed_retry)}
+          />
         ) : (
           <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}

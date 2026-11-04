@@ -6,6 +6,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 
 const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
@@ -70,8 +71,10 @@ function renderSection(adapter = makeAdapter()) {
         wsId="ws-1"
         pathname="/acme/issues"
         plainRowsLit
-        issueLitInTree={false}
+        issueInAllIssues={false}
         activeIssueId={null}
+        litSource={null}
+        actions={actions as unknown as IssueViewActions}
       />
     </NavigationProvider>,
   );
@@ -106,13 +109,13 @@ describe("ViewsSection", () => {
     expect(screen.getByRole("button", { name: "Views" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("opens again to name a new view inline", () => {
+  it("opens again to show a new view, named in the page header", () => {
     useSidebarTreeStore.setState({ viewsCollapsed: true });
     renderSection();
 
     fireEvent.click(screen.getByRole("button", { name: "New view" }));
     expect(useSidebarTreeStore.getState().viewsCollapsed).toBe(false);
-    expect(actions.create).toHaveBeenCalledWith(expect.objectContaining({ renameIn: "sidebar" }));
+    expect(actions.create).toHaveBeenCalledWith(expect.objectContaining({ renameIn: "header" }));
   });
 
   it("lets every view expand, built-in or saved, whatever its filters", () => {

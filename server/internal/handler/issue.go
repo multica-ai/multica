@@ -800,7 +800,7 @@ type searchResult struct {
 // case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
 // trades the title, description, and comment content GIN fast paths for one
 // predictable pass over each relation within the selected workspace.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, projectID pgtype.UUID, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, term := range terms {
@@ -841,6 +841,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	hiddenProjectsParam := ""
 	if len(hiddenProjectIDs) > 0 {
 		hiddenProjectsParam = nextArg(hiddenProjectIDs)
+	}
+
+	// Bound before limit/offset so the handler's args[len-2]/args[len-1] fill
+	// keeps landing on the pagination placeholders.
+	projectParam := ""
+	if projectID.Valid {
+		projectParam = nextArg(projectID)
 	}
 
 	limitParam := nextArg(nil)
@@ -885,6 +892,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	issueWhere := "i.workspace_id = " + wsParam
+	if projectParam != "" {
+		issueWhere += " AND i.project_id = " + projectParam
+	}
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
@@ -960,6 +970,17 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		commentSnippetPredicate,
 	))
 
+	commentWhere := "c.workspace_id = " + wsParam
+	if terminalStatusesParam != "" || projectParam != "" {
+		// Prune comments for ineligible issues before LOWER(c.content) and
+		// aggregation. Repeating the workspace predicate lets the planner drive
+		// comment index lookups from eligible issues.
+		commentWhere += fmt.Sprintf(
+			" AND EXISTS (SELECT 1 FROM issue i WHERE i.id = c.issue_id AND %s)",
+			issueWhere,
+		)
+	}
+
 	// PostgreSQL otherwise inlines this scalar LATERAL subquery and recomputes
 	// LOWER(c.content) for every flag. OFFSET 0 is the intentional planner fence
 	// that keeps the long comment body lowercased once per row. Future indexable
@@ -974,13 +995,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 				SELECT LOWER(c.content) AS lowered
 				OFFSET 0
 			) lowered_comment
-			WHERE c.workspace_id = %s
+			WHERE %s
 			GROUP BY c.issue_id
 		) aggregated_comments
 		WHERE %s
 	)`,
 		strings.Join(commentFlagColumns, ",\n\t\t\t\t"),
-		wsParam,
+		commentWhere,
 		strings.Join(commentCandidateFlags, " OR "),
 	)
 
@@ -1154,6 +1175,16 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Malformed UUIDs return 400, matching ListIssues.
+	var projectFilter pgtype.UUID
+	if p := r.URL.Query().Get("project_id"); p != "" {
+		id, ok := parseUUIDOrBadRequest(w, p, "project_id")
+		if !ok {
+			return
+		}
+		projectFilter = id
+	}
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 	var terminalStatusKeys []string
@@ -1174,7 +1205,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, hidden.Param()...)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, projectFilter, hidden.Param()...)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -2907,7 +2938,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
-	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, hasSquad, len(req.AttachmentIDs) > 0); status != 0 {
+	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, len(req.AttachmentIDs) > 0); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
@@ -3035,26 +3066,19 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, source stri
 	return h.checkQuickCreateDaemonVersionAtLeast(ctx, source, runtimeID, agentpkg.MinQuickCreateCLIVersion)
 }
 
-// checkQuickCreateQoderLimits rejects quick-create requests that a Qoder
-// Cloud Agents leader can create but not run afterwards. The bridge drafts and
-// creates the issue itself, but the run that the new issue's assignment
-// dispatches next fails on the bridge for a squad-leader task or an issue with
-// attachments, so the user would see "created" followed by a failed run.
-func (h *Handler) checkQuickCreateQoderLimits(ctx context.Context, source string, runtimeID pgtype.UUID, squad, attachments bool) (int, map[string]any) {
-	if !squad && !attachments {
+// checkQuickCreateQoderLimits keeps attachment-backed quick-create blocked:
+// the bridge can run squad leaders, but cannot draft from these attachments.
+func (h *Handler) checkQuickCreateQoderLimits(ctx context.Context, source string, runtimeID pgtype.UUID, attachments bool) (int, map[string]any) {
+	if !attachments {
 		return 0, nil
 	}
 	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
 	if err != nil || rt.Provider != qoderruntime.Provider {
 		return 0, nil
 	}
-	reason := "Qoder Cloud Agents cannot lead a squad; pick the agent directly to create the issue"
-	if !squad {
-		reason = "Qoder Cloud Agents cannot read attachments; remove them or pick another agent"
-	}
 	return http.StatusUnprocessableEntity, map[string]any{
 		"code":   "agent_unavailable",
-		"reason": reason,
+		"reason": "Qoder Cloud Agents cannot read attachments; remove them or pick another agent",
 	}
 }
 
@@ -3141,7 +3165,14 @@ type CreateIssueRequest struct {
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
 
-	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+	AllowDuplicate         bool `json:"allow_duplicate,omitempty"`
+	PRAutoCompleteDisabled bool `json:"pr_auto_complete_disabled,omitempty"`
+}
+
+// CreateIssueResponse echoes the atomic PR setting without expanding issue reads.
+type CreateIssueResponse struct {
+	IssueResponse
+	PRAutoCompleteDisabled bool `json:"pr_auto_complete_disabled"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3552,26 +3583,27 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		Properties:     properties,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:            wsUUID,
+		Title:                  req.Title,
+		Description:            ptrToText(req.Description),
+		Status:                 status,
+		Priority:               priority,
+		AssigneeType:           assigneeType,
+		AssigneeID:             assigneeID,
+		CreatorType:            creatorType,
+		CreatorID:              parseUUID(actualCreatorID),
+		ParentIssueID:          parentIssueID,
+		ProjectID:              projectID,
+		StartDate:              startDate,
+		DueDate:                dueDate,
+		OriginType:             originType,
+		OriginID:               originID,
+		Stage:                  ptrToInt4(req.Stage),
+		AttachmentIDs:          attachmentIDs,
+		LabelIDs:               labelIDs,
+		Properties:             properties,
+		AllowDuplicate:         req.AllowDuplicate,
+		PRAutoCompleteDisabled: req.PRAutoCompleteDisabled,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3646,7 +3678,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// understood label_ids and skip its legacy post-create attach fallback.
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
-	writeJSON(w, http.StatusCreated, resp)
+	if req.PRAutoCompleteDisabled {
+		h.recordPRAutoCompleteActivity(r.Context(), issue, creatorType, actualCreatorID, true)
+	}
+	writeJSON(w, http.StatusCreated, CreateIssueResponse{IssueResponse: resp, PRAutoCompleteDisabled: req.PRAutoCompleteDisabled})
 }
 
 type UpdateIssueRequest struct {
@@ -4243,25 +4278,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	willRun = willRun && !req.SuppressRun
 
 	updatedPayload := map[string]any{
-		"issue":               resp,
-		"assignee_changed":    assigneeChanged,
-		"status_changed":      statusChanged,
-		"priority_changed":    priorityChanged,
-		"project_changed":     projectChanged,
-		"start_date_changed":  startDateChanged,
-		"due_date_changed":    dueDateChanged,
-		"description_changed": descriptionChanged,
-		"title_changed":       titleChanged,
-		"prev_title":          prevIssue.Title,
-		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
-		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
-		"prev_status":         prevIssue.Status,
-		"prev_priority":       prevIssue.Priority,
-		"prev_start_date":     prevStartDate,
-		"prev_due_date":       prevDueDate,
-		"prev_description":    textToPtr(prevIssue.Description),
-		"creator_type":        prevIssue.CreatorType,
-		"creator_id":          uuidToString(prevIssue.CreatorID),
+		"issue":                resp,
+		"assignee_changed":     assigneeChanged,
+		"status_changed":       statusChanged,
+		"priority_changed":     priorityChanged,
+		"project_changed":      projectChanged,
+		"start_date_changed":   startDateChanged,
+		"due_date_changed":     dueDateChanged,
+		"description_changed":  descriptionChanged,
+		"title_changed":        titleChanged,
+		"parent_changed":       prevIssue.ParentIssueID != issue.ParentIssueID,
+		"prev_parent_issue_id": uuidToPtr(prevIssue.ParentIssueID),
+		"prev_title":           prevIssue.Title,
+		"prev_assignee_type":   textToPtr(prevIssue.AssigneeType),
+		"prev_assignee_id":     uuidToPtr(prevIssue.AssigneeID),
+		"prev_status":          prevIssue.Status,
+		"prev_priority":        prevIssue.Priority,
+		"prev_start_date":      prevStartDate,
+		"prev_due_date":        prevDueDate,
+		"prev_description":     textToPtr(prevIssue.Description),
+		"creator_type":         prevIssue.CreatorType,
+		"creator_id":           uuidToString(prevIssue.CreatorID),
 		// Both ends of a mark change ride here: the activity log records it
 		// and clients refresh the two issues' relations from it.
 		"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
@@ -4529,6 +4566,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
+		return
+	}
+	if !h.requireIssueDeletion(w, r, issue.WorkspaceID, []db.Issue{issue}) {
 		return
 	}
 
@@ -5050,6 +5090,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"status_changed":             statusChanged,
 			"priority_changed":           priorityChanged,
 			"project_changed":            projectChanged,
+			"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
+			"prev_title":                 prevIssue.Title,
+			"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
+			"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
 			"prev_status":                prevIssue.Status,
 			"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 			"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
@@ -5144,6 +5188,11 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		seenIssueIDs[issueUUID] = struct{}{}
 		issues = append(issues, issue)
 		excludedIDs = append(excludedIDs, issue.ID)
+	}
+	if !h.requireIssueDeletion(w, r, wsUUID, issues) {
+		return
+	}
+	for _, issue := range issues {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}
