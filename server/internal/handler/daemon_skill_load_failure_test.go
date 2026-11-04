@@ -117,7 +117,7 @@ func TestClaimTaskByRuntime_SkillReadFailurePreservesTask(t *testing.T) {
 			failing := newSkillFileReadFailureHandler(t)
 			runtimeID, taskID, _ := seedSkillLoadFixture(t, ctx, tc.fixture)
 
-			req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-read-fail-daemon")
+			req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 			if tc.capability != "" {
 				req.Header.Set("X-Client-Capabilities", tc.capability)
 			}
@@ -161,12 +161,12 @@ func TestResolveTaskSkillBundles_SkillReadFailureReturns500(t *testing.T) {
 
 	// The same request succeeds on the healthy handler, so the 500 below is
 	// the injected read failure and not a malformed fixture.
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", body, testWorkspaceID, "skill-read-fail-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", body)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
 
 	failing := newSkillFileReadFailureHandler(t)
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", body, testWorkspaceID, "skill-read-fail-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", body)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	testutil.Call(t, failing.ResolveTaskSkillBundles, req).Want(http.StatusInternalServerError)
 }

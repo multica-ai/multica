@@ -147,9 +147,7 @@ var (
 // state on the machine running the tests.
 var syncDaemonAutostart = syncDaemonAutostartDefault
 
-// ---------------------------------------------------------------------------
 // command wiring
-// ---------------------------------------------------------------------------
 
 var daemonAutostartCmd = &cobra.Command{
 	Use:   "autostart",
@@ -394,9 +392,7 @@ func mechanismLabel(key string) string {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // the `daemon start` hook
-// ---------------------------------------------------------------------------
 
 // shouldManageAutostart decides whether the hint/refresh side of
 // `daemon start` applies to this invocation:
@@ -523,9 +519,7 @@ func autostartProfileSlug(profile string) string {
 	return fmt.Sprintf("%s-%06x", slug, h.Sum32()&0xffffff)
 }
 
-// ---------------------------------------------------------------------------
 // platform-agnostic builders (pure; exercised by tests on every OS)
-// ---------------------------------------------------------------------------
 
 // windowsQuoteArg quotes one argv element for a Windows command line using
 // the CRT parsing rules (backslashes before quotes and at the end of a

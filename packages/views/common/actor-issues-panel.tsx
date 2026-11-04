@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { ListTodo, Search } from "lucide-react";
+import { ListTodo, Search } from "@multica/ui/icons";
 import type {
   Issue,
   IssueTableFacetSpec,
@@ -23,6 +23,7 @@ import {
 import { FilterChipsBar } from "../issues/components/filter-chips-bar";
 import { IssueSurface } from "../issues/surface/issue-surface";
 import { useT } from "../i18n";
+import { CollectionNoMatches, CollectionPageState } from "../layout/collection-page";
 import { PAGE_GUTTER } from "../layout/page-header";
 
 export type TaskActorType = "member" | "agent";
@@ -156,17 +157,16 @@ export function ActorIssuesPanel({
       )}
       renderEmpty={() =>
         search.trim() === "" ? (
-          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <ListTodo className="h-10 w-10 text-faint-foreground" />
-            <p className="text-body">
-              {t(($) => $.actor_issues.empty[scope].title)}
-            </p>
-          </div>
+          <CollectionPageState
+            icon={ListTodo}
+            title={t(($) => $.actor_issues.empty[scope].title)}
+          />
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Search className="h-10 w-10 text-faint-foreground" />
-            <p className="text-body">{t(($) => $.actor_issues.search_empty)}</p>
-          </div>
+          <CollectionNoMatches
+            title={t(($) => $.actor_issues.search_empty)}
+            onReset={() => setSearch("")}
+            hasSearch
+          />
         )
       }
     />

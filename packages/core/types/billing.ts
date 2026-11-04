@@ -181,7 +181,6 @@ export interface CreateBillingPortalSessionResponse {
   url: string;
 }
 
-// ---------------------------------------------------------------------------
 // Workspace subscriptions (`/api/cloud-subscriptions/*`)
 //
 // Workspace-scoped, unlike the account-level wallet types above. The server

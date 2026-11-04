@@ -1,4 +1,10 @@
 {
+  "daemon_setup": {
+    "loading": "Chargement des paramètres de connexion...",
+    "error": "Impossible de charger les paramètres de connexion. Vérifiez votre connexion ; une nouvelle tentative sera effectuée automatiquement.",
+    "unknown": "Ce serveur n’a pas confirmé ses paramètres de connexion. Demandez à votre administrateur de mettre à jour le serveur.",
+    "incomplete": "Les paramètres de connexion sont incomplets. Demandez à votre administrateur de configurer les URL publiques de ce serveur."
+  },
   "avatar_upload": {
     "change": "Changer d'avatar",
     "remove": "Supprimer",
@@ -35,6 +41,7 @@
   "cancel": "Annuler",
   "delete": "Supprimer",
   "confirm": "Confirmer",
+  "more_actions": "Plus d'actions",
   "loading": "Chargement...",
   "time": {
     "just_now": "à l'instant",

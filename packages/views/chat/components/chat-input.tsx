@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -24,7 +24,8 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -694,7 +695,7 @@ export function ChatInput({
                     title={t(($) => $.input.change_project_context)}
                     onClear={() => onProjectChange?.(null)}
                     clearLabel={t(($) => $.input.remove_project_context)}
-                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                    className="border-surface-border bg-surface-raised font-medium text-foreground"
                   />
                 }
               />
@@ -773,13 +774,22 @@ export function ChatInput({
               (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
             }
             onStop={onStop}
-            tooltip={gate.uploading
+            // While blocked, the placeholder copy is exactly the reason.
+            disabledReason={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
-                : sendShortcut
-                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                  : t(($) => $.input.send_tooltip)}
+              : disabled || noAgent
+                ? placeholder
+                : undefined}
+            tooltip={isRunning
+              ? t(($) => $.input.queue_send_tooltip)
+              : sendShortcut
+                ? (
+                  <>
+                    {t(($) => $.input.send_tooltip)}
+                    <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                  </>
+                )
+                : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : isRunning

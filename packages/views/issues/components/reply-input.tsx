@@ -9,7 +9,8 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -22,9 +23,7 @@ import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface ReplyInputProps {
   issueId: string;
@@ -51,9 +50,7 @@ interface ReplyInputProps {
 
 const NEVER_STEER_BY_DEFAULT = () => false;
 
-// ---------------------------------------------------------------------------
 // ReplyInput
-// ---------------------------------------------------------------------------
 
 function ReplyInput({
   issueId,
@@ -80,7 +77,7 @@ function ReplyInput({
   // Quick actions in the `/` menu — same catalog and same insert-don't-run
   // behavior as the top-level composer. A reply posts to the same issue, so
   // `/` has to offer the same thing here (MUL-5588).
-  const quickActionMenu = useQuickActionMenu(issueId);
+  const quickActionMenu = useQuickActionMenu();
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -165,17 +162,15 @@ function ReplyInput({
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
-    containerRef: composerRef,
     normalize: (raw) => {
       const current = draftKey ? useCommentDraftStore.getState().getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS;
       return !targetMissing && hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
-    // A thread reply is rarely the last thing the user has to say, so the caret
-    // stays in the box for the next one. Unlike a top-level comment, the posted
-    // reply lands directly above the box that is still focused — nothing needs
-    // to pull the eye elsewhere. `containerRef` keeps this from stealing focus
-    // if the user moved to another composer while the reply was in flight.
-    afterAccepted: () => (editorScrubbedRef.current ? "refocus" : "none"),
+    // Drop the caret once the reply is posted, same as a top-level comment: a
+    // focused editor swallows the page's keyboard shortcuts, so keeping it here
+    // would trap the user until they click away. Bound to `editorScrubbedRef`
+    // so a draft the stale-submit guard kept stays focused.
+    afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;
       const { suppressAgentIds, steerTaskIds } = routing;
@@ -338,13 +333,19 @@ function ReplyInput({
             disabled={!canSend}
             loading={submitting}
             busy={gate.uploading}
-            tooltip={gate.uploading
+            disabledReason={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : !canSend && annotations.length > 0 && !targetMissing
                 ? t(($) => $.reply.annotations.intent_hint)
-              : sendShortcut
-                ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                : t(($) => $.comment.send_tooltip)}
+                : undefined}
+            tooltip={sendShortcut
+              ? (
+                <>
+                  {t(($) => $.comment.send_tooltip)}
+                  <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                </>
+              )
+              : t(($) => $.comment.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.comment.send_tooltip)}

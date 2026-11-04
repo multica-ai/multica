@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "@multica/ui/icons";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -43,6 +43,7 @@ import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/
 import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -205,6 +206,25 @@ export function LarkTab() {
   );
 }
 
+function LarkReceiptGuidance({
+  installation,
+  showStatus = true,
+}: {
+  installation: LarkInstallation;
+  showStatus?: boolean;
+}) {
+  const { t } = useT("settings");
+  const verified = !!installation.first_message_received_at;
+  return (
+    <div className="space-y-1 text-caption text-muted-foreground">
+      {showStatus && (
+        <p>{verified ? t(($) => $.lark.inbound_verified) : t(($) => $.lark.inbound_pending)}</p>
+      )}
+      <p>{verified ? t(($) => $.lark.inbound_verified_hint) : t(($) => $.lark.inbound_pending_hint)}</p>
+    </div>
+  );
+}
+
 function InstallationRow({
   installation,
   canManage,
@@ -249,6 +269,7 @@ function InstallationRow({
               </span>
             )}
           </p>
+          {isActive && <LarkReceiptGuidance installation={installation} />}
           <p className="text-micro text-muted-foreground">
             {t(($) => $.lark.installed_at_label, {
               when: new Date(installation.installed_at).toLocaleString(locale),
@@ -394,40 +415,46 @@ export function LarkAgentBindButton({
         className={cn("flex flex-wrap items-center gap-2", className)}
         data-testid="lark-agent-bind-buttons"
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogRegion("feishu")}
-          disabled={!agentId}
-          title={
+        <TooltipHint
+          label={
             agentName
               ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
               : undefined
           }
-          data-testid="lark-agent-bind-feishu"
         >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.lark.bind_button_feishu)}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogRegion("feishu")}
+            disabled={!agentId}
+            data-testid="lark-agent-bind-feishu"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.lark.bind_button_feishu)}
+          </Button>
+        </TooltipHint>
         {/* MUL-3083: Lark (international) bind entry is temporarily hidden —
             see LARK_INTL_CONNECT_ENABLED. Mainland Feishu (above) is
             unaffected. */}
         {LARK_INTL_CONNECT_ENABLED && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDialogRegion("lark")}
-            disabled={!agentId}
-            title={
+          <TooltipHint
+            label={
               agentName
                 ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
                 : undefined
             }
-            data-testid="lark-agent-bind-lark"
           >
-            <ExternalLink className="h-3 w-3" />
-            {t(($) => $.lark.bind_button_lark)}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDialogRegion("lark")}
+              disabled={!agentId}
+              data-testid="lark-agent-bind-lark"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t(($) => $.lark.bind_button_lark)}
+            </Button>
+          </TooltipHint>
         )}
       </div>
       {dialogRegion && (
@@ -445,7 +472,7 @@ export function LarkAgentBindButton({
 
 // LarkAgentBotStatusRow is the compact, read-only connected affordance the
 // agent inspector (left column) renders instead of the full badge. It shows
-// only the status — green dot, Feishu/Lark region chip, "Connected to Lark"
+// only the receipt status and Feishu/Lark region chip
 // — and is a single full-width button that deep-links into the Integrations
 // tab, where Manage / Disconnect live. Keeping the destructive action out of
 // the always-visible sidebar means it exists in exactly one place.
@@ -469,13 +496,18 @@ function LarkAgentBotStatusRow({
       )}
       data-testid="lark-agent-bot-status"
     >
-      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+      <span className={cn(
+        "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+        installation.first_message_received_at ? "bg-success" : "bg-muted-foreground",
+      )} />
       <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
         {installation.region === "lark"
           ? t(($) => $.lark.region_lark)
           : t(($) => $.lark.region_feishu)}
       </span>
-      <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
+      <span className="truncate">{installation.first_message_received_at
+        ? t(($) => $.lark.inbound_verified)
+        : t(($) => $.lark.inbound_pending)}</span>
       <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0" />
     </button>
   );
@@ -566,29 +598,37 @@ function LarkAgentBotConnectedBadge({
           and stops message delivery. */}
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
-          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <span className={cn(
+        "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+        installation.first_message_received_at ? "bg-success" : "bg-muted-foreground",
+      )} />
           <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
             {installation.region === "lark"
               ? t(($) => $.lark.region_lark)
               : t(($) => $.lark.region_feishu)}
           </span>
-          <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
+          <span className="truncate">{installation.first_message_received_at
+        ? t(($) => $.lark.inbound_verified)
+        : t(($) => $.lark.inbound_pending)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.lark.disconnect)}
-          data-testid="lark-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.lark.disconnecting)
-            : t(($) => $.lark.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.lark.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.lark.disconnect)}
+            data-testid="lark-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.lark.disconnecting)
+              : t(($) => $.lark.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
+
+      <LarkReceiptGuidance installation={installation} showStatus={false} />
 
       {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console
           app page. Demoted below the status row so it no longer competes
@@ -611,13 +651,8 @@ function LarkAgentBotConnectedBadge({
           : t(($) => $.lark.agent_bot_manage_link_feishu)}
       </a>
 
-      {/* Row 3: the check a silent Bot almost always needs (#8496). An app
-          whose events go to a request URL instead of the long connection
-          binds fine and shows exactly this badge while receiving nothing,
-          and this row is where someone looks when the Bot stays quiet —
-          the install dialog closes itself a beat after success. */}
+      {/* Keep troubleshooting reachable after the install dialog closes. */}
       <p className="text-caption text-muted-foreground">
-        {t(($) => $.lark.agent_bot_silent_hint)}{" "}
         <a
           href={larkDocsUrl(i18n.language)}
           target="_blank"

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
 import {
+  archivedInboxFacetsOptions,
+  archivedInboxPagesOptions,
   deduplicateArchivedInboxItems,
   deduplicateInboxItems,
   hasOtherWorkspaceUnread,
@@ -134,6 +137,19 @@ describe("deduplicateArchivedInboxItems", () => {
     ]);
 
     expect(merged).toHaveLength(2);
+  });
+});
+
+describe("archived inbox options", () => {
+  it("keeps an idle selection out of archive query keys", () => {
+    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, idleOnly: true };
+
+    expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
+      archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
+    );
+    expect(archivedInboxFacetsOptions("ws", idle).queryKey).toEqual(
+      archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
+    );
   });
 });
 

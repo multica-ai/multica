@@ -1,11 +1,12 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ListChecks, Pencil } from "lucide-react";
+import { ListChecks, Pencil } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
@@ -14,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
@@ -71,16 +73,16 @@ export function SystemWakeupRow({
           render={
             <button
               type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-1.5 text-left text-caption hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
-          <span className="flex min-h-8 min-w-0 items-start gap-2 py-1 pl-2 pr-1">
+          <span className="flex min-h-7 min-w-0 items-center gap-2 pl-2 pr-1">
             <ListChecks className="mt-px size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="line-clamp-2 min-w-0 break-words font-medium">{title}</span>
+            <span className="line-clamp-2 min-w-0 break-words">{title}</span>
             <SystemBadge />
           </span>
-          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 ${paused ? "text-warning" : "text-muted-foreground"}`}>
+          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 text-caption ${paused ? "text-warning" : "text-muted-foreground"}`}>
             {summary}
           </span>
         </PopoverTrigger>
@@ -122,8 +124,9 @@ export function SystemWakeupRow({
           </p>
         </PopoverContent>
       </Popover>
-      <div className="z-10 col-start-2 row-start-1 flex min-h-11 items-center self-start px-2">
+      <div className="z-10 col-start-2 row-start-1 flex min-h-10 items-center self-start px-2">
         <Switch
+          size="sm"
           checked={rule.enabled}
           disabled={update.isPending}
           aria-label={t(($) => $.wakeups.system.toggle)}
@@ -163,11 +166,11 @@ function InstructionEditor({
       <div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-caption font-medium">{label}</p>
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
-            aria-label={t(($) => $.wakeups.system.instruction_edit)}
+            label={t(($) => $.wakeups.system.instruction_edit)}
             onClick={() => {
               setValue(rule.instruction);
               setError("");
@@ -175,16 +178,18 @@ function InstructionEditor({
             }}
           >
             <Pencil aria-hidden="true" />
-          </Button>
+          </IconButton>
         </div>
         {rule.instruction ? (
           <p className="whitespace-pre-wrap break-words text-caption">{rule.instruction}</p>
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
-            <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words" title={rule.default_instruction}>
-              {rule.default_instruction}
-            </p>
+            <TruncatedTooltip content={rule.default_instruction}>
+              <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">
+                {rule.default_instruction}
+              </p>
+            </TruncatedTooltip>
           </div>
         )}
       </div>

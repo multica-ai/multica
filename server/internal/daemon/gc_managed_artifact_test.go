@@ -80,7 +80,7 @@ func TestManagedArtifact_IdleActiveChatReclaimsSandboxBin(t *testing.T) {
 	if action != gcActionCleanManagedArtifacts {
 		t.Fatalf("want gcActionCleanManagedArtifacts, got %d", action)
 	}
-	d.applyGCAction(taskDir, action, stats)
+	d.applyGCAction(context.Background(), taskDir, action, stats)
 
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir,
@@ -212,7 +212,7 @@ func TestManagedArtifact_NonTerminalAutopilotAndQuickCreate(t *testing.T) {
 		if action != gcActionCleanManagedArtifacts {
 			t.Fatalf("%s: want gcActionCleanManagedArtifacts, got %d", tc.name, action)
 		}
-		d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+		d.applyGCAction(context.Background(), taskDir, action, &gcStats{byPattern: map[string]int{}})
 		assertGone(t, taskDir, sandboxBinRel)
 		assertKept(t, taskDir, ".gc_meta.json")
 	}
@@ -261,7 +261,7 @@ func TestManagedArtifact_LocalDirectoryChatReclaimsSandboxBin(t *testing.T) {
 	if action != gcActionCleanManagedArtifacts {
 		t.Fatalf("want gcActionCleanManagedArtifacts, got %d", action)
 	}
-	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(context.Background(), taskDir, action, &gcStats{byPattern: map[string]int{}})
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir, "logs/run.log", ".gc_meta.json")
 }
@@ -287,7 +287,7 @@ func TestManagedArtifact_SecondCycleIsANoOp(t *testing.T) {
 	if first != gcActionCleanManagedArtifacts {
 		t.Fatalf("first cycle: want gcActionCleanManagedArtifacts, got %d", first)
 	}
-	d.applyGCAction(taskDir, first, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(context.Background(), taskDir, first, &gcStats{byPattern: map[string]int{}})
 	assertGone(t, taskDir, sandboxBinRel)
 
 	for cycle := 2; cycle <= 3; cycle++ {
@@ -460,7 +460,7 @@ func TestManagedArtifact_DirectRemovalMatchesTreeWalk(t *testing.T) {
 			setup(t, walked)
 			setup(t, direct)
 
-			wRemoved, wBytes, wPattern := d.cleanTaskArtifactsMatching(walked, walkMatcher)
+			wRemoved, wBytes, wPattern := d.cleanTaskArtifactsMatching(context.Background(), walked, walkMatcher)
 			dRemoved, dBytes, dPattern := d.cleanManagedTaskArtifacts(direct)
 
 			if wRemoved != dRemoved || wBytes != dBytes || fmt.Sprint(wPattern) != fmt.Sprint(dPattern) {

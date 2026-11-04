@@ -15,6 +15,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -69,38 +70,78 @@ func (r inboxWaitRig) deliver(ctx context.Context, item map[string]any) (bool, t
 // measured on the request that created the comment.
 func TestTryDeliverInbox_MemberAuthoredPushDoesNotWaitForTheAcceptanceWindow(t *testing.T) {
 	t.Parallel()
-	// The production default: cmd/server does not set AcceptanceWindow.
-	rig := newInboxWaitRig(t, 2*time.Second)
-	item := agentInboxItem("new_comment", inboxWaitAgentID)
-	item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
+	synctest.Test(t, func(t *testing.T) {
+		// The production default: cmd/server does not set AcceptanceWindow.
+		rig := newInboxWaitRig(t, 2*time.Second)
+		item := agentInboxItem("new_comment", inboxWaitAgentID)
+		item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
 
-	got, elapsed := rig.deliver(context.Background(), item)
-	if elapsed > 300*time.Millisecond {
-		t.Fatalf("a member-authored push blocked %v; a verdict with no fallback behind it must not be waited for", elapsed)
-	}
-	if !got {
-		t.Error("tryDeliverInbox = false; the bus took the frame and there is no second route to report a miss to")
-	}
-	if n := rig.dedupe.claimStateCount(); n != 0 {
-		t.Errorf("the claim was polled %d times; a member-authored push must not enter the acceptance window", n)
-	}
+		got, elapsed := rig.deliver(context.Background(), item)
+		if elapsed != 0 {
+			t.Fatalf("a member-authored push blocked %v; a verdict with no fallback behind it must not be waited for", elapsed)
+		}
+		if !got {
+			t.Error("tryDeliverInbox = false; the bus took the frame and there is no second route to report a miss to")
+		}
+		if n := rig.dedupe.claimStateCount(); n != 0 {
+			t.Errorf("the claim was polled %d times; a member-authored push must not enter the acceptance window", n)
+		}
+	})
 }
+
+// pendingInboxDeadline models a deadline whose cancellation callback has not run.
+type pendingInboxDeadline struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c pendingInboxDeadline) Deadline() (time.Time, bool) { return c.deadline, true }
 
 // TestTryDeliverInbox_WaitIsBoundedByTheCallersDeadline: the wait runs on the
 // request's goroutine, so the caller's budget has to cap it. A 3s window with a
 // 150ms caller must come back in the caller's time, not the window's.
 func TestTryDeliverInbox_WaitIsBoundedByTheCallersDeadline(t *testing.T) {
 	t.Parallel()
-	rig := newInboxWaitRig(t, 3*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
+	for _, tc := range []struct {
+		name                string
+		cancellationPending bool
+	}{
+		{name: "canceled"},
+		{name: "cancellation_pending", cancellationPending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const budget = 150 * time.Millisecond
+				rig := newInboxWaitRig(t, 3*time.Second)
+				var ctx context.Context
+				if tc.cancellationPending {
+					ctx = pendingInboxDeadline{Context: context.Background(), deadline: time.Now().Add(budget)}
+				} else {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(context.Background(), budget)
+					defer cancel()
+				}
 
-	got, elapsed := rig.deliver(ctx, agentInboxItem("new_comment", inboxWaitAgentID))
-	if elapsed > 900*time.Millisecond {
-		t.Fatalf("the push blocked %v with a 150ms caller budget; the caller's ctx must cap the window", elapsed)
-	}
-	if got {
-		t.Error("tryDeliverInbox = true; a caller that ran out of time confirmed nothing")
+				item := agentInboxItem("new_comment", inboxWaitAgentID)
+				got, elapsed := rig.deliver(ctx, item)
+				if elapsed != budget {
+					t.Fatalf("the push blocked %v, want exactly the caller's %v budget", elapsed, budget)
+				}
+				if got {
+					t.Error("tryDeliverInbox = true; a caller that ran out of time confirmed nothing")
+				}
+				if tc.cancellationPending && ctx.Err() != nil {
+					t.Fatal("the deadline's cancellation must remain pending to exercise the timer ordering")
+				}
+				if n := rig.relay.publishedTo(inboxWaitFallbackInst); n != 0 {
+					t.Errorf("the fallback was offered %d frames after the caller's deadline, want 0", n)
+				}
+				eventID := relayInboxEventID(itemIDOf(item), "33333333-3333-3333-3333-333333333333", inboxWaitAgentInst)
+				if rig.dedupe.holds(dedupeKey(eventID)) {
+					t.Error("the unconfirmed delivery was fenced after the caller's deadline")
+				}
+			})
+		})
 	}
 }
 
@@ -109,26 +150,29 @@ func TestTryDeliverInbox_WaitIsBoundedByTheCallersDeadline(t *testing.T) {
 // return, leaving the cost at exactly one window rather than two.
 func TestTryDeliverInbox_FallbackAttemptDoesNotWaitAgain(t *testing.T) {
 	t.Parallel()
-	// Small enough to keep the test quick, big enough that one window is
-	// several polls and two windows would be unmistakable.
-	rig := newInboxWaitRig(t, 400*time.Millisecond)
+	// Virtual time keeps CI scheduling delays from consuming the acceptance
+	// poll's timeout cushion while still exercising the real relay and timers.
+	synctest.Test(t, func(t *testing.T) {
+		const window = 400 * time.Millisecond
+		rig := newInboxWaitRig(t, window)
 
-	got, elapsed := rig.deliver(context.Background(), agentInboxItem("new_comment", inboxWaitAgentID))
-	if !got {
-		t.Error("tryDeliverInbox = false; the fallback publish was accepted and had no route behind it")
-	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("the push took %v for a 400ms window; the fallback must not wait again", elapsed)
-	}
-	// One window at step = window/8 is about nine polls; two would be about
-	// eighteen. The bound sits between them.
-	if n := rig.dedupe.claimStateCount(); n > 12 {
-		t.Errorf("the claim was polled %d times; the fallback attempt paid a second acceptance window", n)
-	}
-	if n := rig.relay.publishedTo(inboxWaitFallbackInst); n != 1 {
-		t.Errorf("the recipient-wide bot was offered %d frames, want 1", n)
-	}
-	if n := rig.relay.publishedTo(inboxWaitAgentInst); n != 1 {
-		t.Errorf("the acting agent's bot was offered %d frames, want 1", n)
-	}
+		got, elapsed := rig.deliver(context.Background(), agentInboxItem("new_comment", inboxWaitAgentID))
+		if !got {
+			t.Error("tryDeliverInbox = false; the fallback publish was accepted and had no route behind it")
+		}
+		if elapsed != window {
+			t.Fatalf("the push took %v, want exactly one acceptance window (%v)", elapsed, window)
+		}
+		// One window at step = window/8 is about nine polls; two would be about
+		// eighteen. The bound sits between them.
+		if n := rig.dedupe.claimStateCount(); n > 12 {
+			t.Errorf("the claim was polled %d times; the fallback attempt paid a second acceptance window", n)
+		}
+		if n := rig.relay.publishedTo(inboxWaitFallbackInst); n != 1 {
+			t.Errorf("the recipient-wide bot was offered %d frames, want 1", n)
+		}
+		if n := rig.relay.publishedTo(inboxWaitAgentInst); n != 1 {
+			t.Errorf("the acting agent's bot was offered %d frames, want 1", n)
+		}
+	})
 }

@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import { describe, expect, it, vi } from "vitest";
 import {
   HTML_BLOCK_MAX_CONTENT_PX,
   HTML_BLOCK_MESSAGE_KEY,
@@ -14,6 +15,42 @@ import {
 import { __FRAGMENT_NAV_SHIM__ } from "./iframe-fragment-nav";
 
 const THEME = { declarations: "--foreground:black;--chart-1:blue", colorScheme: "dark" as const };
+
+describe("HTML block bridge", () => {
+  it("repeats an unchanged height only when its parent requests a measurement", () => {
+    const listeners = new Map<string, (event?: unknown) => void>();
+    const parent = { postMessage: vi.fn() };
+    runInNewContext(__HTML_BLOCK_BRIDGE__, {
+      parent,
+      window: { addEventListener: (type: string, listener: (event?: unknown) => void) => listeners.set(type, listener) },
+      document: {
+        readyState: "complete",
+        body: { children: [] },
+        createRange: () => ({
+          selectNodeContents: () => {},
+          getBoundingClientRect: () => ({ width: 100, height: 200, bottom: 200 }),
+        }),
+      },
+      getComputedStyle: () => ({}),
+    });
+    const height = { [HTML_BLOCK_MESSAGE_KEY]: 1, type: "height", height: 200 };
+    expect(parent.postMessage).toHaveBeenLastCalledWith(height, "*");
+    listeners.get("load")!();
+    expect(parent.postMessage).toHaveBeenCalledTimes(1);
+
+    const request = { [HTML_BLOCK_MESSAGE_KEY]: 1, type: "measure" };
+    listeners.get("message")!({ source: {}, data: request });
+    listeners.get("message")!({ source: parent, data: { type: "measure" } });
+    listeners.get("message")!({ source: parent, data: { ...request, type: "other" } });
+    expect(parent.postMessage).toHaveBeenCalledTimes(1);
+
+    listeners.get("message")!({ source: parent, data: request });
+    expect(parent.postMessage).toHaveBeenCalledTimes(2);
+    expect(parent.postMessage).toHaveBeenLastCalledWith(height, "*");
+    listeners.get("load")!();
+    expect(parent.postMessage).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("buildHtmlBlockDocument", () => {
   it("puts the theme and bridge in front of the markup and the fragment shim after it", () => {

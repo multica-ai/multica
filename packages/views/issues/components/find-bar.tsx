@@ -1,9 +1,10 @@
 "use client";
 
 import type { KeyboardEvent } from "react";
-import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { isImeComposing } from "@multica/core/utils";
+import { ChevronDown, ChevronUp, Search, X } from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import type { UseInPageFindResult } from "../hooks/use-in-page-find";
@@ -44,6 +45,7 @@ export function FindBar({
   const noMatches = matchCount === 0;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       if (e.shiftKey) goPrev();
@@ -78,38 +80,38 @@ export function FindBar({
         {countLabel}
       </span>
       <div className="flex items-center">
-        <Button
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-xs"
           disabled={noMatches}
           onClick={goPrev}
-          aria-label={t(($) => $.detail.find.previous)}
-          title={t(($) => $.detail.find.previous)}
+          label={t(($) => $.detail.find.previous)}
+          tooltipSide="bottom"
         >
           <ChevronUp />
-        </Button>
-        <Button
+        </IconButton>
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-xs"
           disabled={noMatches}
           onClick={goNext}
-          aria-label={t(($) => $.detail.find.next)}
-          title={t(($) => $.detail.find.next)}
+          label={t(($) => $.detail.find.next)}
+          tooltipSide="bottom"
         >
           <ChevronDown />
-        </Button>
-        <Button
+        </IconButton>
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-xs"
           onClick={closeFind}
-          aria-label={t(($) => $.detail.find.close)}
-          title={t(($) => $.detail.find.close)}
+          label={t(($) => $.detail.find.close)}
+          tooltipSide="bottom"
         >
           <X />
-        </Button>
+        </IconButton>
       </div>
     </div>
   );

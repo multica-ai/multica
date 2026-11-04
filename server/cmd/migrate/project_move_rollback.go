@@ -10,7 +10,7 @@ import (
 // Bulk rollback work never takes an explicit table lock. Each transaction
 // discards at most 128 projections and holds row locks for at most 2s of SQL
 // execution. The same keep rule and atomic, monotone watermark are used by the
-// bounded residual pass in 579 down. A failed batch or runner crash is retryable.
+// bounded residual pass in 620 down. A failed batch or runner crash is retryable.
 func pruneProjectMoveSearchDuplicates(ctx context.Context, pool *pgxpool.Pool) error {
 	for {
 		deleted, err := pruneProjectMoveSearchDuplicateBatch(ctx, pool)

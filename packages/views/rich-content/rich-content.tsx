@@ -80,6 +80,8 @@ import {
   isRichFenceLanguage,
   shouldUpgradeFence,
 } from "./rich-code-block";
+import { RichTable, RichTableSourceContext } from "./rich-table";
+import { getTextContent } from "./rich-table-model";
 import "katex/dist/katex.min.css";
 import "../editor/styles/index.css";
 import "./rich-content.css";
@@ -87,9 +89,7 @@ import "./rich-content.css";
 export type RichContentDensity = "compact" | "document";
 export type RichContentPhase = "streaming" | "settled";
 
-// ---------------------------------------------------------------------------
 // Fence gate context
-// ---------------------------------------------------------------------------
 //
 // The closed-fence offsets travel by context rather than by rebuilding the
 // components map. The map must stay referentially stable: react-markdown
@@ -109,9 +109,7 @@ function useClosedFence(offset: number | undefined): ClosedFence | undefined {
   return offset == null ? undefined : closed.get(offset);
 }
 
-// ---------------------------------------------------------------------------
 // Mention / link renderers
-// ---------------------------------------------------------------------------
 
 /**
  * Issue mention chip. Navigation — plain click, modifier click, and the
@@ -356,19 +354,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   return plainLink;
 }
 
-// ---------------------------------------------------------------------------
 // Fenced code
-// ---------------------------------------------------------------------------
-
-function getTextContent(node: ReactNode): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(getTextContent).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return getTextContent(node.props.children);
-  }
-  return "";
-}
 
 // Props react-markdown actually passes to a component override: the intrinsic
 // element's own props plus the source hast node (`ExtraProps`). Deriving them
@@ -522,12 +508,9 @@ const COMPONENTS: Partial<Components> = {
     return <div {...props}>{children}</div>;
   },
 
-  // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-  table: ({ children }) => (
-    <div className="tableWrapper">
-      <table>{children}</table>
-    </div>
-  ),
+  // Tables keep Tiptap's tableWrapper (border/radius/scroll) and add column
+  // resizing, an expanded view and copy.
+  table: RichTable,
 
   code: RichCode,
   pre: RichPre,
@@ -550,9 +533,7 @@ const REHYPE_PLUGINS = [
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export interface RichContentProps {
   content: string;
@@ -603,6 +584,7 @@ export const RichContent = memo(function RichContent({
   // with the hast node positions the `code`/`pre` renderers observe. Computing
   // it from the raw pre-preprocess text would mis-match every rewritten node.
   const closedFences = useMemo(() => computeClosedFences(processed), [processed]);
+  const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
@@ -617,17 +599,19 @@ export const RichContent = memo(function RichContent({
   const markdown = useMemo(
     () => (
       <ClosedFenceContext.Provider value={closedFences}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
-          urlTransform={markdownUrlTransform}
-          components={COMPONENTS}
-        >
-          {processed}
-        </ReactMarkdown>
+        <RichTableSourceContext.Provider value={tableSource}>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_PLUGINS}
+            urlTransform={markdownUrlTransform}
+            components={COMPONENTS}
+          >
+            {processed}
+          </ReactMarkdown>
+        </RichTableSourceContext.Provider>
       </ClosedFenceContext.Provider>
     ),
-    [processed, closedFences],
+    [processed, closedFences, tableSource],
   );
 
   return (

@@ -14,9 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Model list request store
-// ---------------------------------------------------------------------------
 //
 // The server cannot call the daemon directly (the daemon is behind the user's
 // NAT and only polls the server). So "list models for this runtime" uses a
@@ -326,9 +324,7 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 	return status == ModelListCompleted || status == ModelListFailed || status == ModelListTimeout
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 // InitiateListModels answers a "list this runtime's models" request.
 //

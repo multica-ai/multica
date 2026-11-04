@@ -13,8 +13,7 @@ import { ReplyInput } from "./reply-input";
 /** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
 type QuickActionMenuProp = {
   getQuickActions?: () => { id: string; name: string; description?: string }[];
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  onRenderError?: (error: unknown) => void;
+  getQuickActionContent?: (quickActionId: string) => string;
 };
 
 // Uploads now flow through the module-level coordinator, which calls
@@ -39,8 +38,8 @@ const editorQuickActionMenu = vi.hoisted(() => ({
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
 // doesn't exist yet, exactly like the real handle.
-// Post-send caret policy: the top-level composer blurs (the page scrolls to the
-// posted comment instead), a thread reply keeps the caret for the next reply.
+// Post-send caret policy: both the top-level composer and a thread reply blur,
+// so the page's keyboard shortcuts work again straight after a send.
 const focusCalls = vi.hoisted(() => ({ focused: 0, blurred: 0 }));
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 const insertPlaceholderSpy = vi.hoisted(() => vi.fn());
@@ -58,6 +57,7 @@ let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "https://api.example.test",
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
@@ -274,6 +274,12 @@ function activateComposer(shellTestId: "comment-composer-shell" | "reply-compose
   fireEvent.click(screen.getByTestId(shellTestId));
 }
 
+/** Native `disabled` while empty or sending; `aria-disabled` while an upload
+ *  blocks it, so the reason tooltip stays reachable. */
+function isSendBlocked(button: HTMLButtonElement): boolean {
+  return button.disabled || button.getAttribute("aria-disabled") === "true";
+}
+
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
   // Submit is always the last button in a composer's action cluster.
   const buttons = container.querySelectorAll("button");
@@ -320,7 +326,7 @@ describe("quick action `/` menu", () => {
     apiListWorkspaces.mockResolvedValue([workspace]);
     apiListQuickActions.mockResolvedValue({
       quick_actions: [
-        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
+        { id: "qa-1", name: "review", description: "Ask for a review", status: "active", assignee_type: "", prompt: "Review this issue" },
         { id: "qa-2", name: "retired", description: "", status: "archived" },
       ],
     });
@@ -371,17 +377,14 @@ describe("quick action `/` menu", () => {
       });
     });
 
-    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
-      apiRenderQuickAction.mockResolvedValue("rendered body");
+    it(`builds quick action text from the catalog in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
       activateComposer(composer.shell);
 
       await waitFor(() => {
-        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
+        expect(editorQuickActionMenu.last?.getQuickActionContent?.("qa-1")).toBe("Review this issue");
       });
-      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
-
-      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
+      expect(apiRenderQuickAction).not.toHaveBeenCalled();
     });
   }
 });
@@ -629,13 +632,13 @@ describe("comment composers", () => {
     resolveSubmit(true);
 
     // Success: the composer clears (now empty → submit disabled, lock released).
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
   });
 
-  // Post-send caret policy. The two composers deliberately disagree: posting a
-  // top-level comment ends the turn and drops the caret, while a thread reply
-  // leaves the user mid-conversation with the box ready for the next one.
+  // Post-send caret policy. Both composers drop the caret once the send is
+  // accepted: a focused editor swallows the page's keyboard shortcuts, so
+  // leaving the caret in a reply box traps the user until they click away.
   it("blurs the top-level composer after a posted comment", async () => {
     const { container } = renderCommentInput();
 
@@ -650,17 +653,18 @@ describe("comment composers", () => {
     expect(focusCalls.focused).toBe(0);
   });
 
-  it("keeps the caret in the reply box after a posted reply", async () => {
+  it("blurs the reply box after a posted reply", async () => {
     const { container } = renderReplyInput();
 
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "replied" } });
-    // Discard the shell→editor activation focus; what follows is the refocus.
+    // Discard the shell→editor activation focus; what follows is entirely the
+    // post-send policy.
     focusCalls.focused = 0;
     fireEvent.click(getSubmitButton(container));
 
-    await waitFor(() => expect(focusCalls.focused).toBeGreaterThan(0));
-    expect(focusCalls.blurred).toBe(0);
+    await waitFor(() => expect(focusCalls.blurred).toBeGreaterThan(0));
+    expect(focusCalls.focused).toBe(0);
   });
 
   it("reports the new reply id as the accepted scroll target", async () => {
@@ -675,7 +679,7 @@ describe("comment composers", () => {
     expect(onAccepted).toHaveBeenCalledWith("reply-new");
   });
 
-  it("does not refocus the reply box when the send fails", async () => {
+  it("leaves reply focus alone when the send fails", async () => {
     const onSubmit = vi.fn().mockResolvedValue(false);
     const { container } = renderReplyInput({ onSubmit });
 
@@ -687,6 +691,7 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(focusCalls.focused).toBe(0);
+    expect(focusCalls.blurred).toBe(0);
   });
 
   // Regression: the tab-switch flush re-writes IDENTICAL content mid-flight;
@@ -749,9 +754,9 @@ describe("comment composers", () => {
     expect(focusCalls.blurred).toBe(0);
   });
 
-  // Same coupling on the reply side: refocus is bound to having actually wiped
+  // Same coupling on the reply side: the blur is bound to having actually wiped
   // the editor, not merely to acceptance.
-  it("does not refocus a reply box whose mid-flight draft was kept", async () => {
+  it("does not blur a reply box whose mid-flight draft was kept", async () => {
     let resolveSubmit!: (v: boolean) => void;
     const onSubmit = vi.fn(() => new Promise<boolean>((r) => { resolveSubmit = r; }));
     renderReplyInput({ onSubmit, draftKey: "reply:issue-1:comment-1" });
@@ -773,6 +778,7 @@ describe("comment composers", () => {
       "reply A plus more",
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(focusCalls.blurred).toBe(0);
     expect(focusCalls.focused).toBe(0);
   });
 
@@ -827,7 +833,7 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 });
 
@@ -880,7 +886,7 @@ describe("comment composers — upload submit gate", () => {
 
     const pending = startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     // Screen readers must hear "busy", not just a dead control.
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
@@ -888,7 +894,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     expect(getSubmitButton(container)).not.toHaveAttribute("aria-busy");
   });
 
@@ -903,7 +909,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
     const pending = startPendingUpload(container, "mine.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(insertPlaceholderSpy).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -956,7 +962,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
 
     const pending = startPendingUpload(container, "doomed.png");
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     await act(async () => {
       pending.fail();
@@ -1032,7 +1038,7 @@ describe("comment composers — upload submit gate", () => {
     // Draft + pending upload mount the editor directly (no shell).
     const editor = await screen.findByTestId("editor");
 
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
     // The shortcut path bypasses the button — the submit-time re-read of the
@@ -1052,7 +1058,7 @@ describe("comment composers — upload submit gate", () => {
           uploadAttachment("att-prev", "https://cdn.example/att-prev.png"),
         );
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
   });
@@ -1065,18 +1071,18 @@ describe("comment composers — upload submit gate", () => {
     const first = startPendingUpload(container, "a.png");
     const second = startPendingUpload(container, "b.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // First one lands — the second is still in flight, so send must stay shut.
     await act(async () => {
       first.resolve(uploadAttachment("att-a", "https://cdn.example/att-a.png"));
     });
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
 
     await act(async () => {
       second.resolve(uploadAttachment("att-b", "https://cdn.example/att-b.png"));
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("re-enables send after a FAILED upload so the draft isn't stuck", async () => {
@@ -1085,14 +1091,14 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
 
     const pending = startPendingUpload(container);
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // uploadWithToast reports the failure and resolves null — the placeholder
     // is dropped and the body never referenced it, so submit must come back.
     await act(async () => {
       pending.fail();
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("sends the attachment id once the upload completes", async () => {
@@ -1105,7 +1111,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-9", "https://cdn.example/att-9.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() =>
@@ -1231,7 +1237,7 @@ describe("comment composers — upload submit gate", () => {
 
     startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
   });
 
@@ -1314,7 +1320,7 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
     expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

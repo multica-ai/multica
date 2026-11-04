@@ -124,7 +124,7 @@ func TestProjectMoveRollbackResidualDeadline(t *testing.T) {
  BEGIN PERFORM pg_advisory_xact_lock(73579,1); PERFORM pg_sleep(20); RETURN OLD; END $$`); err != nil {
 		t.Fatal(err)
 	}
-	sql, err := os.ReadFile(realMigrationFiles(t, []string{"579_search_index_workspace_moves"}, "down")[0])
+	sql, err := os.ReadFile(realMigrationFiles(t, []string{"620_search_index_workspace_moves"}, "down")[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestProjectMoveRollbackResidualDeadline(t *testing.T) {
 	conn.Exec(context.Background(), "ROLLBACK")
 	var rows int
 	var marked, recorded bool
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM search_index_prune_mark),EXISTS(SELECT 1 FROM schema_migrations WHERE version='579_search_index_workspace_moves')`).Scan(&rows, &marked, &recorded); err != nil || rows != 2 || marked || !recorded {
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM search_index_prune_mark),EXISTS(SELECT 1 FROM schema_migrations WHERE version='620_search_index_workspace_moves')`).Scan(&rows, &marked, &recorded); err != nil || rows != 2 || marked || !recorded {
 		t.Fatalf("atomic timeout rows=%d marked=%v recorded=%v err=%v", rows, marked, recorded, err)
 	}
 	t.Logf("residual deadline SQLSTATE=%s elapsed=%s", pgErr.Code, elapsed)
@@ -190,12 +190,12 @@ func TestProjectMoveRollbackCrashAfterHookRetries(t *testing.T) {
 	}
 	seedProjectMoveRollbackDuplicates(t, ctx, pool, 257)
 	opts := projectMoveRollbackOptions(t, schema)
-	hook := opts.Hooks["579_search_index_workspace_moves"]
+	hook := opts.Hooks["620_search_index_workspace_moves"]
 	if hook == nil {
-		t.Fatal("579 down must register bounded pre-cleanup")
+		t.Fatal("620 down must register bounded pre-cleanup")
 	}
 	crash := errors.New("crash after committed hook, before SQL")
-	opts.Hooks = map[string]preMigrationHook{"579_search_index_workspace_moves": func(ctx context.Context, pool *pgxpool.Pool) error {
+	opts.Hooks = map[string]preMigrationHook{"620_search_index_workspace_moves": func(ctx context.Context, pool *pgxpool.Pool) error {
 		if err := hook(ctx, pool); err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func TestProjectMoveRollbackCrashAfterHookRetries(t *testing.T) {
 	var rows int
 	var recorded bool
 	var mark string
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM schema_migrations WHERE version='579_search_index_workspace_moves'),(SELECT pruned_through_xid::text FROM search_index_prune_mark)`).Scan(&rows, &recorded, &mark); err != nil || rows != 257 || !recorded {
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM schema_migrations WHERE version='620_search_index_workspace_moves'),(SELECT pruned_through_xid::text FROM search_index_prune_mark)`).Scan(&rows, &recorded, &mark); err != nil || rows != 257 || !recorded {
 		t.Fatalf("committed hook rows=%d ledger=%v mark=%s err=%v", rows, recorded, mark, err)
 	}
 	if pruned, err := q.SearchIndexSinceIsPruned(ctx, cursor); err != nil || !pruned {
@@ -249,7 +249,7 @@ func TestProjectMoveRollbackHookDeadline(t *testing.T) {
 	}
 	var rows int
 	var marked, recorded bool
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM search_index_prune_mark),EXISTS(SELECT 1 FROM schema_migrations WHERE version='579_search_index_workspace_moves')`).Scan(&rows, &marked, &recorded); err != nil || rows != 2 || marked || !recorded {
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change),EXISTS(SELECT 1 FROM search_index_prune_mark),EXISTS(SELECT 1 FROM schema_migrations WHERE version='620_search_index_workspace_moves')`).Scan(&rows, &marked, &recorded); err != nil || rows != 2 || marked || !recorded {
 		t.Fatalf("failed batch atomicity: rows=%d marked=%v ledger=%v err=%v", rows, marked, recorded, err)
 	}
 	t.Logf("hook execution deadline SQLSTATE=%s elapsed=%s; batch rolled back", pgErr.Code, time.Since(start))

@@ -14,7 +14,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-var projectMoveMigrationVersions = []string{"573_project_move", "574_issue_key_alias_key", "575_issue_key_alias_issue", "576_project_move_id", "577_project_move_source", "578_search_index_workspace_key", "579_search_index_workspace_moves"}
+var projectMoveMigrationVersions = []string{"614_project_move", "615_issue_key_alias_key", "616_issue_key_alias_issue", "617_project_move_id", "618_project_move_source", "619_search_index_workspace_key", "620_search_index_workspace_moves"}
 
 func projectMoveMigrationPool(t *testing.T, ctx context.Context) (*pgxpool.Pool, string) {
 	t.Helper()
@@ -72,7 +72,7 @@ UPDATE issue SET workspace_id='00000000-0000-0000-0000-00000000000b';`); err != 
 			attemptCtx, stop := context.WithTimeout(ctx, 8*time.Second)
 			defer stop()
 			start := time.Now()
-			err = runMigrations(attemptCtx, pool, runOptions{Direction: "down", Files: realMigrationFiles(t, []string{"579_search_index_workspace_moves"}, "down"), SchemaMigrationsTable: schema + ".schema_migrations", AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1, Hooks: hooksForDirection("down")})
+			err = runMigrations(attemptCtx, pool, runOptions{Direction: "down", Files: realMigrationFiles(t, []string{"620_search_index_workspace_moves"}, "down"), SchemaMigrationsTable: schema + ".schema_migrations", AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1, Hooks: hooksForDirection("down")})
 			elapsed := time.Since(start)
 			var pgErr *pgconn.PgError
 			if !errors.As(err, &pgErr) || pgErr.Code != "55P03" || elapsed > 5*time.Second {
@@ -86,7 +86,7 @@ UPDATE issue SET workspace_id='00000000-0000-0000-0000-00000000000b';`); err != 
 			var projections int
 			var recorded, marked bool
 			if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_index_change WHERE entity_type='issue'),
-EXISTS(SELECT 1 FROM schema_migrations WHERE version='579_search_index_workspace_moves'),
+EXISTS(SELECT 1 FROM schema_migrations WHERE version='620_search_index_workspace_moves'),
 EXISTS(SELECT 1 FROM search_index_prune_mark)`).Scan(&projections, &recorded, &marked); err != nil || projections != 1 || !recorded || !marked {
 				t.Fatalf("failed DDL must retain the committed hook's prune mark and ledger: projections=%d recorded=%v marked=%v err=%v", projections, recorded, marked, err)
 			}
@@ -108,7 +108,7 @@ func TestProjectMoveRollbackCleanupBeforeCommentDDL(t *testing.T) {
 	if _, err := blocker.Exec(ctx, "LOCK TABLE search_index_change IN ACCESS EXCLUSIVE MODE"); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile(realMigrationFiles(t, []string{"579_search_index_workspace_moves"}, "down")[0])
+	migration, err := os.ReadFile(realMigrationFiles(t, []string{"620_search_index_workspace_moves"}, "down")[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestProjectMoveRollbackGapRejectsWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	runProjectMoveMigrations(t, ctx, pool, schema, "down", projectMoveMigrationVersions[6:])
-	// A writer in another connection enters the exact gap before 578's
+	// A writer in another connection enters the exact gap before 619's
 	// concurrent unique build. Fail closed rather than introduce duplicates.
 	writer, err := pool.Acquire(ctx)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestProjectMoveRollbackGapRejectsWrites(t *testing.T) {
 	runProjectMoveMigrations(t, ctx, pool, schema, "down", projectMoveMigrationVersions[5:6])
 	assertIndexReadyAndValid(t, pool, schema, "search_index_change_pkey", true)
 	if _, err := writer.Exec(ctx, "UPDATE issue SET workspace_id='00000000-0000-0000-0000-00000000000b'"); err != nil {
-		t.Fatalf("retry after 578: %v", err)
+		t.Fatalf("retry after 619: %v", err)
 	}
 	var projections int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM search_index_change").Scan(&projections); err != nil || projections != 1 {

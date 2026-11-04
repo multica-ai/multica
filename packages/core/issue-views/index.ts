@@ -4,3 +4,7 @@ export * from "./active-view-store";
 export * from "./use-active-view";
 export * from "./baseline";
 export * from "./preferences";
+export * from "./sidebar-views";
+export * from "./view-target";
+export * from "./definition";
+export * from "./rename-store";

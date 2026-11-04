@@ -140,11 +140,18 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
-	"574_issue_key_alias_key":                                   "idx_issue_key_alias_key",
-	"575_issue_key_alias_issue":                                 "idx_issue_key_alias_issue",
-	"576_project_move_id":                                       "idx_project_move_id",
-	"577_project_move_source":                                   "idx_project_move_source",
-	"578_search_index_workspace_key":                            "idx_search_index_workspace_key",
+	"615_issue_key_alias_key":                                   "idx_issue_key_alias_key",
+	"616_issue_key_alias_issue":                                 "idx_issue_key_alias_issue",
+	"617_project_move_id":                                       "idx_project_move_id",
+	"618_project_move_source":                                   "idx_project_move_source",
+	"619_search_index_workspace_key":                            "idx_search_index_workspace_key",
+	"613_skill_version_index":                                   "idx_skill_version_skill_version",
+	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
+	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",
+	"603_wecom_install_session_agent_pending_idx":               "idx_wecom_install_session_agent_pending",
+	"602_wecom_install_session_request_idx":                     "idx_wecom_install_session_request",
+	"601_wecom_install_session_due_idx":                         "idx_wecom_install_session_due",
+	"594_agent_task_process_cleanup_index":                      "idx_agent_task_queue_process_cleanup",
 	"563_search_index_change_changed_at_index":                  "idx_search_index_change_changed_at",
 	"562_search_index_change_workspace_index":                   "idx_search_index_change_workspace_xid",
 	"552_agent_task_history_page_index":                         "idx_agent_task_queue_history_page",
@@ -155,6 +162,9 @@ var concurrentIndexCleanups = map[string]string{
 	"546_issue_pr_automation_workspace_index":                   "idx_issue_pr_automation_workspace",
 	"547_issue_pull_request_exclusion_workspace_index":          "idx_issue_pull_request_exclusion_workspace",
 	"548_task_supplement_comment_task_index":                    "task_supplement_comment_task_uidx",
+	"574_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
+	"576_issue_workflow_workspace_name_index":                   "idx_issue_workflow_workspace_name",
+	"582_issue_workflow_default_index":                          "idx_issue_workflow_workspace_default",
 	"554_wakeup_expiry_index":                                   "issue_wakeup_expiry_idx",
 	"556_wakeup_system_rule_index":                              "issue_wakeup_system_rule_idx",
 	"559_issue_child_event_id":                                  "issue_child_event_id_idx",
@@ -189,6 +199,9 @@ var concurrentIndexCleanups = map[string]string{
 	"486_maintenance_job_id_index":                              "idx_maintenance_job_id",
 	"487_maintenance_job_idempotency_index":                     "idx_maintenance_job_idempotency",
 	"488_maintenance_job_active_index":                          "idx_maintenance_job_active",
+	"587_cloud_agent_connection_provider_index":                 "cloud_agent_connection_provider_index",
+	"590_member_delegation_day_unique_index":                    "member_delegation_day_user_date_uidx",
+	"598_issue_unread_unique_index":                             "issue_unread_workspace_user_issue_uidx",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",
@@ -367,7 +380,7 @@ var concurrentIndexCleanups = map[string]string{
 // the retry, while a bare CREATE would stay wedged on "already exists"; both
 // cases need direction-specific cleanup before the rollback can retry safely.
 var concurrentDownIndexCleanups = map[string]string{
-	"578_search_index_workspace_key":                        "search_index_change_pkey",
+	"619_search_index_workspace_key":                        "search_index_change_pkey",
 	"144_drop_agent_task_queue_chat_pending_v1":             "idx_agent_task_queue_chat_pending",
 	"171_drop_legacy_label_namespace_index":                 "issue_label_workspace_name_lower_idx",
 	"256_drop_agent_task_queue_chat_pending_v2":             "idx_agent_task_queue_chat_pending_v2",
@@ -417,7 +430,7 @@ var preRollbackHooks = func() map[string]preMigrationHook {
 		hooks[version] = ensureSourceContextRollbackSafe
 	}
 	hooks["430_channel_outbound_message_binding_index"] = refuseChannelChatRouteHistoryRollback
-	hooks["579_search_index_workspace_moves"] = pruneProjectMoveSearchDuplicates
+	hooks["620_search_index_workspace_moves"] = pruneProjectMoveSearchDuplicates
 	return hooks
 }()
 

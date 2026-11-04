@@ -4,8 +4,9 @@ description: 为智能体创建一个 Slack Bot，在私聊、频道以及 /issu
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它、用 `/issue` 创建任务、用 `/new` 新建 Multica Chat，或用 `/clear` 重置当前 Chat 的智能体上下文。
+Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它，也可以用 `/issue` 创建任务、`/new` 新建 Multica Chat、`/clear` 重置当前 Chat 的智能体上下文。
 
 一个 Slack app 对应一个 Multica 智能体。需要接入多个智能体时，为每个智能体分别创建 app。
 
@@ -16,57 +17,62 @@ Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot�
 - Bot User OAuth Token，以 `xoxb-` 开头；
 - App-level Token，以 `xapp-` 开头。
 
-## 1. 从 manifest 创建 Slack app
+## 连接 Bot
+
+<Steps>
+<Step>
+
+### 从 manifest 创建 Slack app [#1-从-manifest-创建-slack-app]
 
 打开 [Slack API Apps](https://api.slack.com/apps)，点击 **Create New App → From a manifest**，选择 Slack workspace，然后在 **YAML** 中粘贴以下内容：
 
 ```yaml
 display_information:
- name: Multica
+  name: Multica
 features:
- app_home:
- home_tab_enabled: false
- messages_tab_enabled: true
- messages_tab_read_only_enabled: false
- bot_user:
- display_name: Multica
- always_online: true
- slash_commands:
- - command: /issue
- description: Create a Multica issue
- usage_hint: "[description]"
- - command: /new
- description: Start a new Multica chat
- usage_hint: "[message]"
- - command: /clear
- description: Clear the current Multica chat context
- usage_hint: "[message]"
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[description]"
+    - command: /new
+      description: Start a new Multica chat
+      usage_hint: "[message]"
+    - command: /clear
+      description: Clear the current Multica chat context
+      usage_hint: "[message]"
 oauth_config:
- scopes:
- bot:
- - app_mentions:read
- - channels:history
- - files:read
- - groups:history
- - im:history
- - mpim:history
- - chat:write
- - reactions:write
- - users:read
- - commands
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - files:read
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - reactions:write
+      - users:read
+      - commands
 settings:
- event_subscriptions:
- bot_events:
- - app_mention
- - message.im
- - message.channels
- - message.groups
- - message.mpim
- interactivity:
- is_enabled: false
- org_deploy_enabled: false
- socket_mode_enabled: true
- token_rotation_enabled: false
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
 ```
 
 创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复、`/issue`、`/new` 或 `/clear` 可能无法工作。
@@ -81,24 +87,28 @@ Slack slash command 名称在整个 workspace 中共享。如果其他已安装 
 
 Bot 使用 Socket Mode 主动连接 Slack，不需要配置公网 Request URL 或 OAuth Redirect URL。
 
-## 2. 获取两个 token
+</Step>
+<Step>
 
-### Bot token
+### 获取两个 token [#2-获取两个-token]
+
+#### Bot token
 
 1. 在 Slack app 中打开 **Install App**。
 2. 点击 **Install to Workspace** 并批准权限。
 3. 复制 **Bot User OAuth Token**，它以 `xoxb-` 开头。
 
-
-### App-level token
+#### App-level token
 
 1. 打开 **Basic Information → App-Level Tokens**。
 2. 点击 **Generate Token and Scopes**。
 3. 添加 `connections:write` scope。
 4. 生成并复制以 `xapp-` 开头的 token。
 
+</Step>
+<Step>
 
-## 3. 连接到智能体
+### 连接到智能体 [#3-连接到智能体]
 
 1. 在 Multica 中打开 **智能体**，选择要接入 Slack 的智能体。
 2. 进入 **集成**，点击 **连接 Slack**。
@@ -110,6 +120,9 @@ Multica 会验证两个 token 是否来自同一个 app。连接成功后，页�
 <Callout type="warning">
 两个 token 会加密保存在 Multica 服务器上。Token 即凭据，不要写进任务、评论或代码仓库。已连接到其他智能体或工作区的 app 不能直接重复使用，需先断开原连接。
 </Callout>
+
+</Step>
+</Steps>
 
 ## 第一次使用
 
@@ -133,9 +146,9 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 
 ### 发送文件
 
-在私聊里，或者在 @ 提及 Bot 的频道消息里直接带上文件。文件会作为附件进入同一项工作，智能体可以结合文件和你的诉求一起处理。
+在私聊里，或者在 @ 提及 Bot 的频道消息里直接带上文件。文件会作为附件交给智能体，和消息一起处理。
 
-这需要 `files:read` 权限 —— 如果这个应用是在附件支持之前安装的，参考第 1 步的提示。单个文件不超过 20 MiB，一条消息最多带 10 个。超出大小、仍在上传，或者存放在 Slack 之外（比如 Google Drive、Dropbox 链接）的文件会被跳过，消息文本仍然会交给智能体。
+这需要 `files:read` 权限；应用如果是在附件支持之前安装的，见第 1 步的提示。单个文件不超过 20 MiB，一条消息最多带 10 个。超出大小、仍在上传，或者存放在 Slack 之外（比如 Google Drive、Dropbox 链接）的文件会被跳过，消息文本仍然会交给智能体。
 
 ### 用 `/issue` 创建任务
 
@@ -149,9 +162,9 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 
 ### 用 `/new` 新建 Chat
 
-在与 Bot 的私聊中，发送 `/new` 会立即创建一个空的、可见的新 Chat；发送 `/new <消息>` 会把消息作为新 Chat 的第一轮。裸 `/new` 在第一条有效用户消息到来前显示为“新对话”，之后沿用现有的首条消息标题逻辑。
+在与 Bot 的私聊中，发送 `/new` 会立即创建一个空的、可见的新 Chat；发送 `/new <消息>` 会把消息作为新 Chat 的第一轮。裸 `/new` 创建的 Chat 在收到第一条有效消息前显示为"新对话"，之后按首条消息生成标题。
 
-旧 Chat 仍保留在 Multica 中，并可继续从 Web、桌面端或移动端发送消息；只有 Slack 这条外部会话的后续消息会切换到新 Chat。
+旧 Chat 仍保留在 Multica 中，可以继续从 Web、桌面端或移动端发消息；切换到新 Chat 的只有 Slack 这条外部会话的后续消息。
 
 在频道或 thread 中，Slack 原生 slash command 的 payload 不包含目标 thread。请在目标 thread 里发送 `@Multica /new [消息]`。
 

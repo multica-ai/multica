@@ -62,5 +62,5 @@ func TestRunMigrationsReplaysProjectMoveFilesWithoutLedger(t *testing.T) {
 
 func projectMoveRollbackOptions(t *testing.T, schema string) runOptions {
 	t.Helper()
-	return runOptions{Direction: "down", Files: realMigrationFiles(t, []string{"579_search_index_workspace_moves"}, "down"), SchemaMigrationsTable: schema + ".schema_migrations", AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1, Hooks: hooksForDirection("down")}
+	return runOptions{Direction: "down", Files: realMigrationFiles(t, []string{"620_search_index_workspace_moves"}, "down"), SchemaMigrationsTable: schema + ".schema_migrations", AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1, Hooks: hooksForDirection("down")}
 }

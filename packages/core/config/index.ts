@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
+import type { DaemonConfigStatus, DaemonSetupTarget } from "../runtimes/commands";
 
 interface ConfigState {
   cdnDomain: string;
@@ -12,6 +13,8 @@ interface ConfigState {
   googleClientId: string;
   daemonServerUrl: string;
   daemonAppUrl: string;
+  daemonConfigStatus: DaemonConfigStatus;
+  daemonSetupTarget: DaemonSetupTarget;
   // Self-host gate (#3433): when true, every "Create workspace" affordance
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
@@ -55,7 +58,9 @@ interface ConfigState {
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
     daemonAppUrl?: string;
+    daemonSetupTarget?: DaemonSetupTarget;
   }) => void;
+  setDaemonConfigStatus: (status: DaemonConfigStatus) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
@@ -72,6 +77,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   googleClientId: "",
   daemonServerUrl: "",
   daemonAppUrl: "",
+  daemonConfigStatus: "loading",
+  daemonSetupTarget: "unknown",
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
@@ -88,8 +95,17 @@ export const configStore = createStore<ConfigState>((set) => ({
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
   }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
-  setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
-    set({ daemonServerUrl, daemonAppUrl }),
+  setDaemonConfig: ({
+    daemonServerUrl = "",
+    daemonAppUrl = "",
+    daemonSetupTarget = "unknown",
+  }) => set({
+    daemonServerUrl,
+    daemonAppUrl,
+    daemonSetupTarget,
+    daemonConfigStatus: "ready",
+  }),
+  setDaemonConfigStatus: (daemonConfigStatus) => set({ daemonConfigStatus }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
   setLocalWorktreeSupported: (supported = false) =>

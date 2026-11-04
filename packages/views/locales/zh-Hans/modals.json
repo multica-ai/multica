@@ -19,6 +19,16 @@
     "toast_deleted": "已删除任务",
     "toast_delete_failed": "删除任务失败"
   },
+  "rename_issue": {
+    "title": "重命名任务",
+    "placeholder": "任务标题",
+    "input_aria_label": "重命名 {{identifier}}",
+    "submit": "保存",
+    "saving": "保存中...",
+    "title_required": "请输入标题",
+    "toast_renamed": "任务名称已更新",
+    "toast_failed": "重命名任务失败"
+  },
   "feedback": {
     "title": "反馈",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",
@@ -50,6 +60,12 @@
     "description": "搜索一个任务添加为子任务",
     "toast_failed": "添加子任务失败",
     "toast_success": "已添加 {{identifier}} 为子任务"
+  },
+  "add_project_issue": {
+    "title": "添加已有任务",
+    "description": "搜索要移入这个项目的任务",
+    "toast_success": "已把 {{identifier}} 移入项目",
+    "toast_failed": "移动任务失败"
   },
   "run_confirm": {
     "title_assign": "确认指派？",
@@ -240,6 +256,7 @@
       "sent_label": "已发送",
       "sent_count": "已发送 {{count}}",
       "version_blocked_tooltip": "守护进程 CLI 必须 ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents 无法读取附件。请移除附件，或换一个智能体。",
       "toast_sent": "已交给智能体——完成后会在收件箱通知你",
       "error_agent_unavailable_fallback": "智能体不可用，请换一个。",
       "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",

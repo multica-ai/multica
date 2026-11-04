@@ -47,8 +47,8 @@ func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 		}
 	}
 
-	httpBeat := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat",
-		map[string]any{"runtime_id": runtimeID}, testWorkspaceID, "lookup-source-daemon")
+	httpBeat := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat",
+		map[string]any{"runtime_id": runtimeID})
 	testutil.Call(t, h.DaemonHeartbeat, httpBeat).Want(http.StatusOK)
 
 	// A model poll for a runtime that no longer exists: the read-access gate

@@ -657,16 +657,16 @@ func TestRunMigrationsRepairsShareLinkIndexesBeforeRetry(t *testing.T) {
 }
 
 // TestRunMigrationsRepairsProjectMoveIndexesBeforeRetry extends the existing
-// invalid-leftover and valid-index/missing-ledger contract to the real 574–578
-// files, including the concurrent build in 578 down.
+// invalid-leftover and valid-index/missing-ledger contract to the real 615–619
+// files, including the concurrent build in 619 down.
 func TestRunMigrationsRepairsProjectMoveIndexesBeforeRetry(t *testing.T) {
 	for _, tc := range []struct{ version, direction, index, table, columns string }{
-		{"574_issue_key_alias_key", "up", "idx_issue_key_alias_key", "issue_key_alias", "source_workspace_id,prefix,number"},
-		{"575_issue_key_alias_issue", "up", "idx_issue_key_alias_issue", "issue_key_alias", "issue_id,source_workspace_id"},
-		{"576_project_move_id", "up", "idx_project_move_id", "project_move", "id"},
-		{"577_project_move_source", "up", "idx_project_move_source", "project_move", "source_workspace_id,project_id,moved_at"},
-		{"578_search_index_workspace_key", "up", "idx_search_index_workspace_key", "search_index_change", "workspace_id,entity_type,entity_id"},
-		{"578_search_index_workspace_key", "down", "search_index_change_pkey", "search_index_change", "entity_type,entity_id"},
+		{"615_issue_key_alias_key", "up", "idx_issue_key_alias_key", "issue_key_alias", "source_workspace_id,prefix,number"},
+		{"616_issue_key_alias_issue", "up", "idx_issue_key_alias_issue", "issue_key_alias", "issue_id,source_workspace_id"},
+		{"617_project_move_id", "up", "idx_project_move_id", "project_move", "id"},
+		{"618_project_move_source", "up", "idx_project_move_source", "project_move", "source_workspace_id,project_id,moved_at"},
+		{"619_search_index_workspace_key", "up", "idx_search_index_workspace_key", "search_index_change", "workspace_id,entity_type,entity_id"},
+		{"619_search_index_workspace_key", "down", "search_index_change_pkey", "search_index_change", "entity_type,entity_id"},
 	} {
 		t.Run(tc.version+"/"+tc.direction, func(t *testing.T) {
 			admin := openTestPool(t)
