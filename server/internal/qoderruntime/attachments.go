@@ -23,8 +23,8 @@ type attachment struct {
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	DownloadURL string `json:"download_url"`
-	// Gone marks a chat attachment deleted before the run read it.
-	Gone bool `json:"-"`
+	// Chat claims only carry IDs and names; resolve metadata before transfer.
+	NeedsMetadata bool `json:"-"`
 }
 
 const (
@@ -55,11 +55,24 @@ func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDi
 	used := map[string]bool{}
 	imageEncoded := 0
 	for _, a := range attachments {
+		if a.NeedsMetadata {
+			// Proxy download URLs expire after 60 seconds. Fetch each URL only
+			// after the preceding attachment's download and upload have finished.
+			var current attachment
+			err := taskAPI.call(ctx, http.MethodGet, "/api/attachments/"+url.PathEscape(a.ID), nil, &current)
+			var missing *apiError
+			if errors.As(err, &missing) && missing.Status == http.StatusNotFound {
+				skipped = append(skipped, attachmentName(a, used)+" (deleted)")
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("read chat attachment %s: %w", a.Filename, err)
+			}
+			a = current
+		}
 		name := attachmentName(a, used)
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
 		switch {
-		case a.Gone:
-			skipped = append(skipped, name+" (deleted)")
 		case imageMediaTypes[mediaType]:
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentImageBytes)
 			if errors.Is(err, errTooLarge) || err == nil && imageEncoded+base64.StdEncoding.EncodedLen(len(data)) > maxAttachmentImageEncoded {
@@ -123,23 +136,13 @@ func (b *Bridge) attachFiles(ctx context.Context, taskAPI *api, heading, mountDi
 	return nil
 }
 
-// chatAttachments reads the metadata of a chat message's attachments with the
-// task credential, as `multica attachment download` does; the claim carries
-// only their IDs and names.
-func chatAttachments(ctx context.Context, taskAPI *api, claimed []claimedAttachment) ([]attachment, error) {
+// chatAttachments defers metadata reads until each attachment is transferred.
+func chatAttachments(claimed []claimedAttachment) []attachment {
 	out := make([]attachment, 0, len(claimed))
 	for _, c := range claimed {
-		var a attachment
-		err := taskAPI.call(ctx, http.MethodGet, "/api/attachments/"+url.PathEscape(c.ID), nil, &a)
-		var missing *apiError
-		if errors.As(err, &missing) && missing.Status == http.StatusNotFound {
-			a = attachment{ID: c.ID, Filename: c.Filename, Gone: true}
-		} else if err != nil {
-			return nil, fmt.Errorf("read chat attachment %s: %w", c.Filename, err)
-		}
-		out = append(out, a)
+		out = append(out, attachment{ID: c.ID, Filename: c.Filename, NeedsMetadata: true})
 	}
-	return out, nil
+	return out
 }
 
 func (b *Bridge) downloadAttachment(ctx context.Context, taskAPI *api, a attachment, limit int64) ([]byte, error) {

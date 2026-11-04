@@ -56,10 +56,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		if len(t.ChatAttachments) > 0 {
 			taskAPI := *b.multica
 			taskAPI.token = t.AuthToken
-			attachments, err := chatAttachments(ctx, &taskAPI, t.ChatAttachments)
-			if err != nil {
-				return nil, err
-			}
+			attachments := chatAttachments(t.ChatAttachments)
 			// Each message mounts under its own run, so files with the same
 			// name from earlier turns of a continued session stay intact.
 			r.MountFiles = true
