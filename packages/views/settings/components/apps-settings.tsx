@@ -44,6 +44,7 @@ import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { AddAppDialog } from "./add-app-dialog";
 import { AppAccountDialog } from "./app-account-dialog";
+import { CustomCatalogDialog } from "./custom-catalog-dialog";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 type AccountTarget = { scope: AppAccountScope; connection: AppConnection; name: string };
@@ -65,6 +66,7 @@ export function AppsSettings() {
   const [adding, setAdding] = useState(false);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
   const [disconnecting, setDisconnecting] = useState<AccountTarget | null>(null);
+  const [editingList, setEditingList] = useState(false);
 
   // The hosted connect flow returns with `?connected=<slug>` or
   // `?error=composio_connect_failed`. Consume it once, then drop the params so
@@ -120,7 +122,10 @@ export function AppsSettings() {
   const catalogModeLabel = (mode: AppCatalogMode) =>
     mode === "curated"
       ? t(($) => $.connected_apps.catalog_curated)
-      : t(($) => $.connected_apps.catalog_all);
+      : mode === "custom"
+        ? t(($) => $.connected_apps.catalog_custom)
+        : t(($) => $.connected_apps.catalog_all);
+  const allowedCount = data.allowed_toolkits?.length ?? 0;
 
   const rows = (scope: AppAccountScope, connections: AppConnection[]) =>
     connections
@@ -188,7 +193,7 @@ export function AppsSettings() {
             size="select"
           >
             <Select
-              items={(["all", "curated"] as const).map((value) => ({
+              items={(["all", "curated", "custom"] as const).map((value) => ({
                 value,
                 label: catalogModeLabel(value),
               }))}
@@ -196,7 +201,12 @@ export function AppsSettings() {
               disabled={!canManage || updateSettings.isPending}
               onValueChange={(value) => {
                 if (!value || value === data.catalog_mode) return;
-                updateSettings.mutate(value as AppCatalogMode, {
+                // A custom catalog is only saved together with its list.
+                if (value === "custom") {
+                  setEditingList(true);
+                  return;
+                }
+                updateSettings.mutate({ catalog_mode: value as AppCatalogMode }, {
                   onError: () => toast.error(t(($) => $.connected_apps.toast_failed)),
                 });
               }}
@@ -207,9 +217,20 @@ export function AppsSettings() {
               <SelectContent align="end">
                 <SelectItem value="all">{catalogModeLabel("all")}</SelectItem>
                 <SelectItem value="curated">{catalogModeLabel("curated")}</SelectItem>
+                <SelectItem value="custom">{catalogModeLabel("custom")}</SelectItem>
               </SelectContent>
             </Select>
           </SettingsRow>
+          {data.catalog_mode === "custom" && (
+            <SettingsRow
+              label={t(($) => $.connected_apps.custom.row_label)}
+              description={t(($) => $.connected_apps.custom.row_description, { count: allowedCount })}
+            >
+              <Button size="sm" variant="outline" disabled={!canManage} onClick={() => setEditingList(true)}>
+                {t(($) => $.connected_apps.custom.edit)}
+              </Button>
+            </SettingsRow>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -228,8 +249,12 @@ export function AppsSettings() {
           slug={detail.connection.toolkit_slug}
           name={detail.name}
           canEdit={detail.scope === "personal" || canManage}
+          canClassify={canManage}
           onClose={() => setDetail(null)}
         />
+      )}
+      {editingList && (
+        <CustomCatalogDialog initial={data.allowed_toolkits ?? []} onClose={() => setEditingList(false)} />
       )}
       {disconnecting?.scope === "team" && (
         <DisconnectTeamDialog target={disconnecting} onClose={() => setDisconnecting(null)} />

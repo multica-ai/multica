@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Pencil, Plug, ShieldCheck } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { cn } from "@multica/ui/lib/utils";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -15,19 +16,71 @@ import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   chatAppRequestsOptions,
+  connectedAppsKeys,
   issueAppRequestsOptions,
   useDecideAppRequest,
 } from "@multica/core/connected-apps";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppRequest } from "@multica/core/types";
 import { useLocale, useT } from "../i18n";
+import { currentPath, useNavigation } from "../navigation";
 
-/** Pending app confirmations of an issue, shown above its composer. */
-export function IssueAppRequests({ issueId }: { issueId: string }) {
+const CONNECTED_PARAM = "app_connected";
+const CONNECT_ERROR_PARAM = "app_connect_error";
+let lastConnectReturn = "";
+
+/**
+ * Connecting from a card leaves the app and comes back to the page it started
+ * on with `?app_connected=<slug>` (or `app_connect_error`). The server has
+ * already let the waiting agent continue; say so once, then drop the param so
+ * a refresh does not repeat it.
+ */
+function useConnectReturn() {
+  const { t } = useT("settings");
+  const navigation = useNavigation();
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const connected = navigation.searchParams?.get(CONNECTED_PARAM) ?? null;
+  const failed = navigation.searchParams?.get(CONNECT_ERROR_PARAM) ?? null;
+  useEffect(() => {
+    const app = connected ?? failed;
+    if (!app) return;
+    // Several cards can mount on one page; only the first reports.
+    const key = `${navigation.pathname}:${connected ? "ok" : "error"}:${app}`;
+    if (lastConnectReturn === key) return;
+    lastConnectReturn = key;
+    if (connected) {
+      toast.success(t(($) => $.connected_apps.request.connected_resumed, { app }));
+      void qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) });
+    } else {
+      toast.error(t(($) => $.connected_apps.toast_connect_failed));
+    }
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete(CONNECTED_PARAM);
+    params.delete(CONNECT_ERROR_PARAM);
+    const search = params.toString();
+    navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}${navigation.hash}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, failed]);
+}
+
+/** Pending app confirmations of an issue, shown above its composer. The Inbox
+ * passes the request it opened so that card scrolls into view; bumping
+ * `highlightToken` replays it. */
+export function IssueAppRequests({
+  issueId,
+  highlightId,
+  highlightToken,
+}: {
+  issueId: string;
+  highlightId?: string;
+  highlightToken?: number;
+}) {
   const wsId = useWorkspaceId();
   const enabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
   const { data } = useQuery({ ...issueAppRequestsOptions(wsId, issueId), enabled });
-  return <AppRequestList requests={data ?? []} />;
+  useConnectReturn();
+  return <AppRequestList requests={data ?? []} highlightId={highlightId} highlightToken={highlightToken} />;
 }
 
 /** Pending app confirmations of a chat, shown above its input. */
@@ -35,6 +88,7 @@ export function ChatAppRequests({ sessionId }: { sessionId: string | null | unde
   const wsId = useWorkspaceId();
   const enabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false) && !!sessionId;
   const { data } = useQuery({ ...chatAppRequestsOptions(wsId, sessionId ?? ""), enabled });
+  useConnectReturn();
   return <AppRequestList requests={data ?? []} />;
 }
 
@@ -42,6 +96,7 @@ export function ChatAppRequests({ sessionId }: { sessionId: string | null | unde
 export function InboxAppRequest({ requestId, chatSessionId }: { requestId: string; chatSessionId?: string | null }) {
   const wsId = useWorkspaceId();
   const enabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
+  useConnectReturn();
   const { data } = useQuery({
     queryKey: [...chatAppRequestsOptions(wsId, chatSessionId ?? "").queryKey, "inbox", requestId],
     queryFn: () =>
@@ -53,7 +108,17 @@ export function InboxAppRequest({ requestId, chatSessionId }: { requestId: strin
   return <AppRequestList requests={[request]} showDecided />;
 }
 
-function AppRequestList({ requests, showDecided = false }: { requests: AppRequest[]; showDecided?: boolean }) {
+function AppRequestList({
+  requests,
+  showDecided = false,
+  highlightId,
+  highlightToken,
+}: {
+  requests: AppRequest[];
+  showDecided?: boolean;
+  highlightId?: string;
+  highlightToken?: number;
+}) {
   const { t } = useT("settings");
   const viewerId = useAuthStore((s) => s.user?.id);
   const decide = useDecideAppRequest();
@@ -87,7 +152,12 @@ function AppRequestList({ requests, showDecided = false }: { requests: AppReques
         </div>
       )}
       {visible.map((request) => (
-        <AppRequestCard key={request.id} request={request} isApprover={request.approver_user_id === viewerId} />
+        <AppRequestCard
+          key={request.id}
+          request={request}
+          isApprover={request.approver_user_id === viewerId}
+          highlightToken={request.id === highlightId ? (highlightToken ?? 0) : undefined}
+        />
       ))}
     </section>
   );
@@ -97,9 +167,29 @@ function prettyArgs(args: Record<string, unknown> | undefined) {
   return JSON.stringify(args ?? {}, null, 2);
 }
 
-function AppRequestCard({ request, isApprover }: { request: AppRequest; isApprover: boolean }) {
+const HIGHLIGHT_MS = 2400;
+
+function AppRequestCard({
+  request,
+  isApprover,
+  highlightToken,
+}: {
+  request: AppRequest;
+  isApprover: boolean;
+  highlightToken?: number;
+}) {
   const { t } = useT("settings");
   const locale = useLocale();
+  const navigation = useNavigation();
+  const ref = useRef<HTMLDivElement>(null);
+  const [highlighted, setHighlighted] = useState(false);
+  useEffect(() => {
+    if (highlightToken === undefined) return;
+    ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlighted(true);
+    const timer = setTimeout(() => setHighlighted(false), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlightToken]);
   const { getActorName } = useActorName();
   const decide = useDecideAppRequest();
   const [editing, setEditing] = useState(false);
@@ -149,7 +239,9 @@ function AppRequestCard({ request, isApprover }: { request: AppRequest; isApprov
   const connect = async () => {
     setConnecting(true);
     try {
-      const { redirect_url } = await api.connectApp("personal", app);
+      // The callback appends its own query, so the fragment stays behind.
+      const returnTo = currentPath({ ...navigation, hash: "" });
+      const { redirect_url } = await api.connectApp("personal", app, returnTo);
       window.location.href = redirect_url;
     } catch {
       toast.error(t(($) => $.connected_apps.toast_failed));
@@ -171,7 +263,14 @@ function AppRequestCard({ request, isApprover }: { request: AppRequest; isApprov
   };
 
   return (
-    <div className="rounded-lg border border-brand/40 bg-brand/5 p-3">
+    <div
+      ref={ref}
+      data-app-request={request.id}
+      className={cn(
+        "rounded-lg border border-brand/40 bg-brand/5 p-3 transition-shadow duration-300",
+        highlighted && "ring-2 ring-brand/60",
+      )}
+    >
       <div className="flex items-start gap-2">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
         <div className="min-w-0 flex-1 space-y-1">

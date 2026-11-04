@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS app_tool_class_override;
 DROP TABLE IF EXISTS workspace_app_setting;
 DROP TABLE IF EXISTS app_tool_call;
 DROP TABLE IF EXISTS app_action_request;

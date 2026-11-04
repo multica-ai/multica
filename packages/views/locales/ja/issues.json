@@ -1783,5 +1783,24 @@
       "empty_title": "保存したビューはまだありません",
       "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
     }
+  },
+  "app_calls": {
+    "section_title": "アプリ",
+    "chips_label": "この実行で使ったアプリ",
+    "calls_count_other": "{{count}} 回",
+    "more": "ほか {{count}} 件",
+    "scope": {
+      "team": "チームアカウント",
+      "personal": "個人アカウント"
+    },
+    "outcome": {
+      "ok": "実行済み",
+      "error": "失敗",
+      "blocked": "ブロック",
+      "pending": "確認待ち",
+      "approved": "承認済み",
+      "rejected": "却下",
+      "rate_limited": "レート制限"
+    }
   }
 }

@@ -44,7 +44,27 @@ type stateClaims struct {
 	// workspace that owns it and the admin who started the handshake.
 	WorkspaceID string `json:"w,omitempty"`
 	ConnectedBy string `json:"c,omitempty"`
-	Exp         int64  `json:"e"`
+	// ReturnTo is the app path the browser goes back to, e.g. the issue whose
+	// connect card started the flow. Validated by SafeReturnPath at sign time.
+	ReturnTo string `json:"r,omitempty"`
+	Exp      int64  `json:"e"`
+}
+
+// SafeReturnPath reports whether p is a same-origin app path: absolute,
+// not protocol-relative, without control characters, and short.
+func SafeReturnPath(p string) bool {
+	if p == "" || len(p) > 512 || !strings.HasPrefix(p, "/") {
+		return false
+	}
+	if strings.HasPrefix(p, "//") || strings.HasPrefix(p, "/\\") {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f || r == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // signState produces a URL-safe "<payload>.<sig>" token. payload is the

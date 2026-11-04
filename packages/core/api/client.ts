@@ -199,7 +199,9 @@ import type {
   AppsOverview,
   AppCatalogResponse,
   AppRule,
+  AppTool,
   AppToolCall,
+  IssueAppCall,
   TeamAppImpact,
   AppRequest,
   AgentApp,
@@ -5245,15 +5247,18 @@ export class ApiClient {
     return this.fetch(`/api/apps`);
   }
 
-  async listAppCatalog(): Promise<AppCatalogResponse> {
-    return this.fetch(`/api/apps/catalog`);
+  /** The workspace's catalog; `view: "all"` (admins) lists every app with
+   * whether the catalog allows it. */
+  async listAppCatalog(view?: "all"): Promise<AppCatalogResponse> {
+    return this.fetch(`/api/apps/catalog${view ? `?view=${view}` : ""}`);
   }
 
-  /** Starts connecting an account; the browser is sent to the returned URL. */
-  async connectApp(scope: AppAccountScope, toolkitSlug: string): Promise<ComposioConnectInitResponse> {
+  /** Starts connecting an account; the browser is sent to the returned URL
+   * and comes back to `returnTo` (an app path) when given. */
+  async connectApp(scope: AppAccountScope, toolkitSlug: string, returnTo?: string): Promise<ComposioConnectInitResponse> {
     return this.fetch(`/api/apps/${scope}/connect`, {
       method: "POST",
-      body: JSON.stringify({ toolkit_slug: toolkitSlug }),
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(returnTo ? { return_to: returnTo } : {}) }),
     });
   }
 
@@ -5265,11 +5270,30 @@ export class ApiClient {
     return this.fetch(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
   }
 
-  async updateAppSettings(catalogMode: AppCatalogMode): Promise<{ catalog_mode: AppCatalogMode }> {
+  async updateAppSettings(body: {
+    catalog_mode: AppCatalogMode;
+    allowed_toolkits?: string[];
+  }): Promise<{ catalog_mode: AppCatalogMode; allowed_toolkits: string[] }> {
     return this.fetch(`/api/apps/settings`, {
       method: "PUT",
-      body: JSON.stringify({ catalog_mode: catalogMode }),
+      body: JSON.stringify(body),
     });
+  }
+
+  async listAppTools(toolkitSlug: string): Promise<{ tools: AppTool[] }> {
+    return this.fetch(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+  }
+
+  /** Corrects one tool's class; `null` restores the automatic class. */
+  async updateAppToolClass(toolkitSlug: string, toolSlug: string, actionClass: AppActionClass | null): Promise<void> {
+    await this.fetch(`/api/apps/tools/class`, {
+      method: "PUT",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, tool_slug: toolSlug, action_class: actionClass ?? "" }),
+    });
+  }
+
+  async listIssueAppCalls(issueId: string): Promise<{ calls: IssueAppCall[] }> {
+    return this.fetch(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
   }
 
   async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {

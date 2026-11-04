@@ -1462,9 +1462,10 @@
     "disconnect": "断开",
     "catalog_title": "可用应用",
     "catalog_label": "成员可添加的应用",
-    "catalog_description": "精选应用带有审核过的默认规则。「全部应用」包含 Composio 能连接的所有应用；Multica 无法识别的操作一律先征得同意。",
+    "catalog_description": "精选应用带有审核过的默认规则。「全部应用」包含 Composio 能连接的所有应用；Multica 无法识别的操作一律先征得同意。「指定名单」只允许你选中的应用。",
     "catalog_all": "全部应用",
     "catalog_curated": "仅精选",
+    "catalog_custom": "指定名单",
     "toast_connected": "账号已连接",
     "toast_connect_failed": "连接未完成，请重试。",
     "toast_disconnected": "已断开",
@@ -1541,7 +1542,8 @@
       "blocked": "已拦截",
       "pending": "等待确认",
       "approved": "已批准",
-      "rejected": "已拒绝"
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
     },
     "scopes": {
       "team": "团队账号",
@@ -1578,7 +1580,28 @@
       "toast_approved": "已批准，智能体将继续。",
       "toast_rejected": "已拒绝，智能体会调整做法。",
       "toast_failed": "无法记录你的决定。",
-      "not_connected": "请先连接账号。"
+      "not_connected": "请先连接账号。",
+      "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。"
+    },
+    "tools": {
+      "tab": "工具",
+      "description": "工具的分类决定适用哪条规则。自动分类有误的工具可以在这里纠正，改动对本工作区里这个应用的所有账号生效。",
+      "read_only": "只有工作区管理员可以修改工具分类。",
+      "search": "搜索工具",
+      "empty": "没有匹配的工具。",
+      "auto": "自动（{{class}}）",
+      "truncated": "共 {{total}} 个，显示前 {{shown}} 个。搜索可缩小范围。"
+    },
+    "custom": {
+      "title": "指定应用名单",
+      "description": "智能体只能看到你选中的应用，其他应用也无法再连接账号。",
+      "selected_other": "已选 {{count}} 个应用",
+      "cancel": "取消",
+      "save": "保存名单",
+      "saved": "应用名单已保存",
+      "edit": "编辑名单",
+      "row_label": "允许的应用",
+      "row_description_other": "已允许 {{count}} 个应用"
     }
   }
 }

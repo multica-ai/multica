@@ -85,7 +85,8 @@
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
-    "app_connect_requested": "Connecter une app"
+    "app_connect_requested": "Connecter une app",
+    "app_action_result": "Résultat d'action d'app"
   },
   "labels": {
     "set_status_to": "Statut défini sur",

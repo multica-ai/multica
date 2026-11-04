@@ -1462,9 +1462,10 @@
     "disconnect": "接続を解除",
     "catalog_title": "利用できるアプリ",
     "catalog_label": "メンバーが追加できるアプリ",
-    "catalog_description": "厳選アプリにはレビュー済みの既定ルールがあります。「すべてのアプリ」は Composio で接続できるすべてを含み、Multica が分類できない操作は必ず確認を求めます。",
+    "catalog_description": "厳選アプリにはレビュー済みの既定ルールがあります。「すべてのアプリ」は Composio で接続できるすべてを含み、Multica が分類できない操作は必ず確認を求めます。カスタムリストでは選んだアプリだけを許可します。",
     "catalog_all": "すべてのアプリ",
     "catalog_curated": "厳選のみ",
+    "catalog_custom": "カスタムリスト",
     "toast_connected": "アカウントを接続しました",
     "toast_connect_failed": "接続を完了できませんでした。もう一度お試しください。",
     "toast_disconnected": "接続を解除しました",
@@ -1541,7 +1542,8 @@
       "blocked": "ブロック",
       "pending": "確認待ち",
       "approved": "承認済み",
-      "rejected": "却下"
+      "rejected": "却下",
+      "rate_limited": "レート制限"
     },
     "scopes": {
       "team": "チームアカウント",
@@ -1578,7 +1580,28 @@
       "toast_approved": "承認しました。エージェントが続行します。",
       "toast_rejected": "却下しました。エージェントが方針を調整します。",
       "toast_failed": "判断を記録できませんでした。",
-      "not_connected": "先にアカウントを接続してください。"
+      "not_connected": "先にアカウントを接続してください。",
+      "connected_resumed": "{{app}} を接続しました。エージェントは中断したところから再開します。"
+    },
+    "tools": {
+      "tab": "ツール",
+      "description": "ツールの分類によって適用されるルールが決まります。自動分類が誤っているツールは修正できます。変更はワークスペース内のこのアプリのすべてのアカウントに適用されます。",
+      "read_only": "ツールの分類を変更できるのはワークスペース管理者のみです。",
+      "search": "ツールを検索",
+      "empty": "一致するツールはありません。",
+      "auto": "自動（{{class}}）",
+      "truncated": "{{total}} 件中 {{shown}} 件を表示しています。検索して絞り込んでください。"
+    },
+    "custom": {
+      "title": "カスタムアプリリスト",
+      "description": "エージェントには選んだアプリだけが表示され、ほかのアプリのアカウントは誰も接続できません。",
+      "selected_other": "{{count}} 個のアプリを選択中",
+      "cancel": "キャンセル",
+      "save": "リストを保存",
+      "saved": "アプリリストを保存しました",
+      "edit": "リストを編集",
+      "row_label": "許可するアプリ",
+      "row_description_other": "{{count}} 個のアプリを許可"
     }
   }
 }

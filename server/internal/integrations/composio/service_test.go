@@ -699,6 +699,12 @@ func TestCallbackRedirect(t *testing.T) {
 	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion"}, false); got != "https://multica.ai/settings?error=composio_connect_failed&tab=apps" {
 		t.Errorf("failure redirect = %q", got)
 	}
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", ReturnTo: "/acme/issues/MUL-1?tab=x"}, true); got != "https://multica.ai/acme/issues/MUL-1?app_connected=notion&tab=x" {
+		t.Errorf("return redirect = %q", got)
+	}
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", ReturnTo: "//evil.example/x"}, false); got != "https://multica.ai/settings?error=composio_connect_failed&tab=apps" {
+		t.Errorf("unsafe return path not ignored: %q", got)
+	}
 	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, true); got != "https://multica.ai/settings?connected=notion&scope=team&tab=apps" {
 		t.Errorf("team redirect = %q", got)
 	}
@@ -714,4 +720,21 @@ func seedActive(store *fakeStore, userID pgtype.UUID, slug, caID string) db.User
 		ComposioUserID:     util.UUIDToString(userID),
 	})
 	return row
+}
+
+func TestSafeReturnPath(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/acme/issues/MUL-1":      true,
+		"/acme/chat?session=1":    true,
+		"":                        false,
+		"acme/issues":             false,
+		"//evil.example":          false,
+		"/\\evil.example":         false,
+		"https://evil.example":    false,
+		"/acme/\r\nSet-Cookie: x": false,
+	} {
+		if got := SafeReturnPath(path); got != want {
+			t.Errorf("SafeReturnPath(%q) = %v, want %v", path, got, want)
+		}
+	}
 }

@@ -15,7 +15,8 @@ export function useUpdateAppSettings() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (mode: AppCatalogMode) => api.updateAppSettings(mode),
+    mutationFn: (body: { catalog_mode: AppCatalogMode; allowed_toolkits?: string[] }) =>
+      api.updateAppSettings(body),
     onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
   });
 }
@@ -27,6 +28,16 @@ export function useUpdateAppRules(slug: string, scope: AppAccountScope) {
     mutationFn: (rules: { action_class: AppActionClass; policy: AppActionPolicy }[]) =>
       api.updateAppRules(slug, scope, rules),
     onSuccess: (data) => qc.setQueryData(connectedAppsKeys.rules(wsId, slug, scope), data.rules),
+  });
+}
+
+export function useUpdateAppToolClass(slug: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ tool, actionClass }: { tool: string; actionClass: AppActionClass | null }) =>
+      api.updateAppToolClass(slug, tool, actionClass),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.tools(wsId, slug) }),
   });
 }
 

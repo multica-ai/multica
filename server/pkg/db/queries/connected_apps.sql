@@ -251,13 +251,67 @@ LIMIT $4;
 SELECT * FROM workspace_app_setting WHERE workspace_id = $1;
 
 -- name: UpsertWorkspaceAppSetting :one
-INSERT INTO workspace_app_setting (workspace_id, catalog_mode, updated_by)
-VALUES ($1, $2, $3)
+INSERT INTO workspace_app_setting (workspace_id, catalog_mode, allowed_toolkits, updated_by)
+VALUES ($1, $2, sqlc.arg('allowed_toolkits')::text[], $3)
 ON CONFLICT (workspace_id) DO UPDATE SET
-    catalog_mode = EXCLUDED.catalog_mode,
-    updated_by   = EXCLUDED.updated_by,
-    updated_at   = now()
+    catalog_mode     = EXCLUDED.catalog_mode,
+    allowed_toolkits = EXCLUDED.allowed_toolkits,
+    updated_by       = EXCLUDED.updated_by,
+    updated_at       = now()
 RETURNING *;
+
+-- name: ListAppToolClassOverrides :many
+SELECT * FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2;
+
+-- name: GetAppToolClassOverride :one
+SELECT action_class FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND tool_slug = $3;
+
+-- name: UpsertAppToolClassOverride :exec
+INSERT INTO app_tool_class_override (workspace_id, toolkit_slug, tool_slug, action_class, updated_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, toolkit_slug, tool_slug) DO UPDATE SET
+    action_class = EXCLUDED.action_class,
+    updated_by   = EXCLUDED.updated_by,
+    updated_at   = now();
+
+-- name: DeleteAppToolClassOverride :exec
+DELETE FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND tool_slug = $3;
+
+-- name: CountRecentAppAccountCalls :one
+-- Calls that reached the app through one account within the window; backs the
+-- per-account rate limit. Blocked, pending and limited calls never ran.
+SELECT count(*) FROM app_tool_call
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = $3
+  AND account_owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner')::uuid
+  AND outcome IN ('ok', 'error', 'approved')
+  AND created_at > sqlc.arg('since')::timestamptz;
+
+-- name: HasBlockedAppToolCall :one
+-- Whether a run already hit a block on this tool, so the person is told once.
+SELECT EXISTS (
+    SELECT 1 FROM app_tool_call
+    WHERE workspace_id = $1 AND toolkit_slug = $2 AND task_id = $3
+      AND tool_slug = $4 AND outcome = 'blocked'
+      AND created_at > sqlc.arg('since')::timestamptz
+);
+
+-- name: ListIssueAppToolCalls :many
+-- The latest calls the runs of one issue made, newest first. Arguments are
+-- never stored.
+SELECT * FROM app_tool_call
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC
+LIMIT 500;
+
+-- name: ListPendingConnectRequestsForUser :many
+-- Connection requests a member is asked to answer for one app; resolved when
+-- they finish connecting it.
+SELECT * FROM app_action_request
+WHERE approver_user_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+  AND status = 'pending' AND account_scope = 'personal';
 
 -- name: AppendQueuedTaskHandoffNote :execrows
 -- Folds a decision into a run that has not been claimed yet, so approving a

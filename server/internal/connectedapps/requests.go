@@ -3,6 +3,7 @@ package connectedapps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +23,10 @@ import (
 // chat. The payload carries ids and status only; the request body is read
 // through the authorized API.
 const EventRequestChanged = "app_request:changed"
+
+// EventCallCreated tells clients an issue's runs made another app call, so
+// its call chips and sidebar refetch.
+const EventCallCreated = "app_call:created"
 
 // Inbox notification types.
 const (
@@ -71,7 +76,7 @@ func (s *Service) createRequest(ctx context.Context, rn *run, kind string, app d
 		ActionClass:    class,
 		Arguments:      raw,
 		Summary:        truncate(summary, 500),
-		ExpiresAt:      pgtype.Timestamptz{Time: s.now().Add(RequestTTL), Valid: true},
+		ExpiresAt:      pgtype.Timestamptz{Time: s.now().Add(requestTTL(kind)), Valid: true},
 	})
 	if err != nil {
 		return db.AppActionRequest{}, err
@@ -125,6 +130,24 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 	s.publishChange(final)
 	s.resume(ctx, final, actorID, note)
 	return final, nil
+}
+
+// ResolveConnectRequests completes the connection requests a member was
+// asked to answer for slug, once they connected it, and resumes each agent.
+// It runs from the OAuth callback, so nobody has to come back and confirm.
+func (s *Service) ResolveConnectRequests(ctx context.Context, userID pgtype.UUID, slug string) {
+	rows, err := s.q.ListPendingConnectRequestsForUser(ctx, db.ListPendingConnectRequestsForUserParams{
+		ApproverUserID: userID, ToolkitSlug: NormalizeSlug(slug),
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list connect requests failed", "toolkit", slug, "error", err)
+		return
+	}
+	for _, r := range rows {
+		if _, err := s.Approve(ctx, r.WorkspaceID, userID, r.ID, nil); err != nil && !errors.Is(err, ErrNotPending) {
+			slog.Warn("connectedapps: resolve connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
+		}
+	}
 }
 
 // Reject declines a request and resumes the agent so it can adapt.
@@ -214,7 +237,7 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	if !ok {
 		return fail("the app is no longer attached to the agent")
 	}
-	if !AppAllowed(s.CatalogMode(ctx, req.WorkspaceID), req.ToolkitSlug) {
+	if !s.Catalog(ctx, req.WorkspaceID).Allows(req.ToolkitSlug) {
 		return fail("the workspace no longer allows this app")
 	}
 	acct, err := s.resolveAccount(ctx, req.WorkspaceID, req.ApproverUserID, req.ToolkitSlug, req.AccountScope)
@@ -226,7 +249,7 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	if err != nil {
 		return fail("the tool could not be loaded")
 	}
-	class := Classify(req.ToolkitSlug, tool.Slug, tool.Tags)
+	class := s.classify(ctx, req.WorkspaceID, req.ToolkitSlug, tool)
 	rule, err := s.accountRule(ctx, req.WorkspaceID, req.ToolkitSlug, acct, class)
 	if err != nil {
 		return fail("the rules could not be read")
@@ -302,7 +325,7 @@ func (s *Service) CancelTeamRequests(ctx context.Context, workspaceID pgtype.UUI
 
 // Sweep expires requests past their deadline and reminds approvers two hours
 // before. Expiry does not resume the agent: the run already ended, and
-// nothing happened.
+// nothing happened. The approver gets a result notification instead.
 func (s *Service) Sweep(ctx context.Context) {
 	expired, err := s.q.ExpireDueAppActionRequests(ctx)
 	if err != nil {
@@ -310,6 +333,7 @@ func (s *Service) Sweep(ctx context.Context) {
 	}
 	for _, r := range expired {
 		s.publishChange(r)
+		s.notify(ctx, r, NotifActionResult)
 	}
 	due, err := s.q.ClaimAppActionRequestReminders(ctx)
 	if err != nil {
@@ -371,7 +395,18 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		}
 	}
 	var body string
+	severity := "action_required"
 	switch notifType {
+	case NotifActionResult:
+		severity = "info"
+		switch {
+		case req.Status == "blocked":
+			body = fmt.Sprintf("A rule blocked %s from running %s · %s", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
+		case req.Kind == KindConnect:
+			body = fmt.Sprintf("%s's request to connect %s expired without an answer", agentName, appLabel(req.ToolkitSlug))
+		default:
+			body = fmt.Sprintf("%s's request to run %s · %s expired without an answer", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
+		}
 	case NotifConnectRequested:
 		body = fmt.Sprintf("%s asks you to connect %s", agentName, appLabel(req.ToolkitSlug))
 	case NotifActionReminder:
@@ -380,7 +415,9 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		body = fmt.Sprintf("%s wants to run %s · %s", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
 	}
 	details, _ := json.Marshal(map[string]any{
-		"request_id":      util.UUIDToString(req.ID),
+		"request_id":      util.UUIDToPtr(req.ID),
+		"task_id":         util.UUIDToPtr(req.TaskID),
+		"status":          req.Status,
 		"kind":            req.Kind,
 		"toolkit_slug":    req.ToolkitSlug,
 		"tool_slug":       req.ToolSlug,
@@ -396,7 +433,7 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		RecipientType: "member",
 		RecipientID:   req.ApproverUserID,
 		Type:          notifType,
-		Severity:      "action_required",
+		Severity:      severity,
 		IssueID:       req.IssueID,
 		Title:         title,
 		Body:          pgtype.Text{String: body, Valid: true},

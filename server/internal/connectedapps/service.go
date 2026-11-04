@@ -14,6 +14,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
+	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,6 +29,21 @@ const Provider = "multica"
 
 // RequestTTL is how long a confirmation waits before it expires.
 const RequestTTL = 24 * time.Hour
+
+// ConnectRequestTTL is how long a connection request waits. Connecting an
+// account can need someone else (an IT admin approving the OAuth app), so it
+// waits longer than a confirmation.
+const ConnectRequestTTL = 7 * 24 * time.Hour
+
+// DefaultCallsPerMinute caps the calls one account runs per minute.
+const DefaultCallsPerMinute = 30
+
+func requestTTL(kind string) time.Duration {
+	if kind == KindConnect {
+		return ConnectRequestTTL
+	}
+	return RequestTTL
+}
 
 // tokenTTL bounds a gateway token. The task status check is the real bound;
 // this only caps a token that leaks from a run that never finishes.
@@ -57,6 +73,9 @@ type Config struct {
 	PublicBaseURL string
 	Bus           *events.Bus
 	Now           func() time.Time
+	// CallsPerMinute caps the calls one account runs per minute;
+	// DefaultCallsPerMinute when zero.
+	CallsPerMinute int
 }
 
 // Service is the connected-apps runtime: overlay, gateway, and confirmations.
@@ -68,6 +87,7 @@ type Service struct {
 	bus        *events.Bus
 	now        func() time.Time
 	resumer    Resumer
+	perMinute  int
 }
 
 // New returns a Service, or an error when a required dependency is missing.
@@ -86,6 +106,10 @@ func New(cfg Config) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
+	perMinute := cfg.CallsPerMinute
+	if perMinute <= 0 {
+		perMinute = DefaultCallsPerMinute
+	}
 	return &Service{
 		q:          cfg.Queries,
 		composio:   cfg.Composio,
@@ -93,28 +117,78 @@ func New(cfg Config) (*Service, error) {
 		gatewayURL: base + GatewayPath,
 		bus:        cfg.Bus,
 		now:        now,
+		perMinute:  perMinute,
 	}, nil
 }
 
 // SetResumer installs how agents are resumed after a decision.
 func (s *Service) SetResumer(r Resumer) { s.resumer = r }
 
-// CatalogMode returns the workspace's catalog mode, "all" by default.
-func (s *Service) CatalogMode(ctx context.Context, workspaceID pgtype.UUID) string {
-	row, err := s.q.GetWorkspaceAppSetting(ctx, workspaceID)
-	if err != nil || row.CatalogMode != CatalogCurated {
-		return CatalogAll
-	}
-	return CatalogCurated
+// Catalog is which apps a workspace lets its members use.
+type Catalog struct {
+	Mode string
+	// Allowed lists the apps of a custom catalog.
+	Allowed []string
 }
 
-// AppAllowed reports whether the workspace catalog permits slug.
-func AppAllowed(mode, slug string) bool {
-	if mode != CatalogCurated {
-		return true
+// Allows reports whether the catalog permits slug.
+func (c Catalog) Allows(slug string) bool {
+	switch c.Mode {
+	case CatalogCurated:
+		_, ok := Curated(slug)
+		return ok
+	case CatalogCustom:
+		slug = NormalizeSlug(slug)
+		for _, allowed := range c.Allowed {
+			if NormalizeSlug(allowed) == slug {
+				return true
+			}
+		}
+		return false
 	}
-	_, ok := Curated(slug)
-	return ok
+	return true
+}
+
+// Catalog returns the workspace's catalog, every app by default.
+func (s *Service) Catalog(ctx context.Context, workspaceID pgtype.UUID) Catalog {
+	row, err := s.q.GetWorkspaceAppSetting(ctx, workspaceID)
+	if err != nil {
+		return Catalog{Mode: CatalogAll}
+	}
+	switch row.CatalogMode {
+	case CatalogCurated:
+		return Catalog{Mode: CatalogCurated}
+	case CatalogCustom:
+		return Catalog{Mode: CatalogCustom, Allowed: row.AllowedToolkits}
+	}
+	return Catalog{Mode: CatalogAll}
+}
+
+// ClassOverrides returns the workspace's class corrections for one app, keyed
+// by upper-case tool slug.
+func (s *Service) ClassOverrides(ctx context.Context, workspaceID pgtype.UUID, slug string) map[string]string {
+	rows, err := s.q.ListAppToolClassOverrides(ctx, db.ListAppToolClassOverridesParams{
+		WorkspaceID: workspaceID, ToolkitSlug: NormalizeSlug(slug),
+	})
+	out := make(map[string]string, len(rows))
+	if err != nil {
+		return out
+	}
+	for _, row := range rows {
+		out[strings.ToUpper(row.ToolSlug)] = row.ActionClass
+	}
+	return out
+}
+
+// classify is Classify with the workspace's corrections applied first.
+func (s *Service) classify(ctx context.Context, workspaceID pgtype.UUID, slug string, tool *sdk.Tool) string {
+	class, err := s.q.GetAppToolClassOverride(ctx, db.GetAppToolClassOverrideParams{
+		WorkspaceID: workspaceID, ToolkitSlug: NormalizeSlug(slug), ToolSlug: strings.ToUpper(tool.Slug),
+	})
+	if err == nil {
+		return class
+	}
+	return Classify(slug, tool.Slug, tool.Tags)
 }
 
 type gatewayServer struct {
@@ -139,7 +213,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	if len(apps) == 0 {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
-	mode := s.CatalogMode(ctx, agent.WorkspaceID)
+	catalog := s.Catalog(ctx, agent.WorkspaceID)
 	team, err := s.activeTeamAccounts(ctx, agent.WorkspaceID)
 	if err != nil {
 		return runtimeapps.MCPOverlayResult{}, err
@@ -152,7 +226,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	}
 	meta := make([]runtimeapps.ConnectedApp, 0, len(apps))
 	for _, app := range apps {
-		if !AppAllowed(mode, app.ToolkitSlug) {
+		if !catalog.Allows(app.ToolkitSlug) {
 			continue
 		}
 		status := "not_connected"
@@ -342,6 +416,40 @@ func (s *Service) recordCall(ctx context.Context, c toolCall) {
 		RequestID:          c.requestID,
 		Error:              pgtype.Text{String: c.err, Valid: c.err != ""},
 	})
+	if s.bus != nil && c.issueID.Valid {
+		s.bus.Publish(events.Event{
+			Type:        EventCallCreated,
+			WorkspaceID: util.UUIDToString(c.workspaceID),
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(c.agentID),
+			Payload:     map[string]any{"issue_id": util.UUIDToString(c.issueID)},
+		})
+	}
+}
+
+// overLimit reports whether acct already ran its per-minute share of calls.
+func (s *Service) overLimit(ctx context.Context, workspaceID pgtype.UUID, slug string, acct account) bool {
+	n, err := s.q.CountRecentAppAccountCalls(ctx, db.CountRecentAppAccountCallsParams{
+		WorkspaceID:  workspaceID,
+		ToolkitSlug:  slug,
+		AccountScope: acct.scope,
+		Owner:        acct.owner,
+		Since:        pgtype.Timestamptz{Time: s.now().Add(-time.Minute), Valid: true},
+	})
+	return err == nil && n >= int64(s.perMinute)
+}
+
+// firstBlock reports whether this is the run's first blocked call of a tool,
+// so the person who triggered it is told once, not on every retry.
+func (s *Service) firstBlock(ctx context.Context, c toolCall) bool {
+	if !c.taskID.Valid {
+		return true
+	}
+	seen, err := s.q.HasBlockedAppToolCall(ctx, db.HasBlockedAppToolCallParams{
+		WorkspaceID: c.workspaceID, ToolkitSlug: c.toolkit, TaskID: c.taskID, ToolSlug: c.tool,
+		Since: pgtype.Timestamptz{Time: s.now().Add(-tokenTTL), Valid: true},
+	})
+	return err == nil && !seen
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }

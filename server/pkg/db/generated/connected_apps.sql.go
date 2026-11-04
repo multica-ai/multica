@@ -206,6 +206,37 @@ func (q *Queries) CountPendingTeamAppActionRequests(ctx context.Context, arg Cou
 	return count, err
 }
 
+const countRecentAppAccountCalls = `-- name: CountRecentAppAccountCalls :one
+SELECT count(*) FROM app_tool_call
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = $3
+  AND account_owner_user_id IS NOT DISTINCT FROM $4::uuid
+  AND outcome IN ('ok', 'error', 'approved')
+  AND created_at > $5::timestamptz
+`
+
+type CountRecentAppAccountCallsParams struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ToolkitSlug  string             `json:"toolkit_slug"`
+	AccountScope string             `json:"account_scope"`
+	Owner        pgtype.UUID        `json:"owner"`
+	Since        pgtype.Timestamptz `json:"since"`
+}
+
+// Calls that reached the app through one account within the window; backs the
+// per-account rate limit. Blocked, pending and limited calls never ran.
+func (q *Queries) CountRecentAppAccountCalls(ctx context.Context, arg CountRecentAppAccountCallsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentAppAccountCalls,
+		arg.WorkspaceID,
+		arg.ToolkitSlug,
+		arg.AccountScope,
+		arg.Owner,
+		arg.Since,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAppActionRequest = `-- name: CreateAppActionRequest :one
 INSERT INTO app_action_request (
     workspace_id, kind, task_id, agent_id, issue_id, chat_session_id, approver_user_id,
@@ -356,6 +387,22 @@ type DeleteAgentAppsExceptParams struct {
 
 func (q *Queries) DeleteAgentAppsExcept(ctx context.Context, arg DeleteAgentAppsExceptParams) error {
 	_, err := q.db.Exec(ctx, deleteAgentAppsExcept, arg.AgentID, arg.Keep)
+	return err
+}
+
+const deleteAppToolClassOverride = `-- name: DeleteAppToolClassOverride :exec
+DELETE FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND tool_slug = $3
+`
+
+type DeleteAppToolClassOverrideParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+	ToolSlug    string      `json:"tool_slug"`
+}
+
+func (q *Queries) DeleteAppToolClassOverride(ctx context.Context, arg DeleteAppToolClassOverrideParams) error {
+	_, err := q.db.Exec(ctx, deleteAppToolClassOverride, arg.WorkspaceID, arg.ToolkitSlug, arg.ToolSlug)
 	return err
 }
 
@@ -518,8 +565,26 @@ func (q *Queries) GetAppActionRequest(ctx context.Context, arg GetAppActionReque
 	return i, err
 }
 
+const getAppToolClassOverride = `-- name: GetAppToolClassOverride :one
+SELECT action_class FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND tool_slug = $3
+`
+
+type GetAppToolClassOverrideParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+	ToolSlug    string      `json:"tool_slug"`
+}
+
+func (q *Queries) GetAppToolClassOverride(ctx context.Context, arg GetAppToolClassOverrideParams) (string, error) {
+	row := q.db.QueryRow(ctx, getAppToolClassOverride, arg.WorkspaceID, arg.ToolkitSlug, arg.ToolSlug)
+	var action_class string
+	err := row.Scan(&action_class)
+	return action_class, err
+}
+
 const getWorkspaceAppSetting = `-- name: GetWorkspaceAppSetting :one
-SELECT workspace_id, catalog_mode, updated_by, updated_at FROM workspace_app_setting WHERE workspace_id = $1
+SELECT workspace_id, catalog_mode, allowed_toolkits, updated_by, updated_at FROM workspace_app_setting WHERE workspace_id = $1
 `
 
 func (q *Queries) GetWorkspaceAppSetting(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceAppSetting, error) {
@@ -528,6 +593,7 @@ func (q *Queries) GetWorkspaceAppSetting(ctx context.Context, workspaceID pgtype
 	err := row.Scan(
 		&i.WorkspaceID,
 		&i.CatalogMode,
+		&i.AllowedToolkits,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
 	)
@@ -562,6 +628,37 @@ func (q *Queries) GetWorkspaceComposioConnection(ctx context.Context, arg GetWor
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const hasBlockedAppToolCall = `-- name: HasBlockedAppToolCall :one
+SELECT EXISTS (
+    SELECT 1 FROM app_tool_call
+    WHERE workspace_id = $1 AND toolkit_slug = $2 AND task_id = $3
+      AND tool_slug = $4 AND outcome = 'blocked'
+      AND created_at > $5::timestamptz
+)
+`
+
+type HasBlockedAppToolCallParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ToolkitSlug string             `json:"toolkit_slug"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	ToolSlug    string             `json:"tool_slug"`
+	Since       pgtype.Timestamptz `json:"since"`
+}
+
+// Whether a run already hit a block on this tool, so the person is told once.
+func (q *Queries) HasBlockedAppToolCall(ctx context.Context, arg HasBlockedAppToolCallParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasBlockedAppToolCall,
+		arg.WorkspaceID,
+		arg.ToolkitSlug,
+		arg.TaskID,
+		arg.ToolSlug,
+		arg.Since,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const insertAppToolCall = `-- name: InsertAppToolCall :exec
@@ -886,6 +983,94 @@ func (q *Queries) ListAppActionRulesForRun(ctx context.Context, arg ListAppActio
 	return items, nil
 }
 
+const listAppToolClassOverrides = `-- name: ListAppToolClassOverrides :many
+SELECT workspace_id, toolkit_slug, tool_slug, action_class, updated_by, updated_at FROM app_tool_class_override
+WHERE workspace_id = $1 AND toolkit_slug = $2
+`
+
+type ListAppToolClassOverridesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+}
+
+func (q *Queries) ListAppToolClassOverrides(ctx context.Context, arg ListAppToolClassOverridesParams) ([]AppToolClassOverride, error) {
+	rows, err := q.db.Query(ctx, listAppToolClassOverrides, arg.WorkspaceID, arg.ToolkitSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppToolClassOverride{}
+	for rows.Next() {
+		var i AppToolClassOverride
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueAppToolCalls = `-- name: ListIssueAppToolCalls :many
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC
+LIMIT 500
+`
+
+type ListIssueAppToolCallsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// The latest calls the runs of one issue made, newest first. Arguments are
+// never stored.
+func (q *Queries) ListIssueAppToolCalls(ctx context.Context, arg ListIssueAppToolCallsParams) ([]AppToolCall, error) {
+	rows, err := q.db.Query(ctx, listIssueAppToolCalls, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppToolCall{}
+	for rows.Next() {
+		var i AppToolCall
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.TriggeredBy,
+			&i.AccountScope,
+			&i.AccountOwnerUserID,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Outcome,
+			&i.RequestID,
+			&i.Error,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingAppActionRequestsForApprover = `-- name: ListPendingAppActionRequestsForApprover :many
 SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
 WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
@@ -900,6 +1085,65 @@ type ListPendingAppActionRequestsForApproverParams struct {
 
 func (q *Queries) ListPendingAppActionRequestsForApprover(ctx context.Context, arg ListPendingAppActionRequestsForApproverParams) ([]AppActionRequest, error) {
 	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForApprover, arg.WorkspaceID, arg.ApproverUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingConnectRequestsForUser = `-- name: ListPendingConnectRequestsForUser :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE approver_user_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+  AND status = 'pending' AND account_scope = 'personal'
+`
+
+type ListPendingConnectRequestsForUserParams struct {
+	ApproverUserID pgtype.UUID `json:"approver_user_id"`
+	ToolkitSlug    string      `json:"toolkit_slug"`
+}
+
+// Connection requests a member is asked to answer for one app; resolved when
+// they finish connecting it.
+func (q *Queries) ListPendingConnectRequestsForUser(ctx context.Context, arg ListPendingConnectRequestsForUserParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingConnectRequestsForUser, arg.ApproverUserID, arg.ToolkitSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -1405,28 +1649,64 @@ func (q *Queries) UpsertAppActionRule(ctx context.Context, arg UpsertAppActionRu
 	return i, err
 }
 
-const upsertWorkspaceAppSetting = `-- name: UpsertWorkspaceAppSetting :one
-INSERT INTO workspace_app_setting (workspace_id, catalog_mode, updated_by)
-VALUES ($1, $2, $3)
-ON CONFLICT (workspace_id) DO UPDATE SET
-    catalog_mode = EXCLUDED.catalog_mode,
+const upsertAppToolClassOverride = `-- name: UpsertAppToolClassOverride :exec
+INSERT INTO app_tool_class_override (workspace_id, toolkit_slug, tool_slug, action_class, updated_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, toolkit_slug, tool_slug) DO UPDATE SET
+    action_class = EXCLUDED.action_class,
     updated_by   = EXCLUDED.updated_by,
     updated_at   = now()
-RETURNING workspace_id, catalog_mode, updated_by, updated_at
 `
 
-type UpsertWorkspaceAppSettingParams struct {
+type UpsertAppToolClassOverrideParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	CatalogMode string      `json:"catalog_mode"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+	ToolSlug    string      `json:"tool_slug"`
+	ActionClass string      `json:"action_class"`
 	UpdatedBy   pgtype.UUID `json:"updated_by"`
 }
 
+func (q *Queries) UpsertAppToolClassOverride(ctx context.Context, arg UpsertAppToolClassOverrideParams) error {
+	_, err := q.db.Exec(ctx, upsertAppToolClassOverride,
+		arg.WorkspaceID,
+		arg.ToolkitSlug,
+		arg.ToolSlug,
+		arg.ActionClass,
+		arg.UpdatedBy,
+	)
+	return err
+}
+
+const upsertWorkspaceAppSetting = `-- name: UpsertWorkspaceAppSetting :one
+INSERT INTO workspace_app_setting (workspace_id, catalog_mode, allowed_toolkits, updated_by)
+VALUES ($1, $2, $4::text[], $3)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    catalog_mode     = EXCLUDED.catalog_mode,
+    allowed_toolkits = EXCLUDED.allowed_toolkits,
+    updated_by       = EXCLUDED.updated_by,
+    updated_at       = now()
+RETURNING workspace_id, catalog_mode, allowed_toolkits, updated_by, updated_at
+`
+
+type UpsertWorkspaceAppSettingParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	CatalogMode     string      `json:"catalog_mode"`
+	UpdatedBy       pgtype.UUID `json:"updated_by"`
+	AllowedToolkits []string    `json:"allowed_toolkits"`
+}
+
 func (q *Queries) UpsertWorkspaceAppSetting(ctx context.Context, arg UpsertWorkspaceAppSettingParams) (WorkspaceAppSetting, error) {
-	row := q.db.QueryRow(ctx, upsertWorkspaceAppSetting, arg.WorkspaceID, arg.CatalogMode, arg.UpdatedBy)
+	row := q.db.QueryRow(ctx, upsertWorkspaceAppSetting,
+		arg.WorkspaceID,
+		arg.CatalogMode,
+		arg.UpdatedBy,
+		arg.AllowedToolkits,
+	)
 	var i WorkspaceAppSetting
 	err := row.Scan(
 		&i.WorkspaceID,
 		&i.CatalogMode,
+		&i.AllowedToolkits,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
 	)

@@ -60,6 +60,7 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   app_action_requested: "type.app_action_requested",
   app_action_reminder: "type.app_action_reminder",
   app_connect_requested: "type.app_connect_requested",
+  app_action_result: "type.app_action_result",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).

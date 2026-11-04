@@ -1783,5 +1783,24 @@
       "empty_title": "아직 저장된 뷰가 없습니다",
       "empty_description": "태스크 목록에서 필터와 표시 방식을 맞춘 뒤 뷰로 저장하세요."
     }
+  },
+  "app_calls": {
+    "section_title": "앱",
+    "chips_label": "이 실행에서 사용한 앱",
+    "calls_count_other": "{{count}}회 호출",
+    "more": "+{{count}}개 더",
+    "scope": {
+      "team": "팀 계정",
+      "personal": "개인 계정"
+    },
+    "outcome": {
+      "ok": "실행됨",
+      "error": "실패",
+      "blocked": "차단됨",
+      "pending": "대기 중",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "rate_limited": "속도 제한"
+    }
   }
 }

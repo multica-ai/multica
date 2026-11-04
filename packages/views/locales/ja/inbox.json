@@ -83,7 +83,8 @@
     "autopilot_quota_exceeded": "自動化の実行上限に達しました",
     "app_action_requested": "確認が必要",
     "app_action_reminder": "確認の期限が近い",
-    "app_connect_requested": "アプリの接続依頼"
+    "app_connect_requested": "アプリの接続依頼",
+    "app_action_result": "アプリ操作の結果"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

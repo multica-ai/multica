@@ -839,6 +839,9 @@ export function InboxPage() {
           layoutId="multica_inbox_issue_detail_layout"
           highlightCommentId={detailItem.details?.comment_id ?? undefined}
           highlightRequestToken={highlightRequestToken}
+          highlightAppRequestId={
+            detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
+          }
           // The split layout already has a nav trigger in the list header.
           // Explicit false suppresses the detail header's fallback trigger,
           // which is the way back once the list column is collapsed.

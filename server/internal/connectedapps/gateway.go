@@ -57,7 +57,7 @@ type run struct {
 	agent       db.Agent
 	workspaceID pgtype.UUID
 	triggeredBy pgtype.UUID
-	mode        string
+	catalog     Catalog
 	apps        map[string]db.AgentApp
 }
 
@@ -149,11 +149,11 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 		agent:       agent,
 		workspaceID: agent.WorkspaceID,
 		triggeredBy: task.OriginatorUserID,
-		mode:        s.CatalogMode(ctx, agent.WorkspaceID),
+		catalog:     s.Catalog(ctx, agent.WorkspaceID),
 		apps:        map[string]db.AgentApp{},
 	}
 	for _, app := range apps {
-		if AppAllowed(rn.mode, app.ToolkitSlug) {
+		if rn.catalog.Allows(app.ToolkitSlug) {
 			rn.apps[NormalizeSlug(app.ToolkitSlug)] = app
 		}
 	}
@@ -378,6 +378,7 @@ func (s *Service) toolSearch(ctx context.Context, rn *run, slug, query string) m
 		Policy      string `json:"policy"`
 		score       int
 	}
+	overrides := s.ClassOverrides(ctx, rn.workspaceID, slug)
 	policies := map[string]string{}
 	var hits []hit
 	for _, t := range tools {
@@ -391,7 +392,10 @@ func (s *Service) toolSearch(ctx context.Context, rn *run, slug, query string) m
 		if len(terms) > 0 && score == 0 {
 			continue
 		}
-		class := Classify(slug, t.Slug, t.Tags)
+		class, ok := overrides[strings.ToUpper(t.Slug)]
+		if !ok {
+			class = Classify(slug, t.Slug, t.Tags)
+		}
 		policy, ok := policies[class]
 		if !ok {
 			policy, _, err = s.policyFor(ctx, rn, app, class)
@@ -422,7 +426,7 @@ func (s *Service) toolGet(ctx context.Context, rn *run, toolSlug string) map[str
 	if err != nil {
 		return textResult("tool not found", true)
 	}
-	class := Classify(app.ToolkitSlug, tool.Slug, tool.Tags)
+	class := s.classify(ctx, rn.workspaceID, app.ToolkitSlug, tool)
 	policy, _, err := s.policyFor(ctx, rn, app, class)
 	if err != nil {
 		policy = "account_not_connected"
@@ -446,7 +450,7 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	if err != nil {
 		return textResult("tool not found", true)
 	}
-	class := Classify(slug, tool.Slug, tool.Tags)
+	class := s.classify(ctx, rn.workspaceID, slug, tool)
 	call := toolCall{
 		workspaceID: rn.workspaceID, taskID: rn.task.ID, agentID: rn.agent.ID,
 		issueID: rn.task.IssueID, chatSessionID: rn.task.ChatSessionID, triggeredBy: rn.triggeredBy,
@@ -463,7 +467,16 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	switch policy {
 	case PolicyBlock:
 		call.outcome = "blocked"
+		first := s.firstBlock(ctx, call)
 		s.recordCall(ctx, call)
+		if first && rn.triggeredBy.Valid {
+			s.notify(ctx, db.AppActionRequest{
+				WorkspaceID: rn.workspaceID, Status: "blocked", Kind: KindAction,
+				TaskID: rn.task.ID, AgentID: rn.agent.ID, IssueID: rn.task.IssueID, ChatSessionID: rn.task.ChatSessionID,
+				ApproverUserID: rn.triggeredBy, AccountScope: app.AccountScope,
+				ToolkitSlug: slug, ToolSlug: tool.Slug, ActionClass: class,
+			}, NotifActionResult)
+		}
 		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", class, tool.Slug, slug), true)
 	case PolicyConfirm:
 		if !rn.triggeredBy.Valid {
@@ -479,6 +492,11 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		call.outcome, call.requestID = "pending", req.ID
 		s.recordCall(ctx, call)
 		return textResult(fmt.Sprintf("submitted: request %s is waiting for confirmation. End your turn now; you will be resumed with the result after the person decides. Do not call this tool again for the same action.", util.UUIDToString(req.ID)), false)
+	}
+	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
+		call.outcome = "rate_limited"
+		s.recordCall(ctx, call)
+		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", slug, s.perMinute), true)
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, *tool, args)
 	s.touch(ctx, rn.workspaceID, acct)

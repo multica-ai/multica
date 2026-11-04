@@ -1474,9 +1474,10 @@
     "disconnect": "Disconnect",
     "catalog_title": "Available apps",
     "catalog_label": "Apps members can add",
-    "catalog_description": "Curated apps come with reviewed default rules. All apps adds everything Composio can connect; actions Multica can't classify always ask first.",
+    "catalog_description": "Curated apps come with reviewed default rules. All apps adds everything Composio can connect; actions Multica can't classify always ask first. A custom list allows only the apps you pick.",
     "catalog_all": "All apps",
     "catalog_curated": "Curated only",
+    "catalog_custom": "Custom list",
     "toast_connected": "Account connected",
     "toast_connect_failed": "Couldn't complete the connection. Please try again.",
     "toast_disconnected": "Disconnected",
@@ -1553,7 +1554,8 @@
       "blocked": "Blocked",
       "pending": "Waiting",
       "approved": "Approved",
-      "rejected": "Declined"
+      "rejected": "Declined",
+      "rate_limited": "Rate limited"
     },
     "scopes": {
       "team": "Team account",
@@ -1591,7 +1593,30 @@
       "toast_approved": "Approved. The agent will continue.",
       "toast_rejected": "Declined. The agent will adapt.",
       "toast_failed": "Couldn't record your decision.",
-      "not_connected": "Connect the account first."
+      "not_connected": "Connect the account first.",
+      "connected_resumed": "{{app}} connected. The agent picks up where it stopped."
+    },
+    "tools": {
+      "tab": "Tools",
+      "description": "A tool's class decides which rule applies to it. Correct any tool the automatic class gets wrong; the change covers every account of this app in the workspace.",
+      "read_only": "Only workspace admins can change how tools are classified.",
+      "search": "Search tools",
+      "empty": "No tools match.",
+      "auto": "Automatic ({{class}})",
+      "truncated": "Showing {{shown}} of {{total}}. Search to narrow the list."
+    },
+    "custom": {
+      "title": "Custom app list",
+      "description": "Agents see only the apps you pick, and nobody can connect an account for any other app.",
+      "selected_one": "{{count}} app selected",
+      "selected_other": "{{count}} apps selected",
+      "cancel": "Cancel",
+      "save": "Save list",
+      "saved": "App list saved",
+      "edit": "Edit list",
+      "row_label": "Allowed apps",
+      "row_description_one": "{{count}} app allowed",
+      "row_description_other": "{{count}} apps allowed"
     }
   }
 }

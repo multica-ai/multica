@@ -95,3 +95,14 @@ func TestTaskToken(t *testing.T) {
 		t.Fatalf("unprefixed token: %v", err)
 	}
 }
+
+func TestDefaultLevel(t *testing.T) {
+	if got := DefaultLevel("private"); got != LevelWrite {
+		t.Fatalf("private agent default = %q, want %q", got, LevelWrite)
+	}
+	for _, mode := range []string{"public_to", ""} {
+		if got := DefaultLevel(mode); got != LevelConfirmWrites {
+			t.Fatalf("%q agent default = %q, want %q", mode, got, LevelConfirmWrites)
+		}
+	}
+}

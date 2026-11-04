@@ -1462,9 +1462,10 @@
     "disconnect": "中斷連線",
     "catalog_title": "可用應用",
     "catalog_label": "成員可新增的應用",
-    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。",
+    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
     "catalog_all": "全部應用",
     "catalog_curated": "僅精選",
+    "catalog_custom": "指定名單",
     "toast_connected": "帳號已連線",
     "toast_connect_failed": "連線未完成，請重試。",
     "toast_disconnected": "已中斷連線",
@@ -1541,7 +1542,8 @@
       "blocked": "已攔截",
       "pending": "等待確認",
       "approved": "已核准",
-      "rejected": "已拒絕"
+      "rejected": "已拒絕",
+      "rate_limited": "已限流"
     },
     "scopes": {
       "team": "團隊帳號",
@@ -1578,7 +1580,28 @@
       "toast_approved": "已核准，AI 代理將繼續。",
       "toast_rejected": "已拒絕，AI 代理會調整做法。",
       "toast_failed": "無法記錄你的決定。",
-      "not_connected": "請先連線帳號。"
+      "not_connected": "請先連線帳號。",
+      "connected_resumed": "{{app}} 已連線，代理會從中斷處繼續。"
+    },
+    "tools": {
+      "tab": "工具",
+      "description": "工具的分類決定適用哪條規則。自動分類有誤的工具可以在這裡修正，變更對本工作區裡這個應用的所有帳號生效。",
+      "read_only": "只有工作區管理員可以修改工具分類。",
+      "search": "搜尋工具",
+      "empty": "沒有符合的工具。",
+      "auto": "自動（{{class}}）",
+      "truncated": "共 {{total}} 個，顯示前 {{shown}} 個。搜尋可縮小範圍。"
+    },
+    "custom": {
+      "title": "指定應用名單",
+      "description": "代理只能看到你選中的應用，其他應用也無法再連線帳號。",
+      "selected_other": "已選 {{count}} 個應用",
+      "cancel": "取消",
+      "save": "儲存名單",
+      "saved": "應用名單已儲存",
+      "edit": "編輯名單",
+      "row_label": "允許的應用",
+      "row_description_other": "已允許 {{count}} 個應用"
     }
   }
 }

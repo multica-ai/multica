@@ -48,6 +48,10 @@ type CallbackResult struct {
 	ToolkitSlug string
 	// WorkspaceID is set for a team account.
 	WorkspaceID string
+	// UserID is the member who connected a personal account.
+	UserID string
+	// ReturnTo is the app path the flow started from, if any.
+	ReturnTo string
 }
 
 // Team reports whether the handshake connected a team account.
@@ -72,7 +76,10 @@ func (s *Service) teamStore() (TeamStore, error) {
 // BeginTeamConnect starts the connect handshake for a workspace's team
 // account. The caller has already checked that actorID administers the
 // workspace.
-func (s *Service) BeginTeamConnect(ctx context.Context, workspaceID, actorID pgtype.UUID, toolkitSlug string) (string, error) {
+func (s *Service) BeginTeamConnect(ctx context.Context, workspaceID, actorID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
+	if !SafeReturnPath(returnTo) {
+		returnTo = ""
+	}
 	if _, err := s.teamStore(); err != nil {
 		return "", err
 	}
@@ -91,6 +98,7 @@ func (s *Service) BeginTeamConnect(ctx context.Context, workspaceID, actorID pgt
 		AuthConfigID: authConfigID,
 		WorkspaceID:  util.UUIDToString(workspaceID),
 		ConnectedBy:  util.UUIDToString(actorID),
+		ReturnTo:     returnTo,
 		Exp:          s.now().Add(s.stateTTL).Unix(),
 	})
 	if err != nil {

@@ -2583,7 +2583,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/rules", h.GetAppRules)
 				r.Put("/rules", h.UpdateAppRules)
 				r.Get("/activity", h.ListAppActivity)
+				r.Get("/tools", h.ListAppTools)
+				r.Put("/tools/class", h.UpdateAppToolClass)
 			})
+			r.Get("/api/app-calls", h.ListIssueAppCalls)
 			r.Route("/api/app-requests", func(r chi.Router) {
 				r.Get("/", h.ListAppRequests)
 				r.Post("/{id}/approve", h.ApproveAppRequest)

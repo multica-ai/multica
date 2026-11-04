@@ -1474,9 +1474,10 @@
     "disconnect": "Déconnecter",
     "catalog_title": "Apps disponibles",
     "catalog_label": "Apps que les membres peuvent ajouter",
-    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord.",
+    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
     "catalog_all": "Toutes les apps",
     "catalog_curated": "Sélection uniquement",
+    "catalog_custom": "Liste personnalisée",
     "toast_connected": "Compte connecté",
     "toast_connect_failed": "La connexion n'a pas abouti. Veuillez réessayer.",
     "toast_disconnected": "Déconnecté",
@@ -1553,7 +1554,8 @@
       "blocked": "Bloqué",
       "pending": "En attente",
       "approved": "Approuvé",
-      "rejected": "Refusé"
+      "rejected": "Refusé",
+      "rate_limited": "Limite atteinte"
     },
     "scopes": {
       "team": "Compte d'équipe",
@@ -1591,7 +1593,30 @@
       "toast_approved": "Approuvé. L'agent va continuer.",
       "toast_rejected": "Refusé. L'agent va s'adapter.",
       "toast_failed": "Impossible d'enregistrer votre décision.",
-      "not_connected": "Connectez d'abord le compte."
+      "not_connected": "Connectez d'abord le compte.",
+      "connected_resumed": "{{app}} connecté. L'agent reprend là où il s'était arrêté."
+    },
+    "tools": {
+      "tab": "Outils",
+      "description": "La classe d'un outil détermine la règle qui s'applique. Corrigez tout outil mal classé automatiquement ; le changement vaut pour tous les comptes de cette app dans l'espace de travail.",
+      "read_only": "Seuls les administrateurs de l'espace de travail peuvent modifier la classification des outils.",
+      "search": "Rechercher des outils",
+      "empty": "Aucun outil ne correspond.",
+      "auto": "Automatique ({{class}})",
+      "truncated": "{{shown}} sur {{total}} affichés. Recherchez pour affiner."
+    },
+    "custom": {
+      "title": "Liste d'apps personnalisée",
+      "description": "Les agents ne voient que les apps choisies, et personne ne peut connecter de compte pour une autre app.",
+      "selected_one": "{{count}} app sélectionnée",
+      "selected_other": "{{count}} apps sélectionnées",
+      "cancel": "Annuler",
+      "save": "Enregistrer la liste",
+      "saved": "Liste d'apps enregistrée",
+      "edit": "Modifier la liste",
+      "row_label": "Apps autorisées",
+      "row_description_one": "{{count}} app autorisée",
+      "row_description_other": "{{count}} apps autorisées"
     }
   }
 }

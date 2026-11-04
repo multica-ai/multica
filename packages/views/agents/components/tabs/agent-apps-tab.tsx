@@ -81,7 +81,9 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const add = (slug: string) => {
     const recommended = appBySlug.get(slug)?.recommended_scope;
     const scope: AppAccountScope = recommended === "team" && canManageTeam ? "team" : "personal";
-    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level: "confirm_writes" }]);
+    // Only its owner runs a private agent, and would confirm each write anyway.
+    const level: AppAccessLevel = agent.permission_mode === "private" ? "write" : "confirm_writes";
+    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level }]);
   };
 
   const addable = (catalog.data?.apps ?? []).filter((app) => !apps.some((a) => a.toolkit_slug === app.slug));

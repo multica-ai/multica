@@ -2,6 +2,9 @@ export {
   connectedAppsKeys,
   appsOverviewOptions,
   appCatalogOptions,
+  fullAppCatalogOptions,
+  appToolsOptions,
+  issueAppCallsOptions,
   appRulesOptions,
   appActivityOptions,
   teamAppImpactOptions,
@@ -12,6 +15,7 @@ export {
 export {
   useUpdateAppSettings,
   useUpdateAppRules,
+  useUpdateAppToolClass,
   useDisconnectTeamApp,
   useUpdateAgentApps,
   useDecideAppRequest,

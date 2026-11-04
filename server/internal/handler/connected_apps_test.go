@@ -129,9 +129,10 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
-		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting"} {
+		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override"} {
 			testPool.Exec(ctx, `DELETE FROM `+table+` WHERE workspace_id = $1`, testWorkspaceID)
 		}
+		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE workspace_id = $1 AND type LIKE 'app\_%'`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, agentID)
 	})
 
@@ -393,5 +394,203 @@ func TestConnectedApps_AdminOnlyTeamSurfaces(t *testing.T) {
 	// A team app without a connected team account reports not_connected.
 	if _, text, _ := f.gateway(t, f.token(t), "apps_list", nil); !strings.Contains(text, `"status": "not_connected"`) {
 		t.Fatalf("apps_list = %s, want not_connected", text)
+	}
+}
+
+func (f *appsFixture) inboxCount(t *testing.T, recipient, notifType string) int {
+	t.Helper()
+	var n int
+	testPool.QueryRow(context.Background(), `SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND recipient_id = $2 AND type = $3`, testWorkspaceID, recipient, notifType).Scan(&n)
+	return n
+}
+
+func TestConnectedApps_ResultNotifications(t *testing.T) {
+	f := newAppsFixture(t)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "read"}})
+	token := f.token(t)
+
+	// A block tells the person who triggered the run once, not on every retry.
+	for i := 0; i < 2; i++ {
+		if _, text, isErr := f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{}}); !isErr || !strings.HasPrefix(text, "blocked") {
+			t.Fatalf("send at read level = %s", text)
+		}
+	}
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionResult); n != 1 {
+		t.Fatalf("block notifications = %d, want 1", n)
+	}
+
+	// An unanswered confirmation expires into a result notification.
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}})
+	if _, text, _ := f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "x"}}); !strings.HasPrefix(text, "submitted") {
+		t.Fatalf("send = %s, want submitted", text)
+	}
+	testPool.Exec(context.Background(), `UPDATE app_action_request SET expires_at = now() - interval '1 minute' WHERE task_id = $1`, f.taskID)
+	f.h.ConnectedApps.Sweep(context.Background())
+	if reqs := f.listRequests(t, testUserID); len(reqs) != 1 || reqs[0].Status != "expired" {
+		t.Fatalf("requests after sweep = %+v", reqs)
+	}
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionResult); n != 2 {
+		t.Fatalf("result notifications after expiry = %d, want 2", n)
+	}
+
+	// Muting agent activity mutes results, never confirmations.
+	testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, '{"agent_activity":"muted"}')
+		ON CONFLICT (workspace_id, user_id) DO UPDATE SET preferences = EXCLUDED.preferences
+	`, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, testUserID)
+	})
+	f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "y"}})
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionRequested); n != 2 {
+		t.Fatalf("confirmations with agent activity muted = %d, want 2", n)
+	}
+	testPool.Exec(context.Background(), `UPDATE app_action_request SET expires_at = now() - interval '1 minute' WHERE task_id = $1 AND status = 'pending'`, f.taskID)
+	f.h.ConnectedApps.Sweep(context.Background())
+	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionResult); n != 2 {
+		t.Fatalf("muted result delivered: %d, want 2", n)
+	}
+}
+
+func TestConnectedApps_RateLimit(t *testing.T) {
+	f := newAppsFixture(t)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "write"}})
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO app_tool_call (workspace_id, agent_id, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome)
+		SELECT $1, $2, 'personal', $3, 'gmail', 'GMAIL_FETCH_EMAILS', 'read', 'ok' FROM generate_series(1, $4::int)
+	`, testWorkspaceID, f.agentID, testUserID, connectedapps.DefaultCallsPerMinute); err != nil {
+		t.Fatalf("seed calls: %v", err)
+	}
+	_, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}})
+	if !isErr || !strings.HasPrefix(text, "rate limited") {
+		t.Fatalf("call over the limit = %s (error %v)", text, isErr)
+	}
+	if n := len(f.sdk.executions()); n != 0 {
+		t.Fatalf("limited call executed")
+	}
+	// Older calls fall out of the window.
+	testPool.Exec(context.Background(), `UPDATE app_tool_call SET created_at = now() - interval '2 minutes' WHERE workspace_id = $1`, testWorkspaceID)
+	if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}}); isErr {
+		t.Fatalf("call after the window = %s", text)
+	}
+}
+
+func TestConnectedApps_ConnectRequestResolvesOnConnect(t *testing.T) {
+	f := newAppsFixture(t)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "notion", "account_scope": "personal", "level": "write"}})
+	_, text, isErr := f.gateway(t, f.token(t), "apps_request_connection", map[string]any{"app": "notion", "summary": "Read the spec"})
+	if isErr || !strings.HasPrefix(text, "requested") {
+		t.Fatalf("request connection = %s (error %v)", text, isErr)
+	}
+	reqs := f.listRequests(t, testUserID)
+	if len(reqs) != 1 || reqs[0].Kind != "connect" {
+		t.Fatalf("requests = %+v", reqs)
+	}
+	expires, _ := time.Parse(time.RFC3339, reqs[0].ExpiresAt)
+	if time.Until(expires) < 6*24*time.Hour {
+		t.Fatalf("connect request expires %s, want about 7 days out", reqs[0].ExpiresAt)
+	}
+
+	account := fmt.Sprintf("ca_notion_%d", testSeq.Add(1))
+	testHandler.Queries.UpsertUserComposioConnection(context.Background(), db.UpsertUserComposioConnectionParams{
+		UserID: parseUUID(testUserID), ToolkitSlug: "notion", AuthConfigID: "ac_notion",
+		ConnectedAccountID: account, ComposioUserID: testUserID,
+	})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
+	})
+	f.h.ConnectedApps.ResolveConnectRequests(context.Background(), parseUUID(testUserID), "notion")
+
+	if reqs := f.listRequests(t, testUserID); len(reqs) != 1 || reqs[0].Status != "approved" {
+		t.Fatalf("connect request after connecting = %+v", reqs)
+	}
+	var note string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT handoff_note FROM agent_task_queue
+		WHERE agent_id = $1 AND issue_id = $2 AND status = 'queued' AND trigger_evidence_kind = 'app_action_request'
+	`, f.agentID, f.issueID).Scan(&note); err != nil || !strings.Contains(note, "now connected") {
+		t.Fatalf("resume run = %q, %v", note, err)
+	}
+}
+
+func TestConnectedApps_ToolClassOverride(t *testing.T) {
+	f := newAppsFixture(t)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}})
+
+	setClass := func(userID, class string) int {
+		w := httptest.NewRecorder()
+		f.h.UpdateAppToolClass(w, appsReqAs(t, userID, http.MethodPut, "/api/apps/tools/class",
+			map[string]string{"toolkit_slug": "gmail", "tool_slug": "GMAIL_FETCH_EMAILS", "action_class": class}))
+		return w.Code
+	}
+	if code := setClass(f.member, "send"); code != http.StatusForbidden {
+		t.Fatalf("member overrides a class: %d, want 403", code)
+	}
+	if code := setClass(testUserID, "send"); code != http.StatusNoContent {
+		t.Fatalf("admin override: %d", code)
+	}
+
+	w := httptest.NewRecorder()
+	f.h.ListAppTools(w, appsReqAs(t, f.member, http.MethodGet, "/api/apps/tools?toolkit_slug=gmail", nil))
+	var tools struct {
+		Tools []AppToolResponse `json:"tools"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &tools)
+	found := false
+	for _, tool := range tools.Tools {
+		if tool.Slug == "GMAIL_FETCH_EMAILS" {
+			found = true
+			if tool.Class != "send" || tool.AutoClass != "read" || !tool.Overridden {
+				t.Fatalf("overridden tool = %+v", tool)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("tools = %s", w.Body.String())
+	}
+
+	// The corrected class drives the policy: a "read" now waits for confirmation.
+	if _, text, _ := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}}); !strings.HasPrefix(text, "submitted") {
+		t.Fatalf("overridden read = %s, want submitted", text)
+	}
+	if code := setClass(testUserID, ""); code != http.StatusNoContent {
+		t.Fatalf("reset override: %d", code)
+	}
+	if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}}); isErr || strings.HasPrefix(text, "submitted") {
+		t.Fatalf("read after reset = %s", text)
+	}
+}
+
+func TestConnectedApps_CustomCatalogAndIssueCalls(t *testing.T) {
+	f := newAppsFixture(t)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "write"}})
+	f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}})
+
+	w := httptest.NewRecorder()
+	f.h.ListIssueAppCalls(w, appsReqAs(t, f.member, http.MethodGet, "/api/app-calls?issue_id="+f.issueID, nil))
+	var calls struct {
+		Calls []IssueAppCallResponse `json:"calls"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &calls)
+	if w.Code != http.StatusOK || len(calls.Calls) != 1 || calls.Calls[0].ToolSlug != "GMAIL_FETCH_EMAILS" || calls.Calls[0].Outcome != "ok" {
+		t.Fatalf("issue calls = %d %s", w.Code, w.Body.String())
+	}
+
+	// A custom catalog keeps everything off the list away from agents.
+	w = httptest.NewRecorder()
+	f.h.UpdateAppSettings(w, appsReqAs(t, testUserID, http.MethodPut, "/api/apps/settings",
+		map[string]any{"catalog_mode": "custom", "allowed_toolkits": []string{"Notion", "notion", ""}}))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"allowed_toolkits":["notion"]`) {
+		t.Fatalf("custom settings: %d %s", w.Code, w.Body.String())
+	}
+	if _, text, _ := f.gateway(t, f.token(t), "apps_list", nil); strings.Contains(text, "gmail") {
+		t.Fatalf("apps_list in custom catalog = %s", text)
+	}
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "notion", "account_scope": "personal", "level": "read"}}); w.Code != http.StatusOK {
+		t.Fatalf("listed app: %d %s", w.Code, w.Body.String())
+	}
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "slack", "account_scope": "personal", "level": "read"}}); w.Code != http.StatusForbidden {
+		t.Fatalf("unlisted app in custom catalog: %d, want 403", w.Code)
 	}
 }

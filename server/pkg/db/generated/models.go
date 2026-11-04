@@ -259,6 +259,15 @@ type AppToolCall struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type AppToolClassOverride struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ToolkitSlug string             `json:"toolkit_slug"`
+	ToolSlug    string             `json:"tool_slug"`
+	ActionClass string             `json:"action_class"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Attachment struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -1879,10 +1888,11 @@ type Workspace struct {
 }
 
 type WorkspaceAppSetting struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CatalogMode string             `json:"catalog_mode"`
-	UpdatedBy   pgtype.UUID        `json:"updated_by"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	CatalogMode     string             `json:"catalog_mode"`
+	AllowedToolkits []string           `json:"allowed_toolkits"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceComposioConnection struct {

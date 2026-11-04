@@ -27,6 +27,7 @@ const (
 const (
 	CatalogAll     = "all"
 	CatalogCurated = "curated"
+	CatalogCustom  = "custom"
 )
 
 // CuratedApp is an app Multica has tested end to end. Curated apps carry a
@@ -106,6 +107,16 @@ func NormalizeSlug(slug string) string {
 // ValidScope reports whether scope is an account scope.
 func ValidScope(scope string) bool {
 	return scope == ScopeTeam || scope == ScopePersonal
+}
+
+// DefaultLevel is the level an app joins an agent at. Only the owner can run
+// a private agent, so the owner is the one who would confirm each write;
+// shared agents ask first.
+func DefaultLevel(agentPermissionMode string) string {
+	if agentPermissionMode == "private" {
+		return LevelWrite
+	}
+	return LevelConfirmWrites
 }
 
 // ValidLevel reports whether level is an agent permission level.

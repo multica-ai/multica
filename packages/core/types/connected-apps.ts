@@ -14,8 +14,9 @@ export type AppActionClass = "read" | "write" | "send" | "delete" | "share";
 
 export type AppActionPolicy = "allow" | "confirm" | "block";
 
-/** `all` lists every connectable app; `curated` only Multica's reviewed set. */
-export type AppCatalogMode = "all" | "curated";
+/** `all` lists every connectable app; `curated` only Multica's reviewed set;
+ * `custom` only the apps an admin listed. */
+export type AppCatalogMode = "all" | "curated" | "custom";
 
 export interface AppConnection {
   id: string;
@@ -35,6 +36,8 @@ export interface AgentApp {
 
 export interface AppsOverview {
   catalog_mode: AppCatalogMode;
+  /** The apps of a custom catalog. */
+  allowed_toolkits?: string[];
   /** Whether the caller administers team accounts and catalog settings. */
   can_manage: boolean;
   team: AppConnection[];
@@ -49,6 +52,44 @@ export interface AppCatalogEntry {
   category?: string;
   curated: boolean;
   recommended_scope?: AppAccountScope;
+  /** False only in the admin's full view for apps the catalog leaves out. */
+  allowed?: boolean;
+}
+
+/** One tool of an app and how this workspace classifies it. */
+export interface AppTool {
+  slug: string;
+  name: string;
+  description: string;
+  auto_class: AppActionClass;
+  class: AppActionClass;
+  overridden: boolean;
+}
+
+export type AppCallOutcome =
+  | "ok"
+  | "error"
+  | "blocked"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "rate_limited";
+
+/** One call an issue's runs made through an app. */
+export interface IssueAppCall {
+  id: string;
+  task_id: string | null;
+  agent_id: string;
+  account_scope: AppAccountScope;
+  account_owner_user_id: string | null;
+  toolkit_slug: string;
+  tool_slug: string;
+  action_class: AppActionClass | string;
+  outcome: AppCallOutcome | string;
+  request_id: string | null;
+  /** Present only for the account's owner. */
+  error: string | null;
+  created_at: string;
 }
 
 export interface AppCatalogResponse {
@@ -71,7 +112,7 @@ export interface AppToolCall {
   triggered_by: string | null;
   tool_slug: string;
   action_class: AppActionClass;
-  outcome: "ok" | "error" | "blocked" | "pending" | "approved" | "rejected" | string;
+  outcome: AppCallOutcome | string;
   error: string | null;
   created_at: string;
 }

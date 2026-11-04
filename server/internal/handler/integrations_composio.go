@@ -105,8 +105,9 @@ func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 // session cookie (expired session, SameSite/ITP stripping, private window,
 // self-hosted callback subdomain). Identity therefore comes solely from the
 // HMAC-signed `state` query param, which CompleteCallback verifies before
-// doing anything. On success the row is upserted and the browser is redirected
-// to the settings page; any failure redirects to the same page with a stable
+// doing anything. On success the row is upserted, connection requests waiting
+// on this account resume their agents, and the browser is redirected to where
+// the flow started (the settings page by default); any failure redirects to the same page with a stable
 // error code so the user is never left on a blank API response.
 func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
@@ -125,6 +126,11 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 		// browser which check failed.
 		http.Redirect(w, r, h.Composio.CallbackRedirect(result, false), http.StatusFound)
 		return
+	}
+	if h.ConnectedApps != nil && !result.Team() {
+		if userID, perr := parseUUIDStrict(result.UserID); perr == nil {
+			h.ConnectedApps.ResolveConnectRequests(r.Context(), userID, result.ToolkitSlug)
+		}
 	}
 	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
 }

@@ -44,11 +44,12 @@ type AgentAppResponse struct {
 
 // AppsOverviewResponse backs Settings › Apps.
 type AppsOverviewResponse struct {
-	CatalogMode string                  `json:"catalog_mode"`
-	CanManage   bool                    `json:"can_manage"`
-	Team        []AppConnectionResponse `json:"team"`
-	Personal    []AppConnectionResponse `json:"personal"`
-	AgentApps   []AgentAppResponse      `json:"agent_apps"`
+	CatalogMode     string                  `json:"catalog_mode"`
+	AllowedToolkits []string                `json:"allowed_toolkits"`
+	CanManage       bool                    `json:"can_manage"`
+	Team            []AppConnectionResponse `json:"team"`
+	Personal        []AppConnectionResponse `json:"personal"`
+	AgentApps       []AgentAppResponse      `json:"agent_apps"`
 }
 
 // AppCatalogEntry is one app in the add-app dialog.
@@ -59,6 +60,36 @@ type AppCatalogEntry struct {
 	Category         string `json:"category,omitempty"`
 	Curated          bool   `json:"curated"`
 	RecommendedScope string `json:"recommended_scope,omitempty"`
+	// Allowed is false only in the admin's full view (?view=all) for apps
+	// the workspace catalog leaves out.
+	Allowed bool `json:"allowed"`
+}
+
+// AppToolResponse is one tool of an app with how it is classified.
+type AppToolResponse struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	AutoClass   string `json:"auto_class"`
+	Class       string `json:"class"`
+	Overridden  bool   `json:"overridden"`
+}
+
+// IssueAppCallResponse is one call an issue's runs made. Errors stay with
+// the account owner, like an account's activity.
+type IssueAppCallResponse struct {
+	ID                 string  `json:"id"`
+	TaskID             *string `json:"task_id"`
+	AgentID            string  `json:"agent_id"`
+	AccountScope       string  `json:"account_scope"`
+	AccountOwnerUserID *string `json:"account_owner_user_id"`
+	ToolkitSlug        string  `json:"toolkit_slug"`
+	ToolSlug           string  `json:"tool_slug"`
+	ActionClass        string  `json:"action_class"`
+	Outcome            string  `json:"outcome"`
+	RequestID          *string `json:"request_id"`
+	Error              *string `json:"error"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 // AppRuleResponse is the policy of one action class for one account.
@@ -186,12 +217,14 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
 	}
+	catalog := h.ConnectedApps.Catalog(ctx, workspaceID)
 	resp := AppsOverviewResponse{
-		CatalogMode: h.ConnectedApps.CatalogMode(ctx, workspaceID),
-		CanManage:   isAdmin,
-		Team:        make([]AppConnectionResponse, 0, len(team)),
-		Personal:    make([]AppConnectionResponse, 0, len(personal)),
-		AgentApps:   make([]AgentAppResponse, 0, len(agentApps)),
+		CatalogMode:     catalog.Mode,
+		AllowedToolkits: append([]string{}, catalog.Allowed...),
+		CanManage:       isAdmin,
+		Team:            make([]AppConnectionResponse, 0, len(team)),
+		Personal:        make([]AppConnectionResponse, 0, len(personal)),
+		AgentApps:       make([]AgentAppResponse, 0, len(agentApps)),
 	}
 	for _, row := range team {
 		resp.Team = append(resp.Team, connectionFromTeam(row))
@@ -205,30 +238,33 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ListAppCatalog (GET /api/apps/catalog) is every app the workspace may add:
-// all connectable apps, or only curated ones in curated mode.
+// ListAppCatalog (GET /api/apps/catalog) is every app the workspace may add.
+// An admin passing ?view=all gets every connectable app, each marked with
+// whether the catalog allows it, to edit a custom list.
 func (h *Handler) ListAppCatalog(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
 	}
-	_, workspaceID, _, ok := h.appsMember(w, r)
+	_, workspaceID, isAdmin, ok := h.appsMember(w, r)
 	if !ok {
 		return
 	}
+	viewAll := isAdmin && r.URL.Query().Get("view") == "all"
 	toolkits, err := h.Composio.ListToolkits(r.Context())
 	if err != nil {
 		slog.Warn("apps catalog failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusBadGateway, "failed to load apps")
 		return
 	}
-	mode := h.ConnectedApps.CatalogMode(r.Context(), workspaceID)
+	catalog := h.ConnectedApps.Catalog(r.Context(), workspaceID)
 	out := make([]AppCatalogEntry, 0, len(toolkits))
 	for _, tk := range toolkits {
 		slug := connectedapps.NormalizeSlug(tk.Slug)
-		if !connectedapps.AppAllowed(mode, slug) {
+		allowed := catalog.Allows(slug)
+		if !allowed && !viewAll {
 			continue
 		}
-		entry := AppCatalogEntry{Slug: slug, Name: tk.Name, Logo: tk.LogoURL, Category: tk.Category}
+		entry := AppCatalogEntry{Slug: slug, Name: tk.Name, Logo: tk.LogoURL, Category: tk.Category, Allowed: allowed}
 		if app, ok := connectedapps.Curated(slug); ok {
 			entry.Curated, entry.RecommendedScope = true, app.Scope
 		}
@@ -236,29 +272,32 @@ func (h *Handler) ListAppCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	// Curated apps first, each group keeping Composio's usage order.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Curated && !out[j].Curated })
-	writeJSON(w, http.StatusOK, map[string]any{"catalog_mode": mode, "apps": out})
+	writeJSON(w, http.StatusOK, map[string]any{"catalog_mode": catalog.Mode, "apps": out})
 }
 
 type appSlugRequest struct {
 	ToolkitSlug string `json:"toolkit_slug"`
+	// ReturnTo is the app path to come back to after the hosted flow.
+	ReturnTo string `json:"return_to"`
 }
 
-func (h *Handler) decodeAppSlug(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID) (string, bool) {
+func (h *Handler) decodeAppSlug(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID) (appSlugRequest, bool) {
 	var req appSlugRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
-		return "", false
+		return req, false
 	}
 	slug := connectedapps.NormalizeSlug(req.ToolkitSlug)
 	if slug == "" {
 		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
-		return "", false
+		return req, false
 	}
-	if !connectedapps.AppAllowed(h.ConnectedApps.CatalogMode(r.Context(), workspaceID), slug) {
-		writeError(w, http.StatusForbidden, "this workspace only allows curated apps")
-		return "", false
+	if !h.ConnectedApps.Catalog(r.Context(), workspaceID).Allows(slug) {
+		writeError(w, http.StatusForbidden, "this workspace does not allow this app")
+		return req, false
 	}
-	return slug, true
+	req.ToolkitSlug = slug
+	return req, true
 }
 
 func writeConnectError(w http.ResponseWriter, r *http.Request, err error) {
@@ -284,11 +323,11 @@ func (h *Handler) ConnectTeamApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only workspace admins can connect team accounts")
 		return
 	}
-	slug, ok := h.decodeAppSlug(w, r, workspaceID)
+	req, ok := h.decodeAppSlug(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	url, err := h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, slug)
+	url, err := h.Composio.BeginTeamConnect(r.Context(), workspaceID, member.UserID, req.ToolkitSlug, req.ReturnTo)
 	if err != nil {
 		writeConnectError(w, r, err)
 		return
@@ -306,11 +345,11 @@ func (h *Handler) ConnectPersonalApp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	slug, ok := h.decodeAppSlug(w, r, workspaceID)
+	req, ok := h.decodeAppSlug(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	url, err := h.Composio.BeginConnect(r.Context(), member.UserID, slug)
+	url, err := h.Composio.BeginConnectReturning(r.Context(), member.UserID, req.ToolkitSlug, req.ReturnTo)
 	if err != nil {
 		writeConnectError(w, r, err)
 		return
@@ -398,7 +437,11 @@ func (h *Handler) GetTeamAppImpact(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateAppSettings (PUT /api/apps/settings) sets the catalog mode. Admins only.
+// maxAllowedToolkits bounds a custom catalog.
+const maxAllowedToolkits = 500
+
+// UpdateAppSettings (PUT /api/apps/settings) sets the catalog: all apps,
+// curated ones, or a custom list. Admins only.
 func (h *Handler) UpdateAppSettings(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
 		return
@@ -412,20 +455,41 @@ func (h *Handler) UpdateAppSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		CatalogMode string `json:"catalog_mode"`
+		CatalogMode     string   `json:"catalog_mode"`
+		AllowedToolkits []string `json:"allowed_toolkits"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.CatalogMode != connectedapps.CatalogAll && req.CatalogMode != connectedapps.CatalogCurated) {
-		writeError(w, http.StatusBadRequest, "catalog_mode must be all or curated")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	switch req.CatalogMode {
+	case connectedapps.CatalogAll, connectedapps.CatalogCurated, connectedapps.CatalogCustom:
+	default:
+		writeError(w, http.StatusBadRequest, "catalog_mode must be all, curated or custom")
+		return
+	}
+	allowed := []string{}
+	seen := map[string]bool{}
+	for _, raw := range req.AllowedToolkits {
+		slug := connectedapps.NormalizeSlug(raw)
+		if slug == "" || seen[slug] {
+			continue
+		}
+		seen[slug] = true
+		allowed = append(allowed, slug)
+	}
+	if len(allowed) > maxAllowedToolkits {
+		writeError(w, http.StatusBadRequest, "too many apps in the list")
 		return
 	}
 	row, err := h.Queries.UpsertWorkspaceAppSetting(r.Context(), db.UpsertWorkspaceAppSettingParams{
-		WorkspaceID: workspaceID, CatalogMode: req.CatalogMode, UpdatedBy: member.UserID,
+		WorkspaceID: workspaceID, CatalogMode: req.CatalogMode, AllowedToolkits: allowed, UpdatedBy: member.UserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save settings")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"catalog_mode": row.CatalogMode})
+	writeJSON(w, http.StatusOK, map[string]any{"catalog_mode": row.CatalogMode, "allowed_toolkits": row.AllowedToolkits})
 }
 
 // ruleScope resolves whose rules a request reads or writes: the team account
@@ -590,6 +654,130 @@ func (h *Handler) ListAppActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"calls": out})
 }
 
+// ListAppTools (GET /api/apps/tools?toolkit_slug=) lists an app's tools and
+// how each is classified in this workspace.
+func (h *Handler) ListAppTools(w http.ResponseWriter, r *http.Request) {
+	if !h.appsReady(w, r) {
+		return
+	}
+	_, workspaceID, _, ok := h.appsMember(w, r)
+	if !ok {
+		return
+	}
+	slug := connectedapps.NormalizeSlug(r.URL.Query().Get("toolkit_slug"))
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
+		return
+	}
+	tools, err := h.Composio.ListToolkitTools(r.Context(), slug)
+	if err != nil {
+		slog.Warn("apps tools failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusBadGateway, "failed to load tools")
+		return
+	}
+	overrides := h.ConnectedApps.ClassOverrides(r.Context(), workspaceID, slug)
+	out := make([]AppToolResponse, 0, len(tools))
+	for _, t := range tools {
+		auto := connectedapps.Classify(slug, t.Slug, t.Tags)
+		class, overridden := overrides[strings.ToUpper(t.Slug)]
+		if !overridden {
+			class = auto
+		}
+		out = append(out, AppToolResponse{
+			Slug: t.Slug, Name: t.Name, Description: t.Description,
+			AutoClass: auto, Class: class, Overridden: overridden,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tools": out})
+}
+
+// UpdateAppToolClass (PUT /api/apps/tools/class) corrects how one tool is
+// classified in this workspace; an empty class restores the automatic one.
+// Admins only, since the class decides what every account's rules apply.
+func (h *Handler) UpdateAppToolClass(w http.ResponseWriter, r *http.Request) {
+	if !h.appsReady(w, r) {
+		return
+	}
+	member, workspaceID, isAdmin, ok := h.appsMember(w, r)
+	if !ok {
+		return
+	}
+	if !isAdmin {
+		writeError(w, http.StatusForbidden, "only workspace admins can change how tools are classified")
+		return
+	}
+	var req struct {
+		ToolkitSlug string `json:"toolkit_slug"`
+		ToolSlug    string `json:"tool_slug"`
+		ActionClass string `json:"action_class"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	slug := connectedapps.NormalizeSlug(req.ToolkitSlug)
+	tool := strings.ToUpper(strings.TrimSpace(req.ToolSlug))
+	if slug == "" || tool == "" {
+		writeError(w, http.StatusBadRequest, "toolkit_slug and tool_slug are required")
+		return
+	}
+	var err error
+	if req.ActionClass == "" {
+		err = h.Queries.DeleteAppToolClassOverride(r.Context(), db.DeleteAppToolClassOverrideParams{
+			WorkspaceID: workspaceID, ToolkitSlug: slug, ToolSlug: tool,
+		})
+	} else {
+		if !connectedapps.ValidClass(req.ActionClass) {
+			writeError(w, http.StatusBadRequest, "invalid action_class")
+			return
+		}
+		err = h.Queries.UpsertAppToolClassOverride(r.Context(), db.UpsertAppToolClassOverrideParams{
+			WorkspaceID: workspaceID, ToolkitSlug: slug, ToolSlug: tool,
+			ActionClass: req.ActionClass, UpdatedBy: member.UserID,
+		})
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListIssueAppCalls (GET /api/app-calls?issue_id=) lists the app calls an
+// issue's runs made, for the call chips and the issue sidebar.
+func (h *Handler) ListIssueAppCalls(w http.ResponseWriter, r *http.Request) {
+	if !h.appsReady(w, r) {
+		return
+	}
+	member, workspaceID, _, ok := h.appsMember(w, r)
+	if !ok {
+		return
+	}
+	issue, ok := h.loadIssueForUser(w, r, r.URL.Query().Get("issue_id"))
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListIssueAppToolCalls(r.Context(), db.ListIssueAppToolCallsParams{WorkspaceID: workspaceID, IssueID: issue.ID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list calls")
+		return
+	}
+	out := make([]IssueAppCallResponse, 0, len(rows))
+	for _, row := range rows {
+		call := IssueAppCallResponse{
+			ID: uuidToString(row.ID), TaskID: uuidToPtr(row.TaskID), AgentID: uuidToString(row.AgentID),
+			AccountScope: row.AccountScope, AccountOwnerUserID: uuidToPtr(row.AccountOwnerUserID),
+			ToolkitSlug: row.ToolkitSlug, ToolSlug: row.ToolSlug, ActionClass: row.ActionClass,
+			Outcome: row.Outcome, RequestID: uuidToPtr(row.RequestID), CreatedAt: timestampToString(row.CreatedAt),
+		}
+		if row.AccountOwnerUserID == member.UserID {
+			call.Error = textToPtr(row.Error)
+		}
+		out = append(out, call)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"calls": out})
+}
+
 // ListAgentApps (GET /api/agents/{id}/apps).
 func (h *Handler) ListAgentApps(w http.ResponseWriter, r *http.Request) {
 	if !h.appsReady(w, r) {
@@ -650,7 +838,7 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 	for _, row := range existing {
 		current[row.ToolkitSlug] = row
 	}
-	mode := h.ConnectedApps.CatalogMode(ctx, workspaceID)
+	catalog := h.ConnectedApps.Catalog(ctx, workspaceID)
 	keep := []string{}
 	seen := map[string]bool{}
 	type want struct{ slug, scope, level string }
@@ -664,8 +852,8 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 		seen[slug] = true
 		prev, had := current[slug]
 		changed := !had || prev.AccountScope != app.AccountScope || prev.Level != app.Level
-		if changed && !connectedapps.AppAllowed(mode, slug) {
-			writeError(w, http.StatusForbidden, "this workspace only allows curated apps")
+		if changed && !catalog.Allows(slug) {
+			writeError(w, http.StatusForbidden, "this workspace does not allow this app")
 			return
 		}
 		touchesTeam := app.AccountScope == connectedapps.ScopeTeam || (had && prev.AccountScope == connectedapps.ScopeTeam)
@@ -740,7 +928,7 @@ func syncAgentAppsFromAllowlist(ctx context.Context, q *db.Queries, agent db.Age
 		}
 		if _, err := q.UpsertAgentApp(ctx, db.UpsertAgentAppParams{
 			WorkspaceID: agent.WorkspaceID, AgentID: agent.ID, ToolkitSlug: slug,
-			AccountScope: connectedapps.ScopePersonal, Level: connectedapps.LevelConfirmWrites, CreatedBy: actorID,
+			AccountScope: connectedapps.ScopePersonal, Level: connectedapps.DefaultLevel(agent.PermissionMode), CreatedBy: actorID,
 		}); err != nil {
 			return err
 		}

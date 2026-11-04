@@ -85,7 +85,8 @@
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
-    "app_connect_requested": "Connect an app"
+    "app_connect_requested": "Connect an app",
+    "app_action_result": "App action result"
   },
   "labels": {
     "set_status_to": "Set status to",

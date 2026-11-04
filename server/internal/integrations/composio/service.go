@@ -243,6 +243,15 @@ func toolkitLogoURL(slug, upstreamLogoURL string) string {
 // The composio_user_id sent to Composio is the Multica user id verbatim — the
 // invariant the rest of the integration relies on.
 func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitSlug string) (string, error) {
+	return s.BeginConnectReturning(ctx, userID, toolkitSlug, "")
+}
+
+// BeginConnectReturning is BeginConnect whose callback sends the browser back
+// to returnTo, an app path; an unsafe or empty path keeps the settings page.
+func (s *Service) BeginConnectReturning(ctx context.Context, userID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
+	if !SafeReturnPath(returnTo) {
+		returnTo = ""
+	}
 	slug := strings.ToLower(strings.TrimSpace(toolkitSlug))
 	authConfigID, err := s.ensureAuthConfig(ctx, slug)
 	if err != nil {
@@ -260,6 +269,7 @@ func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitS
 		UserID:       composioUserID,
 		ToolkitSlug:  slug,
 		AuthConfigID: authConfigID,
+		ReturnTo:     returnTo,
 		Exp:          s.now().Add(s.stateTTL).Unix(),
 	})
 	if err != nil {
@@ -294,7 +304,10 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	if err != nil {
 		return CallbackResult{}, err
 	}
-	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID}
+	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ReturnTo: claims.ReturnTo}
+	if claims.WorkspaceID == "" {
+		result.UserID = claims.UserID
+	}
 
 	if !strings.EqualFold(strings.TrimSpace(status), "success") {
 		// Honor the state for the redirect slug, but do not write an active row.
@@ -469,6 +482,19 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 // route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
 func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
+	if result.ReturnTo != "" && SafeReturnPath(result.ReturnTo) {
+		path, rawQuery, _ := strings.Cut(result.ReturnTo, "?")
+		q, err := url.ParseQuery(rawQuery)
+		if err != nil {
+			q = url.Values{}
+		}
+		if success {
+			q.Set("app_connected", result.ToolkitSlug)
+		} else {
+			q.Set("app_connect_error", result.ToolkitSlug)
+		}
+		return s.frontendURL + path + "?" + q.Encode()
+	}
 	q := url.Values{}
 	q.Set("tab", "apps")
 	if success {

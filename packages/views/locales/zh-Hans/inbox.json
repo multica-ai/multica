@@ -83,7 +83,8 @@
     "autopilot_quota_exceeded": "自动化执行次数已用完",
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
-    "app_connect_requested": "请连接应用"
+    "app_connect_requested": "请连接应用",
+    "app_action_result": "应用操作结果"
   },
   "labels": {
     "set_status_to": "状态设为",

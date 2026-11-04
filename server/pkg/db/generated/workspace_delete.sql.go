@@ -501,6 +501,9 @@ deleted_app_tool_calls AS (
 deleted_workspace_app_settings AS (
     DELETE FROM workspace_app_setting WHERE workspace_id = $1
 ),
+deleted_app_tool_class_overrides AS (
+    DELETE FROM app_tool_class_override WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)

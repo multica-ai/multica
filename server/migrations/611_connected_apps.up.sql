@@ -9,7 +9,7 @@
 -- person.
 --
 -- No foreign keys (repo rule): workspace and agent teardown delete these rows
--- explicitly. Every index is built concurrently in 609-617, following
+-- explicitly. Every index is built concurrently in 612-621, following
 -- wecom_install_session (600-604), so no migration builds an index inline on a
 -- live table. The tables start empty, so the window between this migration
 -- and its indexes carries no load.
@@ -113,19 +113,34 @@ CREATE TABLE IF NOT EXISTS app_tool_call (
     tool_slug             TEXT NOT NULL,
     action_class          TEXT NOT NULL,
     outcome               TEXT NOT NULL
-        CHECK (outcome IN ('ok', 'error', 'blocked', 'pending', 'approved', 'rejected')),
+        CHECK (outcome IN ('ok', 'error', 'blocked', 'pending', 'approved', 'rejected', 'rate_limited')),
     request_id            UUID,
     error                 TEXT,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Which apps members may connect. 'all' is every app in the catalog,
--- 'curated' only the curated ones. No row means 'all'.
+-- 'curated' only the curated ones, 'custom' only allowed_toolkits. No row
+-- means 'all'.
 CREATE TABLE IF NOT EXISTS workspace_app_setting (
-    workspace_id UUID PRIMARY KEY,
-    catalog_mode TEXT NOT NULL DEFAULT 'all' CHECK (catalog_mode IN ('all', 'curated')),
+    workspace_id     UUID PRIMARY KEY,
+    catalog_mode     TEXT NOT NULL DEFAULT 'all' CHECK (catalog_mode IN ('all', 'curated', 'custom')),
+    allowed_toolkits TEXT[] NOT NULL DEFAULT '{}',
+    updated_by       UUID,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- An admin's correction of how one tool is classified in this workspace. It
+-- wins over the curated table and the name heuristics.
+CREATE TABLE IF NOT EXISTS app_tool_class_override (
+    workspace_id UUID NOT NULL,
+    toolkit_slug TEXT NOT NULL,
+    tool_slug    TEXT NOT NULL,
+    action_class TEXT NOT NULL
+        CHECK (action_class IN ('read', 'write', 'send', 'delete', 'share')),
     updated_by   UUID,
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workspace_id, toolkit_slug, tool_slug)
 );
 
 -- Carry over agents that allowlisted toolkits under the first version. That
