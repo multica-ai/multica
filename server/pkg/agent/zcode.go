@@ -351,6 +351,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	configOwnedBySession = true
 	go func() {
+		var result Result
 		defer cleanupConfig()
 		defer cancel()
 		defer stopProcess()
@@ -359,8 +360,26 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer func() {
 			stdin.Close()
 			stopProcess()
+			// Startup failures can race the stderr copier just like turn EOF.
+			// Stop the tree before draining so a live app-server cannot hold the
+			// pipes open; bound the wait for descendants that retain a pipe.
+			drainCtx, drainCancel := context.WithTimeout(context.Background(), defaultZcodeInterruptGrace)
+			select {
+			case <-readerDone:
+			case <-drainCtx.Done():
+			}
+			select {
+			case <-stderrDone:
+			case <-drainCtx.Done():
+			}
+			drainCancel()
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
+			streamingCurrentTurn.Store(false)
+			if result.Error != "" {
+				result.Error = withAgentStderr(result.Error, "zcode", stderrBuf.Tail())
+			}
+			resCh <- result
 		}()
 
 		startTime := time.Now()
@@ -411,21 +430,21 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				params["thoughtLevel"] = opts.ThinkingLevel
 			}
 			if mcpServers, err := buildZcodeMcpServers(opts.McpConfig, b.cfg.Logger); err != nil {
-				resCh <- Result{Status: "failed", Error: fmt.Sprintf("zcode mcp_config parse failed: %v", err), DurationMs: time.Since(startTime).Milliseconds(), SessionID: opts.ResumeSessionID}
+				result = Result{Status: "failed", Error: fmt.Sprintf("zcode mcp_config parse failed: %v", err), DurationMs: time.Since(startTime).Milliseconds(), SessionID: opts.ResumeSessionID}
 				return
 			} else if len(mcpServers) > 0 {
 				// Cold resume rebuilds the runtime from scratch, so MCP
 				// servers must be re-injected exactly like session/create.
 				params["mcpServers"] = mcpServers
 			}
-			result, err := c.request(runCtx, "session/resume", params, handshakeTimeout)
+			snapshot, err := c.request(runCtx, "session/resume", params, handshakeTimeout)
 			if err != nil {
 				if zcodeIsSessionUnavailable(err) {
 					b.cfg.Logger.Warn("zcode resumed session not found; the daemon will retry fresh",
 						"backend", "zcode",
 						"requested_session", opts.ResumeSessionID,
 					)
-					resCh <- Result{
+					result = Result{
 						Status:         "failed",
 						Error:          fmt.Sprintf("zcode session/resume failed: %v", err),
 						DurationMs:     time.Since(startTime).Milliseconds(),
@@ -435,20 +454,20 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					return
 				}
 				status, msg := classifyStartupFailure(err, "session/resume")
-				resCh <- Result{
+				result = Result{
 					Status:     status,
-					Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+					Error:      msg,
 					DurationMs: time.Since(startTime).Milliseconds(),
 					SessionID:  opts.ResumeSessionID,
 				}
 				return
 			}
-			sessionID = zcodeSessionIDFromSnapshot(result)
+			sessionID = zcodeSessionIDFromSnapshot(snapshot)
 			if sessionID == "" {
 				sessionID = opts.ResumeSessionID
 			}
 			if effectiveThinking == "" {
-				effectiveThinking = zcodeSavedThinkingLevel(result, opts.Model)
+				effectiveThinking = zcodeSavedThinkingLevel(snapshot, opts.Model)
 				if effectiveThinking == "" {
 					effectiveThinking = zcodeResolveThinkingLevel(runCtx, b.cfg.commandAt(execPath), opts.Model)
 				}
@@ -487,26 +506,26 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				params["thoughtLevel"] = effectiveThinking
 			}
 			if mcpServers, err := buildZcodeMcpServers(opts.McpConfig, b.cfg.Logger); err != nil {
-				resCh <- Result{Status: "failed", Error: fmt.Sprintf("zcode mcp_config parse failed: %v", err), DurationMs: time.Since(startTime).Milliseconds()}
+				result = Result{Status: "failed", Error: fmt.Sprintf("zcode mcp_config parse failed: %v", err), DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			} else if len(mcpServers) > 0 {
 				params["mcpServers"] = mcpServers
 			}
-			result, err := c.request(runCtx, "session/create", params, handshakeTimeout)
+			snapshot, err := c.request(runCtx, "session/create", params, handshakeTimeout)
 			if err != nil {
 				status, msg := classifyStartupFailure(err, "session/create")
-				resCh <- Result{
+				result = Result{
 					Status:     status,
-					Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+					Error:      msg,
 					DurationMs: time.Since(startTime).Milliseconds(),
 				}
 				return
 			}
-			sessionID = zcodeSessionIDFromSnapshot(result)
+			sessionID = zcodeSessionIDFromSnapshot(snapshot)
 			if sessionID == "" {
-				resCh <- Result{
+				result = Result{
 					Status:     "failed",
-					Error:      withAgentStderr("zcode session/create returned no sessionId", "zcode", stderrBuf.Tail()),
+					Error:      "zcode session/create returned no sessionId",
 					DurationMs: time.Since(startTime).Milliseconds(),
 				}
 				return
@@ -523,9 +542,9 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		subSeq, err := c.subscribe(runCtx, sessionID, handshakeTimeout)
 		if err != nil {
 			status, msg := classifyStartupFailure(err, "session/subscribe")
-			resCh <- Result{
+			result = Result{
 				Status:     status,
-				Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+				Error:      msg,
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  sessionID,
 			}
@@ -544,9 +563,9 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		streamingCurrentTurn.Store(true)
 		if _, err := c.request(runCtx, "session/send", sendParams, handshakeTimeout); err != nil {
 			status, msg := classifyStartupFailure(err, "session/send")
-			resCh <- Result{
+			result = Result{
 				Status:     status,
-				Error:      withAgentStderr(msg, "zcode", stderrBuf.Tail()),
+				Error:      msg,
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  sessionID,
 			}
@@ -586,30 +605,12 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		} else {
 			// stdout EOF or process exit without a terminal event.
 			finalStatus = "failed"
-			finalError = withAgentStderr("zcode process exited before the turn completed", "zcode", stderrBuf.Tail())
+			finalError = "zcode process exited before the turn completed"
 		}
 
 		terminalObserved.Store(true)
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("zcode finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
-
-		stdin.Close()
-		cancel()
-		stopProcess()
-
-		// The app-server may keep the pipes open briefly after the terminal
-		// event. Bound the drain so cleanup cannot hang.
-		drainCtx, drainCancel := context.WithTimeout(context.Background(), defaultZcodeInterruptGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
-		}
-		select {
-		case <-stderrDone:
-		case <-drainCtx.Done():
-		}
-		drainCancel()
-		streamingCurrentTurn.Store(false)
 
 		var usageMap map[string]TokenUsage
 		if outcome.terminal {
@@ -622,7 +623,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			}
 		}
 
-		resCh <- Result{
+		result = Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
 			Error:          finalError,

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -570,6 +571,85 @@ exit 1
 	}
 	if !strings.Contains(res.Error, "authentication failed") {
 		t.Fatalf("expected the stderr tail in the error, got %q", res.Error)
+	}
+}
+
+type zcodeStderrGateHandler struct {
+	slog.Handler
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (h *zcodeStderrGateHandler) Handle(ctx context.Context, record slog.Record) error {
+	if strings.HasPrefix(record.Message, "[zcode:stderr] ") {
+		h.once.Do(func() { close(h.entered) })
+		<-h.release
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
+func TestZcodeFailureWaitsForStderr(t *testing.T) {
+	t.Parallel()
+	const failure = "echo 'zcode: authentication failed: invalid api key' >&2\nexit 1\n"
+	for _, stage := range []string{"create", "resume", "subscribe", "send", "turn"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Parallel()
+			opts := ExecOptions{Cwd: t.TempDir(), Timeout: 5 * time.Second}
+			script := "#!/bin/sh\n" + failure
+			switch stage {
+			case "resume":
+				opts.ResumeSessionID = "saved"
+			case "subscribe", "send":
+				script = strings.Replace(fakeZcodeHappyScript(""), "*'\"method\":\"session/"+stage+"\"'*)", "*'\"method\":\"session/"+stage+"\"'*)\n"+failure, 1)
+			case "turn":
+				script = fakeZcodeHappyScript(failure)
+			}
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(unblock)
+			handler := &zcodeStderrGateHandler{
+				Handler: slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
+				entered: make(chan struct{}),
+				release: release,
+			}
+			backend, err := New("zcode", Config{ExecutablePath: writeFakeZcodeScript(t, script), Logger: slog.New(handler), TaskID: "task-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, err := backend.Execute(context.Background(), "prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-handler.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("stderr copier never reached the log handler")
+			}
+			// Hold the copier before it captures the tail, reproducing a slow
+			// stderr reader even after the CLI has exited and stdout reached EOF.
+			var result Result
+			early := false
+			select {
+			case result = <-session.Result:
+				early = true
+			case <-time.After(50 * time.Millisecond):
+			}
+			unblock()
+			if early {
+				for range session.Messages {
+				}
+				t.Error("result published before stderr drained")
+			} else {
+				_, result = collectZcodeSession(t, session)
+			}
+			if result.Status != "failed" || !strings.Contains(result.Error, "authentication failed") {
+				t.Fatalf("expected failure with stderr diagnostic, got status=%q error=%q", result.Status, result.Error)
+			}
+			if strings.Count(result.Error, "zcode stderr:") != 1 {
+				t.Fatalf("expected one stderr tail, got %q", result.Error)
+			}
+		})
 	}
 }
 
