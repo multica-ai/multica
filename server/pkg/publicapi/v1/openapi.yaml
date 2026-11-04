@@ -117,8 +117,12 @@ paths:
       description: >-
         The transcript companion to the task lifecycle events: plugins holding
         tasks:read can read what an agent actually did during a run (thinking,
-        tool_use, tool_result, text) without a user PAT. ?since=<seq> returns
+        tool_use, tool_result, text, error) without a user PAT. ?since=<seq> returns
         only newer messages; ?include=thinking=false drops thinking messages.
+        Private chat transcripts require a member credential for the session
+        creator; plugin-only credentials cannot read them. Issue-scoped callbacks
+        can read only tasks belonging to that issue. Missing or inaccessible
+        tasks return 404; lookup failures return a retryable 500.
       x-multica-contract: shared_resource
       x-multica-scope: tasks:read
       parameters:
@@ -423,7 +427,7 @@ components:
           type: string
           description: Empty for chat and autopilot tasks that carry no issue.
         seq: { type: integer }
-        type: { type: string, enum: [thinking, tool_use, tool_result, text] }
+        type: { type: string, enum: [thinking, tool_use, tool_result, text, error] }
         tool: { type: string }
         call_id: { type: string }
         content: { type: string }

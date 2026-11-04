@@ -3,8 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	publicapiv1 "github.com/multica-ai/multica/server/pkg/publicapi/v1"
+	"gopkg.in/yaml.v3"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/service"
@@ -70,7 +74,7 @@ func taskCallbackToken(t *testing.T, installationID string, issueID string) stri
 		Installation: installation,
 		Hook:         plugincontract.Hook{Key: "archive"},
 		Trigger:      plugincontract.TriggerEvent,
-		Actor:        service.HookActor{Type: "member", ID: parseUUID(testUserID)},
+		Actor:        service.HookActor{Type: "plugin", ID: parseUUID(installationID)},
 	}
 	if issueID != "" {
 		invocation.IssueID = parseUUID(issueID)
@@ -106,6 +110,7 @@ func seedTranscript(t *testing.T, label string) (taskID, issueID string) {
 
 type taskMessagesBody struct {
 	Messages []struct {
+		Content string `json:"content"`
 		Seq     int    `json:"seq"`
 		Type    string `json:"type"`
 		IssueID string `json:"issue_id"`
@@ -247,5 +252,139 @@ func TestPluginTaskMessagesRequiresTasksReadScope(t *testing.T) {
 	testHandler.ListPluginTaskMessages(recorder, pluginTaskMessagesRequest(taskCallbackToken(t, installationID, ""), taskID, ""))
 	if recorder.Code == http.StatusOK {
 		t.Fatalf("status=200 without tasks:read — scope gate broken (body=%s)", recorder.Body.String())
+	}
+}
+
+func TestPluginTaskMessagesPrivateChatAuthorization(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installTaskReaderPlugin(t)
+	runtimeID := dbfx.Runtime(t, "transcript privacy")
+	agentID := dbfx.Agent(t, "transcript privacy", runtimeID)
+	otherUser := dbfx.User(t, "transcript-other", "transcript-other@example.com")
+	dbfx.Member(t, testWorkspaceID, otherUser, "admin")
+	chatID := dbfx.ChatSession(t, agentID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": chatID})
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		map[string]any{"seq": 1, "type": "text", "content": "private chat content"},
+	})).Want(http.StatusOK)
+	installToken := rotateToken(t, installationID).Token
+
+	for _, tc := range []struct {
+		name, user, token string
+		want              int
+	}{
+		{"owner bridge", testUserID, "", http.StatusOK},
+		{"non-owner admin bridge", otherUser, "", http.StatusNotFound},
+		{"owner callback", "", issueCallbackToken(t, installationID, service.HookActor{Type: "member", ID: parseUUID(testUserID)}), http.StatusOK},
+		{"non-owner admin callback", "", issueCallbackToken(t, installationID, service.HookActor{Type: "member", ID: parseUUID(otherUser)}), http.StatusNotFound},
+		{"installation token", "", installToken, http.StatusNotFound},
+		{"event callback", "", taskCallbackToken(t, installationID, ""), http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := pluginTaskMessagesRequest(tc.token, taskID, "")
+			if tc.user != "" {
+				req.Header.Del("Authorization")
+				req.Header.Set("X-User-ID", tc.user)
+				req.Header.Set(pluginInstallationHeader, installationID)
+			}
+			testutil.Call(t, testHandler.ListPluginTaskMessages, req).Want(tc.want)
+		})
+	}
+}
+
+func TestPluginTaskMessagesIssueScopeRejectsTasksWithoutIssue(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installTaskReaderPlugin(t)
+	issueTask, issueID := seedTranscript(t, "scoped transcript")
+	token := taskCallbackToken(t, installationID, issueID)
+	installation, err := testHandler.PluginService.InstallationForWorkspace(context.Background(), parseUUID(testWorkspaceID), installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberToken, err := testHandler.PluginService.Callbacks.Issue(context.Background(), service.HookInvocation{
+		Installation: installation, Hook: plugincontract.Hook{Key: "archive"},
+		Trigger: plugincontract.TriggerManual, Actor: service.HookActor{Type: "member", ID: parseUUID(testUserID)},
+		IssueID: parseUUID(issueID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Call(t, testHandler.ListPluginTaskMessages, pluginTaskMessagesRequest(token, issueTask, "")).Want(http.StatusOK)
+	runtimeID := dbfx.Runtime(t, "scope runtime")
+	agentID := dbfx.Agent(t, "scope agent", runtimeID)
+	chatID := dbfx.ChatSession(t, agentID)
+	apID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "scope autopilot", "assignee_id": agentID,
+		"status": "paused", "created_by_type": "member", "created_by_id": testUserID,
+	})
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{"autopilot_id": apID, "source": "manual", "status": "running"})
+	for _, tc := range []struct{ name, column, id string }{
+		{"chat", "chat_session_id", chatID}, {"autopilot", "autopilot_run_id", runID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, tc.column: tc.id})
+			testutil.Call(t, testHandler.ListPluginTaskMessages, pluginTaskMessagesRequest(token, taskID, "")).Want(http.StatusNotFound)
+			testutil.Call(t, testHandler.ListPluginTaskMessages, pluginTaskMessagesRequest(memberToken, taskID, "")).Want(http.StatusNotFound)
+		})
+	}
+}
+
+func TestPluginTaskMessagesLookupFailuresAreRetryable(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installTaskReaderPlugin(t)
+	taskID, _ := seedTranscript(t, "lookup transcript")
+	token := taskCallbackToken(t, installationID, "")
+	for _, query := range []string{"GetAgentTask", "GetIssue"} {
+		t.Run(query, func(t *testing.T) {
+			fault := &lookupFaultPool{DBTX: testPool, query: query}
+			h := *testHandler
+			h.Queries = db.New(fault)
+			taskService := *testHandler.TaskService
+			taskService.Queries = h.Queries
+			h.TaskService = &taskService
+			testutil.Call(t, h.ListPluginTaskMessages, pluginTaskMessagesRequest(token, taskID, "")).Want(http.StatusInternalServerError)
+			if !fault.called {
+				t.Fatal("lookup fault was not exercised")
+			}
+		})
+	}
+}
+
+func TestPluginTaskMessagesFailedRunMatchesSchema(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installTaskReaderPlugin(t)
+	taskID, _ := seedTranscript(t, "failed transcript")
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		map[string]any{"seq": 4, "type": "error", "content": "agent failed"},
+	})).Want(http.StatusOK)
+	dbfx.Exec(t, "UPDATE agent_task_queue SET status = 'failed' WHERE id = $1", taskID)
+	var body taskMessagesBody
+	testutil.Call(t, testHandler.ListPluginTaskMessages, pluginTaskMessagesRequest(taskCallbackToken(t, installationID, ""), taskID, "")).Want(http.StatusOK).JSON(&body)
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct{ Enum []string }
+			}
+		}
+	}
+	if err := yaml.Unmarshal(publicapiv1.OpenAPI(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	allowed := doc.Components.Schemas["TaskMessage"].Properties["type"].Enum
+	if len(body.Messages) != 4 || body.Messages[3].Type != "error" || body.Messages[3].Content != "agent failed" {
+		t.Fatalf("missing persisted error: %+v", body.Messages)
+	}
+	for _, message := range body.Messages {
+		if !slices.Contains(allowed, message.Type) {
+			t.Errorf("message type %q violates schema %v", message.Type, allowed)
+		}
 	}
 }

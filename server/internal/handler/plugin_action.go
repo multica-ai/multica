@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -414,7 +415,7 @@ func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
 // The task-event twin of GetPluginIssue: task.completed/task.failed deliver a
 // task id under the tasks:read grant, and this endpoint is what makes that
 // grant worth something — the persisted run transcript (thinking, tool_use,
-// tool_result, text) for memory/archive/audit plugins, so they no longer need
+// tool_result, text, error) for memory/archive/audit plugins, so they no longer need
 // a human PAT plus the CLI to read what an agent did.
 //
 // ?since=<seq> returns only messages after that sequence (incremental
@@ -422,7 +423,7 @@ func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
 // drops thinking messages for audit-style consumers; memory plugins want
 // reasoning traces as distillation input, so they ship by default.
 func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request) {
-	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksRead)
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksRead)
 	if !ok {
 		return
 	}
@@ -434,21 +435,33 @@ func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request)
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), parsed)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		} else {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to load task")
+		}
+		return
+	}
+	scope, err := h.TaskService.ResolveTaskScopeChecked(r.Context(), task)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve task scope")
+		return
+	}
+	if scope.WorkspaceID != uuidToString(caller.WorkspaceID) {
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
 		return
 	}
-	// Same reach rule as pluginIssueForUser: workspace membership was
-	// established by pluginCaller, and a task uuid from another workspace
-	// 404s rather than 403s for the same enumeration reason.
-	wsID, err := h.TaskService.ResolveTaskWorkspaceIDChecked(r.Context(), task)
-	if err != nil || wsID != uuidToString(caller.WorkspaceID) {
+	// Private transcripts require the session creator, even for workspace
+	// admins. Plugin actors have no member authorization for private chats.
+	if task.ChatSessionID.Valid && (!actor.isMember() ||
+		scope.ChatSessionOwnerID == "" ||
+		scope.ChatSessionOwnerID != uuidToString(actor.Member.UserID)) {
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
 		return
 	}
-	// A callback grant issued about one issue reaches only that issue's
-	// tasks (chat/autopilot tasks carry no issue and skip this check).
-	if caller.IssueScope.Valid && task.IssueID.Valid &&
-		uuidToString(task.IssueID) != uuidToString(caller.IssueScope) {
+	// An issue-scoped grant reaches only tasks belonging to that issue.
+	if caller.IssueScope.Valid && (!task.IssueID.Valid ||
+		uuidToString(task.IssueID) != uuidToString(caller.IssueScope)) {
 		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
 		return
 	}
