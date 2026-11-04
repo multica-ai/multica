@@ -280,7 +280,10 @@ services:
     networks:
       - knowledge
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weknora -d weknora"]
+      # Over TCP: on the first start the image's init server listens only on the
+      # Unix socket, so a socket check reports healthy before the real server
+      # accepts connections, and knowledge-app would crash on connection refused.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U weknora -d weknora"]
       interval: 10s
       timeout: 10s
       retries: 5
