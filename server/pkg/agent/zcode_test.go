@@ -556,45 +556,15 @@ func TestZcodeUnknownNotificationDoesNotBreakFlow(t *testing.T) {
 // handshake completes fails the run with the stderr tail attached.
 func TestZcodeStderrFailurePromotion(t *testing.T) {
 	t.Parallel()
-	stderrStarted := make(chan struct{})
-	stderrRelease := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseStderr := func() { releaseOnce.Do(func() { close(stderrRelease) }) }
-	defer releaseStderr()
 	bin := writeFakeZcodeScript(t, `#!/bin/sh
 echo "zcode: authentication failed: invalid api key" >&2
 exit 1
 `)
 
-	backend, err := New("zcode", Config{
-		ExecutablePath: bin,
-		Logger: slog.New(&zcodeStderrGate{
-			Handler: slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
-			started: stderrStarted,
-			release: stderrRelease,
-		}),
-		TaskID: "task-1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
+	session, err := newZcodeTestBackend(t, bin).Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	select {
-	case <-stderrStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("stderr copier did not start")
-	}
-	// Hold the copier after reading the diagnostic but before retaining its
-	// tail. stdout EOF must not publish a failure before stderr is drained.
-	select {
-	case res := <-session.Result:
-		t.Fatalf("published failure before stderr drained: %q", res.Error)
-	case <-time.After(100 * time.Millisecond):
-	}
-	releaseStderr()
 	_, res := collectZcodeSession(t, session)
 	if res.Status != "failed" {
 		t.Fatalf("expected failed, got %q", res.Status)
@@ -604,19 +574,75 @@ exit 1
 	}
 }
 
-type zcodeStderrGate struct {
+type zcodeDelayedStderrHandler struct {
 	slog.Handler
-	started chan struct{}
-	release <-chan struct{}
+	entered chan struct{}
+	release chan struct{}
 	once    sync.Once
 }
 
-func (w *zcodeStderrGate) Handle(ctx context.Context, record slog.Record) error {
-	if strings.HasPrefix(record.Message, "[zcode:stderr]") {
-		w.once.Do(func() { close(w.started) })
-		<-w.release
+func (h *zcodeDelayedStderrHandler) Handle(ctx context.Context, record slog.Record) error {
+	if strings.HasPrefix(record.Message, "[zcode:stderr] ") {
+		h.once.Do(func() { close(h.entered) })
+		<-h.release
 	}
-	return w.Handler.Handle(ctx, record)
+	return h.Handler.Handle(ctx, record)
+}
+
+func TestZcodeStartupFailureWaitsForStderr(t *testing.T) {
+	for _, method := range []string{"session/create", "session/resume", "session/subscribe", "session/send"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			failureCase := fmt.Sprintf(`  case "$line" in
+    *'"method":"%s"'*)
+      echo "zcode: authentication failed" >&2
+      exit 1
+      ;;
+`, method)
+			script := strings.Replace(fakeZcodeHappyScript(""), `  case "$line" in`, failureCase, 1)
+			handler := &zcodeDelayedStderrHandler{
+				Handler: slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
+				entered: make(chan struct{}),
+				release: make(chan struct{}),
+			}
+			releaseStderr := sync.OnceFunc(func() { close(handler.release) })
+			defer releaseStderr()
+			backend, err := New("zcode", Config{
+				ExecutablePath: writeFakeZcodeScript(t, script),
+				Logger:         slog.New(handler),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			opts := ExecOptions{Cwd: t.TempDir()}
+			if method == "session/resume" {
+				opts.ResumeSessionID = fakeZcodeSessionID
+			}
+			session, err := backend.Execute(ctx, "prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-handler.entered:
+			case <-ctx.Done():
+				t.Fatal("stderr was never forwarded")
+			}
+			// Hold the independent stderr copier after the child writes its
+			// diagnostic. A transport failure must not publish an empty tail.
+			select {
+			case result := <-session.Result:
+				t.Fatalf("result arrived before stderr was drained: %+v", result)
+			case <-time.After(50 * time.Millisecond):
+			}
+			releaseStderr()
+			_, result := collectZcodeSession(t, session)
+			if result.Status != "failed" || !strings.Contains(result.Error, "authentication failed") {
+				t.Fatalf("expected failure with stderr diagnostic, got %+v", result)
+			}
+		})
+	}
 }
 
 // TestZcodeThinkingDeltas covers T19: reasoning deltas map to MessageThinking.

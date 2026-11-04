@@ -123,6 +123,14 @@ use S3-compatible object storage instead.
 | `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
 | `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
 
+Uploads support files up to **100 MiB**. The backend allows an additional
+1 MiB for multipart boundaries and metadata, and returns HTTP 413 for oversized
+files or requests. The web upload route streams the body to the backend, so
+Next Proxy's body-buffer limit does not truncate uploads, including requests
+without `Content-Length`. If you deploy your own reverse proxy or ingress,
+allow request bodies of at least **101 MiB** there too. The upload limit is fixed;
+no upload-size environment variable is supported.
+
 #### S3 / CloudFront
 
 | Variable | Description |

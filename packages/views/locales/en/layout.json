@@ -40,14 +40,6 @@
   },
   "whats_new": {
     "trigger": "What's new",
-    "card": {
-      "eyebrow": "Multica updated · {{range}}",
-      "title_one": "{{count}} new feature since your last visit",
-      "title_other": "{{count}} new features since your last visit",
-      "dismiss": "Dismiss",
-      "view_details": "View details",
-      "got_it": "Got it"
-    },
     "panel": {
       "title": "What's new",
       "close": "Close",
@@ -162,8 +154,8 @@
       "members_one": "{{count}} member",
       "members_other": "{{count}} members",
       "resources": "Resources",
-      "runtimes_offline_one": "{{count}} offline",
-      "runtimes_offline_other": "{{count}} offline",
+      "runtimes_online_one": "{{count}} online",
+      "runtimes_online_other": "{{count}} online",
       "invite_member": "Invite member"
     },
     "autopilots": {

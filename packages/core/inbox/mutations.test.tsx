@@ -65,6 +65,84 @@ function summaryCount(qc: QueryClient) {
   return summary?.find((e) => e.workspace_id === WORKSPACE_ID)?.count;
 }
 
+describe("useMarkInboxRead", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    setApiInstance({
+      markInboxRead: vi.fn(async (id: string) => item({ id, read: true, archived: false })),
+    } as unknown as ApiClient);
+  });
+
+  // MUL-8618: the server reads the issue's other unread active rows with the
+  // one the row shows, so an assignment under a later comment does not stay
+  // unread out of sight. The optimistic patch covers the same rows.
+  it("reads the item and every other active item on its issue", async () => {
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "comment", type: "new_comment", archived: false }),
+      item({ id: "assigned", type: "issue_assigned", severity: "action_required", archived: false }),
+      item({ id: "archived-sibling", archived: true }),
+      item({ id: "other-issue", issue_id: "issue-2", archived: false }),
+      item({ id: "no-issue", issue_id: null, archived: false }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("comment");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const read = Object.fromEntries(listCache(queryClient).map((i) => [i.id, i.read]));
+    expect(read).toEqual({
+      comment: true,
+      assigned: true,
+      "archived-sibling": false,
+      "other-issue": false,
+      "no-issue": false,
+    });
+  });
+
+  it("reads the issue's active items when the row was opened from the archive", async () => {
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "active", type: "issue_assigned", archived: false }),
+    ]);
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.archived(WORKSPACE_ID), [
+      item({ id: "archived-newest" }),
+      item({ id: "archived-older" }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("archived-newest");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(listCache(queryClient)[0]?.read).toBe(true);
+    expect(archivedCache(queryClient).map((i) => [i.id, i.read])).toEqual([
+      ["archived-newest", true],
+      ["archived-older", false],
+    ]);
+  });
+
+  it("reads only the item when it has no issue", async () => {
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "first", issue_id: null, archived: false }),
+      item({ id: "second", issue_id: null, archived: false }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("first");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(listCache(queryClient).map((i) => i.read)).toEqual([true, false]);
+  });
+});
+
 describe("useMarkInboxUnread", () => {
   let queryClient: QueryClient;
   let markInboxUnread: ReturnType<typeof vi.fn>;
@@ -78,8 +156,8 @@ describe("useMarkInboxUnread", () => {
   });
 
   it("flips only the targeted item unread, in both lists", async () => {
-    // Item-level, mirroring mark-read: the list shows one row per issue
-    // carrying that group's newest item, so flipping siblings would resurrect
+    // Item-level, unlike mark-read: the list shows one row per issue carrying
+    // that group's newest item, so flipping siblings would resurrect
     // notifications the user already dealt with without changing the row.
     queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
       item({ id: "inbox-1", read: true, archived: false }),

@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "新功能",
-    "card": {
-      "eyebrow": "Multica 已更新 · {{range}}",
-      "title_other": "自你上次访问以来，新增了 {{count}} 项功能",
-      "dismiss": "关闭",
-      "view_details": "查看详情",
-      "got_it": "知道了"
-    },
     "panel": {
       "title": "新功能",
       "close": "关闭",
@@ -157,7 +150,7 @@
       "squads_and_members": "小队与成员",
       "members_other": "{{count}} 位成员",
       "resources": "资源",
-      "runtimes_offline_other": "{{count}} 个离线",
+      "runtimes_online_other": "{{count}} 台在线",
       "invite_member": "邀请成员"
     },
     "autopilots": {

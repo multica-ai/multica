@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "新機能",
-    "card": {
-      "eyebrow": "Multica が更新されました · {{range}}",
-      "title_other": "前回の訪問以降、{{count}} 件の新機能が追加されました",
-      "dismiss": "閉じる",
-      "view_details": "詳細を見る",
-      "got_it": "了解"
-    },
     "panel": {
       "title": "新機能",
       "close": "閉じる",
@@ -157,7 +150,7 @@
       "squads_and_members": "スクワッドとメンバー",
       "members_other": "メンバー {{count}} 人",
       "resources": "リソース",
-      "runtimes_offline_other": "{{count}} 件オフライン",
+      "runtimes_online_other": "{{count}} 台オンライン",
       "invite_member": "メンバーを招待"
     },
     "autopilots": {

@@ -11,6 +11,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
+import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import {
   SIDEBAR_FIRST_PAGE,
   projectSidebarRequest,
@@ -228,9 +229,10 @@ function ProjectTreeItem({
   const source = projectSidebarSource(project.id);
   const [expanded, setExpanded] = useExpanded(source);
   const statusCatalog = useIssueStatuses(wsId);
-  const params = statusCatalog.isLoaded
-    ? projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId)
-    : undefined;
+  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
+  const params = catalogDependency.unresolved
+    ? undefined
+    : projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId);
   const prefetch = usePrefetch(wsId, source, params);
 
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
@@ -293,6 +295,8 @@ function ProjectTreeItem({
           wsId={wsId}
           source={source}
           params={params}
+          paramsError={catalogDependency.error}
+          onRetry={catalogDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(false);

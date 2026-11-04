@@ -1,4 +1,4 @@
-import { Command, Globe, ListPlus, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { Command, Gauge, Globe, Layers, ListPlus, PanelLeft, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
@@ -21,8 +21,6 @@ export interface WhatsNewHighlight {
   /** English is required; a missing locale falls back to it. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
-  /** Image shown above the expanded highlight in the update card. */
-  media?: { src: string };
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
@@ -32,11 +30,109 @@ export interface WhatsNewRelease extends ReleaseStamp {
 /**
  * In-app highlights per release, newest first. Not the changelog: only
  * user-visible changes worth discovering, 0–3 per release, with copy that
- * says how to use the feature. Fix-only releases get no entry, so they
- * neither open the card nor light the rail dot. Versions and dates must
+ * says how to use the feature. Fix-only releases get no entry, so they are
+ * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.8.0",
+    date: "2026-11-03",
+    highlights: [
+      {
+        id: "workspace-layout",
+        icon: PanelLeft,
+        copy: {
+          en: {
+            title: "A new workspace layout",
+            body: "The bar on the left switches between Work, Team, Chat, Inbox, and Auto. Collapse or resize the side panel next to it to make room.",
+          },
+          "zh-Hans": {
+            title: "全新工作区布局",
+            body: "左侧的导航栏在 工作、团队、聊天、收件箱 和 自动化 之间切换，旁边的侧边面板可以折叠，也可以拖动调整宽度。",
+          },
+          "zh-Hant": {
+            title: "全新工作區佈局",
+            body: "左側的導覽列在 工作、團隊、聊天、收件箱 和 自動化 之間切換，旁邊的側邊面板可以收合，也可以拖曳調整寬度。",
+          },
+          ja: {
+            title: "新しいワークスペースレイアウト",
+            body: "左のバーで 作業・チーム・チャット・受信箱・自動化 を切り替えられます。隣のサイドパネルは折りたたんだり、幅を変えたりできます。",
+          },
+          ko: {
+            title: "새 워크스페이스 레이아웃",
+            body: "왼쪽 바에서 작업, 팀, 채팅, 인박스, 자동화를 오갈 수 있습니다. 옆의 사이드 패널은 접거나 너비를 조절할 수 있습니다.",
+          },
+          fr: {
+            title: "Une nouvelle mise en page",
+            body: "La barre de gauche bascule entre Travail, Équipe, Chat, Boîte et Auto. Repliez ou redimensionnez le panneau latéral voisin pour gagner de la place.",
+          },
+        },
+      },
+      {
+        id: "views",
+        icon: Layers,
+        action: { kind: "route", to: (p) => p.views() },
+        copy: {
+          en: {
+            title: "Rebuilt views",
+            body: "Save views as favorites, combine or exclude filters, and filter by agent status or “Me and my agents”.",
+          },
+          "zh-Hans": {
+            title: "重做的视图",
+            body: "可以收藏视图、组合或排除筛选条件，还能按智能体状态或“我和我的智能体”筛选。",
+          },
+          "zh-Hant": {
+            title: "重做的檢視",
+            body: "可以收藏檢視、組合或排除篩選條件，還能按 AI 代理狀態或「我和我的 AI 代理」篩選。",
+          },
+          ja: {
+            title: "作り直したビュー",
+            body: "ビューをお気に入りに保存し、フィルターを組み合わせたり除外したりできます。エージェントの状態や「自分と自分のエージェント」でも絞り込めます。",
+          },
+          ko: {
+            title: "새로 만든 뷰",
+            body: "뷰를 즐겨찾기에 저장하고, 필터를 조합하거나 제외할 수 있습니다. 에이전트 상태나 ‘나와 내 에이전트’로도 필터링할 수 있습니다.",
+          },
+          fr: {
+            title: "Des vues repensées",
+            body: "Ajoutez des vues en favori, combinez ou excluez des filtres, et filtrez par statut d'agent ou « Moi et mes agents ».",
+          },
+        },
+      },
+      {
+        id: "runtime-concurrency",
+        icon: Gauge,
+        action: { kind: "route", to: (p) => p.runtimes() },
+        copy: {
+          en: {
+            title: "Limit concurrent runs per runtime",
+            body: "Open a runtime and set how many runs it handles at once. Extra runs wait in the queue.",
+          },
+          "zh-Hans": {
+            title: "限制运行时的并发数",
+            body: "打开某个运行时，设置它同时处理多少个运行，超出的运行会排队等待。",
+          },
+          "zh-Hant": {
+            title: "限制執行時的並行數",
+            body: "打開某個執行時，設定它同時處理多少個執行，超出的執行會排隊等待。",
+          },
+          ja: {
+            title: "ランタイムの同時実行数を制限",
+            body: "ランタイムを開いて、同時に処理する実行の数を設定できます。上限を超えた実行はキューで待機します。",
+          },
+          ko: {
+            title: "런타임별 동시 실행 제한",
+            body: "런타임을 열어 한 번에 처리할 실행 수를 정할 수 있습니다. 한도를 넘는 실행은 대기열에서 기다립니다.",
+          },
+          fr: {
+            title: "Limitez les exécutions simultanées par runtime",
+            body: "Ouvrez un runtime et fixez combien d'exécutions il traite à la fois. Les suivantes attendent dans la file.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.7.2",
     date: "2026-10-30",

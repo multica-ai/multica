@@ -7757,6 +7757,50 @@ func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, arg Pr
 	return items, nil
 }
 
+const reassignPendingAgentTasksToRuntime = `-- name: ReassignPendingAgentTasksToRuntime :one
+WITH fence AS MATERIALIZED (
+    SELECT lock_task_owner_rows($1, NULL, $2) AS ok
+),
+reassigned AS (
+    UPDATE agent_task_queue
+    SET runtime_id = $2
+    WHERE agent_id = $1
+      AND status IN ('queued', 'deferred')
+      AND runtime_id IS DISTINCT FROM $2
+      AND (SELECT ok FROM fence)
+    RETURNING id
+)
+SELECT
+    (SELECT ok FROM fence) AS fence_ok,
+    (SELECT count(*) FROM reassigned) AS reassigned_tasks
+`
+
+type ReassignPendingAgentTasksToRuntimeParams struct {
+	AgentID      pgtype.UUID `json:"agent_id"`
+	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
+}
+
+type ReassignPendingAgentTasksToRuntimeRow struct {
+	FenceOk         bool  `json:"fence_ok"`
+	ReassignedTasks int64 `json:"reassigned_tasks"`
+}
+
+// Moves an agent's not-yet-dispatched tasks to the runtime it was just rebound
+// to. Claims fence on agent.runtime_id = task.runtime_id (MUL-6697), so a
+// queued or deferred row left on the old runtime is claimable by neither
+// daemon. Deferred rows move too: promotion is per runtime and would otherwise
+// strand them later. Dispatched, running and waiting rows are already held by
+// the old runtime's daemon and stay. Callers hold the agent row FOR UPDATE.
+//
+// Same fence-verdict shape as ReassignTasksToRuntime: FenceOk = false must
+// abort the rebind rather than commit a binding with stranded rows.
+func (q *Queries) ReassignPendingAgentTasksToRuntime(ctx context.Context, arg ReassignPendingAgentTasksToRuntimeParams) (ReassignPendingAgentTasksToRuntimeRow, error) {
+	row := q.db.QueryRow(ctx, reassignPendingAgentTasksToRuntime, arg.AgentID, arg.NewRuntimeID)
+	var i ReassignPendingAgentTasksToRuntimeRow
+	err := row.Scan(&i.FenceOk, &i.ReassignedTasks)
+	return i, err
+}
+
 const rebindAgentBuilderRuntime = `-- name: RebindAgentBuilderRuntime :one
 UPDATE agent
 SET runtime_id = $1,

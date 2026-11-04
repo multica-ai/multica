@@ -196,7 +196,7 @@ export function IssueViewHeader({
   const unreadView = isUnreadView(activeView);
   const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
   const starId = unreadView
-    ? null
+    ? builtinViewItemId("unread")
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey

@@ -67,6 +67,8 @@ Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存�
 
 不选择模型时，Multica 使用该工具的默认设置。列表为空时，先确认运行时在线并且工具已经登录，再刷新模型列表。
 
+使用 Kiro CLI 时，创建和设置智能体页面中的**思考**选项来自所选模型支持的 effort 档位，选择会应用到新建和恢复的会话。不选择时沿用 Kiro 自身的 effort 设置。模型或 CLI 版本未返回 effort 选项时，不显示该选择器。
+
 QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
 
 DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multica --list-models`）。它的模型 id 采用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），请从列表中选择完整 id。
