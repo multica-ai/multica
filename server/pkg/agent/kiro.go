@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"strings"
 	"sync"
@@ -130,7 +131,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
+	blockedArgs := kiroBlockedArgs
+	if opts.ThinkingLevel != "" {
+		// Preserve custom effort unless a structured override takes precedence.
+		blockedArgs = maps.Clone(kiroBlockedArgs)
+		blockedArgs["--effort"] = blockedWithValue
+	}
+	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, blockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, kiroArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(kiroArgs, trustAgentCommandPositional(0, "acp")))
@@ -408,14 +415,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		supplements.mu.Unlock()
 		b.cfg.Logger.Info("kiro session created", "session_id", sessionID)
 
-		if opts.Model != "" {
+		modelToSet := opts.Model
+		// Kiro 2.34 can return a default model before loading its reasoning
+		// schema. Selecting that same model initializes effort support.
+		if modelToSet == "" && opts.ThinkingLevel != "" {
+			modelToSet = effectiveModel
+		}
+		if modelToSet != "" {
 			if _, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
-				"modelId":   opts.Model,
+				"modelId":   modelToSet,
 			}); err != nil {
-				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", opts.Model)
+				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", modelToSet)
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", opts.Model, err)
+				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", modelToSet, err)
 				if setupFailureWithholdsSessionID(opts) {
 					sessionID = ""
 				} else if isACPSessionNotFound(err) {
@@ -439,8 +452,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				}
 				return
 			}
-			b.cfg.Logger.Info("kiro session model set", "model", opts.Model)
+			b.cfg.Logger.Info("kiro session model set", "model", modelToSet)
 		}
+
+		applyKiroEffort(runCtx, c.request, b.cfg.Logger, sessionID, opts.ThinkingLevel)
 
 		userText := prompt
 		if opts.SystemPrompt != "" {

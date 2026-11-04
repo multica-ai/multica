@@ -1956,6 +1956,7 @@ func discoverKiroModels(ctx context.Context, runtimeCmd Command) ([]Model, error
 		defaultBin:   "kiro-cli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
+		enrich:       enrichKiroModelThinking,
 	})
 }
 
@@ -2058,6 +2059,9 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// enrich reads provider-specific metadata through the same discovery
+	// session when session/new does not include model capabilities.
+	enrich func(context.Context, acpRequestFn, []Model, json.RawMessage)
 	// probeModelEffort switches the throwaway session onto each non-current
 	// model to read that model's own effort catalog; see probeACPModelEffort.
 	probeModelEffort bool
@@ -2289,6 +2293,11 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	}
 	if p.annotate != nil {
 		p.annotate(models, sessionResult)
+	}
+	if p.enrich != nil {
+		p.enrich(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
+			return requestACP(method, params)
+		}, models, sessionResult)
 	}
 	if p.probeModelEffort {
 		probeACPModelEffort(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
