@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   ExternalLink,
   Loader2,
-  Plus,
   Trash2,
   Users,
 } from "@multica/ui/icons";
@@ -31,6 +30,7 @@ import {
 } from "@multica/core/squads/stores";
 import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { SquadsIntro } from "./squads-intro";
 import {
   Dialog,
   DialogContent,
@@ -59,7 +59,6 @@ import {
   CollectionFilterButton,
   CollectionNoMatches,
   CollectionPageHeader,
-  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -609,17 +608,7 @@ export function SquadsPage() {
       />
 
       {!isLoading && squads.length === 0 ? (
-        <CollectionPageState
-          icon={Users}
-          title={t(($) => $.page.empty_no_squads)}
-          description={t(($) => $.page.empty_description)}
-          actions={
-            <Button size="sm" onClick={openCreateSquad}>
-              <Plus aria-hidden="true" />
-              {t(($) => $.page.new_button)}
-            </Button>
-          }
-        />
+        <SquadsIntro onCreate={openCreateSquad} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}

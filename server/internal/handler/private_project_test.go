@@ -408,6 +408,46 @@ func removeProjectMemberAsOwner(t *testing.T, f privateProjectFixture, userID st
 	testutil.Call(t, testHandler.RemoveProjectMember, req).Want(http.StatusNoContent)
 }
 
+func TestPrivateProjectIssueUnreadRunReferencesAfterRevocation(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	agentID := dbfx.Agent(t, f.marker+" unread agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
+	secretTask := dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID, "status": "completed"})
+	publicTask := dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.publicIssue, "runtime_id": testRuntimeID, "status": "completed"})
+	secretResult := dbfx.Comment(t, f.secretIssue, "private run result", testutil.Cols{"source_task_id": secretTask})
+	publicResult := dbfx.Comment(t, f.publicIssue, "public run result", testutil.Cols{"source_task_id": publicTask})
+	dbfx.Cleanup(t, `DELETE FROM issue_unread WHERE user_id = $1`, f.insider)
+	dbfx.Exec(t, `
+INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, agent_id, task_id)
+VALUES ($1, $2, $3, 'completed', $4, $5), ($1, $2, $6, 'completed', $4, $7)`,
+		testWorkspaceID, f.insider, f.secretIssue, agentID, secretTask, f.publicIssue, publicTask)
+
+	before := listIssueUnreadAs(t, f.insider)
+	if len(before) != 2 {
+		t.Fatalf("member should see both unread issues, got %+v", before)
+	}
+	for _, item := range before {
+		wantTask, wantComment := publicTask, publicResult
+		if item.IssueID == f.secretIssue {
+			wantTask, wantComment = secretTask, secretResult
+		} else if item.IssueID != f.publicIssue {
+			t.Fatalf("unexpected unread issue: %+v", item)
+		}
+		if item.TaskID == nil || *item.TaskID != wantTask || item.CommentID == nil || *item.CommentID != wantComment {
+			t.Fatalf("unread issue should link to task %s and comment %s, got %+v", wantTask, wantComment, item)
+		}
+	}
+
+	removeProjectMemberAsOwner(t, f, f.insider)
+
+	after := listIssueUnreadAs(t, f.insider)
+	if len(after) != 1 || after[0].IssueID != f.publicIssue {
+		t.Fatalf("revoked member should only see the public unread issue, got %+v", after)
+	}
+	if after[0].TaskID == nil || *after[0].TaskID != publicTask || after[0].CommentID == nil || *after[0].CommentID != publicResult {
+		t.Fatalf("public unread issue should retain its run references after revocation, got %+v", after[0])
+	}
+}
+
 func TestPrivateProjectArchivedInboxAndUnreadAfterRevocation(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	dbfx.Insert(t, "inbox_item", testutil.Cols{

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -912,23 +913,12 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("direction", d)
 	}
 
-	var fields []string
-	if v, _ := cmd.Flags().GetString("fields"); v != "" {
-		valid := make(map[string]bool, len(validIssueFields))
-		for _, f := range validIssueFields {
-			valid[f] = true
-		}
-		keepsProperties := false
-		for _, f := range strings.Split(v, ",") {
-			f = strings.TrimSpace(f)
-			if !valid[f] {
-				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
-			}
-			if f == "properties" {
-				keepsProperties = true
-			}
-			fields = append(fields, f)
-		}
+	fields, err := parseIssueFieldsFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if len(fields) > 0 {
+		keepsProperties := slices.Contains(fields, "properties")
 		// --fields without `properties` deletes the very key
 		// --resolve-properties rewrites, so the pair would either cost two
 		// requests for output nobody sees or leave the flag silently doing
@@ -1003,6 +993,33 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
+	printIssueListTable(ctx, client, issuesRaw, fullID)
+	// Page footer on stderr so stdout stays a plain table. It speaks whenever
+	// there is more or the page was offset, and stays silent for a short
+	// first page. "of N" appears only while total is trusted, so the line
+	// never claims a page is the whole list beside a pointer to the next one.
+	switch {
+	case returned == 0 && offset > 0:
+		if totalTrusted {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
+		} else {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
+		}
+	case hasMore || offset > 0:
+		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
+		if totalTrusted {
+			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
+		}
+		if hasMore {
+			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
+	return nil
+}
+
+// printIssueListTable prints issue rows in the `issue list` table layout.
+func printIssueListTable(ctx context.Context, client *cli.APIClient, issuesRaw []any, fullID bool) {
 	headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
 	if fullID {
 		headers = []string{"KEY", "ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
@@ -1047,28 +1064,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		rows = append(rows, row)
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
-	// Page footer on stderr so stdout stays a plain table. It speaks whenever
-	// there is more or the page was offset, and stays silent for a short
-	// first page. "of N" appears only while total is trusted, so the line
-	// never claims a page is the whole list beside a pointer to the next one.
-	switch {
-	case returned == 0 && offset > 0:
-		if totalTrusted {
-			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
-		} else {
-			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
-		}
-	case hasMore || offset > 0:
-		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
-		if totalTrusted {
-			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
-		}
-		if hasMore {
-			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
-		}
-		fmt.Fprintln(os.Stderr, line)
-	}
-	return nil
 }
 
 func runIssuePullRequests(cmd *cobra.Command, args []string) error {
@@ -3675,6 +3670,24 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// parseIssueFieldsFlag validates --fields against validIssueFields; nil
+// means the flag was not given.
+func parseIssueFieldsFlag(cmd *cobra.Command) ([]string, error) {
+	v, _ := cmd.Flags().GetString("fields")
+	if v == "" {
+		return nil, nil
+	}
+	var fields []string
+	for _, f := range strings.Split(v, ",") {
+		f = strings.TrimSpace(f)
+		if !slices.Contains(validIssueFields, f) {
+			return nil, fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+		}
+		fields = append(fields, f)
+	}
+	return fields, nil
 }
 
 // filterIssueFields keeps only the requested top-level keys on each issue,

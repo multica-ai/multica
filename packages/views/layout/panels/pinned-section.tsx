@@ -38,6 +38,7 @@ import {
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
+  unreadIssueHref,
   useIssueAgentState,
 } from "./sidebar-tree";
 
@@ -341,7 +342,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={href}
+        href={unreadIssueHref(href, unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}

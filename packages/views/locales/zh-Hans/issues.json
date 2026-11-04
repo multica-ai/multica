@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
   },
+  "unread_filter_error": {
+    "title": "无法加载未读任务"
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "加载状态后才能显示任务。",
@@ -181,6 +184,8 @@
     "relation_my_agents": "分配给我的智能体的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "section_read_state": "阅读状态",
+    "read_state_unread": "未读",
     "operator_label": "关系",
     "operator_is": "是",
     "operator_is_not": "不是",
@@ -527,7 +532,6 @@
     "agents_group": "智能体",
     "mark_done_tooltip": "标记为已完成",
     "archive_tooltip": "归档",
-    "restore_to_inbox_tooltip": "恢复到收件箱",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "quick_jump_label": "快捷跳转",
@@ -755,6 +759,7 @@
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",
+    "unread_title": "没有未读任务",
     "clear_button": "清除筛选"
   },
   "agent_live": {
@@ -926,6 +931,7 @@
     "open_in_new_tab": "在新标签页打开",
     "pin_to_sidebar": "固定到侧边栏",
     "unpin_from_sidebar": "从侧边栏取消固定",
+    "restore_to_inbox": "恢复到收件箱",
     "mark_read": "标为已读",
     "mark_unread": "标为未读",
     "copy_link": "复制链接",
@@ -1722,7 +1728,8 @@
     "builtin": {
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
-      "all_issues": "全部任务"
+      "all_issues": "全部任务",
+      "unread": "未读"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",
@@ -1754,6 +1761,9 @@
     "save_as_new": "另存为新视图",
     "save_as_new_hint": "「{{name}}」保持不变",
     "save_as_view": "保存为视图",
+    "save_view": "保存视图",
+    "add_filter": "添加筛选",
+    "setup_hint": "这个视图还没有条件，目前显示全部任务",
     "set_by_view": "由此视图设定",
     "new_issue": "新建任务",
     "unavailable": "此视图已不可用",
