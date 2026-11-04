@@ -1944,6 +1944,8 @@
     "brief_save_unavailable": "Knowledge is not set up for this workspace",
     "brief_earlier": "Earlier briefs",
     "brief_proposals": "Proposals in this brief",
+    "setup_trigger": "Company setup",
+    "setup_trigger_offer": "Next step",
     "setup_title": "Set up your company",
     "setup_intro": "Each morning the Secretary reads the company and tells you what needs a decision.",
     "setup_check_runtime": "Hermes runtime online",
