@@ -789,6 +789,7 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
+    "unread_title": "No unread issues",
     "clear_button": "Clear filters"
   },
   "agent_live": {

@@ -1,4 +1,5 @@
 import type { IssueView } from "../api/schemas";
+import { baselineFromQuery, type IssueViewBaseline } from "./baseline";
 
 /**
  * The built-in "Unread" view: All issues filtered on the viewer's unread
@@ -24,6 +25,12 @@ export const UNREAD_VIEW: IssueView = {
   created_at: "",
   updated_at: "",
 };
+
+/**
+ * Saved views can be edited, so their filters stay removable. This one has no
+ * editor: the unread condition is fixed, and clearing filters returns to it.
+ */
+export const UNREAD_VIEW_BASELINE: IssueViewBaseline = baselineFromQuery(UNREAD_VIEW.query);
 
 export function isUnreadView(view: Pick<IssueView, "id"> | null | undefined): boolean {
   return view?.id === UNREAD_VIEW_ID;

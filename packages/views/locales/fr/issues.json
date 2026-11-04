@@ -789,6 +789,7 @@
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",
+    "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
   "agent_live": {

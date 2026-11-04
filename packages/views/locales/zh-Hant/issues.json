@@ -760,6 +760,7 @@
   },
   "filtered_empty": {
     "title": "沒有符合篩選條件的任務",
+    "unread_title": "沒有未讀任務",
     "clear_button": "清除篩選"
   },
   "agent_live": {

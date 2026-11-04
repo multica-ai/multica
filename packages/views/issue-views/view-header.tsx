@@ -82,6 +82,7 @@ import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { IssueDisplayControls, IssueFilterMenu } from "../issues/components/issues-header";
 import { useFilterChips } from "../issues/components/filter-chips-bar";
+import { useViewBaseline } from "../issues/surface/view-baseline-context";
 import { WorkspaceAgentWorkingChip } from "../issues/components/workspace-agent-working-chip";
 import type { IssueSurfaceController } from "../issues/surface/use-issue-surface-controller";
 import { useT } from "../i18n";
@@ -291,7 +292,8 @@ export function IssueViewHeader({
 
   // "My issues" is already a relation to me; a second one there is noise.
   const showRelation = base.kind !== "my";
-  const { chips: allFilterChips } = useFilterChips(dateFilter, setDateFilter);
+  const viewBaseline = useViewBaseline() ?? undefined;
+  const { chips: allFilterChips } = useFilterChips(dateFilter, setDateFilter, viewBaseline);
   const filterChips = showRelation
     ? allFilterChips
     : allFilterChips.filter((chip) => chip.key !== "relation");
@@ -456,6 +458,7 @@ export function IssueViewHeader({
         )}
 
         <IssueFilterMenu
+          viewBaseline={viewBaseline}
           align="start"
           tooltip={filterTooltip}
           trigger={

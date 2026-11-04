@@ -21,6 +21,12 @@ import {
   seedIssueSurfaceViewState,
 } from "@multica/core/issues/stores/surface-view-store";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
+import { UNREAD_VIEW_BASELINE, isUnreadView } from "@multica/core/issue-views/unread-view";
+import {
+  issueViewDefinitionFromState,
+  issueViewSeedDefinition,
+  sameFilterMeaning,
+} from "@multica/core/issue-views/definition";
 import { ViewBaselineProvider, useViewBaseline } from "./view-baseline-context";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -125,6 +131,7 @@ export function IssueSurface({
       : activeView && scope.type === "my"
         ? { ...scope, relation: myRelationForViewVariant(activeView.scope_variant) }
         : scope;
+  const viewBaseline = isUnreadView(activeView) ? UNREAD_VIEW_BASELINE : null;
   const store = useMemo(() => {
     // First-open seeding happens HERE, at store-creation time for this key:
     // no React component has subscribed to the new key's store yet, so the
@@ -133,7 +140,13 @@ export function IssueSurface({
     if (seedDefinition) {
       seedIssueSurfaceViewState(resolvedSurfaceKey, seedDefinition);
     }
-    return getIssueSurfaceViewStore(resolvedSurfaceKey);
+    const viewStore = getIssueSurfaceViewStore(resolvedSurfaceKey);
+    // Seeding happens once per key, so state persisted before the condition
+    // was fixed would otherwise come back without it.
+    if (viewBaseline?.unread && !viewStore.getState().unreadFilter) {
+      viewStore.setState({ unreadFilter: true });
+    }
+    return viewStore;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed identity follows the key
   }, [resolvedSurfaceKey]);
 
@@ -151,31 +164,33 @@ export function IssueSurface({
 
   return (
     <ViewStoreProvider store={store}>
-      {/* Remount on data-window change: the list queries keep the previous
-          key's data as a placeholder (keepPreviousData) so sort/filter
-          changes within ONE surface never flash a skeleton — but reusing the
-          mounted observer across windows made project A's cards impersonate
-          project B (with isLoading=false, so no skeleton either) until B's
-          fetch landed. A window-keyed remount gives the new window a fresh
-          observer: cold window → skeleton, warm window → instant cache hit.
-          The window identity is wsId + scope — wsId is required because the
-          workspace layout does not remount on workspace switch and two
-          workspaces share the same scope key (e.g. "workspace:all"). Keyed
-          by data identity, not surfaceKey (view-preference identity). */}
-      <IssueSurfaceContent
-        key={contentKey}
-        scope={effectiveScope}
-        modes={modes}
-        createDefaults={createDefaults}
-        search={search}
-        renderHeader={renderHeader}
-        renderEmpty={renderEmpty}
-        renderLoading={renderLoading}
-        clientFilter={clientFilter}
-        showClientEmpty={showClientEmpty}
-        batchToolbar={batchToolbar}
-        contentClassName={contentClassName}
-      />
+      <ViewBaselineProvider baseline={viewBaseline}>
+        {/* Remount on data-window change: the list queries keep the previous
+            key's data as a placeholder (keepPreviousData) so sort/filter
+            changes within ONE surface never flash a skeleton — but reusing the
+            mounted observer across windows made project A's cards impersonate
+            project B (with isLoading=false, so no skeleton either) until B's
+            fetch landed. A window-keyed remount gives the new window a fresh
+            observer: cold window → skeleton, warm window → instant cache hit.
+            The window identity is wsId + scope — wsId is required because the
+            workspace layout does not remount on workspace switch and two
+            workspaces share the same scope key (e.g. "workspace:all"). Keyed
+            by data identity, not surfaceKey (view-preference identity). */}
+        <IssueSurfaceContent
+          key={contentKey}
+          scope={effectiveScope}
+          modes={modes}
+          createDefaults={createDefaults}
+          search={search}
+          renderHeader={renderHeader}
+          renderEmpty={renderEmpty}
+          renderLoading={renderLoading}
+          clientFilter={clientFilter}
+          showClientEmpty={showClientEmpty}
+          batchToolbar={batchToolbar}
+          contentClassName={contentClassName}
+        />
+      </ViewBaselineProvider>
     </ViewStoreProvider>
   );
 }
@@ -435,16 +450,30 @@ function FilteredEmptyState() {
   const handleClear = baseline
     ? () => resetFiltersTo(baseline.raw)
     : clearFilters;
+  const baselineQuery = useMemo(
+    () => (baseline ? issueViewSeedDefinition({ query: { ...baseline.raw }, display: {} }).query : null),
+    [baseline],
+  );
+  // Only the view's own conditions are on, so there is nothing to clear.
+  const atBaseline = useViewStore(
+    (s) => !!baselineQuery && sameFilterMeaning(baselineQuery, issueViewDefinitionFromState(s).query),
+  );
 
   return (
     <CollectionPageState
       size="compact"
       icon={FilterX}
-      title={t(($) => $.filtered_empty.title)}
+      title={
+        atBaseline && baseline?.unread
+          ? t(($) => $.filtered_empty.unread_title)
+          : t(($) => $.filtered_empty.title)
+      }
       actions={
-        <Button variant="outline" size="sm" onClick={handleClear}>
-          {t(($) => $.filtered_empty.clear_button)}
-        </Button>
+        atBaseline ? undefined : (
+          <Button variant="outline" size="sm" onClick={handleClear}>
+            {t(($) => $.filtered_empty.clear_button)}
+          </Button>
+        )
       }
     />
   );

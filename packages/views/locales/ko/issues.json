@@ -760,6 +760,7 @@
   },
   "filtered_empty": {
     "title": "필터 조건에 맞는 태스크가 없습니다",
+    "unread_title": "읽지 않은 태스크가 없습니다",
     "clear_button": "필터 해제"
   },
   "agent_live": {
