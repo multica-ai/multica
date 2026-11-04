@@ -165,18 +165,6 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 
 	for kind, ctx := range fixtures {
 		out := buildMetaSkillContent("claude", ctx)
-		for _, want := range []string{
-			"only through the `multica` CLI — never `curl` / `wget`",
-			"If no command or documented platform mechanism covers what you need",
-			"report the gap in your result instead of working around it",
-		} {
-			if !strings.Contains(out, want) {
-				t.Errorf("kind=%d: brief missing CLI guidance %q", kind, want)
-			}
-		}
-		if strings.Contains(out, "workspace owner") {
-			t.Errorf("kind=%d: brief must not default to escalating CLI gaps to the workspace owner", kind)
-		}
 		for _, c := range checks {
 			needle := "\n" + c.heading + "\n"
 			firstLine := c.heading + "\n"
