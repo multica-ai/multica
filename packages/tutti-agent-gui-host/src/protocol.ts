@@ -13,7 +13,7 @@ import type {
   SendChatMessageResponse,
   TaskMessagePayload,
 } from "@multica/core/types";
-import type { LocalBackgroundTask, LocalPermissionMode, LocalProviderUsage, LocalSidePrompt, LocalUserQuestion } from "@multica/core/local-conversation/protocol";
+import type { LocalBackgroundTask, LocalPermissionMode, LocalProviderUsage, LocalUserQuestion } from "@multica/core/local-conversation/protocol";
 
 export interface AgentGuiAgentDescriptor {
   agent: Agent;
@@ -50,7 +50,6 @@ export interface AgentGuiWorkspaceState {
   queueOwner?: "desktop";
   sideWorkspace?: boolean;
   sidePane?: boolean;
-  movedQueueRequests?: string[];
   agents: AgentGuiAgentDescriptor[];
   executionTargets?: AgentGuiExecutionTarget[];
   local?: boolean;
@@ -144,8 +143,6 @@ export interface AgentGuiRpcMethods {
   "session.delete": { params: { sessionId: string }; result: void };
   "session.markRead": { params: { sessionId: string }; result: void };
   "session.cancel": { params: { sessionId: string; taskId: string }; result: CancelTaskResponse };
-  "session.watch": { params: { sessionIds: string[] }; result: void };
-  "task.messages": { params: { taskId: string }; result: AgentGuiTaskMessagePayload[] };
   "models.list": { params: { agentId: string; force?: boolean }; result: RuntimeModelsResult };
   "usage.read": { params: { agentId: string; sessionId?: string; force?: boolean }; result: LocalProviderUsage };
   "session.compact": { params: { sessionId: string; requestId: string }; result: { turnId: string } };
@@ -170,8 +167,7 @@ export interface AgentGuiRpcMethods {
   "storage.write": { params: { key: string; value: string }; result: void };
   "host.openTask": { params: { issueId: string }; result: void };
   "host.openInternalResource": { params: { href: string; background?: boolean }; result: void };
-  "host.openSide": { params: { sessionId: string; turnId?: string; quote?: string; requestId: string; pending?: LocalSidePrompt; queuedRequestId?: string; queued?: true }; result: ChatSession };
-  "host.startSide": { params: { sessionId: string; queued?: true }; result: void };
+  "host.openSide": { params: { sessionId: string; turnId?: string; quote?: string; requestId: string; queuedRequestId?: string; queued?: true }; result: ChatSession };
   "host.openResource": { params: { sessionId: string; url: string }; result: void };
   "host.showFileContextMenu": { params: { sessionId: string; url: string; hasSelection: boolean }; result: void };
   "host.locateSource": { params: { sessionId: string; turnId?: string; quote?: string }; result: void };
@@ -192,7 +188,6 @@ export type AgentGuiHostEvent =
   | { type: "locateSource"; sessionId: string; turnId?: string; quote?: string; sequence: number }
   | { type: "invalidate"; scope: "workspace"; generation?: number }
   | { type: "invalidate"; scope: "session"; sessionId: string; generation?: number }
-  | { type: "invalidate"; scope: "task"; sessionId: string; taskId: string; generation?: number }
   | { type: "init"; snapshot: AgentGuiInitSnapshot }
   | { type: "appendPrompt"; sequence: number; prompt: string; sessionId?: string; attachments?: Attachment[]; restoreRequestId?: string }
   | { type: "connection"; connected: boolean }

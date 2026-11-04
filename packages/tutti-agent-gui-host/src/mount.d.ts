@@ -6,7 +6,7 @@ import type { AgentGuiInitSnapshot, AgentGuiRpcClient, LocalConversationSource }
 export interface AgentGuiMountProps {
   client: AgentGuiRpcClient;
   initial: AgentGuiInitSnapshot;
-  localConversations?: LocalConversationSource;
+  localConversations: LocalConversationSource;
   onRendered?: () => void;
 }
 

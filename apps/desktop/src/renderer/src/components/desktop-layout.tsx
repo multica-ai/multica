@@ -295,7 +295,7 @@ export function DesktopShell() {
           </SidebarProvider>
         </div>
         {slug && <ModalRegistry />}
-        {slug && <SearchCommand />}
+        {slug && <SearchCommand showConversationFlow />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

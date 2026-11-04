@@ -144,7 +144,7 @@ describe("Agent workspace task history", () => {
     expect(screen.getAllByText("16s").length).toBeGreaterThan(0);
     expect(screen.getByText(enAgents.task_failure.reasons.agent_error_provider_quota_limit)).toBeVisible();
     expect(screen.getByText("Cancelled by Lee")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Open conversation" })).toHaveAttribute("href", "/dev/conversations?session=session-1");
+    expect(screen.getByRole("link", { name: "Open conversation" })).toHaveAttribute("href", "/dev/chat?session=session-1");
     expect(screen.getByRole("link", { name: "Open task" })).toHaveAttribute("href", "/dev/issues/issue-1");
     expect(screen.queryByText("run-1")).not.toBeInTheDocument();
     expect(screen.queryByText("old/workdir")).not.toBeInTheDocument();

@@ -246,6 +246,8 @@ export interface AgentsPageProps {
   localDaemonId?: string | null;
   localMachineName?: string | null;
   hasLocalMachine?: boolean;
+  /** Desktop links to its local AI sessions from the header. */
+  showConversationFlowEntry?: boolean;
 }
 
 // Page header
@@ -253,9 +255,11 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  showConversationFlowEntry,
 }: {
   totalCount: number;
   onCreate: () => void;
+  showConversationFlowEntry: boolean;
 }) {
   const { t, i18n } = useT("agents");
   const { t: tLayout } = useT("layout");
@@ -271,9 +275,11 @@ function PageHeaderBar({
       }}
       actions={
         <>
-          <WorkspaceButton variant="outline" size="sm" className="agent-workspace-entry h-8" asChild>
-            <AppLink href={paths.conversationFlow()} target="_blank">{tLayout(($) => $.nav.conversation_flow)}</AppLink>
-          </WorkspaceButton>
+          {showConversationFlowEntry && (
+            <WorkspaceButton variant="outline" size="sm" className="agent-workspace-entry h-8" asChild>
+              <AppLink href={paths.conversationFlow()} target="_blank">{tLayout(($) => $.nav.conversation_flow)}</AppLink>
+            </WorkspaceButton>
+          )}
           <CollectionPageHeaderAction
             icon={Plus}
             label={t(($) => $.page.new_agent)}
@@ -289,15 +295,17 @@ function ListError({
   onCreate,
   listError,
   onRetry,
+  showConversationFlowEntry,
 }: {
   onCreate: () => void;
   listError: unknown;
   onRetry: () => void;
+  showConversationFlowEntry: boolean;
 }) {
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
+      <PageHeaderBar totalCount={0} onCreate={onCreate} showConversationFlowEntry={showConversationFlowEntry} />
       <CollectionPageState
         role="alert"
         tone="destructive"
@@ -768,7 +776,7 @@ function LoadingSkeleton() {
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
 // Page
 
-export function AgentsPage(_props: AgentsPageProps = {}) {
+export function AgentsPage({ showConversationFlowEntry = false }: AgentsPageProps = {}) {
   const { t } = useT("agents");
   const locale = useLocale();
   const wsId = useWorkspaceId();
@@ -1008,6 +1016,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         onCreate={() => navigation.push(paths.newAgent())}
         listError={listError}
         onRetry={() => refetchList()}
+        showConversationFlowEntry={showConversationFlowEntry}
       />
     );
   }
@@ -1043,6 +1052,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => navigation.push(paths.newAgent())}
+        showConversationFlowEntry={showConversationFlowEntry}
       />
 
       {isLoading || (!showEmpty && !listReady) ? (

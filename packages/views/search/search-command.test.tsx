@@ -419,7 +419,7 @@ describe("SearchCommand", () => {
 
   it("offers every workspace nav page, not a hand-maintained subset", async () => {
     const user = userEvent.setup();
-    renderSearch();
+    render(<SearchCommand showConversationFlow />, { wrapper: I18nWrapper });
     const input = screen.getByPlaceholderText("Type a command or search...");
 
     // The Pages group is generated from WORKSPACE_PAGES — the same registry
@@ -485,10 +485,18 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
+  it("offers AI Sessions only when the platform has the page", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+    await user.type(screen.getByPlaceholderText("Type a command or search..."), "conversation");
+    expect(await screen.findByText("Chat")).toBeInTheDocument();
+    expect(screen.queryByText("AI Sessions")).not.toBeInTheDocument();
+  });
+
   it("opens AI Sessions in a separate tab on a normal selection", async () => {
     const user = userEvent.setup();
     const open = vi.spyOn(window, "open").mockReturnValue(null);
-    renderSearch();
+    render(<SearchCommand showConversationFlow />, { wrapper: I18nWrapper });
     await user.type(screen.getByPlaceholderText("Type a command or search..."), "conversations");
     await user.click(await screen.findByText("AI Sessions"));
     expect(open).toHaveBeenCalledWith("https://app.multica//ws-test/conversations", "_blank", "noopener,noreferrer");

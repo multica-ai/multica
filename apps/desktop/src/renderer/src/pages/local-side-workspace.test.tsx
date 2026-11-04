@@ -9,7 +9,7 @@ import chat from "../../../../../../packages/views/locales/zh-Hans/chat.json";
 vi.mock("../platform/local-v2-transport", () => ({ localV2Transport: () => window.desktopAPI.localV2 }));
 
 vi.mock("@multica/views/i18n", () => ({ useT: () => ({ t: (selector: (resource: typeof chat) => string, options?: Record<string, string | number>) => selector(chat).replace(/{{(\w+)}}/g, (_, key) => String(options?.[key] ?? "")) }) }));
-vi.mock("@multica/views/conversation-flow/panel", () => ({ TuttiAgentGuiPanel: ({ activeSessionId, active }: { activeSessionId: string; active: boolean }) => <textarea aria-label={`Side draft ${activeSessionId}`} data-active={String(active)} /> }));
+vi.mock("../components/tutti-agent-gui-panel", () => ({ TuttiAgentGuiPanel: ({ activeSessionId, active }: { activeSessionId: string; active: boolean }) => <textarea aria-label={`Side draft ${activeSessionId}`} data-active={String(active)} /> }));
 const scope = { userId: "side-user", workspaceId: "side-workspace" };
 let queryClient: QueryClient;
 let sessions: LocalConversation[];

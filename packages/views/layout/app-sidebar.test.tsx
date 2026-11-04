@@ -262,11 +262,11 @@ describe("PinRow", () => {
     expect(within(group).getByRole("button", { name: "Mac Studio" })).toHaveAttribute("data-active", "true");
   });
 
-  it("keeps the web's single conversations entry without desktop device navigation", async () => {
+  it("shows no AI Sessions entry without the desktop device list", async () => {
     const { container } = renderWithI18n(<AppSidebar />);
-    expect(await screen.findByText("AI Sessions")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "AI Sessions" })).not.toBeInTheDocument();
-    expect(container.querySelector('button[data-href="/acme/conversations"]')).toHaveAttribute("data-target", "_blank");
+    expect(await screen.findByRole("button", { name: "Chat" })).toBeInTheDocument();
+    expect(screen.queryByText("AI Sessions")).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/conversations"]')).toBeNull();
   });
 
   it("unpins missing details", async () => {
@@ -492,7 +492,7 @@ describe("personal nav — Chat", () => {
   });
 
   it("opens AI Sessions in a new tab while Chat keeps its existing destination", () => {
-    const { container } = render(<AppSidebar />);
+    const { container } = render(<AppSidebar conversationFlowDevices={[]} />);
     expect(container.querySelector('[data-href="/acme/conversations"]')).toHaveAttribute("data-target", "_blank");
     expect(chatNav(container)).not.toHaveAttribute("data-target");
   });

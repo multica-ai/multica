@@ -323,11 +323,6 @@
     "filter_sessions": "篩選 {{name}} 的會話",
     "session_action_error": "無法更新會話，請重試。",
     "reference_read_only": "此會話為唯讀，無法新增任務引用",
-    "reference_unavailable": "此智慧體目前不可呼叫，無法新增任務引用",
-    "search_sessions": "搜尋會話",
-    "clear_search": "清除搜尋",
-    "no_search_results": "沒有相符的會話",
-    "return_conversation": "返回對話",
-    "new_session_unavailable": "需要一個可呼叫且已繫結執行時的智慧體。"
+    "reference_unavailable": "此智慧體目前不可呼叫，無法新增任務引用"
   }
 }

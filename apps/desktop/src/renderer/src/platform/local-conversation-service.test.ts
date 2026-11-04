@@ -44,7 +44,7 @@ function setup(options: { queryClient?: QueryClient;  getSelectionIntent?: () =>
   const callbacks = { onLocalSelect: vi.fn(), onOpenSide: vi.fn(), onShowMessage: vi.fn() };
   const qc = options.queryClient ?? new QueryClient();
   const service = createLocalConversationParentService({ queryClient: qc, workspaceId: "ws", workspaceSlug: "workspace", userId: "user", isCurrent: () => true, resolveAvatar: (value) => value,
-    onSelectSession: vi.fn(), onOpenTask: vi.fn(), ...callbacks, ...options }, Object.assign(using, deviceId ? { deviceId } : {}));
+    onOpenTask: vi.fn(), ...callbacks, ...options }, Object.assign(using, deviceId ? { deviceId } : {}));
   disposers.push(() => { service.dispose(); qc.clear(); });
   return { service, ...callbacks };
 }

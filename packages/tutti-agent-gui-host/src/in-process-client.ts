@@ -25,12 +25,12 @@ export interface AgentGuiHostService {
 
 /** Methods a hidden or unfocused GUI may still call; every other one is a user action. */
 function allowedInBackground(method: string, params: unknown): boolean {
-  if (method === "workspace.load" || method === "session.load" || method === "session.watch" || method === "task.messages") return true;
+  if (method === "workspace.load" || method === "session.load") return true;
   // A transfer outlives the focus that started it.
   if (method === "attachment.cancel" || method === "attachment.retry" || method === "attachment.forget" || method === "attachment.url" || method === "image.url") return true;
   if (method === "attachment.read" || method === "image.read" || method === "context.tasks" || method === "host.promptApplied" || method === "host.showMessage" || method.startsWith("storage.")) return true;
   // A prompt admitted to the queue must survive focus and tab changes.
-  return ["session.send", "queue.enqueue", "host.openSide", "host.startSide"].includes(method) && (params as { queued?: unknown } | null)?.queued === true;
+  return ["session.send", "queue.enqueue", "host.openSide"].includes(method) && (params as { queued?: unknown } | null)?.queued === true;
 }
 
 /**

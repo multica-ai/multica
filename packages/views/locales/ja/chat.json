@@ -323,11 +323,6 @@
     "filter_sessions": "{{name}} との会話を絞り込む",
     "session_action_error": "会話を更新できませんでした。もう一度お試しください。",
     "reference_read_only": "この会話は読み取り専用のため、タスク参照を追加できません。",
-    "reference_unavailable": "このエージェントは現在利用できないため、タスク参照を追加できません。",
-    "search_sessions": "会話を検索",
-    "clear_search": "検索をクリア",
-    "no_search_results": "一致する会話がありません",
-    "return_conversation": "会話に戻る",
-    "new_session_unavailable": "ランタイムが設定された利用可能なエージェントが必要です。"
+    "reference_unavailable": "このエージェントは現在利用できないため、タスク参照を追加できません。"
   }
 }

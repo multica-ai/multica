@@ -9,7 +9,7 @@ import layout from "../../../../../../packages/views/locales/zh-Hans/layout.json
 import { LocalConversationFlowPage } from "./local-conversation-flow";
 import { useProjectVisibilityStore } from "../stores/local-conversation-project-visibility";
 import { useConversationLayoutStore } from "../stores/local-conversation-layout";
-import type { TuttiAgentGuiPanel } from "@multica/views/conversation-flow/panel";
+import type { TuttiAgentGuiPanel } from "../components/tutti-agent-gui-panel";
 import type { ComponentProps } from "react";
 import type { LocalHostAvailability } from "../../../shared/local-host-availability";
 const transportFor = vi.hoisted(() => ({ calls: [] as string[] }));
@@ -30,7 +30,7 @@ vi.mock("@multica/views/navigation", () => ({
 vi.mock("@multica/views/i18n", () => ({ useLocale: () => mock.locale, useT: (namespace?: string) => ({ t: (selector: (resource: typeof chat) => string, options?: { title?: string; device?: string }) => selector((namespace === "layout" ? layout : chat) as typeof chat).replace("{{title}}", options?.title ?? "").replace("{{device}}", options?.device ?? "") }) }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => mock.compact }));
 vi.mock("@multica/views/runtimes/provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("@multica/views/conversation-flow/panel", () => ({ TuttiAgentGuiPanel: (props: ComponentProps<typeof TuttiAgentGuiPanel>) => {
+vi.mock("../components/tutti-agent-gui-panel", () => ({ TuttiAgentGuiPanel: (props: ComponentProps<typeof TuttiAgentGuiPanel>) => {
   mock.panel(props);
   return <textarea aria-label="Conversation draft" data-new-conversation={JSON.stringify(props.newConversationRequest)} />;
 } }));

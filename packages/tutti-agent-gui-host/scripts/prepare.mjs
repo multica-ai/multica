@@ -1,6 +1,6 @@
-// Generates what the GUI's sources import and no bundler can produce the same
-// way on both apps: its scoped stylesheet and the HTML preview's libraries.
-// Both apps run this before they build. Third-party notices go to their public roots.
+// Generates what the GUI's sources import and a bundler cannot produce: its scoped
+// stylesheet and the HTML preview's libraries. Desktop runs this before it builds.
+// Third-party notices go to its public root.
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -17,10 +17,7 @@ const themeTokensFile = join(packageRoot, ".multica-tokens.css");
 const stylesheet = join(packageRoot, "src/styles.css");
 const generatedStylesheet = join(packageRoot, "src/agent-gui.generated.css");
 const generatedLibraries = join(packageRoot, "src/html-preview/libraries.generated.ts");
-const licenseRoots = [
-  join(repositoryRoot, "apps/desktop/src/renderer/public/licenses/agent-gui"),
-  join(repositoryRoot, "apps/web/public/licenses/agent-gui"),
-];
+const licenseRoot = join(repositoryRoot, "apps/desktop/src/renderer/public/licenses/agent-gui");
 
 async function acquireLock() {
   const deadline = Date.now() + 180_000;
@@ -100,15 +97,13 @@ async function buildLibraries() {
 }
 
 async function publishLicenses() {
-  for (const target of licenseRoots) {
-    await mkdir(join(target, "tutti"), { recursive: true });
-    await mkdir(join(target, "html-preview"), { recursive: true });
-    await cp(join(repositoryRoot, "vendor/tutti/LICENSE"), join(target, "tutti/LICENSE"));
-    await cp(join(repositoryRoot, "vendor/tutti/NOTICE"), join(target, "tutti/NOTICE"));
-    await cp(join(repositoryRoot, "vendor/tutti/packages/ui/system/NOTICE"), join(target, "tutti/UI_SYSTEM_NOTICE"));
-    await cp(join(dirname(fileURLToPath(import.meta.resolve("chart.js"))), "../LICENSE.md"), join(target, "html-preview/Chart.js-LICENSE.md"));
-    await cp(join(dirname(fileURLToPath(import.meta.resolve("d3"))), "../LICENSE"), join(target, "html-preview/D3-LICENSE"));
-  }
+  await mkdir(join(licenseRoot, "tutti"), { recursive: true });
+  await mkdir(join(licenseRoot, "html-preview"), { recursive: true });
+  await cp(join(repositoryRoot, "vendor/tutti/LICENSE"), join(licenseRoot, "tutti/LICENSE"));
+  await cp(join(repositoryRoot, "vendor/tutti/NOTICE"), join(licenseRoot, "tutti/NOTICE"));
+  await cp(join(repositoryRoot, "vendor/tutti/packages/ui/system/NOTICE"), join(licenseRoot, "tutti/UI_SYSTEM_NOTICE"));
+  await cp(join(dirname(fileURLToPath(import.meta.resolve("chart.js"))), "../LICENSE.md"), join(licenseRoot, "html-preview/Chart.js-LICENSE.md"));
+  await cp(join(dirname(fileURLToPath(import.meta.resolve("d3"))), "../LICENSE"), join(licenseRoot, "html-preview/D3-LICENSE"));
 }
 
 await acquireLock();

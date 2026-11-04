@@ -374,7 +374,7 @@ function AgentRunRow({
         )}
         {run.chat_session_id && (
           <AppLink
-            href={paths.conversationFlowSession(run.chat_session_id)}
+            href={paths.chatSession(run.chat_session_id)}
             aria-describedby={titleId}
             onClick={onRevealConversation}
             className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"

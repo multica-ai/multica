@@ -1179,9 +1179,6 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../core
-      '@multica/tutti-agent-gui-host':
-        specifier: workspace:*
-        version: link:../tutti-agent-gui-host
       '@multica/ui':
         specifier: workspace:*
         version: link:../ui

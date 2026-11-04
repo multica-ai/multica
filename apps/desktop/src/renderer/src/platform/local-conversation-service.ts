@@ -4,7 +4,7 @@ import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
 import type { AgentTask, Attachment } from "@multica/core/types";
-import { createAgentGuiParentService, type ParentServiceOptions } from "@multica/views/conversation-flow/service";
+import { createAgentGuiWorkspaceService, type AgentGuiParentService, type ParentServiceOptions } from "./agent-gui-parent-service";
 import type { AgentGuiHostEvent, AgentGuiRpcMethod, AgentGuiRpcMethods, AgentGuiSession, AgentGuiSessionDetail, AgentGuiWorkspaceState, LocalConversationSource } from "@multica/tutti-agent-gui-host/protocol";
 import { isTaskCreationReference, type LocalFolderProject, type LocalPromptQueue, type LocalProviderId, type LocalProviderUsage, type LocalQueuedPrompt } from "@multica/core/local-conversation/protocol";
 import { localV2SummarySchema, type LocalV2Scope, type LocalV2Summary, type LocalV2Transport } from "@multica/core/local-conversation/v2";
@@ -87,7 +87,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   onLocateSource?: (sessionId: string, turnId?: string, quote?: string) => void;
   storagePrefix?: string;
   locale?: string;
-}, transport: LocalV2Transport): ReturnType<typeof createAgentGuiParentService> {
+}, transport: LocalV2Transport): AgentGuiParentService {
   const storage = options.storage ?? defaultStorage;
   const usageStorageKey = `multica:local-agent-mentions:v1:${JSON.stringify([api.getBaseUrl(), options.userId, options.workspaceId])}`;
   const scope: LocalV2Scope = { userId: options.userId, workspaceId: options.workspaceId };
@@ -95,7 +95,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
   const providersQuery = localProvidersQuery(client, deviceId);
   const foldersQuery = localFolderProjectsQuery(client, deviceId);
-  const cloud = createAgentGuiParentService(options);
+  const cloud = createAgentGuiWorkspaceService(options);
   const listeners = new Set<(event: AgentGuiHostEvent) => void>();
   let disposed = false;
   let cloudState: AgentGuiWorkspaceState | undefined;
@@ -160,7 +160,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     const providers = qc.getQueryData<LocalProviderList>(providersQuery.queryKey)!;
     const folderProjects = qc.getQueryData<LocalFolderProjectList>(foldersQuery.queryKey);
     const summaries = client.summaries();
-    return { local: true, composerDraftScope: JSON.stringify([api.getBaseUrl(), options.storagePrefix ?? ""]), queueOwner: "desktop", sideWorkspace: true, sidePane: Boolean(options.storagePrefix), agents: lastAgents.get(client) ?? [], movedQueueRequests: [],
+    return { local: true, composerDraftScope: JSON.stringify([api.getBaseUrl(), options.storagePrefix ?? ""]), queueOwner: "desktop", sideWorkspace: true, sidePane: Boolean(options.storagePrefix), agents: lastAgents.get(client) ?? [],
       executionTargets: providers.providers.map((entry) => ({ id: localTargetId(entry.id), name: entry.name, provider: entry.id, iconUrl: "", canInvoke: entry.available, canFork: true, runtimeBound: entry.available, runtimeOnline: entry.available, unavailableReason: entry.available ? undefined : "未在本机安装" })),
       sessions: summaries.map((summary) => projectLocalSession(summary, scope)),
       folderProjects: (folderProjects?.projects ?? []).map((project): LocalFolderProject => ({ id: project.id, title: project.title, path: project.path, createdAt: project.created_at })),
@@ -204,7 +204,6 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     assertCurrent(); const params = raw as Record<string, any>;
     switch (method) {
       case "workspace.load": return load();
-      case "session.watch": return undefined;
       case "session.markRead": return undefined;
       case "queue.enqueue": {
         // Transfer ownership before any asynchronous view-bound preparation.
@@ -216,15 +215,12 @@ export function createLocalConversationParentService(options: ParentServiceOptio
       case "queue.update":
         return projectQueue(await command(params.sessionId, { type: "queue_update", action: params.action === "sendNow" ? "send_now" : params.action, request_id: params.requestId }));
       case "host.openSide": {
-        const pending = params.pending as { requestId: string; content: string; model?: string; reasoningEffort?: string | null; permissionMode?: string; attachmentIds?: string[]; references?: unknown[] } | undefined;
         const raw = params.queuedRequestId
           ? await command(params.sessionId, { type: "queue_side", request_id: params.queuedRequestId })
-          : await command(params.sessionId, { type: "create_side", request_id: params.requestId, turn_id: params.turnId, quote: params.quote,
-            ...(pending ? { item: { ...pending, display: { id: pending.requestId, clientSubmitId: pending.requestId, createdAtUnixMs: Date.now() } } } : {}) });
+          : await command(params.sessionId, { type: "create_side", request_id: params.requestId, turn_id: params.turnId, quote: params.quote });
         const side = received(raw);
         assertCurrent(); options.onOpenSide?.(side.id, params.sessionId); return side;
       }
-      case "host.startSide": return undefined; // a moved message runs in its Side by itself
       case "host.openResource": options.onOpenResource?.(params.sessionId, params.url); return undefined;
       case "host.showFileContextMenu":
         await window.desktopAPI.localFileContextMenu.show(scope, { sessionId: params.sessionId, url: params.url, hasSelection: params.hasSelection }, (transport as { deviceId?: string }).deviceId ?? "local"); return undefined;
@@ -271,7 +267,6 @@ export function createLocalConversationParentService(options: ParentServiceOptio
         return { id: params.taskId, agent_id: "", runtime_id: "", issue_id: "", chat_session_id: params.sessionId, kind: "chat", status: "running", priority: 0,
           created_at: new Date().toISOString(), started_at: null, dispatched_at: null, completed_at: null, result: null, error: null } as AgentTask;
       }
-      case "task.messages": return [];
       case "models.list": {
         const result = await client.request("GET", `/models?provider=${localProviderId(params.agentId)}${params.force ? "&force=true" : ""}`) as Record<string, unknown>;
         return { ...result, id: "local-models", runtime_id: params.agentId, status: "completed" };

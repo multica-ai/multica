@@ -22,8 +22,8 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { useNavigation, AppLink } from "@multica/views/navigation";
 import { useLocale, useT } from "@multica/views/i18n";
 import { ProviderLogo } from "@multica/views/runtimes/provider-logo";
-import { TuttiAgentGuiPanel } from "@multica/views/conversation-flow/panel";
-import type { ParentServiceOptions } from "@multica/views/conversation-flow/service";
+import { TuttiAgentGuiPanel } from "../components/tutti-agent-gui-panel";
+import type { ParentServiceOptions } from "../platform/agent-gui-parent-service";
 import type { LocalFolderProject, LocalProviderId } from "@multica/core/local-conversation/protocol";
 import { isAutomaticLocalDirectory } from "@multica/tutti-agent-gui-host/local-projects";
 import { createLocalConversationParentService, localConversationKey, localFolderProjectsQuery, localProvidersQuery, localTargetId, type LocalFolderProjectList, type LocalProviderList } from "../platform/local-conversation-service";
@@ -497,7 +497,7 @@ function LocalConversationFlow() {
           <TuttiAgentGuiPanel locateRequest={locateRequest ?? undefined} restoreDraftRequest={referenceDraft} key={`${workspace.id}:${userId}`} serviceFactory={factory} workspaceId={workspace.id} workspaceSlug={slug} userId={userId}
             activeSessionId={selectedId} selectedAgentId={localTargetId(provider)} active={active && mainVisible && (!compact || !showList)} composerFocusSequence={focusSequence || undefined}
             newConversationRequest={newConversationRequest}
-            onRestoreDraftApplied={() => setReferenceDraft(null)} onSelectSession={(session) => select(session?.id ?? null)}
+            onRestoreDraftApplied={() => setReferenceDraft(null)}
             onOpenTask={(id) => { if (openInNewTab) openInNewTab(paths.issueDetail(id), undefined, { activate: true }); else push(paths.issueDetail(id)); }}
             onShowMessage={(message, tone) => toast[tone ?? "info"](message)} />
         </div>}

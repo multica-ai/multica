@@ -323,11 +323,6 @@
     "filter_sessions": "筛选 {{name}} 的会话",
     "session_action_error": "无法更新会话，请重试。",
     "reference_read_only": "此会话为只读，无法添加任务引用",
-    "reference_unavailable": "此智能体当前不可调用，无法添加任务引用",
-    "search_sessions": "搜索会话",
-    "clear_search": "清除搜索",
-    "no_search_results": "没有匹配的会话",
-    "return_conversation": "返回对话",
-    "new_session_unavailable": "需要一个可调用且已绑定运行时的智能体。"
+    "reference_unavailable": "此智能体当前不可调用，无法添加任务引用"
   }
 }

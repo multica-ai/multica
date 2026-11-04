@@ -16,8 +16,8 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle, useDefaultLayout } from "@multica/ui/components/ui/resizable";
-import { TuttiAgentGuiPanel } from "@multica/views/conversation-flow/panel";
-import type { ParentServiceOptions } from "@multica/views/conversation-flow/service";
+import { TuttiAgentGuiPanel } from "../components/tutti-agent-gui-panel";
+import type { ParentServiceOptions } from "../platform/agent-gui-parent-service";
 import type { LocalConversationScope, LocalProviderId } from "@multica/core/local-conversation/protocol";
 import { FileLinkPreviewError, fileLinkErrorMessage, resolutionSource, resolveConversationFile } from "./local-resource-resolution";
 import { createLocalConversationParentService, localConversationKey, localTargetId } from "../platform/local-conversation-service";
@@ -290,7 +290,7 @@ function SideConversation(props: Props & { sessionId: string; onSide(id: string)
     {session?.side && <div className="shrink-0 border-b px-3 py-3 text-caption text-muted-foreground"><div className="flex items-center justify-between gap-2"><span className="min-w-0 truncate">{props.chinese ? "来自主对话" : "From main chat"} · {props.sessions.find((entry) => entry.id === session.side!.sourceId)?.title}</span><Button variant="link" size="xs" onClick={() => props.onSelectSource(session.side!.sourceId, session.side!.turnId, session.side!.quote)}><ArrowLeft className="size-3.5" />{props.chinese ? "定位来源" : "Locate source"}</Button></div>{session.side.quote && <blockquote className="mt-2 max-h-28 overflow-auto border-l-2 pl-3 text-body text-foreground">{session.side.quote}</blockquote>}</div>}
     <SideActivitySummary activity={activity} />
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <TuttiAgentGuiPanel serviceFactory={factory} workspaceId={props.scope.workspaceId} workspaceSlug={props.slug} userId={props.scope.userId} activeSessionId={props.sessionId} selectedAgentId={localTargetId(session?.provider ?? props.provider)} active={props.visible} onRestoreDraftApplied={() => {}} onSelectSession={() => {}} onOpenTask={props.onOpenTask} onShowMessage={props.onShowMessage} />
+      <TuttiAgentGuiPanel serviceFactory={factory} workspaceId={props.scope.workspaceId} workspaceSlug={props.slug} userId={props.scope.userId} activeSessionId={props.sessionId} selectedAgentId={localTargetId(session?.provider ?? props.provider)} active={props.visible} onRestoreDraftApplied={() => {}} onOpenTask={props.onOpenTask} onShowMessage={props.onShowMessage} />
       {session && session.turnCount === 0 && !session.running && <div className="pointer-events-none absolute inset-x-4 top-1/3 flex flex-col items-center gap-3 text-center text-body text-muted-foreground"><MessagesSquare className="size-6" aria-hidden="true" /><p>{props.chinese ? (session.side?.quote ? "围绕选中的内容继续提问" : "在旁支里继续探索") : (session.side?.quote ? "Ask a follow-up about your selection" : "Continue exploring in this side conversation")}</p></div>}
     </div>
   </div>;

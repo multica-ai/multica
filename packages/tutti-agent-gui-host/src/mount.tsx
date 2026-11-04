@@ -39,7 +39,7 @@ type Handle = ReturnType<typeof createMulticaAgentGuiRuntime>;
 export interface AgentGuiMountProps {
   client: AgentGuiRpcClient;
   initial: AgentGuiInitSnapshot;
-  localConversations?: LocalConversationSource;
+  localConversations: LocalConversationSource;
   onRendered?: () => void;
 }
 

@@ -115,7 +115,6 @@ const PINNED_PREVIEW_LIMIT = 5;
 type NavKey =
   | "inbox"
   | "chat"
-  | "conversationFlow"
   | "myIssues"
   | "issues"
   | "projects"
@@ -132,7 +131,6 @@ type NavKey =
 type NavLabelKey =
   | "inbox"
   | "chat"
-  | "conversation_flow"
   | "my_issues"
   | "issues"
   | "projects"
@@ -151,7 +149,6 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "inbox", labelKey: "inbox" },
   { key: "myIssues", labelKey: "my_issues" },
   { key: "chat", labelKey: "chat" },
-  { key: "conversationFlow", labelKey: "conversation_flow" },
 ];
 
 const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
@@ -434,7 +431,7 @@ interface AppSidebarProps {
   headerClassName?: string;
   /** Extra style for SidebarHeader */
   headerStyle?: React.CSSProperties;
-  /** Desktop supplies connected devices (including an empty list) to show the device navigation group. */
+  /** Desktop supplies connected devices (including an empty list) to show the AI Sessions group. Web has no such group. */
   conversationFlowDevices?: { peerId: string; name: string }[];
 }
 
@@ -785,12 +782,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle, 
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);
-                  if (item.key === "conversationFlow" && conversationFlowDevices) return null;
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} target={item.key === "conversationFlow" ? "_blank" : undefined} />}
+                        render={<AppLink href={href} />}
                         className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />

@@ -35,10 +35,6 @@ function workspaceScoped(slug: string) {
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
     conversationFlow: () => `${ws}/conversations`,
-    conversationFlowSession: (sessionId: string) =>
-      `${ws}/conversations?session=${encode(sessionId)}`,
-    conversationFlowWithAgent: (agentId: string) =>
-      `${ws}/conversations?agent=${encode(agentId)}`,
     // Another device's conversations over Device link (Desktop only).
     conversationFlowDevice: (peerId: string) => `${ws}/conversations/devices/${encode(peerId)}`,
     // Step 1 of agent creation: choose where the agent runs.

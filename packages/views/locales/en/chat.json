@@ -327,11 +327,6 @@
     "filter_sessions": "Filter conversations with {{name}}",
     "session_action_error": "Could not update the conversation. Try again.",
     "reference_read_only": "This conversation is read-only. Task references cannot be added.",
-    "reference_unavailable": "This agent is currently unavailable. Task references cannot be added.",
-    "search_sessions": "Search conversations",
-    "clear_search": "Clear search",
-    "no_search_results": "No matching conversations",
-    "return_conversation": "Return to conversation",
-    "new_session_unavailable": "An available agent with a bound runtime is required."
+    "reference_unavailable": "This agent is currently unavailable. Task references cannot be added."
   }
 }

@@ -15,7 +15,6 @@ interface PendingPrompt {
 
 /** Presentation adapter only: Electron owns admission, persistence and draining. */
 export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
-  enabled(): boolean;
   locale?(): string;
   enqueue(input: SubmitInput): Promise<LocalPromptQueue>;
   update(id: string, action: "pause" | "stop" | "resume" | "remove" | "sendNow", requestId?: string): Promise<LocalPromptQueue>;
@@ -41,7 +40,6 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
   let disposed = false;
   const snapshot = () => {
     const state = base.getSnapshot();
-    if (!options.enabled()) return state;
     if (cached && state === lastBase && revision === lastRevision) return cached;
     const records = { ...state.promptQueue.recordsBySessionId };
     const submits = { ...state.pendingIntents.submitsByClientSubmitId };
@@ -183,7 +181,6 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
     getSnapshot: snapshot,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     submitPrompt(input) {
-      if (!options.enabled()) return base.submitPrompt(input);
       if (!input.content.length || !input.clientSubmitId) return { accepted: false, queued: false };
       const submissionError = promptSubmissionError(input, options.locale?.() ?? "en");
       if (submissionError) {
@@ -208,7 +205,7 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
       return { accepted: true, queued };
     },
     dispatch(intent, dispatchOptions) {
-      if (options.enabled() && "agentSessionId" in intent && typeof intent.agentSessionId === "string") {
+      if ("agentSessionId" in intent && typeof intent.agentSessionId === "string") {
         const id = intent.agentSessionId;
         if (intent.type === "queue/suspended") { update(id, "pause"); return; }
         if (intent.type === "queue/resumed") { update(id, "resume"); return; }
@@ -219,7 +216,6 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
       base.dispatch(intent, dispatchOptions);
     },
     stopSession(input) {
-      if (!options.enabled()) return base.stopSession(input);
       // Persist the pause before the cancellation can release the next turn.
       update(input.agentSessionId, "stop");
     },

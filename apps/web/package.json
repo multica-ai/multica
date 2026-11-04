@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../../packages/tutti-agent-gui-host/scripts/prepare.mjs && sh -c 'next dev --webpack --port \"${FRONTEND_PORT:-3000}\"'",
-    "build": "node ../../packages/tutti-agent-gui-host/scripts/prepare.mjs && next build --webpack",
+    "dev": "sh -c 'next dev --webpack --port \"${FRONTEND_PORT:-3000}\"'",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

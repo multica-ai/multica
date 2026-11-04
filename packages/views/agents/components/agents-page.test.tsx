@@ -353,6 +353,22 @@ describe("AgentsPage docs link", () => {
   });
 });
 
+describe("AgentsPage AI Sessions entry", () => {
+  it("is absent unless the platform has the page", () => {
+    renderPage();
+    expect(screen.queryByRole("link", { name: "AI Sessions" })).not.toBeInTheDocument();
+  });
+
+  it("links to the page when the platform asks for it", () => {
+    renderWithI18n(
+      <NavigationProvider value={makeAdapter()}>
+        <AgentsPage showConversationFlowEntry />
+      </NavigationProvider>,
+    );
+    expect(screen.getByRole("link", { name: "AI Sessions" })).toHaveAttribute("href", "/test-workspace/conversations");
+  });
+});
+
 describe("AgentsPage search + model column (GitHub #9500)", () => {
   it("filters by the store's search query so it survives leaving the page", () => {
     // The query comes from the view store, not page-local state: a remount

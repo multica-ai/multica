@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient } from "@multica/tutti-agent-gui-host/protocol";
+import { NavigationProvider } from "@multica/views/navigation";
 import { TuttiAgentGuiPanel } from "./tutti-agent-gui-panel";
-import { NavigationProvider } from "../navigation";
 
 type Service = { load: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; publish: ReturnType<typeof vi.fn<(event: AgentGuiHostEvent) => void>>; dispose: ReturnType<typeof vi.fn>; subscribe: (listener: (event: AgentGuiHostEvent) => void) => () => void; reconnect: ReturnType<typeof vi.fn> };
 const mock = vi.hoisted(() => ({
@@ -15,13 +15,12 @@ const mock = vi.hoisted(() => ({
   renderOnMount: true,
   loadFails: false,
 }));
-vi.mock("./parent-service", () => ({ createAgentGuiParentService: mock.create }));
 vi.mock("@multica/core/auth", () => ({ useAuthStore: { getState: () => ({ user: { id: "user" } }) } }));
 vi.mock("@multica/core/platform", () => ({ getCurrentSlug: () => "acme", getCurrentWsId: () => "ws" }));
 vi.mock("@multica/core/realtime", () => ({ useWSReconnect: () => {} }));
-vi.mock("../common/use-app-foreground", () => ({ useAppForeground: () => mock.foreground }));
+vi.mock("@multica/views/common/use-app-foreground", () => ({ useAppForeground: () => mock.foreground }));
 vi.mock("@multica/ui/components/common/theme-provider", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
-vi.mock("../i18n", () => ({ useLocale: () => "en", useT: () => ({ t: (selector: (value: unknown) => string) => selector({ workbench: { title: "Agent GUI", loading: "Loading", load_error: "Failed", retry: "Retry" } }) }) }));
+vi.mock("@multica/views/i18n", () => ({ useLocale: () => "en", useT: () => ({ t: (selector: (value: unknown) => string) => selector({ workbench: { title: "Agent GUI", loading: "Loading", load_error: "Failed", retry: "Retry" } }) }) }));
 vi.mock("@multica/tutti-agent-gui-host/mount", () => ({
   default: function FakeMount(props: { client: AgentGuiRpcClient; initial: AgentGuiInitSnapshot; onRendered?: () => void }) {
     if (mock.loadFails) throw new Error("chunk failed");
@@ -37,7 +36,7 @@ vi.mock("@multica/tutti-agent-gui-host/mount", () => ({
 }));
 
 const props = { workspaceId: "ws", workspaceSlug: "acme", userId: "user", activeSessionId: null,
-  active: true, onRestoreDraftApplied: vi.fn(), onSelectSession: vi.fn(), onOpenTask: vi.fn(), onShowMessage: vi.fn() };
+  active: true, serviceFactory: mock.create, onRestoreDraftApplied: vi.fn(), onOpenTask: vi.fn(), onShowMessage: vi.fn() };
 const clients: QueryClient[] = [];
 function TestProvider({ children }: { children: React.ReactNode }) {
   const [qc] = useState(() => new QueryClient());

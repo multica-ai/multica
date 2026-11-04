@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -10,4 +10,6 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom", "@tiptap/core", "@tiptap/pm", "@tiptap/react"],
   },
+  // Rendering the GUI takes seconds on a loaded CI runner.
+  test: { testTimeout: 20_000 },
 });

@@ -8,18 +8,17 @@ import { useAuthStore } from "@multica/core/auth";
 import { getCurrentSlug, getCurrentWsId } from "@multica/core/platform";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useWSReconnect } from "@multica/core/realtime";
-import type { Agent, ChatSession } from "@multica/core/types";
-import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient } from "@multica/tutti-agent-gui-host/protocol";
+import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient, LocalConversationSource } from "@multica/tutti-agent-gui-host/protocol";
 import { createInProcessRpcClient } from "@multica/tutti-agent-gui-host/in-process-client";
-import { useLocale, useT } from "../i18n";
-import { useAppForeground } from "../common/use-app-foreground";
-import type { RestoreDraftRequest } from "../chat/components/use-chat-draft-restore";
-import { createAgentGuiParentService, type ParentServiceOptions } from "./parent-service";
-import { useAppOrigin, useOptionalNavigation } from "../navigation";
+import { useLocale, useT } from "@multica/views/i18n";
+import { useAppForeground } from "@multica/views/common/use-app-foreground";
+import type { RestoreDraftRequest } from "@multica/views/chat/use-chat-draft-restore";
+import { useAppOrigin, useOptionalNavigation } from "@multica/views/navigation";
+import type { AgentGuiParentService, ParentServiceOptions } from "../platform/agent-gui-parent-service";
 
 interface Props {
   locateRequest?: { sessionId: string; turnId?: string; quote?: string; sequence: number };
-  serviceFactory?: (options: ParentServiceOptions) => ReturnType<typeof createAgentGuiParentService>;
+  serviceFactory: (options: ParentServiceOptions) => AgentGuiParentService;
   workspaceId: string;
   workspaceSlug: string;
   userId: string;
@@ -30,7 +29,6 @@ interface Props {
   newConversationRequest?: AgentGuiInitSnapshot["newConversationRequest"];
   restoreDraftRequest?: RestoreDraftRequest | null;
   onRestoreDraftApplied: (id: string) => void;
-  onSelectSession: (session: ChatSession | null, agent?: Agent) => void;
   onOpenTask: (issueId: string) => void;
   onShowMessage: (message: string, tone?: "success" | "info" | "warning" | "error") => void;
 }
@@ -59,10 +57,10 @@ export function TuttiAgentGuiPanel(props: Props) {
   latest.current = { ...props, active };
   const visible = useRef(props.active);
   visible.current = props.active;
-  const serviceRef = useRef<ReturnType<typeof createAgentGuiParentService> | null>(null);
+  const serviceRef = useRef<AgentGuiParentService | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [connection, setConnection] = useState<{ client: AgentGuiRpcClient; initial: AgentGuiInitSnapshot } | null>(null);
+  const [connection, setConnection] = useState<{ client: AgentGuiRpcClient; initial: AgentGuiInitSnapshot; localConversations: LocalConversationSource } | null>(null);
   // A failed chunk load is cached by its lazy component, so a retry needs a new one.
   const AgentGuiMount = useMemo(() => { void attempt; return lazy(() => import("@multica/tutti-agent-gui-host/mount")); }, [attempt]);
   const renderTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -92,10 +90,9 @@ export function TuttiAgentGuiPanel(props: Props) {
     const current = () => alive
       && getCurrentSlug() === workspaceSlug && getCurrentWsId() === workspaceId
       && useAuthStore.getState().user?.id === userId;
-    const service = (props.serviceFactory ?? createAgentGuiParentService)({
+    const service = props.serviceFactory({
       queryClient, workspaceId, workspaceSlug, userId, isCurrent: current,
       resolveAvatar: (url) => resolvePublicFileUrl(url) ?? url,
-      onSelectSession: (session, agent) => latest.current.onSelectSession(session, agent),
       onOpenTask: (id) => latest.current.onOpenTask(id),
       getAppOrigin: () => resourceNavigation.current.appOrigin,
       onOpenInternalResource: (path, background) => {
@@ -136,7 +133,7 @@ export function TuttiAgentGuiPanel(props: Props) {
         (initial) => {
           if (!current()) return;
           initialized = true;
-          setConnection({ client: inProcess.client, initial });
+          setConnection({ client: inProcess.client, initial, localConversations: service.localConversations });
         },
         () => { if (current()) setStatus("error"); },
       ).finally(() => { initializing = false; });
@@ -183,7 +180,7 @@ export function TuttiAgentGuiPanel(props: Props) {
 
   const rendered = useCallback(() => { clearTimeout(renderTimer.current); setStatus("ready"); }, []);
   return <div ref={container} className="relative flex min-h-0 flex-1 flex-col" data-testid="tutti-agent-gui-host">
-    {connection && <LoadBoundary key={attempt} onError={() => setStatus("error")}><Suspense fallback={null}><AgentGuiMount client={connection.client} initial={connection.initial} localConversations={serviceRef.current?.localConversations} onRendered={rendered} /></Suspense></LoadBoundary>}
+    {connection && <LoadBoundary key={attempt} onError={() => setStatus("error")}><Suspense fallback={null}><AgentGuiMount client={connection.client} initial={connection.initial} localConversations={connection.localConversations} onRendered={rendered} /></Suspense></LoadBoundary>}
     {status !== "ready" && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background" role="status">
       <span>{t(($) => status === "error" ? $.workbench.load_error : $.workbench.loading)}</span>
       {status === "error" && <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>{t(($) => $.workbench.retry)}</Button>}

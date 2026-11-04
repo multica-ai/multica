@@ -42,6 +42,7 @@ export function DesktopAgentsPage() {
 
   return (
     <AgentsPage
+      showConversationFlowEntry
       localDaemonId={status.daemonId ?? lastIdentity.daemonId}
       localMachineName={status.deviceName ?? lastIdentity.deviceName ?? hostName}
       // Desktop owns a local machine for the lifetime of the app, even

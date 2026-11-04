@@ -1,11 +1,12 @@
 # Tutti Agent GUI host
 
 This package mounts the Tutti Agent GUI, vendored and owned in `vendor/tutti`,
-directly in the app's document. `src/mount.tsx` is one instance: its runtime lives
-as long as the component, and its styles apply only under its root element. Apps
-load it on demand, and server bundles leave it out. Multica owns the session list
-and header around it, and hides the redundant embedded provider and session rails
-with host-scoped CSS. The original Chat page keeps its styles and navigation.
+directly in Desktop's document for its local conversations. `src/mount.tsx` is one
+instance: its runtime lives as long as the component, and its styles apply only
+under its root element. Desktop loads it on demand. Desktop owns the session list
+and header around it, and the embedded provider and session rails are hidden with
+host-scoped CSS. Web does not build the GUI, and `/chat` on either platform does
+not use it.
 
 The host's `multica-theme.css` and `multica-components.css` adapt the intact
 source UI to Multica's shared semantic tokens, fonts and control treatments.
@@ -20,24 +21,15 @@ The build reads the public Multica token stylesheet and generates an ignored
 and have one maintained source. This avoids nesting upstream Tailwind utility
 directives inside a cascade layer while retaining the source style order.
 
-The workspace's Conversations navigation entry opens `/conversations` in its
-own application tab on desktop. Its page owns selection through URL parameters
-and does not write the native Chat's active-session pointer. The `/chat` page
-retains its original UI. A cold GUI without a selected session or agent starts
-with a real callable, runtime-bound agent when available; explicit selections
-are never replaced by that default.
+The workspace's AI Sessions entry opens `/conversations` in its own application
+tab on Desktop. Its page owns selection through URL parameters. On Web that path
+redirects to `/chat`, keeping the query.
 
-The parent session list reuses Multica's native Chat components with explicit
-Conversations links and successful-deletion callbacks. Changing Agent selects
-a fresh conversation scope; the old draft remains with its original scope.
-For local Codex / Claude Code providers, the complete current draft also follows
-the provider selection, including references and attachments. Switching again
-on the home composer keeps the same draft; selecting another saved conversation
-still restores that conversation's own draft.
-Model discovery uses the selected Agent's runtime catalog. A model preference
-is stored per session or draft and is sent as an optional model override on the
-next turn; it does not update the Agent's default. See
-`docs/engineering/conversation-flow-two-pane.md` for the execution boundary.
+The complete current draft follows the provider selection, including references
+and attachments. Switching again on the home composer keeps the same draft;
+selecting another saved conversation still restores that conversation's own draft.
+Model discovery uses the provider's catalog. A model preference is stored per
+session or draft and travels with the queued prompt.
 
 ## Build and serve
 
@@ -45,12 +37,11 @@ next turn; it does not update the Agent's default. See
 pnpm --filter @multica/tutti-agent-gui-host build
 ```
 
-This runs `scripts/prepare.mjs`, which generates what no bundler can produce the
-same way on both apps: `src/agent-gui.generated.css`, the GUI's own Tailwind output
-with every rule limited to `.multica-agent-gui` and `html`, `body` and `:root`
-rewritten to that element; and the HTML preview's libraries. The desktop renderer
-Vite hook and Web dev/build scripts run it automatically. Generated files are
-ignored. A stylesheet change needs a rerun or an app restart.
+This runs `scripts/prepare.mjs`, which generates what a bundler cannot produce:
+`src/agent-gui.generated.css`, the GUI's own Tailwind output with every rule limited
+to `.multica-agent-gui` and `html`, `body` and `:root` rewritten to that element; and
+the HTML preview's libraries. The desktop renderer Vite hook runs it automatically.
+Generated files are ignored. A stylesheet change needs a rerun or an app restart.
 
 The composer mention categories are limited to Sessions, Tasks and Agents: the
 vendored tab order and English/Chinese composer hint say so, so empty browsing,
@@ -69,16 +60,16 @@ Scroll, content and viewport resizes refresh the affordance without resuming
 follow mode or moving a detached reader.
 
 The preparation step's cache covers host source, shared Multica token styles, the
-vendored packages and the lockfile; concurrent Web/desktop startup shares a lock.
-It publishes Tutti's LICENSE and NOTICE, UI System's NOTICE, and the Chart.js and
-D3 licenses to each app's `public/licenses/agent-gui/`.
+vendored packages and the lockfile; concurrent runs share a lock. It publishes
+Tutti's LICENSE and NOTICE, UI System's NOTICE, and the Chart.js and D3 licenses to
+Desktop's `public/licenses/agent-gui/`.
 
 ## Host contract
 
 `createInProcessRpcClient` connects a GUI to its host in the same document. Calls
 stay asynchronous and copy their data, so the two sides never alias objects and a
 host event cannot re-enter a runtime operation in progress. Requests use exact
-Multica workspace, session, task and attachment identities. Abort stops awaiting a
+Multica workspace, session and attachment identities. Abort stops awaiting a
 request and never retries a send. Unmounting rejects outstanding calls. A hidden
 or unfocused instance cannot act for the user: other than reads and admitted queue
 items, its requests fail with `inactive_host`.
@@ -87,7 +78,10 @@ Local conversations are read through an injected `LocalConversationSource`; the
 runtime only projects them, and they outlive it.
 
 `e2e-harness/` is a test rig that drives the GUI over a MessagePort with fake data.
-Neither app ships it. Build it with `build-e2e-harness.mjs`.
+Neither app ships it. Build it with `build-e2e-harness.mjs`, which still writes to
+`apps/web/public/tutti-agent-gui` so the existing specs can be served from there.
+Specs describe conversations as `session.load` details; only this rig answers that
+method.
 
 Composer append requests wait through startup,
 are applied sequentially by the source composer, and are acknowledged only
@@ -116,11 +110,13 @@ invalidation events through the public host event seam.
 ```sh
 pnpm --filter @multica/tutti-agent-gui-host typecheck
 pnpm --filter @multica/tutti-agent-gui-host test
-make env-exec ARGS='-- pnpm exec playwright test e2e/tutti-agent-gui.spec.ts'
+node packages/tutti-agent-gui-host/scripts/build-e2e-harness.mjs
+# Serve apps/web/public with any static server, then:
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:<port> pnpm exec playwright test agent-gui-direct-mount
 ```
 
-The end-to-end test uses a test-created runtime with no daemon attached. It must
-not execute an installed Agent CLI or consume a model account.
+These specs use fake host data. They must not execute an installed Agent CLI or
+consume a model account.
 
 All file publication uses Node path/filesystem APIs and relative browser asset
 URLs. No POSIX-only copy command or platform-specific filesystem path is used.

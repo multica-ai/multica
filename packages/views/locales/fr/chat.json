@@ -327,11 +327,6 @@
     "filter_sessions": "Filtrer les conversations avec {{name}}",
     "session_action_error": "Impossible de modifier la conversation. Réessayez.",
     "reference_read_only": "Cette conversation est en lecture seule. Impossible d’ajouter des références aux tâches.",
-    "reference_unavailable": "Cet agent est actuellement indisponible. Impossible d’ajouter des références aux tâches.",
-    "search_sessions": "Rechercher des conversations",
-    "clear_search": "Effacer la recherche",
-    "no_search_results": "Aucune conversation correspondante",
-    "return_conversation": "Revenir à la conversation",
-    "new_session_unavailable": "Un agent disponible associé à un runtime est requis."
+    "reference_unavailable": "Cet agent est actuellement indisponible. Impossible d’ajouter des références aux tâches."
   }
 }

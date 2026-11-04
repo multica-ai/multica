@@ -7,7 +7,7 @@ import { createMulticaAgentGuiRuntime as createRuntime } from "./runtime";
 import type { AgentGuiInitSnapshot, AgentGuiRpcClient } from "./protocol";
 import { localSourceFromClient } from "./runtime/local-snapshot-test-host";
 
-const createMulticaAgentGuiRuntime: typeof createRuntime = (client, init) => createRuntime(client, init, init.local ? localSourceFromClient(client as never) : undefined);
+const createMulticaAgentGuiRuntime = (client: AgentGuiRpcClient, init: AgentGuiInitSnapshot) => createRuntime(client, init, localSourceFromClient(client as never));
 
 vi.mock("./usage-indicator", () => ({ UsageIndicator: () => null }));
 vi.mock("./permission-picker", () => ({ PermissionPicker: () => null }));
@@ -61,7 +61,6 @@ it.each(["codex", "claude"] as const)("selects and displays %s thinking effort, 
     if (method === "storage.read") return storage.get(params.key!) ?? null;
     if (method === "storage.write") { storage.set(params.key!, params.value!); return; }
     if (method === "workspace.load") return snapshot;
-    if (method === "session.watch") return;
     if (method === "models.list") return { supported: true, models: [
       { id: "reasoning", label: "Reasoning", thinking: { supported_levels: [{ value: "low", label: "Low" }, { value: "high", label: "High" }] } },
       { id: "plain", label: "Plain" },
@@ -96,17 +95,14 @@ it.each(["codex", "claude"] as const)("selects and displays %s thinking effort, 
   expect(option("High")).toBeUndefined();
 });
 
-it.each([
-  { local: true, locale: "en" }, { local: true, locale: "zh-CN" },
-  { local: false, locale: "en" }, { local: false, locale: "zh-CN" },
-] as const)("keeps error recovery and scopes the model menu footer for local=$local, locale=$locale", async ({ local, locale }) => {
+it.each([{ locale: "en" }, { locale: "zh-CN" }] as const)("keeps error recovery and scopes the model menu footer for locale=$locale", async ({ locale }) => {
   const target = { id: "local:codex", name: "Codex", provider: "codex", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true };
-  const snapshot: AgentGuiInitSnapshot = { workspaceId: "ws", workspaceSlug: "workspace", userId: "user", theme: "light", locale, local,
+  const snapshot: AgentGuiInitSnapshot = { workspaceId: "ws", workspaceSlug: "workspace", userId: "user", theme: "light", locale, local: true,
     activeSessionId: null, agents: [], executionTargets: [target], sessions: [] };
   let attempts = 0;
   const request = vi.fn(async (method: string) => {
     if (method === "storage.read") return null;
-    if (method === "storage.write" || method === "session.watch") return;
+    if (method === "storage.write") return;
     if (method === "workspace.load") return snapshot;
     if (method === "models.list") {
       if (++attempts === 1) throw new Error("Catalog unavailable");
@@ -132,22 +128,13 @@ it.each([
   expect(request).toHaveBeenCalledWith("models.list", { agentId: target.id, force: true }, expect.anything());
   expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(item(retry)).toBeUndefined();
-  if (local) {
-    expect(item(refresh)).toBeUndefined();
-    expect(document.body.textContent).not.toContain(scope);
-    expect(document.querySelector('.multica-model-picker-menu')!.lastElementChild?.getAttribute("role")).not.toBe("separator");
-  } else {
-    expect(item(refresh)).toBeDefined();
-    expect(document.body.textContent).toContain(scope);
-  }
+  expect(item(refresh)).toBeUndefined();
+  expect(document.body.textContent).not.toContain(scope);
+  expect(document.querySelector('.multica-model-picker-menu')!.lastElementChild?.getAttribute("role")).not.toBe("separator");
   const model = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((entry) => entry.textContent === "Reasoning")!;
   await act(async () => model.click());
   expect(handle.getModelSelection(target.id)).toBe("reasoning");
   await open();
   expect(attempts).toBe(2);
-  if (local) expect(document.querySelector('.multica-model-picker-effort')).not.toBeNull();
-  else {
-    await act(async () => item(refresh)!.click());
-    expect(attempts).toBe(3);
-  }
+  expect(document.querySelector('.multica-model-picker-effort')).not.toBeNull();
 });

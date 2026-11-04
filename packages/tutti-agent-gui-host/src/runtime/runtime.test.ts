@@ -1,16 +1,15 @@
 import { executionTargets } from "../protocol";
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Agent, AgentTask, Attachment, ChatMessage, ChatSession, PendingChatTaskItem, TaskMessagePayload } from "@multica/core/types";
-import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient, AgentGuiRpcMethods, AgentGuiSessionDetail, AgentGuiTaskMessagePayload } from "../protocol";
+import type { Agent, AgentTask, Attachment, ChatMessage, ChatSession, PendingChatTaskItem } from "@multica/core/types";
+import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient, AgentGuiRpcMethods } from "../protocol";
 import { LOCAL_TIMING_PREFIX } from "../local-timing";
 import { createMulticaAgentGuiRuntime as createRuntime, MulticaAgentGuiError } from "./create-multica-agent-gui-runtime";
 import { RuntimeLedger } from "./ledger";
-import { projectDetail } from "./projection";
 import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
 import { localSourceFromClient } from "./local-snapshot-test-host";
 
-const createMulticaAgentGuiRuntime: typeof createRuntime = (client, init) => createRuntime(client, init, init.local ? localSourceFromClient(client as never) : undefined);
+const createMulticaAgentGuiRuntime = (client: AgentGuiRpcClient, init: AgentGuiInitSnapshot) => createRuntime(client, init, localSourceFromClient(client as never));
 
 const time = "2026-10-24T01:00:00Z";
 const agent = { id: "agent-1", name: "Codex", model: "test-model", archived_at: null } as Agent;
@@ -21,7 +20,7 @@ const session = {
 } as ChatSession;
 const init: AgentGuiInitSnapshot = {
   workspaceId: "workspace-1", workspaceSlug: "dev", userId: "member-1",
-  locale: "en", theme: "dark", activeSessionId: null,
+  locale: "en", theme: "dark", activeSessionId: null, local: true, queueOwner: "desktop",
   agents: [{ agent, provider: "codex", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true }],
   sessions: [],
 };
@@ -32,7 +31,6 @@ function backend(storage = new Map<string, string>()) {
   const sessions: ChatSession[] = [];
   const messages: ChatMessage[] = [];
   const tasks: AgentTask[] = [];
-  const transcript: TaskMessagePayload[] = [];
   const listeners = new Set<(event: AgentGuiHostEvent) => void>();
   let pending: { task_id?: string; status?: string; created_at?: string } = {};
   let rejectSend: unknown;
@@ -40,11 +38,18 @@ function backend(storage = new Map<string, string>()) {
     switch (method) {
       case "storage.read": return storage.get(params.key) ?? null;
       case "storage.write": storage.set(params.key, params.value); return;
-      case "workspace.load": return { agents: init.agents, sessions };
+      case "workspace.load": return { agents: init.agents, sessions, local: true, queueOwner: "desktop" };
       case "session.create": sessions.push({ ...session }); return { ...session };
       case "session.load": return { session: { ...session }, messages: [...messages], pending: { ...pending }, tasks: [...tasks] };
-      case "task.messages": return [...transcript];
-      case "session.watch": return;
+      case "queue.enqueue": {
+        if (rejectSend) throw rejectSend;
+        const taskId = `server-task-${messages.length + 1}`;
+        messages.push({ id: `server-message-${messages.length + 1}`, chat_session_id: session.id, role: "user", content: params.item.content, task_id: null, created_at: time });
+        pending = { task_id: taskId, status: "running", created_at: time };
+        return { revision: messages.length, paused: false, items: [] };
+      }
+      case "models.list": return { id: "catalog", runtime_id: params.agentId, status: "completed", supported: true, models: [] };
+      case "queue.update": return { revision: messages.length, paused: false, items: [] };
       case "session.send": {
         if (rejectSend) throw rejectSend;
         const taskId = `server-task-${messages.length + 1}`;
@@ -71,7 +76,7 @@ function backend(storage = new Map<string, string>()) {
     request: request as unknown as AgentGuiRpcClient["request"],
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
-  return { client, request, storage, sessions, messages, transcript, tasks,
+  return { client, request, storage, sessions, messages, tasks,
     complete: (taskId: string) => {
       tasks.push({ id: taskId, chat_session_id: session.id, status: "completed", created_at: time, started_at: time, completed_at: time } as AgentTask);
       if (pending.task_id === taskId) pending = {};
@@ -81,6 +86,10 @@ function backend(storage = new Map<string, string>()) {
     emit: (event: AgentGuiHostEvent | { type: "local.events" | "local.reload"; sessionId: string; message?: unknown }) => { for (const listener of listeners) listener(event as AgentGuiHostEvent); },
   };
 }
+
+type Requests = { mock: { calls: unknown[][] } };
+const enqueuedItem = (request: Requests) => (request.mock.calls.find(([method]) => method === "queue.enqueue")?.[1] as { item: Record<string, any> } | undefined)?.item;
+const wasEnqueued = (request: Requests) => request.mock.calls.some(([method]) => method === "queue.enqueue");
 
 async function setup(data = backend()) {
   const handle = createMulticaAgentGuiRuntime(data.client, init);
@@ -300,9 +309,9 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     handles.push(restored); await restored.initialize();
     expect(await restored.runtime.getSession(init.workspaceId, session.id)).toMatchObject({ cwd: directory.cwd, noProject: false });
   });
-  it.each(["claude-code", "codex"].flatMap((provider) => [false, true].map((desktopQueue) => ({ provider, desktopQueue }))))("loads and submits to an externally created $provider session before workspace refresh completes (desktop queue: $desktopQueue)", async ({ provider, desktopQueue }) => {
+  it.each(["claude-code", "codex"])("loads and submits to an externally created %s session before workspace refresh completes", async (provider) => {
     const data = backend();
-    const localInit = { ...init, local: true, queueOwner: desktopQueue ? "desktop" as const : undefined, agents: [{ ...init.agents[0]!, provider }] };
+    const localInit = { ...init, local: true, agents: [{ ...init.agents[0]!, provider }] };
     const original = data.request.getMockImplementation()!;
     const staleWorkspace = { agents: localInit.agents, sessions: [] };
     let delayRefresh = false;
@@ -337,7 +346,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
       const engine = handle.runtime.getSessionEngine(init.workspaceId);
       engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "external-first-send", content: [{ type: "text", text: "First message" }] });
       await vi.waitFor(() => expect(data.request.mock.calls.some(([method, params]) =>
-        method === (desktopQueue ? "queue.enqueue" : "session.send") && params.sessionId === session.id && (desktopQueue ? params.item.content : params.content) === "First message")).toBe(true));
+        method === "queue.enqueue" && params.sessionId === session.id && params.item.content === "First message")).toBe(true));
       expect(errors).not.toHaveBeenCalled();
       expect(data.request.mock.calls.filter(([method]) => method === "session.create")).toHaveLength(1);
     } finally {
@@ -466,13 +475,14 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const handle = createMulticaAgentGuiRuntime(data.client, localInit); handles.push(handle); await handle.initialize();
     const engine = handle.runtime.getSessionEngine(init.workspaceId);
     engine.activateSession({ mode: "new", agentSessionId: "permission-draft", agentTargetId: agent.id, requestId: "permission-activation", clientSubmitId: "permission-submit", initialContent: [{ type: "text", text: "Use Auto" }] });
-    await vi.waitFor(() => expect(data.request.mock.calls.find(([method]) => method === "session.send")?.[1]).toMatchObject({ permissionMode: "auto" }));
+    await vi.waitFor(() => expect(enqueuedItem(data.request)).toMatchObject({ permissionMode: "auto" }));
+    await handle.runtime.getSession(init.workspaceId, "permission-draft");
     await expect(handle.setPermissionSelection(agent.id, "permission-draft", "full-access")).rejects.toMatchObject({ code: "run_in_progress" });
     const restored = createMulticaAgentGuiRuntime(data.client, localInit); handles.push(restored); await restored.initialize();
     expect(restored.getPermissionSelection(agent.id, session.id)).toBe("auto");
     expect(restored.getPermissionSelection("other-provider")).toBe("default");
   });
-  it("preserves inherited permissions until explicitly changed, retains them after save failure and rejects cloud overrides", async () => {
+  it("preserves inherited permissions until explicitly changed, and retains them after save failure", async () => {
     const data = backend(); data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
     let failSave = false;
@@ -492,139 +502,34 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     await handle.setPermissionSelection(agent.id, session.id, "default");
     expect(handle.getPermissionSelection(agent.id, session.id)).toBe("default");
     await expect(handle.setPermissionSelection("other-provider", session.id, "auto")).rejects.toThrow();
-    const cloud = (await setup(data)).handle;
-    await expect(cloud.setPermissionSelection(agent.id, null, "full-access")).rejects.toMatchObject({ code: "invalid_permission_mode" });
   });
-  it("moves a prepared queued message to Side only after pausing and persisting its original queue", async () => {
+
+
+
+  it("moves a queued message to Side through its own queue, and keeps it if that fails", async () => {
     const data = backend(); data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
-    let opened: any;
+    let failSide = true;
+    let items: unknown[] = [];
     data.request.mockImplementation(async (method, params) => {
+      if (method === "queue.enqueue") { items = [...items, params.item]; return { revision: items.length, paused: false, items }; }
       if (method === "host.openSide") {
-        opened = params;
-        const saved = JSON.parse(data.storage.get("runtime-ledger-v1")!);
-        expect(saved.promptQueues[0].prompts.some((prompt: { id: string }) => prompt.id === "move-me")).toBe(true);
+        if (failSide) throw new Error("Side save failed");
         return { ...session, id: "side-session" };
       }
-      if (method === "host.startSide") {
-        const saved = JSON.parse(data.storage.get("runtime-ledger-v1")!);
-        expect(saved.promptQueues[0].prompts.map((prompt: { id: string }) => prompt.id)).toEqual(["keep-here"]);
-        return undefined;
-      }
       return original(method, params);
-    });
-    const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true }); handles.push(handle); await handle.initialize();
-    await handle.runtime.getSession(init.workspaceId, session.id);
-    await handle.setPermissionSelection(agent.id, session.id, "auto");
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "active", content: [{ type: "text", text: "Original running request" }] });
-    await vi.waitFor(() => expect(data.messages).toHaveLength(1));
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "move-me", content: [{ type: "text", text: "Side request" }, { type: "file", attachmentId: "prepared-file", name: "spec.txt" }] });
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "keep-here", content: [{ type: "text", text: "Stay in main queue" }] });
-    await handle.moveQueuedToSide(session.id, "move-me");
-    expect(opened).toMatchObject({ sessionId: session.id, requestId: `side:${session.id}:move-me`, pending: { content: "Side request", attachmentIds: ["prepared-file"], permissionMode: "auto", requestId: `side:${session.id}:move-me` } });
-    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.prompts.map((prompt) => prompt.id)).toEqual(["keep-here"]);
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
-    expect(data.request.mock.calls.some(([method]) => method === "session.cancel")).toBe(false);
-  });
-  it("retains a paused queue on failed Side creation and excludes desktop-owned transfers when restoring", async () => {
-    const data = backend(); data.sessions.push(session);
-    const original = data.request.getMockImplementation()!;
-    let transferred = false;
-    data.request.mockImplementation(async (method, params) => {
-      if (method === "host.openSide") throw new Error("Side save failed");
-      const result = await original(method, params);
-      if (method === "workspace.load" && transferred) return { ...result, movedQueueRequests: [`side:${session.id}:moved`] };
-      return result;
     });
     const { handle } = await setup(data); await handle.runtime.getSession(init.workspaceId, session.id);
     const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "active", content: [{ type: "text", text: "Running" }] });
-    await vi.waitFor(() => expect(data.messages).toHaveLength(1));
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "moved", content: [{ type: "text", text: "Transferred elsewhere" }] });
-    await expect(handle.moveQueuedToSide(session.id, "moved")).rejects.toThrow("Side save failed");
-    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]).toMatchObject({ suspendReason: "user_stop", prompts: [{ id: "moved" }] });
-    handle.dispose(); transferred = true;
-    const restored = (await setup(data)).handle;
-    expect(restored.runtime.getSessionEngine(init.workspaceId).getSnapshot().promptQueue.recordsBySessionId[session.id]).toBeUndefined();
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
+    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "move-me", content: [{ type: "text", text: "Side request" }] });
+    await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
+    await vi.waitFor(() => expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.prompts.map((prompt) => prompt.id)).toEqual(["move-me"]));
+    await expect(handle.moveQueuedToSide(session.id, "move-me")).rejects.toThrow("Side save failed");
+    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.prompts.map((prompt) => prompt.id)).toEqual(["move-me"]);
+    failSide = false;
+    await expect(handle.moveQueuedToSide(session.id, "move-me")).resolves.toMatchObject({ id: "side-session" });
+    expect(data.request).toHaveBeenCalledWith("host.openSide", { sessionId: session.id, requestId: `side:${session.id}:move-me`, queued: true, queuedRequestId: "move-me" });
   });
-  it("reports a failed queue save and retains the messages for a later successful write", async () => {
-    const data = backend(); data.sessions.push(session);
-    const original = data.request.getMockImplementation()!;
-    let storageFull = false;
-    data.request.mockImplementation(async (method, params) => {
-      if (method === "storage.write" && storageFull) throw new Error("Storage full");
-      if (method === "host.showMessage") return;
-      return original(method, params);
-    });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const { handle } = await setup(data);
-      await handle.runtime.getSession(init.workspaceId, session.id);
-      const engine = handle.runtime.getSessionEngine(init.workspaceId);
-      engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "sent", content: [{ type: "text", text: "2" }] });
-      await vi.waitFor(() => expect(JSON.parse(data.storage.get("runtime-ledger-v1")!).submissions.sent?.state).toBe("accepted"));
-      storageFull = true;
-      for (const id of ["3", "4"]) engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: id, content: [{ type: "text", text: id }] });
-      await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "host.showMessage")).toHaveLength(1));
-      expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.prompts).toHaveLength(2);
-      storageFull = false;
-      engine.dispatch({ type: "submit/canceled", agentSessionId: session.id, clientSubmitId: "3" });
-      await vi.waitFor(() => expect(JSON.parse(data.storage.get("runtime-ledger-v1")!).promptQueues[0].prompts.map((prompt: { id: string }) => prompt.id)).toEqual(["4"]));
-    } finally { errors.mockRestore(); }
-  });
-
-  it("excludes accepted submissions from restored queues and keeps uncertain sends from reposting", async () => {
-    const data = backend(); data.sessions.push(session);
-    const queue = (id: string) => ({ id, clientSubmitId: id, content: [{ type: "text", text: id }], createdAtUnixMs: 1 });
-    data.storage.set("runtime-ledger-v1", JSON.stringify({
-      submissions: {
-        delivered: { sessionId: session.id, state: "accepted", response: { message_id: "already-sent", task_id: "already-run", created_at: time } },
-        uncertain: { sessionId: session.id, state: "pending" },
-      },
-      promptQueues: [{ agentSessionId: session.id, prompts: [queue("delivered"), queue("uncertain"), queue("waiting")] }],
-    }));
-    const { handle } = await setup(data);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]).toMatchObject({ suspendReason: "user_stop", prompts: [{ id: "uncertain" }, { id: "waiting" }] });
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(0);
-    engine.dispatch({ type: "queue/resumed", agentSessionId: session.id });
-    await vi.waitFor(() => expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]?.failedPromptId).toBe("uncertain"));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(0);
-  });
-
-  it("persists queued content immediately and restores it paused across repeated restarts", async () => {
-    const data = backend(); data.sessions.push(session);
-    const { handle } = await setup(data);
-    await handle.runtime.getSession(init.workspaceId, session.id);
-    let engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "sent", content: [{ type: "text", text: "2" }] });
-    await vi.waitFor(() => expect(data.messages).toHaveLength(1));
-    const content = [{ type: "text" as const, text: "Read [@task](mention://workspace-issue/task-id)" }, { type: "file" as const, name: "report.txt", assetId: "saved-file", url: "blob:expired-preview" }];
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "saved-3", content });
-    handle.registerAttachments([{ id: "markdown-file", filename: "report.txt", url: "/api/attachments/markdown-file/download", markdown_url: "/api/attachments/markdown-file/download" } as Attachment]);
-    const lastPrompt = "4 [@report.txt](/api/attachments/markdown-file/download)";
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "saved-4", content: [{ type: "text", text: lastPrompt }] });
-    await vi.waitFor(() => expect(JSON.parse(data.storage.get("runtime-ledger-v1")!).promptQueues?.[0]?.prompts.map((prompt: { id: string }) => prompt.id)).toEqual(["saved-3", "saved-4"]));
-    handle.dispose();
-    data.complete("server-task-1");
-    const restored = (await setup(data)).handle;
-    engine = restored.runtime.getSessionEngine(init.workspaceId);
-    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]).toMatchObject({ suspendReason: "user_stop", prompts: [{ id: "saved-3", content: [{ text: content[0]!.text }, { name: "report.txt", assetId: "saved-file" }] }, { id: "saved-4" }] });
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
-    engine.dispatch({ type: "submit/canceled", agentSessionId: session.id, clientSubmitId: "saved-3" });
-    await vi.waitFor(() => expect(JSON.parse(data.storage.get("runtime-ledger-v1")!).promptQueues[0].prompts.map((prompt: { id: string }) => prompt.id)).toEqual(["saved-4"]));
-    restored.dispose();
-    const next = (await setup(data)).handle;
-    engine = next.runtime.getSessionEngine(init.workspaceId);
-    expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]).toMatchObject({ suspendReason: "user_stop", prompts: [{ id: "saved-4" }] });
-    engine.dispatch({ type: "queue/resumed", agentSessionId: session.id });
-    await vi.waitFor(() => expect(data.messages.map((message) => message.content)).toEqual(["2", lastPrompt]));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send").at(-1)?.[1].attachmentIds).toEqual(["markdown-file"]);
-    await vi.waitFor(() => expect(JSON.parse(data.storage.get("runtime-ledger-v1")!).promptQueues).toEqual([]));
-  });
-
   it("inherits a fork's native model and still allows an explicit default-model preference", async () => {
     const data = backend(); data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
@@ -668,9 +573,10 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     engine.activateSession({ mode: "new", agentSessionId: "model-draft", agentTargetId: agent.id,
       requestId: "model-activation", clientSubmitId: "model-submit", initialContent: [{ type: "text", text: "Use selected model" }] });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(data.request.mock.calls.some(([method]) => method === "session.send")).toBe(false);
+    expect(wasEnqueued(data.request)).toBe(false);
     release(); await initializing;
-    await vi.waitFor(() => expect(data.request.mock.calls.find(([method]) => method === "session.send")?.[1]).toMatchObject({ model: "catalog-model" }));
+    await vi.waitFor(() => expect(enqueuedItem(data.request)).toMatchObject({ model: "catalog-model" }));
+    await handle.runtime.getSession(init.workspaceId, "model-draft");
     expect(handle.getModelSelection(agent.id, "model-draft")).toBe("catalog-model");
     expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.settings.model).toBe("catalog-model");
     expect(agent.model).toBe("test-model");
@@ -702,8 +608,8 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const engine = handle.runtime.getSessionEngine(init.workspaceId);
     engine.activateSession({ mode: "new", agentSessionId: "default-draft", agentTargetId: agent.id,
       requestId: "default-activation", clientSubmitId: "default-submit", initialContent: [{ type: "text", text: "Use inherited default" }] });
-    await vi.waitFor(() => expect(data.request.mock.calls.some(([method]) => method === "session.send")).toBe(true));
-    expect(data.request.mock.calls.find(([method]) => method === "session.send")?.[1]).not.toHaveProperty("model");
+    await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
+    expect(enqueuedItem(data.request)).not.toHaveProperty("model");
   });
 
   it("sends selected reference identities to the parent and rejects a foreign workspace before submission", async () => {
@@ -714,8 +620,8 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const engine = handle.runtime.getSessionEngine(init.workspaceId);
     engine.activateSession({ mode: "new", agentSessionId: "reference-session", agentTargetId: agent.id,
       requestId: "reference-activation", clientSubmitId: "reference-submit", initialContent: [{ type: "text", text: content }] });
-    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.send")).toBe(true));
-    expect(request.mock.calls.find(([method]) => method === "session.send")?.[1]).toMatchObject({ references: [
+    await vi.waitFor(() => expect(wasEnqueued(request)).toBe(true));
+    expect(enqueuedItem(request)).toMatchObject({ references: [
       { kind: "issue", id: "workspace-issue-id" }, { kind: "session", id: "agent-session-id" }, { kind: "agent", id: agent.id },
     ] });
     const other = await setup();
@@ -725,60 +631,9 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
       }) }] });
     await vi.waitFor(() => expect(other.request.mock.calls.some(([method]) => method === "session.create")).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(other.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(0);
-  });
-  it("does not forward the default agent's model to a mentioned agent", async () => {
-    const data = backend();
-    data.storage.set("model-preferences-v1", JSON.stringify([["draft:agent-1", "selected-parent-model"]]));
-    const {handle}=await setup(data);
-    handle.runtime.getSessionEngine(init.workspaceId).activateSession({mode:"new",agentSessionId:"invocation-session",agentTargetId:agent.id,requestId:"invoke",clientSubmitId:"invoke-submit",initialContent:[{type:"text",text:createRichTextMentionMarkdown({providerId:"agent-target",entityId:agent.id,label:"Defined reviewer",scope:{workspaceId:init.workspaceId}})}]});
-    await vi.waitFor(()=>expect(data.request.mock.calls.some(([method])=>method==="session.send")).toBe(true));
-    expect(data.request.mock.calls.find(([method])=>method==="session.send")?.[1]).not.toHaveProperty("model");
+    expect(wasEnqueued(other.request)).toBe(false);
   });
 
-  it.each(["codex", "claude"])("drains %s prompts in order after the window loses focus", async (provider) => {
-    const data = backend();
-    data.sessions.push(session);
-    let focused = true;
-    const original = data.request.getMockImplementation()!;
-    const agents = [{ ...init.agents[0]!, provider }];
-    data.request.mockImplementation(async (method, params) => {
-      if (method === "session.send" && !focused && params.queued !== true) {
-        throw new MulticaAgentGuiError("This Agent GUI tab is inactive", "inactive_host", 409);
-      }
-      const value = await original(method, params);
-      const running = data.tasks.find((task) => task.status === "running");
-      if (method === "workspace.load") return { ...value, agents, pendingTasks: running ? [{ task_id: running.id, chat_session_id: session.id, status: "running" }] : [] };
-      if (method === "session.load") return { ...value, pending: running ? { task_id: running.id, status: "running", created_at: time } : {} };
-      if (method === "session.send") data.tasks.push({ id: value.task_id, chat_session_id: session.id, status: "running", created_at: time, started_at: time } as AgentTask);
-      return value;
-    });
-    const handle = createMulticaAgentGuiRuntime(data.client, { ...init, agents });
-    handles.push(handle);
-    await handle.initialize();
-    await handle.runtime.getSession(init.workspaceId, session.id);
-    const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: session.id });
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "queue-2", content: [{ type: "text", text: "2" }] });
-    await vi.waitFor(() => expect(data.tasks).toHaveLength(1));
-    for (const content of ["3", "4", "5", "6"]) engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: `queue-${content}`, content: [{ type: "text", text: content }] });
-    expect(data.tasks).toHaveLength(1);
-    focused = false;
-    for (let index = 0; index < 5; index++) {
-      const task = data.tasks[index]!;
-      task.status = "completed";
-      task.completed_at = new Date(Date.parse(time) + (index + 1) * 1000).toISOString();
-      data.emit({ type: "invalidate", scope: "session", sessionId: session.id });
-      data.emit({ type: "invalidate", scope: "workspace" });
-      if (index < 4) await vi.waitFor(() => expect(data.tasks).toHaveLength(index + 2));
-    }
-    await vi.waitFor(() => expect(engine.getSnapshot().promptQueue.recordsBySessionId[session.id]).toBeUndefined());
-    const sends = data.request.mock.calls.filter(([method]) => method === "session.send");
-    expect(sends.map(([, params]) => params.content)).toEqual(["2", "3", "4", "5", "6"]);
-    expect(sends[0]![1]).not.toHaveProperty("queued");
-    for (const [, params] of sends.slice(1)) expect(params.queued).toBe(true);
-    release();
-  });
 
   it("keeps a real queued submission stable through subscription and canonical refreshes", async () => {
     const data = backend();
@@ -798,7 +653,9 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     engine.activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
       requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Queued task" }] });
     const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: "gui-session" });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]).toMatchObject({ activeTurnId: "server-task-1", activeTurn: { phase: "submitted" } }));
+    await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
+    data.emit({ type: "invalidate", scope: "session", sessionId: session.id });
+    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]).toMatchObject({ activeTurnId: "server-task-1" }));
     for (let index = 0; index < 3; index++) data.emit({ type: "invalidate", scope: "session", sessionId: session.id });
     await new Promise((resolve) => setTimeout(resolve, 100));
     const reads = data.request.mock.calls.filter(([method]) => method === "session.load").length;
@@ -806,39 +663,11 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(reads);
     expect(updates).toBe(settledUpdates);
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
+    expect(data.request.mock.calls.filter(([method]) => method === "queue.enqueue")).toHaveLength(1);
     expect(updates).toBeLessThan(50);
     release(); unsubscribe();
   });
 
-  it("drains simultaneous queued-session and task invalidations without reinserting into a live Map iterator", async () => {
-    const data = backend();
-    data.sessions.push(session);
-    const original = data.request.getMockImplementation()!;
-    let unblock = () => {};
-    let entered = false;
-    const gate = new Promise<void>((resolve) => { unblock = resolve; });
-    data.request.mockImplementation(async (method, params) => {
-      const value = await original(method, params);
-      if (method !== "session.load") return value;
-      if (!entered) { entered = true; await gate; }
-      return { ...value, pending: { task_id: "queued-task", status: "queued", created_at: time },
-        tasks: [{ id: "queued-task", chat_session_id: session.id, status: "queued", created_at: time }] };
-    });
-    const { handle } = await setup(data);
-    const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: session.id });
-    await vi.waitFor(() => expect(entered).toBe(true));
-    data.emit({ type: "invalidate", scope: "session", sessionId: session.id });
-    data.emit({ type: "invalidate", scope: "task", sessionId: session.id, taskId: "queued-task" });
-    data.transcript.push({ task_id: "queued-task", issue_id: "", seq: 1, type: "text", content: "Final queued diagnostic frame" });
-    unblock();
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessionMessagesById[session.id]?.some((message) => message.payload.content === "Final queued diagnostic frame")).toBe(true));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(2);
-    expect(data.request.mock.calls.filter(([method]) => method === "task.messages").length).toBeLessThanOrEqual(3);
-    expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurn?.phase).toBe("submitted");
-    release();
-  });
 
   it("shows a cold conversation's real pending run without inventing a start time or completion", async () => {
     const data = backend();
@@ -935,32 +764,21 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
       requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }],
     })).toBe(true);
     expect(handle.toServerSessionId("gui-session")).toBeNull();
+    await vi.waitFor(() => expect(wasEnqueued(request)).toBe(true));
+    await handle.runtime.getSession(init.workspaceId, "gui-session");
     await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBe("server-task-1"));
     const snapshot = handle.runtime.getSnapshot(init.workspaceId);
     expect(snapshot.sessions[0]?.agentSessionId).toBe("gui-session");
     expect(snapshot.sessions[0]?.railSectionKey).toBe("conversations");
     expect(snapshot.sessionMessagesById["gui-session"]?.[0]).toMatchObject({
-      messageId: "server-message-1", turnId: "server-task-1", payload: { clientSubmitId: "submit-1" },
+      messageId: "server-message-1", turnId: "server-task-1",
     });
     expect(handle.toServerSessionId("gui-session")).toBe("server-session");
-    const send = request.mock.calls.find(([method]) => method === "session.send");
-    expect(send?.[1]).toMatchObject({ sessionId: "server-session", content: "Inspect build" });
+    expect(request.mock.calls.find(([method]) => method === "queue.enqueue")?.[1]).toMatchObject({ sessionId: "server-session", item: { content: "Inspect build" } });
     expect(storage.get("runtime-ledger-v1")).toContain("server-session");
     expect(handle.runtime.getSnapshot(init.workspaceId)).toBe(handle.runtime.getSnapshot(init.workspaceId));
   });
 
-  it("cancels the exact Multica run and reflects authoritative message deletion", async () => {
-    const { handle, request } = await setup();
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
-      requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }] });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBe("server-task-1"));
-    engine.stopSession({ agentSessionId: "gui-session" });
-    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.cancel")).toBe(true));
-    expect(request.mock.calls.find(([method]) => method === "session.cancel")?.[1]).toEqual({ sessionId: "server-session", taskId: "server-task-1" });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBeNull());
-    expect(handle.runtime.getSnapshot(init.workspaceId).sessionMessagesById["gui-session"]).toEqual([]);
-  });
 
   it("restores aliases across runtime restart instead of inventing a second conversation", async () => {
     const data = backend();
@@ -976,25 +794,6 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(next.runtime.getSnapshot(init.workspaceId).sessions.map((entry) => entry.agentSessionId)).toEqual(["gui-session"]);
   });
 
-  it("preserves ambiguous sends as unknown across reload and never automatically posts them again", async () => {
-    const data = backend();
-    data.rejectSend(new Error("Connection lost after submission"));
-    const { handle } = await setup(data);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
-      requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }] });
-    await vi.waitFor(() => expect(data.storage.get("runtime-ledger-v1")).toContain('"state":"unknown"'));
-    const restored = new RuntimeLedger();
-    restored.hydrate(data.storage.get("runtime-ledger-v1")!);
-    expect(restored.submission("submit-1")?.state).toBe("unknown");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
-    engine.activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
-      requestId: "retry-activation", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }] });
-    await vi.waitFor(() => expect(JSON.stringify(engine.getSnapshot().pendingIntents)).toContain("submission_unconfirmed"));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.send")).toHaveLength(1);
-    expect(data.request.mock.calls.filter(([method]) => method === "session.create")).toHaveLength(1);
-  });
 
   it("rejects recoverable deletion and unsupported capabilities without calling a destructive API", async () => {
     const { handle, request } = await setup();
@@ -1006,52 +805,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(() => handle.runtime.getSessionEngine("another-workspace")).toThrow("workspace changed");
   });
 
-  it("refreshes streaming task output without reloading the full session history", async () => {
-    const data = backend();
-    const { handle } = await setup(data);
-    handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
-      requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }] });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBe("server-task-1"));
-    const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: "gui-session" });
-    await vi.waitFor(() => expect(data.request.mock.calls.some(([method]) => method === "session.watch")).toBe(true));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const sessionReads = data.request.mock.calls.filter(([method]) => method === "session.load").length;
-    data.transcript.push({ task_id: "server-task-1", issue_id: "", seq: 1, type: "text", content: "Live output" });
-    data.emit({ type: "invalidate", scope: "task", sessionId: "server-session", taskId: "server-task-1" });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessionMessagesById["gui-session"]?.some((message) => message.payload.content === "Live output")).toBe(true));
-    expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(sessionReads);
-    release();
-  });
 
-  it("does not lose the last stream frame when another task invalidation arrives during a read", async () => {
-    const data = backend();
-    const { handle } = await setup(data);
-    handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
-      requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Inspect build" }] });
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBe("server-task-1"));
-    const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: "gui-session" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const original = data.request.getMockImplementation()!;
-    let unblock = () => {};
-    let entered = false;
-    const gate = new Promise<void>((resolve) => { unblock = resolve; });
-    data.request.mockImplementation(async (method, params) => {
-      const result = await original(method, params);
-      if (method === "task.messages" && !entered) {
-        entered = true;
-        await gate;
-      }
-      return result;
-    });
-    data.transcript.push({ task_id: "server-task-1", issue_id: "", seq: 1, type: "text", content: "Hello " });
-    data.emit({ type: "invalidate", scope: "task", sessionId: "server-session", taskId: "server-task-1" });
-    await vi.waitFor(() => expect(entered).toBe(true));
-    data.transcript.push({ task_id: "server-task-1", issue_id: "", seq: 2, type: "text", content: "world" });
-    data.emit({ type: "invalidate", scope: "task", sessionId: "server-session", taskId: "server-task-1" });
-    unblock();
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessionMessagesById["gui-session"]?.some((message) => message.payload.content === "Hello world")).toBe(true));
-    release();
-  });
 
   it("maps the source engine's unread-removal write to one real server mark-read", async () => {
     const data = backend();
@@ -1078,8 +832,8 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(await upload?.[1].file.text()).toBe("image bytes");
     handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
       requestId: "activation-1", clientSubmitId: "submit-1", initialContent: prepared.content });
-    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.send")).toBe(true));
-    expect(request.mock.calls.find(([method]) => method === "session.send")?.[1]).toMatchObject({ attachmentIds: ["attachment-1"] });
+    await vi.waitFor(() => expect(wasEnqueued(request)).toBe(true));
+    expect(enqueuedItem(request)).toMatchObject({ attachmentIds: ["attachment-1"] });
     expect(request.mock.calls.filter(([method]) => method === "attachment.upload")).toHaveLength(1);
   });
 
@@ -1126,11 +880,13 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: "gui-session" });
     await vi.waitFor(() => expect(data.request.mock.calls.some(([method]) => method === "session.create")).toBe(true));
     expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(0);
-    expect(data.request.mock.calls.filter(([method]) => method === "session.watch").every(([, params]) => !params.sessionIds.includes("gui-session"))).toBe(true);
+    const opened = (handle.localConversations as unknown as { opened: string[] }).opened;
+    expect(opened).not.toContain("gui-session");
     completeCreation();
-    await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.activeTurnId).toBe("server-task-1"));
+    await vi.waitFor(() => expect(opened).toContain("server-session"));
+    await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
     expect(data.request.mock.calls.filter(([method]) => method === "session.load").every(([, params]) => params.sessionId === "server-session")).toBe(true);
-    expect(data.request.mock.calls.some(([method, params]) => method === "session.watch" && params.sessionIds.includes("server-session"))).toBe(true);
+    expect(opened).not.toContain("gui-session");
     release();
   });
 
@@ -1141,8 +897,8 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const lookalikeHref = `mention://file/${encodeURIComponent("/other/report.txt")}`;
     handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
       requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: `Read [@report.txt](${realHref}) and [@report.txt](${lookalikeHref})` }] });
-    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.send")).toBe(true));
-    expect(request.mock.calls.find(([method]) => method === "session.send")?.[1].attachmentIds).toEqual(["real-file"]);
+    await vi.waitFor(() => expect(wasEnqueued(request)).toBe(true));
+    expect(enqueuedItem(request)?.attachmentIds).toEqual(["real-file"]);
   });
 
   it("binds ordinary source Markdown files to their registered real attachment IDs", async () => {
@@ -1153,8 +909,8 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     ]);
     handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "gui-session", agentTargetId: agent.id,
       requestId: "activation-1", clientSubmitId: "submit-1", initialContent: [{ type: "text", text: "Read [@report.txt](http://localhost:6099/api/attachments/real-file/download) and [@report.txt](https://example.test/report.txt)" }] });
-    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.send")).toBe(true));
-    expect(request.mock.calls.find(([method]) => method === "session.send")?.[1].attachmentIds).toEqual(["real-file"]);
+    await vi.waitFor(() => expect(wasEnqueued(request)).toBe(true));
+    expect(enqueuedItem(request)?.attachmentIds).toEqual(["real-file"]);
   });
 
   it("keeps archived history visible and blocks execution when the agent is no longer callable", async () => {
@@ -1178,125 +934,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
   });
 });
 
-describe("session projection cursors and execution messages", () => {
-  it("omits internal local image markers from message text while retaining image blocks and raw history", () => {
-    const content = "Can you see it?\n\n[Image attachment: screen.png]";
-    const detail: AgentGuiSessionDetail = { session: { ...session, agent_id: "local:codex" }, pending: {}, messages: [
-      { id: "image-message", role: "user", content, chat_session_id: session.id, task_id: null, created_at: time,
-        attachments: [{ id: "image", filename: "screen.png", content_type: "image/png", url: "data:image/png;base64,cGl4ZWxz", size_bytes: 6 }] as Attachment[] },
-    ] };
-    const projected = projectDetail(detail, undefined, new Map(), new RuntimeLedger());
-    expect(projected.messages[0]?.payload).toMatchObject({ text: "Can you see it?", content: [{ type: "text", text: "Can you see it?" }, { type: "image", attachmentId: "image" }] });
-    expect((projected.messages[0]?.payload.content as { url?: string }[])[1]?.url).toBeUndefined();
-    expect(detail.messages[0]?.content).toBe(content);
-    const cloud = projectDetail({ ...detail, session }, undefined, new Map(), new RuntimeLedger());
-    expect(cloud.messages[0]?.payload.text).toBe(content);
-  });
-  it.each([false, true])("keeps connection retries separate from assistant replies when completed=%s", (completed) => {
-    const taskId = "connection-run";
-    const warning = (attempt: number) => `Reconnecting... ${attempt}/5 (stream disconnected before completion: websocket closed by server before response.completed)`;
-    const reply = { id: "reply", chat_session_id: session.id, task_id: taskId, role: "assistant", content: "Actual answer", created_at: time } as ChatMessage;
-    const detail: AgentGuiSessionDetail = { session, pending: completed ? {} : { task_id: taskId, status: "running" }, messages: completed ? [reply] : [],
-      tasks: [{ id: taskId, status: completed ? "completed" : "running", created_at: time, ...(completed ? { completed_at: time } : {}) }] as AgentTask[] };
-    const events = [
-      { task_id: taskId, issue_id: "", seq: 1, type: "status", content: warning(2) },
-      { task_id: taskId, issue_id: "", seq: 2, type: "status", content: warning(3) },
-      { task_id: taskId, issue_id: "", seq: 3, type: "text", content: "Actual answer" },
-    ] satisfies AgentGuiTaskMessagePayload[];
-    const result = projectDetail(detail, executionTargets(init)[0], new Map([[taskId, events]]), new RuntimeLedger(), "zh-CN");
-    const notices = result.messages.filter((message) => message.payload.kind === "agent_system_notice");
-    expect(notices).toHaveLength(completed ? 0 : 2);
-    if (!completed) expect(notices[1]).toMatchObject({ payload: { noticeKind: "transport_retry", title: "连接中断，正在重连（3/5）", detail: warning(3), retryable: true }, semantics: { userVisibleAssistantResponse: false, turnSettling: false } });
-    const answers = result.messages.filter((message) => message.kind === "text" && message.payload.kind !== "agent_system_notice");
-    expect(answers).toHaveLength(1);
-    expect(answers[0]?.payload.content).toBe("Actual answer");
-    expect(result.session.activeTurnId).toBe(completed ? null : taskId);
-  });
-  it.each(["completed", "failed", "cancelled"] as const)("updates a background record in place to %s without settling the foreground or fabricating an assistant reply", (status) => {
-    const ledger = new RuntimeLedger();
-    const createdAt = "2026-10-24T01:00:01Z";
-    const detail: AgentGuiSessionDetail = { session, pending: { task_id: "foreground", status: "running" }, messages: [],
-      tasks: [{ id: "origin", status: "completed", created_at: time, completed_at: time }, { id: "foreground", status: "running", created_at: time }] as AgentTask[],
-      backgroundTasks: [{ turnId: "origin", task: { id: "watcher", description: "Watch PR", status: "running", createdAt } }],
-    };
-    const running = projectDetail(detail, executionTargets(init)[0], new Map(), ledger, "zh-CN");
-    expect(running.messages).toHaveLength(1);
-    expect(running.messages[0]).toMatchObject({ messageId: "background:origin:watcher", turnId: "origin", status: "running",
-      payload: { kind: "agent_system_notice", noticeKind: "background_task", title: "后台任务运行中 · Watch PR" }, semantics: { userVisibleAssistantResponse: false, turnSettling: false }, occurredAtUnixMs: Date.parse(createdAt) });
-    Object.assign(detail.backgroundTasks![0]!.task, { status, summary: "Native task result" });
-    const done = projectDetail(detail, executionTargets(init)[0], new Map(), ledger);
-    expect(done.messages).toHaveLength(1);
-    expect(done.messages[0]).toMatchObject({ messageId: running.messages[0]!.messageId, status, occurredAtUnixMs: Date.parse(createdAt), payload: { content: "Native task result" } });
-    expect(done.messages[0]!.version).toBeGreaterThan(running.messages[0]!.version);
-    expect(done.session.activeTurnId).toBe("foreground");
-    expect(done.turns.find((turn) => turn.turnId === "origin")?.phase).toBe("settled");
-    detail.backgroundTasks![0]!.task.ambient = true;
-    expect(projectDetail(detail, executionTargets(init)[0], new Map(), ledger).messages).toHaveLength(0);
-  });
-  it("shows the authored prompt while retaining execution context in server history", () => {
-    const context = "\n\n<!-- multica-context-snapshot:start -->\nReference data\n<!-- multica-context-snapshot:end -->";
-    const detail = { session, pending: {}, messages: [{ id: "reference-message", chat_session_id: session.id, role: "user", content: `Review${context}`, created_at: time }] as ChatMessage[] };
-    const projected = projectDetail(detail, executionTargets(init)[0], new Map(), new RuntimeLedger());
-    expect(projected.messages[0]?.payload.content).toBe("Review");
-    expect(detail.messages[0]?.content).toContain("Reference data");
-  });
-  it("pairs calls within each task, merges stream fragments, replaces final text and preserves attachment identities", () => {
-    const ledger = new RuntimeLedger();
-    const detail = {
-      session, pending: {}, messages: [
-        { id: "user-1", role: "user", content: "Inspect screenshot", task_id: "task-1", chat_session_id: session.id, created_at: time,
-          attachments: [{ id: "attachment-1", filename: "screen.png", content_type: "image/png", markdown_url: "/attachment", url: "/attachment", size_bytes: 4 }] },
-      ] as ChatMessage[],
-    };
-    const transcript = new Map<string, TaskMessagePayload[]>([
-      ["task-1", [
-        { task_id: "task-1", issue_id: "", seq: 1, type: "text", content: "Hello " },
-        { task_id: "task-1", issue_id: "", seq: 2, type: "text", content: "world" },
-        { task_id: "task-1", issue_id: "", seq: 3, type: "tool_use", call_id: "same-id", tool: "Read", input: { path: "file" } },
-        { task_id: "task-1", issue_id: "", seq: 4, type: "tool_result", call_id: "same-id", tool: "Read", output: "contents", output_truncated: true },
-      ]],
-      ["task-2", [{ task_id: "task-2", issue_id: "", seq: 1, type: "tool_use", call_id: "same-id", tool: "Write" }]],
-    ]);
-    const first = projectDetail(detail, executionTargets(init)[0], transcript, ledger);
-    const text = first.messages.find((message) => message.payload.content === "Hello world");
-    expect(text).toBeDefined();
-    const calls = first.messages.filter((message) => message.kind === "tool_call");
-    expect(calls).toHaveLength(2);
-    expect(calls.find((message) => message.payload.callId === "task-1:same-id")).toMatchObject({ status: "completed", payload: { callId: "task-1:same-id", input: { path: "file" }, output: "contents", outputTruncated: true } });
-    const image = (first.messages[0]!.payload.content as any[]).find((block) => block.type === "image");
-    expect(image.attachmentId).toBe("attachment-1");
-    const second = projectDetail(detail, executionTargets(init)[0], transcript, ledger);
-    expect(second.messages.map((message) => message.version)).toEqual(first.messages.map((message) => message.version));
-    detail.messages.push({ id: "final-1", role: "assistant", content: "Hello world", task_id: "task-1", chat_session_id: session.id, created_at: time });
-    const final = projectDetail(detail, executionTargets(init)[0], transcript, ledger);
-    expect(final.messages.filter((message) => message.payload.content === "Hello world")).toHaveLength(1);
-    expect(final.messages.find((message) => message.messageId === "final-1")!.version).toBeGreaterThan(ledger.latestVersion(session.id) - 1);
-  });
-});
 
-it("projects a single authored input and both named agent results from durable invocation runs", () => {
-  const tasks=[{id:"run-design",agent_id:"design",chat_invocation_group_id:"group",chat_invoked_agent_name:"设计评审师"},{id:"run-code",agent_id:"code",chat_invocation_group_id:"group",chat_invoked_agent_name:"代码审查师"}].map((item)=>({...item,chat_session_id:session.id,status:"completed",created_at:time,completed_at:time})) as AgentTask[];
-  const detail={session,pending:{},tasks,messages:tasks.flatMap((task)=>[{id:`input-${task.id}`,chat_session_id:session.id,role:"user",content:"Review this change",task_id:task.id,created_at:time},{id:`reply-${task.id}`,chat_session_id:session.id,role:"assistant",content:`Result ${task.agent_id}`,task_id:task.id,created_at:time}]) as ChatMessage[]};
-  const result=projectDetail(detail,executionTargets(init)[0],new Map(),new RuntimeLedger());
-  expect(result.messages.filter((item)=>item.role==="user")).toHaveLength(1);
-  expect(result.messages.filter((item)=>item.role==="assistant").map((item)=>item.payload)).toEqual([
-    { text: "Result design", content: "Result design", invokedAgent: { id: "design", name: "设计评审师" } },
-    { text: "Result code", content: "Result code", invokedAgent: { id: "code", name: "代码审查师" } },
-  ]);
-  const transcript = new Map<string, AgentGuiTaskMessagePayload[]>([["run-code", [
-    { issue_id: "", task_id: "run-code", seq: 1, type: "text", content: "Result " },
-    { issue_id: "", task_id: "run-code", seq: 2, type: "text", content: "code" },
-  ]]]);
-  const streaming = projectDetail({ ...detail, messages: detail.messages.filter((item) => item.task_id !== "run-code") }, executionTargets(init)[0], transcript, new RuntimeLedger());
-  expect(streaming.messages.filter((item) => item.role === "assistant").map((item) => item.payload)).toEqual([
-    result.messages.find((item) => item.messageId === "reply-run-design")!.payload,
-    { content: "Result code", invokedAgent: { id: "code", name: "代码审查师" } },
-  ]);
-  const restored = projectDetail(detail, executionTargets(init)[0], transcript, new RuntimeLedger());
-  expect(restored.messages.filter((item) => item.role === "assistant")).toHaveLength(2);
-  expect(restored.messages.find((item) => item.messageId === "reply-run-code")!.payload).toEqual(result.messages.find((item) => item.messageId === "reply-run-code")!.payload);
-  expect(result.turns).toHaveLength(2);
-});
 
 
 describe("local thinking settings", () => {
@@ -1323,17 +961,16 @@ describe("local thinking settings", () => {
     await handle.setReasoningSelection(agent.id, null, null);
     handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "default-draft", agentTargetId: agent.id,
       settings: { reasoningEffort: "high" }, requestId: "default-activation", clientSubmitId: "default-submit", initialContent: [{ type: "text", text: "Default" }] });
-    await vi.waitFor(() => expect(data.request.mock.calls.find(([method]) => method === "session.send")?.[1]).toMatchObject({ reasoningEffort: null }));
+    await vi.waitFor(() => expect(enqueuedItem(data.request)).toMatchObject({ reasoningEffort: null }));
+    await handle.runtime.getSession(init.workspaceId, "default-draft");
     await expect(handle.setReasoningSelection(agent.id, "default-draft", "low")).rejects.toMatchObject({ code: "run_in_progress" });
   });
-  it.each([undefined, "desktop"] as const)("keeps draft selection through activation, delivery, and restart (queue owner: %s)", async (queueOwner) => {
+  it("keeps draft selection through activation, delivery, and restart", async () => {
     const data = backend();
     const original = data.request.getMockImplementation()!;
     data.request.mockImplementation(async (method, params) => {
       if (method === "models.list") return { supported: true, models: [{ id: "test-model", label: "Test", thinking: { supported_levels: [{ value: "low", label: "Low" }, { value: "high", label: "High" }] } }] };
-      if (method === "queue.enqueue") return { revision: 1, paused: false, items: [params.item] };
-      const result = await original(method, params);
-      return method === "workspace.load" ? { ...result, local: true, queueOwner } : result;
+      return original(method, params);
     });
     const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true }); handles.push(handle);
     await handle.initialize();
@@ -1343,8 +980,7 @@ describe("local thinking settings", () => {
     expect(options).toMatchObject({ reasoningConfigurable: true, reasoningEfforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }], effectiveSettings: { reasoningEffort: "high" } });
     handle.runtime.getSessionEngine(init.workspaceId).activateSession({ mode: "new", agentSessionId: "thinking-draft", agentTargetId: agent.id,
       requestId: "thinking-activation", clientSubmitId: "thinking-submit", initialContent: [{ type: "text", text: "Think" }] });
-    const method = queueOwner ? "queue.enqueue" : "session.send";
-    await vi.waitFor(() => expect(data.request.mock.calls.find(([name]) => name === method)?.[1]).toMatchObject(queueOwner ? { item: { reasoningEffort: "high", model: "test-model" } } : { reasoningEffort: "high", model: "test-model" }));
+    await vi.waitFor(() => expect(enqueuedItem(data.request)).toMatchObject({ reasoningEffort: "high", model: "test-model" }));
     expect(handle.getReasoningSelection(agent.id, "thinking-draft")).toBe("high");
     const restarted = createMulticaAgentGuiRuntime(data.client, { ...init, local: true }); handles.push(restarted);
     await restarted.initialize();
@@ -1380,12 +1016,6 @@ describe("local thinking settings", () => {
     const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true }); handles.push(handle);
     await handle.initialize();
     expect(handle.getModelSelection(agent.id)).toBe("default");
-  });
-  it("rejects thinking changes on managed agent connections", async () => {
-    const data = backend();
-    const { handle } = await setup(data);
-    await expect(handle.setReasoningSelection(agent.id, null, "high")).rejects.toMatchObject({ code: "invalid_reasoning_effort" });
-    expect(handle.getReasoningSelection(agent.id)).toBeNull();
   });
 });
 

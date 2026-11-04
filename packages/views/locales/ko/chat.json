@@ -323,11 +323,6 @@
     "filter_sessions": "{{name}}와의 대화 필터링",
     "session_action_error": "대화를 업데이트할 수 없습니다. 다시 시도해 주세요.",
     "reference_read_only": "이 대화는 읽기 전용이므로 태스크 참조를 추가할 수 없습니다.",
-    "reference_unavailable": "현재 이 에이전트를 사용할 수 없어 태스크 참조를 추가할 수 없습니다.",
-    "search_sessions": "대화 검색",
-    "clear_search": "검색 지우기",
-    "no_search_results": "일치하는 대화가 없습니다",
-    "return_conversation": "대화로 돌아가기",
-    "new_session_unavailable": "런타임이 연결된 사용 가능한 에이전트가 필요합니다."
+    "reference_unavailable": "현재 이 에이전트를 사용할 수 없어 태스크 참조를 추가할 수 없습니다."
   }
 }
