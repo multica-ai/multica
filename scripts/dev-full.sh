@@ -31,6 +31,9 @@ HERMES_KEYS=(HERMES_BASE_URL HERMES_MODEL HERMES_API_KEY)
 # (Hermes Agent v0.22.5). The installer takes --commit, so the pin is exact.
 HERMES_INSTALL_URL="https://hermes-agent.nousresearch.com/install.sh"
 HERMES_PIN_COMMIT="bf0203a794a07aac3ff764972ab9087baa4e4f4e"
+# Polls of 3 seconds each. A first run on a fresh clone installs node modules, downloads
+# the Go toolchain and builds the API before /health answers, which can take 20 minutes.
+WAIT_TRIES=480
 HERMES_STATUS="not installed"
 DAEMON_STATUS="not started"
 
@@ -213,8 +216,8 @@ wait_for_url() {
       return 1
     fi
     tries=$((tries + 1))
-    if [ "$tries" -ge 120 ]; then
-      echo "! $label: $url did not answer after about 6 minutes" >&2
+    if [ "$tries" -ge "$WAIT_TRIES" ]; then
+      echo "! $label: $url did not answer after about $((WAIT_TRIES * 3 / 60)) minutes" >&2
       return 1
     fi
     sleep 3
