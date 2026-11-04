@@ -3,12 +3,65 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStartHermesTaskGatewayLifecycle(t *testing.T) {
+	for _, mode := range []string{"ready", "cancel startup", "cancel running", "exit", "probe error"} {
+		t.Run(mode, func(t *testing.T) {
+			home := t.TempDir()
+			path, record := filepath.Join(home, "hermes"), filepath.Join(home, "invocation")
+			writeTestExecutable(t, path, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" \"$HERMES_HOME\" > \"$RECORD\"\nif [ \"$MODE\" = exit ]; then exit 7; fi\nexec sleep 60\n"))
+			cfg := Config{ExecutablePath: path, LaunchPrefix: []string{"wrapped"}, Logger: slog.Default(),
+				Env: map[string]string{"HERMES_HOME": home, "RECORD": record, "MODE": mode}}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			stop, err := startHermesTaskGateway(ctx, cfg, home, func(string) (bool, error) {
+				if _, err := os.Stat(record); err != nil {
+					return false, nil
+				}
+				switch mode {
+				case "cancel startup":
+					cancel()
+					return false, nil
+				case "probe error":
+					return false, errors.New("probe failed")
+				case "exit":
+					return false, nil
+				}
+				return true, nil
+			})
+			if mode == "ready" || mode == "cancel running" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "cancel running" {
+					cancel()
+				}
+				stop()
+				stop() // Deferred cleanup may follow cancellation.
+			} else if err == nil {
+				stop()
+				t.Fatal("expected startup failure")
+			}
+			got, readErr := os.ReadFile(record)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			want := "wrapped\n--profile\ndefault\ngateway\nrun\n--quiet\n--external-supervisor\n" + home + "\n"
+			if string(got) != want {
+				t.Fatalf("invocation = %q, want %q", got, want)
+			}
+		})
+	}
+}
 
 func TestStopHermesTaskGateway(t *testing.T) {
 	home, tools := t.TempDir(), t.TempDir()
