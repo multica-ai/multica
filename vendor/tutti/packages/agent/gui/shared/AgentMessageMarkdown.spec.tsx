@@ -366,6 +366,17 @@ describe("AgentMessageMarkdown", () => {
     );
   });
 
+  it("lets finished blocks skip layout only while streaming", () => {
+    const shell = () =>
+      document.querySelector('[data-workspace-agent-markdown="true"]')!.className;
+    const { rerender } = render(
+      <AgentMessageMarkdown content={"one\n\ntwo"} streaming />
+    );
+    expect(shell()).toContain("content-visibility:auto");
+    rerender(<AgentMessageMarkdown content={"one\n\ntwo"} />);
+    expect(shell()).not.toContain("content-visibility:auto");
+  });
+
   it("applies CJK bare-link boundaries while streaming markdown", () => {
     const url = "https://github.com/settings/applications";
     render(

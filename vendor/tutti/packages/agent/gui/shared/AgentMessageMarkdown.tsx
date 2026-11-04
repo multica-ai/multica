@@ -78,7 +78,7 @@ export { resetCachedMarkdownImagesForTests } from "./AgentMessageMarkdownMedia";
 export type { StreamingMarkdownBlock } from "./agentMessageMarkdownRuntime";
 export { splitStreamingMarkdownBlocks } from "./agentMessageMarkdownRuntime";
 
-const STREAMING_MARKDOWN_FRAME_MS = 24;
+const STREAMING_MARKDOWN_FRAME_MS = 40;
 const STREAMING_MARKDOWN_MAX_CHARS_PER_SECOND = 6_000;
 const STREAMING_MARKDOWN_TAIL_FLUSH_CHARS = 0;
 const STANDARD_MARKDOWN_LINK_PROTOCOLS = [
@@ -355,6 +355,9 @@ export function AgentMessageMarkdown({
           isCollapsed &&
             "max-h-[calc(13px*1.5*8)] overflow-hidden [mask-image:linear-gradient(180deg,black_0%,black_calc(100%_-_36px),transparent_100%)] [-webkit-mask-image:linear-gradient(180deg,black_0%,black_calc(100%_-_36px),transparent_100%)] [&_pre]:overflow-hidden",
           shouldCollapse && !isCollapsed && "max-h-[72rem]",
+          // Blocks that finished stop costing layout on each update once off screen; the last one is still changing.
+          streaming &&
+            "[&>*:not(:last-child)]:[content-visibility:auto] [&>*:not(:last-child)]:[contain-intrinsic-size:auto_24px]",
           className
         )}
         data-workspace-agent-markdown="true"
