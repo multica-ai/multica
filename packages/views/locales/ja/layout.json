@@ -157,7 +157,7 @@
       "squads_and_members": "スクワッドとメンバー",
       "members_other": "メンバー {{count}} 人",
       "resources": "リソース",
-      "runtimes_offline_other": "{{count}} 件オフライン",
+      "runtimes_online_other": "{{count}} 台オンライン",
       "invite_member": "メンバーを招待"
     },
     "autopilots": {
