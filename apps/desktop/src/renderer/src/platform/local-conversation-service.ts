@@ -40,6 +40,14 @@ function projectQueue(raw: unknown): LocalPromptQueue {
     ...(queue.dispatching_request_id ? { dispatchingRequestId: queue.dispatching_request_id } : {}), items: (queue.items ?? []) as LocalQueuedPrompt[] };
 }
 
+const PROVIDERS_PATH = "/providers";
+const FOLDER_PROJECTS_PATH = "/folder-projects";
+type ProviderList = { providers: { id: LocalProviderId; name: string; available: boolean }[] };
+type FolderProjectList = { projects: { id: string; title: string; path: string; created_at: string }[] };
+
+/** Survives a tab's page being rebuilt, so @agent does not start empty each time. */
+const lastAgents = new WeakMap<LocalV2ScopeClient, AgentGuiWorkspaceState["agents"]>();
+
 export function createLocalConversationParentService(options: ParentServiceOptions & {
   onLocalSelect(id: string | null, provider?: LocalProviderId): void;
   getSelectionIntent?: () => string;
@@ -72,7 +80,13 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   const publish = (event: AgentGuiHostEvent) => { if (!disposed && options.isCurrent()) listeners.forEach((listener) => listener(event)); };
   const remoteWorkspace = async () => {
     if (!cloudState || cloudDirty) {
-      cloudLoad ??= cloud.load().then((value) => { cloudState = value; cloudDirty = false; return value; }).finally(() => { cloudLoad = undefined; });
+      cloudLoad ??= cloud.load().then((value) => {
+        const agentsChanged = JSON.stringify(value.agents) !== JSON.stringify(lastAgents.get(client) ?? []);
+        lastAgents.set(client, value.agents);
+        cloudState = value; cloudDirty = false;
+        if (agentsChanged) publish({ type: "invalidate", scope: "workspace" });
+        return value;
+      }).finally(() => { cloudLoad = undefined; });
       return cloudLoad;
     }
     return cloudState;
@@ -98,19 +112,30 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     return { data: await blobBase64(await response.blob()), mimeType: response.headers.get("content-type") ?? "application/octet-stream", name: decodeURIComponent(name) };
   };
 
+  /**
+   * Answers from what is known and refreshes each source on its own; a source
+   * that changes invalidates the workspace. Only a GUI that has never seen them
+   * waits, and only for this device's targets and list, which it cannot start
+   * without. Selecting a conversation therefore never waits on any source.
+   */
   async function load(): Promise<AgentGuiWorkspaceState> {
-    const [remote, providers, folderProjects] = await Promise.all([
-      remoteWorkspace(),
-      client.request("GET", "/providers") as Promise<{ providers: { id: LocalProviderId; name: string; available: boolean }[] }>,
-      client.request("GET", "/folder-projects") as Promise<{ projects: { id: string; title: string; path: string; created_at: string }[] }>,
-      client.loadSummaries(),
-    ]);
     assertCurrent();
+    const refreshFailed = (source: string) => (error: unknown) => { console.warn(`Could not refresh ${source}`, error); };
+    remoteWorkspace().catch(refreshFailed("cloud agents"));
+    client.refreshKnown(FOLDER_PROJECTS_PATH).catch(refreshFailed("folder projects"));
+    const providersRead = client.refreshKnown(PROVIDERS_PATH);
+    providersRead.catch(refreshFailed("providers"));
+    const summariesRead = client.loadSummaries();
+    summariesRead.catch(refreshFailed("conversations"));
+    await Promise.all([client.known(PROVIDERS_PATH) ? null : providersRead, client.hasSummaries() ? null : summariesRead]);
+    assertCurrent();
+    const providers = client.known<ProviderList>(PROVIDERS_PATH)!;
+    const folderProjects = client.known<FolderProjectList>(FOLDER_PROJECTS_PATH);
     const summaries = client.summaries();
-    return { local: true, composerDraftScope: JSON.stringify([api.getBaseUrl(), options.storagePrefix ?? ""]), queueOwner: "desktop", sideWorkspace: true, sidePane: Boolean(options.storagePrefix), agents: remote.agents, movedQueueRequests: [],
+    return { local: true, composerDraftScope: JSON.stringify([api.getBaseUrl(), options.storagePrefix ?? ""]), queueOwner: "desktop", sideWorkspace: true, sidePane: Boolean(options.storagePrefix), agents: lastAgents.get(client) ?? [], movedQueueRequests: [],
       executionTargets: providers.providers.map((entry) => ({ id: localTargetId(entry.id), name: entry.name, provider: entry.id, iconUrl: "", canInvoke: entry.available, canFork: true, runtimeBound: entry.available, runtimeOnline: entry.available, unavailableReason: entry.available ? undefined : "未在本机安装" })),
       sessions: summaries.map((summary) => projectLocalSession(summary, scope)),
-      folderProjects: folderProjects.projects.map((project): LocalFolderProject => ({ id: project.id, title: project.title, path: project.path, createdAt: project.created_at })),
+      folderProjects: (folderProjects?.projects ?? []).map((project): LocalFolderProject => ({ id: project.id, title: project.title, path: project.path, createdAt: project.created_at })),
       pendingTasks: summaries.flatMap((summary) => summary.active_turn_id ? [{ task_id: summary.active_turn_id, status: "running" as const, chat_session_id: summary.conversation_id }] : []),
     };
   }
@@ -326,6 +351,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     if (workspaceTimer) return;
     workspaceTimer = setTimeout(() => { workspaceTimer = undefined; publish({ type: "invalidate", scope: "workspace" }); }, 50);
   });
+  const unsubscribeKnown = client.onKnownChanged(() => publish({ type: "invalidate", scope: "workspace" }));
   const unsubscribeCloud = cloud.subscribe((event) => { if (event.type === "invalidate" && event.scope === "workspace") { cloudDirty = true; publish(event); } });
   const unsubscribeConnection = transport.onConnection((value, connected) => {
     if (disposed || !options.isCurrent() || value.userId !== scope.userId || value.workspaceId !== scope.workspaceId) return;
@@ -344,7 +370,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
       uploads.dispose();
       for (const id of [...subscriptions.keys()]) unsubscribe(id);
       if (workspaceTimer) clearTimeout(workspaceTimer);
-      unsubscribeSummaries(); unsubscribeCloud(); unsubscribeConnection(); cloud.dispose(); listeners.clear();
+      unsubscribeSummaries(); unsubscribeKnown(); unsubscribeCloud(); unsubscribeConnection(); cloud.dispose(); listeners.clear();
     },
   };
 }

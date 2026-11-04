@@ -16,7 +16,7 @@ const transportFor = vi.hoisted(() => ({ calls: [] as string[] }));
 vi.mock("../platform/local-v2-transport", () => ({ setRemoteFolderChooser: () => {}, localV2Transport: (deviceId = "local") => { transportFor.calls.push(deviceId); return window.desktopAPI.localV2; } }));
 vi.mock("../platform/linked-devices", () => ({ useLinkedDevices: () => [{ peer_id: "peer-1", device_name: "Mac Studio", connection: "direct" }], deviceName: (_devices: unknown, id: string) => id === "peer-1" ? "Mac Studio" : id }));
 
-const mock = vi.hoisted(() => ({ request: vi.fn(), replace: vi.fn(), pathname: "/test/conversations", selected: "source", error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), panel: vi.fn(), copyText: vi.fn(), compact: false, locale: "zh-Hans", projects: [] as Project[], folders: [] as LocalFolderProject[], folderError: null as Error | null }));
+const mock = vi.hoisted(() => ({ request: vi.fn(), replace: vi.fn(), pathname: "/test/conversations", selected: "source", error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), panel: vi.fn(), copyText: vi.fn(), compact: false, locale: "zh-Hans", projects: [] as Project[], folders: [] as LocalFolderProject[], folderError: null as Error | null, folderPending: null as Promise<unknown> | null }));
 vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mock.copyText }));
 vi.mock("@multica/core/projects/queries", () => ({ projectListOptions: () => ({ queryKey: ["test-projects"], queryFn: async () => mock.projects }) }));
 vi.mock("sonner", () => ({ toast: { error: mock.error, success: mock.success, info: mock.info, warning: mock.warning } }));
@@ -91,7 +91,7 @@ function installDaemon() {
       try {
         const url = new URL(path, "http://daemon");
         if (path === "/providers") return { providers: ((await mock.request(scope, "providers", {})) ?? []).map((entry: { id: string; name?: string; available: boolean }) => ({ name: entry.id, ...entry })) };
-        if (path === "/folder-projects") { if (mock.folderError) throw mock.folderError; return { projects: mock.folders.map(folderRow) }; }
+        if (path === "/folder-projects") { if (mock.folderPending) await mock.folderPending; if (mock.folderError) throw mock.folderError; return { projects: mock.folders.map(folderRow) }; }
         if (url.pathname === "/sessions" && method === "GET") return { scope_seq: summarySeq, summaries: (await rows(scope)).map(summary), has_more: false };
         const match = /^\/sessions\/([^/]+)\/(snapshot|commands)$/.exec(url.pathname);
         if (match?.[2] === "snapshot") { const entry = await read(scope, match[1]!); return { version: 2, store_generation: "g", snapshot_seq: 0, conversation: summary(entry), turns: [] }; }
@@ -133,6 +133,7 @@ beforeEach(() => {
   mock.projects = [];
   mock.folders = [];
   mock.folderError = null;
+  mock.folderPending = null;
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   source = { id: "source", title: "Original", provider: "codex", cwd: "/owned/work", providerSessionId: "native", model: null, pinned: false, archived: false, createdAt: "2026-01-01", updatedAt: "2026-01-01", messages: [{ id: "message", role: "assistant", content: "Result", turnId: "turn", createdAt: "2026-01-01" }], turns: [] };
   mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? [source] : method === "providers" ? [{ id: "codex", available: true }] : undefined);
@@ -210,6 +211,34 @@ describe("provider detection recovery", () => {
     await act(async () => publishConnection({ userId: "user", workspaceId: "workspace" }, true));
     await waitFor(() => expect(createButton).not.toHaveAttribute("aria-disabled", "true"));
     expect(reads()).toBeGreaterThan(before);
+  });
+});
+
+describe("reading only what the page needs", () => {
+  const snapshotReads = () => daemonRequests.filter((entry) => entry.path.endsWith("/snapshot"));
+
+  it("lists conversations while folder projects are still loading", async () => {
+    mock.folderPending = new Promise(() => {});
+    const other = { ...source, id: "other", title: "Not selected" };
+    mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? [source, other] : method === "providers" ? [{ id: "codex", available: true }] : undefined);
+    render(page());
+    expect(await screen.findByRole("link", { name: /Not selected/ })).toBeVisible();
+  });
+
+  it("does not read the snapshot of a conversation the list already knows", async () => {
+    render(page());
+    expect(await screen.findByRole("link", { name: /Original/ })).toBeVisible();
+    await waitFor(() => expect(listReads().length).toBeGreaterThan(0));
+    expect(snapshotReads()).toEqual([]);
+  });
+
+  it("reads the snapshot of a selected conversation the list does not know", async () => {
+    mock.selected = "elsewhere";
+    mock.request.mockImplementation(async (_scope, method, params) => method === "listPage" ? [source]
+      : method === "providers" ? [{ id: "codex", available: true }]
+      : method === "read" && (params as { id: string }).id === "elsewhere" ? { ...source, id: "elsewhere" } : undefined);
+    render(page());
+    await waitFor(() => expect(snapshotReads().map((entry) => entry.path)).toEqual(["/sessions/elsewhere/snapshot"]));
   });
 });
 

@@ -7,6 +7,12 @@ import type { LocalV2Bridge } from "../../../shared/local-v2-bridge";
 const BLOCKING = new Set(["daemon_offline", "not_signed_in", "account_mismatch", "device_unreachable", "device_link_off", "device_unknown", "api_url_mismatch"]);
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
+/**
+ * Chromium allows six connections per host, so another device's slow requests
+ * would queue this device's behind them if both used the daemon's one address.
+ */
+function remoteDeviceBase(base: string) { return base.replace(/^[^:]+/, "localhost"); }
+
 const REQUEST_TIMEOUT_MS = 120_000;
 const PROBE_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 20_000;
@@ -100,7 +106,7 @@ export class DirectLocalV2Transport implements LocalV2Transport {
     if (record) (this.options.timing ?? consoleLocalTiming)(record);
   }
 
-  private url(endpoint: LocalV2RendererEndpoint, path: string) { return `http://${endpoint.base}${this.basePath}/local/v2${path}`; }
+  private url(endpoint: LocalV2RendererEndpoint, path: string) { return `http://${this.deviceId === "local" ? endpoint.base : remoteDeviceBase(endpoint.base)}${this.basePath}/local/v2${path}`; }
 
   private headers(endpoint: LocalV2RendererEndpoint, scope: LocalV2Scope): Record<string, string> {
     return { Authorization: `Bearer ${endpoint.token}`, "X-Multica-API-Origin": endpoint.apiUrl, "X-Multica-User-ID": scope.userId, "X-Workspace-ID": scope.workspaceId, "X-Multica-Client-ID": this.clientId };

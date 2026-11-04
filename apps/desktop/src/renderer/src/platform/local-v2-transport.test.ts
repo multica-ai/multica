@@ -273,11 +273,20 @@ describe("DirectLocalV2Transport", () => {
     const [first, second] = daemon.requests.map((request) => request.headers["x-multica-client-id"]);
     expect(first).toMatch(/^[0-9a-f-]{36}$/);
     expect(second).toBe(first);
-    expect(transport.fileUrl(scope, "/attachments/a1")).toContain(`http://${daemon.base}/local/devices/peer%201/local/v2/attachments/a1?`);
+    expect(transport.fileUrl(scope, "/attachments/a1")).toContain(`http://${daemon.base.replace("127.0.0.1", "localhost")}/local/devices/peer%201/local/v2/attachments/a1?`);
     // Another device has no OS picker here.
     await expect(transport.choose(scope, { purpose: "folder_project" })).resolves.toEqual({ id: "f1" });
     expect(bridge.choose).not.toHaveBeenCalled();
     expect(chooseRemote).toHaveBeenCalledWith(scope, { purpose: "folder_project" });
+  });
+
+  it("keeps another device's requests off the host this device's requests use", async () => {
+    const local = await setup();
+    await local.transport.request(scope, "GET", "/sessions");
+    expect(local.daemon.requests[0]!.headers.host).toBe(local.daemon.base);
+    const remote = await setup(undefined, { deviceId: "peer" });
+    await remote.transport.request(scope, "GET", "/sessions");
+    expect(remote.daemon.requests[0]!.headers.host).toBe(remote.daemon.base.replace("127.0.0.1", "localhost"));
   });
 
   it("needs Device link support from another device's daemon", async () => {

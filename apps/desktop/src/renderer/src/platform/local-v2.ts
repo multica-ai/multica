@@ -39,8 +39,11 @@ export class LocalV2ScopeClient {
   /** The list as last read; replaced on each change so React sees a new value. */
   private summaryList: LocalV2Summary[] = [];
   private summaryLoad?: Promise<void>;
+  private summariesRead = false;
   private scopeSeq = 0;
   private summaryListeners = new Set<() => void>();
+  private knownReads = new Map<string, { value?: unknown; pending?: Promise<unknown> }>();
+  private knownListeners = new Set<() => void>();
   private conversations = new Map<string, ConversationSubscription>();
   /** Listeners whose subscriptions a disconnect dropped, reloaded on reconnect. */
   private lost = new Map<string, Set<ConversationListener>>();
@@ -91,6 +94,29 @@ export class LocalV2ScopeClient {
   }
   async discardUpload(id: string) { await this.request("DELETE", `/attachments/${encodeURIComponent(id)}`); }
 
+  /** The last answer to a GET that rarely changes, if it has been read. */
+  known<T>(path: string): T | undefined { return this.knownReads.get(path)?.value as T | undefined; }
+
+  /** Reads it again, one request at a time; listeners hear when the answer changed. */
+  refreshKnown<T>(path: string): Promise<T> {
+    const entry = this.knownReads.get(path) ?? {};
+    this.knownReads.set(path, entry);
+    return (entry.pending ??= this.request("GET", path).then((value) => {
+      const changed = JSON.stringify(value) !== JSON.stringify(entry.value);
+      entry.value = value;
+      if (changed) for (const listener of this.knownListeners) listener();
+      return value;
+    }).finally(() => { entry.pending = undefined; })) as Promise<T>;
+  }
+
+  onKnownChanged(listener: () => void): () => void {
+    this.knownListeners.add(listener);
+    return () => { this.knownListeners.delete(listener); };
+  }
+
+  /** Whether the list has been read; after that it stays current on its own. */
+  hasSummaries(): boolean { return this.summariesRead; }
+
   /** Every conversation of the scope, loaded once and kept current. */
   summaries(): LocalV2Summary[] { return this.summaryList; }
   summary(id: string): LocalV2Summary | undefined { return this.summaryMap.get(id); }
@@ -106,8 +132,10 @@ export class LocalV2ScopeClient {
         if (!list.has_more) break;
       }
       this.scopeSeq = after;
-      await this.transport.send(this.scope, { version: LOCAL_V2_VERSION, type: "subscribe_scope", after_scope_seq: after });
+      this.summariesRead = true;
       this.notifySummaries();
+      // The list is usable now; only its updates need the socket.
+      void this.transport.send(this.scope, { version: LOCAL_V2_VERSION, type: "subscribe_scope", after_scope_seq: after }).catch(() => { this.summaryLoad = undefined; });
     })().catch((error: unknown) => { this.summaryLoad = undefined; throw error; });
   }
 

@@ -39,6 +39,48 @@ describe("LocalV2ScopeClient", () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
+  it("hands out the list without waiting for the scope subscription, and retries a failed one", async () => {
+    const { t, sent } = transport([{ scope_seq: 1, summaries: [summary("a", 1)], has_more: false }]);
+    vi.mocked(t.send).mockReturnValueOnce(new Promise(() => {}));
+    const client = new LocalV2ScopeClient(t, scope);
+    expect(client.hasSummaries()).toBe(false);
+    await client.loadSummaries();
+    expect(client.summaries().map((s) => s.conversation_id)).toEqual(["a"]);
+    expect(client.hasSummaries()).toBe(true);
+
+    const failing = transport([{ scope_seq: 1, summaries: [], has_more: false }]);
+    vi.mocked(failing.t.send).mockRejectedValueOnce(new Error("socket down"));
+    const retried = new LocalV2ScopeClient(failing.t, scope);
+    await retried.loadSummaries();
+    await vi.waitFor(async () => { await retried.loadSummaries(); expect(failing.sent).toHaveLength(1); });
+    expect(sent).toEqual([]);
+  });
+
+  it("keeps the last answer of a known read, shares requests and reports only changes", async () => {
+    const { t } = transport();
+    const client = new LocalV2ScopeClient(t, scope);
+    const changed = vi.fn();
+    client.onKnownChanged(changed);
+    vi.mocked(t.request).mockResolvedValue({ providers: ["codex"] });
+    expect(client.known("/providers")).toBeUndefined();
+
+    await Promise.all([client.refreshKnown("/providers"), client.refreshKnown("/providers")]);
+    expect(t.request).toHaveBeenCalledTimes(1);
+    expect(client.known("/providers")).toEqual({ providers: ["codex"] });
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    await client.refreshKnown("/providers");
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    vi.mocked(t.request).mockRejectedValueOnce(new Error("daemon_offline: down"));
+    await expect(client.refreshKnown("/providers")).rejects.toThrow("down");
+    expect(client.known("/providers")).toEqual({ providers: ["codex"] });
+
+    vi.mocked(t.request).mockResolvedValue({ providers: ["codex", "claude"] });
+    await client.refreshKnown("/providers");
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
   it("tells a daemon that supports it which conversation is in focus, and again after a reconnect", async () => {
     vi.useFakeTimers();
     try {

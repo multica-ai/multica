@@ -174,10 +174,11 @@ function LocalConversationFlow() {
   const folderProjects = folderQuery.data ?? [];
   const hiddenProjectIds = hiddenProjectPreferences.filter((id) => folderProjects.some((project) => project.id === id));
   const selectedId = searchParams.get("session");
-  const sessions = useLocalConversationPages(transport, scope, folderProjects, hiddenProjectIds, archived, search, !!workspace && !!userId && folderQuery.isSuccess);
-  const selectedQuery = useQuery({ queryKey: [...localConversationKey(scope, device.id), "selected", selectedId], queryFn: async () => sessionEntry((await v2.snapshot(selectedId!)).conversation), enabled: !!workspace && !!userId && !!selectedId, retry: false, refetchOnMount: "always" });
-  const listed = sessions.data?.find((entry) => entry.id === selectedId);
-  const selected = listed ?? selectedQuery.data;
+  const sessions = useLocalConversationPages(transport, scope, folderProjects, hiddenProjectIds, archived, search, !!workspace && !!userId);
+  // The list already knows every conversation; only an ID it lacks needs its snapshot read here.
+  const selectedSummary = selectedId ? v2.summary(selectedId) : undefined;
+  const selectedQuery = useQuery({ queryKey: [...localConversationKey(scope, device.id), "selected", selectedId], queryFn: async () => sessionEntry((await v2.snapshot(selectedId!)).conversation), enabled: !!workspace && !!userId && !!selectedId && !selectedSummary && !sessions.isPending, retry: false, refetchOnMount: "always" });
+  const selected = selectedSummary ? sessionEntry(selectedSummary) : selectedQuery.data;
   const selectedRef = useRef(selectedId); selectedRef.current = selectedId;
   const provider = selected?.provider ?? (searchParams.get("provider") === "claude" ? "claude" : "codex");
   const active = pathname === flowPath && getCurrentSlug() === slug;

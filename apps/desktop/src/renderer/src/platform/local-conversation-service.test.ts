@@ -40,11 +40,11 @@ function transport(): LocalV2Transport {
   };
 }
 
-function setup(options: { getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null; storagePrefix?: string; userId?: string; workspaceId?: string; storage?: StorageAdapter } = {}, deviceId?: string) {
+function setup(options: { getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null; storagePrefix?: string; userId?: string; workspaceId?: string; storage?: StorageAdapter } = {}, deviceId?: string, using = transport()) {
   const callbacks = { onLocalSelect: vi.fn(), onOpenSide: vi.fn(), onShowMessage: vi.fn() };
   const qc = new QueryClient();
   const service = createLocalConversationParentService({ queryClient: qc, workspaceId: "ws", workspaceSlug: "workspace", userId: "user", isCurrent: () => true, resolveAvatar: (value) => value,
-    onSelectSession: vi.fn(), onOpenTask: vi.fn(), ...callbacks, ...options }, Object.assign(transport(), deviceId ? { deviceId } : {}));
+    onSelectSession: vi.fn(), onOpenTask: vi.fn(), ...callbacks, ...options }, Object.assign(using, deviceId ? { deviceId } : {}));
   disposers.push(() => { service.dispose(); qc.clear(); });
   return { service, ...callbacks };
 }
@@ -93,6 +93,159 @@ describe("local conversation parent service over v2", () => {
     expect(state.folderProjects).toEqual([{ id: "folder-1", title: "Repo", path: "/repo", createdAt: at }]);
     expect(state.pendingTasks).toEqual([{ task_id: "turn-9", status: "running", chat_session_id: "busy" }]);
     expect(sent).toContainEqual({ version: 2, type: "subscribe_scope", after_scope_seq: 3 });
+  });
+
+  describe("independent sources", () => {
+    const never = new Promise(() => {});
+    const hang = (...paths: string[]) => routes.unshift((_method, path) => paths.some((entry) => path.startsWith(entry)) ? never : undefined);
+
+    it("starts without waiting for folder projects, then asks the GUI to reload when they arrive", async () => {
+      let release!: (value: unknown) => void;
+      const folders = new Promise((resolve) => { release = resolve; });
+      routes.unshift((method, path) => path === "/folder-projects" && method === "GET" ? folders : undefined);
+      const { service } = setup();
+      const events: unknown[] = [];
+      service.subscribe((event) => { if (event.type === "invalidate") events.push(event); });
+
+      const state = await service.load();
+      expect(state.sessions).toHaveLength(2);
+      expect(state.folderProjects).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      events.length = 0;
+
+      release({ projects: [{ id: "folder-1", title: "Repo", path: "/repo", created_at: at }] });
+      await vi.waitFor(() => expect(events).toContainEqual({ type: "invalidate", scope: "workspace" }));
+      expect((await service.load()).folderProjects?.map((project) => project.id)).toEqual(["folder-1"]);
+    });
+
+    it("answers a later load from what it knows while every source hangs", async () => {
+      const { service } = setup();
+      await service.load();
+      hang("/providers", "/folder-projects", "/sessions?");
+      mock.api.listAgents.mockReturnValue(never);
+      service.reconnect();
+      for (const listener of connections) listener(scope, true);
+
+      const state = await service.load();
+      expect(state.executionTargets?.map((target) => target.id)).toEqual(["local:codex", "local:claude"]);
+      expect(state.sessions.map((session) => session.id)).toEqual(["idle", "busy"]);
+    });
+
+    it("keeps what it knows when a later refresh fails", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { service } = setup();
+      await service.load();
+      routes.unshift((_method, path) => path === "/providers" || path === "/folder-projects" ? new Error("daemon_offline: down") : undefined);
+
+      const state = await service.load();
+      expect(state.executionTargets).toHaveLength(2);
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+      warn.mockRestore();
+    });
+
+    it("cannot start without this device's providers or conversations", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      routes.unshift((_method, path) => path === "/providers" ? new Error("daemon_offline: down") : undefined);
+      await expect(setup().service.load()).rejects.toThrow("down");
+      routes.shift();
+      routes.unshift((_method, path) => path.startsWith("/sessions?") ? new Error("daemon_offline: down") : undefined);
+      await expect(setup().service.load()).rejects.toThrow("down");
+      warn.mockRestore();
+    });
+
+    it("gives a rebuilt page the known sources and agents at once", async () => {
+      const shared = transport();
+      const first = setup({}, undefined, shared).service;
+      await vi.waitFor(async () => expect((await first.load()).agents).toHaveLength(1));
+      first.dispose();
+
+      hang("/providers", "/folder-projects", "/sessions?");
+      mock.api.listAgents.mockReturnValue(never);
+      const state = await setup({}, undefined, shared).service.load();
+      expect(state.agents.map((entry) => entry.agent.id)).toEqual(["design"]);
+      expect(state.executionTargets).toHaveLength(2);
+      expect(state.folderProjects).toHaveLength(1);
+    });
+  });
+
+  describe("cloud agent directory", () => {
+    type Service = ReturnType<typeof setup>["service"];
+    const watchInvalidations = (service: Service) => {
+      const events: unknown[] = [];
+      service.subscribe((event) => { if (event.type === "invalidate") events.push(event); });
+      return events;
+    };
+    const loadedAgentIds = async (service: Service) => (await service.load()).agents.map((entry) => entry.agent.id);
+    const agentsLoaded = (service: Service) => vi.waitFor(async () => expect(await loadedAgentIds(service)).toEqual(["design"]));
+    // Lets the summary list's coalesced invalidation and reconnect's notification land first.
+    const earlierInvalidations = () => new Promise((resolve) => setTimeout(resolve, 60));
+
+    it("returns local data while the cloud hangs, then asks the GUI to reload when agents arrive", async () => {
+      const agents = await mock.api.listAgents();
+      let release!: (value: unknown) => void;
+      mock.api.listAgents.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+      const { service } = setup();
+      const events = watchInvalidations(service);
+
+      const state = await service.load();
+      expect(state.sessions.map((session) => session.id)).toEqual(["idle", "busy"]);
+      expect(state.agents).toEqual([]);
+      await earlierInvalidations();
+      events.length = 0;
+
+      release(agents);
+      await vi.waitFor(() => expect(events).toEqual([{ type: "invalidate", scope: "workspace" }]));
+      expect(await loadedAgentIds(service)).toEqual(["design"]);
+    });
+
+    it("returns local data when the cloud fails, and a later load recovers the agents", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mock.api.listAgents.mockRejectedValueOnce(new Error("network down"));
+      const { service } = setup();
+      const events = watchInvalidations(service);
+
+      expect((await service.load()).sessions).toHaveLength(2);
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+      await earlierInvalidations();
+      events.length = 0;
+
+      await service.load();
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(await loadedAgentIds(service)).toEqual(["design"]);
+      warn.mockRestore();
+    });
+
+    it("reloads the GUI only when a refresh changes the agents", async () => {
+      const [agent] = await mock.api.listAgents();
+      const { service } = setup();
+      const events = watchInvalidations(service);
+      await agentsLoaded(service);
+
+      service.reconnect();
+      await earlierInvalidations();
+      events.length = 0;
+      const callsBefore = mock.api.listAgents.mock.calls.length;
+      await service.load();
+      await vi.waitFor(() => expect(mock.api.listAgents.mock.calls.length).toBeGreaterThan(callsBefore));
+      await earlierInvalidations();
+      expect(events).toEqual([]);
+
+      mock.api.listAgents.mockResolvedValue([{ ...agent, name: "Renamed reviewer" }]);
+      service.reconnect();
+      await earlierInvalidations();
+      events.length = 0;
+      await service.load();
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+    });
+
+    it("keeps the last known agents while a refresh hangs", async () => {
+      const { service } = setup();
+      await agentsLoaded(service);
+
+      mock.api.listAgents.mockReturnValue(new Promise(() => {}));
+      service.reconnect();
+      expect(await loadedAgentIds(service)).toEqual(["design"]);
+    });
   });
 
   it("creates a conversation in a folder project and sends with mentions and quoted references", async () => {
