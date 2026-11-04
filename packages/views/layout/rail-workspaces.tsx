@@ -90,8 +90,10 @@ function NewWindowButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-// A text tag rather than a window glyph, so it never reads as the row
-// button that opens a new window.
+/**
+ * Pin toggle that takes the trailing status slot on hover/highlight. Its tone
+ * follows the row's unread state, so pinning never hides the unread signal.
+ */
 function PinButton({ pinned, unread, onToggle }: { pinned: boolean; unread: boolean; onToggle: () => void }) {
   const { t } = useT("layout");
   const label = pinned ? t(($) => $.rail.unpin_workspace) : t(($) => $.rail.pin_workspace);
@@ -108,6 +110,8 @@ function PinButton({ pinned, unread, onToggle }: { pinned: boolean; unread: bool
   );
 }
 
+// A text tag rather than a window glyph, so it never reads as the row
+// button that opens a new window.
 function OtherWindowMarker() {
   const { t } = useT("layout");
   return (

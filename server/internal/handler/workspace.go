@@ -207,8 +207,12 @@ func (h *Handler) SetWorkspacePinned(w http.ResponseWriter, r *http.Request) {
 	pinnedAt, err := h.Queries.SetWorkspacePinned(r.Context(), db.SetWorkspacePinnedParams{
 		WorkspaceID: id, UserID: member.UserID, Pinned: *req.Pinned,
 	})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update workspace pin")
 		return
 	}
 	var result *string

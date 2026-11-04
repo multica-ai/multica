@@ -1,4 +1,3 @@
-import { WorkspaceListItemSchema, WorkspacePinnedSchema } from "./schema";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -510,6 +509,8 @@ import {
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
+  WorkspaceListItemSchema,
+  WorkspacePinnedSchema,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -3144,7 +3145,9 @@ export class ApiClient {
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
     const raw = await this.fetch<unknown>("/api/workspaces");
-    return parseWithFallback(raw, WorkspaceListItemSchema.array(), [] as Workspace[], { endpoint: "GET /api/workspaces" });
+    return parseWithFallback(raw, WorkspaceListItemSchema.array(), [] as Workspace[], {
+      endpoint: "GET /api/workspaces",
+    }) as Workspace[];
   }
 
   async setWorkspacePinned(id: string, pinned: boolean): Promise<{ pinned_at: string | null }> {

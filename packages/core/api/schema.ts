@@ -1,4 +1,4 @@
-import { z, type ZodType } from "zod";
+import type { ZodType } from "zod";
 import { type Logger, noopLogger } from "../logger";
 
 // Module-level logger for schema warnings. Defaults to no-op so test
@@ -53,22 +53,3 @@ export function parseWithFallback<T>(
   );
   return fallback;
 }
-
-export const WorkspaceListItemSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  slug: z.string(),
-  description: z.string().nullable(),
-  context: z.string().nullable(),
-  settings: z.record(z.string(), z.unknown()),
-  repos: z.array(z.object({ url: z.string(), description: z.string().optional() })),
-  issue_prefix: z.string(),
-  avatar_url: z.string().nullable(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
-}).loose();
-
-export const WorkspacePinnedSchema = z.object({
-  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
-});

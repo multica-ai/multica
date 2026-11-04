@@ -4028,3 +4028,17 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Only `pinned_at` is new here; every other field keeps its pre-schema
+// leniency so one odd workspace can never empty the whole switcher.
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created_at: z.string(),
+  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+}).loose();
+
+export const WorkspacePinnedSchema = z.object({
+  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
+});
