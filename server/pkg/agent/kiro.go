@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"strings"
 	"sync"
@@ -29,7 +30,6 @@ var kiroBlockedArgs = map[string]blockedArgMode{
 	"-a":                blockedStandalone,
 	"--trust-all-tools": blockedStandalone,
 	"--trust-tools":     blockedWithValue,
-	"--effort":          blockedWithValue,
 }
 
 // kiroBackend implements Backend by spawning `kiro-cli acp` and communicating
@@ -131,7 +131,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
+	blockedArgs := kiroBlockedArgs
+	if opts.ThinkingLevel != "" {
+		// Preserve custom effort unless a structured override takes precedence.
+		blockedArgs = maps.Clone(kiroBlockedArgs)
+		blockedArgs["--effort"] = blockedWithValue
+	}
+	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, blockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, kiroArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(kiroArgs, trustAgentCommandPositional(0, "acp")))

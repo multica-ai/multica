@@ -133,12 +133,16 @@ func TestKiroBackendAppliesEffortBeforePrompt(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, model, resume, level, response, warning string
+		customArgs                                    []string
 	}{
 		{name: "fresh", model: "auto", level: "max", response: `"result":{"success":true}`},
 		{name: "resumed", model: "auto", resume: "ses_loaded", level: "low", response: `"result":{"success":true}`},
 		{name: "default model", level: "max", response: `"result":{"success":true}`},
 		{name: "resumed without model override", resume: "ses_loaded", level: "low", response: `"result":{"success":true}`},
-		{name: "runtime default"},
+		{name: "runtime default", customArgs: []string{}},
+		{name: "custom effort separate value", customArgs: []string{"--effort", "high"}},
+		{name: "custom effort inline value", customArgs: []string{"--effort=low"}},
+		{name: "resumed custom effort", resume: "ses_loaded", customArgs: []string{"--effort", "high"}},
 		{name: "rejected", level: "max", response: `"result":{"success":false,"message":"unsupported effort"}`, warning: "unsupported effort"},
 		{name: "unsupported command", level: "high", response: `"error":{"code":-32601,"message":"Method not found"}`, warning: "Method not found"},
 		{name: "unconfirmed", level: "high", response: `"result":{}`, warning: "did not apply"},
@@ -167,12 +171,16 @@ func TestKiroBackendAppliesEffortBeforePrompt(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			customArgs := tc.customArgs
+			if customArgs == nil {
+				customArgs = []string{"--effort", "high", "--effort=low"}
+			}
 			session, err := backend.Execute(ctx, "task", ExecOptions{
 				ResumeSessionID: tc.resume,
 				Model:           tc.model,
 				ThinkingLevel:   tc.level,
 				Timeout:         5 * time.Second,
-				CustomArgs:      []string{"--effort", "high", "--effort=low"},
+				CustomArgs:      customArgs,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -190,8 +198,12 @@ func TestKiroBackendAppliesEffortBeforePrompt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(string(argv), "--effort") {
-				t.Errorf("custom effort bypassed saved configuration: %s", argv)
+			wantArgs := []string{"acp", "--trust-all-tools"}
+			if tc.level == "" {
+				wantArgs = append(wantArgs, customArgs...)
+			}
+			if got := strings.Split(strings.TrimSpace(string(argv)), "\n"); !reflect.DeepEqual(got, wantArgs) {
+				t.Errorf("launch args = %q, want %q", got, wantArgs)
 			}
 			raw, err := os.ReadFile(requestsFile)
 			if err != nil {
