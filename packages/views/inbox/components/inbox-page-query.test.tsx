@@ -45,7 +45,13 @@ vi.mock("./inbox-list", () => ({
     ))}</div>
   ),
 }));
-vi.mock("./inbox-filter-menu", () => ({ InboxFilterMenu: () => null }));
+const filterMenuUnmounted = vi.hoisted(() => vi.fn());
+vi.mock("./inbox-filter-menu", () => ({
+  InboxFilterMenu: () => {
+    useEffect(() => () => filterMenuUnmounted(), []);
+    return <div data-testid="filter-menu" />;
+  },
+}));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
 let rowActions: { onAction: (id: string) => void };
 vi.mock("./inbox-context-menu", () => ({
@@ -80,6 +86,7 @@ beforeEach(() => {
   searchParams = new URLSearchParams();
   replace.mockClear();
   detailUnmounted.mockClear();
+  filterMenuUnmounted.mockClear();
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
   useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
 });
@@ -227,4 +234,23 @@ it.each(["status", "priority", "actor"] as const)("still applies the %s filter t
   await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
   expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+});
+
+it("keeps the archived list and its filter menu mounted while a new filter loads", async () => {
+  searchParams = new URLSearchParams("view=archived");
+  const next = deferred<ArchivedInboxPage>();
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters) =>
+    filters.statuses.length ? next.promise : page([item({ archived: true })]));
+  setApiInstance({ listArchivedInboxPage, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  await screen.findByText("inbox-a");
+  const menu = screen.getByTestId("filter-menu");
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "todo"));
+  await waitFor(() => expect(listArchivedInboxPage).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(screen.getByText("inbox-a")).toBeInTheDocument();
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "in_progress"));
+  await act(async () => next.resolve(page([item({ archived: true })])));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(filterMenuUnmounted).not.toHaveBeenCalled();
 });
