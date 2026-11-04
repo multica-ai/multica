@@ -1,6 +1,6 @@
 ---
 title: 聊天整合
-description: 把 Multica AI 代理接入飛書、Lark、Slack、釘釘、企業微信或 Telegram，在團隊已有的聊天工具中使用。
+description: 把 Multica AI 代理接入飛書、Lark、Slack、釘釘、企業微信、Telegram 或紛享銷客，在團隊已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,29 +8,31 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 接入聊天工具後，團隊不用開啟 Multica，就能在私聊裡向 AI 代理提問、在群聊中 @ 它，或者直接在聊天視窗建立任務。
 
-目前支援飛書/Lark、Slack、釘釘、企業微信和 Telegram。它們使用相同的會話、身份和執行機制，但安裝方式不同。
+目前支援飛書/Lark、Slack、釘釘、企業微信、Telegram 和紛享銷客。它們使用相同的會話、身份和執行機制，但安裝方式不同。
 
 ## 選擇平臺
 
-| | 飛書 / Lark | Slack | 釘釘 | 企業微信 | Telegram |
-|---|---|---|---|---|---|
-| 安裝方式 | 在 Multica 中生成二維碼，用飛書掃碼授權 | 在 Slack 建立 app，再把兩個 token 填入 Multica | 建立企業內部應用和 Stream 模式機器人，再把 AppKey 與 AppSecret 填入 Multica | 在企業微信管理後臺建立智慧機器人並開啟長連線，再把 Bot ID 與 Secret 填入 Multica | 用 @BotFather 建立 Bot，再把 token 填入 Multica |
-| 私聊 AI 代理 | 支援 | 支援 | 支援 | 支援 | 支援 |
-| 群聊或頻道 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 或回覆 Bot 後觸發 |
-| 建立任務 | `/issue` 訊息命令，按輸入直接建立 | `/issue` slash 命令，AI 代理整理描述後建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 |
-| 新建 Chat | `/new [訊息]` | 私聊：`/new [訊息]`；頻道/thread：`@Multica /new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` |
-| 清空當前 Chat 上下文 | `/clear [訊息]` | 私聊：`/clear [訊息]`；頻道/thread：`@Multica /clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` |
-| 連線方式 | 平臺長連線 | Socket Mode | Stream 模式 | 平臺長連線 | `getUpdates` 長輪詢 |
+| | 飛書 / Lark | Slack | 釘釘 | 企業微信 | Telegram | 紛享銷客 |
+|---|---|---|---|---|---|---|
+| 安裝方式 | 在 Multica 中生成二維碼，用飛書掃碼授權 | 在 Slack 建立 app，再把兩個 token 填入 Multica | 建立企業內部應用和 Stream 模式機器人，再把 AppKey 與 AppSecret 填入 Multica | 在企業微信管理後臺建立智慧機器人並開啟長連線，再把 Bot ID 與 Secret 填入 Multica | 用 @BotFather 建立 Bot，再把 token 填入 Multica | 在紛享銷客開放平臺建立機器人憑據，再把 App ID 與 App Secret 填入 Multica |
+| 私聊 AI 代理 | 支援 | 支援 | 支援 | 支援 | 支援 | 支援 |
+| 群聊或頻道 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 或回覆 Bot 後觸發 | @ Bot 後觸發 |
+| 建立任務 | `/issue` 訊息命令，按輸入直接建立 | `/issue` slash 命令，AI 代理整理描述後建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 |
+| 新建 Chat | `/new [訊息]` | 私聊：`/new [訊息]`；頻道/thread：`@Multica /new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` |
+| 清空當前 Chat 上下文 | `/clear [訊息]` | 私聊：`/clear [訊息]`；頻道/thread：`@Multica /clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` |
+| 連線方式 | 平臺長連線 | Socket Mode | Stream 模式 | 平臺長連線 | `getUpdates` 長輪詢 | SSE 長連線 |
 
 新連線目前只開放中國大陸版飛書；已有的國際版 Lark 連線仍可繼續使用和管理。
 
 每個 Bot 繫結一個 Multica AI 代理。需要在同一個聊天平臺中使用多個 AI 代理時，要分別連線多個 Bot。
 
-釘釘、企業微信和 Telegram [由社群維護](/community-maintained)：隨每個版本釋出，但沒有官方支援 SLA。遇到問題請提交 [GitHub 任務](https://github.com/multica-ai/multica/issues)。
+釘釘、企業微信、Telegram 和紛享銷客 [由社群維護](/community-maintained)：隨每個版本釋出，但沒有官方支援 SLA。遇到問題請提交 [GitHub 任務](https://github.com/multica-ai/multica/issues)。
 
 企業微信目前只處理文字訊息。語音、圖片和檔案訊息會收到一句說明，不會轉交給 AI 代理。
 
 Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理，並把 AI 代理生成的檔案發回聊天；這兩個方向都需要服務端配置物件儲存，未配置時媒體訊息仍像以前一樣收到不支援提示。貼紙等非檔案訊息會收到同樣的提示，不會轉交給 AI 代理。
+
+紛享銷客目前處理文字和入站圖片。檔案和語音不會轉交給 AI 代理。AI 代理回覆仍以純文字發出。
 
 詳細步驟：
 
@@ -38,6 +40,7 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 - [Slack Bot 接入](/slack-bot-integration)
 - [釘釘 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+- [紛享銷客 Bot 接入](/sharecrm-bot-integration)
 
 ## 訊息的執行流程
 
@@ -68,6 +71,7 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 - 釘釘按 conversation 區分會話；每個單聊或群聊分別延續自己的會話。
 - 企業微信按聊天區分會話；每個單聊或群聊分別延續自己的會話。
 - Telegram 按聊天區分會話；forum 的每個 topic 分別隔離。
+- 紛享銷客按 conversation 區分會話；每個單聊或群聊分別延續自己的會話。
 
 在頻道中繼續追問時仍需再次 @ Bot。除了上面提到的近期上下文，AI 代理不會自動讀取整個頻道的歷史。
 
@@ -97,6 +101,7 @@ MULTICA_SLACK_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_DINGTALK_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_WECOM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_TELEGRAM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
+MULTICA_SHARECRM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 ```
 
 這些金鑰用於加密儲存 Bot 憑據。生成、儲存和輪換方法見[環境變數](/environment-variables)。Multica Cloud 已完成這項配置。
@@ -108,10 +113,13 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 
 任何模式下都有一個殘留視窗：回覆產生時沒有任何副本持有活連線（全部在重連中），這條回覆不會送達。轉發它的副本事後會確認有沒有副本認領過這次投遞，沒有就給 `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` 加一，所以丟失的頻率可以從這個指標看出來。不能接受這種丟失時，單副本仍是最保守的部署方式。
 
+紛享銷客使用 channel supervisor 租約下的按安裝 SSE 連線；同一個 App ID 同一時間只保持一條活躍流。
+
 ## 接下來
 
 - [飛書 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [釘釘 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+- [紛享銷客 Bot 接入](/sharecrm-bot-integration)
 - [與 AI 代理對話](/chat)

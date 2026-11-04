@@ -185,7 +185,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 與 App ID 配套的完整 PEM 私鑰，用途同上 |
 | 飛書 | `MULTICA_LARK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 編碼的 32 位元組 token 加密金鑰 |
+| 釘釘 | `MULTICA_DINGTALK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉釘釘 |
+| 企業微信 | `MULTICA_WECOM_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉企業微信 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 編碼的 32 位元組 Bot token 加密金鑰 |
+| 紛享銷客 | `MULTICA_SHARECRM_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰；為空則關閉紛享銷客 |
 | Composio | `COMPOSIO_API_KEY` | 啟用 Composio 工具連線 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回撥 API 地址；可回退到 `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 簽名金鑰；可從 `JWT_SECRET` 派生 |
@@ -198,7 +201,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 不配置 `GITHUB_APP_ID` 和私鑰時，PR 仍會正常關聯、映象，並在合併後改狀態，但卡片上不顯示 CI 與可合併狀態，"從 GitHub 選擇"倉庫入口也會禁用。
 
-配置步驟見 [GitHub 整合](/github-integration#自託管配置)、[飛書 Bot](/lark-bot-integration#自託管配置)、[Slack Bot](/slack-bot-integration#自託管配置)和 [Telegram Bot](/telegram-bot-integration#自託管配置)。
+配置步驟見 [GitHub 整合](/github-integration#自託管配置)、[飛書 Bot](/lark-bot-integration#自託管配置)、[Slack Bot](/slack-bot-integration#自託管配置)、[釘釘 Bot](/dingtalk-bot-integration#自部署配置)、[Telegram Bot](/telegram-bot-integration#自託管配置)、[紛享銷客 Bot](/sharecrm-bot-integration#自部署配置)和[聊天整合](/channels#自託管)。
 
 ## 服務端 LLM
 
