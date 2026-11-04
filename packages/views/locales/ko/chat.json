@@ -1,5 +1,6 @@
 {
   "limit_reset": {
+    "last_known": "{{provider}} 마지막 확인값 ({{time}})",
     "label": "리셋",
     "countdown_label": "한도 초기화까지 남은 시간",
     "unknown": "리셋 시각 확인 불가",

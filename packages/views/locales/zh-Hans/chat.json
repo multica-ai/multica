@@ -1,5 +1,6 @@
 {
   "limit_reset": {
+    "last_known": "{{provider}} 上次确认值 ({{time}})",
     "label": "重置",
     "countdown_label": "距离额度重置的时间",
     "unknown": "无法确认重置时间",

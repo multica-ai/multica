@@ -3,7 +3,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { llmLimitStatusSchema } from "@multica/core/api/schemas";
-import { formatResetCountdown, LlmRemainingBadge } from "./llm-remaining-badge";
+import { formatResetCountdown, retainKnownQuota, LlmRemainingBadge } from "./llm-remaining-badge";
 
 function renderBadge() {
   const queryClient = new QueryClient({
@@ -160,4 +160,51 @@ describe("reset countdown", () => {
     expect(llmLimitStatusSchema.parse({ five_hour_resets_at: "bad" }).five_hour_resets_at).toBeNull();
     expect(llmLimitStatusSchema.parse({ claude_status: "stale", five_hour_resets_at: "2026-11-04T00:00:00Z" }).five_hour_resets_at).toBeNull();
   });
+});
+
+
+describe("last known quota during failures", () => {
+  it("retains observed percentages when a later API response loses a provider", () => {
+    const previous = llmLimitStatusSchema.parse({five_hour_pct: 9, seven_day_pct: 82, gpt_five_hour_pct: 0, gpt_seven_day_pct: 1, claude_status: "available", gpt_status: "available", claude_last_observed_at: "2026-11-04T10:38:40Z"});
+    const current = llmLimitStatusSchema.parse({claude_status: "unavailable", gpt_status: "unavailable"});
+    const result = retainKnownQuota(previous, current);
+    expect(result).toMatchObject({five_hour_pct: 9, seven_day_pct: 82, gpt_five_hour_pct: 0, gpt_seven_day_pct: 1, claude_status: "unavailable", gpt_status: "unavailable", claude_last_observed_at: "2026-11-04T10:38:40Z"});
+    expect(result.seven_day_resets_at).toBeNull();
+    expect(retainKnownQuota(undefined, current).five_hour_pct).toBeNull();
+  });
+
+  it("uses the API's last observation on initial load without claiming it is current", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ok: true, json: async () => ({claude_status: "unavailable", claude_last_five_hour_pct: 9, claude_last_seven_day_pct: 82, claude_last_observed_at: "2026-11-04T10:38:40Z"})})));
+    renderBadge();
+    await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 91%/7d 18%"));
+    expect(screen.getByTestId("chat-token-gauge").title).toContain("마지막 확인값");
+    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 리셋 --:--:--");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the last successful percentages when manual refresh fails", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce({ok: true,json: async () => ({five_hour_pct: 9,seven_day_pct: 82,gpt_five_hour_pct: 0,gpt_seven_day_pct: 1})}).mockResolvedValue({ok: false});
+    vi.stubGlobal("fetch", fetcher);
+    renderBadge();
+    await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C: 5h 91%/7d 18%"));
+    fireEvent.click(screen.getByLabelText("채팅 LLM 잔량 새로고침"));
+    await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 91%/7d 18% · G*: 5h 100%/7d 99%"));
+    vi.unstubAllGlobals();
+  });
+});
+
+
+it("marks partial fallback as stale and replaces it with the next complete observation", () => {
+  const previous = llmLimitStatusSchema.parse({five_hour_pct: 9, seven_day_pct: 82});
+  const partial = retainKnownQuota(previous, llmLimitStatusSchema.parse({five_hour_pct: 10, claude_status: "available"}));
+  expect(partial).toMatchObject({five_hour_pct: 10, seven_day_pct: 82, claude_status: "stale"});
+  const recovered = retainKnownQuota(partial, llmLimitStatusSchema.parse({five_hour_pct: 11, seven_day_pct: 83, claude_status: "available"}));
+  expect(recovered).toMatchObject({five_hour_pct: 11, seven_day_pct: 83, claude_status: "available"});
+});
+
+it("marks a retained weekly-only observation", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ok: true,json: async () => ({claude_status: "unavailable",claude_last_seven_day_pct: 82})})));
+  renderBadge();
+  await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 확인 불가/7d 18%"));
+  vi.unstubAllGlobals();
 });

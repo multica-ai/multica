@@ -1,5 +1,6 @@
 {
   "limit_reset": {
+    "last_known": "{{provider}} last known value ({{time}})",
     "label": "Reset",
     "countdown_label": "Time until limit reset",
     "unknown": "Reset time unavailable",

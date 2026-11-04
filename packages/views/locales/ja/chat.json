@@ -1,5 +1,6 @@
 {
   "limit_reset": {
+    "last_known": "{{provider}} 最後に確認した値 ({{time}})",
     "label": "リセット",
     "countdown_label": "上限リセットまでの時間",
     "unknown": "リセット時刻を確認できません",

@@ -89,15 +89,35 @@ function ResetCountdown({ data }: { data: LlmLimitStatus }) {
   </div>;
 }
 
+export function retainKnownQuota(previous: LlmLimitStatus | undefined, current: LlmLimitStatus): LlmLimitStatus {
+  const result = { ...current };
+  if (current.five_hour_pct === null || current.seven_day_pct === null) {
+    result.five_hour_pct ??= current.claude_last_five_hour_pct ?? previous?.five_hour_pct ?? null;
+    result.seven_day_pct ??= current.claude_last_seven_day_pct ?? previous?.seven_day_pct ?? null;
+    result.sonnet_pct ??= previous?.sonnet_pct ?? null;
+    result.claude_last_observed_at ??= previous?.claude_last_observed_at;
+    if (result.five_hour_pct !== null || result.seven_day_pct !== null) result.claude_status = current.claude_status === "available" ? "stale" : current.claude_status ?? "unavailable";
+  }
+  if (current.gpt_five_hour_pct === null || current.gpt_seven_day_pct === null) {
+    result.gpt_five_hour_pct ??= previous?.gpt_five_hour_pct ?? null;
+    result.gpt_seven_day_pct ??= previous?.gpt_seven_day_pct ?? null;
+    result.gpt_last_observed_at ??= previous?.gpt_last_observed_at;
+    if (result.gpt_five_hour_pct !== null || result.gpt_seven_day_pct !== null) result.gpt_status = current.gpt_status === "available" ? "stale" : current.gpt_status ?? "unavailable";
+  }
+  return result;
+}
+
 export function LlmRemainingBadge({ className }: { className?: string }) {
+  const { t } = useT("chat");
   const { data: fetchedData, isError, isFetching, refetch } = useQuery({
     queryKey: ["chat-llm-limit-status"],
     queryFn: fetchLlmLimitStatus,
+    structuralSharing: (previous, current) => retainKnownQuota(previous as LlmLimitStatus | undefined, current as LlmLimitStatus),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
-  const data = isError ? unavailableLlmLimitStatus : fetchedData;
+  const data = isError ? retainKnownQuota(fetchedData, unavailableLlmLimitStatus) : fetchedData;
   if (!data) return null;
 
   const claudeFiveHourRemaining = remainingFromUsage(data.five_hour_pct);
@@ -115,9 +135,15 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
     `GPT 5시간 ${gptFiveHourRemaining === null ? "확인 불가" : `${gptFiveHourRemaining}%`}, 리셋 ${gptFiveHourReset}`,
     `GPT 1주 ${gptSevenDayRemaining === null ? "확인 불가" : `${gptSevenDayRemaining}%`}, 리셋 ${gptSevenDayReset}`,
   ].join(", ");
+  const claudeLastKnown = data.claude_status !== undefined && data.claude_status !== "available" && (claudeFiveHourRemaining !== null || claudeSevenDayRemaining !== null);
+  const gptLastKnown = data.gpt_status !== undefined && data.gpt_status !== "available" && (gptFiveHourRemaining !== null || gptSevenDayRemaining !== null);
+  const lastKnownTitle = [
+    claudeLastKnown ? t($ => $.limit_reset.last_known, {provider: "C*", time: data.claude_last_observed_at ?? "--"}) : "",
+    gptLastKnown ? t($ => $.limit_reset.last_known, {provider: "G*", time: data.gpt_last_observed_at ?? "--"}) : "",
+  ].filter(Boolean).join(" · ");
   const compactLabel = [
-    `C: 5h ${compactRemainingLabel(claudeFiveHourRemaining)}/7d ${compactRemainingLabel(claudeSevenDayRemaining)}`,
-    `G: 5h ${compactRemainingLabel(gptFiveHourRemaining)}/7d ${compactRemainingLabel(gptSevenDayRemaining)}`,
+    `C${claudeLastKnown ? "*" : ""}: 5h ${compactRemainingLabel(claudeFiveHourRemaining)}/7d ${compactRemainingLabel(claudeSevenDayRemaining)}`,
+    `G${gptLastKnown ? "*" : ""}: 5h ${compactRemainingLabel(gptFiveHourRemaining)}/7d ${compactRemainingLabel(gptSevenDayRemaining)}`,
   ].join(" · ");
 
   return (
@@ -128,8 +154,8 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
         "flex min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1 text-[10px] leading-none text-muted-foreground",
         className,
       )}
-      title={data.claude_last_observed_at ? `Claude 마지막 관측 ${new Date(data.claude_last_observed_at).toLocaleString()}` : undefined}
-      aria-label={ariaLabel}
+      title={lastKnownTitle || (data.claude_last_observed_at ? `Claude 마지막 관측 ${new Date(data.claude_last_observed_at).toLocaleString()}` : undefined)}
+      aria-label={[ariaLabel, lastKnownTitle].filter(Boolean).join(" · ")}
     >
       <div className="flex w-full min-w-0 items-center gap-1.5">
       <span
