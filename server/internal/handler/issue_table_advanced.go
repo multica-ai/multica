@@ -57,11 +57,19 @@ func canonicalIssueTableFilterNode(node *issueTableFilterNode) *issueTableFilter
 	if node == nil {
 		return nil
 	}
+	var values []json.RawMessage
+	if strings.HasPrefix(node.Field, issueTableFilterPropertyPrefix) {
+		// Property equality keeps whitespace significant, including string
+		// members alongside operator objects. Mirror propertyPredicate.
+		values = sortedUniqueRawJSON(node.Values)
+	} else {
+		values = canonicalIssueTableValues(node.Values)
+	}
 	out := issueTableFilterNode{
 		Match:  node.Match,
 		Field:  node.Field,
 		Negate: node.Negate,
-		Values: canonicalIssueTableValues(node.Values),
+		Values: values,
 	}
 	// A condition whose values canonicalize to nothing cannot constrain the
 	// query (the compiler drops it), so it is dropped here too — otherwise two
@@ -95,16 +103,9 @@ func isDroppedIssueTableFilterNode(node *issueTableFilterNode) bool {
 	return len(node.Children) == 0 && len(node.Values) == 0
 }
 
-// canonicalIssueTableValues canonicalizes an advanced condition's values the
-// same way the compile path reads them, so two spellings of one query share a
-// fingerprint. Condition values are JSON strings; they go through the same
-// TrimSpace/empty-drop/sort/dedupe that sortedUniqueStrings applies before
-// compiling (a value that trims to nothing cannot constrain the query, so it
-// must not distinguish fingerprints either — otherwise a cursor captured
-// under one spelling is rejected with cursor_query_mismatch when the same
-// query arrives under another). Property conditions carry non-string values;
-// those keep the raw-byte canonicalization, which is all the property
-// compiler does with them.
+// canonicalIssueTableValues applies the compiler's string normalization to
+// built-in dimensions. Non-string members stay raw for compiler validation;
+// property conditions use sortedUniqueRawJSON instead.
 func canonicalIssueTableValues(values []json.RawMessage) []json.RawMessage {
 	if len(values) == 0 {
 		return nil

@@ -1,110 +1,156 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// rowsRequestWithCursor posts one table-rows query and returns the response.
-func rowsRequestWithCursor(t *testing.T, advanced map[string]any, cursor string) issueTableRowsResponse {
-	t.Helper()
-	filters := map[string]any{}
-	if advanced != nil {
-		filters["advanced"] = advanced
-	}
-	body := map[string]any{
-		"query": map[string]any{
-			"scope":   map[string]any{"kind": "workspace"},
-			"filters": filters,
-			"sort":    map[string]any{"field": "position", "direction": "asc"},
-		},
-		"group": map[string]any{"kind": "none"},
-		"page": func() any {
-			if cursor == "" {
-				return map[string]any{"limit": 1}
-			}
-			return map[string]any{"limit": 1, "cursor": cursor}
-		}(),
-	}
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues/table/rows", body)
-	testHandler.ListIssueTableRows(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("table rows: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp issueTableRowsResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode rows response: %v", err)
-	}
-	return resp
-}
-
-// TestIssueTableCursorSurvivesDroppedEmptyAdvancedValues pins the
-// fingerprint/compile parity for whitespace-only advanced values (#9766
-// follow-up): the compile path drops values that trim to nothing, so
-// ["urgent"] and ["urgent", "  "] are the same query and a cursor captured
-// under one spelling must survive the other. Before the fix the two
-// spellings fingerprinted differently and the second page died with 409
-// cursor_query_mismatch.
 func TestIssueTableCursorSurvivesDroppedEmptyAdvancedValues(t *testing.T) {
-	urgentA := dbfxIssueWithPriority(t, "urgent", "one")
-	urgentB := dbfxIssueWithPriority(t, "urgent", "two")
-	t.Cleanup(func() {
-		deleteIssueForTableTest(t, urgentA)
-		deleteIssueForTableTest(t, urgentB)
-	})
-
-	advanced := func(values ...string) map[string]any {
-		children := make([]map[string]any, 0, len(values))
-		for _, v := range values {
-			children = append(children, map[string]any{"field": "priorities", "values": []string{v}})
-		}
-		return map[string]any{"match": "any", "children": children}
+	prefix := "cursor-empty-" + uuid.NewString()
+	firstID := dbfx.Issue(t, prefix+" first", testutil.Cols{"priority": "urgent", "position": 1})
+	secondID := dbfx.Issue(t, prefix+" second", testutil.Cols{"priority": "urgent", "position": 2})
+	condition := func(values ...any) issueTableFilterNode {
+		return issueTableFilterNode{Field: "priorities", Values: rawValues(values...)}
 	}
-
-	// Page 1 under spelling A captures a cursor.
-	first := rowsRequestWithCursor(t, advanced("urgent"), "")
-	if first.NextCursor == nil || *first.NextCursor == "" {
-		t.Fatalf("expected a next cursor with limit=1 and two urgent issues")
+	base := issueTableFilterNode{Match: "any", Children: []issueTableFilterNode{condition("urgent")}}
+	variants := map[string]issueTableFilterNode{
+		"empty value": {Match: "any", Children: []issueTableFilterNode{condition("urgent", "  ")}},
+		"empty condition": {Match: "any", Children: []issueTableFilterNode{
+			condition("urgent"), condition("  "),
+		}},
+		"empty group": {Match: "any", Children: []issueTableFilterNode{
+			condition("urgent"), {Match: "all", Children: []issueTableFilterNode{condition("  ")}},
+		}},
+		"padded value": {Match: "any", Children: []issueTableFilterNode{condition(" urgent ")}},
 	}
-
-	// Page 2 under spelling B (same query, extra whitespace-only value).
-	second := rowsRequestWithCursor(t, advanced("urgent", "  "), *first.NextCursor)
-	if len(second.Rows) == 0 {
-		t.Fatalf("page 2 returned no rows")
+	rows := func(t *testing.T, advanced *issueTableFilterNode, cursor *string) issueTableRowsResponse {
+		t.Helper()
+		var response issueTableRowsResponse
+		testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope:   issueTableScope{Kind: "workspace"},
+				Search:  prefix,
+				Filters: issueTableFiltersRequest{Advanced: advanced},
+				Sort:    issueTableSortRequest{Field: "position", Direction: "asc"},
+			},
+			Group: issueTableGroupSpec{Kind: "none"},
+			Page:  issueTablePageRequest{Limit: 1, Cursor: cursor},
+		})).Want(http.StatusOK).JSON(&response)
+		return response
 	}
-	for _, row := range second.Rows {
-		if row.Issue.ID == urgentA || row.Issue.ID == urgentB {
-			continue
-		}
-		t.Fatalf("page 2 leaked non-fixture row %s", row.Issue.ID)
+	for name, variant := range variants {
+		t.Run(name, func(t *testing.T) {
+			for _, reverse := range []bool{false, true} {
+				from, to := &base, &variant
+				if reverse {
+					from, to = to, from
+				}
+				first := rows(t, from, nil)
+				if len(first.Rows) != 1 || first.Rows[0].Issue.ID != firstID || first.NextCursor == nil {
+					t.Fatalf("reverse=%v: unexpected first page: %+v", reverse, first)
+				}
+				second := rows(t, to, first.NextCursor)
+				if len(second.Rows) != 1 || second.Rows[0].Issue.ID != secondID || second.NextCursor != nil {
+					t.Fatalf("reverse=%v: unexpected second page: %+v", reverse, second)
+				}
+				if first.QueryFingerprint != second.QueryFingerprint {
+					t.Fatalf("reverse=%v: equivalent filters have different fingerprints", reverse)
+				}
+			}
+		})
 	}
-
-	// And the reverse order: cursor captured under B survives A.
-	firstB := rowsRequestWithCursor(t, advanced("urgent", "  "), "")
-	if firstB.NextCursor == nil || *firstB.NextCursor == "" {
-		t.Fatalf("expected a next cursor under spelling B")
-	}
-	secondA := rowsRequestWithCursor(t, advanced("urgent"), *firstB.NextCursor)
-	if len(secondA.Rows) == 0 {
-		t.Fatalf("page 2 (reverse order) returned no rows")
-	}
-	_ = fmt.Sprint
 }
 
-// dbfxIssueWithPriority creates one issue with the given priority and returns
-// its id.
-func dbfxIssueWithPriority(t *testing.T, priority, tag string) string {
-	t.Helper()
-	created := createIssueForTest(t, map[string]any{"title": "fingerprint parity " + priority + " " + tag, "priority": priority})
-	return created.ID
+func TestIssueTableCursorRejectsChangedAdvancedPropertyValues(t *testing.T) {
+	definition := uuid.NewString()
+	issue := func(title, value string, position int) string {
+		return dbfx.Issue(t, title, testutil.Cols{
+			"properties": testutil.Raw(fmt.Sprintf(`'{"%s": %q}'::jsonb`, definition, value)),
+			"position":   position,
+		})
+	}
+	plainFirst := issue("plain first", "alpha", 10)
+	plainSecond := issue("plain second", "alpha", 30)
+	paddedFirst := issue("padded first", " alpha ", 5)
+	paddedSecond := issue("padded second", " alpha ", 20)
+	request := func(value string, cursor *string) issueTableRowsRequest {
+		return issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope: issueTableScope{Kind: "workspace"},
+				Filters: issueTableFiltersRequest{Advanced: &issueTableFilterNode{
+					Match:    "all",
+					Children: []issueTableFilterNode{{Field: "property:" + definition, Values: rawValues(value)}},
+				}},
+				Sort: issueTableSortRequest{Field: "position", Direction: "asc"},
+			},
+			Group: issueTableGroupSpec{Kind: "none"},
+			Page:  issueTablePageRequest{Limit: 1, Cursor: cursor},
+		}
+	}
+	for _, tc := range []struct {
+		value, otherValue string
+		firstID, secondID string
+	}{
+		{"alpha", " alpha ", plainFirst, plainSecond},
+		{" alpha ", "alpha", paddedFirst, paddedSecond},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			var first, second issueTableRowsResponse
+			testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", request(tc.value, nil))).Want(http.StatusOK).JSON(&first)
+			if len(first.Rows) != 1 || first.Rows[0].Issue.ID != tc.firstID || first.NextCursor == nil {
+				t.Fatalf("unexpected first page: %+v", first)
+			}
+			testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", request(tc.value, first.NextCursor))).Want(http.StatusOK).JSON(&second)
+			if len(second.Rows) != 1 || second.Rows[0].Issue.ID != tc.secondID || second.NextCursor != nil {
+				t.Fatalf("unexpected second page: %+v", second)
+			}
+			var rejected struct {
+				Error string `json:"error"`
+			}
+			testutil.Call(t, testHandler.ListIssueTableRows, newRequest(http.MethodPost, "/api/issues/table/rows", request(tc.otherValue, first.NextCursor))).Want(http.StatusConflict).JSON(&rejected)
+			if rejected.Error != "cursor_query_mismatch" {
+				t.Fatalf("unexpected cursor rejection: %s", rejected.Error)
+			}
+		})
+	}
 }
 
-func deleteIssueForTableTest(t *testing.T, id string) {
-	t.Helper()
-	r := withURLParam(newRequest("DELETE", "/api/issues/"+id, nil), "id", id)
-	testHandler.DeleteIssue(httptest.NewRecorder(), r)
+func TestIssueTableFingerprintPreservesAdvancedPropertyValues(t *testing.T) {
+	field := "property:" + uuid.NewString()
+	fingerprint := func(t *testing.T, values ...any) string {
+		t.Helper()
+		value, err := canonicalIssueTableFingerprint(testWorkspaceID, issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "workspace"},
+			Filters: issueTableFiltersRequest{Advanced: &issueTableFilterNode{
+				Match:    "all",
+				Children: []issueTableFilterNode{{Field: field, Values: rawValues(values...)}},
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	for _, tc := range []struct {
+		name        string
+		left, right []any
+	}{
+		{"padded string", []any{"alpha"}, []any{" alpha "}},
+		{"whitespace-only string", []any{"  "}, nil},
+		{"padded unset marker", []any{noPropertyValue}, []any{" " + noPropertyValue + " "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if fingerprint(t, tc.left...) == fingerprint(t, tc.right...) {
+				t.Fatal("different property predicates share a fingerprint")
+			}
+		})
+	}
+	op := map[string]string{"op": "contains", "value": " alpha "}
+	if fingerprint(t, "alpha", op, "alpha") != fingerprint(t, op, "alpha") {
+		t.Fatal("property value order or duplicates changed the fingerprint")
+	}
 }
