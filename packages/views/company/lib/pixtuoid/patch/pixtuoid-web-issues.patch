@@ -1399,30 +1399,6 @@ index c32553c7..3b4f33f8 100644
 +    assert!(first.strike().is_none(), "a daylight office never strikes");
 +    assert_eq!(first.nightfall(), 0.0, "a daylight office never goes dark");
 +}
-diff --git a/crates/pixtuoid-web/examples/cb.rs b/crates/pixtuoid-web/examples/cb.rs
-new file mode 100644
-index 00000000..29decc93
---- /dev/null
-+++ b/crates/pixtuoid-web/examples/cb.rs
-@@ -0,0 +1,18 @@
-+use pixtuoid_web::Company;
-+fn main() {
-+    let (w, h) = (416u32, 255u32);
-+    let mut o = Company::new(2).expect("office");
-+    o.clear_script();
-+    o.set_weather(Some("clear".to_string()));
-+    let base = 1_793_760_000_000.0;
-+    o.step(base, w, h);
-+    for i in 0..30u32 { let k = format!("k{i}"); o.issue_start(&k, i % 4, true); if i % 3 == 0 { o.issue_working(&k, true); } }
-+    let t0 = std::time::Instant::now();
-+    for i in 0..600 { o.step(base + 33.0 * (i as f64 + 1.0), w, h); }
-+    println!("avg_step_ms={:.3}", t0.elapsed().as_secs_f64() * 1000.0 / 600.0);
-+    println!("{}", pixtuoid_scene::cutaway::canvas::rg_report());
-+    println!("{}", pixtuoid_scene::outside::rg2_report());
-+    println!("{}", pixtuoid_scene::clouds::cp_report());
-+    println!("{}", pixtuoid_scene::outside::rg3_report());
-+    println!("{}", pixtuoid_scene::celestial::cc_report());
-+}
 diff --git a/crates/pixtuoid-web/examples/hero_still.rs b/crates/pixtuoid-web/examples/hero_still.rs
 index e8434865..95ded108 100644
 --- a/crates/pixtuoid-web/examples/hero_still.rs
@@ -1463,7 +1439,7 @@ index e8434865..95ded108 100644
          Err(_) => {
              eprintln!("bundled sprite pack failed to parse (build bug)");
 diff --git a/crates/pixtuoid-web/src/lib.rs b/crates/pixtuoid-web/src/lib.rs
-index 14fd1b18..1c48a21c 100644
+index 14fd1b18..53a6662c 100644
 --- a/crates/pixtuoid-web/src/lib.rs
 +++ b/crates/pixtuoid-web/src/lib.rs
 @@ -1,7 +1,7 @@
@@ -1595,7 +1571,7 @@ index 14fd1b18..1c48a21c 100644
              // Too small to lay out: the canvas still takes a frame its size,
              // in the background the engine fills a too-small classic with.
              self.screen.blank(px);
-@@ -256,17 +296,159 @@ impl Office {
+@@ -256,17 +296,161 @@ impl Office {
          let badges = picture
              .text
              .map_or_else(Vec::new, |text| text.badges.to_vec());
@@ -1609,9 +1585,11 @@ index 14fd1b18..1c48a21c 100644
 +        };
          let picture = pixtuoid_scene::look::Picture::Floor(picture);
          if !self.screen.admit(&picture, px, (), None).written() {
-+            // The screen keeps its last frame, so the next written frame repaints whole.
++            // The screen keeps its last frame and the page's canvas still shows it, so
++            // nothing is repainted now. The next written frame repaints whole.
 +            self.mirror_stale = true;
-+            self.dirty_full = true;
++            self.dirty_full = false;
++            self.dirty_out.clear();
              return;
          }
 -        expand_rgba(&mut self.rgba, picture.pixels());
@@ -1757,7 +1735,7 @@ index 14fd1b18..1c48a21c 100644
      /// bytes).
      ///
      /// CONTRACT: re-read this (and rebuild any `Uint8ClampedArray` view) after
-@@ -277,7 +459,7 @@ impl Office {
+@@ -277,7 +461,7 @@ impl Office {
          self.rgba.as_ptr()
      }
  
@@ -1766,7 +1744,7 @@ index 14fd1b18..1c48a21c 100644
      pub fn frame_len(&self) -> usize {
          self.rgba.len()
      }
-@@ -305,6 +487,15 @@ impl Office {
+@@ -305,6 +489,15 @@ impl Office {
          self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
      }
  
@@ -1782,7 +1760,7 @@ index 14fd1b18..1c48a21c 100644
      /// Recolor the whole office to one of the [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES) by name. Unknown
      /// name = no-op.
      pub fn set_theme(&mut self, name: &str) {
-@@ -362,6 +553,10 @@ impl Office {
+@@ -362,6 +555,10 @@ impl Office {
                  hex(*marker),
                  hex(name.ink)
              ));
@@ -1793,7 +1771,7 @@ index 14fd1b18..1c48a21c 100644
              out.push('}');
          }
          out.push_str(&format!(
-@@ -374,7 +569,32 @@ impl Office {
+@@ -374,7 +571,32 @@ impl Office {
          push_board_segments(&mut out, &board.mood, theme);
          out.push_str(",\"context\":");
          push_board_segments(&mut out, &board.context, theme);
@@ -1827,7 +1805,7 @@ index 14fd1b18..1c48a21c 100644
          out
      }
  
-@@ -495,17 +715,17 @@ impl Office {
+@@ -495,17 +717,17 @@ impl Office {
  /// which already crossfades.
  const GAIN_DEZIPPER: Duration = Duration::from_millis(30);
  
@@ -1849,7 +1827,7 @@ index 14fd1b18..1c48a21c 100644
      pub fn frame_size(&self, w: u32, h: u32) -> (u16, u16) {
          let scale = self.fit.scale();
          let (w, h) = self.units(w, h);
-@@ -535,6 +755,30 @@ impl Office {
+@@ -535,6 +757,30 @@ impl Office {
          let cap = floor_capacity(units_w, units_h, self.seed);
          self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
          self.caps_units = Some((units_w, units_h));
@@ -1880,7 +1858,7 @@ index 14fd1b18..1c48a21c 100644
      }
  
      /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
-@@ -624,14 +868,40 @@ impl Office {
+@@ -624,14 +870,40 @@ impl Office {
      }
  }
  
@@ -1924,7 +1902,7 @@ index 14fd1b18..1c48a21c 100644
      }
  }
  
-@@ -708,9 +978,9 @@ mod tests {
+@@ -708,9 +980,9 @@ mod tests {
      use crate::script::cast_id;
      use pixtuoid_scene::screen::{Flashes, ManualClock};
  
@@ -1937,7 +1915,7 @@ index 14fd1b18..1c48a21c 100644
              Ok(o) => o,
              Err(_) => panic!("bundled pack must parse"),
          }
-@@ -776,7 +1046,7 @@ mod tests {
+@@ -776,7 +1048,7 @@ mod tests {
      }
  
      /// A storm office whose flashes are held on a screen clock the test moves.
@@ -1946,7 +1924,7 @@ index 14fd1b18..1c48a21c 100644
          let mut o = office();
          o.set_weather(Some("storm".into()));
          let screen = ManualClock::default();
-@@ -824,7 +1094,7 @@ mod tests {
+@@ -824,7 +1096,7 @@ mod tests {
      }
  
      /// Step `o` to `ms` with its screen clock there too.
@@ -1955,7 +1933,7 @@ index 14fd1b18..1c48a21c 100644
          screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(ms));
          o.step(ms as f64, 160, 96);
      }
-@@ -881,7 +1151,7 @@ mod tests {
+@@ -881,7 +1153,7 @@ mod tests {
          let (mut o, screen) = storm_on_screen();
          step_at(&mut o, &screen, strike.changes[0] - 2 * FLOOR_MS);
          step_at(&mut o, &screen, second - FLOOR_MS / 4);
@@ -1964,7 +1942,7 @@ index 14fd1b18..1c48a21c 100644
              let v: serde_json::Value =
                  serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
              v["labels"].as_array().expect("labels").len()
-@@ -1046,6 +1316,22 @@ mod tests {
+@@ -1046,6 +1318,22 @@ mod tests {
          );
      }
  
@@ -1987,7 +1965,7 @@ index 14fd1b18..1c48a21c 100644
      #[test]
      fn overlay_json_exports_a_board_and_a_label_per_visible_agent() {
          let mut o = office();
-@@ -1202,7 +1488,7 @@ mod tests {
+@@ -1202,7 +1490,7 @@ mod tests {
          use pixtuoid_core::state::DaemonState;
          let mut o = office();
          let gw = hero_gateway();
@@ -1996,7 +1974,7 @@ index 14fd1b18..1c48a21c 100644
              o.scene
                  .daemon(gw.source(), gw.instance())
                  .map(|p| p.display_state())
-@@ -1299,7 +1585,7 @@ mod tests {
+@@ -1299,7 +1587,7 @@ mod tests {
              "the click past exhaustion is refused outright: {admitted:?}"
          );
          o.step(T0_MS + 32_000.0, w, h);
@@ -2005,7 +1983,7 @@ index 14fd1b18..1c48a21c 100644
              .expect("the portrait buffer lays out");
          assert_eq!(
              o.scene.total_capacity(),
-@@ -1356,7 +1642,7 @@ mod tests {
+@@ -1356,7 +1644,7 @@ mod tests {
              "only the first MAX_LIVE clicks are admitted; click spam past it is refused"
          );
          o.step(T0_MS + 32_000.0, 320, 180);
@@ -2014,7 +1992,7 @@ index 14fd1b18..1c48a21c 100644
              o.scene
                  .agents
                  .keys()
-@@ -1394,7 +1680,7 @@ mod tests {
+@@ -1394,7 +1682,7 @@ mod tests {
          );
          o.step(T0_MS + 32_000.0, 320, 180);
  
@@ -2023,7 +2001,7 @@ index 14fd1b18..1c48a21c 100644
              o.scene
                  .agents
                  .keys()
-@@ -1418,12 +1704,12 @@ mod tests {
+@@ -1418,12 +1706,12 @@ mod tests {
  
      #[test]
      fn set_weather_forces_that_weather_and_two_offices_dont_fight() {
@@ -2038,7 +2016,7 @@ index 14fd1b18..1c48a21c 100644
          clear.set_weather(Some("clear".into()));
          clear.step(T0_MS, 160, 96);
          let clear_frame = clear.frame().to_vec();
-@@ -1436,12 +1722,12 @@ mod tests {
+@@ -1436,12 +1724,12 @@ mod tests {
              "storm office must keep its own weather after another office stepped"
          );
  
@@ -2053,7 +2031,7 @@ index 14fd1b18..1c48a21c 100644
          unforced.step(T0_MS, 160, 96);
          // `assert!` over the slices, not `assert_eq!`: a mismatch would otherwise
          // dump two whole frames into the failure output.
-@@ -1456,16 +1742,16 @@ mod tests {
+@@ -1456,16 +1744,16 @@ mod tests {
      #[test]
      fn an_offices_rain_follows_its_own_weather_after_another_steps() {
          let now = SystemTime::UNIX_EPOCH + Duration::from_millis(T0_MS as u64);
@@ -2073,7 +2051,7 @@ index 14fd1b18..1c48a21c 100644
          clear.set_weather(Some("clear".into()));
          clear.step(T0_MS, 160, 96);
          assert_ne!(rain(&mut clear), alone, "storm vs clear must sound apart");
-@@ -1478,7 +1764,7 @@ mod tests {
+@@ -1478,7 +1766,7 @@ mod tests {
  
      #[test]
      fn set_theme_recolors_and_unknown_is_noop() {
