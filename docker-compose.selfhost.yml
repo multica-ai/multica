@@ -404,7 +404,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      # The first start runs migrations and takes about a minute before /health
+      # answers. A shorter period marks the container unhealthy and fails make dev-full.
+      start_period: 180s
     restart: unless-stopped
 
   knowledge-ui:
