@@ -157,7 +157,7 @@
       "squads_and_members": "스쿼드 및 멤버",
       "members_other": "멤버 {{count}}명",
       "resources": "리소스",
-      "runtimes_offline_other": "{{count}}개 오프라인",
+      "runtimes_online_other": "{{count}}대 온라인",
       "invite_member": "멤버 초대"
     },
     "autopilots": {

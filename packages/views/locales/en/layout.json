@@ -162,8 +162,8 @@
       "members_one": "{{count}} member",
       "members_other": "{{count}} members",
       "resources": "Resources",
-      "runtimes_offline_one": "{{count}} offline",
-      "runtimes_offline_other": "{{count}} offline",
+      "runtimes_online_one": "{{count}} online",
+      "runtimes_online_other": "{{count}} online",
       "invite_member": "Invite member"
     },
     "autopilots": {

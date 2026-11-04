@@ -157,7 +157,7 @@
       "squads_and_members": "小队与成员",
       "members_other": "{{count}} 位成员",
       "resources": "资源",
-      "runtimes_offline_other": "{{count}} 个离线",
+      "runtimes_online_other": "{{count}} 台在线",
       "invite_member": "邀请成员"
     },
     "autopilots": {
