@@ -375,12 +375,16 @@ services:
       SYSTEM_AES_KEY: ${KNOWLEDGE_SYSTEM_AES_KEY:-}
       SYSTEM_SIGNING_KEY: ${KNOWLEDGE_SYSTEM_SIGNING_KEY:-}
       # Multica provisions one WeKnora workspace (tenant) per Multica workspace
-      # through a single service user, so the per-user tenant cap is lifted and
-      # self-service tenant creation stays on. Registration can be closed once
+      # through a single service user. WeKnora's default cap of 10 tenants per
+      # user is too low for that, so it is raised (KNOWLEDGE_TENANT_MAX_OWNED_PER_USER).
+      # Self-service tenant creation stays on. Registration can be closed once
       # the service user exists (KNOWLEDGE_DISABLE_REGISTRATION=true).
       DISABLE_REGISTRATION: ${KNOWLEDGE_DISABLE_REGISTRATION:-false}
       WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED: "true"
-      WEKNORA_TENANT_MAX_OWNED_PER_USER: ${KNOWLEDGE_TENANT_MAX_OWNED_PER_USER:--1}
+      WEKNORA_TENANT_MAX_OWNED_PER_USER: ${KNOWLEDGE_TENANT_MAX_OWNED_PER_USER:-1000}
+      # WeKnora creates per-owner logins only for a system administrator, so the
+      # service user must be bootstrapped as one (SELF_HOSTING.md, knowledge).
+      WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL: ${KNOWLEDGE_SERVICE_EMAIL:-}
       WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
     volumes:
       - knowledge-data-files:/data/files

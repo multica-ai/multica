@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli agent-pack agent-pack-bundles multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
+.PHONY: help makehelp dev dev-full server daemon cli agent-pack agent-pack-bundles multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -306,6 +306,9 @@ remove-worktree: ## Drop a linked worktree's database, then remove it (WORKTREE=
 
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
+
+dev-full: ## Fresh machine: start the WeKnora knowledge services, fill their secrets, then make dev
+	@bash scripts/dev-full.sh
 
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)
