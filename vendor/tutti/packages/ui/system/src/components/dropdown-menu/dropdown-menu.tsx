@@ -9,6 +9,7 @@ import {
   menuItemIndicatorClassName,
   menuItemWithIndicatorClassName
 } from "../menu-surface";
+import { getPortalContainer } from "../../lib/portal-container";
 
 function DropdownMenu({
   ...props
@@ -20,7 +21,7 @@ function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>) {
   return (
-    <DropdownMenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />
+    <DropdownMenuPrimitive.Portal container={getPortalContainer()} data-slot="dropdown-menu-portal" {...props} />
   );
 }
 
@@ -44,7 +45,7 @@ function DropdownMenuContent({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={getPortalContainer()}>
       <DropdownMenuPrimitive.Content
         asChild
         data-slot="dropdown-menu-content"
@@ -276,7 +277,7 @@ function DropdownMenuSubContent({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={getPortalContainer()}>
       <DropdownMenuPrimitive.SubContent
         asChild
         data-slot="dropdown-menu-sub-content"

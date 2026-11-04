@@ -16,10 +16,12 @@ import type { AgentFileMentionKind } from "./agentFileMentionExtension";
 import { AGENT_RICH_TEXT_CARET_ANCHOR } from "./agentRichTextCaretAnchor";
 import { agentRichTextContentToPromptText } from "./agentRichTextDocument";
 
+import { shouldStagePastedText } from "@multica/tutti-agent-gui-host/large-text-paste";
+
 export const AGENT_RICH_TEXT_LARGE_PASTE_MIN_CHARS = 5_000;
 
 export function isAgentRichTextLargeTextPaste(text: string): boolean {
-  return text.trim().length >= AGENT_RICH_TEXT_LARGE_PASTE_MIN_CHARS;
+  return shouldStagePastedText(text, AGENT_RICH_TEXT_LARGE_PASTE_MIN_CHARS);
 }
 
 export type AgentRichTextTextPasteKind =

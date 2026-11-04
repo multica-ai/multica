@@ -7,7 +7,8 @@ import {
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import { translate } from "../../../i18n/index";
+import { getActiveUiLanguage, translate } from "../../../i18n/index";
+import { promptHasAgentMention, promptSubmissionError } from "@multica/tutti-agent-gui-host/prompt-submission-policy";
 import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
 import type { AgentInteractionResponseInput } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type {
@@ -231,6 +232,11 @@ export function useAgentGUISubmitInteractionActions(
     ) => {
       const normalizedContent = normalizeAgentPromptContentBlocks(content);
       if (!agentSessionId || normalizedContent.length === 0) {
+        return;
+      }
+      const submissionError = promptSubmissionError(options ?? {}, getActiveUiLanguage());
+      if (submissionError) {
+        setDetailError(submissionError);
         return;
       }
       const targetIsActiveConversation =
@@ -621,7 +627,7 @@ export function useAgentGUISubmitInteractionActions(
         return;
       }
       const activeTurnId = activeEngineActiveTurn?.turnId.trim() ?? "";
-      const pendingQuestionResponse = resolvePendingQuestionComposerResponse({
+      const pendingQuestionResponse = promptHasAgentMention(normalizedContent) ? null : resolvePendingQuestionComposerResponse({
         activeTurnId,
         agentSessionId,
         content: normalizedContent,

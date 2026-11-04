@@ -69,7 +69,7 @@ func TestForkThroughATurnCopiesItsHistory(t *testing.T) {
 	if forked.ProviderSessionID != "native-fork" || forked.ForkedFromID != "conv-1" || forked.TurnCount != 1 || !strings.HasSuffix(forked.Title, "· Fork") {
 		t.Fatalf("fork = %+v", forked)
 	}
-	snap, err := f.svc.Snapshot(ctx, f.scopeID, forked.ID)
+	snap, err := f.svc.Snapshot(ctx, f.scopeID, forked.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

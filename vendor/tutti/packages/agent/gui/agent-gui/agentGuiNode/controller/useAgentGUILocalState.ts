@@ -1,3 +1,4 @@
+import { useComposerDrafts } from "@multica/tutti-agent-gui-host/composer-drafts";
 import {
   useCallback,
   useRef,
@@ -72,9 +73,7 @@ export function useAgentGUILocalState({
   const [isComposerHome, setIsComposerHome] = useState(
     data.lastActiveAgentSessionId === null
   );
-  const [draftByScopeKey, setDraftByScopeKey] = useState<
-    Record<string, AgentComposerDraft>
-  >({});
+  const [draftByScopeKey, setDraftByScopeKey] = useComposerDrafts();
   const submittedDraftSnapshotsRef = useRef<
     Record<string, SubmittedDraftSnapshot>
   >({});

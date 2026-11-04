@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 import { projectAgentActivitySessionToConversationVM } from "../../../../vendor/tutti/packages/agent/gui/shared/agentConversation/projection/workspaceAgentMessageProjection";
-import { V2Conversation } from "./v2-conversation";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
 import { projectV2Conversation } from "./v2-projection";
 
 const at = "2026-10-29T12:00:00Z";

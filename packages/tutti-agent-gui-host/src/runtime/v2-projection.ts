@@ -3,7 +3,7 @@ import type { LocalBackgroundTask } from "@multica/core/local-conversation/proto
 import { localMessageDisplayContent } from "@multica/core/local-conversation/protocol";
 import { chatAuthoredPrompt } from "@multica/core/chat/context-snapshot";
 import { backgroundTaskPresentation } from "./background-task-presentation";
-import type { V2Conversation, V2Item, V2Turn } from "./v2-conversation";
+import type { V2Conversation, V2Item, V2Turn } from "@multica/core/local-conversation/conversation";
 
 /** The daemon's context MCP server; its question tool is shown as an interaction instead. */
 const CONTEXT_SERVER = "multica_desktop_context";

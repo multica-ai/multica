@@ -29,6 +29,7 @@ import {
   useStableEventCallback
 } from "./agentGUIViewUtils";
 import styles from "../AgentGUINode.styles";
+import { useIsSidePane } from "@multica/tutti-agent-gui-host/side-entry";
 import { useAgentGUIDetailScroll } from "./useAgentGUIDetailScroll";
 import { useAgentGUIDetailModel } from "./useAgentGUIDetailModel";
 import { useAgentGUIComposerInputHistoryProps } from "./useAgentGUIComposerInputHistoryProps";
@@ -95,6 +96,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
   composerEmptySubmit = null
 }: AgentGUIDetailPaneProps): React.JSX.Element {
   "use memo";
+  const isHostSidePane = useIsSidePane();
   const viewModel = {
     shell,
     rail,
@@ -681,7 +683,12 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
     virtualScrollControllerRef,
     viewModel
   });
-  const homeContent = !hasActiveConversation ? (
+  const showDraftWelcome = hasActiveConversation
+    && viewModel.detail.availability === "ready"
+    && conversation?.rows.length === 0
+    && viewModel.detail.conversationDetail?.turns.length === 0
+    && !isComposerSending;
+  const homeContent = !hasActiveConversation || showDraftWelcome ? (
     <AgentGUIEmptyHomePane
       isActive={isActive}
       isVisible={isVisible}
@@ -702,9 +709,9 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       onAuthLogin={authLogin}
       onContinueInNewConversation={continueInNewConversation}
       chromeLabels={chromeLabels}
-      composerProps={emptyHeroComposerProps}
+      composerProps={hasActiveConversation ? null : emptyHeroComposerProps}
       labels={labels}
-      suggestions={labels.homeSuggestions ?? EMPTY_HOME_SUGGESTIONS}
+      suggestions={hasActiveConversation ? EMPTY_HOME_SUGGESTIONS : labels.homeSuggestions ?? EMPTY_HOME_SUGGESTIONS}
       suggestionsCloseLabel={labels.homeSuggestionsClose}
       onSelectSuggestion={handleSelectHomeSuggestion}
       onSelectSuggestionAction={handleHomeSuggestionAction}
@@ -733,7 +740,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
             availableSkills={viewModel.composer.availableSkills}
             conversation={conversation}
             editRetry={editRetry}
-            conversationFlowEmpty={conversationFlowEmpty}
+            conversationFlowEmpty={homeContent ?? conversationFlowEmpty}
             conversationFlowLabels={conversationFlowLabels}
             followEndMode={followEndMode}
             forkedFrom={forkedFrom}
@@ -766,7 +773,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
               onScrollToBottom={scrollTimelineToBottom}
               bottomDockLiftedPrompt={bottomDockLiftedPrompt}
               bottomDockReplacementPrompt={bottomDockReplacementPrompt}
-              composerProps={bottomDockComposerProps}
+              composerProps={showDraftWelcome && !isHostSidePane ? emptyHeroComposerProps : bottomDockComposerProps}
               approvalDisabledReason={
                 viewModel.interaction.approvalDisabledReason
               }

@@ -40,9 +40,9 @@ function transport(): LocalV2Transport {
   };
 }
 
-function setup(options: { getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null; storagePrefix?: string; userId?: string; workspaceId?: string; storage?: StorageAdapter } = {}, deviceId?: string, using = transport()) {
+function setup(options: { queryClient?: QueryClient;  getSelectionIntent?: () => string; getSelectedSessionId?: () => string | null; storagePrefix?: string; userId?: string; workspaceId?: string; storage?: StorageAdapter } = {}, deviceId?: string, using = transport()) {
   const callbacks = { onLocalSelect: vi.fn(), onOpenSide: vi.fn(), onShowMessage: vi.fn() };
-  const qc = new QueryClient();
+  const qc = options.queryClient ?? new QueryClient();
   const service = createLocalConversationParentService({ queryClient: qc, workspaceId: "ws", workspaceSlug: "workspace", userId: "user", isCurrent: () => true, resolveAvatar: (value) => value,
     onSelectSession: vi.fn(), onOpenTask: vi.fn(), ...callbacks, ...options }, Object.assign(using, deviceId ? { deviceId } : {}));
   disposers.push(() => { service.dispose(); qc.clear(); });
@@ -68,10 +68,8 @@ beforeEach(() => {
 afterEach(() => { disposers.splice(0).forEach((dispose) => dispose()); });
 
 describe("local conversation parent service over v2", () => {
-  it("reloads the selected conversation on reconnect even when its first snapshot failed before subscribing", async () => {
-    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? new Error("device_unreachable: the network changed") : undefined);
-    const { service } = setup({ getSelectedSessionId: () => "c1" }, "peer-1");
-    await expect(service.request("local.snapshot", { sessionId: "c1" })).rejects.toThrow("network changed");
+  it("publishes connection changes of its own scope and refreshes the workspace on return", async () => {
+    const { service } = setup();
     const events: unknown[] = []; service.subscribe((event) => events.push(event));
     for (const listener of connections) listener({ ...scope, workspaceId: "other" }, true);
     expect(events).toEqual([]);
@@ -79,12 +77,8 @@ describe("local conversation parent service over v2", () => {
     expect(events).toEqual([{ type: "connection", connected: false }]);
     for (const listener of connections) listener(scope, true);
     expect(events).toContainEqual({ type: "connection", connected: true });
-    expect(events).toContainEqual({ type: "local.reload", sessionId: "c1" });
-    service.dispose(); events.length = 0;
-    for (const listener of connections) listener(scope, true);
-    expect(events).toEqual([]);
+    expect(events).toContainEqual({ type: "invalidate", scope: "workspace" });
   });
-
   it("loads providers, folder projects and every conversation with its running turn", async () => {
     const { service } = setup();
     const state = await service.load();
@@ -155,13 +149,16 @@ describe("local conversation parent service over v2", () => {
 
     it("gives a rebuilt page the known sources and agents at once", async () => {
       const shared = transport();
-      const first = setup({}, undefined, shared).service;
+      // A rebuilt page shares the app's query client and the store.
+      const queryClient = new QueryClient();
+      const first = setup({ queryClient }, undefined, shared).service;
       await vi.waitFor(async () => expect((await first.load()).agents).toHaveLength(1));
+      await vi.waitFor(async () => expect((await first.load()).folderProjects).toHaveLength(1));
       first.dispose();
 
       hang("/providers", "/folder-projects", "/sessions?");
       mock.api.listAgents.mockReturnValue(never);
-      const state = await setup({}, undefined, shared).service.load();
+      const state = await setup({ queryClient }, undefined, shared).service.load();
       expect(state.agents.map((entry) => entry.agent.id)).toEqual(["design"]);
       expect(state.executionTargets).toHaveLength(2);
       expect(state.folderProjects).toHaveLength(1);
@@ -270,27 +267,6 @@ describe("local conversation parent service over v2", () => {
     expect(requests.some((entry) => entry.body?.type === "update_settings")).toBe(false);
   });
 
-  it("stores another device's conversations and returns them for an instant open", async () => {
-    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? snapshot("c1") : undefined);
-    const saved = new Map<string, unknown>();
-    const snapshotStore = { read: vi.fn(async (key: string) => (saved.get(key) ?? null) as never), write: vi.fn(async (key: string, value: unknown) => { saved.set(key, value); }) };
-    const { service } = setup({ snapshotStore } as never, "peer");
-    await expect(service.request("local.storedSnapshot", { sessionId: "c1" })).resolves.toBeNull();
-    await service.request("local.snapshot", { sessionId: "c1" });
-    expect(snapshotStore.write).toHaveBeenCalledWith(JSON.stringify(["peer", "user", "ws", "c1"]), expect.objectContaining({ snapshot_seq: expect.any(Number) }));
-    const stored = await service.request("local.storedSnapshot", { sessionId: "c1" });
-    expect(stored?.detail.session.id).toBe("c1");
-  });
-
-  it("does not store this device's own conversations", async () => {
-    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? snapshot("c1") : undefined);
-    const snapshotStore = { read: vi.fn(), write: vi.fn() };
-    const { service } = setup({ snapshotStore } as never);
-    await service.request("local.snapshot", { sessionId: "c1" });
-    expect(snapshotStore.write).not.toHaveBeenCalled();
-    await expect(service.request("local.storedSnapshot", { sessionId: "c1" })).resolves.toBeNull();
-  });
-
   it("gives message images a file URL instead of their bytes", async () => {
     const { service } = setup();
     await expect(service.request("attachment.url", { attachmentId: "a/b" })).resolves.toEqual({ url: "v2:/attachments/a%2Fb" });
@@ -316,23 +292,11 @@ describe("local conversation parent service over v2", () => {
     // The copied turn keeps its start time; a turn sent after the fork must not move the branch point.
     const turn = (id: string, startedAt: string) => ({ id, turn_index: 0, request_id: id, status: "completed", started_at: startedAt, completed_at: startedAt, messages: [], events: [] });
     const turns = [turn("copy-3", "2026-10-28T23:00:00Z"), turn("after", "2026-10-29T01:00:00Z")];
-    routes.unshift((_method, path) => path === "/sessions/c1/snapshot" ? snapshot("c1", { forked_from_id: "src", forked_from_turn_id: "t-3", turns, queue: { revision: 5, paused: true, error: "stopped", items: [] } }) : undefined);
+    routes.unshift((_method, path) => path.startsWith("/sessions/c1/snapshot") ? snapshot("c1", { forked_from_id: "src", forked_from_turn_id: "t-3", turns, queue: { revision: 5, paused: true, error: "stopped", items: [] } }) : undefined);
     const { service } = setup();
-    const { detail } = await service.request("local.snapshot", { sessionId: "c1" }) as unknown as { detail: Record<string, unknown> };
+    await service.localConversations!.ensure("c1");
+    const detail = service.localConversations!.detail("c1");
     expect(detail).toMatchObject({ model: "gpt", reasoningEffort: "high", permissionMode: "default", promptQueue: { revision: 5, paused: true, error: "stopped", items: [] }, forkedFrom: { sessionId: "src", turnId: "t-3", targetTurnId: "copy-3" } });
-  });
-
-  it("forwards a conversation's events while subscribed", async () => {
-    const { service } = setup();
-    const events: unknown[] = [];
-    service.subscribe((event) => events.push(event));
-    await service.request("local.subscribe", { sessionId: "c1", afterSeq: 4, generation: "g" } as never);
-    expect(sent).toContainEqual({ version: 2, type: "subscribe", conversation_id: "c1", after_seq: 4, store_generation: "g" });
-    const message = { version: 2, type: "conversation.events", conversation_id: "c1", from_seq: 5, to_seq: 5, events: [{ seq: 5, type: "turn.started", turn_id: "t", final: false, created_at: at, payload: {} }] };
-    messages.forEach((listener) => listener(scope, message));
-    expect(events).toContainEqual({ type: "local.events", sessionId: "c1", message });
-    await service.request("local.unsubscribe", { sessionId: "c1" } as never);
-    expect(sent.at(-1)).toEqual({ version: 2, type: "unsubscribe", conversation_id: "c1" });
   });
 
   it("maps queue, fork, answer and cancel to conversation commands", async () => {

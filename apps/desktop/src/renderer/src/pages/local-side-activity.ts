@@ -1,4 +1,4 @@
-import type { V2Conversation } from "@multica/tutti-agent-gui-host/v2-conversation";
+import type { V2Conversation } from "@multica/core/local-conversation/conversation";
 
 export type SideActivityState = "idle" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 

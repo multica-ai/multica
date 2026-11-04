@@ -1,0 +1,104 @@
+// Test rig: two GUI instances beside app UI in one document, under the app's own stylesheet.
+import { useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "../../../apps/desktop/src/renderer/src/globals.css";
+import AgentGuiMount from "../src/mount";
+import { createInProcessRpcClient } from "../src/in-process-client";
+import { localSourceFromClient } from "../src/runtime/local-snapshot-test-host";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { localV2SnapshotSchema, type LocalV2SnapshotTurn } from "@multica/core/local-conversation/v2";
+import type { AgentGuiHostEvent, AgentGuiInitSnapshot, LocalConversationSource } from "../src/protocol";
+
+const at = "2026-11-03T10:00:00Z";
+const listeners = new Set<(event: AgentGuiHostEvent) => void>();
+function snapshot(id: string, theme: "light" | "dark", sidePane: boolean): AgentGuiInitSnapshot {
+  const session = { id, workspace_id: "w", creator_id: "u", agent_id: "local:codex", title: id, status: "active", created_at: at, updated_at: at };
+  return { workspaceId: "w", workspaceSlug: "w", userId: "u", locale: "en", theme, sidePane, local: true, hostActive: true, hostVisible: true,
+    agents: [], sessions: [session], activeSessionId: id, selectedAgentId: "local:codex",
+    executionTargets: [{ id: "local:codex", provider: "codex", name: "Codex", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true }] } as unknown as AgentGuiInitSnapshot;
+}
+const storage = new Map<string, string>();
+function service(id: string, theme: "light" | "dark", sidePane: boolean) {
+  const session = snapshot(id, theme, sidePane).sessions[0]!;
+  const request = async (method: string, params: { key?: string; value?: string }) => {
+    switch (method) {
+      case "workspace.load": return snapshot(id, theme, sidePane);
+      case "session.load": return { session, messages: [
+        { id: `${id}-q`, chat_session_id: id, role: "user", content: `Question for ${id}`, task_id: `${id}-t`, created_at: at },
+        { id: `${id}-a`, chat_session_id: id, role: "assistant", content: `Reply in ${id}`, task_id: `${id}-t`, created_at: at },
+      ], tasks: [], pending: {} };
+      case "storage.read": return storage.get(params.key!) ?? null;
+      case "storage.write": storage.set(params.key!, params.value!); return undefined;
+      case "models.list": return { id: "m", runtime_id: "local:codex", status: "completed", supported: true, models: [] };
+      case "usage.read": return { provider: "codex", context: { usedTokens: null, limitTokens: null, model: null, updatedAt: null }, account: { status: "unavailable", windows: [], plan: null, updatedAt: null } };
+      case "context.tasks": return [];
+      default: return undefined;
+    }
+  };
+  return { request, subscribe(listener: (event: AgentGuiHostEvent) => void) { listeners.add(listener); return () => listeners.delete(listener); } };
+}
+
+const TOTAL_TURNS = 60, PAGE_TURNS = 10;
+const paging = { reads: 0, failing: new URLSearchParams(location.search).has("failOlder"), started: [] as number[] };
+Object.assign(window, { paging });
+function turnOf(index: number): LocalV2SnapshotTurn {
+  const id = `turn-${index}`;
+  const started = new Date(Date.parse(at) + index * 60_000).toISOString();
+  return { id, turn_index: index, request_id: id, status: "completed", started_at: started, completed_at: started, messages: [{ id: `${id}-q`, role: "user", content: `Question ${index}`, attachment_ids: [], steered: false, failed: false, created_at: started }],
+    events: [{ seq: index + 1, turn_id: id, turn_seq: 1, item_id: `${id}-a`, type: "item.completed", final: true, created_at: started, payload: { kind: "assistant_text", status: "completed", text: `Answer ${index}\n\n${"Line of a long reply. ".repeat(40)}` } }] };
+}
+/** Pages like the store, over a real V2Conversation, with the daemon's paging answered here. */
+function pagedSource(id: string): LocalConversationSource {
+  const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({
+    version: 2, store_generation: "g", snapshot_seq: TOTAL_TURNS, has_older_turns: true,
+    conversation: { conversation_id: id, summary_seq: 1, provider: "codex", title: id, status: "idle", pinned: false, archived: false, updated_at: at, turn_count: TOTAL_TURNS },
+    turns: Array.from({ length: PAGE_TURNS }, (_, i) => turnOf(TOTAL_TURNS - PAGE_TURNS + i)),
+  }));
+  const observers = new Set<(events: readonly never[]) => void>();
+  const session = snapshot(id, "light", false).sessions[0]!;
+  return {
+    open: () => () => {},
+    ensure: async () => conversation,
+    refresh: async () => conversation,
+    observe(_id, listener) { observers.add(listener); return () => { observers.delete(listener); }; },
+    conversation: () => conversation,
+    detail: () => ({ session, model: null, reasoningEffort: null, permissionMode: "default", promptQueue: { revision: 0, paused: false, items: [] }, messages: [], pending: {}, tasks: [] }) as never,
+    async loadOlder() {
+      const before = conversation.oldestTurnIndex() ?? 0;
+      paging.reads++;
+      paging.started.push(before);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (paging.failing) throw new Error("device_unreachable: offline");
+      const from = Math.max(0, before - PAGE_TURNS);
+      conversation.mergeHistory({ store_generation: "g", has_older_turns: from > 0, turns: Array.from({ length: before - from }, (_, i) => turnOf(from + i)) });
+      for (const observer of observers) observer([]);
+    },
+  };
+}
+
+function Instance({ id, theme, sidePane }: { id: string; theme: "light" | "dark"; sidePane: boolean }) {
+  const { connection, source } = useMemo(() => {
+    const host = service(id, theme, sidePane);
+    return { connection: createInProcessRpcClient(host as never, { interactive: () => true, current: () => true }), source: id === "paged-conversation" ? pagedSource(id) : localSourceFromClient(host as never) };
+  }, [id, theme, sidePane]);
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-instance={id}><AgentGuiMount client={connection.client} initial={snapshot(id, theme, sidePane)} localConversations={source} /></div>;
+}
+
+function Page() {
+  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [paged, setPaged] = useState(false);
+  return <div className="flex h-dvh bg-background text-foreground">
+    <aside data-testid="app-aside" className="flex w-56 shrink-0 flex-col gap-3 border-r p-4 text-sm">
+      <button id="toggle" className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground" onClick={() => setMounted((value) => !value)}>Toggle GUI</button>
+      <button id="paged" className="rounded-md border px-3 py-2 text-sm" onClick={() => setPaged((value) => !value)}>Toggle long conversation</button>
+      <button id="theme" className="rounded-md border px-3 py-2 text-sm" onClick={() => setTheme((value) => value === "dark" ? "light" : "dark")}>Toggle theme</button>
+      <h1 id="heading" className="text-lg font-semibold">App heading</h1>
+      <p id="paragraph" className="text-sm text-muted-foreground">App text must not change when the GUI mounts.</p>
+    </aside>
+    {paged && <div className="flex min-h-0 min-w-0 flex-1"><Instance id="paged-conversation" theme={theme} sidePane={false} /></div>}
+    {mounted && <div key={theme} className="flex min-h-0 min-w-0 flex-1"><Instance id="main-conversation" theme={theme} sidePane={false} /><div className="w-px bg-border" /><Instance id="side-conversation" theme={theme} sidePane /></div>}
+  </div>;
+}
+
+createRoot(document.getElementById("app-root")!).render(<Page />);

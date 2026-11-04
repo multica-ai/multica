@@ -28,7 +28,7 @@ function deferred() {
 
 async function mount(chinese = true) {
   await act(async () => root.render(
-    <SideEntryProvider client={client} handle={handle} sessionId="session-a" chinese={chinese} enabled>
+    <SideEntryProvider root={document.body} client={client} handle={handle} sessionId="session-a" chinese={chinese} enabled>
       <article data-multica-turn-id="turn-a"><p>Selected reply text</p></article>
     </SideEntryProvider>,
   ));
@@ -152,7 +152,7 @@ it.each(["issue", "agent", "project", "squad", "skill", "autopilot", "runtime"])
   const id = "01a186cf-49de-7308-b61e-7201c9849b94";
   await act(async () => root.render(
     <ResourceLinkProvider client={client} scope={{ workspaceId: "workspace", workspaceSlug: "chovy-multica" }} agents={[]}>
-      <SideEntryProvider client={client} handle={handle} sessionId="session-a" chinese enabled>
+      <SideEntryProvider root={document.body} client={client} handle={handle} sessionId="session-a" chinese enabled>
         <ResourceMarkdownLink href={`mention://${kind}/${id}`} fallback={null}>CHOV-50</ResourceMarkdownLink>
       </SideEntryProvider>
     </ResourceLinkProvider>,

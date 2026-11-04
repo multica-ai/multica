@@ -1,7 +1,7 @@
 import type { LocalPreviewFile, LocalPreviewLocation } from "@multica/core/local-conversation/protocol";
 import { localResourceTarget } from "@multica/tutti-agent-gui-host/message-resource-links";
-import type { V2Conversation } from "@multica/tutti-agent-gui-host/v2-conversation";
-import { LocalV2RequestError } from "../platform/local-v2";
+import type { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { LocalV2RequestError } from "../platform/conversation-store";
 
 export class FileLinkPreviewError extends Error {
   constructor(readonly kind: "missing" | "ambiguous" | "denied" | "incomplete") {

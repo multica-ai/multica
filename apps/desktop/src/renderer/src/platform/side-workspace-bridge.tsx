@@ -4,7 +4,7 @@ import { getCurrentWsId, getCurrentSlug } from "@multica/core/platform";
 import { paths } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useTabStore } from "../stores/tab-store";
-import { localV2 } from "./local-v2";
+import { conversationStore } from "./conversation-store";
 import { applySideCommand, hasSideWorkspaceView, prepareSideTab, readSideLayout, sideLayoutKey, sideSnapshot, syncSideWorkspace } from "../pages/local-side-workspace-sync";
 import { sideWorkspaceControlSchema } from "../../../shared/side-workspace";
 import { localV2Transport } from "./local-v2-transport";
@@ -51,7 +51,7 @@ export function DesktopSideWorkspaceBridge() {
       await syncSideWorkspace(transport, request.scope, snapshot); check();
       if (request.op === "select" || (request.op === "open" && request.select !== false)) {
         const slug = getCurrentSlug(); if (!slug) throw new Error("No selected workspace");
-        const source = (await localV2(transport, request.scope).snapshot(request.conversationId)).conversation; check();
+        const source = (await conversationStore(transport, request.scope).snapshot(request.conversationId)).conversation; check();
         const flow = deviceId === "local" ? paths.workspace(slug).conversationFlow() : paths.workspace(slug).conversationFlowDevice(deviceId);
         const path = `${flow}?${new URLSearchParams({ session: source.conversation_id, provider: source.provider })}`;
         useTabStore.getState().openTab(path, "", { activate: true });

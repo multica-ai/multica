@@ -15,6 +15,8 @@ import { UnderlineTabs } from "@tutti-os/ui-system/components";
 import { cn } from "@tutti-os/ui-system/utils";
 import { flattenMentionPaletteEntries } from "./mentionPaletteEntries.ts";
 import { mentionPaletteExpandLabel } from "./mentionPaletteModel.ts";
+import { Spinner } from "@multica/ui/components/ui/spinner";
+import { useMentionScrollPagination } from "@multica/tutti-agent-gui-host/mention-scroll-pagination";
 import { MentionPaletteScrollbar } from "./mentionPaletteScrollbar.tsx";
 import type {
   MentionPaletteGroup,
@@ -133,6 +135,7 @@ export function MentionPalette<TItem>(
 
   const highlightedOptionRef = useRef<HTMLButtonElement | null>(null);
   const scrollBodyRef = useRef<HTMLDivElement | null>(null);
+  useMentionScrollPagination(scrollBodyRef, state, onExpandGroup);
   const loadingVisibleUntilRef = useRef(0);
   const loadingHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
@@ -418,6 +421,7 @@ function MentionPaletteGroups<TItem>({
     <div className={paletteStyles.groups}>
       {state.groups.map((group, index) => {
         const showGroupDivider = index > 0 && !group.hideTopDivider;
+        const isLoadingMore = group.expandStatus === "loading" || state.status === "loading";
         return (
           <section
             key={group.id}
@@ -480,8 +484,9 @@ function MentionPaletteGroups<TItem>({
                   }
                   type="button"
                   className={paletteStyles.expandButton}
-                  disabled={group.expandStatus === "loading"}
-                  aria-busy={group.expandStatus === "loading" || undefined}
+                  data-load-more-group={group.id}
+                  disabled={isLoadingMore}
+                  aria-busy={isLoadingMore || undefined}
                   data-highlighted={
                     `expand:${group.id}` === highlightedKey ? "" : undefined
                   }
@@ -492,12 +497,12 @@ function MentionPaletteGroups<TItem>({
                   }}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
-                    if (group.expandStatus !== "loading") {
+                    if (!isLoadingMore) {
                       onExpandGroup(group.id);
                     }
                   }}
                 >
-                  {mentionPaletteExpandLabel(group)}
+                  {isLoadingMore ? <><Spinner aria-hidden="true" />{group.expandLoadingLabel ?? mentionPaletteExpandLabel(group)}</> : mentionPaletteExpandLabel(group)}
                 </button>
               ) : null}
             </div>

@@ -16,6 +16,8 @@ import {
 } from "@tutti-os/ui-rich-text/at-panel";
 import { resolveIssueManagerStatusPresentation } from "@tutti-os/workspace-issue-manager/ui";
 import { userAvatarPlaceholderUrl } from "../../shared/userAvatarPlaceholder";
+import { getActiveUiLanguage } from "../../i18n/index";
+import { renderMulticaMentionRow } from "@multica/tutti-agent-gui-host/mention-row";
 import { translate } from "../../i18n/index";
 import { managedAgentRoundedIconUrl } from "../../shared/managedAgentIcons";
 import { workspaceAgentActivityStatusLabel } from "../../shared/workspaceAgentActivityStatusLabel";
@@ -280,7 +282,7 @@ export function AgentFileMentionPalette({
       getItemKey={agentMentionItemKey}
       isItemDisabled={isAgentMentionItemDisabled}
       renderItem={(item) =>
-        renderMentionRow(agentMentionItemToRowItem(item), {
+        renderMulticaMentionRow(item, getActiveUiLanguage(), agentMentionItemToRowItem(item), {
           classNames: AGENT_MENTION_ROW_CLASS_NAMES,
           dataAttributeMode: "agent",
           ...(onNavigateIntoItem && canNavigateIntoMentionItem(item)

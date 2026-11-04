@@ -1,3 +1,4 @@
+import { projectMessageImageCopies } from "@multica/tutti-agent-gui-host/message-image-clipboard";
 import type { WorkspaceAgentSessionDetailViewModel } from "../../workspaceAgentSessionDetailViewModel";
 import type {
   AgentMessageContentVM,
@@ -46,7 +47,7 @@ export function projectAgentMessageFinalText(
       return withoutCopyText;
     });
 
-    return changed ? { ...row, messages } : row;
+    return projectMessageImageCopies(changed ? { ...row, messages } : row);
   });
 }
 

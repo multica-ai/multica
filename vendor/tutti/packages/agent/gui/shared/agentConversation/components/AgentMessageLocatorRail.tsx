@@ -378,7 +378,7 @@ export function AgentMessageLocatorRail({
               aria-label={item.summary}
               title={item.summary}
               data-selected={item.key === selectedKey ? "true" : undefined}
-              data-agent-message-locator-turn-group-index={item.turnGroupIndex}
+              data-agent-message-locator-turn-group-index={item.turnGroupIndex} data-multica-locator-turn-id={(item as { turnId?: string }).turnId}
               data-unread-agent-response={
                 unreadAgentResponseKeys.has(item.key) ? "true" : undefined
               }

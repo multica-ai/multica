@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 const TEXTURE_SIZE = 256;
 const RECORD_RADIUS_RATIO = 0.47;
@@ -86,7 +87,7 @@ export function vinylRecordTexture(
     context.beginPath();
     context.arc(center, center, recordMaskRadius - 0.5, 0, Math.PI * 2);
     context.strokeStyle =
-      getComputedStyle(document.body)
+      getComputedStyle(getPortalContainer())
         .getPropertyValue("--background-session-flow")
         .trim() || "transparent";
     context.lineWidth = 2;

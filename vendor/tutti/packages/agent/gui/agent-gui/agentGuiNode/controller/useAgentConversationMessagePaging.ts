@@ -220,6 +220,9 @@ export function useAgentConversationMessagePaging(
           inputRef.current.isMounted() &&
           (!agentSessionId ||
             inputRef.current.getActiveSessionId()?.trim() === agentSessionId),
+        ...(inputRef.current.runtime.loadOlderSessionMessages
+          ? { loadOlderSessionMessages: (older: { workspaceId: string; agentSessionId: string }) => inputRef.current.runtime.loadOlderSessionMessages!(older) }
+          : {}),
         listSessionMessages: ({
           agentSessionId,
           beforeVersion,

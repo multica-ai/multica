@@ -1,12 +1,12 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LocalV2ScopeClient } from "./local-v2";
+import type { ConversationStore } from "./conversation-store";
 import { useConversationFocus } from "./use-conversation-focus";
 
 function client() {
   const release = vi.fn();
   const focus = vi.fn(() => release);
-  return { client: { focus } as unknown as LocalV2ScopeClient, focus, release };
+  return { client: { focus } as unknown as ConversationStore, focus, release };
 }
 
 const setVisibility = (state: DocumentVisibilityState) => {

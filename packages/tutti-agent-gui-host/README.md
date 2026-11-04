@@ -1,20 +1,20 @@
 # Tutti Agent GUI host
 
-This package runs the pinned, unmodified Tutti Agent GUI in its own HTML document.
-Multica supplies authenticated data and commands through a private MessageChannel;
-the iframe receives no authentication token. The GUI owns its React root, full
-upstream styles, portals, fonts, transcript and composer. Multica owns the
-session list and header outside the iframe, and hides the redundant embedded
-provider and session rails with host-scoped CSS. The original Chat page keeps
-its existing styles and navigation.
+This package mounts the Tutti Agent GUI, vendored and owned in `vendor/tutti`,
+directly in the app's document. `src/mount.tsx` is one instance: its runtime lives
+as long as the component, and its styles apply only under its root element. Apps
+load it on demand, and server bundles leave it out. Multica owns the session list
+and header around it, and hides the redundant embedded provider and session rails
+with host-scoped CSS. The original Chat page keeps its styles and navigation.
 
 The host's `multica-theme.css` and `multica-components.css` adapt the intact
 source UI to Multica's shared semantic tokens, fonts and control treatments.
 They do not replace the source transcript or composer. The host also mounts
 Agent and model selection through the public composer footer accessory slot.
-Inter, Source Serif and Geist Mono are loaded in this document; parent font
-faces do not cross the iframe boundary. Both theme attributes and the `.dark`
-class follow the authenticated host snapshot, including source menu portals.
+Inter, Source Serif and Geist Mono load with the GUI. Both theme attributes and
+the `.dark` class follow the authenticated host snapshot, on each instance's root
+and on the container overlays portal into (`getPortalContainer()`). Nothing goes
+on `<html>`, whose `data-theme` the app's own tokens respond to.
 The build reads the public Multica token stylesheet and generates an ignored
 `.multica-tokens.css` with stronger root selectors. Token values stay unchanged
 and have one maintained source. This avoids nesting upstream Tailwind utility
@@ -45,19 +45,16 @@ next turn; it does not update the Agent's default. See
 pnpm --filter @multica/tutti-agent-gui-host build
 ```
 
-The build uses relative asset URLs and publishes the same output to the desktop
-renderer public directory and Web public directory as `tutti-agent-gui/`.
-The desktop renderer Vite hook and Web dev/build scripts run this automatically.
-The generated directories are ignored. Source changes inside this isolated
-bundle require rebuilding or restarting the app's development command; the
-outer application retains its existing hot reload behavior.
+This runs `scripts/prepare.mjs`, which generates what no bundler can produce the
+same way on both apps: `src/agent-gui.generated.css`, the GUI's own Tailwind output
+with every rule limited to `.multica-agent-gui` and `html`, `body` and `:root`
+rewritten to that element; and the HTML preview's libraries. The desktop renderer
+Vite hook and Web dev/build scripts run it automatically. Generated files are
+ignored. A stylesheet change needs a rerun or an app restart.
 
-The host build limits the composer mention categories to Sessions, Tasks and
-Agents. A guarded pre-transform changes only the pinned source's shared tab
-order and the English/Chinese composer hint in the compiled bundle, so empty
-browsing, search results and keyboard cycling use the same three categories.
-The upstream files remain unchanged;
-the build fails if the expected declaration changes. The public hidden-category
+The composer mention categories are limited to Sessions, Tasks and Agents: the
+vendored tab order and English/Chinese composer hint say so, so empty browsing,
+search results and keyboard cycling use the same three categories. The public hidden-category
 setting alone does not cover the source's search-result tabs or keyboard order.
 The application passes a stable hidden-category array through that public
 setting to preserve the source search controller across composer updates.
@@ -70,40 +67,38 @@ virtual transcripts, including the virtual list's total-size spacer, because
 the virtual controller's cached end state can lag behind content resizes.
 Scroll, content and viewport resizes refresh the affordance without resuming
 follow mode or moving a detached reader.
-This is also a guarded presentation adaptation; the vendor snapshot stays intact.
 
-Build caching includes host source, shared Multica token styles, the vendored package closure, root lockfile,
-dependency manifests, and upstream attribution. Concurrent Web/desktop startup
-shares a build lock. The distribution contains Tutti's LICENSE and NOTICE,
-UI System's NOTICE, and the pinned upstream repository/revision under
-`licenses/tutti/`.
-
-Vite 8.0.1's Rolldown default and esbuild minification paths both panic while
-replacing chunk hashes after upstream Unicode strings such as `━`. Unminified
-production output builds successfully, so this package currently disables JS
-minification and source maps. This increases transfer and parse size; the
-complete source UI, including lazy Monaco and Mermaid modules, is retained.
-Do not rewrite upstream UI strings to work around a bundler bug.
+The preparation step's cache covers host source, shared Multica token styles, the
+vendored packages and the lockfile; concurrent Web/desktop startup shares a lock.
+It publishes Tutti's LICENSE and NOTICE, UI System's NOTICE, and the Chart.js and
+D3 licenses to each app's `public/licenses/agent-gui/`.
 
 ## Host contract
 
-The iframe announces `multica:agent-gui:ready` version 1. Its parent verifies
-the exact frame window and origin, then transfers one MessagePort with an init
-snapshot. All business requests use that port and exact Multica workspace,
-session, task, and attachment identities. Abort stops awaiting a request and
-never retries a send. Closing the iframe rejects outstanding calls.
+`createInProcessRpcClient` connects a GUI to its host in the same document. Calls
+stay asynchronous and copy their data, so the two sides never alias objects and a
+host event cannot re-enter a runtime operation in progress. Requests use exact
+Multica workspace, session, task and attachment identities. Abort stops awaiting a
+request and never retries a send. Unmounting rejects outstanding calls. A hidden
+or unfocused instance cannot act for the user: other than reads and admitted queue
+items, its requests fail with `inactive_host`.
 
-Theme and locale updates apply to the iframe document. Source menus and dialogs
-remain inside that document. Composer append requests wait through startup,
+Local conversations are read through an injected `LocalConversationSource`; the
+runtime only projects them, and they outlive it.
+
+`e2e-harness/` is a test rig that drives the GUI over a MessagePort with fake data.
+Neither app ships it. Build it with `build-e2e-harness.mjs`.
+
+Composer append requests wait through startup,
 are applied sequentially by the source composer, and are acknowledged only
 after its public completion callback. Existing attachment IDs are reused.
 Legacy Multica Task links keep their original `mention://issue/<id>` protocol
 and open the existing issue page through the host, including source pointer and
 keyboard activation.
 
-An unsent source composer draft belongs to its mounted GUI document. Background
-visibility/focus changes keep that document alive. Routing away or switching a
-desktop tab can unmount it; restoring an unsent source draft after that unmount
+An unsent source composer draft belongs to its mounted GUI. Background
+visibility/focus changes keep it mounted. Routing away or switching a
+desktop tab unmounts it; restoring an unsent source draft after that unmount
 is not currently supported by a public source draft persistence port. Multica's
 durable cancellation restore still uses its existing host pipeline and ACK.
 

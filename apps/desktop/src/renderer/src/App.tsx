@@ -1,3 +1,4 @@
+import { conversationStores } from "./platform/conversation-store";
 import { deleteLocalV2Snapshots } from "./platform/local-v2-snapshot-store";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -370,6 +371,7 @@ const sessionTeardown: SessionTeardown = {
   clearDaemonToken: () => window.daemonAPI.clearToken(),
   stopDaemon: () => window.daemonAPI.stop(),
   deleteStoredConversations: () => deleteLocalV2Snapshots(),
+  disposeConversations: () => conversationStores.disposeAll(),
 };
 
 function handleDaemonLogout() {

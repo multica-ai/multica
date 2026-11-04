@@ -4,23 +4,186 @@
   "title": "Local conversation wire protocol v2",
   "description": "Daemon <-> Desktop messages for local conversations. Draft for P0 review; see docs/engineering/local-conversation-go-sqlite-plan.md sections 5 and 7.",
   "$defs": {
-    "hello": {"type": "object", "required": ["version", "store_generation", "capabilities"], "properties": {"version": {"const": 2}, "store_generation": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "scope_seq": {"type": "integer", "minimum": 0}}},
-    "session_groups": {"type": "object", "required": ["scope_seq", "groups"], "properties": {"scope_seq": {"type": "integer", "minimum": 0}, "groups": {"type": "array", "items": {"type": "object", "required": ["id", "title", "path", "total"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "path": {"type": "string"}, "total": {"type": "integer", "minimum": 0}}}}}},
-    "session_page": {"type": "object", "required": ["scope_seq", "summaries", "has_more", "next_cursor"], "properties": {"scope_seq": {"type": "integer", "minimum": 0}, "summaries": {"type": "array", "items": {"$ref": "#/$defs/conversation_summary"}}, "has_more": {"type": "boolean"}, "next_cursor": {"type": ["string", "null"], "minLength": 1}}, "allOf": [{"if": {"properties": {"has_more": {"const": true}}}, "then": {"properties": {"next_cursor": {"type": "string"}}}, "else": {"properties": {"next_cursor": {"type": "null"}}}}]},
-    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "seq": { "type": "integer", "minimum": 1 },
-    "timestamp": { "type": "string", "format": "date-time" },
-
+    "hello": {
+      "type": "object",
+      "required": [
+        "version",
+        "store_generation",
+        "capabilities"
+      ],
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "store_generation": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "session_groups": {
+      "type": "object",
+      "required": [
+        "scope_seq",
+        "groups"
+      ],
+      "properties": {
+        "scope_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "path",
+              "total"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "session_page": {
+      "type": "object",
+      "required": [
+        "scope_seq",
+        "summaries",
+        "has_more",
+        "next_cursor"
+      ],
+      "properties": {
+        "scope_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/conversation_summary"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "has_more": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "next_cursor": {
+                "type": "string"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "next_cursor": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
     "event": {
       "description": "One persisted conversation event. `final` events carry the complete state of their item and replace whatever deltas produced.",
       "type": "object",
-      "required": ["seq", "type", "final", "created_at", "payload"],
+      "required": [
+        "seq",
+        "type",
+        "final",
+        "created_at",
+        "payload"
+      ],
       "additionalProperties": false,
       "properties": {
-        "seq": { "$ref": "#/$defs/seq" },
-        "turn_id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
-        "turn_seq": { "oneOf": [{ "$ref": "#/$defs/seq" }, { "type": "null" }] },
-        "item_id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "turn_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_seq": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/seq"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "type": {
           "enum": [
             "user.message",
@@ -37,186 +200,867 @@
             "queue.updated"
           ]
         },
-        "final": { "type": "boolean" },
-        "created_at": { "$ref": "#/$defs/timestamp" },
-        "payload": { "type": "object" }
+        "final": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "first_seq": {
+          "$ref": "#/$defs/seq",
+          "description": "Sequence of the item's first event, on a settled turn's final event read from history."
+        },
+        "first_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "When the item's first event happened, alongside first_seq."
+        }
       },
       "allOf": [
-        { "if": { "properties": { "type": { "const": "user.message" } } }, "then": { "properties": { "final": { "const": true }, "payload": { "$ref": "#/$defs/user_message" } } } },
-        { "if": { "properties": { "type": { "const": "turn.started" } } }, "then": { "properties": { "final": { "const": false }, "payload": { "$ref": "#/$defs/turn_started" } } } },
-        { "if": { "properties": { "type": { "const": "turn.completed" } } }, "then": { "properties": { "final": { "const": true }, "payload": { "$ref": "#/$defs/turn_completed" } } } },
-        { "if": { "properties": { "type": { "const": "item.started" } } }, "then": { "required": ["item_id"], "properties": { "item_id": { "$ref": "#/$defs/id" }, "final": { "const": false }, "payload": { "$ref": "#/$defs/item_started" } } } },
-        { "if": { "properties": { "type": { "const": "item.delta" } } }, "then": { "required": ["item_id"], "properties": { "item_id": { "$ref": "#/$defs/id" }, "final": { "const": false }, "payload": { "$ref": "#/$defs/item_delta" } } } },
-        { "if": { "properties": { "type": { "const": "item.updated" } } }, "then": { "required": ["item_id"], "properties": { "item_id": { "$ref": "#/$defs/id" }, "final": { "const": false }, "payload": { "$ref": "#/$defs/item_state" } } } },
-        { "if": { "properties": { "type": { "const": "item.completed" } } }, "then": { "required": ["item_id"], "properties": { "item_id": { "$ref": "#/$defs/id" }, "final": { "const": true }, "payload": { "$ref": "#/$defs/item_state" } } } },
-        { "if": { "properties": { "type": { "const": "interaction.requested" } } }, "then": { "properties": { "final": { "const": false }, "payload": { "$ref": "#/$defs/interaction_requested" } } } },
-        { "if": { "properties": { "type": { "const": "interaction.resolved" } } }, "then": { "properties": { "final": { "const": true }, "payload": { "$ref": "#/$defs/interaction_resolved" } } } },
-        { "if": { "properties": { "type": { "const": "usage.updated" } } }, "then": { "properties": { "final": { "const": false }, "payload": { "$ref": "#/$defs/usage" } } } },
-        { "if": { "properties": { "type": { "const": "conversation.updated" } } }, "then": { "properties": { "final": { "const": false }, "payload": { "$ref": "#/$defs/conversation_settings" } } } },
-        { "if": { "properties": { "type": { "const": "queue.updated" } } }, "then": { "properties": { "final": { "const": false }, "payload": { "$ref": "#/$defs/queue_state" } } } }
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "user.message"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": true
+              },
+              "payload": {
+                "$ref": "#/$defs/user_message"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "turn.started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/turn_started"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "turn.completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": true
+              },
+              "payload": {
+                "$ref": "#/$defs/turn_completed"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "item.started"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "item_id"
+            ],
+            "properties": {
+              "item_id": {
+                "$ref": "#/$defs/id"
+              },
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/item_started"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "item.delta"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "item_id"
+            ],
+            "properties": {
+              "item_id": {
+                "$ref": "#/$defs/id"
+              },
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/item_delta"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "item.updated"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "item_id"
+            ],
+            "properties": {
+              "item_id": {
+                "$ref": "#/$defs/id"
+              },
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/item_state"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "item.completed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "item_id"
+            ],
+            "properties": {
+              "item_id": {
+                "$ref": "#/$defs/id"
+              },
+              "final": {
+                "const": true
+              },
+              "payload": {
+                "$ref": "#/$defs/item_state"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.requested"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/interaction_requested"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.resolved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": true
+              },
+              "payload": {
+                "$ref": "#/$defs/interaction_resolved"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "usage.updated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/usage"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "conversation.updated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/conversation_settings"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "queue.updated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final": {
+                "const": false
+              },
+              "payload": {
+                "$ref": "#/$defs/queue_state"
+              }
+            }
+          }
+        }
       ]
     },
-
     "user_message": {
       "type": "object",
-      "required": ["message_id", "content"],
+      "required": [
+        "message_id",
+        "content"
+      ],
       "additionalProperties": false,
       "properties": {
-        "message_id": { "$ref": "#/$defs/id" },
-        "request_id": { "$ref": "#/$defs/id" },
-        "content": { "type": "string" },
-        "attachment_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
-        "steered": { "type": "boolean" },
+        "message_id": {
+          "$ref": "#/$defs/id"
+        },
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "content": {
+          "type": "string"
+        },
+        "attachment_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "steered": {
+          "type": "boolean"
+        },
         "origin": {
           "type": "object",
-          "required": ["conversation_id", "request_id"],
+          "required": [
+            "conversation_id",
+            "request_id"
+          ],
           "additionalProperties": false,
-          "properties": { "conversation_id": { "$ref": "#/$defs/id" }, "request_id": { "$ref": "#/$defs/id" } }
+          "properties": {
+            "conversation_id": {
+              "$ref": "#/$defs/id"
+            },
+            "request_id": {
+              "$ref": "#/$defs/id"
+            }
+          }
         }
       }
     },
     "turn_started": {
       "type": "object",
-      "required": ["request_id"],
+      "required": [
+        "request_id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "request_id": { "$ref": "#/$defs/id" },
-        "input_message_id": { "$ref": "#/$defs/id" },
-        "model": { "type": ["string", "null"] }
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "input_message_id": {
+          "$ref": "#/$defs/id"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "turn_completed": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "status": { "enum": ["completed", "failed", "cancelled"] },
-        "error": { "$ref": "#/$defs/error" },
-        "recovered": { "type": "boolean", "description": "Set when native reconciliation after a daemon restart closed the turn." }
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
+        "recovered": {
+          "type": "boolean",
+          "description": "Set when native reconciliation after a daemon restart closed the turn."
+        }
       }
     },
-
     "item_kind": {
-      "enum": ["assistant_text", "reasoning", "command", "file_change", "tool_call", "image", "background_task", "compaction", "error", "subagent"]
+      "enum": [
+        "assistant_text",
+        "reasoning",
+        "command",
+        "file_change",
+        "tool_call",
+        "image",
+        "background_task",
+        "compaction",
+        "error",
+        "subagent"
+      ]
     },
-    "subagent_kind": { "enum": ["assistant_text", "command", "tool_call", "image", "error"] },
-    "item_status": { "enum": ["in_progress", "completed", "failed", "cancelled"] },
+    "subagent_kind": {
+      "enum": [
+        "assistant_text",
+        "command",
+        "tool_call",
+        "image",
+        "error"
+      ]
+    },
+    "item_status": {
+      "enum": [
+        "in_progress",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
     "item_started": {
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": { "$ref": "#/$defs/item_kind" },
-        "tool": { "type": "string" },
-        "server": { "type": "string" },
+        "kind": {
+          "$ref": "#/$defs/item_kind"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        },
         "input": {},
-        "command": { "type": "string" },
-        "cwd": { "type": "string" },
-        "task_id": { "type": "string" },
-        "description": { "type": "string" },
-        "tool_use_id": { "type": "string" },
-        "task_type": { "type": "string" },
-        "item_order": { "type": "integer", "minimum": 0 },
-        "item_kind": { "$ref": "#/$defs/subagent_kind" },
-        "parent_tool_use_id": { "type": "string", "description": "Spawning tool call; child items stay in the original turn but render inside its subagent transcript." }
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "task_type": {
+          "type": "string"
+        },
+        "item_order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_kind": {
+          "$ref": "#/$defs/subagent_kind"
+        },
+        "parent_tool_use_id": {
+          "type": "string",
+          "description": "Spawning tool call; child items stay in the original turn but render inside its subagent transcript."
+        }
       }
     },
     "item_delta": {
       "description": "Appends text to one field of the item. Only text-bearing fields stream.",
       "type": "object",
-      "required": ["kind", "field", "text"],
+      "required": [
+        "kind",
+        "field",
+        "text"
+      ],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["assistant_text", "reasoning", "command", "tool_call", "background_task", "subagent"] },
-        "field": { "enum": ["text", "output"] },
-        "text": { "type": "string" },
-        "parent_tool_use_id": { "type": "string" },
-        "item_order": { "type": "integer", "minimum": 0 },
-        "item_kind": { "$ref": "#/$defs/subagent_kind" }
+        "kind": {
+          "enum": [
+            "assistant_text",
+            "reasoning",
+            "command",
+            "tool_call",
+            "background_task",
+            "subagent"
+          ]
+        },
+        "field": {
+          "enum": [
+            "text",
+            "output"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "parent_tool_use_id": {
+          "type": "string"
+        },
+        "item_order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_kind": {
+          "$ref": "#/$defs/subagent_kind"
+        }
       }
     },
     "item_state": {
       "description": "Complete item state. On item.completed it is final; on item.updated (background tasks) it replaces the previous state without ending the item.",
       "type": "object",
-      "required": ["kind", "status"],
+      "required": [
+        "kind",
+        "status"
+      ],
       "properties": {
-        "kind": { "$ref": "#/$defs/item_kind" },
-        "status": { "$ref": "#/$defs/item_status" },
-        "parent_tool_use_id": { "type": "string" },
-        "tool_use_id": { "type": "string" },
-        "task_type": { "type": "string" },
-        "item_order": { "type": "integer", "minimum": 0 },
-        "item_kind": { "$ref": "#/$defs/subagent_kind" },
-        "error": { "$ref": "#/$defs/error" }
+        "kind": {
+          "$ref": "#/$defs/item_kind"
+        },
+        "status": {
+          "$ref": "#/$defs/item_status"
+        },
+        "parent_tool_use_id": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "task_type": {
+          "type": "string"
+        },
+        "item_order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_kind": {
+          "$ref": "#/$defs/subagent_kind"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "assistant_text" } } }, "then": { "required": ["text"], "properties": { "text": { "type": "string" }, "phase": { "type": "string" } } } },
-        { "if": { "properties": { "kind": { "const": "reasoning" } } }, "then": { "required": ["text"], "properties": { "text": { "type": "string" } } } },
-        { "if": { "properties": { "kind": { "const": "command" } } }, "then": { "required": ["command", "output"], "properties": { "command": { "type": "string" }, "cwd": { "type": "string" }, "output": { "type": "string" }, "exit_code": { "type": ["integer", "null"] }, "duration_ms": { "type": "integer", "minimum": 0 } } } },
-        { "if": { "properties": { "kind": { "const": "file_change" } } }, "then": { "required": ["changes"], "properties": { "changes": { "type": "array", "items": { "$ref": "#/$defs/file_change" } } } } },
-        { "if": { "properties": { "kind": { "const": "tool_call" } } }, "then": { "required": ["tool"], "properties": { "tool": { "type": "string" }, "server": { "type": "string" }, "input": {}, "output": { "type": "string" } } } },
-        { "if": { "properties": { "kind": { "const": "image" } } }, "then": { "required": ["attachment_id", "mime_type"], "properties": { "attachment_id": { "$ref": "#/$defs/id" }, "mime_type": { "type": "string" } } } },
-        { "if": { "properties": { "kind": { "const": "background_task" } } }, "then": { "required": ["task_id", "description"], "properties": { "task_id": { "type": "string" }, "description": { "type": "string" }, "summary": { "type": "string" }, "progress_summary": { "type": "string" }, "output": { "type": "string" }, "usage": { "$ref": "#/$defs/task_usage" } } } },
-        { "if": { "properties": { "kind": { "const": "subagent" } } }, "then": { "required": ["parent_tool_use_id", "item_kind"] } },
-        { "if": { "properties": { "kind": { "const": "error" } } }, "then": { "required": ["error"] } }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "assistant_text"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "reasoning"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "command",
+              "output"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "output": {
+                "type": "string"
+              },
+              "exit_code": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "file_change"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "changes"
+            ],
+            "properties": {
+              "changes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/file_change"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "tool_call"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "tool"
+            ],
+            "properties": {
+              "tool": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "input": {},
+              "output": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "image"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "attachment_id",
+              "mime_type"
+            ],
+            "properties": {
+              "attachment_id": {
+                "$ref": "#/$defs/id"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "background_task"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "task_id",
+              "description"
+            ],
+            "properties": {
+              "task_id": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "progress_summary": {
+                "type": "string"
+              },
+              "output": {
+                "type": "string"
+              },
+              "usage": {
+                "$ref": "#/$defs/task_usage"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "subagent"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "parent_tool_use_id",
+              "item_kind"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "error"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
       ]
     },
     "file_change": {
       "type": "object",
-      "required": ["path", "kind"],
+      "required": [
+        "path",
+        "kind"
+      ],
       "additionalProperties": false,
       "properties": {
-        "path": { "type": "string" },
-        "kind": { "enum": ["add", "delete", "update", "move"] },
-        "move_path": { "type": "string" },
-        "diff": { "type": "string" }
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "add",
+            "delete",
+            "update",
+            "move"
+          ]
+        },
+        "move_path": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        }
       }
     },
     "task_usage": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "total_tokens": { "type": "integer", "minimum": 0 },
-        "tool_uses": { "type": "integer", "minimum": 0 },
-        "duration_ms": { "type": "integer", "minimum": 0 }
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "error": {
       "type": "object",
-      "required": ["kind", "message"],
+      "required": [
+        "kind",
+        "message"
+      ],
       "additionalProperties": false,
       "properties": {
-        "kind": { "type": "string", "description": "Stable classification such as provider_exited, storage_limit, concurrency_limit, unsupported_version. Clients fall back to a generic presentation for unknown kinds." },
-        "message": { "type": "string" }
+        "kind": {
+          "type": "string",
+          "description": "Stable classification such as provider_exited, storage_limit, concurrency_limit, unsupported_version. Clients fall back to a generic presentation for unknown kinds."
+        },
+        "message": {
+          "type": "string"
+        }
       }
     },
-
     "interaction_requested": {
       "type": "object",
-      "required": ["interaction_id", "kind", "request"],
+      "required": [
+        "interaction_id",
+        "kind",
+        "request"
+      ],
       "additionalProperties": false,
       "properties": {
-        "interaction_id": { "$ref": "#/$defs/id" },
-        "kind": { "enum": ["permission", "question"] },
-        "request": { "type": "object", "description": "Kind-specific request shown to the user: the tool, command or questions to answer." }
+        "interaction_id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "permission",
+            "question"
+          ]
+        },
+        "request": {
+          "type": "object",
+          "description": "Kind-specific request shown to the user: the tool, command or questions to answer."
+        }
       }
     },
     "interaction_resolved": {
       "type": "object",
-      "required": ["interaction_id", "status"],
+      "required": [
+        "interaction_id",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "interaction_id": { "$ref": "#/$defs/id" },
-        "status": { "enum": ["answered", "cancelled"] },
-        "answer": { "type": "object" }
+        "interaction_id": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "answered",
+            "cancelled"
+          ]
+        },
+        "answer": {
+          "type": "object"
+        }
       }
     },
     "usage": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "used_tokens": { "type": ["integer", "null"], "minimum": 0 },
-        "limit_tokens": { "type": ["integer", "null"], "minimum": 0 },
-        "model": { "type": ["string", "null"] }
+        "used_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "limit_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "conversation_settings": {
@@ -224,153 +1068,365 @@
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
-        "title": { "type": "string" },
-        "title_mode": { "enum": ["auto", "manual"] },
-        "model": { "type": ["string", "null"] },
-        "reasoning_effort": { "type": ["string", "null"] },
-        "permission_mode": { "enum": ["default", "auto", "full-access"] },
-        "provider_session_id": { "type": "string" },
-        "cwd": { "type": "string" },
-        "project_id": { "type": ["string", "null"] },
-        "pinned": { "type": "boolean" },
-        "archived": { "type": "boolean" }
+        "title": {
+          "type": "string"
+        },
+        "title_mode": {
+          "enum": [
+            "auto",
+            "manual"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permission_mode": {
+          "enum": [
+            "default",
+            "auto",
+            "full-access"
+          ]
+        },
+        "provider_session_id": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        }
       }
     },
     "queue_state": {
       "type": "object",
-      "required": ["revision", "paused", "count"],
+      "required": [
+        "revision",
+        "paused",
+        "count"
+      ],
       "additionalProperties": false,
       "properties": {
-        "revision": { "type": "integer", "minimum": 0 },
-        "paused": { "type": "boolean" },
-        "count": { "type": "integer", "minimum": 0 },
-        "error": { "type": "string" }
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "string"
+        }
       }
     },
-
     "conversation_summary": {
       "type": "object",
-      "required": ["conversation_id", "summary_seq", "provider", "title", "status", "pinned", "archived", "updated_at"],
+      "required": [
+        "conversation_id",
+        "summary_seq",
+        "provider",
+        "title",
+        "status",
+        "pinned",
+        "archived",
+        "updated_at"
+      ],
       "additionalProperties": false,
       "properties": {
-        "conversation_id": { "$ref": "#/$defs/id" },
-        "summary_seq": { "$ref": "#/$defs/seq" },
-        "provider": { "type": "string", "description": "codex or claude; unknown providers render with a generic label." },
-        "title": { "type": "string" },
-        "status": { "type": "string", "description": "idle, running, failed or deleted. Unknown values fall back to idle." },
-        "cwd": { "type": "string" },
-        "project_id": { "type": ["string", "null"] },
-        "pinned": { "type": "boolean" },
-        "archived": { "type": "boolean" },
-        "last_message_preview": { "type": "string" },
-        "pending_interactions": { "type": "integer", "minimum": 0 },
-        "queue_count": { "type": "integer", "minimum": 0 },
-        "background_tasks": { "type": "integer", "minimum": 0 },
-        "side_source_id": { "type": "string" },
-        "side_source_turn_id": { "type": "string" },
-        "side_quote": { "type": "string" },
-        "active_turn_id": { "type": "string" },
-        "turn_count": { "type": "integer", "minimum": 0 },
-        "created_at": { "$ref": "#/$defs/timestamp" },
-        "updated_at": { "$ref": "#/$defs/timestamp" }
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "summary_seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "provider": {
+          "type": "string",
+          "description": "codex or claude; unknown providers render with a generic label."
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "idle, running, failed or deleted. Unknown values fall back to idle."
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "last_message_preview": {
+          "type": "string"
+        },
+        "pending_interactions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queue_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "background_tasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "side_source_id": {
+          "type": "string"
+        },
+        "side_source_turn_id": {
+          "type": "string"
+        },
+        "side_quote": {
+          "type": "string"
+        },
+        "active_turn_id": {
+          "type": "string"
+        },
+        "turn_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
-
     "client_message": {
       "description": "Desktop -> daemon WS messages.",
       "oneOf": [
-        { "$ref": "#/$defs/subscribe_scope" },
-        { "$ref": "#/$defs/subscribe" },
-        { "$ref": "#/$defs/unsubscribe" },
-        { "$ref": "#/$defs/conversation_focus" },
-        { "$ref": "#/$defs/host_reply" }
+        {
+          "$ref": "#/$defs/subscribe_scope"
+        },
+        {
+          "$ref": "#/$defs/subscribe"
+        },
+        {
+          "$ref": "#/$defs/unsubscribe"
+        },
+        {
+          "$ref": "#/$defs/conversation_focus"
+        },
+        {
+          "$ref": "#/$defs/host_reply"
+        }
       ]
     },
     "conversation_focus": {
       "description": "A client has stayed on a conversation (focused) or left it. Clients send it only to a daemon announcing the conversation-focus-v1 capability; older daemons ignore unknown types anyway.",
       "type": "object",
-      "required": ["version", "type", "conversation_id", "focused"],
+      "required": [
+        "version",
+        "type",
+        "conversation_id",
+        "focused"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "conversation.focus" },
-        "conversation_id": { "$ref": "#/$defs/id" },
-        "focused": { "type": "boolean" }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "conversation.focus"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "focused": {
+          "type": "boolean"
+        }
       }
     },
     "host_reply": {
       "description": "Desktop's answer to a host.request: a result, or an error.",
       "type": "object",
-      "required": ["version", "type", "request_id"],
+      "required": [
+        "version",
+        "type",
+        "request_id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "host.reply" },
-        "request_id": { "$ref": "#/$defs/id" },
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "host.reply"
+        },
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
         "result": {},
-        "error": { "$ref": "#/$defs/error" }
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       }
     },
     "subscribe_scope": {
       "type": "object",
-      "required": ["version", "type"],
+      "required": [
+        "version",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "subscribe_scope" },
-        "after_scope_seq": { "type": "integer", "minimum": 0 },
-        "store_generation": { "type": "string" }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "subscribe_scope"
+        },
+        "after_scope_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "store_generation": {
+          "type": "string"
+        }
       }
     },
     "subscribe": {
       "type": "object",
-      "required": ["version", "type", "conversation_id", "after_seq", "store_generation"],
+      "required": [
+        "version",
+        "type",
+        "conversation_id",
+        "after_seq",
+        "store_generation"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "subscribe" },
-        "conversation_id": { "$ref": "#/$defs/id" },
-        "after_seq": { "type": "integer", "minimum": 0 },
-        "store_generation": { "type": "string" }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "subscribe"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "after_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "store_generation": {
+          "type": "string"
+        }
       }
     },
     "unsubscribe": {
       "type": "object",
-      "required": ["version", "type", "conversation_id"],
+      "required": [
+        "version",
+        "type",
+        "conversation_id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "unsubscribe" },
-        "conversation_id": { "$ref": "#/$defs/id" }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "unsubscribe"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        }
       }
     },
-
     "server_message": {
       "description": "Daemon -> Desktop WS messages.",
       "oneOf": [
-        { "$ref": "#/$defs/conversation_events" },
-        { "$ref": "#/$defs/scope_summaries" },
-        { "$ref": "#/$defs/subscription_status" },
-        { "$ref": "#/$defs/host_request" },
-        { "$ref": "#/$defs/scope_presence" }
+        {
+          "$ref": "#/$defs/conversation_events"
+        },
+        {
+          "$ref": "#/$defs/scope_summaries"
+        },
+        {
+          "$ref": "#/$defs/subscription_status"
+        },
+        {
+          "$ref": "#/$defs/host_request"
+        },
+        {
+          "$ref": "#/$defs/scope_presence"
+        }
       ]
     },
     "scope_presence": {
       "description": "Other devices using a conversation now, excluding the receiving connection. An empty list clears it.",
       "type": "object",
-      "required": ["version", "type", "conversation_id", "devices"],
+      "required": [
+        "version",
+        "type",
+        "conversation_id",
+        "devices"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "scope.presence" },
-        "conversation_id": { "type": "string", "minLength": 1 },
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "scope.presence"
+        },
+        "conversation_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "devices": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["peer_id", "device_name"],
+            "required": [
+              "peer_id",
+              "device_name"
+            ],
             "additionalProperties": false,
-            "properties": { "peer_id": { "type": "string", "minLength": 1 }, "device_name": { "type": "string" } }
+            "properties": {
+              "peer_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "device_name": {
+                "type": "string"
+              }
+            }
           }
         }
       }
@@ -378,54 +1434,133 @@
     "host_request": {
       "description": "Asks the connected Desktop to act for an execution, such as confirming a setting or opening a Side tab. Desktop answers with host.reply.",
       "type": "object",
-      "required": ["version", "type", "request_id", "kind", "payload"],
+      "required": [
+        "version",
+        "type",
+        "request_id",
+        "kind",
+        "payload"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "host.request" },
-        "request_id": { "$ref": "#/$defs/id" },
-        "kind": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "payload": { "type": "object" }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "host.request"
+        },
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "payload": {
+          "type": "object"
+        }
       }
     },
     "conversation_events": {
       "type": "object",
-      "required": ["version", "type", "conversation_id", "from_seq", "to_seq", "events"],
+      "required": [
+        "version",
+        "type",
+        "conversation_id",
+        "from_seq",
+        "to_seq",
+        "events"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "conversation.events" },
-        "conversation_id": { "$ref": "#/$defs/id" },
-        "from_seq": { "$ref": "#/$defs/seq" },
-        "to_seq": { "$ref": "#/$defs/seq" },
-        "events": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event" } }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "conversation.events"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "from_seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "to_seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        }
       }
     },
     "scope_summaries": {
       "type": "object",
-      "required": ["version", "type", "scope_seq", "summaries"],
+      "required": [
+        "version",
+        "type",
+        "scope_seq",
+        "summaries"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "scope.summaries" },
-        "scope_seq": { "type": "integer", "minimum": 0 },
-        "summaries": { "type": "array", "items": { "$ref": "#/$defs/conversation_summary" } }
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "scope.summaries"
+        },
+        "scope_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/conversation_summary"
+          }
+        }
       }
     },
     "subscription_status": {
       "type": "object",
-      "required": ["version", "type", "status"],
+      "required": [
+        "version",
+        "type",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": { "const": 2 },
-        "type": { "const": "subscription.status" },
-        "conversation_id": { "$ref": "#/$defs/id" },
+        "version": {
+          "const": 2
+        },
+        "type": {
+          "const": "subscription.status"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/id"
+        },
         "status": {
-          "enum": ["subscribed", "live", "resubscribe", "snapshot_required", "rejected"],
+          "enum": [
+            "subscribed",
+            "live",
+            "resubscribe",
+            "snapshot_required",
+            "rejected"
+          ],
           "description": "subscribed: catch-up started at high_water. live: catch-up finished. resubscribe: catch-up buffer exceeded. snapshot_required: generation changed or cursor ahead. rejected: subscription limit or access."
         },
-        "high_water": { "type": "integer", "minimum": 0 },
-        "error": { "$ref": "#/$defs/error" }
+        "high_water": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       }
     }
   }

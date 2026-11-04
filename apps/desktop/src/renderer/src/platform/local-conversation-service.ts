@@ -5,14 +5,13 @@ import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
 import type { AgentTask, Attachment } from "@multica/core/types";
 import { createAgentGuiParentService, type ParentServiceOptions } from "@multica/views/conversation-flow/service";
-import type { AgentGuiHostEvent, AgentGuiRpcMethod, AgentGuiRpcMethods, AgentGuiSession, AgentGuiSessionDetail, AgentGuiWorkspaceState } from "@multica/tutti-agent-gui-host/protocol";
+import type { AgentGuiHostEvent, AgentGuiRpcMethod, AgentGuiRpcMethods, AgentGuiSession, AgentGuiSessionDetail, AgentGuiWorkspaceState, LocalConversationSource } from "@multica/tutti-agent-gui-host/protocol";
 import { isTaskCreationReference, type LocalFolderProject, type LocalPromptQueue, type LocalProviderId, type LocalProviderUsage, type LocalQueuedPrompt } from "@multica/core/local-conversation/protocol";
-import { localV2SummarySchema, type LocalV2Scope, type LocalV2Snapshot, type LocalV2Summary, type LocalV2Transport } from "@multica/core/local-conversation/v2";
+import { localV2SummarySchema, type LocalV2Scope, type LocalV2Summary, type LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { isAutomaticLocalDirectory } from "@multica/tutti-agent-gui-host/local-projects";
 import { projectForDirectory } from "./local-conversation-projects";
 import { blobBase64 } from "./local-preview-file";
-import { localV2, type LocalV2ScopeClient } from "./local-v2";
-import { createLocalV2SnapshotStore, type LocalV2SnapshotStore } from "./local-v2-snapshot-store";
+import { conversationStore, type ConversationStore } from "./conversation-store";
 import { createLocalV2Uploads } from "./local-v2-uploads";
 
 /** Query keys of a device's conversations; deviceId is "local" or another device's peer ID. */
@@ -40,13 +39,44 @@ function projectQueue(raw: unknown): LocalPromptQueue {
     ...(queue.dispatching_request_id ? { dispatchingRequestId: queue.dispatching_request_id } : {}), items: (queue.items ?? []) as LocalQueuedPrompt[] };
 }
 
-const PROVIDERS_PATH = "/providers";
-const FOLDER_PROJECTS_PATH = "/folder-projects";
-type ProviderList = { providers: { id: LocalProviderId; name: string; available: boolean }[] };
-type FolderProjectList = { projects: { id: string; title: string; path: string; created_at: string }[] };
+export type LocalProviderList = { providers: { id: LocalProviderId; name: string; available: boolean }[] };
+export type LocalFolderProjectList = { projects: { id: string; title: string; path: string; created_at: string }[] };
+
+/** One query per device for what the page and the GUI both show, so they read one answer. */
+export function localProvidersQuery(store: ConversationStore, deviceId: string) {
+  return { queryKey: [...localConversationKey(store.scope, deviceId), "providers"], queryFn: () => store.request("GET", "/providers") as Promise<LocalProviderList> };
+}
+export function localFolderProjectsQuery(store: ConversationStore, deviceId: string) {
+  return { queryKey: [...localConversationKey(store.scope, deviceId), "folder-projects"], queryFn: () => store.request("GET", "/folder-projects") as Promise<LocalFolderProjectList> };
+}
 
 /** Survives a tab's page being rebuilt, so @agent does not start empty each time. */
-const lastAgents = new WeakMap<LocalV2ScopeClient, AgentGuiWorkspaceState["agents"]>();
+const lastAgents = new WeakMap<ConversationStore, AgentGuiWorkspaceState["agents"]>();
+
+export function localConversationSource(store: ConversationStore, scope: LocalV2Scope): LocalConversationSource {
+  return {
+    open: (id) => store.open(id),
+    ensure: (id) => store.ensure(id),
+    refresh: (id) => store.refresh(id),
+    loadOlder: (id) => store.loadOlder(id),
+    observe: (id, listener) => store.observe(id, listener),
+    conversation: (id) => store.conversation(id),
+    detail(id) {
+      const conversation = store.conversation(id);
+      if (!conversation) return null;
+      const settings = conversation.settings;
+      // A fork's copied turns started before it was created; the last one is where it branched, once loaded.
+      const branched = [...conversation.turns.values()].filter((turn) => Date.parse(turn.startedAt) <= Date.parse(conversation.createdAt)).at(-1);
+      const forked = conversation.forkedFromId && conversation.forkedFromTurnId
+        ? { forkedFrom: { sessionId: conversation.forkedFromId, turnId: conversation.forkedFromTurnId, targetTurnId: branched?.id ?? "", operationId: id, createdAt: conversation.createdAt } } : {};
+      return {
+        session: projectLocalSession(store.summary(id) ?? conversation.summary, scope), model: (settings.model ?? null) as string | null, reasoningEffort: (settings.reasoning_effort ?? null) as AgentGuiSessionDetail["reasoningEffort"],
+        permissionMode: settings.permission_mode as AgentGuiSessionDetail["permissionMode"], promptQueue: projectQueue(conversation.queue),
+        messages: [], pending: {}, tasks: [], ...forked,
+      };
+    },
+  };
+}
 
 export function createLocalConversationParentService(options: ParentServiceOptions & {
   onLocalSelect(id: string | null, provider?: LocalProviderId): void;
@@ -57,19 +87,16 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   onLocateSource?: (sessionId: string, turnId?: string, quote?: string) => void;
   storagePrefix?: string;
   locale?: string;
-  snapshotStore?: LocalV2SnapshotStore;
 }, transport: LocalV2Transport): ReturnType<typeof createAgentGuiParentService> {
   const storage = options.storage ?? defaultStorage;
   const usageStorageKey = `multica:local-agent-mentions:v1:${JSON.stringify([api.getBaseUrl(), options.userId, options.workspaceId])}`;
   const scope: LocalV2Scope = { userId: options.userId, workspaceId: options.workspaceId };
-  const client: LocalV2ScopeClient = localV2(transport, scope);
+  const client: ConversationStore = conversationStore(transport, scope);
   const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
-  // Only another device's conversations cost anything to read.
-  const snapshots: LocalV2SnapshotStore | null = deviceId === "local" ? null : options.snapshotStore ?? createLocalV2SnapshotStore();
-  const snapshotKey = (id: string) => JSON.stringify([deviceId, scope.userId, scope.workspaceId, id]);
+  const providersQuery = localProvidersQuery(client, deviceId);
+  const foldersQuery = localFolderProjectsQuery(client, deviceId);
   const cloud = createAgentGuiParentService(options);
   const listeners = new Set<(event: AgentGuiHostEvent) => void>();
-  const subscriptions = new Map<string, () => void>();
   let disposed = false;
   let cloudState: AgentGuiWorkspaceState | undefined;
   let cloudDirty = true;
@@ -122,15 +149,16 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     assertCurrent();
     const refreshFailed = (source: string) => (error: unknown) => { console.warn(`Could not refresh ${source}`, error); };
     remoteWorkspace().catch(refreshFailed("cloud agents"));
-    client.refreshKnown(FOLDER_PROJECTS_PATH).catch(refreshFailed("folder projects"));
-    const providersRead = client.refreshKnown(PROVIDERS_PATH);
+    const qc = options.queryClient;
+    void qc.fetchQuery({ ...foldersQuery, staleTime: 0 }).catch(refreshFailed("folder projects"));
+    const providersRead = qc.fetchQuery({ ...providersQuery, staleTime: 0 });
     providersRead.catch(refreshFailed("providers"));
     const summariesRead = client.loadSummaries();
     summariesRead.catch(refreshFailed("conversations"));
-    await Promise.all([client.known(PROVIDERS_PATH) ? null : providersRead, client.hasSummaries() ? null : summariesRead]);
+    await Promise.all([qc.getQueryData(providersQuery.queryKey) ? null : providersRead, client.hasSummaries() ? null : summariesRead]);
     assertCurrent();
-    const providers = client.known<ProviderList>(PROVIDERS_PATH)!;
-    const folderProjects = client.known<FolderProjectList>(FOLDER_PROJECTS_PATH);
+    const providers = qc.getQueryData<LocalProviderList>(providersQuery.queryKey)!;
+    const folderProjects = qc.getQueryData<LocalFolderProjectList>(foldersQuery.queryKey);
     const summaries = client.summaries();
     return { local: true, composerDraftScope: JSON.stringify([api.getBaseUrl(), options.storagePrefix ?? ""]), queueOwner: "desktop", sideWorkspace: true, sidePane: Boolean(options.storagePrefix), agents: lastAgents.get(client) ?? [], movedQueueRequests: [],
       executionTargets: providers.providers.map((entry) => ({ id: localTargetId(entry.id), name: entry.name, provider: entry.id, iconUrl: "", canInvoke: entry.available, canFork: true, runtimeBound: entry.available, runtimeOnline: entry.available, unavailableReason: entry.available ? undefined : "未在本机安装" })),
@@ -138,25 +166,6 @@ export function createLocalConversationParentService(options: ParentServiceOptio
       folderProjects: (folderProjects?.projects ?? []).map((project): LocalFolderProject => ({ id: project.id, title: project.title, path: project.path, createdAt: project.created_at })),
       pendingTasks: summaries.flatMap((summary) => summary.active_turn_id ? [{ task_id: summary.active_turn_id, status: "running" as const, chat_session_id: summary.conversation_id }] : []),
     };
-  }
-
-  async function detail(id: string): Promise<{ detail: AgentGuiSessionDetail; snapshot: LocalV2Snapshot }> {
-    const snapshot = await client.snapshot(id); assertCurrent();
-    client.receiveSummary(snapshot.conversation);
-    void snapshots?.write(snapshotKey(id), snapshot);
-    return projectDetail(snapshot);
-  }
-
-  function projectDetail(snapshot: LocalV2Snapshot): { detail: AgentGuiSessionDetail; snapshot: LocalV2Snapshot } {
-    // The fork's copied turns started before the fork was created; the last one is where it branched.
-    const branched = snapshot.turns.filter((turn) => Date.parse(turn.started_at) <= Date.parse(snapshot.created_at)).at(-1);
-    const forked = snapshot.forked_from_id && snapshot.forked_from_turn_id
-      ? { forkedFrom: { sessionId: snapshot.forked_from_id, turnId: snapshot.forked_from_turn_id, targetTurnId: branched?.id ?? "", operationId: snapshot.conversation.conversation_id, createdAt: snapshot.created_at } } : {};
-    return { snapshot, detail: {
-      session: projectLocalSession(snapshot.conversation, scope), model: snapshot.settings.model, reasoningEffort: snapshot.settings.reasoning_effort as AgentGuiSessionDetail["reasoningEffort"],
-      permissionMode: snapshot.settings.permission_mode as AgentGuiSessionDetail["permissionMode"], promptQueue: projectQueue(snapshot.queue),
-      messages: [], pending: {}, tasks: [], ...forked,
-    } };
   }
 
   async function referencedContent(content: string, references: { kind: string; id: string }[]): Promise<string> {
@@ -191,32 +200,11 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     });
   }
 
-  function unsubscribe(id: string) {
-    subscriptions.get(id)?.();
-    subscriptions.delete(id);
-  }
-
   async function request(method: AgentGuiRpcMethod, raw: unknown): Promise<unknown> {
     assertCurrent(); const params = raw as Record<string, any>;
     switch (method) {
       case "workspace.load": return load();
-      case "local.snapshot": return detail(params.sessionId);
-      case "local.storedSnapshot": {
-        const stored = await snapshots?.read(snapshotKey(params.sessionId)); assertCurrent();
-        return stored ? projectDetail(stored) : null;
-      }
-      case "session.load": return (await detail(params.sessionId)).detail;
-      case "local.subscribe": {
-        unsubscribe(params.sessionId);
-        subscriptions.set(params.sessionId, client.subscribe(params.sessionId, params.afterSeq, params.generation, (message) => publish({ type: "local.events", sessionId: params.sessionId, message })));
-        return undefined;
-      }
-      case "local.unsubscribe": unsubscribe(params.sessionId); return undefined;
-      case "session.watch": {
-        const watched = new Set<string>(params.sessionIds);
-        for (const id of [...subscriptions.keys()]) if (!watched.has(id)) unsubscribe(id);
-        return undefined;
-      }
+      case "session.watch": return undefined;
       case "session.markRead": return undefined;
       case "queue.enqueue": {
         // Transfer ownership before any asynchronous view-bound preparation.
@@ -351,24 +339,28 @@ export function createLocalConversationParentService(options: ParentServiceOptio
     if (workspaceTimer) return;
     workspaceTimer = setTimeout(() => { workspaceTimer = undefined; publish({ type: "invalidate", scope: "workspace" }); }, 50);
   });
-  const unsubscribeKnown = client.onKnownChanged(() => publish({ type: "invalidate", scope: "workspace" }));
+  // The page and this service share these queries; either reading new data refreshes the GUI.
+  const known = new Map<string, unknown>();
+  const unsubscribeKnown = options.queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated" || event.action.type !== "success") return;
+    const hash = event.query.queryHash;
+    if (hash !== JSON.stringify(providersQuery.queryKey) && hash !== JSON.stringify(foldersQuery.queryKey)) return;
+    const changed = known.get(hash) !== event.query.state.data;
+    known.set(hash, event.query.state.data);
+    if (changed) publish({ type: "invalidate", scope: "workspace" });
+  });
   const unsubscribeCloud = cloud.subscribe((event) => { if (event.type === "invalidate" && event.scope === "workspace") { cloudDirty = true; publish(event); } });
   const unsubscribeConnection = transport.onConnection((value, connected) => {
     if (disposed || !options.isCurrent() || value.userId !== scope.userId || value.workspaceId !== scope.workspaceId) return;
     publish({ type: "connection", connected });
-    if (!connected) return;
-    // A failed first snapshot has no event subscription to signal its recovery.
-    const selected = options.getSelectedSessionId?.();
-    if (selected && !subscriptions.has(selected)) publish({ type: "local.reload", sessionId: selected });
-    publish({ type: "invalidate", scope: "workspace" });
+    if (connected) publish({ type: "invalidate", scope: "workspace" });
   });
-  return { load, request: request as <M extends AgentGuiRpcMethod>(method: M, params: AgentGuiRpcMethods[M]["params"]) => Promise<AgentGuiRpcMethods[M]["result"]>,
+  return { localConversations: localConversationSource(client, scope), load, request: request as <M extends AgentGuiRpcMethod>(method: M, params: AgentGuiRpcMethods[M]["params"]) => Promise<AgentGuiRpcMethods[M]["result"]>,
     publish, subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     reconnect: () => { cloudDirty = true; cloud.reconnect(); publish({ type: "invalidate", scope: "workspace" }); },
     dispose: () => {
       disposed = true;
       uploads.dispose();
-      for (const id of [...subscriptions.keys()]) unsubscribe(id);
       if (workspaceTimer) clearTimeout(workspaceTimer);
       unsubscribeSummaries(); unsubscribeKnown(); unsubscribeCloud(); unsubscribeConnection(); cloud.dispose(); listeners.clear();
     },

@@ -1,3 +1,5 @@
 /.build-lock/
 /.build-fingerprint
 /.multica-tokens.css
+/src/agent-gui.generated.css
+/src/html-preview/libraries.generated.ts

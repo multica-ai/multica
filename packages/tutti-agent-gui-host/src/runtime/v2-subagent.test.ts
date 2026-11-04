@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
-import { V2Conversation } from "./v2-conversation";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
 import { projectV2Conversation } from "./v2-projection";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { projectAgentActivitySessionToConversationVM } from "../../../../vendor/tutti/packages/agent/gui/shared/agentConversation/projection/workspaceAgentMessageProjection";

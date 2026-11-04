@@ -274,7 +274,7 @@ function useAgentMessageImageSources(
     ) {
       for (const image of missingImages) {
         const readImage = image.attachmentId
-          ? runtime.readSessionAttachment?.({
+          ? (runtime.readSessionAttachmentSource ?? runtime.readSessionAttachment)?.({
               workspaceId: image.workspaceId ?? "",
               agentSessionId: image.agentSessionId,
               attachmentId: image.attachmentId ?? ""
@@ -296,7 +296,7 @@ function useAgentMessageImageSources(
               const next = new Map(current);
               next.set(
                 image.id,
-                `data:${attachment.mimeType};base64,${attachment.data}`
+                "url" in attachment ? attachment.url : `data:${attachment.mimeType};base64,${attachment.data}`
               );
               return next;
             });

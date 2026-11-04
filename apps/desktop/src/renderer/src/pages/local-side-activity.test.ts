@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
-import { V2Conversation } from "@multica/tutti-agent-gui-host/v2-conversation";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
 import { localSideActivity } from "./local-side-activity";
 
 const at = "2026-10-27T09:00:00Z";

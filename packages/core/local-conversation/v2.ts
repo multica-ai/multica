@@ -22,6 +22,9 @@ export const localV2EventSchema = z.object({
   type: z.string(),
   final: z.boolean(),
   created_at: z.string(),
+  /** Sequence of the item's first event, on the final event a settled turn is read back from. */
+  first_seq: z.number().int().optional(),
+  first_at: z.string().optional(),
   payload,
 });
 export type LocalV2Event = z.infer<typeof localV2EventSchema>;
@@ -115,12 +118,27 @@ export const localV2SnapshotSchema = z.object({
     revision: z.number().int(), paused: z.boolean(), error: z.string().optional(), dispatching_request_id: z.string().optional(),
     items: z.array(payload).default([]),
   }).default({ revision: 0, paused: false, items: [] }),
+  /** Events of background items still running whose turn is older than this snapshot's window. */
+  open_background_items: z.array(localV2EventSchema).default([]),
   created_at: z.string().default(""),
   forked_from_id: z.string().default(""),
   forked_from_turn_id: z.string().default(""),
   imported_from_session_id: z.string().default(""),
 });
 export type LocalV2Snapshot = z.infer<typeof localV2SnapshotSchema>;
+
+export const localV2QueueSchema = z.object({
+  revision: z.number().int(), paused: z.boolean(), error: z.string().optional(), dispatching_request_id: z.string().optional(),
+  items: z.array(payload).default([]),
+});
+export type LocalV2Queue = z.infer<typeof localV2QueueSchema>;
+
+export const localV2HistorySchema = z.object({
+  store_generation: z.string(),
+  turns: z.array(snapshotTurnSchema),
+  has_older_turns: z.boolean(),
+});
+export type LocalV2History = z.infer<typeof localV2HistorySchema>;
 
 export const localV2SessionListSchema = z.object({
   scope_seq: z.number().int(),
@@ -157,6 +175,10 @@ export interface LocalV2Transport {
   send(scope: LocalV2Scope, message: LocalV2ClientMessage): Promise<void>;
   /** What the daemon behind this transport announces in /hello. */
   capabilities?(): Promise<string[]>;
+  /** The daemon's store generation from /hello, read fresh. */
+  storeGeneration?(): Promise<string>;
+  /** Stops keeping a scope connected. */
+  release?(scope: LocalV2Scope): void;
   /** Receives the scope's server messages. */
   subscribe(listener: (scope: LocalV2Scope, message: unknown) => void): () => void;
   /** Receives connection changes; subscriptions are lost on disconnect. */

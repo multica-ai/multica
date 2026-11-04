@@ -272,9 +272,9 @@ function AskUserAnswerFlowSurface({
             })}
           </div>
         ) : null}
-        {question.allowFreeText !== false &&
-        (!conversationReturn || question.options.length === 0) ? (
+        {question.allowFreeText !== false ? (
           <textarea
+            aria-label={question.question}
             value={flow.freeText}
             placeholder={labels.answerPlaceholder}
             disabled={isSubmitting || isInteractionDisabled}

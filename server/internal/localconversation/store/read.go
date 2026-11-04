@@ -19,6 +19,15 @@ type TurnView struct {
 	// Events holds final events plus, for unfinished items and item-less
 	// events of a running turn, every event in order.
 	Events []sqlitedb.Event
+	// ItemStarts is when each item began. A settled turn keeps only each item's
+	// final event, and clients order and time items by their start.
+	ItemStarts map[string]ItemStart
+}
+
+// ItemStart is an item's first event.
+type ItemStart struct {
+	Seq       int64
+	CreatedAt string
 }
 
 // Snapshot is a bounded first screen of a conversation.
@@ -30,6 +39,10 @@ type Snapshot struct {
 	SnapshotSeq int64
 	// HasOlderTurns reports whether turns before Turns[0] exist.
 	HasOlderTurns bool
+	// OpenBackgroundItems is the latest event of each background item still
+	// running in a turn older than Turns. Later events of those items arrive with
+	// no loaded turn, so a client needs them to know the item at all.
+	OpenBackgroundItems []sqlitedb.Event
 }
 
 // Snapshot reads the latest turnLimit turns of a conversation in one read
@@ -61,7 +74,21 @@ func (s *Store) Snapshot(ctx context.Context, conversationID string, turnLimit i
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{Conversation: conv, Turns: views, PendingInteractions: pending, SnapshotSeq: conv.LastSeq}
+	background, err := q.ListBackgroundTaskEvents(ctx, conversationID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	loaded := make(map[string]bool, len(turns))
+	for _, t := range turns {
+		loaded[t.ID] = true
+	}
+	var openOutside []sqlitedb.Event
+	for _, e := range latestOpenEvents(background) {
+		if !loaded[e.TurnID.String] {
+			openOutside = append(openOutside, e)
+		}
+	}
+	snap := Snapshot{Conversation: conv, Turns: views, PendingInteractions: pending, SnapshotSeq: conv.LastSeq, OpenBackgroundItems: openOutside}
 	if len(turns) > 0 {
 		snap.HasOlderTurns = turns[len(turns)-1].TurnIndex > 0
 	}
@@ -160,7 +187,17 @@ func turnViews(ctx context.Context, q *sqlitedb.Queries, conversationID string, 
 				return nil, err
 			}
 		}
-		views = append(views, TurnView{Turn: t, Messages: messages, Events: events})
+		starts, err := q.ListTurnItemStarts(ctx, sqlitedb.ListTurnItemStartsParams{ConversationID: conversationID, TurnID: turnID})
+		if err != nil {
+			return nil, err
+		}
+		itemStarts := make(map[string]ItemStart, len(starts))
+		for _, s := range starts {
+			if first, ok := s.FirstSeq.(int64); ok {
+				itemStarts[s.ItemID.String] = ItemStart{Seq: first, CreatedAt: s.CreatedAt}
+			}
+		}
+		views = append(views, TurnView{Turn: t, Messages: messages, Events: events, ItemStarts: itemStarts})
 	}
 	return views, nil
 }
@@ -277,6 +314,11 @@ func (s *Store) OpenBackgroundTaskItems(ctx context.Context, conversationID stri
 	if err != nil {
 		return nil, err
 	}
+	return latestOpenEvents(rows), nil
+}
+
+// latestOpenEvents keeps the last event of each item with no final event.
+func latestOpenEvents(rows []sqlitedb.Event) []sqlitedb.Event {
 	latest := map[string]sqlitedb.Event{}
 	var order []string
 	for _, e := range rows {
@@ -297,7 +339,7 @@ func (s *Store) OpenBackgroundTaskItems(ctx context.Context, conversationID stri
 			delete(latest, id)
 		}
 	}
-	return open, nil
+	return open
 }
 
 // ConversationTurns lists a conversation's turns in order.

@@ -1,3 +1,5 @@
+import type { V2Conversation } from "@multica/core/local-conversation/conversation";
+import type { LocalV2Event } from "@multica/core/local-conversation/v2";
 import type {
   Agent,
   AgentTask,
@@ -128,13 +130,6 @@ export interface AgentGuiRpcMethods {
   "interaction.respond": { params: { sessionId: string; turnId: string; requestId: string; answers: Record<string, string | string[]> }; result: void };
   "workspace.load": { params: Record<string, never>; result: AgentGuiWorkspaceState };
   "session.load": { params: { sessionId: string }; result: AgentGuiSessionDetail };
-  /** A local conversation's metadata and its v2 snapshot (`LocalV2Snapshot`). */
-  "local.snapshot": { params: { sessionId: string }; result: { detail: AgentGuiSessionDetail; snapshot: unknown } };
-  /** Receive a local conversation's events after afterSeq as `local.events`. */
-  /** The conversation as this viewer last read it from another device; null otherwise. */
-  "local.storedSnapshot": { params: { sessionId: string }; result: { detail: AgentGuiSessionDetail; snapshot: unknown } | null };
-  "local.subscribe": { params: { sessionId: string; afterSeq: number; generation: string }; result: void };
-  "local.unsubscribe": { params: { sessionId: string }; result: void };
   "session.create": {
     params: { agentId: string; title?: string; projectId?: string | null; cwd?: string };
     result: AgentGuiSession;
@@ -201,12 +196,29 @@ export type AgentGuiHostEvent =
   | { type: "init"; snapshot: AgentGuiInitSnapshot }
   | { type: "appendPrompt"; sequence: number; prompt: string; sessionId?: string; attachments?: Attachment[]; restoreRequestId?: string }
   | { type: "connection"; connected: boolean }
-  /** A v2 server message of a subscribed local conversation. */
   | { type: "attachment.upload"; attachmentId: string; state: "uploaded" }
   | { type: "attachment.upload"; attachmentId: string; state: "failed"; message: string }
-  | { type: "local.events"; sessionId: string; message: unknown }
-  /** The local conversation's subscription ended; reload its snapshot. */
-  | { type: "local.reload"; sessionId: string };
+  ;
+
+/**
+ * Local conversations as the runtime reads them. It owns nothing here: the
+ * conversations outlive the GUI, which projects them while it is mounted.
+ */
+export interface LocalConversationSource {
+  /** Starts keeping a conversation current; the returned function is leaving it. */
+  open(sessionId: string): () => void;
+  /** The conversation with at least its first turns. */
+  ensure(sessionId: string): Promise<V2Conversation>;
+  /** The conversation as the daemon has it now, for a caller that must see what it just caused. */
+  refresh(sessionId: string): Promise<V2Conversation>;
+  /** Reads the next older page, if any. */
+  loadOlder(sessionId: string): Promise<void>;
+  /** Watches changes; events is empty for a change that is not new events. */
+  observe(sessionId: string, listener: (events: readonly LocalV2Event[]) => void): () => void;
+  conversation(sessionId: string): V2Conversation | undefined;
+  /** What the GUI's session model needs from a loaded conversation. */
+  detail(sessionId: string): AgentGuiSessionDetail | null;
+}
 
 export interface AgentGuiRpcClient {
   request<TMethod extends AgentGuiRpcMethod>(

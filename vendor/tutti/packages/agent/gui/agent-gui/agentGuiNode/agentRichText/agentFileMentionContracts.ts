@@ -75,6 +75,8 @@ export interface AgentMentionWorkspaceIssueItem {
   creatorName?: string;
   iconUrl?: string;
   status?: string;
+  statusLabel?: string;
+  statusCategory?: string;
   contentPreview?: string;
   updatedAtUnixMs?: number;
 }

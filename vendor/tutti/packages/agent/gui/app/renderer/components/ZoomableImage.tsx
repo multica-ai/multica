@@ -29,6 +29,7 @@ import {
   downloadImage,
   resolveImageDownloadName
 } from "./zoomableImageDownload";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 interface ZoomableImageProps extends ComponentPropsWithoutRef<"img"> {
   downloadName?: string;
@@ -348,7 +349,7 @@ export function ZoomableImage({
                 onDownload={handleDownloadImage}
               />
             </div>,
-            document.body
+            getPortalContainer()
           )
         : null}
       {(isImagePreviewOpen || isImagePreviewClosing) && actionSource
@@ -440,7 +441,7 @@ export function ZoomableImage({
                 />
               ) : null}
             </div>,
-            document.body
+            getPortalContainer()
           )
         : null}
       {copyStatus && !isImagePreviewOpen
@@ -455,7 +456,7 @@ export function ZoomableImage({
                 }
               }}
             />,
-            document.body
+            getPortalContainer()
           )
         : null}
     </>

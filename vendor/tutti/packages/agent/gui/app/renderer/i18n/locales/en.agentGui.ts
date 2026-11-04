@@ -19,7 +19,7 @@ export const enAgentGui = {
   imageLoadFailed: "Image failed to load",
   imageTemporarilyUnavailable: "Image temporarily unavailable",
   retryImage: "Retry",
-  initialPlaceholder: "Type @ to reference sessions, files, tasks, and apps",
+  initialPlaceholder: "Type @ to reference sessions, tasks, and agents",
   followupPlaceholder: "Request follow-up changes from {{provider}}",
   installRequiredPlaceholder: "Connect {{provider}} to send messages",
   installRequiredAction: "Connect",
@@ -295,7 +295,7 @@ export const enAgentGui = {
   ...enAgentGuiOrchestration,
   queuedLabel: "Queued",
   queuePausedByUserLabel:
-    "The queue is paused because you interrupted the current response.",
+    "Queue paused",
   sendQueuedPromptNext: "Send next",
   editQueuedPrompt: "Edit",
   deleteQueuedPrompt: "Delete",
@@ -688,12 +688,12 @@ export const enAgentGui = {
   computerUseCapabilitySettingsLabel: "Computer use setup",
   computerUseCapabilitySettingsDescription:
     "Install, remove, or grant computer access.",
-  fileMentionPalette: "Files",
+  fileMentionPalette: "References and agents",
   fileMentionLoading: "Searching...",
   fileMentionEmpty: "Search workspace files based on your input",
   fileMentionError: "Unable to search Files.",
   fileMentionTabHint:
-    "Tab switch category | ←→ enter/leave folder | ↑↓ switch selection",
+    "Tab / ←→ switch category | ↑↓ switch selection",
   fileDropHint: "Drop files to add them to the session",
   composerFileFolderUnsupported: "Folders cannot be attached here",
   composerFileTooLarge: "File is too large",

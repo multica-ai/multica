@@ -25,16 +25,16 @@ import type {
   AgentGuiSession,
   AgentGuiWorkspaceState,
   AgentGuiTaskMessagePayload,
+  LocalConversationSource,
 } from "../protocol";
 import { executionTargets } from "../protocol";
 import { ReasoningPreferences } from "./reasoning-preferences";
 import { ModelPreferences } from "./model-preferences";
 import { PermissionPreferences } from "./permission-preferences";
+import type { LocalV2Event } from "@multica/core/local-conversation/v2";
 import { isLocalReasoningEffort, localReasoningLevels, isLocalPermissionMode, type LocalReasoningEffort, type LocalPermissionMode } from "@multica/core/local-conversation/protocol";
 import { RuntimeLedger } from "./ledger";
 import { composerOptions, projectDetail, projectPendingSession, projectSession, projectV2Detail } from "./projection";
-import { V2Conversation } from "./v2-conversation";
-import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 import { createDesktopQueueEngine } from "./desktop-queue-engine";
 import { promptSubmissionError } from "./prompt-submission-policy";
 import { createDesktopPendingStore } from "./desktop-pending-store";
@@ -55,7 +55,7 @@ export function unsupported(capability: string): never {
   throw new MulticaAgentGuiError(`${capability} is not supported by this Multica connection.`, "unsupported");
 }
 
-export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: AgentGuiInitSnapshot) {
+export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: AgentGuiInitSnapshot, source?: LocalConversationSource) {
   const uploads = createAttachmentUploadTracker(client, init.locale);
   const workspaceId = init.workspaceId;
   const presentationTiming = createLocalPresentationTiming();
@@ -79,9 +79,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   void permissionHydration.catch(() => {});
   const details = new Map<string, AgentGuiSessionDetail>();
   const transcripts = new Map<string, Map<string, AgentGuiTaskMessagePayload[]>>();
-  /** Local conversations: v2 state built from a snapshot and its events. */
-  const v2 = new Map<string, V2Conversation>();
+  /** Local conversations in view: each one's release and its observer's. */
+  const openLocal = new Map<string, () => void>();
   const v2Applies = new Set<string>();
+  let hostVisible = init.hostVisible !== false;
   const attachments = new Map<string, Attachment>();
   const sessionLoads = new Map<string, Promise<AgentActivitySession>>();
   const dirtySessions = new Set<string>();
@@ -462,7 +463,20 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     if (disposed) return;
     console.error("[multica-agent-gui]", error);
   }
+  /** A hidden GUI, such as a closed Side, holds nothing: it reads what it missed when shown again. */
+  function syncLocalWatch() {
+    if (!source) return;
+    const wanted = new Set(hostVisible ? [...watched.keys()].map(resolvedServerId).filter((id): id is string => Boolean(id)) : []);
+    for (const [id, release] of openLocal) if (!wanted.has(id)) { release(); openLocal.delete(id); }
+    for (const id of wanted) {
+      if (openLocal.has(id)) continue;
+      const stopObserving = source.observe(id, (events) => receiveLocal(ledger.guiId(id), events));
+      const leave = source.open(id);
+      openLocal.set(id, () => { leave(); stopObserving(); });
+    }
+  }
   function syncWatch() {
+    if (init.local) { syncLocalWatch(); return Promise.resolve(); }
     const sessionIds = [...watched.keys()].map(resolvedServerId).filter((id): id is string => Boolean(id));
     watchQueue = watchQueue.catch(() => {}).then(() => client.request("session.watch", { sessionIds }));
     return watchQueue;
@@ -526,74 +540,58 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   function project(guiId: string) {
     const detail = details.get(guiId)!;
     const agent = executionTargets(workspace).find((entry) => entry.id === detail.session.agent_id);
-    const conversation = v2.get(guiId);
+    const conversation = localConversation(guiId);
     return conversation
       ? projectV2Detail(detail, conversation, agent, ledger, init.locale)
       : projectDetail(detail, agent, transcripts.get(guiId) ?? new Map(), ledger, init.locale);
   }
 
-  /** Loads a local conversation's snapshot and subscribes to what follows. */
-  async function loadLocalSession(guiId: string, signal?: AbortSignal) {
+  function localConversation(guiId: string) {
+    const id = resolvedServerId(guiId);
+    return id ? source?.conversation(id) : undefined;
+  }
+
+  /** Projects a local conversation from the source, which keeps it current. */
+  async function loadLocalSession(guiId: string, fresh: boolean) {
+    if (!source) throw new MulticaAgentGuiError("Local conversations are unavailable here.", "local_unavailable");
     const sessionId = await backendSessionId(guiId);
-    // Show the conversation as last read at once; the current state replaces it below.
-    if (!details.has(guiId)) {
-      const stored = await client.request("local.storedSnapshot", { sessionId }, { signal }).catch(() => null);
-      const parsed = stored ? localV2SnapshotSchema.safeParse(stored.snapshot) : null;
-      if (stored && parsed?.success && !details.has(guiId)) {
-        scope(stored.detail.session.workspace_id);
-        details.set(guiId, stored.detail);
-        v2.set(guiId, V2Conversation.fromSnapshot(parsed.data));
-        applyDetail(guiId);
-      }
-    }
-    const { detail, snapshot } = await client.request("local.snapshot", { sessionId }, { signal });
-    const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse(snapshot));
+    await (fresh ? source.refresh(sessionId) : source.ensure(sessionId));
+    const detail = source.detail(sessionId);
+    if (!detail) throw new MulticaAgentGuiError("This conversation is not available.", "session_unavailable");
     scope(detail.session.workspace_id);
     details.set(guiId, detail);
-    v2.set(guiId, conversation);
-    if (watched.has(guiId)) await client.request("local.subscribe", { sessionId, afterSeq: conversation.seq, generation: conversation.storeGeneration }, { signal });
     scope(workspaceId);
     return applyDetail(guiId);
   }
 
-  /** Applies a v2 server message of a subscribed local conversation. */
-  function receiveLocal(guiId: string, raw: unknown) {
-    const conversation = v2.get(guiId);
-    const parsed = localV2ServerMessageSchema.safeParse(raw);
-    if (!conversation || !parsed.success) return;
-    const message = parsed.data;
-    if (message.type === "subscription.status") {
-      if (message.status === "resubscribe" || message.status === "snapshot_required" || message.status === "rejected") reloadLocal(guiId);
-      return;
+  /** A local conversation changed: new events, a page of history or its queue. */
+  function receiveLocal(guiId: string, events: readonly LocalV2Event[]) {
+    const conversation = localConversation(guiId);
+    if (!conversation) return;
+    for (const event of events) {
+      if (event.turn_id && isLocalTimingModelOutput(event.type, event.payload.kind)) presentationTiming.received(conversation.summary.conversation_id, event.turn_id);
     }
-    if (message.type !== "conversation.events") return;
-    for (const event of message.events) {
-      if (event.turn_id && isLocalTimingModelOutput(event.type, event.payload.kind)) presentationTiming.received(message.conversation_id, event.turn_id);
-    }
-    if (conversation.apply(message.events) === "gap") { reloadLocal(guiId); return; }
     // Coalesce a burst of event batches into one projection.
     if (v2Applies.has(guiId)) return;
     v2Applies.add(guiId);
     queueMicrotask(() => {
       v2Applies.delete(guiId);
-      if (!disposed && details.has(guiId)) applyDetail(guiId);
+      if (disposed || !details.has(guiId)) return;
+      const id = resolvedServerId(guiId);
+      const detail = id ? source?.detail(id) : null;
+      if (detail) details.set(guiId, detail);
+      applyDetail(guiId);
     });
   }
 
-  function reloadLocal(guiId: string) {
-    if (!watched.has(guiId)) return;
-    if (sessionLoads.has(guiId)) dirtySessions.add(guiId);
-    else void loadSession(guiId).catch(reportError);
-  }
-
-  async function loadSession(guiId: string, signal?: AbortSignal): Promise<AgentActivitySession> {
+  async function loadSession(guiId: string, signal?: AbortSignal, fresh = false): Promise<AgentActivitySession> {
     scope(workspaceId);
     const current = sessionLoads.get(guiId);
     if (current) return current;
     if (init.local) {
-      const operation = loadLocalSession(guiId, signal).finally(() => {
+      const operation = loadLocalSession(guiId, fresh).finally(() => {
         sessionLoads.delete(guiId);
-        if (dirtySessions.delete(guiId) && watched.has(guiId) && !disposed) void loadSession(guiId).catch(reportError);
+        if (dirtySessions.delete(guiId) && watched.has(guiId) && !disposed) void loadSession(guiId, undefined, true).catch(reportError);
       });
       sessionLoads.set(guiId, operation);
       return operation;
@@ -642,7 +640,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
 
   async function loadFreshSession(guiId: string, signal?: AbortSignal) {
     await sessionLoads.get(guiId)?.catch(() => {});
-    return loadSession(guiId, signal);
+    return loadSession(guiId, signal, true);
   }
 
   function applyDetail(guiId: string): AgentActivitySession {
@@ -655,7 +653,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       type: "session/historyAuthoritativeSnapshotReceived", workspaceId,
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
       session: withModel(result.session), turns: result.turns, messages: result.messages,
-      sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: false, oldestLoadedVersion: result.messages.length ? Math.min(...result.messages.map((message) => message.version)) : null }],
+      sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: localConversation(guiId)?.hasOlderTurns ?? false,
+        oldestLoadedVersion: result.messages.reduce<number | null>((oldest, message) => oldest === null || message.version < oldest ? message.version : oldest, null) }],
     });
     // A same-timestamp terminal result can leave the engine's previous active
     // pointer intact. Fence that specific transition once: replaying every
@@ -674,7 +673,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         type: "turn/upserted", live: true, replayAcceptedLiveCompletion: true, turn,
       });
     }
-    const conversation = v2.get(guiId);
+    const conversation = localConversation(guiId);
     if (init.local) for (const turn of result.turns) {
       const events = transcripts.get(guiId)?.get(turn.turnId) ?? [];
       const hasOutput = (conversation ? conversation.turnItems(turn.turnId).length > 0 : false)
@@ -1005,6 +1004,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         section: input.section === "full" ? undefined : input.section,
       });
     },
+    loadOlderSessionMessages: source ? async (input) => {
+      scope(input.workspaceId);
+      await source.loadOlder(await backendSessionId(input.agentSessionId));
+    } : undefined,
     listSessionMessages: async (input) => {
       scope(input.workspaceId);
       await loadSession(input.agentSessionId, input.signal);
@@ -1085,13 +1088,12 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       if (snapshot.workspaceId !== workspaceId || snapshot.userId !== init.userId) return;
       if (snapshot.generation !== undefined && snapshot.generation < latestGeneration) return;
       latestGeneration = Math.max(latestGeneration, snapshot.generation ?? 0);
+      if (snapshot.hostVisible !== undefined && snapshot.hostVisible !== hostVisible) { hostVisible = snapshot.hostVisible; syncLocalWatch(); }
       // This subscription precedes the application's selection subscription.
       receiveWorkspace(snapshot);
       return;
     }
     if (!initialized) return;
-    if (event.type === "local.events") { receiveLocal(ledger.guiId(event.sessionId), event.message); return; }
-    if (event.type === "local.reload") { reloadLocal(ledger.guiId(event.sessionId)); return; }
     if (event.type === "connection") {
       engine.dispatch({ type: "engine/connectionChanged", status: event.connected ? "connected" : "disconnected", workspaceId });
       return;
@@ -1108,7 +1110,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       if (watched.has(id)) {
         if (event.scope === "task") void loadTask(id, event.taskId).catch(reportError);
         else if (sessionLoads.has(id)) dirtySessions.add(id);
-        else void loadSession(id).catch(reportError);
+        else void loadSession(id, undefined, true).catch(reportError);
       }
     }
   });
@@ -1173,7 +1175,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
      */
     continuable(agentSessionId: string) {
       if (engine.getSnapshot().promptQueue.recordsBySessionId[agentSessionId]?.prompts.length) return false;
-      return v2.get(agentSessionId)?.continuable() ?? false;
+      return localConversation(agentSessionId)?.continuable() ?? false;
     },
     /** Asks the conversation's provider to continue where its turn stopped. */
     continueSession(agentSessionId: string) {
@@ -1203,6 +1205,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     uploadAttachment,
     subscribeUploads: uploads.subscribe,
     activeUploadCount: uploads.activeCount,
+    localConversations: source,
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -1211,7 +1214,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       for (const pending of pendingIdentities.values()) pending.reject(new MulticaAgentGuiError("This connection has closed.", "disposed"));
       pendingIdentities.clear();
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void persist().catch(() => {}); }
-      void client.request("session.watch", { sessionIds: [] }).catch(() => {});
+      for (const release of openLocal.values()) release();
+      openLocal.clear();
+      if (!init.local) void client.request("session.watch", { sessionIds: [] }).catch(() => {});
       engine.dispose();
       workspaceListeners.clear();
       modelListeners.clear();

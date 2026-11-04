@@ -13,6 +13,7 @@ import tuttiSnapStarsLightActiveUrl from "../../../app/renderer/assets/animation
 import tuttiSnapStarsDarkUrl from "../../../app/renderer/assets/animations/tutti-snap-stars-dark.png";
 import tuttiSnapStarsDarkActiveUrl from "../../../app/renderer/assets/animations/tutti-snap-stars-dark-active.png";
 import styles from "../AgentGUINode.styles";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 /**
  * Compact Tutti Mode activation switch in the composer footer. It drives the
@@ -110,7 +111,7 @@ function ComposerTuttiModeSnapAnimation({
 }): React.JSX.Element {
   const isDark =
     typeof document !== "undefined" &&
-    document.documentElement.getAttribute("data-theme") === "dark";
+    getPortalContainer().getAttribute("data-theme") === "dark";
   const src =
     SNAP_STARS_URLS[isDark ? "dark" : "light"][active ? "active" : "idle"];
   const [isLoaded, setIsLoaded] = useState(false);

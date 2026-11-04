@@ -49,6 +49,7 @@ import {
   writePlainTextToClipboard
 } from "./agentRichTextEditorSupport";
 export { isAgentRichTextLargeTextPaste } from "./agentRichTextEditorSupport";
+import { pasteMessageImageReferences } from "@multica/tutti-agent-gui-host/message-image-clipboard";
 import { routeAgentRichTextTextPaste } from "./routeAgentRichTextTextPaste";
 import { useAgentRichTextEditorHandle } from "./useAgentRichTextEditorHandle";
 import { AgentRichTextEditorSurface } from "./AgentRichTextEditorSurface";
@@ -408,6 +409,21 @@ export const AgentRichTextEditor = forwardRef<
           return true;
         },
         paste: (_view, event) => {
+          if (disabled) return false;
+          if (pasteMessageImageReferences({
+            text: event.clipboardData?.getData("text/plain") ?? "",
+            supported: promptImagesSupportedRef.current,
+            onImages: onPasteImagesRef.current,
+            onUnsupported: onPromptImagesUnsupportedRef.current,
+            insertText: (text) => routeAgentRichTextTextPaste({
+              availableCapabilities: availableCapabilitiesRef.current,
+              availableSkills: availableSkillsRef.current,
+              editorRef, html: "", mentionSuggestionSuppression, text,
+            }),
+          })) {
+            event.preventDefault();
+            return true;
+          }
           const { externalFiles, imageFiles, imagesHandledAsFiles } =
             routeAgentRichTextExternalFiles(event.clipboardData, {
               externalFilesSupported: Boolean(onPasteFilesRef.current),
@@ -704,6 +720,7 @@ export const AgentRichTextEditor = forwardRef<
   }, [closeContextMenu, contextMenu]);
 
   useAgentRichTextEditorHandle({
+    onBeforeOpenMentionPalette: () => mentionSuggestionSuppression.setRestoredValue(""),
     availableCapabilitiesRef,
     availableSkillsRef,
     editorRef,

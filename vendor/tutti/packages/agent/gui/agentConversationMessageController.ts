@@ -47,6 +47,8 @@ export interface AgentConversationMessageControllerDiagnostics {
 }
 
 export interface CreateAgentConversationMessageControllerInput {
+  /** See AgentGUIRuntime.loadOlderSessionMessages. */
+  loadOlderSessionMessages?(input: { workspaceId: string; agentSessionId: string }): Promise<void>;
   diagnostics?: AgentConversationMessageControllerDiagnostics;
   engine: Pick<AgentSessionEngine, "dispatch" | "getSnapshot">;
   ensureSessionSynchronized?(input: {
@@ -285,7 +287,20 @@ export function createAgentConversationMessageController(
         generation: requestGeneration,
         promise: Promise.resolve()
       };
-      const promise = input
+      const ownedPaging = input.loadOlderSessionMessages?.({ agentSessionId: normalized, workspaceId: input.workspaceId });
+      const promise = ownedPaging ? ownedPaging.then(() => {
+        if (!isCurrentRequest(request)) return;
+        input.onOlderPageApplied?.(normalized);
+        publish({ agentSessionId: normalized, error: null, olderPagePhase: "idle" });
+      }).catch((error: unknown) => {
+        if (!isCurrentRequest(request)) return;
+        input.onOlderPageFailed?.(error);
+        publish({ agentSessionId: normalized, error, olderPagePhase: "error" });
+      }).finally(() => {
+        if (olderRequest?.promise !== promise) return;
+        olderRequest = null;
+        if (!disposed && generation === requestGeneration) input.onOlderPageSettled?.();
+      }) : input
         .listSessionMessages({
           agentSessionId: normalized,
           beforeVersion,

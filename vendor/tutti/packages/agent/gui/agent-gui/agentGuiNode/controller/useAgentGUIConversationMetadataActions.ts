@@ -328,7 +328,7 @@ export function useAgentGUIConversationMetadataActions(
           turnId: normalizedTurnId,
           workspaceId
         });
-        input.selectConversation?.(result.targetAgentSessionId);
+        if (dataRef.current.lastActiveAgentSessionId === normalizedSourceAgentSessionId) input.selectConversation?.(result.targetAgentSessionId);
       } catch (error) {
         const message = getAgentGUIErrorMessage(error);
         reportAgentGUIRuntimeError({

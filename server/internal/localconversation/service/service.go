@@ -512,16 +512,25 @@ func (s *Service) Interrupt(ctx context.Context, scopeID int64, conversationID s
 	return r.Interrupt(ctx)
 }
 
-// Snapshot returns the conversation's first screen.
-func (s *Service) Snapshot(ctx context.Context, scopeID int64, conversationID string) (store.Snapshot, error) {
+// Snapshot returns the conversation's latest turns, at most turnLimit; zero
+// means the default.
+func (s *Service) Snapshot(ctx context.Context, scopeID int64, conversationID string, turnLimit int) (store.Snapshot, error) {
 	if _, err := s.scopedConversation(ctx, scopeID, conversationID); err != nil {
 		return store.Snapshot{}, err
 	}
-	return s.store.Snapshot(ctx, conversationID, snapshotTurns)
+	return s.store.Snapshot(ctx, conversationID, pageTurns(turnLimit))
 }
 
-// History returns settled turns before an exclusive turn index.
-func (s *Service) History(ctx context.Context, scopeID int64, conversationID string, before int64) ([]store.TurnView, error) {
+func pageTurns(turnLimit int) int {
+	if turnLimit <= 0 || turnLimit > snapshotTurns {
+		return snapshotTurns
+	}
+	return turnLimit
+}
+
+// History returns settled turns before an exclusive turn index, at most
+// turnLimit; zero means the default.
+func (s *Service) History(ctx context.Context, scopeID int64, conversationID string, before int64, turnLimit int) ([]store.TurnView, error) {
 	conv, err := s.scopedConversation(ctx, scopeID, conversationID)
 	if err != nil {
 		return nil, err
@@ -529,7 +538,7 @@ func (s *Service) History(ctx context.Context, scopeID int64, conversationID str
 	if before < 0 || before > conv.TurnCount {
 		return nil, fmt.Errorf("%w: invalid history cursor", ErrInvalidRequest)
 	}
-	return s.store.TurnsBefore(ctx, conversationID, before, snapshotTurns)
+	return s.store.TurnsBefore(ctx, conversationID, before, pageTurns(turnLimit))
 }
 
 // Subscribe starts a catch-up subscription to a conversation in scope.

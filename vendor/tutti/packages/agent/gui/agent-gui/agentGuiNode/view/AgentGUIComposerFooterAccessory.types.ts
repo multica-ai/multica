@@ -4,6 +4,9 @@ import type { AgentComposerProps } from "../AgentComposer";
 export type AgentGUIComposerFooterAccessoryContext = Pick<
   AgentComposerProps,
   | "agentSessionId"
+  | "draftContent"
+  | "onDraftContentChange"
+  | "onProjectPathChange"
   | "isActive"
   | "isSendingTurn"
   | "isSubmittingPrompt"

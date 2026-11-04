@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { SubagentTranscript } from "@multica/tutti-agent-gui-host/subagent-transcript";
 import { translate } from "../../../i18n/index";
 import type { AgentMessageContentVM } from "../contracts/agentMessageRowVM";
 import { AgentMessageDetailsDisclosure } from "./AgentMessageDetailsDisclosure";
@@ -76,6 +77,8 @@ export function AgentSystemNoticeMessage({
     >
       <div className="min-w-0">
         <div className="font-medium text-[var(--text-secondary)]">{title}</div>
+        {notice?.noticeKind === "background_task" && message.body.trim() !== title ? <div role="status" className="mt-1 whitespace-pre-line break-words text-[12px] leading-5">{message.body}</div> : null}
+        {notice?.noticeKind === "background_task" ? <SubagentTranscript message={message} /> : null}
         {detail ? (
           <AgentMessageDetailsDisclosure
             detail={detail}

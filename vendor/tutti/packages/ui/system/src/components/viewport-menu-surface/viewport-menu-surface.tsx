@@ -2,6 +2,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 
 import { MenuSurface } from "../menu-surface";
+import { getPortalContainer } from "../../lib/portal-container";
 
 export interface MenuSize {
   width: number;
@@ -425,7 +426,7 @@ const ViewportMenuSurface = React.forwardRef<
     return null;
   }
 
-  const portalTarget = resolvedPlacement.portalTarget ?? document.body;
+  const portalTarget = resolvedPlacement.portalTarget ?? getPortalContainer();
 
   return createPortal(
     <MenuSurface

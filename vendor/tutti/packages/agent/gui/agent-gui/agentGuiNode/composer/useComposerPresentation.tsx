@@ -23,7 +23,7 @@ import type {
   AgentComposerPromptTip,
   AgentComposerProps
 } from "./AgentComposer.types";
-import { SendFilledIcon } from "./AgentComposerDraftPreview";
+import { ArrowUp as SendFilledIcon } from "lucide-react";
 import { useOptionalAgentGUIRuntime } from "../../../agentActivityRuntime";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
 import { submitAgentInteractionResponseAndDismiss } from "../../../shared/agentConversation/interactionResponseAdmission";

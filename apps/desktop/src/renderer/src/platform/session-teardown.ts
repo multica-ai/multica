@@ -32,6 +32,8 @@ export interface SessionTeardown {
   stopDaemon: () => Promise<unknown>;
   /** Conversations of other devices kept on this device for instant opening. */
   deleteStoredConversations: () => Promise<unknown>;
+  /** Everything held of the user's conversations in this window. */
+  disposeConversations: () => void;
 }
 
 /**
@@ -47,6 +49,7 @@ export async function tearDownOnLogout(t: SessionTeardown): Promise<void> {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
+  t.disposeConversations();
   void t.deleteStoredConversations().catch(() => undefined);
   try {
     await t.clearDaemonToken();
@@ -75,4 +78,5 @@ export function tearDownOnSessionExpiry(t: SessionTeardown): void {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
+  t.disposeConversations();
 }

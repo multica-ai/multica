@@ -13,6 +13,7 @@
     "./markdown": "./markdown/index.ts",
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
+    "./local-conversation/conversation": "./local-conversation/conversation.ts",
     "./local-conversation/focus": "./local-conversation/focus.ts",
     "./local-conversation/protocol": "./local-conversation/protocol.ts",
     "./local-conversation/timing": "./local-conversation/timing.ts",

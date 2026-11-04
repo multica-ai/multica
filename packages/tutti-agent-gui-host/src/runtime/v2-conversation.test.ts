@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { localV2ServerMessageSchema, localV2SnapshotSchema, type LocalV2Event } from "@multica/core/local-conversation/v2";
-import { V2Conversation } from "./v2-conversation";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
 import { projectV2Conversation } from "./v2-projection";
 import { mergeWorkspaceAgentActivityDurableAndOverlayMessages } from "../../../../vendor/tutti/packages/agent/gui/shared/workspaceAgentMessageOverlay";
 
@@ -27,7 +27,7 @@ function empty(seq = 0): V2Conversation {
 function withSample(name: string): V2Conversation {
   const events = sampleEvents(name);
   const conversation = empty(events[0]!.seq - 1);
-  conversation.turns.set("turn-1", { id: "turn-1", requestId: "r1", status: "running", startedAt: at, completedAt: null, error: null });
+  conversation.turns.set("turn-1", { id: "turn-1", index: 0, requestId: "r1", status: "running", startedAt: at, completedAt: null, error: null });
   expect(conversation.apply(events)).toBe("applied");
   return conversation;
 }
@@ -152,7 +152,7 @@ describe("V2Conversation", () => {
 
   it("shows background task progress and its final state", () => {
     const conversation = empty(39);
-    conversation.turns.set("turn-1", { id: "turn-1", requestId: "r1", status: "running", startedAt: at, completedAt: null, error: null });
+    conversation.turns.set("turn-1", { id: "turn-1", index: 0, requestId: "r1", status: "running", startedAt: at, completedAt: null, error: null });
     const events = sampleEvents("background_task");
     conversation.apply(events.slice(0, 2));
     expect(project(conversation).messages[0]).toMatchObject({ status: "running", payload: { noticeKind: "background_task", title: "Background task running · watch build" } });
@@ -276,5 +276,94 @@ describe("V2Conversation", () => {
       turns: [turn("old", "2026-10-29T00:00:00Z", "cancelled", null), turn("latest", "2026-10-29T01:00:00Z", status as string, kind as string | null)],
     }));
     expect(conversation.continuable()).toBe(expected);
+  });
+});
+
+describe("paging and retained conversations", () => {
+  const at = "2026-11-03T10:00:00Z";
+  const summary = { conversation_id: "c", summary_seq: 1, provider: "codex", title: "c", status: "idle", pinned: false, archived: false, updated_at: at };
+  const event = (seq: number, type: string, fields: Record<string, unknown> = {}) => ({ seq, turn_id: "t5", turn_seq: seq, item_id: "x", type, final: type === "item.completed", created_at: at, payload: { kind: "background_task" }, ...fields });
+  const turn = (index: number, events: unknown[] = []) => ({ id: `t${index}`, turn_index: index, request_id: "", status: "completed", started_at: at, completed_at: at, messages: [], events });
+  const snapshot = (fields: Record<string, unknown> = {}) => localV2SnapshotSchema.parse({ version: 2, store_generation: "g", snapshot_seq: 100, conversation: summary, turns: [turn(5)], has_older_turns: true, pending_interactions: [], ...fields });
+
+  it("does not apply an item's events twice when a late page repeats what the stream delivered", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot());
+    conversation.apply([event(101, "item.started"), event(102, "item.delta", { payload: { field: "output", text: "ab" } })] as never);
+    conversation.mergeHistory({ store_generation: "g", has_older_turns: false, turns: [turn(4, [event(101, "item.started"), event(102, "item.delta", { payload: { field: "output", text: "ab" } })])] } as never);
+    expect(conversation.items.get("x")!.state.output).toBe("ab");
+  });
+
+  it("keeps a final state when an older event of the item arrives after it", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot());
+    conversation.apply([event(101, "item.completed", { payload: { kind: "background_task", status: "completed", output: "done" } })] as never);
+    conversation.mergeHistory({ store_generation: "g", has_older_turns: false, turns: [turn(4, [event(50, "item.delta", { payload: { field: "output", text: "partial" } })])] } as never);
+    expect(conversation.items.get("x")!.state.output).toBe("done");
+  });
+
+  it("orders turns by index and never moves the cursor when paging", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot());
+    conversation.mergeHistory({ store_generation: "g", has_older_turns: true, turns: [turn(3), turn(4)] } as never);
+    expect([...conversation.turns.keys()]).toEqual(["t3", "t4", "t5"]);
+    expect(conversation.seq).toBe(100);
+    expect(conversation.oldestTurnIndex()).toBe(3);
+    expect(conversation.hasOlderTurns).toBe(true);
+  });
+
+  it("learns an item's kind from a later event when its first was a delta", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot());
+    conversation.apply([event(101, "item.delta", { payload: { field: "output", text: "a" } }), event(102, "item.updated", { payload: { kind: "background_task", status: "in_progress" } })] as never);
+    expect(conversation.items.get("x")!.kind).toBe("background_task");
+  });
+
+  it("keeps an item's start from a settled turn's final event", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot({ turns: [turn(5, [event(9, "item.completed", { first_seq: 3, first_at: "2026-11-03T09:00:00Z" })])] }));
+    expect(conversation.items.get("x")).toMatchObject({ order: 3, startedAt: "2026-11-03T09:00:00Z" });
+  });
+
+  it("retains paged history only when the new snapshot continues it", () => {
+    const paged = V2Conversation.fromSnapshot(snapshot());
+    paged.mergeHistory({ store_generation: "g", has_older_turns: false, turns: [turn(3), turn(4)] } as never);
+    const continuing = V2Conversation.fromSnapshot(snapshot({ turns: [turn(5), turn(6)] }));
+    continuing.retainHistoryFrom(paged);
+    expect([...continuing.turns.keys()]).toEqual(["t3", "t4", "t5", "t6"]);
+    expect(continuing.hasOlderTurns).toBe(true);
+    const distant = V2Conversation.fromSnapshot(snapshot({ turns: [turn(40)] }));
+    distant.retainHistoryFrom(paged);
+    expect([...distant.turns.keys()]).toEqual(["t40"]);
+    const otherStore = V2Conversation.fromSnapshot(snapshot({ store_generation: "other", turns: [turn(5)] }));
+    otherStore.retainHistoryFrom(paged);
+    expect([...otherStore.turns.keys()]).toEqual(["t5"]);
+  });
+
+  it("drops a retained turn with an unfinished item, which could never finish", () => {
+    const paged = V2Conversation.fromSnapshot(snapshot());
+    paged.mergeHistory({ store_generation: "g", has_older_turns: false, turns: [turn(3), turn(4, [{ ...event(10, "item.started"), turn_id: "t4" }])] } as never);
+    const next = V2Conversation.fromSnapshot(snapshot());
+    next.retainHistoryFrom(paged);
+    expect([...next.turns.keys()]).toEqual(["t5"]);
+    expect(next.hasOlderTurns).toBe(true);
+  });
+
+  it("keeps queue revisions monotonic and marks items stale until they are read", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot({ queue: { revision: 5, paused: false, error: "old", dispatching_request_id: "r", items: [{ request_id: "a" }] } }));
+    expect(conversation.settings).toMatchObject({ permission_mode: "default" });
+    const queued = (seq: number, payload: Record<string, unknown>) => ({ seq, turn_id: null, turn_seq: null, item_id: null, type: "queue.updated", final: false, created_at: at, payload });
+    conversation.apply([queued(101, { revision: 4, paused: true, count: 9 })] as never);
+    expect(conversation.queue).toMatchObject({ revision: 5, paused: false });
+    conversation.apply([queued(102, { revision: 6, paused: false, count: 0 })] as never);
+    expect(conversation.queue.error).toBeUndefined();
+    expect(conversation.queueItemsStale()).toBe(true);
+    conversation.receiveQueue({ revision: 6, paused: false, items: [] });
+    expect(conversation.queueItemsStale()).toBe(false);
+    expect(conversation.queue.items).toEqual([]);
+    conversation.receiveQueue({ revision: 2, paused: true, items: [{ request_id: "stale" }] });
+    expect(conversation.queue.items).toEqual([]);
+  });
+
+  it("clears the dispatching flag when the turn starts, since no other event does", () => {
+    const conversation = V2Conversation.fromSnapshot(snapshot({ queue: { revision: 5, paused: false, dispatching_request_id: "r", items: [] } }));
+    conversation.apply([{ seq: 101, turn_id: "t6", turn_seq: 1, item_id: null, type: "turn.started", final: false, created_at: at, payload: {} }] as never);
+    expect(conversation.queue.dispatching_request_id).toBeUndefined();
+    expect(conversation.turns.get("t6")!.index).toBe(6);
   });
 });

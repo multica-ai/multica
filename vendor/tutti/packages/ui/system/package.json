@@ -27,7 +27,8 @@
       "default": "./src/styles/native.css"
     },
     "./styles.css": "./src/styles/index.css",
-    "./utils": "./src/lib/utils.ts"
+    "./utils": "./src/lib/utils.ts",
+    "./portal-container": "./src/lib/portal-container.ts"
   },
   "files": [
     "dist",

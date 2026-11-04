@@ -1727,6 +1727,47 @@ func (q *Queries) ListTurnFinalEvents(ctx context.Context, arg ListTurnFinalEven
 	return items, nil
 }
 
+const listTurnItemStarts = `-- name: ListTurnItemStarts :many
+SELECT item_id, MIN(seq) AS first_seq, created_at
+FROM event
+WHERE conversation_id = ?1 AND turn_id = ?2 AND item_id IS NOT NULL
+GROUP BY item_id
+`
+
+type ListTurnItemStartsParams struct {
+	ConversationID string
+	TurnID         sql.NullString
+}
+
+type ListTurnItemStartsRow struct {
+	ItemID    sql.NullString
+	FirstSeq  interface{}
+	CreatedAt string
+}
+
+func (q *Queries) ListTurnItemStarts(ctx context.Context, arg ListTurnItemStartsParams) ([]ListTurnItemStartsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTurnItemStarts, arg.ConversationID, arg.TurnID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTurnItemStartsRow{}
+	for rows.Next() {
+		var i ListTurnItemStartsRow
+		if err := rows.Scan(&i.ItemID, &i.FirstSeq, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTurnMessages = `-- name: ListTurnMessages :many
 SELECT id, conversation_id, turn_id, role, content, attachment_ids, steered, failed, created_at FROM message
 WHERE conversation_id = ? AND turn_id = ?

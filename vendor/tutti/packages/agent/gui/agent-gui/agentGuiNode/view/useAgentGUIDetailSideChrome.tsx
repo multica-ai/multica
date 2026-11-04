@@ -74,6 +74,9 @@ export function useAgentGUIDetailSideChrome({
     () =>
       renderComposerFooterAccessory?.({
         agentSessionId: baseComposerProps.agentSessionId,
+        draftContent: baseComposerProps.draftContent,
+        onDraftContentChange: baseComposerProps.onDraftContentChange,
+        onProjectPathChange: baseComposerProps.onProjectPathChange,
         isActive: baseComposerProps.isActive,
         isSendingTurn: baseComposerProps.isSendingTurn,
         isSubmittingPrompt: baseComposerProps.isSubmittingPrompt,
@@ -82,6 +85,9 @@ export function useAgentGUIDetailSideChrome({
       }) ?? null,
     [
       baseComposerProps.agentSessionId,
+      baseComposerProps.draftContent,
+      baseComposerProps.onDraftContentChange,
+      baseComposerProps.onProjectPathChange,
       baseComposerProps.composerSettings,
       baseComposerProps.isActive,
       baseComposerProps.isSendingTurn,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 import { resolveComposerPortalTarget } from "./composerPortalTarget";
 
 describe("resolveComposerPortalTarget", () => {
@@ -10,7 +11,7 @@ describe("resolveComposerPortalTarget", () => {
     boundary.appendChild(anchor);
     document.body.appendChild(boundary);
 
-    expect(resolveComposerPortalTarget(anchor)).toBe(document.body);
+    expect(resolveComposerPortalTarget(anchor)).toBe(getPortalContainer());
 
     boundary.remove();
   });

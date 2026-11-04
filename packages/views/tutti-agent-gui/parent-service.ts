@@ -31,6 +31,7 @@ import type {
   AgentGuiRpcMethod,
   AgentGuiRpcMethods,
   AgentGuiWorkspaceState,
+  LocalConversationSource,
 } from "@multica/tutti-agent-gui-host/protocol";
 import { redactSecrets } from "../common/task-transcript/redact";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -85,7 +86,18 @@ function boolField(value: Record<string, unknown>, key: string): boolean {
 }
 
 /** Auth and server connections stay in the Multica document. */
-export function createAgentGuiParentService(options: ParentServiceOptions) {
+export interface AgentGuiParentService {
+  /** Present when the host keeps local conversations. */
+  localConversations?: LocalConversationSource;
+  load(): Promise<AgentGuiWorkspaceState>;
+  request<M extends AgentGuiRpcMethod>(method: M, params: AgentGuiRpcMethods[M]["params"]): Promise<AgentGuiRpcMethods[M]["result"]>;
+  publish(event: AgentGuiHostEvent): void;
+  subscribe(listener: (event: AgentGuiHostEvent) => void): () => void;
+  reconnect(): void;
+  dispose(): void;
+}
+
+export function createAgentGuiParentService(options: ParentServiceOptions): AgentGuiParentService {
   const { queryClient: qc, workspaceId, workspaceSlug, userId } = options;
   const storage = options.storage ?? defaultStorage;
   const listeners = new Set<(event: AgentGuiHostEvent) => void>();

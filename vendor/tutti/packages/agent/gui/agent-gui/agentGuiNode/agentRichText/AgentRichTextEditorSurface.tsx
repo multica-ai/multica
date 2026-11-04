@@ -11,6 +11,7 @@ import { EditorContent } from "@tiptap/react";
 import { cn } from "../../../app/renderer/lib/utils";
 import type { TranslateFn } from "../../../i18n/index";
 import type { AgentRichTextContextMenuState } from "./AgentRichTextEditor.types";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 export function AgentRichTextEditorSurface({
   className,
@@ -102,7 +103,7 @@ export function AgentRichTextEditorSurface({
                 onSelect={pasteClipboardText}
               />
             </div>,
-            document.body
+            getPortalContainer()
           )
         : null}
     </div>

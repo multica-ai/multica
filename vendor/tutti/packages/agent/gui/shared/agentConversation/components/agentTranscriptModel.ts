@@ -18,6 +18,7 @@ export interface AgentMessageLocatorItem {
   rowKey: string;
   turnGroupIndex: number;
   rowIndex: number;
+  turnId?: string | null;
   summary: string;
 }
 
@@ -171,6 +172,7 @@ export function buildUserMessageLocatorItems(
       rowKey,
       turnGroupIndex: turnGroupIndexByRowIndex.get(rowIndex) ?? rowIndex,
       rowIndex,
+      turnId: row.turnId ?? null,
       summary
     });
   });

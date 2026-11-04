@@ -1,5 +1,5 @@
 // Explicit Electron regression check: isolated profile, fake data, no agent CLI or backend.
-// Run after `pnpm --filter @multica/tutti-agent-gui-host build`.
+// Run after `node packages/tutti-agent-gui-host/scripts/build-e2e-harness.mjs <dir>`, with that directory.
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -12,13 +12,13 @@ import ts from "typescript";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Resolve Electron from the desktop package that declares and installs it.
 const desktopRequire = createRequire(join(root, "apps/desktop/package.json"));
-const gui = resolve(process.argv[2] ?? join(root, "packages/tutti-agent-gui-host/dist"), "index.html");
+const gui = resolve(process.argv[2] ?? join(root, "apps/web/public/tutti-agent-gui"), "index.html");
 await readFile(gui); // Fail early if the production GUI has not been built.
 const temporary = await mkdtemp(join(tmpdir(), "multica-agent-gui-file-"));
 let application;
 let page;
 try {
-  const helper = await readFile(join(root, "packages/tutti-agent-gui-host/src/frame-messaging.ts"), "utf8");
+  const helper = await readFile(join(root, "packages/tutti-agent-gui-host/e2e-harness/frame-messaging.ts"), "utf8");
   await writeFile(join(temporary, "frame-messaging.js"), ts.transpileModule(helper, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText);

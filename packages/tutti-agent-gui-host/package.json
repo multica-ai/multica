@@ -6,18 +6,36 @@
   "exports": {
     "./agent-mention-usage": "./src/agent-mention-usage.ts",
     "./local-projects": "./src/local-projects.ts",
-    "./frame-messaging": "./src/frame-messaging.ts",
     "./message-resource-links": "./src/message-resource-links.ts",
     "./resource-reference": "./src/resource-reference.ts",
     "./protocol": "./src/protocol.ts",
     "./local-timing": "./src/local-timing.ts",
-    "./v2-conversation": "./src/runtime/v2-conversation.ts",
-    "./html-preview": "./src/html-preview-contract.ts"
+    "./html-preview": "./src/html-preview-contract.ts",
+    "./subagent-transcript": "./src/subagent-transcript.tsx",
+    "./timeline-end-position": "./src/timeline-end-position.ts",
+    "./prompt-submission-policy": "./src/runtime/prompt-submission-policy.ts",
+    "./invoked-agent-reply": "./src/invoked-agent-reply.tsx",
+    "./composer-drafts": "./src/composer-drafts.tsx",
+    "./message-image-clipboard": "./src/message-image-clipboard.ts",
+    "./composer-file-picker": "./src/composer-file-picker.ts",
+    "./large-text-paste": "./src/large-text-paste.ts",
+    "./resource-link": "./src/resource-link.tsx",
+    "./side-entry": "./src/side-entry.tsx",
+    "./html-preview-pre": "./src/html-preview/markdown-pre.tsx",
+    "./mention-row": "./src/mention-row.tsx",
+    "./markdown-table": "./src/markdown-table.tsx",
+    "./mention-scroll-pagination": "./src/mention-scroll-pagination.ts",
+    "./mount": {
+      "types": "./src/mount.d.ts",
+      "default": "./src/mount.tsx"
+    },
+    "./in-process-client": "./src/in-process-client.ts"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "test": "node --test scripts/publish.test.mjs && vitest run --exclude 'scripts/**' && vitest run --root ../../vendor/tutti/packages/agent/gui agent-gui/agentGuiNode/composer/useComposerFocusAndDrop.spec.tsx",
-    "typecheck": "tsc --noEmit"
+    "build": "node scripts/prepare.mjs",
+    "test": "node scripts/prepare.mjs && node --test scripts/scope-css.test.mjs && vitest run --exclude 'scripts/**' && vitest run --root ../../vendor/tutti/packages/agent/gui agent-gui/agentGuiNode/composer/useComposerFocusAndDrop.spec.tsx",
+    "typecheck": "node scripts/prepare.mjs && tsc --noEmit",
+    "build:e2e-harness": "node scripts/build-e2e-harness.mjs"
   },
   "dependencies": {
     "lucide-react": "catalog:",
@@ -52,6 +70,8 @@
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "^8.0.0",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "postcss": "catalog:",
+    "@tailwindcss/postcss": "catalog:"
   }
 }

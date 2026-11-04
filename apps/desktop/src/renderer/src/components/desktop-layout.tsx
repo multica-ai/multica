@@ -37,6 +37,8 @@ import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
 import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 import { deviceName, useLinkedDevices } from "../platform/linked-devices";
+import { conversationStores } from "../platform/conversation-store";
+import { useAuthStore } from "@multica/core/auth";
 
 const TOP_BAR_HEIGHT_CLASS = "h-10";
 const toolbarMotion = {
@@ -236,6 +238,7 @@ export function DesktopShell() {
   // the tab router can mount WorkspaceRouteLayout, which is what populates
   // the singleton in the first place.
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  useReleaseConversationsOfLeftWorkspaces(workspaces);
   const slug =
     currentSlug && workspaces.some((w) => w.slug === currentSlug)
       ? currentSlug
@@ -297,4 +300,16 @@ export function DesktopShell() {
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>
   );
+}
+
+/** A workspace gone from the list keeps nothing in memory and no connection. */
+function useReleaseConversationsOfLeftWorkspaces(workspaces: { id: string }[]) {
+  const userId = useAuthStore((state) => state.user?.id);
+  const known = useRef(new Set<string>());
+  useEffect(() => {
+    if (!userId) return;
+    const current = new Set(workspaces.map((workspace) => workspace.id));
+    for (const id of known.current) if (!current.has(id)) conversationStores.disposeWorkspace(userId, id);
+    known.current = current;
+  }, [userId, workspaces]);
 }

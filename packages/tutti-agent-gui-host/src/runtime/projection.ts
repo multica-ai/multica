@@ -14,7 +14,7 @@ import { RuntimeLedger } from "./ledger";
 import { chatAuthoredPrompt } from "@multica/core/chat/context-snapshot";
 import { localMessageDisplayContent } from "@multica/core/local-conversation/protocol";
 import { backgroundTaskPresentation } from "./background-task-presentation";
-import type { V2Conversation } from "./v2-conversation";
+import type { V2Conversation } from "@multica/core/local-conversation/conversation";
 import { projectV2Conversation } from "./v2-projection";
 
 export const MULTICA_GUI_CAPABILITIES: AgentActivitySessionCapabilities = {
@@ -326,7 +326,7 @@ export function projectV2Detail(
     const clientSubmitId = message.role === "user" ? ledger.clientSubmitId(message.messageId) : undefined;
     if (clientSubmitId) message.payload = { ...message.payload, clientSubmitId };
   }
-  const messages = ledger.project(sessionId, view.messages, new Map(view.turns.map((turn) => [turn.turnId, turn.startedAtUnixMs])));
+  const messages = ledger.project(sessionId, view.messages, new Map(view.turns.map((turn) => [turn.turnId, turn.startedAtUnixMs])), true);
   const turns = view.turns.map((turn) => ({ ...turn, providerForkBindingAvailable: agent?.canFork === true }));
   const session = projectSession(detail.session, agent, ledger, turns, view.activeTurnId);
   session.latestTurnInteractions = view.interactions.filter((item) => item.turnId === (session.activeTurnId ?? session.latestTurn?.turnId));

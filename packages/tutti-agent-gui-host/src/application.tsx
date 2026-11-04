@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AgentGUI, type AgentGUIProps } from "@tutti-os/agent-gui/agent-gui";
 import { resolveAgentGUIProviderIdentity } from "@tutti-os/agent-gui/provider-identity";
 import { resolveProviderIconAsset } from "@tutti-os/agent-gui/provider-icons";
@@ -14,6 +14,7 @@ import { SideEntryProvider } from "./side-entry";
 import { ResourceLinkProvider } from "./resource-link";
 import { ComposerDraftProvider } from "./composer-drafts";
 import { InvokedAgentsProvider } from "./invoked-agent-reply";
+import { applyAgentGuiAppearance, syncAgentGuiDocument } from "./agent-gui-appearance";
 import { dispatchAgentGuiWorkbenchCommand } from "../../../vendor/tutti/packages/agent/gui/workbench/commands";
 
 type RuntimeHandle = ReturnType<typeof createMulticaAgentGuiRuntime>;
@@ -40,10 +41,12 @@ export function AgentGuiApplication({
   client,
   initial,
   handle,
+  root,
 }: {
   client: AgentGuiRpcClient;
   initial: AgentGuiInitSnapshot;
   handle: RuntimeHandle;
+  root: HTMLElement;
 }) {
   const [snapshot, setSnapshot] = useState(initial);
   const [composerFocusSequence, setComposerFocusSequence] = useState<number | null>(null);
@@ -61,21 +64,21 @@ export function AgentGuiApplication({
   const appendRestoreIds = useRef(new Map<number, string | undefined>());
   const appliedAppends = useRef(new Set<number>());
   const previousInit = useRef(initial);
-  const [size, setSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [size, setSize] = useState(() => ({ width: root.clientWidth, height: root.clientHeight }));
+  // Several instances share the document, so one's own identity keeps its workbench commands apart.
+  const instanceId = `multica-agent-gui:${initial.workspaceId}:${useId()}`;
 
   useEffect(() => {
-    document.documentElement.dataset.multicaPresentation = "conversation";
-    document.documentElement.dataset.sidePane = String(snapshot.sidePane === true);
-    document.documentElement.dataset.theme = snapshot.theme;
-    document.documentElement.classList.toggle("dark", snapshot.theme === "dark");
-    document.documentElement.lang = snapshot.locale;
-  }, [snapshot.locale, snapshot.theme, snapshot.sidePane]);
+    applyAgentGuiAppearance(root, snapshot);
+    syncAgentGuiDocument(snapshot);
+  }, [root, snapshot.locale, snapshot.theme, snapshot.sidePane]);
 
   useEffect(() => {
-    const resize = () => setSize({ width: window.innerWidth, height: window.innerHeight });
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, []);
+    // A hidden instance measures zero; it keeps the size it last showed.
+    const observer = new ResizeObserver(() => { if (root.clientWidth && root.clientHeight) setSize({ width: root.clientWidth, height: root.clientHeight }); });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [root]);
 
   useEffect(() => client.subscribe((event) => {
     if (event.type === "init") {
@@ -207,12 +210,12 @@ export function AgentGuiApplication({
     }
   })), [handle]);
 
-  return <ComposerDraftProvider initial={initial}><InvokedAgentsProvider value={workspace.agents}><ResourceLinkProvider client={client} scope={{ workspaceId: initial.workspaceId, workspaceSlug: initial.workspaceSlug, appOrigin: snapshot.appOrigin }} agents={workspace.agents}><SideEntryProvider enabled={snapshot.sideWorkspace === true} sidePane={snapshot.sidePane} client={client} handle={handle} sessionId={node.lastActiveAgentSessionId ? handle.toServerSessionId(node.lastActiveAgentSessionId) : null} chinese={snapshot.locale === "zh-CN"}><AgentGUI
-    identity={{ nodeId: `multica-agent-gui:${snapshot.workspaceId}`, workspaceId: snapshot.workspaceId, currentUserId: snapshot.userId, title: "Agent GUI" }}
+  return <ComposerDraftProvider initial={initial}><InvokedAgentsProvider value={workspace.agents}><ResourceLinkProvider client={client} scope={{ workspaceId: initial.workspaceId, workspaceSlug: initial.workspaceSlug, appOrigin: snapshot.appOrigin }} agents={workspace.agents}><SideEntryProvider root={root} enabled={snapshot.sideWorkspace === true} sidePane={snapshot.sidePane} client={client} handle={handle} sessionId={node.lastActiveAgentSessionId ? handle.toServerSessionId(node.lastActiveAgentSessionId) : null} chinese={snapshot.locale === "zh-CN"}><AgentGUI
+    identity={{ nodeId: instanceId, workspaceId: snapshot.workspaceId, currentUserId: snapshot.userId, title: "Agent GUI" }}
     workspace={{ path: "", agentSettings: { avoidGroupingEdits: false }, prepareExternalPromptFiles: prepareFiles }}
     frame={{ position: { x: 0, y: 0 }, ...size, desktopSize: size, isActive: snapshot.hostActive ?? true, isVisible: snapshot.hostVisible ?? true, embedded: true }}
     state={node}
-    runtimeRequests={{ composerAppend: appends[0] ?? null, composerFocusSequence, workbench: { instanceId: `multica-agent-gui:${initial.workspaceId}` } }}
+    runtimeRequests={{ composerAppend: appends[0] ?? null, composerFocusSequence, workbench: { instanceId } }}
     agentDirectory={agentDirectory}
     mentionAgentDirectory={mentionAgentDirectory}
     agentActivityRuntime={handle.runtime}
@@ -242,7 +245,7 @@ export function AgentGuiApplication({
     }}
     renderSlots={{ composerEmptySubmit, composerFooterAccessory: (context) => <ComposerFooterControls context={context} client={client} handle={handle} targets={executionTargets(workspace)} snapshot={snapshot} onReadyForFocus={setComposerFocusSequence}
       newConversationRequest={pendingNewConversation} onNewConversationApplied={() => setPendingNewConversation(undefined)}
-      onOpenNewConversation={() => dispatchAgentGuiWorkbenchCommand({ type: "new-conversation", instanceId: `multica-agent-gui:${initial.workspaceId}` })}
+      onOpenNewConversation={() => dispatchAgentGuiWorkbenchCommand({ type: "new-conversation", instanceId })}
       pendingTarget={pendingTarget} onCancelTargetSwitch={() => setPendingTarget(null)}
       onLeaveSession={(target, fromSession, draft, projectPath) => { setPendingTarget({ target, fromSession, draft, projectPath }); setNode((current) => ({ ...current, lastActiveAgentSessionId: null })); }}
       onSelectAgent={(target) => { setPendingTarget(null); setNode((current) => current.agentTargetId === target.id ? current : { ...current, provider: target.provider, agentTargetId: target.id, lastActiveAgentSessionId: null }); }} /> }}

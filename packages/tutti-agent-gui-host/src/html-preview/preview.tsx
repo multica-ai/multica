@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@multica/ui/components/ui/button";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 import { HTML_PREVIEW_MAX_LENGTH, type MessagePreviewFormat } from "../html-preview-contract";
 import { createHtmlPreviewDocument, type PreviewLibraries, type PreviewPalette } from "./document";
 import { SvgPreviewSurface } from "./svg-preview-surface";
 
 function subscribeAppearance(changed: () => void) {
   const observer = new MutationObserver(changed);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "lang"] });
+  observer.observe(getPortalContainer(), { attributes: true, attributeFilter: ["data-theme", "lang"] });
   return () => observer.disconnect();
 }
-function appearance() { return `${document.documentElement.dataset.theme}:${document.documentElement.lang}`; }
+function appearance() { const root = getPortalContainer(); return `${root.dataset.theme}:${root.lang}`; }
 const EMPTY_LIBRARIES: PreviewLibraries = { chart: "", d3: "" };
 
 export function DocumentPreview({ source, streaming, format }: { source: string; streaming: boolean; format: MessagePreviewFormat }) {
@@ -41,14 +42,14 @@ export function DocumentPreview({ source, streaming, format }: { source: string;
     let current = true;
     setLoadError(false);
     if (format === "svg") return;
-    void import("virtual:multica-html-libraries").then((loaded) => { if (current) setLibraries(loaded.libraries); }, () => { if (current) setLoadError(true); });
+    void import("./libraries.generated").then((loaded) => { if (current) setLibraries(loaded.libraries); }, () => { if (current) setLoadError(true); });
     return () => { current = false; };
   }, [streaming, oversized, attempt, format]);
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
   const documentSource = useMemo(() => {
     if ((format === "html" && !libraries) || streaming || oversized) return undefined;
-    const style = getComputedStyle(document.documentElement);
+    const style = getComputedStyle(getPortalContainer());
     const palette: PreviewPalette = {};
     for (const name of ["background", "foreground", "muted", "muted-foreground", "border", "brand"] as const) palette[name] = style.getPropertyValue(`--${name}`).trim();
     return createHtmlPreviewDocument(source, libraries ?? EMPTY_LIBRARIES, channel, theme, palette, format);

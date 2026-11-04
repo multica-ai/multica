@@ -1,4 +1,4 @@
-import { localV2, localV2Error, LocalV2RequestError } from "../platform/local-v2";
+import { conversationStore, localV2Error, LocalV2RequestError } from "../platform/conversation-store";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
 import { LocalRuntimeNotice } from "./local-runtime-notice";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -26,7 +26,7 @@ import { TuttiAgentGuiPanel } from "@multica/views/conversation-flow/panel";
 import type { ParentServiceOptions } from "@multica/views/conversation-flow/service";
 import type { LocalFolderProject, LocalProviderId } from "@multica/core/local-conversation/protocol";
 import { isAutomaticLocalDirectory } from "@multica/tutti-agent-gui-host/local-projects";
-import { createLocalConversationParentService, localConversationKey, localTargetId } from "../platform/local-conversation-service";
+import { createLocalConversationParentService, localConversationKey, localFolderProjectsQuery, localProvidersQuery, localTargetId, type LocalFolderProjectList, type LocalProviderList } from "../platform/local-conversation-service";
 import { useLocalConversationPages } from "../platform/local-conversation-pages";
 import { projectForDirectory, sessionEntry, type LocalSessionEntry } from "../platform/local-conversation-projects";
 import { LocalConversationImportButton } from "./local-conversation-import";
@@ -120,7 +120,7 @@ function LocalConversationFlow() {
   const [referenceDraft, setReferenceDraft] = useState<RestoreDraftRequest | null>(null);
   const [locateRequest, setLocateRequest] = useState<{ sessionId: string; turnId?: string; quote?: string; sequence: number } | null>(null);
   const scope = { userId: userId || "", workspaceId: workspace?.id || "" };
-  const v2 = localV2(transport, scope);
+  const v2 = conversationStore(transport, scope);
   // Other devices with a conversation open; shown on this device's own page only.
   const [, setPresenceVersion] = useState(0);
   useEffect(() => remote ? undefined : v2.onPresence(() => setPresenceVersion((version) => version + 1)), [v2, remote]);
@@ -147,10 +147,10 @@ function LocalConversationFlow() {
   const [contextSelection, setContextSelection] = useState("");
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set());
   const [focusSequence, setFocusSequence] = useState(0);
-  const providers = useQuery({ queryKey: [...localConversationKey(scope, device.id), "providers"], queryFn: async () => (await v2.request("GET", "/providers") as { providers: { id: LocalProviderId; name: string; available: boolean }[] }).providers, enabled: !!workspace && !!userId });
+  const providers = useQuery({ ...localProvidersQuery(v2, device.id), select: (value: LocalProviderList) => value.providers, enabled: !!workspace && !!userId });
   const projectQuery = useQuery({ ...projectListOptions(scope.workspaceId), enabled: !!workspace && !!userId });
   const projects = (projectQuery.data ?? []).filter((project) => project.workspace_id === scope.workspaceId);
-  const folderQuery = useQuery({ queryKey: [...localConversationKey(scope, device.id), "folder-projects"], queryFn: async () => (await v2.request("GET", "/folder-projects") as { projects: { id: string; title: string; path: string; created_at: string }[] }).projects.map(folderProject), enabled: !!workspace && !!userId,
+  const folderQuery = useQuery({ ...localFolderProjectsQuery(v2, device.id), select: (value: LocalFolderProjectList) => value.projects.map(folderProject), enabled: !!workspace && !!userId,
     retry: (count, error) => !localProjectsRequireRestart(error) && count < 2 });
   useEffect(() => {
     if (!scope.userId || !scope.workspaceId) return;

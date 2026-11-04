@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { cn } from "../../../app/renderer/lib/utils";
 import { DESKTOP_WINDOW_TOP_MARGIN } from "../../workspaceDesktop/constants";
 import { resolveComposerPortalTarget } from "../composer/composerPortalTarget";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 const COMPOSER_MENU_GAP_PX = 8;
 const COMPOSER_MENU_VIEWPORT_PADDING_PX = 8;
@@ -357,7 +358,7 @@ export const ComposerFloatingMenuSurface = forwardRef<
     frame?.portalTarget ??
     (anchorRef.current
       ? resolveComposerPortalTarget(anchorRef.current)
-      : document.body);
+      : getPortalContainer());
 
   return createPortal(
     <div

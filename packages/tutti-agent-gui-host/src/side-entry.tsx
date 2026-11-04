@@ -17,7 +17,7 @@ export function useCanPreviewResources(): boolean {
   return useContext(SideEntryContext)?.enabled === true;
 }
 
-export function SideEntryProvider({ children, ...entry }: Entry & { children: ReactNode }) {
+export function SideEntryProvider({ children, root, ...entry }: Entry & { root: HTMLElement; children: ReactNode }) {
   const current = useRef(entry); current.current = entry;
   const [selection, setSelection] = useState<{ text: string; turnId?: string; left: number; top: number; bottom: number } | null>(null);
   const toolbar = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export function SideEntryProvider({ children, ...entry }: Entry & { children: Re
       const value = window.getSelection();
       const anchor = value?.anchorNode?.parentElement;
       const focus = value?.focusNode?.parentElement;
-      const source = anchor?.closest<HTMLElement>("[data-multica-turn-id]");
+      const source = anchor && root.contains(anchor) ? anchor.closest<HTMLElement>("[data-multica-turn-id]") : null;
       const text = value?.toString().trim();
       if (!text || !source || !source.contains(focus ?? null) || anchor?.closest('[contenteditable="true"],input,textarea') || !current.current.sessionId || !value?.rangeCount) { setSelection(null); return; }
       const box = value.getRangeAt(0).getBoundingClientRect();
@@ -58,7 +58,7 @@ export function SideEntryProvider({ children, ...entry }: Entry & { children: Re
     document.addEventListener("contextmenu", contextMenu, true);
     document.addEventListener("pointerup", select); document.addEventListener("keyup", key); document.addEventListener("scroll", select, true); document.addEventListener("click", open, true); document.addEventListener("keydown", open, true); window.addEventListener("resize", select);
     return () => { document.removeEventListener("contextmenu", contextMenu, true); document.removeEventListener("pointerup", select); document.removeEventListener("keyup", key); document.removeEventListener("scroll", select, true); document.removeEventListener("click", open, true); document.removeEventListener("keydown", open, true); window.removeEventListener("resize", select); };
-  }, [entry.enabled]);
+  }, [entry.enabled, root]);
   useLayoutEffect(() => {
     if (!selection || !toolbar.current) return;
     const { width, height } = toolbar.current.getBoundingClientRect();
@@ -73,7 +73,7 @@ export function SideEntryProvider({ children, ...entry }: Entry & { children: Re
     let attempts = 0;
     const find = () => {
       if (cancelled || ++attempts > 30) return;
-      const source = current.current.sessionId === event.sessionId && event.turnId ? document.querySelector(`[data-multica-turn-id="${CSS.escape(event.turnId)}"]`) : null;
+      const source = current.current.sessionId === event.sessionId && event.turnId ? root.querySelector(`[data-multica-turn-id="${CSS.escape(event.turnId)}"]`) : null;
       const target = source && source.firstElementChild;
       if (target) {
         let anchor = target;
@@ -84,7 +84,16 @@ export function SideEntryProvider({ children, ...entry }: Entry & { children: Re
         anchor.scrollIntoView({ block: "center", behavior: "smooth" });
         anchor.setAttribute("data-multica-located", "true"); setTimeout(() => anchor.removeAttribute("data-multica-located"), 2000);
       } else {
-        if (event.turnId) document.querySelector<HTMLElement>(`[data-multica-locator-turn-id="${CSS.escape(event.turnId)}"]`)?.click();
+        if (event.turnId) {
+          root.querySelector<HTMLElement>(`[data-multica-locator-turn-id="${CSS.escape(event.turnId)}"]`)?.click();
+          // The turn may be older than what is loaded: read back until it is, or none are left.
+          const source = current.current.handle.localConversations;
+          const conversation = source?.conversation(event.sessionId);
+          if (conversation && !conversation.turns.has(event.turnId) && conversation.hasOlderTurns) {
+            attempts = 0;
+            void source?.loadOlder(event.sessionId).catch(() => {});
+          }
+        }
         setTimeout(find, 100);
       }
     };

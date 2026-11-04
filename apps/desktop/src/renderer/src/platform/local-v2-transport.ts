@@ -154,6 +154,15 @@ export class DirectLocalV2Transport implements LocalV2Transport {
     this.report(compatible ? { state: "connected" } : { state: "unavailable", reason: "incompatible" });
   }
 
+  /** Read fresh: the point is noticing the daemon's database was replaced. */
+  async storeGeneration(): Promise<string> {
+    const endpoint = await this.endpoint();
+    const response = await this.fetch(this.url(endpoint, "/hello"), { headers: { Authorization: `Bearer ${endpoint.token}` }, signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw failure(`http_${response.status}`, "The daemon did not answer");
+    const hello = localV2HelloSchema.safeParse(await response.json());
+    return hello.success ? hello.data.store_generation : "";
+  }
+
   capabilities(): Promise<string[]> {
     return this.capabilityLoad ??= (async () => {
       const endpoint = await this.endpoint();

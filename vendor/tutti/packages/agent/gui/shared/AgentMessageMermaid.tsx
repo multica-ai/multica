@@ -15,6 +15,7 @@ import mermaid from "mermaid";
 import { Button, CopyIcon, RestoreIcon } from "@tutti-os/ui-system";
 import { RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
 import { useTranslation } from "../i18n/index";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 const MERMAID_MAX_TEXT_SIZE = 50_000;
 const MERMAID_MAX_EDGES = 500;
@@ -249,7 +250,7 @@ class MermaidRenderLifecycle extends Component<
         {isViewerOpen
           ? createPortal(
               <MermaidViewer svg={rendered.svg} onClose={this.closeViewer} />,
-              document.body
+              getPortalContainer()
             )
           : null}
       </>
@@ -639,7 +640,7 @@ function useMermaidTheme(): MermaidTheme {
 }
 
 function resolveMermaidTheme(): MermaidTheme {
-  const documentTheme = document.documentElement.dataset.theme;
+  const documentTheme = getPortalContainer().dataset.theme;
   if (documentTheme === "dark") {
     return "dark";
   }

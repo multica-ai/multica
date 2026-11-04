@@ -1,4 +1,5 @@
 import { flushSync } from "react-dom";
+import { createMessageDraftImage, prepareMessageDraftImage } from "@multica/tutti-agent-gui-host/message-image-clipboard";
 import {
   startTransition,
   useCallback,
@@ -164,6 +165,7 @@ export function useComposerDraftAttachments({
       if (!current) return null;
       const next = update(current);
       publishScopedDraft(sourceScopeKey, next);
+      agentActivityRuntime?.promptAttachmentsRemoved?.(current, next);
       return next;
     }
   );
@@ -264,14 +266,10 @@ export function useComposerDraftAttachments({
         source: "agent-gui",
         workspaceId
       });
-      const nextImages = images.slice(0, remainingSlots).map((image) => ({
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-        name: image.name,
-        mimeType: image.mimeType,
-        data: image.data,
-        previewUrl: `data:${image.mimeType};base64,${image.data}`,
-        uploading: Boolean(uploadPromptContent)
-      }));
+      const imagePreparations = images.slice(0, remainingSlots).map((image) =>
+        createMessageDraftImage(image, Boolean(uploadPromptContent))
+      );
+      const nextImages = imagePreparations.map(({ image }) => image);
       const nextDraftImages = [...currentDraftImages, ...nextImages];
       draftImagesRef.current = nextDraftImages;
       reportContentEntered("image");
@@ -281,17 +279,9 @@ export function useComposerDraftAttachments({
       if (!uploadPromptContent) {
         return;
       }
-      for (const draftImage of nextImages) {
-        void uploadPromptContent({
-          workspaceId,
-          content: [
-            {
-              type: "image",
-              mimeType: draftImage.mimeType,
-              data: draftImage.data,
-              name: draftImage.name
-            }
-          ]
+      for (const { image: draftImage, reference } of imagePreparations) {
+        void prepareMessageDraftImage({
+          workspaceId, image: draftImage, reference, runtime: agentActivityRuntime, uploadPromptContent
         })
           .then((result) => {
             const uploadedImage = result.content.find(
@@ -342,7 +332,7 @@ export function useComposerDraftAttachments({
                         ...(uploadedImage.path
                           ? { path: uploadedImage.path }
                           : {}),
-                        previewUrl: image.previewUrl,
+                        previewUrl: uploadedImage.previewUrl ?? image.previewUrl,
                         uploading: false
                       }
                     : image
@@ -353,6 +343,7 @@ export function useComposerDraftAttachments({
           .catch((error: unknown) => {
             const message =
               error instanceof Error ? error.message : String(error);
+            showErrorToast(translate("agentHost.agentGui.imageLoadFailed"));
             reportAgentComposerDiagnostic(agentActivityRuntime, {
               details: {
                 error: message.slice(0, 500),

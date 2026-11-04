@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { agentGuiMessageTargetOrigin, isAgentGuiFrameMessage } from "../frame-messaging";
 
 /** Promote the existing sandbox to the top layer without remounting its document. */
 export function SvgPreviewSurface({ open, onOpenChange, title, closeLabel, trigger, children }: {
@@ -37,21 +36,6 @@ export function SvgPreviewSurface({ open, onOpenChange, title, closeLabel, trigg
     const surface = dialog.current;
     return () => { if (surface?.open) surface.close(); };
   }, []);
-  useEffect(() => {
-    if (!open) return;
-    const origin = agentGuiMessageTargetOrigin();
-    const receive = (event: MessageEvent) => {
-      if (isAgentGuiFrameMessage(event, window.parent) && event.data?.type === "multica:agent-gui:preview-close" && event.data.version === 1) onOpenChange(false);
-    };
-    document.documentElement.dataset.globalSvgPreview = "true";
-    window.addEventListener("message", receive);
-    window.parent.postMessage({ type: "multica:agent-gui:preview-state", version: 1, expanded: true }, origin);
-    return () => {
-      delete document.documentElement.dataset.globalSvgPreview;
-      window.removeEventListener("message", receive);
-      window.parent.postMessage({ type: "multica:agent-gui:preview-state", version: 1, expanded: false }, origin);
-    };
-  }, [open, onOpenChange]);
   const outside = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.target !== event.currentTarget) return false;
     const bounds = event.currentTarget.getBoundingClientRect();

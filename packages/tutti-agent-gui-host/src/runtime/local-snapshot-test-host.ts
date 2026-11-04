@@ -1,20 +1,57 @@
-import type { AgentGuiSessionDetail } from "../protocol";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { localV2ServerMessageSchema, localV2SnapshotSchema, type LocalV2Event } from "@multica/core/local-conversation/v2";
+import type { AgentGuiSessionDetail, LocalConversationSource } from "../protocol";
 
 type Request = (method: string, params: any, options?: { signal?: AbortSignal }) => Promise<any>;
 
 /**
- * Test hosts describe conversations as `session.load` details. This
- * answers the local v2 methods from the same detail, so a test's own
- * `session.load` overrides also shape the local snapshot.
+ * Test hosts describe conversations as `session.load` details. This source
+ * builds conversations from the same detail, so a test's own `session.load`
+ * overrides also shape them.
  */
-export function withLocalSnapshots(request: Request): Request {
-  return async (method, params, options) => {
-    if (method === "local.subscribe" || method === "local.unsubscribe") return undefined;
-    // Keep the recorded call shape of hosts that never receive options.
-    const call = (name: string, values: unknown) => options === undefined ? request(name, values) : request(name, values, options);
-    if (method !== "local.snapshot") return call(method, params);
-    const detail = await call("session.load", params) as AgentGuiSessionDetail;
-    return { detail, snapshot: snapshotFromDetail(detail) };
+export function localSourceFromClient(client: { request: Request; subscribe(listener: (event: never) => void): () => void }): LocalConversationSource & { opened: string[] } {
+  const opened: string[] = [];
+  const conversations = new Map<string, V2Conversation>();
+  const details = new Map<string, AgentGuiSessionDetail>();
+  const observers = new Map<string, Set<(events: readonly LocalV2Event[]) => void>>();
+  const notify = (id: string, events: readonly LocalV2Event[]) => { for (const observer of [...observers.get(id) ?? []]) observer(events); };
+  const read = async (sessionId: string) => {
+    const detail = await client.request("session.load", { sessionId }) as AgentGuiSessionDetail;
+    const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse(snapshotFromDetail(detail)));
+    details.set(sessionId, detail);
+    conversations.set(sessionId, conversation);
+    return conversation;
+  };
+  // Tests drive a conversation with these two events.
+  client.subscribe(((event: { type: string; sessionId: string; message?: unknown }) => {
+    if (event.type === "local.reload") { void read(event.sessionId).then(() => notify(event.sessionId, [])).catch(() => {}); return; }
+    if (event.type !== "local.events") return;
+    const parsed = localV2ServerMessageSchema.safeParse(event.message);
+    if (!parsed.success) return;
+    const reload = () => { void read(event.sessionId).then(() => notify(event.sessionId, [])).catch(() => {}); };
+    if (parsed.data.type === "subscription.status") {
+      if (["resubscribe", "snapshot_required", "rejected"].includes(parsed.data.status)) reload();
+      return;
+    }
+    if (parsed.data.type !== "conversation.events") return;
+    if (conversations.get(event.sessionId)?.apply(parsed.data.events) === "gap") { reload(); return; }
+    notify(event.sessionId, parsed.data.events);
+  }) as never);
+  return {
+    opened,
+    open: (id) => { opened.push(id); return () => {}; },
+    // Test hosts change their answers between reads, so this always reads.
+    ensure: read,
+    refresh: read,
+    loadOlder: async () => {},
+    observe(id, listener) {
+      const set = observers.get(id) ?? new Set();
+      observers.set(id, set);
+      set.add(listener);
+      return () => { set.delete(listener); };
+    },
+    conversation: (id) => conversations.get(id),
+    detail: (id) => details.get(id) ?? null,
   };
 }
 

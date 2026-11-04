@@ -31,7 +31,7 @@ export function useMentionPaletteFrame(
       return;
     }
 
-    const rect = anchor.getBoundingClientRect();
+    const rect = (anchor.querySelector(".agent-gui-node__composer-prompt-input-area") ?? anchor).getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const width = Math.max(
@@ -54,9 +54,7 @@ export function useMentionPaletteFrame(
     );
     const availableAbove = rect.top - MENTION_PALETTE_GAP_PX - safeTop;
     const height =
-      availableAbove >= MENTION_PALETTE_MIN_HEIGHT_PX
-        ? Math.min(MENTION_PALETTE_MAX_HEIGHT_PX, availableAbove)
-        : MENTION_PALETTE_MIN_HEIGHT_PX;
+      Math.min(MENTION_PALETTE_MAX_HEIGHT_PX, Math.max(0, availableAbove));
 
     setMentionPaletteFrame({
       height,
@@ -88,6 +86,8 @@ export function useMentionPaletteFrame(
         : new ResizeObserver(syncMentionPaletteFrame);
     if (anchor) {
       resizeObserver?.observe(anchor);
+      const prompt = anchor.querySelector(".agent-gui-node__composer-prompt-input-area");
+      if (prompt) resizeObserver?.observe(prompt);
     }
     window.addEventListener("resize", syncMentionPaletteFrame);
     window.addEventListener("scroll", syncMentionPaletteFrame, {
@@ -105,12 +105,12 @@ export function useMentionPaletteFrame(
     () => ({
       position: "fixed",
       left: `${mentionPaletteFrame?.left ?? 0}px`,
-      top: `${mentionPaletteFrame?.top ?? 0}px`,
+      bottom: `calc(100% - ${(mentionPaletteFrame?.top ?? 0) + (mentionPaletteFrame?.height ?? 0)}px)`,
       width: `${mentionPaletteFrame?.width ?? 0}px`,
       maxWidth: `${mentionPaletteFrame?.width ?? 0}px`,
-      minHeight: `${MENTION_PALETTE_MIN_HEIGHT_PX}px`,
-      maxHeight: `${MENTION_PALETTE_MAX_HEIGHT_PX}px`,
-      height: `${mentionPaletteFrame?.height ?? MENTION_PALETTE_MIN_HEIGHT_PX}px`,
+      minHeight: "0px",
+      maxHeight: `${mentionPaletteFrame?.height ?? MENTION_PALETTE_MAX_HEIGHT_PX}px`,
+      height: "auto",
       zIndex: composerPaletteZIndex
     }),
     [mentionPaletteFrame]

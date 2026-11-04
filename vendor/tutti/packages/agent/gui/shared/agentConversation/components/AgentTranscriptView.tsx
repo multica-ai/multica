@@ -746,7 +746,7 @@ export const AgentTranscriptView = memo(function AgentTranscriptView({
                 ref={rowVirtualizer.measureElement}
                 className="agent-gui-transcript-virtual-item"
                 data-index={virtualTurn.index}
-                data-agent-transcript-virtual-turn={group.key}
+                data-agent-transcript-virtual-turn={group.key} data-multica-turn-id={group.turnId ?? ""}
                 style={{
                   paddingBottom: `${
                     turnWorkSectionModelByKey.get(group.key)
@@ -784,7 +784,7 @@ export const AgentTranscriptView = memo(function AgentTranscriptView({
       />
       {turnGroups.map((group, groupIndex) => (
         <Fragment key={group.key}>
-          {renderTurnGroup(group)}
+          <div style={{ display: "contents" }} data-multica-turn-id={group.turnId ?? ""}>{renderTurnGroup(group)}</div>
           {attachmentProjection.byGroupIndex
             .get(groupIndex)
             ?.map(renderAttachment)}

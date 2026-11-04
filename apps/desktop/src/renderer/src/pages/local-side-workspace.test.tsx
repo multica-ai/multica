@@ -95,7 +95,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", async (url: string) => new Response(previewTexts.get(new URL(url.replace(/^v2:/, "http://daemon")).search) ?? ""));
   const messages = new Set<(scope: LocalConversationScope, message: unknown) => void>();
   // A change notice from a case makes the conversation's subscription read it again.
-  changes.add((changed, id) => messages.forEach((listener) => listener(changed, { version: 2, type: "subscription.status", conversation_id: id, status: "resubscribe" })));
+  changes.add((changed, id) => messages.forEach((listener) => listener(changed, { version: 2, type: "subscription.status", conversation_id: id, status: "snapshot_required" })));
   const localV2 = { request: daemon, send: vi.fn(async () => {}), subscribe: (listener: (scope: LocalConversationScope, message: unknown) => void) => { messages.add(listener); return () => messages.delete(listener); },
     onConnection: () => () => {}, fileUrl: (_scope: unknown, path: string) => `v2:${path}`, upload: vi.fn(),
     availability: () => ({ state: "connected" }), onAvailability: () => () => {},

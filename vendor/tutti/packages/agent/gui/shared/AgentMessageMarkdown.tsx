@@ -65,13 +65,15 @@ import {
   MarkdownListItem,
   MarkdownOrderedList,
   MarkdownParagraph,
-  MarkdownPre,
   MarkdownUnorderedList,
   textFromReactNode
 } from "./AgentMessageMarkdownRenderers";
+import { MarkdownTable } from "@multica/tutti-agent-gui-host/markdown-table";
 import { MarkdownMedia } from "./AgentMessageMarkdownMedia";
+import { MarkdownPre } from "@multica/tutti-agent-gui-host/html-preview-pre";
 import { remarkLiteralAutolinkBoundary } from "./remarkLiteralAutolinkBoundary";
 import { cachedMarkdownParser } from "./cachedMarkdownParser";
+import { ResourceMarkdownLink, remarkMessageResourceLinks } from "@multica/tutti-agent-gui-host/resource-link";
 export { resetCachedMarkdownImagesForTests } from "./AgentMessageMarkdownMedia";
 export type { StreamingMarkdownBlock } from "./agentMessageMarkdownRuntime";
 export { splitStreamingMarkdownBlocks } from "./agentMessageMarkdownRuntime";
@@ -239,6 +241,7 @@ export function AgentMessageMarkdown({
     () => [
       remarkGfm,
       remarkLiteralAutolinkBoundary,
+      remarkMessageResourceLinks,
       [
         cachedMarkdownParser,
         {
@@ -290,12 +293,7 @@ export function AgentMessageMarkdown({
   const markdownComponents = useMemo(
     () => ({
       a: (props: MarkdownDomProps<"a">) => (
-        <MarkdownLink
-          {...props}
-          onLinkClick={handleLinkClick}
-          workspaceAppIcons={workspaceAppIcons}
-          agentTargets={effectiveAgentTargets}
-        />
+        <ResourceMarkdownLink href={props.href} fallback={<MarkdownLink {...props} onLinkClick={handleLinkClick} workspaceAppIcons={workspaceAppIcons} agentTargets={effectiveAgentTargets} />}>{props.children}</ResourceMarkdownLink>
       ),
       code: (props: MarkdownDomProps<"code">) => <MarkdownCode {...props} />,
       img: (props: MarkdownDomProps<"img">) => (
@@ -304,6 +302,7 @@ export function AgentMessageMarkdown({
       p: (props: MarkdownDomProps<"p">) => (
         <MarkdownParagraph {...props} inline={inline} />
       ),
+      table: MarkdownTable,
       ul: MarkdownUnorderedList,
       ol: MarkdownOrderedList,
       li: MarkdownListItem,
@@ -428,7 +427,7 @@ const MemoizedMarkdownBlock = memo(function MemoizedMarkdownBlock({
 }): JSX.Element {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkLiteralAutolinkBoundary]}
+      remarkPlugins={[remarkGfm, remarkLiteralAutolinkBoundary, remarkMessageResourceLinks]}
       rehypePlugins={[
         normalizeWindowsMarkdownMediaPaths,
         [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]

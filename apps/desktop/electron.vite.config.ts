@@ -65,7 +65,7 @@ export default defineConfig({
         name: "multica-tutti-agent-gui-assets",
         config() {
           execFileSync(process.execPath, [
-            resolve("../../packages/tutti-agent-gui-host/scripts/build.mjs"),
+            resolve("../../packages/tutti-agent-gui-host/scripts/prepare.mjs"),
           ], { stdio: "inherit" });
         },
       },

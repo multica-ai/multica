@@ -8,6 +8,7 @@ import {
   type PointerEvent
 } from "react";
 import { ChevronRight } from "lucide-react";
+import { SideQueueAction } from "@multica/tutti-agent-gui-host/side-entry";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -588,9 +589,10 @@ export function AgentQueuedPromptPanel({
                     </Tooltip>
                     <DropdownMenuContent
                       align="end"
-                      className={styles.composerMenuContent}
+                      className={`${styles.composerMenuContent} multica-queue-menu`}
                       sideOffset={8}
                     >
+                      <SideQueueAction agentSessionId={agentSessionId} promptId={queuedPrompt.id} disabled={isDraining} />
                       <DropdownMenuItem
                         className={styles.composerMenuItem}
                         disabled={isDraining}

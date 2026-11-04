@@ -3,12 +3,14 @@
 This directory vendors the complete `packages/agent/gui` UI module and its
 frontend dependency closure from
 [`tutti-os/tutti`](https://github.com/tutti-os/tutti/tree/207beeea554435618dffd3b579d0ffe112b065c4).
-The pinned source revision is
-`207beeea554435618dffd3b579d0ffe112b065c4`.
+It was imported at `207beeea554435618dffd3b579d0ffe112b065c4` and no longer
+follows upstream: Multica owns and changes this code directly.
 
-The UI components, layouts, CSS, icons, images, translations, public exports,
-tests and package documentation retain their upstream contents and names.
-This is code and asset vendoring, rather than an upstream repository clone.
+Source files import host modules from `@multica/tutti-agent-gui-host`. That
+dependency is declared at the repository root, not in these packages: the host
+depends on these packages, and a cycle of `node_modules` symlinks makes webpack
+walk directories without end.
+
 Agent instruction files are omitted; Multica repository instructions govern
 integration work here. No daemon, provider executable, native binary,
 `node_modules`, Git metadata or independent build output is included.
@@ -36,36 +38,6 @@ The exact package paths and every copied file are recorded in
 `source-manifest.json`. The current snapshot contains 2,483 unchanged upstream
 files, 8 files changed by local patches and 22 local package metadata
 overlays.
-
-## Reproduce and verify
-
-From the Multica repository root, using a clean checkout of the pinned
-upstream revision:
-
-```sh
-node vendor/tutti/sync.mjs /path/to/tutti-checkout
-node vendor/tutti/sync.mjs --verify
-pnpm install --frozen-lockfile --ignore-scripts
-```
-
-The sync script checks the source revision and worktree, copies exact
-Git-tracked blob bytes, and records SHA-256 hashes. Git blob reads keep the
-snapshot reproducible on Windows checkouts with automatic CRLF conversion.
-Verification requires only this directory;
-it checks the copied contents and generated manifests without fetching or
-executing upstream code.
-
-## Local patches
-
-Changes to upstream files live in `patches/*.patch`, as diffs relative to this
-directory. The sync script applies them in name order after copying the
-upstream files, and the manifest records each patched file's upstream and
-patched hashes. Keep patches minimal and prefer the UI package's existing
-host/runtime ports; a patch is for a port the Host needs and upstream lacks.
-
-- `agent-gui-composer-empty-submit.patch` adds the `composerEmptySubmit`
-  render slot: a Host label and action for the send button while the composer
-  is empty. Multica uses it to continue a stopped or interrupted local turn.
 
 ## Package metadata overlays
 

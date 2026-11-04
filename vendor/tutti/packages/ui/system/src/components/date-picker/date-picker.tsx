@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { ArrowLeftIcon, ArrowRightIcon } from "#icons/system-icons";
 import { cn } from "#lib/utils";
+import { getPortalContainer } from "../../lib/portal-container";
 
 export interface DatePickerLabels {
   placeholder: string;
@@ -454,7 +455,7 @@ const DatePicker = React.forwardRef<HTMLButtonElement, DatePickerProps>(
                   </button>
                 </div>
               </div>,
-              document.body
+              getPortalContainer()
             )
           : null}
       </>

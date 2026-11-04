@@ -331,7 +331,7 @@ export function normalizeAgentPromptContentBlocks(
       const mimeType = block.mimeType?.trim();
       const attachmentId = block.attachmentId?.trim();
       const data = block.data?.trim();
-      const url = block.url?.trim();
+      const url = attachmentId && block.url?.startsWith("data:") ? undefined : block.url?.trim();
       const imagePath = block.path?.trim();
       if (
         (!attachmentId && !data && !url && !imagePath) ||

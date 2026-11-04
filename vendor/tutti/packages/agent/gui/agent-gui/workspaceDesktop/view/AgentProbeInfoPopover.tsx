@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { DockAgentProbeTooltipLine } from "./desktopDockAgentProbeTooltipModel";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 
 const POPOVER_MIN_VIEWPORT_INSET_PX = 16;
 const POPOVER_DEFAULT_WIDTH_PX = 260;
@@ -206,7 +207,7 @@ export function AgentProbeInfoPopover({
       onBlur={closePopover}
     >
       <Info size={15} strokeWidth={2.1} aria-hidden="true" />
-      {isOpen ? createPortal(popover, document.body) : null}
+      {isOpen ? createPortal(popover, getPortalContainer()) : null}
     </div>
   );
 }

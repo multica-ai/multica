@@ -5,7 +5,7 @@ import type {
   AgentGuiRpcError,
   AgentGuiRpcMethod,
   AgentGuiRpcMethods,
-} from "./protocol";
+} from "../src/protocol";
 import { agentGuiMessageTargetOrigin, isAgentGuiFrameMessage } from "./frame-messaging";
 
 interface PendingRequest {

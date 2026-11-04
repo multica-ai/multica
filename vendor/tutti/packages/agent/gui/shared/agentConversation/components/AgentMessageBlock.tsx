@@ -41,6 +41,7 @@ import {
 import { useAgentUserMessageEditRetry } from "./useAgentUserMessageEditRetry";
 import { AgentCopyableMessageGroup } from "./AgentMessageActions";
 import { AgentSystemNoticeMessage } from "./AgentSystemNoticeMessage";
+import { InvokedAgentReply } from "@multica/tutti-agent-gui-host/invoked-agent-reply";
 
 const DEFAULT_TOOL_CALLS_LABEL = (count: number): string =>
   `${count} tool calls`;
@@ -330,7 +331,7 @@ export function AgentMessageBlock({
           {editor}
         </>
       ) : (
-        renderedContent
+        isUser ? renderedContent : <InvokedAgentReply message={message}>{renderedContent}</InvokedAgentReply>
       );
     const editAction =
       isEditTarget && !isEditing && editRetry

@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { Button } from "#components/button";
 import { CloseIcon } from "#icons/system-icons";
 import { cn } from "#lib/utils";
+import { getPortalContainer } from "../../lib/portal-container";
 
 const dialogCloseDurationMs = 150;
 
@@ -55,7 +56,7 @@ function DialogTrigger({
 function DialogPortal({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
-  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
+  return <DialogPrimitive.Portal container={getPortalContainer()} data-slot="dialog-portal" {...props} />;
 }
 
 function DialogClose({

@@ -9,6 +9,7 @@ import {
   type AgentGuiScheduledTask
 } from "./agentGuiScheduler";
 import type { AgentGUIAgentAvatarPresentation } from "./model/agentGuiAgentAvatarPresentation";
+import { normalizeManagedAgentProvider } from "../../shared/managedAgentProviders";
 
 const AGENT_VINYL_COVER_BY_PROVIDER: Readonly<Record<string, string>> = {
   "claude-code": claudeVinylAssetUrl,
@@ -44,7 +45,7 @@ export class AgentGuiHeroCarouselImageLoad {
           this.loadImage(item.iconUrl),
           this.loadImage(
             item.heroImageUrl?.trim() ||
-              AGENT_VINYL_COVER_BY_PROVIDER[item.provider] ||
+              AGENT_VINYL_COVER_BY_PROVIDER[normalizeManagedAgentProvider(item.provider)] ||
               null
           ),
           this.loadImage(item.badge?.iconUrl ?? null, true)

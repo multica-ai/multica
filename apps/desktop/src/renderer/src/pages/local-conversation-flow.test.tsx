@@ -34,7 +34,7 @@ vi.mock("@multica/views/conversation-flow/panel", () => ({ TuttiAgentGuiPanel: (
   mock.panel(props);
   return <textarea aria-label="Conversation draft" data-new-conversation={JSON.stringify(props.newConversationRequest)} />;
 } }));
-vi.mock("../platform/local-conversation-service", () => ({ localConversationKey: () => ["test-local-sessions"], localTargetId: (provider: string) => `local:${provider}`, createLocalConversationParentService: vi.fn() }));
+vi.mock("../platform/local-conversation-service", () => ({ localProvidersQuery: (store: { request(method: string, path: string): Promise<unknown> }) => ({ queryKey: ["test-local-sessions", "providers"], queryFn: () => store.request("GET", "/providers") }), localFolderProjectsQuery: (store: { request(method: string, path: string): Promise<unknown> }) => ({ queryKey: ["test-local-sessions", "folder-projects"], queryFn: () => store.request("GET", "/folder-projects") }), localConversationKey: () => ["test-local-sessions"], localTargetId: (provider: string) => `local:${provider}`, createLocalConversationParentService: vi.fn() }));
 
 let summarySeq = 0;
 /** Publishes the list again, as the daemon does after any change. */

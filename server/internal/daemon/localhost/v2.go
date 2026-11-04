@@ -354,7 +354,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		}
 		writeJSON(w, http.StatusOK, queue)
 	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "side-workspace" && r.Method == http.MethodGet:
-		if _, err := v.svc.Snapshot(r.Context(), scopeID, parts[1]); err != nil {
+		if _, err := v.svc.Snapshot(r.Context(), scopeID, parts[1], 1); err != nil {
 			writeV2Error(w, err)
 			return
 		}
@@ -376,7 +376,11 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 			writeV2Error(w, AppError("invalid_request", "A history cursor is required"))
 			return
 		}
-		turns, err := v.svc.History(r.Context(), scopeID, parts[1], before)
+		turnLimit, ok := turnLimitParam(w, r)
+		if !ok {
+			return
+		}
+		turns, err := v.svc.History(r.Context(), scopeID, parts[1], before, turnLimit)
 		if err != nil {
 			writeV2Error(w, err)
 			return
@@ -450,7 +454,11 @@ func (v *V2) createSession(w http.ResponseWriter, r *http.Request, scopeID int64
 
 func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id string) {
 	began := v.marks.Now()
-	snap, err := v.svc.Snapshot(r.Context(), scopeID, id)
+	turnLimit, ok := turnLimitParam(w, r)
+	if !ok {
+		return
+	}
+	snap, err := v.svc.Snapshot(r.Context(), scopeID, id, turnLimit)
 	if err != nil {
 		writeV2Error(w, err)
 		return
@@ -479,8 +487,30 @@ func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id 
 		"conversation": summaryDTO(c), "turns": turns, "has_older_turns": snap.HasOlderTurns,
 		"pending_interactions": pending, "settings": settings, "queue": queue,
 		"created_at": c.CreatedAt, "forked_from_id": c.ForkedFromID, "forked_from_turn_id": c.ForkedFromTurnID,
-		"imported_from_session_id": c.ImportedFromSessionID,
+		"imported_from_session_id": c.ImportedFromSessionID, "open_background_items": eventDTOs(snap.OpenBackgroundItems),
 	})
+}
+
+// turnLimitParam reads the optional number of turns to return; zero when absent.
+func turnLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("turn_limit")
+	if raw == "" {
+		return 0, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > 20 {
+		writeV2Error(w, AppError("invalid_request", "turn_limit must be between 1 and 20"))
+		return 0, false
+	}
+	return limit, true
+}
+
+func eventDTOs(rows []sqlitedb.Event) []map[string]any {
+	events := make([]map[string]any, len(rows))
+	for i, e := range rows {
+		events[i] = eventDTO(store.CommittedFromRow(e))
+	}
+	return events
 }
 
 func turnDTOs(views []store.TurnView) []map[string]any {
@@ -495,6 +525,9 @@ func turnDTOs(views []store.TurnView) []map[string]any {
 		events := make([]map[string]any, len(t.Events))
 		for j, e := range t.Events {
 			events[j] = eventDTO(store.CommittedFromRow(e))
+			if start, ok := t.ItemStarts[e.ItemID.String]; ok && e.ItemID.Valid {
+				events[j]["first_seq"], events[j]["first_at"] = start.Seq, start.CreatedAt
+			}
 		}
 		turn := map[string]any{"id": t.Turn.ID, "turn_index": t.Turn.TurnIndex, "request_id": t.Turn.RequestID, "status": t.Turn.Status, "started_at": t.Turn.StartedAt, "messages": messages, "events": events}
 		if t.Turn.CompletedAt.Valid {

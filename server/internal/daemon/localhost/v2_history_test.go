@@ -49,6 +49,24 @@ func TestV2HistoryPagesWithoutCrossingWorkspace(t *testing.T) {
 			t.Fatalf("cursor %q = %d", cursor, status)
 		}
 	}
+	_, first := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/history/snapshot?turn_limit=10", nil, h)
+	firstTurns := first["turns"].([]any)
+	if len(firstTurns) != 10 || firstTurns[0].(map[string]any)["turn_index"] != float64(35) || first["has_older_turns"] != true {
+		t.Fatalf("limited snapshot = %v", first)
+	}
+	_, older := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/history/history?before_index=35&turn_limit=10", nil, h)
+	olderTurns := older["turns"].([]any)
+	if len(olderTurns) != 10 || olderTurns[0].(map[string]any)["turn_index"] != float64(25) || older["has_older_turns"] != true {
+		t.Fatalf("limited page = %v", older)
+	}
+	for _, limit := range []string{"0", "21", "-1", "many"} {
+		for _, path := range []string{"snapshot?turn_limit=", "history?before_index=25&turn_limit="} {
+			status, _ := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/history/"+path+limit, nil, h)
+			if status != http.StatusBadRequest {
+				t.Fatalf("%s%s = %d", path, limit, status)
+			}
+		}
+	}
 	other := h.Clone()
 	other.Set(headerWorkspaceID, "ws-2")
 	status, _ = v2Do(t, srv, http.MethodGet, "/local/v2/sessions/history/history?before_index=25", nil, other)
@@ -179,5 +197,47 @@ func TestRemoteSnapshotRevalidatesWithETag(t *testing.T) {
 	}
 	if changed := read(`"stale"`); changed.StatusCode != http.StatusOK {
 		t.Fatalf("changed read = %d", changed.StatusCode)
+	}
+}
+
+func TestSnapshotDescribesItemsAcrossItsWindow(t *testing.T) {
+	t.Parallel()
+	srv, svc := newV2Server(t)
+	h := v2Headers("user-1")
+	if status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "window", "provider": "claude"}, h); status != http.StatusCreated {
+		t.Fatal(status)
+	}
+	writer := svc.Store().NewWriter(store.WriterOptions{})
+	defer writer.Close()
+	submit := func(batch store.Batch) {
+		t.Helper()
+		batch.ConversationID = "window"
+		if _, err := writer.Submit(context.Background(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := func(minute int) time.Time { return time.Date(2026, 11, 3, 10, minute, 0, 0, time.UTC) }
+	// The oldest turn starts a background task that outlives the snapshot's window.
+	submit(store.Batch{StartTurn: &store.NewTurn{ID: "starter", StartedAt: at(0)}, Events: []store.NewEvent{
+		{TurnID: "starter", ItemID: "task", Type: "item.started", Payload: []byte(`{"kind":"background_task"}`), CreatedAt: at(0)},
+		{TurnID: "starter", ItemID: "tool", Type: "item.started", Payload: []byte(`{"kind":"tool_call"}`), CreatedAt: at(1)},
+		{TurnID: "starter", ItemID: "tool", Type: "item.completed", Final: true, Payload: []byte(`{"kind":"tool_call","status":"completed"}`), CreatedAt: at(2)},
+	}})
+	submit(store.Batch{StartTurn: &store.NewTurn{ID: "later", StartedAt: at(4)}})
+
+	_, narrow := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/window/snapshot?turn_limit=1", nil, h)
+	open := narrow["open_background_items"].([]any)
+	if len(open) != 1 || open[0].(map[string]any)["item_id"] != "task" {
+		t.Fatalf("open background items = %v", open)
+	}
+	_, wide := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/window/snapshot", nil, h)
+	if len(wide["open_background_items"].([]any)) != 0 {
+		t.Fatalf("a loaded turn's item repeated: %v", wide["open_background_items"])
+	}
+	for _, event := range wide["turns"].([]any)[0].(map[string]any)["events"].([]any) {
+		e := event.(map[string]any)
+		if e["item_id"] == "tool" && (e["first_seq"] == nil || e["first_seq"].(float64) >= e["seq"].(float64) || e["first_at"] != at(1).Format(time.RFC3339Nano)) {
+			t.Fatalf("final event's start = %v", e)
+		}
 	}
 }

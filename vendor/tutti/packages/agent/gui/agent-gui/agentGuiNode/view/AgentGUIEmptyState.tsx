@@ -104,7 +104,7 @@ interface AgentGUIEmptyHomePaneProps {
   onRetryActivation: AgentGUINodeViewProps["actions"]["retryActivation"];
   onContinueInNewConversation: AgentGUINodeViewProps["actions"]["continueInNewConversation"];
   chromeLabels: ChromeLabels;
-  composerProps: AgentComposerProps;
+  composerProps: AgentComposerProps | null;
   labels: AgentGUIViewLabels;
   suggestions: readonly AgentHomeSuggestionCategory[];
   suggestionsCloseLabel?: string;
@@ -143,9 +143,9 @@ export const AgentGUIEmptyHomePane = memo(function AgentGUIEmptyHomePane({
   const avatarPresentations = useMemo(
     () =>
       agentTargets.length
-        ? agentTargets.map(projectAgentGUIAgentTargetAvatar)
+        ? agentTargets.map((target) => ({ ...projectAgentGUIAgentTargetAvatar(target), iconUrl: agentGUIProviderRailIconPresentation(target.provider).iconUrl }))
         : presentedSelectedAgentTarget
-          ? [projectAgentGUIAgentTargetAvatar(presentedSelectedAgentTarget)]
+          ? [{ ...projectAgentGUIAgentTargetAvatar(presentedSelectedAgentTarget), iconUrl: agentGUIProviderRailIconPresentation(presentedSelectedAgentTarget.provider).iconUrl }]
           : [
               createFallbackAgentGUIAgentAvatar({
                 provider,
@@ -228,7 +228,7 @@ interface AgentGUIEmptyHeroPaneProps {
   agentTargets: readonly AgentGUIAgentTarget[];
   selectedAgentTarget: AgentGUIAgentTarget | null;
   chromeLabels: ChromeLabels;
-  composerProps: AgentComposerProps;
+  composerProps: AgentComposerProps | null;
   providerSelectLabel: string;
   sharedAgentOwnerSeparator: string;
   suggestions: readonly AgentHomeSuggestionCategory[];
@@ -282,7 +282,7 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
     .join("|");
 
   return (
-    <div className={styles.emptyHero}>
+    <div className={cn(styles.emptyHero, !composerProps && "multica-empty-conversation-welcome")}>
       <div className={styles.emptyHeroBody}>
         <div
           className={styles.emptyHeroIconSlot}
@@ -331,7 +331,7 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
             labels={chromeLabels}
           />
         ) : null}
-        <AgentComposer {...composerProps} />
+        {composerProps ? <AgentComposer {...composerProps} /> : null}
         <AgentHomeSuggestions
           categories={suggestions}
           onSelectSuggestion={onSelectSuggestion}

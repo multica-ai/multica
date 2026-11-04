@@ -8,7 +8,7 @@ import type { WorkspaceAgentSessionDetailTurn } from "../../../../vendor/tutti/p
 import type { AgentGuiSessionDetail } from "../protocol";
 import { RuntimeLedger } from "./ledger";
 import { projectDetail, projectV2Detail } from "./projection";
-import { V2Conversation } from "./v2-conversation";
+import { V2Conversation } from "@multica/core/local-conversation/conversation";
 
 const at = "2026-10-29T12:00:00Z";
 const reason = "Authentication failed: please sign in again.";

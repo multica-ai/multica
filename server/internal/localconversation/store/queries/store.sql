@@ -299,3 +299,9 @@ WHERE c.scope_id = sqlc.arg(scope_id) AND c.archived = sqlc.arg(archived)
     OR (c.pinned = sqlc.arg(cursor_pinned) AND c.updated_at = sqlc.arg(cursor_updated_at) AND c.id > sqlc.arg(cursor_id)))
 ORDER BY c.pinned DESC, c.updated_at DESC, c.id
 LIMIT sqlc.arg(row_limit);
+
+-- name: ListTurnItemStarts :many
+SELECT item_id, MIN(seq) AS first_seq, created_at
+FROM event
+WHERE conversation_id = sqlc.arg(conversation_id) AND turn_id = sqlc.arg(turn_id) AND item_id IS NOT NULL
+GROUP BY item_id;

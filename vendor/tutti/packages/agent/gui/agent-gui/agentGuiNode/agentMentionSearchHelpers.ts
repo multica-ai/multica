@@ -212,13 +212,7 @@ export function matchesSessionQuery(
     .every((token) => haystack.includes(token));
 }
 
-export const AGENT_MENTION_FILTER_TAB_ORDER = [
-  "session",
-  "file",
-  "issue",
-  "agent",
-  "app"
-] as const satisfies readonly AgentMentionFilterId[];
+export const AGENT_MENTION_FILTER_TAB_ORDER = ["session", "issue", "agent"] as const satisfies readonly AgentMentionFilterId[];
 
 export const DEFAULT_AGENT_MENTION_FILTER =
   "session" satisfies AgentMentionFilterId;

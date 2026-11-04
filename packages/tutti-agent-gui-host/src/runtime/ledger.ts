@@ -105,7 +105,7 @@ export class RuntimeLedger {
     return version;
   }
   latestVersion(sessionId: string): number { return this.state.versions[sessionId]?.next ?? 0; }
-  project(sessionId: string, messages: Omit<AgentActivityDurableMessage, "version" | "sequence">[], turnStarts: ReadonlyMap<string, number> = new Map()): AgentActivityDurableMessage[] {
+  project(sessionId: string, messages: Omit<AgentActivityDurableMessage, "version" | "sequence">[], turnStarts: ReadonlyMap<string, number> = new Map(), paged = false): AgentActivityDurableMessage[] {
     const anchors = new Map([...turnStarts].filter(([, start]) => Number.isFinite(start) && start > 0));
     const promptTurns = new Set<string>();
     for (const message of messages) {
@@ -130,7 +130,9 @@ export class RuntimeLedger {
       return anchor(a) - anchor(b) || (a.turnId && b.turnId ? turnOrder.get(a.turnId)! - turnOrder.get(b.turnId)! : 0);
     }).map((message, index) => {
       const positioned = { ...message, sequence: index + 1 };
-      return { ...positioned, version: this.version(sessionId, message.messageId, positioned) };
+      // Older turns paged in move every message without changing any, and a full
+      // snapshot replaces what readers hold, so position is not a new version there.
+      return { ...positioned, version: this.version(sessionId, message.messageId, paged ? message : positioned) };
     });
   }
 }

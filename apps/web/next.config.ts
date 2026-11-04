@@ -40,7 +40,49 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
-  transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
+  transpilePackages: [
+    "@multica/core",
+    "@multica/ui",
+    "@multica/views",
+    "@multica/tutti-agent-gui-host",
+    "@tutti-os/agent-activity-core",
+    "@tutti-os/agent-gui",
+    "@tutti-os/analytics",
+    "@tutti-os/browser-node",
+    "@tutti-os/client-tuttid-ts",
+    "@tutti-os/connector-contracts",
+    "@tutti-os/connector-renderer",
+    "@tutti-os/event-protocol",
+    "@tutti-os/event-stream-core",
+    "@tutti-os/ui-i18n-runtime",
+    "@tutti-os/ui-react-hooks",
+    "@tutti-os/ui-rich-text",
+    "@tutti-os/ui-system",
+    "@tutti-os/workbench-snapshot",
+    "@tutti-os/workbench-surface",
+    "@tutti-os/workspace-external-core",
+    "@tutti-os/workspace-file-manager",
+    "@tutti-os/workspace-file-preview",
+    "@tutti-os/workspace-file-reference",
+    "@tutti-os/workspace-issue-manager",
+    "@tutti-os/workspace-user-project",
+  ],
+  webpack(config, { isServer }) {
+    // The GUI only mounts after a client effect, so server bundles leave it out.
+    if (isServer) config.resolve.alias["@multica/tutti-agent-gui-host/mount"] = false;
+    // The GUI's sources import images as URLs, not Next image objects.
+    const vendored = resolve(process.cwd(), "../../vendor/tutti");
+    const visit = (rules: unknown[]) => {
+      for (const rule of rules as { loader?: string; exclude?: unknown; oneOf?: unknown[] }[]) {
+        if (rule?.loader === "next-image-loader") rule.exclude = (file: string) => file.startsWith(vendored);
+        if (rule?.oneOf) visit(rule.oneOf);
+      }
+    };
+    visit(config.module.rules);
+    // A function test: Next stops handling every .svg once a rule's regex matches them.
+    config.module.rules.push({ test: (file: string) => /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(file), include: vendored, type: "asset/resource" });
+    return config;
+  },
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),

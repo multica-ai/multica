@@ -33,6 +33,7 @@ export interface RichTextMentionIdentity {
 }
 
 export interface RichTextMentionPresentation {
+  multicaStatusCategory?: string;
   agentProviderId?: string;
   agentIconUrl?: string;
   iconUrl?: string;

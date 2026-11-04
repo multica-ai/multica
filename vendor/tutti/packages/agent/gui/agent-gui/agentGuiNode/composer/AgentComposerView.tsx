@@ -33,6 +33,9 @@ import {
   composerStyles
 } from "./AgentComposerChrome";
 import { ComposerDraftAttachments } from "./ComposerDraftAttachments";
+import { pickComposerFiles } from "@multica/tutti-agent-gui-host/composer-file-picker";
+import { readAgentRichTextPromptImages, supportedPromptImageMimeType } from "../agentRichText/agentRichTextPromptImages";
+import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import { ComposerFooter } from "./ComposerFooter";
 import { AgentSessionLaunchModeSelect } from "./AgentSessionLaunchModeSelect";
 import { AgentQuickPromptPopover } from "./quickPrompts/AgentQuickPromptPopover";
@@ -48,6 +51,7 @@ import {
 export function AgentComposerView(
   input: AgentComposerViewProps
 ): React.JSX.Element {
+  const filePickerHost = useOptionalAgentHostApi();
   const {
     provider,
     slashStatus = null,
@@ -183,7 +187,7 @@ export function AgentComposerView(
     composerActionButton
   );
   const showComposerActionInFooter =
-    isHeroLayout || input.props.composerActionPlacement === "footer";
+    true;
   const showProjectSelectorInFooter =
     !isHeroLayout && input.props.showProjectSelectorInFooter === true;
   const projectSelectorNode =
@@ -394,8 +398,7 @@ export function AgentComposerView(
                 <div
                   className={cn(
                     "w-full min-w-0 self-start",
-                    !isHeroLayout &&
-                      "agent-gui-node__composer-prompt-input-line"
+                    "agent-gui-node__composer-prompt-input-line"
                   )}
                 >
                   <AgentRichTextEditor
@@ -457,7 +460,7 @@ export function AgentComposerView(
                       input.props.resolvePastedPath ?? undefined
                     }
                   />
-                  {!isHeroLayout && !showComposerActionInFooter
+                  {!showComposerActionInFooter
                     ? composerActionNode
                     : null}
                 </div>
@@ -497,7 +500,7 @@ export function AgentComposerView(
                       onExpandGroup={(groupId) =>
                         input.mentionControllerRef.current?.expandGroup(groupId)
                       }
-                      onNavigateHierarchy={navigateFileMentionHierarchy}
+                      onNavigateHierarchy={undefined}
                       onNavigateIntoItem={navigateIntoFileMentionItem}
                       onOpenReferences={
                         onRequestWorkspaceReferences
@@ -708,7 +711,17 @@ export function AgentComposerView(
               input.props.onCapabilitySettingsRequest
             }
             onRequestWorkspaceReferences={onRequestWorkspaceReferences}
-            onWorkspaceReferencePicker={handleWorkspaceReferencePicker}
+            onWorkspaceReferencePicker={input.externalPromptEntriesSupported ? async () => {
+              try {
+                const files = await pickComposerFiles();
+                const images = files.filter((file) => supportedPromptImageMimeType(file.type));
+                const regularFiles = files.filter((file) => !supportedPromptImageMimeType(file.type));
+                if (images.length) handlePastedImages(await readAgentRichTextPromptImages(images));
+                if (regularFiles.length) input.addExternalPromptEntries(regularFiles);
+              } catch {
+                filePickerHost?.toast?.error(document.documentElement.lang.startsWith("zh") ? "无法读取所选文件，请重新选择" : "Could not read the selected files. Please select them again.");
+              }
+            } : handleWorkspaceReferencePicker}
             onMentionPaletteButton={handleMentionPaletteButton}
             onSettingsChange={onSettingsChange}
             onSubmit={onSubmit}

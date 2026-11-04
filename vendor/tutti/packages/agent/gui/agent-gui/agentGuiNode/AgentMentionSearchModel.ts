@@ -652,6 +652,8 @@ export function providerItemToAgentMentionItem(input: {
       workspaceId,
       targetId,
       topicId: scope.topicId,
+      statusLabel: presentation.statusLabel,
+      statusCategory: presentation.multicaStatusCategory,
       name: label,
       title: label,
       iconUrl: presentation.iconUrl?.trim() || undefined,

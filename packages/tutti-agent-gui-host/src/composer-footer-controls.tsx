@@ -159,7 +159,7 @@ export function ComposerFooterControls({ context, client, handle, targets, snaps
   return <div className="multica-composer-footer-controls">
     {uploadCount > 0 && <span role="status" className="multica-composer-footer-help">{chinese ? `正在上传 ${uploadCount} 个附件` : `Uploading ${uploadCount} ${uploadCount === 1 ? "attachment" : "attachments"}`}</span>}
     {snapshot.local && agentId && <PermissionPicker handle={handle} client={client} agentId={agentId} sessionId={sessionId} chinese={chinese} disabled={busy || saving || unavailable} />}
-    {snapshot.local && agentId && <UsageIndicator client={client} agentId={agentId} sessionId={serverSessionId} chinese={chinese} busy={busy} disabled={unavailable || snapshot.sessions.find((entry) => entry.id === serverSessionId)?.status === "archived"} active={snapshot.hostVisible !== false && snapshot.hostActive !== false} />}
+    {snapshot.local && agentId && <UsageIndicator client={client} localConversations={handle.localConversations} agentId={agentId} sessionId={serverSessionId} chinese={chinese} busy={busy} disabled={unavailable || snapshot.sessions.find((entry) => entry.id === serverSessionId)?.status === "archived"} active={snapshot.hostVisible !== false && snapshot.hostActive !== false} />}
     <DropdownMenu onOpenChange={(open) => { if (open && !catalog && !loading) void load(); }}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" data-testid="multica-model-picker" aria-label={labels.model}

@@ -140,7 +140,7 @@ func TestServiceChecksScopeAndProvider(t *testing.T) {
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID + 1, ConversationID: "conv-1", RequestID: "r", Text: "x"}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("send from another scope = %v", err)
 	}
-	if _, err := f.svc.Snapshot(ctx, f.scopeID+1, "conv-1"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := f.svc.Snapshot(ctx, f.scopeID+1, "conv-1", 0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("snapshot from another scope = %v", err)
 	}
 	if _, _, err := f.svc.Subscribe(ctx, f.scopeID+1, "conv-1", 0); !errors.Is(err, store.ErrNotFound) {

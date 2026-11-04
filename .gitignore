@@ -87,3 +87,5 @@ perf-report/
 
 # Generated, per-architecture Computer Use helper bundle.
 apps/desktop/resources/native/
+/.agent-gui-file-check/
+/.tmp/

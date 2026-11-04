@@ -4,17 +4,6 @@ html.multica-agent-gui [data-agent-model-reasoning-trigger="true"] {
   display: none;
 }
 
-/* The promoted frame is transparent so the popup backdrop reveals the app shell. */
-html.multica-agent-gui[data-global-svg-preview="true"],
-html.multica-agent-gui[data-global-svg-preview="true"] body {
-  background: transparent !important;
-}
-html.multica-agent-gui[data-global-svg-preview="true"] #app {
-  visibility: hidden;
-}
-html.multica-agent-gui[data-global-svg-preview="true"] dialog[open] {
-  visibility: visible;
-}
 html.multica-agent-gui[data-multica-presentation="conversation"] {
   --rich-text-mention-session: var(--brand);
 }

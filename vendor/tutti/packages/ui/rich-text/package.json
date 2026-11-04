@@ -25,17 +25,17 @@
     "directory": "packages/ui/rich-text"
   },
   "dependencies": {
-    "@tutti-os/ui-i18n-runtime": "workspace:*",
-    "@tutti-os/ui-system": "workspace:*",
     "@tiptap/core": "3.23.6",
-    "@tiptap/react": "3.23.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
     "@tiptap/extension-document": "3.23.6",
     "@tiptap/extension-hard-break": "3.23.6",
     "@tiptap/extension-paragraph": "3.23.6",
     "@tiptap/extension-text": "3.23.6",
-    "@tiptap/pm": "3.23.6"
+    "@tiptap/pm": "3.23.6",
+    "@tiptap/react": "3.23.6",
+    "@tutti-os/ui-i18n-runtime": "workspace:*",
+    "@tutti-os/ui-system": "workspace:*",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "peerDependencies": {
     "@tiptap/core": "^3.23.6",

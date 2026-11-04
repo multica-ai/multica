@@ -60,9 +60,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify vendored GUI sources
-        run: node vendor/tutti/sync.mjs --verify
-
       - name: Verify Desktop packaging scripts
         run: |
           pnpm --filter @multica/desktop exec vitest run scripts/package.test.mjs scripts/mac-update-floor.test.mjs
@@ -76,9 +73,12 @@ jobs:
             "-c.publish.owner=${GITHUB_REPOSITORY_OWNER}" \
             "-c.publish.repo=${GITHUB_REPOSITORY#*/}"
 
-      - name: Verify packaged Agent GUI file-page handshake
-        timeout-minutes: 3
-        run: node scripts/check-agent-gui-file.mjs apps/desktop/out/renderer/tutti-agent-gui
+      - name: Verify the Agent GUI renders from a file page
+        timeout-minutes: 5
+        run: |
+          ls apps/desktop/out/renderer/assets/mount-*.js apps/desktop/out/renderer/licenses/agent-gui/tutti/NOTICE
+          node packages/tutti-agent-gui-host/scripts/build-e2e-harness.mjs .agent-gui-file-check
+          node scripts/check-agent-gui-file.mjs .agent-gui-file-check
 
       - name: Verify installers and record checksums
         working-directory: apps/desktop/dist

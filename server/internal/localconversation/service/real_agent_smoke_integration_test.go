@@ -154,7 +154,7 @@ func waitTurn(t *testing.T, svc *Service, scopeID int64, conversationID, turnID,
 
 func findTurn(t *testing.T, svc *Service, scopeID int64, conversationID, turnID string) (store.TurnView, bool) {
 	t.Helper()
-	snap, err := svc.Snapshot(context.Background(), scopeID, conversationID)
+	snap, err := svc.Snapshot(context.Background(), scopeID, conversationID, 0)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}

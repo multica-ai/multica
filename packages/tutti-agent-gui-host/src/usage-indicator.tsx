@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@tutti-os/ui-system/components";
 import { MinimizeIcon, RefreshIcon } from "@tutti-os/ui-system/icons";
-import type { AgentGuiRpcClient } from "./protocol";
+import type { AgentGuiRpcClient, LocalConversationSource } from "./protocol";
 import type { LocalProviderUsage, LocalUsageWindow } from "@multica/core/local-conversation/protocol";
-import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 
 export function remainingPercent(window: LocalUsageWindow, now = Date.now()): number | null {
   if (window.resetsAt && Date.parse(window.resetsAt) <= now) return null;
@@ -25,9 +24,10 @@ function UsageRing({ value }: { value: number | null }) {
     {value !== null && value > 0 && <circle className="multica-usage-ring-fill" cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${value} 100`} transform="rotate(-90 10 10)" />}
   </svg>;
 }
-interface Props { client: AgentGuiRpcClient; agentId: string; sessionId: string | null; chinese: boolean; busy: boolean; active: boolean; disabled?: boolean }
+interface Props {
+  localConversations?: LocalConversationSource; client: AgentGuiRpcClient; agentId: string; sessionId: string | null; chinese: boolean; busy: boolean; active: boolean; disabled?: boolean }
 interface Compaction { sessionId: string; turnId: string }
-export function UsageIndicator({ client, agentId, sessionId, chinese, busy, active, disabled }: Props) {
+export function UsageIndicator({ client, localConversations, agentId, sessionId, chinese, busy, active, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<LocalProviderUsage | null>(null);
   const [loading, setLoading] = useState(false);
@@ -81,26 +81,23 @@ export function UsageIndicator({ client, agentId, sessionId, chinese, busy, acti
     void client.request("host.showMessage", { message, tone: error ? "error" : "success" }).catch(() => {});
     void load(true);
   }, [client, labels.compactDone, labels.compactFailed, load]);
+  const settleCompaction = useCallback((operation: Compaction) => {
+    const turn = localConversations?.conversation(operation.sessionId)?.turns.get(operation.turnId);
+    if (turn && turn.status !== "running") finishCompaction(operation, turn.status, turn.error);
+  }, [finishCompaction, localConversations]);
   const reconcileCompaction = useCallback(async (operation: Compaction) => {
     try {
-      const result = await client.request("local.snapshot", { sessionId: operation.sessionId });
-      const snapshot = localV2SnapshotSchema.parse(result.snapshot);
-      const turn = snapshot.turns.find((item) => item.id === operation.turnId);
-      if (turn && turn.status !== "running") finishCompaction(operation, turn.status, turn.error);
-    } catch { /* Live events still report completion when a snapshot read fails. */ }
-  }, [client, finishCompaction]);
-  useEffect(() => client.subscribe((event) => {
-    const operation = compaction.current;
-    if (!operation || event.type !== "local.events" || event.sessionId !== operation.sessionId) return;
-    const parsed = localV2ServerMessageSchema.safeParse(event.message);
-    if (!parsed.success) return;
-    if (parsed.data.type === "subscription.status" && parsed.data.status === "live") {
-      void reconcileCompaction(operation);
-    }
-    if (parsed.data.type !== "conversation.events") return;
-    const completed = parsed.data.events.find((item) => item.type === "turn.completed" && item.turn_id === operation.turnId);
-    if (completed) finishCompaction(operation, String(completed.payload.status), completed.payload.error);
-  }), [client, finishCompaction, reconcileCompaction]);
+      await localConversations?.refresh(operation.sessionId);
+      settleCompaction(operation);
+    } catch { /* Live events still report completion when a read fails. */ }
+  }, [localConversations, settleCompaction]);
+  useEffect(() => {
+    if (!sessionId || !localConversations) return;
+    return localConversations.observe(sessionId, () => {
+      const operation = compaction.current;
+      if (operation?.sessionId === sessionId) settleCompaction(operation);
+    });
+  }, [sessionId, localConversations, settleCompaction]);
   const compact = async () => {
     if (!sessionId || busy || disabled || compaction.current || !active) return;
     const requestId = crypto.randomUUID();

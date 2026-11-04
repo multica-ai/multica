@@ -68,9 +68,10 @@ async function mount(local = true, options: { activeSessionId?: string; continua
     runtime: {},
   } as unknown as Parameters<typeof AgentGuiApplication>[0]["handle"];
   const client = { request: vi.fn().mockResolvedValue({}), subscribe: () => () => {} } as unknown as AgentGuiRpcClient;
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container);
-  const render = () => root.render(<AgentGuiApplication client={client} initial={initial} handle={handle} />);
+  const render = () => root.render(<AgentGuiApplication client={client} initial={initial} handle={handle} root={container} />);
   await act(async () => render());
   return {
     container, client, handle,

@@ -1,5 +1,7 @@
 # Tutti Agent GUI 完整 UI 接入
 
+> 本文记录首次导入时的决定，其中独立 iframe 文档、逐字节一致和上游同步已被[本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)取代。
+
 本轮按用户最新要求完整引入 Tutti Agent GUI UI 层，保留源组件、样式、图标、资源、文案与交互，不再将该 UI 改写为 Multica 原生工作台。前两轮的语义化工作台仍保留在代码中，主工作台入口改为 Tutti 的公开 `AgentGUI`。
 
 后续 UI 还原遵循 Multica 的设计规范，通过独立宿主主题适配层消费共享 tokens、真实字体与控件状态样式。第三方源文件继续保持逐字节一致；界面仍由完整 `AgentGUI` 渲染，侧栏和输入区测量逻辑不变。当前设计标准、分工和验收证据见 [UI 还原规格](./tutti-agent-gui-ui-restoration.md)。下文首次接入时的“保持源样式”指保留第三方来源，不代表最终显示仍使用源配色。

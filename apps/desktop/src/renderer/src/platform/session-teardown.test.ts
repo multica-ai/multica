@@ -17,6 +17,7 @@ function makeTeardown(
     clearDaemonToken: vi.fn(async () => {}),
     stopDaemon: vi.fn(async () => {}),
     deleteStoredConversations: vi.fn(async () => {}),
+    disposeConversations: vi.fn(),
     ...overrides,
   };
 }

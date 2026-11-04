@@ -9,6 +9,7 @@ import {
   menuItemIndicatorClassName,
   menuItemWithIndicatorClassName
 } from "../menu-surface";
+import { getPortalContainer } from "../../lib/portal-container";
 
 function Select({
   ...props
@@ -78,7 +79,7 @@ function SelectContent({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={getPortalContainer()}>
       <SelectPrimitive.Content
         asChild
         data-slot="select-content"

@@ -3,8 +3,11 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ComposerFooterControls } from "./composer-footer-controls";
-import { createMulticaAgentGuiRuntime } from "./runtime";
+import { createMulticaAgentGuiRuntime as createRuntime } from "./runtime";
 import type { AgentGuiInitSnapshot, AgentGuiRpcClient } from "./protocol";
+import { localSourceFromClient } from "./runtime/local-snapshot-test-host";
+
+const createMulticaAgentGuiRuntime: typeof createRuntime = (client, init) => createRuntime(client, init, init.local ? localSourceFromClient(client as never) : undefined);
 
 vi.mock("./usage-indicator", () => ({ UsageIndicator: () => null }));
 vi.mock("./permission-picker", () => ({ PermissionPicker: () => null }));

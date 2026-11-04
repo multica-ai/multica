@@ -29,7 +29,10 @@ import {
   setTimelineScrollTopWithUserTransition
 } from "./AgentGUIConversationTimelinePane";
 
-const AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX = 240;
+import { useTimelineEndPosition } from "@multica/tutti-agent-gui-host/timeline-end-position";
+
+/** Older history is read while less than this many viewports remain above the visible part. */
+const AGENT_GUI_TOP_HISTORY_PREFETCH_VIEWPORTS = 3;
 const AGENT_GUI_TOP_MASK_SCROLL_EPSILON_PX = 1;
 const AGENT_GUI_REACHED_END_EPSILON_PX = 1;
 
@@ -86,6 +89,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
   const userScrollDirectionRef = useRef<"away" | "toward-end" | null>(null);
   const lastShowTimelineSkeletonRef = useRef(showTimelineSkeleton);
   const bottomDockSafeAreaRef = useRef<BottomDockSafeArea | null>(null);
+  const lastHistoryPrefetchRef = useRef<string | null>(null);
   const [virtualScrollControllerRevision, setVirtualScrollControllerRevision] =
     useState(0);
   const setVirtualScrollController = useCallback(
@@ -261,21 +265,24 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       setTimelineScrollTopInstantly(timeline, maxScrollTop);
       nextScrollTop = maxScrollTop;
       submittedPromptScrollConversationRef.current = null;
-      if (shouldScrollSubmittedPromptToBottom) {
-        pendingPrependScrollAnchorRef.current = null;
-      }
+      // Following the end needs no anchor; one left behind would pull the view
+      // back here on the first streamed update after the user scrolls up.
+      pendingPrependScrollAnchorRef.current = null;
     } else if (shouldRestorePrependAnchor && prependAnchor) {
       const nextScrollHeight = geometry.scrollHeight;
-      const delta = nextScrollHeight - prependAnchor.scrollHeight;
-      nextScrollTop = Math.max(0, prependAnchor.scrollTop + delta);
-      timeline.scrollTop = nextScrollTop;
       if (viewModel.detail.isLoadingOlderMessages) {
+        // Nothing has been prepended yet: growth now is output streaming below.
+        nextScrollTop = Math.min(maxScrollTop, anchor.scrollTop);
+        timeline.scrollTop = nextScrollTop;
         pendingPrependScrollAnchorRef.current = {
           conversationId: activeConversationId,
           scrollHeight: nextScrollHeight,
           scrollTop: nextScrollTop
         };
       } else {
+        const delta = nextScrollHeight - prependAnchor.scrollHeight;
+        nextScrollTop = Math.max(0, prependAnchor.scrollTop + delta);
+        timeline.scrollTop = nextScrollTop;
         pendingPrependScrollAnchorRef.current = null;
       }
     } else {
@@ -473,34 +480,31 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     const loadOlderMessagesNearTop = (
       scrollTop: number,
       scrollHeight: number,
-      clientHeight: number
+      clientHeight: number,
+      userScrolled = false
     ): void => {
-      const bottomLocked = followEndController.getSnapshot() === "following";
-      const virtualScrollController = matchingVirtualScrollController(
-        virtualScrollControllerRef,
-        activeConversationId
-      );
-      const transcriptGeometryIsReady =
-        timelineContent?.querySelector("[data-agent-transcript-row]") !== null;
-      const needsMoreContentToFillViewport =
-        !virtualScrollController &&
-        transcriptGeometryIsReady &&
-        scrollHeight <= clientHeight;
       if (
-        activeConversationId === viewModel.rail.activeConversationId &&
-        viewModel.detail.hasOlderMessages &&
-        !viewModel.detail.isLoadingOlderMessages &&
-        !showTimelineSkeleton &&
-        (!bottomLocked || needsMoreContentToFillViewport) &&
-        scrollTop <= AGENT_GUI_TOP_HISTORY_PREFETCH_THRESHOLD_PX
+        activeConversationId !== viewModel.rail.activeConversationId ||
+        !viewModel.detail.hasOlderMessages ||
+        viewModel.detail.isLoadingOlderMessages ||
+        showTimelineSkeleton ||
+        scrollTop >= AGENT_GUI_TOP_HISTORY_PREFETCH_VIEWPORTS * clientHeight
       ) {
-        pendingPrependScrollAnchorRef.current = {
-          conversationId: activeConversationId,
-          scrollHeight,
-          scrollTop
-        };
-        actions.loadOlderConversationMessages();
+        return;
       }
+      // Only new geometry or the user asks again. A page that failed or added
+      // nothing would otherwise be requested in a loop when loading settles.
+      const geometryKey = `${activeConversationId}:${scrollHeight}:${clientHeight}`;
+      if (!userScrolled && lastHistoryPrefetchRef.current === geometryKey) {
+        return;
+      }
+      lastHistoryPrefetchRef.current = geometryKey;
+      pendingPrependScrollAnchorRef.current = {
+        conversationId: activeConversationId,
+        scrollHeight,
+        scrollTop
+      };
+      actions.loadOlderConversationMessages();
     };
 
     const captureScrollAnchor = (): void => {
@@ -568,7 +572,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       loadOlderMessagesNearTop(
         scrollTop,
         previousAnchor.scrollHeight,
-        previousAnchor.clientHeight
+        previousAnchor.clientHeight,
+        true
       );
     };
 
@@ -606,7 +611,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         setIsTimelineScrolledToTop(
           scrollTop <= AGENT_GUI_TOP_MASK_SCROLL_EPSILON_PX
         );
-        loadOlderMessagesNearTop(scrollTop, scrollHeight, clientHeight);
+        loadOlderMessagesNearTop(scrollTop, scrollHeight, clientHeight, true);
         return;
       }
       const geometry = readTimelineGeometry(timeline);
@@ -626,6 +631,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       setIsTimelineScrolledToTop(
         scrollTop <= AGENT_GUI_TOP_MASK_SCROLL_EPSILON_PX
       );
+      // A taller window can need more history with no scroll to report it.
+      loadOlderMessagesNearTop(scrollTop, scrollHeight, clientHeight);
     };
 
     const captureWheelIntent = (event: WheelEvent): void => {
@@ -777,9 +784,10 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     writeTimelineScrollAnchor
   ]);
 
+  const isTimelineScrolledToBottom = useTimelineEndPosition(input, virtualScrollControllerRevision);
   return {
     followEndMode,
-    isTimelineScrolledToBottom: followEndMode === "following",
+    isTimelineScrolledToBottom,
     isTimelineScrolledToTop,
     setVirtualScrollController,
     scrollTimelineToBottom

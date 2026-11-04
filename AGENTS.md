@@ -50,6 +50,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 ## State Rules
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
+- Desktop local conversations are the exception: `ConversationStore` (`apps/desktop/src/renderer/src/platform/conversation-store.ts`) owns their list and content, because they update by sequence over a stream. Views ask it for work and watch for changes; nothing in it depends on a mounted component, and leaving a conversation finishes the batch in progress and starts nothing new.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.

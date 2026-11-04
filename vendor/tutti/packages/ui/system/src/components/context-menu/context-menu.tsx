@@ -4,6 +4,7 @@ import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 import { ArrowRightIcon } from "#icons/system-icons";
 import { cn } from "#lib/utils";
 import { MenuSurface, menuItemClassName } from "../menu-surface";
+import { getPortalContainer } from "../../lib/portal-container";
 
 function ContextMenu({
   ...props
@@ -26,7 +27,7 @@ function ContextMenuContent({
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={getPortalContainer()}>
       <ContextMenuPrimitive.Content
         asChild
         data-slot="context-menu-content"
@@ -119,7 +120,7 @@ function ContextMenuSubContent({
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={getPortalContainer()}>
       <ContextMenuPrimitive.SubContent
         asChild
         data-slot="context-menu-sub-content"

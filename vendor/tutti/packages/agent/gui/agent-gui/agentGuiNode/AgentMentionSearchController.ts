@@ -588,7 +588,7 @@ export class AgentMentionSearchController extends AgentMentionSearchControllerBa
     this.directoryRequestLifecycle.cancel();
     this.cancelIssueLoadMoreRequests();
     this.requestId += 1;
-    this.currentFilter = DEFAULT_AGENT_MENTION_FILTER;
+    // Retain the last reference category within this composer lifetime.
     this.resetAgentGeneratedBrowsePath();
     this.resetWorkspaceFileBrowsePaths();
     this.resetExpandedCounts();
@@ -599,7 +599,7 @@ export class AgentMentionSearchController extends AgentMentionSearchControllerBa
       status: "idle",
       query: "",
       mode: "browse",
-      filter: DEFAULT_AGENT_MENTION_FILTER,
+      filter: this.currentFilter,
       categories: buildBrowseCategories(this.hiddenFilterIds),
       groups: [],
       error: null

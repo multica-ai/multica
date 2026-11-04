@@ -429,7 +429,8 @@ export function createAgentFileMentionExtension(
                 clientRect: props.clientRect
               });
             },
-            onExit: () => {
+            onExit: (props) => {
+              if (!props.editor.isDestroyed && agentFileMentionPluginKey.getState(props.editor.state)?.active) return;
               options.onSuggestionChange?.(null);
             },
             onKeyDown: (props) =>

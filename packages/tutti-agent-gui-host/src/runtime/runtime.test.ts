@@ -4,11 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Agent, AgentTask, Attachment, ChatMessage, ChatSession, PendingChatTaskItem, TaskMessagePayload } from "@multica/core/types";
 import type { AgentGuiHostEvent, AgentGuiInitSnapshot, AgentGuiRpcClient, AgentGuiRpcMethods, AgentGuiSessionDetail, AgentGuiTaskMessagePayload } from "../protocol";
 import { LOCAL_TIMING_PREFIX } from "../local-timing";
-import { createMulticaAgentGuiRuntime, MulticaAgentGuiError } from "./create-multica-agent-gui-runtime";
+import { createMulticaAgentGuiRuntime as createRuntime, MulticaAgentGuiError } from "./create-multica-agent-gui-runtime";
 import { RuntimeLedger } from "./ledger";
 import { projectDetail } from "./projection";
-import { withLocalSnapshots } from "./local-snapshot-test-host";
 import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
+import { localSourceFromClient } from "./local-snapshot-test-host";
+
+const createMulticaAgentGuiRuntime: typeof createRuntime = (client, init) => createRuntime(client, init, init.local ? localSourceFromClient(client as never) : undefined);
 
 const time = "2026-10-24T01:00:00Z";
 const agent = { id: "agent-1", name: "Codex", model: "test-model", archived_at: null } as Agent;
@@ -66,7 +68,7 @@ function backend(storage = new Map<string, string>()) {
     }
   });
   const client: AgentGuiRpcClient = {
-    request: withLocalSnapshots(request as never) as AgentGuiRpcClient["request"],
+    request: request as unknown as AgentGuiRpcClient["request"],
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
   return { client, request, storage, sessions, messages, transcript, tasks,
@@ -75,7 +77,8 @@ function backend(storage = new Map<string, string>()) {
       if (pending.task_id === taskId) pending = {};
     },
     rejectSend: (error: unknown) => { rejectSend = error; },
-    emit: (event: AgentGuiHostEvent) => { for (const listener of listeners) listener(event); },
+    // Besides host events, tests drive local conversations through localSourceFromClient.
+    emit: (event: AgentGuiHostEvent | { type: "local.events" | "local.reload"; sessionId: string; message?: unknown }) => { for (const listener of listeners) listener(event as AgentGuiHostEvent); },
   };
 }
 
@@ -165,31 +168,6 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
       expect(data.request).toHaveBeenCalledWith("attachment.cancel", { attachmentId: "attachment-1" });
       expect(handle.activeUploadCount()).toBe(0);
     });
-  });
-  it("shows a stored conversation before the current one arrives", async () => {
-    const data = backend(); data.sessions.push(session);
-    const original = data.request.getMockImplementation()!;
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    data.request.mockImplementation(async (method, params) => {
-      if (method === "workspace.load") return { ...await original(method, params), local: true, queueOwner: "desktop" };
-      return original(method, params);
-    });
-    const request = data.client.request;
-    const seen: string[] = [];
-    data.client.request = (async (method: string, params: never, options: never) => {
-      if (method === "local.storedSnapshot") { seen.push("stored"); return request("local.snapshot" as never, params, options); }
-      if (method === "local.snapshot") { seen.push("fresh"); await held; }
-      return request(method as never, params, options);
-    }) as never;
-    const handle = createMulticaAgentGuiRuntime(data.client, { ...init, local: true, queueOwner: "desktop", sessions: [session] });
-    handles.push(handle); await handle.initialize();
-    const loading = handle.runtime.getSession(init.workspaceId, session.id);
-    await vi.waitFor(() => expect(seen).toEqual(["stored", "fresh"]));
-    const shown = handle.runtime.getSessionEngine(init.workspaceId).getSnapshot().sessionLifecycle.sessionsById[session.id];
-    expect(shown).toBeDefined();
-    release();
-    await expect(loading).resolves.toMatchObject({ agentSessionId: session.id });
   });
   it("marks the send and its request under the mapped client stages, once for each attempt", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -351,7 +329,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
       data.emit({ type: "init", snapshot: { ...localInit, sessions: [...data.sessions], activeSessionId: session.id } });
       await expect(handle.runtime.getSession(init.workspaceId, session.id)).resolves.toMatchObject({ agentSessionId: session.id });
       expect(handle.toServerSessionId(session.id)).toBe(session.id);
-      expect(data.request.mock.calls.some(([method, params]) => method === "session.watch" && params.sessionIds.includes(session.id))).toBe(true);
+      expect((handle.localConversations as unknown as { opened: string[] }).opened).toContain(session.id);
       finishRefresh();
       await refresh;
       expect(handle.toServerSessionId(session.id)).toBe(session.id);

@@ -22,6 +22,7 @@ export function useAgentRichTextEditorHandle(input: {
   availableSkillsRef: RefObject<readonly AgentGUIProviderSkillOption[]>;
   editorRef: RefObject<Editor | null>;
   onBeforeProgrammaticFocus?: () => void;
+  onBeforeOpenMentionPalette?: () => void;
   ref: ForwardedRef<AgentRichTextEditorHandle>;
 }): void {
   useImperativeHandle(
@@ -97,6 +98,7 @@ export function useAgentRichTextEditorHandle(input: {
         ) {
           return;
         }
+        input.onBeforeOpenMentionPalette?.();
         const triggerText = isMentionTriggerBoundaryBeforeSelection(
           currentEditor
         )

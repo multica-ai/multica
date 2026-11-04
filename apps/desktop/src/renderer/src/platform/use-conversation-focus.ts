@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import type { LocalV2ScopeClient } from "./local-v2";
+import type { ConversationStore } from "./conversation-store";
 
 /**
  * Reports the conversation on show. Only the active tab's page is mounted, so
  * active plus a visible window means someone can actually be looking at it.
  */
-export function useConversationFocus(client: LocalV2ScopeClient, conversationId: string | null, active: boolean): void {
+export function useConversationFocus(client: ConversationStore, conversationId: string | null, active: boolean): void {
   useEffect(() => {
     if (!conversationId || !active) return;
     let release: (() => void) | undefined;

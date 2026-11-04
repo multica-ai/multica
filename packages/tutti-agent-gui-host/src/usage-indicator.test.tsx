@@ -2,7 +2,7 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AgentGuiHostEvent, AgentGuiRpcClient } from "./protocol";
+import type { AgentGuiHostEvent, AgentGuiRpcClient, LocalConversationSource } from "./protocol";
 import { UsageIndicator } from "./usage-indicator";
 
 let root: Root;
@@ -13,6 +13,7 @@ let request: ReturnType<typeof vi.fn<Request>>;
 let client: AgentGuiRpcClient;
 const usage = { provider: "codex", context: { usedTokens: 100, limitTokens: 1000, model: null, updatedAt: null }, account: { status: "available", plan: "pro", windows: [], updatedAt: null } };
 beforeEach(() => {
+  turns.clear(); observers.clear(); refresh = vi.fn(async () => {});
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
@@ -21,16 +22,24 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); listeners.clear(); vi.unstubAllGlobals(); });
 const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+const turns = new Map<string, { status: string; error: unknown }>();
+const observers = new Set<() => void>();
+let refresh = vi.fn(async () => {});
+const localConversations = {
+  observe: (_id: string, listener: () => void) => { observers.add(listener); return () => { observers.delete(listener); }; },
+  conversation: () => ({ turns }),
+  refresh: () => refresh(),
+} as unknown as LocalConversationSource;
 async function renderUsage(props: Partial<ComponentProps<typeof UsageIndicator>> = {}) {
-  await act(async () => root.render(<UsageIndicator client={client} agentId="local:codex" sessionId="conversation" chinese={false} busy={false} active {...props} />));
+  await act(async () => root.render(<UsageIndicator client={client} localConversations={localConversations} agentId="local:codex" sessionId="conversation" chinese={false} busy={false} active {...props} />));
 }
 async function open() { await act(async () => button("Usage").click()); }
 async function complete(status = "completed", sessionId = "conversation") {
   const id = request.mock.calls.find(([method]) => method === "session.compact")![1].requestId;
   await act(async () => {
-    const event: AgentGuiHostEvent = { type: "local.events", sessionId, message: { version: 2, type: "conversation.events", conversation_id: sessionId, from_seq: 1, to_seq: 1,
-      events: [{ seq: 1, turn_id: `turn-${id}`, turn_seq: 1, item_id: null, type: "turn.completed", final: true, created_at: "2026-10-29T12:00:00Z", payload: { status, error: { kind: "compaction_failed", message: "Not enough history" } } }] } };
-    for (const listener of listeners) listener(event);
+    turns.set(`turn-${id}`, { status, error: status === "failed" ? { message: "Not enough history" } : undefined });
+    // A left conversation's observer is gone, so its completion reaches nothing.
+    if (sessionId === "conversation") for (const observer of [...observers]) observer();
   });
 }
 
@@ -82,25 +91,13 @@ it("keeps a rejected command visible as an error", async () => {
 });
 
 it.each([false, true])("reads durable completion when the event was missed (reconnect: %s)", async (reconnect) => {
-  const original = request.getMockImplementation()!;
-  let completed = !reconnect;
-  request.mockImplementation(async (method, params) => {
-    if (method !== "local.snapshot") return original(method, params);
-    const requestId = request.mock.calls.find(([name]) => name === "session.compact")![1].requestId;
-    return { snapshot: {
-      version: 2, store_generation: "g1", snapshot_seq: 2,
-      conversation: { conversation_id: "conversation", summary_seq: 1, provider: "codex", title: "", status: "idle", pinned: false, archived: false, updated_at: "2026-10-29T12:00:00Z" },
-      turns: [{ id: `turn-${requestId}`, turn_index: 1, status: completed ? "completed" : "running", started_at: "2026-10-29T12:00:00Z", messages: [], events: [] }],
-    } };
-  });
+  const finish = () => turns.set(`turn-${request.mock.calls.find(([name]) => name === "session.compact")![1].requestId}`, { status: "completed", error: undefined });
+  if (!reconnect) refresh = vi.fn(async () => { finish(); });
   await renderUsage(); await open();
   await act(async () => button("Compact").click());
   if (reconnect) {
     expect(button("Compact").disabled).toBe(true);
-    completed = true;
-    await act(async () => {
-      for (const listener of listeners) listener({ type: "local.events", sessionId: "conversation", message: { version: 2, type: "subscription.status", conversation_id: "conversation", status: "live" } });
-    });
+    await act(async () => { finish(); for (const observer of [...observers]) observer(); });
   }
   expect(button("Compact").disabled).toBe(false);
   expect(document.body.textContent).toContain("Conversation context compacted");
