@@ -8,9 +8,7 @@ type SubmitInput = Parameters<ReturnType<typeof createAgentSessionEngine>["submi
 
 function setup(running = false, pendingStore?: DesktopPendingStore) {
   const sendInput = vi.fn();
-  const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" },
-    clock: { nowUnixMs: () => Date.now() }, scheduler: { schedule: (delay, callback) => { const timer = setTimeout(callback, delay); return { cancel: () => clearTimeout(timer) }; } },
-    commandPort: { kind: "typed", effects: { activateSession: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
+  const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" } });
   base.dispatch({ type: "session/snapshotReceived", sessions: [{ agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurnId: running ? "active" : null,
     ...(running ? { activeTurn: { agentSessionId: "session", turnId: "active", origin: "user_prompt", phase: "running", startedAtUnixMs: 1, updatedAtUnixMs: 1 } } : {}), pendingInteractions: [], latestTurnInteractions: [] }] });
   const messages: { role: string; turnId: string; payload: Record<string, unknown> }[] = [];
@@ -347,13 +345,15 @@ describe("desktop queue presentation", () => {
     const { engine, options, prompts } = setup(true);
     const interaction = { agentSessionId: "session", turnId: "active", requestId: "question", kind: "question" as const, status: "pending" as const, createdAtUnixMs: 2, updatedAtUnixMs: 2 };
     try {
-      engine.dispatch({ type: "interaction/upserted", interaction });
+      const session = engine.getSnapshot().sessionLifecycle.sessionsById.session!;
+      const report = (reported: typeof interaction | (Omit<typeof interaction, "status"> & { status: "answered" })) => engine.dispatch({ type: "session/upserted", session: { ...session, pendingInteractions: [], latestTurnInteractions: [reported] } });
+      report(interaction);
       expect(prompts.respondToInteraction({ action: "submit", agentSessionId: "session", requestId: "question", turnId: "active", payload: { answersByQuestionId: { scope: "all" } } })).toBe(true);
       expect(options.respondToInteraction).toHaveBeenCalledOnce();
       expect(prompts.isRespondingToInteraction("session")).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(prompts.isRespondingToInteraction("session")).toBe(true);
-      engine.dispatch({ type: "interaction/upserted", interaction: { ...interaction, status: "answered", updatedAtUnixMs: 3 } });
+      report({ ...interaction, status: "answered", updatedAtUnixMs: 3 });
       expect(prompts.isRespondingToInteraction("session")).toBe(false);
     } finally { engine.dispose(); }
   });

@@ -17,45 +17,6 @@ import {
   selectWorkspaceAgentRootConversationSessions
 } from "./sessionLifecycle.selectors.ts";
 
-test("session operation errors do not fall back to canonical Turn errors", () => {
-  let state = rootEngineReducer(createInitialAgentSessionEngineState(), {
-    sessions: [
-      {
-        activeTurn: {
-          agentSessionId: "session-1",
-          error: { message: "Selected model is at capacity" },
-          origin: "user_prompt",
-          phase: "running",
-          startedAtUnixMs: 10,
-          turnId: "turn-1",
-          updatedAtUnixMs: 20
-        },
-        activeTurnId: "turn-1",
-        agentSessionId: "session-1",
-        cwd: "/workspace",
-        latestTurnInteractions: [],
-        pendingInteractions: [],
-        provider: "codex",
-        title: "Canonical session",
-        workspaceId: "workspace-1"
-      }
-    ],
-    type: "session/snapshotReceived"
-  }).state;
-
-  assert.equal(selectEngineSessionOperationError(state, "session-1"), null);
-
-  state = rootEngineReducer(state, {
-    agentSessionId: "session-1",
-    errorMessage: "Settings update failed",
-    type: "session/errorRecorded"
-  }).state;
-  assert.equal(
-    selectEngineSessionOperationError(state, "session-1"),
-    "Settings update failed"
-  );
-});
-
 test("deleted session selector normalizes ids and hides tombstone storage", () => {
   const state = rootEngineReducer(createInitialAgentSessionEngineState(), {
     agentSessionId: "session-1",
@@ -65,68 +26,6 @@ test("deleted session selector normalizes ids and hides tombstone storage", () =
   assert.equal(selectEngineSessionDeleted(state, " session-1 "), true);
   assert.equal(selectEngineSessionDeleted(state, "missing"), false);
   assert.equal(selectEngineSessionDeleted(state, null), false);
-});
-
-test("failed new activation preserves a canonical session after runtime failure", () => {
-  let state = createInitialAgentSessionEngineState();
-  assert.equal(
-    selectFailedNewActivationResolution(state, "session-1"),
-    "not-applicable"
-  );
-
-  state = rootEngineReducer(state, {
-    agentSessionId: "session-1",
-    agentTargetId: "target-1",
-    clientSubmitId: "submit-1",
-    content: [{ type: "text", text: "hello" }],
-    cwd: "/workspace",
-    expiresAtUnixMs: 45_001,
-    mode: "new",
-    requestedAtUnixMs: 1,
-    requestId: "activation-1",
-    type: "activation/requested",
-    workspaceId: "workspace-1"
-  }).state;
-  state = rootEngineReducer(state, {
-    commandId: "activate:activation-1",
-    commandType: "session/activate",
-    correlationId: "activation-1",
-    errorMessage: "Initial goal failed.",
-    outcome: "failed",
-    type: "engine/commandResult"
-  }).state;
-  assert.equal(
-    selectFailedNewActivationResolution(state, "session-1"),
-    "rollback"
-  );
-
-  state = rootEngineReducer(state, {
-    sessions: [
-      {
-        activeTurnId: null,
-        agentSessionId: "session-1",
-        cwd: "/workspace",
-        latestTurnInteractions: [],
-        pendingInteractions: [],
-        provider: "codex",
-        title: "Persisted session",
-        workspaceId: "workspace-1"
-      }
-    ],
-    type: "session/snapshotReceived"
-  }).state;
-
-  assert.equal(
-    selectFailedNewActivationResolution(state, " session-1 "),
-    "preserve"
-  );
-  assert.equal(
-    selectFailedNewActivationResolution(state, "session-1", {
-      selectionSource: "user-selection"
-    }),
-    "not-applicable"
-  );
-  assert.equal(selectEngineSessionCanReload(state, "session-1"), true);
 });
 
 test("consumer collections hide presentation-invisible sessions without removing exact lookup", () => {
@@ -659,4 +558,21 @@ test("root conversation stays working while a descendant turn is running", () =>
     selectWorkspaceAgentRootConversationSessions(state)[0]?.displayStatus,
     "working"
   );
+});
+
+test("failed new activation preserves a session that exists and rolls back one that does not", () => {
+  const failed = {
+    activationsByRequestId: {
+      request: { agentSessionId: "session-1", mode: "new", requestId: "request", requestedAtUnixMs: 1, status: "failed" }
+    },
+    inactiveSessionIds: {},
+    submitsByClientSubmitId: {}
+  } as unknown as ReturnType<typeof createInitialAgentSessionEngineState>["pendingIntents"];
+  const empty = { ...createInitialAgentSessionEngineState(), pendingIntents: failed };
+  assert.equal(selectFailedNewActivationResolution(empty, "session-1"), "rollback");
+  const existing = rootEngineReducer(empty, {
+    session: { activeTurnId: null, agentSessionId: "session-1", cwd: "/w", latestTurnInteractions: [], pendingInteractions: [], provider: "codex", title: "t", workspaceId: "w" },
+    type: "session/upserted"
+  }).state;
+  assert.equal(selectFailedNewActivationResolution(existing, "session-1"), "preserve");
 });

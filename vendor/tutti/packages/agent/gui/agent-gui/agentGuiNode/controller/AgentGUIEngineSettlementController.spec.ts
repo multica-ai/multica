@@ -8,8 +8,7 @@ import {
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createTestAgentSessionEngine,
-  createTestAgentSessionEngineWithEffects
+  createTestAgentSessionEngine
 } from "../../../shared/testing/createTestAgentSessionEngine";
 import {
   agentComposerDraftPrompt,
@@ -123,17 +122,7 @@ describe("AgentGUIEngineSettlementController", () => {
   });
 
   it("restores a failed activation only while its home draft is empty", async () => {
-    let rejectActivation: (error: Error) => void = vi.fn();
-    const engine = createTestAgentSessionEngine("test-workspace", {
-      execute(command) {
-        if (command.type !== "session/activate") {
-          return Promise.resolve({ ok: true });
-        }
-        return new Promise((_, reject) => {
-          rejectActivation = reject;
-        });
-      }
-    });
+    const engine = createTestAgentSessionEngine("test-workspace");
     const sourceScopeKey = "project:/workspace/app";
     const snapshots: Record<string, SubmittedDraftSnapshot> = {
       "submit-1": {
@@ -155,7 +144,14 @@ describe("AgentGUIEngineSettlementController", () => {
     const detach = controller.attach();
 
     requestActivation(engine, "submit-1");
-    rejectActivation(new Error("activation failed"));
+    engine.dispatch({
+      commandId: "activate:request-1",
+      commandType: "session/activate",
+      correlationId: "request-1",
+      errorMessage: "activation failed",
+      outcome: "failed",
+      type: "engine/commandResult"
+    });
     await vi.waitFor(() => {
       expect(agentComposerDraftPrompt(drafts[sourceScopeKey]!)).toBe("first");
     });
@@ -174,9 +170,7 @@ describe("AgentGUIEngineSettlementController", () => {
         return () => undefined;
       }
     });
-    const engine = createTestAgentSessionEngine("test-workspace", {
-      execute: () => Promise.resolve({ ok: true })
-    });
+    const engine = createTestAgentSessionEngine("test-workspace");
     const { interaction, session } = waitingQuestionSession();
     engine.dispatch({ sessions: [session], type: "session/snapshotReceived" });
     const sourceScopeKey = "session:session-1";
@@ -258,8 +252,14 @@ describe("AgentGUIEngineSettlementController", () => {
     const detach = controller.attach();
 
     engine.dispatch({
-      interaction: { ...interaction, status: "answered", updatedAtUnixMs: 3 },
-      type: "interaction/upserted"
+      session: {
+        ...session,
+        latestTurnInteractions: [
+          { ...interaction, status: "answered", updatedAtUnixMs: 3 }
+        ],
+        pendingInteractions: []
+      },
+      type: "session/upserted"
     });
 
     expect(drafts[sourceScopeKey]).toEqual(emptyAgentComposerDraft());

@@ -1,12 +1,11 @@
+import { createTestAgentSessionEngine } from "../../../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import { observable, runInAction } from "mobx";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  createAgentSessionEngine,
   type AgentActivityMessage
 } from "@tutti-os/agent-activity-core";
 import { createLocalAgentGUIAgentTarget } from "../../../../../agentTargets";
-import { createTestEngineCommandPort } from "../../../../../shared/testing/createTestAgentSessionEngine";
 import { useAgentGuiConversationList } from "./useAgentGuiConversationList";
 
 const committed = observable.map<string, readonly AgentActivityMessage[]>([], {
@@ -33,12 +32,7 @@ describe("useAgentGuiConversationList", () => {
   beforeEach(() => runInAction(() => committed.clear()));
 
   it("projects a child interaction as user action on its root conversation", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -123,12 +117,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("projects a plain @ title from a matching mention-rich initial prompt", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -170,12 +159,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("shows only conversation text for a browser-element activation", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -216,12 +200,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("shows only conversation text for a canonical browser-element session", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -281,12 +260,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("shows a historical session marker after its first message is loaded", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -352,12 +326,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("keeps the projected list stable while an assistant message streams", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -426,12 +395,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("keeps the optimistic activation title until canonical title arrives", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -500,12 +464,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("projects canonical sessions and pending activation records without a list store", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       workspaceId: "workspace-1",
       userId: "user-1",
@@ -605,12 +564,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("keeps concurrent pending activations ordered and replaces only the canonicalized row", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       conversationFilter: { kind: "all" as const },
       workspaceId: "workspace-1",
@@ -711,12 +665,7 @@ describe("useAgentGuiConversationList", () => {
   });
 
   it("orders canonical sessions by latest turn start instead of update timestamps", () => {
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: async () => ({}) }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     const query = {
       conversationFilter: { kind: "all" as const },
       workspaceId: "workspace-1",

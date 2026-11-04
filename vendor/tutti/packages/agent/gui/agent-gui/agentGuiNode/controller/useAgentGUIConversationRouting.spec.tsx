@@ -1,22 +1,14 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { renderHook } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   selectEngineSessionReconcile
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import { useAgentGUIConversationRouting } from "./useAgentGUIConversationRouting";
 
 describe("useAgentGUIConversationRouting", () => {
   it("keeps an explicitly selected active session outside bounded rail state", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: async () => undefined
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const selectConversation = vi.fn();
     const setIntent = vi.fn();
 
@@ -44,14 +36,8 @@ describe("useAgentGUIConversationRouting", () => {
   });
 
   it("reconciles a persisted selection outside the bounded list after restart", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: async () => undefined
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const dispatch = vi.spyOn(sessionEngine, "dispatch");
     const selectConversation = vi.fn();
     const setIntent = vi.fn();
 
@@ -77,26 +63,14 @@ describe("useAgentGUIConversationRouting", () => {
     expect(selectConversation).toHaveBeenCalledWith("persisted-session", {
       reloadConversations: false
     });
-    expect(
-      selectEngineSessionReconcile(
-        sessionEngine.getSnapshot(),
-        "persisted-session"
-      )
-    ).not.toBeNull();
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "persisted-session" }));
     expect(setIntent).not.toHaveBeenCalled();
   });
 
   it.each(["active", "requested"] as const)(
     "does not restore a failed new activation from a stale %s intent",
     (intentTag) => {
-      const sessionEngine = createAgentSessionEngine({
-        clock: { nowUnixMs: () => 1 },
-        commandPort: createTestEngineCommandPort({
-          execute: () => new Promise(() => {})
-        }),
-        identity: { origin: "test", workspaceId: "workspace-1" },
-        scheduler: { schedule: () => ({ cancel() {} }) }
-      });
+      const sessionEngine = createTestAgentSessionEngine("workspace-1");
       sessionEngine.dispatch({
         agentSessionId: "failed-session",
         agentTargetId: "target-1",
@@ -155,14 +129,7 @@ describe("useAgentGUIConversationRouting", () => {
   );
 
   it("keeps a failed activation open when canonical session state exists", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: () => new Promise(() => {})
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     sessionEngine.dispatch({
       agentSessionId: "failed-session",
       agentTargetId: "target-1",
@@ -225,14 +192,7 @@ describe("useAgentGUIConversationRouting", () => {
   });
 
   it("does not let a failed activation override an explicit history selection", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: () => new Promise(() => {})
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     sessionEngine.dispatch({
       agentSessionId: "historical-session",
       agentTargetId: "target-1",

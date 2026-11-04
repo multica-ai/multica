@@ -36,16 +36,10 @@ export {
 export type {
   AgentSessionActivateEffectInput,
   AgentSessionActivationInput,
-  AgentSessionEffectPort,
   AgentSessionEngine,
-  AgentSessionEngineState,
-  EngineEffectOptions,
-  EngineExternalCommand,
-  EngineExtensionCommand,
-  EngineTypedCommandPort
+  AgentSessionEngineState
 } from "./engine/types.ts";
 export { AGENT_SESSION_ENGINE_LOCAL_ORIGIN } from "./engine/types.ts";
-export { selectWorkspaceReconcileState } from "./engine/engineRuntime.selectors.ts";
 export {
   createAgentSessionFamilySnapshotSelector,
   type AgentSessionFamilySnapshot

@@ -1,80 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createTestAgentSessionEngine,
-  type TestEngineCommandHandler
-} from "./shared/testing/createTestAgentSessionEngine";
+import { createTestAgentSessionEngine } from "./shared/testing/createTestAgentSessionEngine";
 import { createAgentConversationMessageController } from "./agentConversationMessageController";
 
 describe("createAgentConversationMessageController", () => {
-  it("routes initial and latest hydration through Engine reconcile commands", async () => {
-    const execute = vi.fn<TestEngineCommandHandler["execute"]>(async () => ({
-      affectedSessionIds: [],
-      appliedMessages: [],
-      session: null,
-      status: "applied"
-    }));
-    const engine = createTestAgentSessionEngine("workspace-1", { execute });
+  it("asks for the state and messages on first open, and only messages for the latest", () => {
+    const engine = createTestAgentSessionEngine("workspace-1");
+    const dispatch = vi.spyOn(engine, "dispatch");
     const controller = createController({ engine });
 
     controller.setActiveSession("session-1");
     controller.requestInitial("session-1");
     controller.requestLatest("session-1");
 
-    await vi.waitFor(() => {
-      expect(
-        execute.mock.calls.filter(
-          ([command]) => command.type === "session/reconcile"
-        )
-      ).toHaveLength(2);
-    });
-    const reconcileCommands = execute.mock.calls
-      .map(([command]) => command)
-      .filter((command) => command.type === "session/reconcile");
-    expect(reconcileCommands).toEqual([
-      expect.objectContaining({
-        agentSessionId: "session-1",
-        scope: "state_and_messages"
-      }),
-      expect.objectContaining({
-        agentSessionId: "session-1",
-        scope: "messages"
-      })
+    expect(dispatch.mock.calls.map(([intent]) => intent)).toEqual([
+      expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "session-1", needsMessages: true, needsState: true }),
+      expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "session-1", needsMessages: true, needsState: false })
     ]);
-
-    controller.dispose();
-    engine.dispose();
-  });
-
-  it("treats repeated initial hydration as idempotent while reconcile is pending", async () => {
-    type CommandResult = Awaited<
-      ReturnType<TestEngineCommandHandler["execute"]>
-    >;
-    let resolveExecute: (result: CommandResult) => void = () => {};
-    const execute = vi.fn<TestEngineCommandHandler["execute"]>(
-      () =>
-        new Promise((resolve) => {
-          resolveExecute = resolve;
-        })
-    );
-    const engine = createTestAgentSessionEngine("workspace-1", { execute });
-    const controller = createController({ engine });
-
-    controller.requestInitial("session-1");
-    controller.requestInitial("session-1");
-
-    await vi.waitFor(() => {
-      expect(
-        execute.mock.calls.filter(
-          ([command]) => command.type === "session/reconcile"
-        )
-      ).toHaveLength(1);
-    });
-    resolveExecute({
-      affectedSessionIds: [],
-      appliedMessages: [],
-      session: null,
-      status: "applied"
-    });
 
     controller.dispose();
     engine.dispose();

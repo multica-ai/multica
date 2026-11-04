@@ -237,5 +237,7 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
     },
     dispose() { activations.dispose(); loads.dispose(); service.dispose(); stopPresenting(); stopPresentingActivations(); stopPresentingLoads(); unsubscribe(); listeners.clear(); base.dispose(); },
   };
-  return { engine, activations, prompts: service, receive: (id: string, queue?: LocalPromptQueue) => service.receive(id, queue) };
+  /** What is presented also reads the transcript, which changes without the engine's state changing. */
+  const transcriptCommitted = () => { cached = undefined; service.lifecycleChanged(); notify(); };
+  return { engine, activations, transcriptCommitted, prompts: service, receive: (id: string, queue?: LocalPromptQueue) => service.receive(id, queue) };
 }

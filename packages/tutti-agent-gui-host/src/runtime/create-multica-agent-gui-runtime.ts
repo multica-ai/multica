@@ -12,8 +12,6 @@ import {
   type AgentSessionActivateEffectInput,
   type AgentSessionActivationInput,
   type AgentSessionEngine,
-  type EngineExtensionCommand,
-  type EngineTypedCommandPort,
 } from "@tutti-os/agent-activity-core";
 import type { AgentGUIRuntime } from "@tutti-os/agent-gui";
 import { extractRichTextMentionsFromContent } from "@tutti-os/ui-rich-text/core";
@@ -110,14 +108,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       void persist().catch(reportError);
     }, 200);
   };
-  const commandPort: EngineTypedCommandPort = {
-    kind: "typed",
-    effects: {
-      activateSession: async () => unsupported("session/activate"),
-      updateSessionSettings: async () => unsupported("session/updateSettings"),
-    },
-    execute: executeExtension,
-  };
   const composer: ComposerService<AgentActivityComposerOptions> = new ComposerService<AgentActivityComposerOptions>(async (request) => {
     const agent = descriptor(request.targetKey);
     const options = composerOptions(agent);
@@ -192,15 +182,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     },
     removed: (id) => { engine.dispatch({ type: "session/removed", agentSessionId: id }); },
   });
-  const baseEngine = createAgentSessionEngine({
-    identity: { workspaceId, origin: "multica" },
-    clock: { nowUnixMs: () => Date.now() },
-    scheduler: { schedule: (delay, callback) => {
-      const timer = setTimeout(callback, delay);
-      return { cancel: () => clearTimeout(timer) };
-    } },
-    commandPort,
-  });
+  const baseEngine = createAgentSessionEngine({ identity: { workspaceId, origin: "multica" } });
   const desktopQueue = createDesktopQueueEngine(baseEngine, {
     activate: (request, signal) => activate(activationEffectInput(request), signal),
     applyActivationResult(target, request, result) {
@@ -526,15 +508,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
       session: withModel(result.session), turns: result.turns,
     }));
-    // A same-timestamp terminal result can leave the engine's previous active
-    // pointer intact. Fence that specific transition once: replaying every
-    // historical settlement would itself request another live reconciliation.
-    for (const turn of result.turns) {
-      if (turn.phase === "settled" && engine.getSnapshot().sessionLifecycle.sessionsById[guiId]?.activeTurnId === turn.turnId) queueEngine.dispatch({
-        type: "turn/projectionReceived", workspaceId, turn, activeTurnId: null,
-        hostFencedSameTurnSettlement: true,
-      });
-    }
+    desktopQueue.transcriptCommitted();
     const conversation = localConversation(guiId);
     for (const turn of result.turns) {
       presentationTiming.applied(detail.session.id, turn.turnId, (conversation?.turnItems(turn.turnId).length ?? 0) > 0, turn.phase === "settled");
@@ -703,12 +677,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     if (!text.length && !attachmentIds.length) throw new MulticaAgentGuiError("Enter a message before sending.", "empty_message");
     return { content: text.join("\n\n"), ...(attachmentIds.length ? { attachmentIds: [...new Set(attachmentIds)] } : {}),
       ...(references.size ? { references: [...references.values()] } : {}) };
-  }
-
-  async function executeExtension(command: EngineExtensionCommand, options?: { signal?: AbortSignal }): Promise<unknown> {
-    switch (command.type) {
-      default: return unsupported(command.type);
-    }
   }
 
   function registerAttachments(values: Attachment[]) {

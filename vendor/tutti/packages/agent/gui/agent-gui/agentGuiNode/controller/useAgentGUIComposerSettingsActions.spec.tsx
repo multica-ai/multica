@@ -1,12 +1,11 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   normalizeAgentActivitySession,
   type AgentActivityComposerOptions
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIRememberComposerDefaultsResult } from "./agentGuiController.providerHelpers";
@@ -16,12 +15,7 @@ import { useAgentGUIComposerSettingsActions } from "./useAgentGUIComposerSetting
 
 describe("useAgentGUIComposerSettingsActions", () => {
   it("retires a remembered model rejected by the authoritative target catalog", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,
@@ -122,12 +116,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("preserves all explicit home defaults across stale options, transient empty selects, and unrelated patches", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,
@@ -257,12 +246,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
 
   it("asks the composer to write an active-session selection and remembers it", () => {
     const execute = vi.fn(() => new Promise<unknown>(() => undefined));
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     sessionEngine.dispatch({
       type: "session/snapshotReceived",
       sessions: [
@@ -361,12 +345,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("reconciles A to B to A by exact field generation", async () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -512,12 +491,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("keeps acknowledged intent after a failed reload and releases confirmation when authority omits the field", async () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -656,12 +630,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("does not sanitize an acknowledged model before a stale authority read is reconciled", async () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -789,12 +758,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("retries composer options without forcing a superseding request", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({ execute: vi.fn() }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,

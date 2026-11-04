@@ -1,11 +1,10 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   selectEngineSessionCanReload
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentGUINodeData } from "../../../types";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import { useAgentConversationSelection } from "./useAgentConversationSelection";
 
 describe("useAgentConversationSelection", () => {
@@ -289,14 +288,7 @@ describe("useAgentConversationSelection", () => {
 
   it("hydrates a historical session after its new activation failed", () => {
     const agentSessionId = "historical-session";
-    const engine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: async () => undefined
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const engine = createTestAgentSessionEngine("workspace-1");
     engine.dispatch({
       agentSessionId,
       agentTargetId: "target-1",

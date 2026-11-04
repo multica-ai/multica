@@ -1,3 +1,4 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import {
   act,
   fireEvent,
@@ -7,7 +8,6 @@ import {
   waitFor
 } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   selectEngineQueuedPrompt
 } from "@tutti-os/agent-activity-core";
 import { useRef, useState } from "react";
@@ -17,7 +17,6 @@ import { createRichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { RichTextTriggerProvider } from "@tutti-os/ui-rich-text/types";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { EngineQueuedPrompt, PromptQueueRecord } from "@tutti-os/agent-activity-core";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import {
   agentComposerDraftImages,
@@ -239,14 +238,7 @@ const queueLabels = {
 
 /** An engine as the prompt service presents it: holding one queued prompt until it is removed. */
 function createQueueTestEngine(prompt: EngineQueuedPrompt) {
-  const engine = createAgentSessionEngine({
-    clock: { nowUnixMs: () => 1 },
-    commandPort: createTestEngineCommandPort({
-      execute: async () => undefined
-    }),
-    identity: { origin: "test", workspaceId: "workspace-1" },
-    scheduler: { schedule: () => ({ cancel() {} }) }
-  });
+  const engine = createTestAgentSessionEngine("workspace-1");
   let prompts: readonly EngineQueuedPrompt[] = [prompt];
   return {
     ...engine,
