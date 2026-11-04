@@ -437,8 +437,9 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-// MarkIssueInboxRead marks the caller's unread notifications on one issue
-// read. The client calls it while the issue is on screen outside the inbox, so
+// MarkIssueInboxRead marks the caller's unread informational notifications on
+// one issue read; items that need handling stay unread (see
+// MarkInboxReadByIssue). The client calls it while the issue is on screen outside the inbox, so
 // reading an issue anywhere also reads it in the inbox (MUL-8588). The update
 // is scoped to the caller's own rows, so an issue id from another workspace
 // matches nothing.

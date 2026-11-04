@@ -655,9 +655,22 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 }
 
 const markInboxReadByIssue = `-- name: MarkInboxReadByIssue :execrows
-UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
-  AND issue_id = $3 AND archived = false AND read = false
+UPDATE inbox_item i SET read = true
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2
+  AND i.issue_id = $3 AND i.archived = false AND i.read = false
+  AND i.severity = 'info' AND i.type <> 'mentioned'
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_item kept
+    WHERE kept.workspace_id = $1 AND kept.recipient_type = 'member' AND kept.recipient_id = $2
+      AND kept.issue_id = $3 AND kept.archived = false AND kept.read = false
+      AND (kept.severity <> 'info' OR kept.type = 'mentioned')
+      AND NOT EXISTS (
+        SELECT 1 FROM inbox_item seen
+        WHERE seen.workspace_id = $1 AND seen.recipient_type = 'member' AND seen.recipient_id = $2
+          AND seen.issue_id = $3 AND seen.archived = false AND seen.read = true
+          AND (seen.created_at, seen.id) > (kept.created_at, kept.id)
+      )
+  )
 `
 
 type MarkInboxReadByIssueParams struct {
@@ -673,6 +686,14 @@ type MarkInboxReadByIssueParams struct {
 // siblings would otherwise stay in CountUnreadInbox. Archived rows are left as
 // they are, as in MarkAllInboxRead, which also keeps the lookup on the partial
 // index idx_inbox_active_by_issue.
+//
+// Only informational rows are read (MUL-8596). action_required and attention
+// rows, and mentions, which are addressed to the reader, stay until handled.
+// The inbox renders the group's newest row, so reading info rows around a
+// pending kept row could turn the group read and hide it; while one is pending
+// nothing is read. A kept row stops being pending once a newer row in the group
+// has been read: the inbox already showed the group past it, and it would
+// otherwise block every later notification on the issue.
 func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markInboxReadByIssue, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
 	if err != nil {
