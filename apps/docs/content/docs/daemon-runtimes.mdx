@@ -232,6 +232,8 @@ The profile is shared across the workspace. Each connected computer looks up the
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 
+Version checks and Pi model discovery run in an empty temporary directory so sandbox wrappers can refuse launches from your home directory. Your home environment and user-level configuration remain available. Use absolute paths for scripts or configuration files in fixed arguments; probes do not discover configuration relative to the daemon's launch directory. Task execution still uses the task's working directory.
+
 ### How your arguments are ordered
 
 Everything you type in the command field stays directly after the executable, ahead of the arguments Multica adds:
