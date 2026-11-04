@@ -53,16 +53,29 @@ export function OfficeBriefDelivery() {
   );
 }
 
-function chatName({ channel, label }: BriefPushBinding) {
-  const name = channel.charAt(0).toUpperCase() + channel.slice(1);
+// chatName labels a chat with its platform's name from the settings channel
+// sections, then the chat's own label. A platform without a name falls back to its
+// type, capitalized.
+function chatName({ channel, label }: BriefPushBinding, channelNames: Record<string, string>) {
+  const name = channelNames[channel] ?? channel.charAt(0).toUpperCase() + channel.slice(1);
   return label ? `${name} · ${label}` : name;
 }
 
 function DeliveryForm({ saved, bindings }: { saved: BriefPushPreference; bindings: BriefPushBinding[] }) {
   const { t } = useT("issues");
+  const { t: tSettings } = useT("settings");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const save = useSaveBriefPush(wsId);
+  // The chat app's type is what the installation stores; the names are the
+  // settings sections' titles for the same apps. Lark's installations store feishu.
+  const channelNames: Record<string, string> = {
+    telegram: tSettings(($) => $.telegram.section_title),
+    slack: tSettings(($) => $.slack.section_title),
+    feishu: tSettings(($) => $.lark.section_title),
+    dingtalk: tSettings(($) => $.dingtalk.section_title),
+    wecom: tSettings(($) => $.wecom.section_title),
+  };
 
   // A saved chat that is no longer listed cannot take briefs, so it reads as none
   // and the next save clears it.
@@ -129,7 +142,7 @@ function DeliveryForm({ saved, bindings }: { saved: BriefPushPreference; binding
             ) : null}
             {bindings.map((option) => (
               <option key={option.id} value={option.id}>
-                {chatName(option)}
+                {chatName(option, channelNames)}
               </option>
             ))}
           </select>

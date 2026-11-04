@@ -70,7 +70,7 @@ func (s *sender) send(ctx context.Context, target sendTarget, text string) (stri
 		if err != nil {
 			return "", fmt.Errorf("marshal msgParam: %w", err)
 		}
-		lastKey, err = s.sendOne(ctx, target, string(param))
+		lastKey, err = s.sendOne(ctx, target, msgKeyMarkdown, string(param))
 		if err != nil {
 			return "", err
 		}
@@ -184,8 +184,8 @@ func escapeMarkdownLinkLabel(text string) string {
 }
 
 // sendOne posts a single rendered message, refreshing the token once on 401.
-func (s *sender) sendOne(ctx context.Context, target sendTarget, msgParam string) (string, error) {
-	path, body, err := s.request(target, msgParam)
+func (s *sender) sendOne(ctx context.Context, target sendTarget, msgKey, msgParam string) (string, error) {
+	path, body, err := s.request(target, msgKey, msgParam)
 	if err != nil {
 		return "", err
 	}
@@ -212,7 +212,7 @@ func (s *sender) sendOne(ctx context.Context, target sendTarget, msgParam string
 
 // request builds the endpoint + body for a target. A 1:1 send needs a recipient
 // staff id; a group send needs the group's openConversationId.
-func (s *sender) request(target sendTarget, msgParam string) (string, map[string]any, error) {
+func (s *sender) request(target sendTarget, msgKey, msgParam string) (string, map[string]any, error) {
 	if target.ConversationType == convTypeP2P {
 		if target.StaffID == "" {
 			return "", nil, errors.New("dingtalk: 1:1 send missing recipient staff id")
@@ -220,7 +220,7 @@ func (s *sender) request(target sendTarget, msgParam string) (string, map[string
 		return pathSendP2P, map[string]any{
 			"robotCode": s.robotCode,
 			"userIds":   []string{target.StaffID},
-			"msgKey":    msgKeyMarkdown,
+			"msgKey":    msgKey,
 			"msgParam":  msgParam,
 		}, nil
 	}
@@ -230,7 +230,7 @@ func (s *sender) request(target sendTarget, msgParam string) (string, map[string
 	body := map[string]any{
 		"robotCode":          s.robotCode,
 		"openConversationId": target.ConversationID,
-		"msgKey":             msgKeyMarkdown,
+		"msgKey":             msgKey,
 		"msgParam":           msgParam,
 	}
 	return pathSendGroup, body, nil

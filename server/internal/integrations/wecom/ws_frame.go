@@ -589,12 +589,21 @@ func (mc aibotMsgCallback) ownCommandSource() string {
 	}
 }
 
-// aibotEventCallback is the body of an aibot_event_callback frame. We only
-// look at the event type; specific event fields (template-card selection,
-// feedback vote) are not surfaced yet.
+// aibotEventCallback is the body of an aibot_event_callback frame. The
+// template-card press reads the sender, the chat and the button's key (event_key)
+// and the card's task_id; other event types only need the event type.
 type aibotEventCallback struct {
+	ChatID   string `json:"chatid"`
+	ChatType string `json:"chattype"` // "single" | "group"
+	From     struct {
+		UserID string `json:"userid"`
+	} `json:"from"`
 	Event struct {
 		EventType string `json:"eventtype"`
+		// EventKey is the key of the button the member pressed: the signed
+		// token a brief card's button carries.
+		EventKey string `json:"event_key"`
+		TaskID   string `json:"task_id"`
 	} `json:"event"`
 }
 
