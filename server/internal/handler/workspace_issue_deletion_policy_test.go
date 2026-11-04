@@ -40,7 +40,7 @@ func TestWorkspaceIssueDeletionPolicyAuthorization(t *testing.T) {
 			if tc.want == 200 {
 				var response WorkspaceResponse
 				result.JSON(&response)
-				if !response.IssueDeletionPolicySupported || response.RestrictIssueDeletion {
+				if response.RestrictIssueDeletion {
 					t.Fatalf("incorrect saved policy response: %+v", response)
 				}
 			}
@@ -122,12 +122,12 @@ func TestWorkspaceIssueDeletionPolicyIsIndependentOfSettings(t *testing.T) {
 	if settings["github_enabled"] != false {
 		t.Fatal("policy update overwrote the other administrator's setting")
 	}
-	// List responses power the shared clients and must carry support and value.
+	// List responses power the shared clients and must carry the saved policy.
 	var response []WorkspaceResponse
 	testutil.Call(t, testHandler.ListWorkspaces, newRequest(http.MethodGet, "/api/workspaces", nil)).Want(http.StatusOK).JSON(&response)
 	for _, item := range response {
 		if item.ID == ws {
-			if !item.IssueDeletionPolicySupported || item.RestrictIssueDeletion {
+			if item.RestrictIssueDeletion {
 				t.Fatal("list returned an incorrect policy")
 			}
 			return

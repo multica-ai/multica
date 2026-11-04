@@ -3127,8 +3127,7 @@ export class ApiClient {
     const parsed = parseWithFallback<Workspace | null>(raw, WorkspaceIssueDeletionPolicySchema, null, {
       endpoint: "PATCH /api/workspaces/:id/issue-deletion-policy",
     });
-    if (!parsed || parsed.issue_deletion_policy_supported !== true ||
-        parsed.restrict_issue_deletion !== restricted) {
+    if (!parsed || parsed.restrict_issue_deletion !== restricted) {
       throw new Error("Invalid issue deletion policy response");
     }
     return parsed;

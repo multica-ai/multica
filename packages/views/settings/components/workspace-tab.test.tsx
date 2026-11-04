@@ -21,7 +21,6 @@ const workspaceRef = vi.hoisted(() => ({
     repos: [] as { url: string }[],
     settings: {} as Record<string, unknown>,
     restrict_issue_deletion: false as boolean | undefined,
-    issue_deletion_policy_supported: true as boolean | undefined,
   },
 }));
 const membersRef = vi.hoisted(() => ({
@@ -113,7 +112,6 @@ describe("WorkspaceTab — automatic updates", () => {
     mockUpdateDeletionPolicy.mockImplementation(async (_id: string, restricted: boolean) => ({
       ...workspaceRef.current,
       restrict_issue_deletion: restricted,
-      issue_deletion_policy_supported: true,
     }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     workspaceRef.current = {
@@ -126,7 +124,6 @@ describe("WorkspaceTab — automatic updates", () => {
       repos: [],
       settings: {},
       restrict_issue_deletion: false,
-      issue_deletion_policy_supported: true,
     };
     membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
     mockUpdateWorkspace.mockImplementation(
@@ -167,8 +164,7 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
   });
 
-  it("disables policy configuration on an older server without a fallback write", async () => {
-    workspaceRef.current.issue_deletion_policy_supported = undefined;
+  it("disables policy configuration when the policy value is absent", async () => {
     workspaceRef.current.restrict_issue_deletion = undefined;
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });

@@ -485,14 +485,14 @@ export function WorkspaceTab() {
           <SettingsRow
             anchor="issue-deletion"
             label={t(($) => $.workspace.restrict_issue_deletion)}
-            description={workspace.issue_deletion_policy_supported === true
+            description={typeof workspace.restrict_issue_deletion === "boolean"
               ? t(($) => $.workspace.restrict_issue_deletion_hint)
               : t(($) => $.workspace.issue_deletion_policy_unsupported)}
           >
             <Switch
               aria-label={t(($) => $.workspace.restrict_issue_deletion)}
               checked={workspace.restrict_issue_deletion === true}
-              disabled={!canManageWorkspace || savingDeletionPolicy || workspace.issue_deletion_policy_supported !== true}
+              disabled={!canManageWorkspace || savingDeletionPolicy || typeof workspace.restrict_issue_deletion !== "boolean"}
               onCheckedChange={async (checked) => {
                 setSavingDeletionPolicy(true);
                 try {
