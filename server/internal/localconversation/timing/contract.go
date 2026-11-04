@@ -297,6 +297,7 @@ var (
 		"link.request_sent", "link.request_received", "link.response_sent", "link.response_received", "link.event_sent", "link.event_received",
 		"snapshot.request", "snapshot.server_read", "snapshot.first_byte", "snapshot.received", "snapshot.parsed", "snapshot.rendered",
 		StageTurnOutputSummary,
+		"client.projection_summary", "client.dispatch_summary", "client.render_summary", "client.heap_sample",
 		StageTimingDropped,
 	)
 	sources      = setOf(SourceDaemon, SourceMobile)

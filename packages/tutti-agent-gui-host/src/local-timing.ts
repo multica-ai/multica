@@ -125,3 +125,57 @@ export function createLocalPresentationTiming(sink: LocalTimingSink = consoleLoc
     },
   };
 }
+
+const LOCAL_COST_WINDOW_MS = 5_000;
+const LOCAL_COST_MARKS = { projection: "client.projection_summary", dispatch: "client.dispatch_summary", render: "client.render_summary" } as const;
+export type LocalCostSegment = keyof typeof LOCAL_COST_MARKS;
+
+/**
+ * What applying a conversation's changes costs on this thread. These run for
+ * every batch of a stream, too often for a record each, so each window writes one
+ * summary per segment. Records carry timings and counts only.
+ */
+export function createLocalCostProfile(options: { itemCount(conversationId: string): number; sink?: LocalTimingSink; heapBytes?(): number | undefined }) {
+  const sink = options.sink ?? consoleLocalTiming;
+  const heapBytes = options.heapBytes ?? (() => (performance as { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize);
+  const samples = new Map<LocalCostSegment, { count: number; total: number; longest: number }>();
+  let conversationId: string | null = null;
+  let started = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const write = (stage: LocalTimingStage, id: string, fields: Partial<LocalTimingRecord>) => {
+    try {
+      const record = parseLocalTiming({ source: "gui", clientKind: "desktop", conversationId: id, version: 2, at: new Date().toISOString(), stage, event: "mark", elapsedMs: Math.round(performance.now() - started), ...fields });
+      if (record) sink(record);
+    } catch { /* Diagnostics must not change execution or delivery. */ }
+  };
+  const flush = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    const id = conversationId;
+    if (id === null || !samples.size) return;
+    for (const [segment, sample] of samples) {
+      write(LOCAL_COST_MARKS[segment], id, { count: sample.count, durationMs: Math.round(sample.total), maxGapMs: Math.round(sample.longest) });
+    }
+    samples.clear();
+    const bytes = heapBytes();
+    write("client.heap_sample", id, { count: options.itemCount(id), ...(bytes === undefined ? {} : { bytes }) });
+  };
+  const record = (segment: LocalCostSegment, id: string, ms: number) => {
+    if (conversationId !== id) { flush(); conversationId = id; }
+    if (!samples.size) started = performance.now();
+    const sample = samples.get(segment) ?? { count: 0, total: 0, longest: 0 };
+    sample.count++; sample.total += ms; sample.longest = Math.max(sample.longest, ms);
+    samples.set(segment, sample);
+    timer ??= setTimeout(flush, LOCAL_COST_WINDOW_MS);
+  };
+  return {
+    /** Runs one segment and adds its duration to the conversation's window. */
+    measure<T>(segment: LocalCostSegment, id: string, action: () => T): T {
+      const before = performance.now();
+      try { return action(); } finally { record(segment, id, performance.now() - before); }
+    },
+    /** Adds a React commit, which applies to whichever conversation changed last. */
+    rendered(ms: number) { if (conversationId !== null) record("render", conversationId, ms); },
+    dispose: flush,
+  };
+}

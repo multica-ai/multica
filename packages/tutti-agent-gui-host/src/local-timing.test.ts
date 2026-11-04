@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLocalSendTiming, createLocalTiming, createLocalPresentationTiming, parseLocalTiming, type LocalTimingRecord } from "./local-timing";
+import { createLocalCostProfile, createLocalSendTiming, createLocalTiming, createLocalPresentationTiming, parseLocalTiming, type LocalTimingRecord } from "./local-timing";
 
 afterEach(() => vi.useRealTimers());
 describe("local turn timing", () => {
@@ -115,5 +115,60 @@ describe("local turn timing", () => {
     expect(records[0]).toMatchObject({ stage: "client.send", at: "2026-11-02T10:00:00.000Z", elapsedMs: 0, attempt: 1, requestId: "r", conversationId: "c" });
     expect(records[1]).toMatchObject({ elapsedMs: 40 });
     expect(records[2]).toMatchObject({ stage: "client.send", attempt: 2 });
+  });
+});
+
+describe("local conversation cost profile", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const setup = () => {
+    vi.useFakeTimers();
+    const records: LocalTimingRecord[] = [];
+    const profile = createLocalCostProfile({ itemCount: () => 12, heapBytes: () => 2048, sink: (record) => records.push(record) });
+    return { records, profile };
+  };
+  const stages = (records: LocalTimingRecord[]) => records.map((record) => record.stage);
+
+  it("writes one summary per segment for a window, not one per run", () => {
+    const { records, profile } = setup();
+    for (let i = 0; i < 50; i++) {
+      profile.measure("projection", "c1", () => { vi.advanceTimersByTime(2); });
+      profile.measure("dispatch", "c1", () => { vi.advanceTimersByTime(1); });
+    }
+    profile.rendered(7);
+    expect(records).toEqual([]);
+    vi.advanceTimersByTime(5_000);
+    expect(stages(records)).toEqual(["client.projection_summary", "client.dispatch_summary", "client.render_summary", "client.heap_sample"]);
+    expect(records[0]).toMatchObject({ conversationId: "c1", count: 50, durationMs: 100, maxGapMs: 2, source: "gui" });
+    expect(records[2]).toMatchObject({ count: 1, durationMs: 7, maxGapMs: 7 });
+    expect(records[3]).toMatchObject({ count: 12, bytes: 2048 });
+    vi.advanceTimersByTime(20_000);
+    expect(records).toHaveLength(4);
+  });
+
+  it("attributes a window to its conversation when another one starts changing", () => {
+    const { records, profile } = setup();
+    profile.measure("projection", "c1", () => {});
+    profile.measure("projection", "c2", () => {});
+    expect(records.map((record) => [record.stage, record.conversationId])).toEqual([["client.projection_summary", "c1"], ["client.heap_sample", "c1"]]);
+    profile.dispose();
+    expect(records.at(-2)).toMatchObject({ stage: "client.projection_summary", conversationId: "c2" });
+  });
+
+  it("keeps the result and the failure of what it measures", () => {
+    const { profile } = setup();
+    expect(profile.measure("dispatch", "c1", () => 3)).toBe(3);
+    expect(() => profile.measure("dispatch", "c1", () => { throw new Error("boom"); })).toThrow("boom");
+  });
+
+  it("ignores a React commit before any conversation changed, and works without a heap reading", () => {
+    vi.useFakeTimers();
+    const records: LocalTimingRecord[] = [];
+    const profile = createLocalCostProfile({ itemCount: () => 0, heapBytes: () => undefined, sink: (record) => records.push(record) });
+    profile.rendered(5);
+    vi.advanceTimersByTime(5_000);
+    expect(records).toEqual([]);
+    profile.measure("projection", "c1", () => {});
+    profile.dispose();
+    expect(records.at(-1)!.bytes).toBeUndefined();
   });
 });

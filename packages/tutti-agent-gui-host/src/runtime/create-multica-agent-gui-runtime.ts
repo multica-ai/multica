@@ -1,4 +1,4 @@
-import { createLocalPresentationTiming, createLocalSendTiming, isLocalTimingModelOutput } from "../local-timing";
+import { createLocalCostProfile, createLocalPresentationTiming, createLocalSendTiming, isLocalTimingModelOutput } from "../local-timing";
 import {
   createAgentActivitySnapshotProjector,
   createAgentSessionEngine,
@@ -58,6 +58,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   const uploads = createAttachmentUploadTracker(client, init.locale);
   const workspaceId = init.workspaceId;
   const presentationTiming = createLocalPresentationTiming();
+  const costProfile = createLocalCostProfile({ itemCount: (id) => source.conversation(id)?.items.size ?? 0 });
   const sendTiming = createLocalSendTiming();
   const ledger = new RuntimeLedger();
   const modelPreferences = new ModelPreferences();
@@ -539,16 +540,16 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   function applyDetail(guiId: string): AgentActivitySession {
     const detail = details.get(guiId)!;
     desktopQueue.receive(guiId, detail.promptQueue);
-    const result = project(guiId);
+    const result = costProfile.measure("projection", detail.session.id, () => project(guiId));
     const unsettled = new Set(Object.values(engine.getSnapshot().sessionLifecycle.turnsById)
       .filter((turn) => turn.agentSessionId === guiId && turn.phase !== "settled").map((turn) => turn.turnId));
-    engine.dispatch({
+    costProfile.measure("dispatch", detail.session.id, () => engine.dispatch({
       type: "session/historyAuthoritativeSnapshotReceived", workspaceId,
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
       session: withModel(result.session), turns: result.turns, messages: result.messages,
       sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: localConversation(guiId)?.hasOlderTurns ?? false,
         oldestLoadedVersion: result.messages.reduce<number | null>((oldest, message) => oldest === null || message.version < oldest ? message.version : oldest, null) }],
-    });
+    }));
     // A same-timestamp terminal result can leave the engine's previous active
     // pointer intact. Fence that specific transition once: replaying every
     // historical settlement would itself request another live reconciliation.
@@ -1044,10 +1045,13 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     uploadAttachment,
     subscribeUploads: uploads.subscribe,
     activeUploadCount: uploads.activeCount,
+    /** A React commit of this GUI, for the cost profile. */
+    rendered: costProfile.rendered,
     localConversations: source,
     dispose() {
       if (disposed) return;
       disposed = true;
+      costProfile.dispose();
       unsubscribe();
       for (const pending of pendingIdentities.values()) pending.reject(new MulticaAgentGuiError("This connection has closed.", "disposed"));
       pendingIdentities.clear();

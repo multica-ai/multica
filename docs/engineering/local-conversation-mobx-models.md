@@ -268,8 +268,8 @@ class ItemModel {
 | 阶段 | 内容 | 消除第 1 节的哪段 |
 | --- | --- | --- |
 | 0. 删除 Web 页面 | 第 8 节 | 无，GUI 只服务本地会话 |
-| 1. 打点和测试注入 | 打点覆盖第 1 节全部五段，记录 item 数和堆大小，用真实长会话记录基线；测试假后端移到 `LocalV2Transport` 层 | 无 |
-| 2a. Model 和 Service | 新包；`ConversationStore`、`V2Conversation` 迁入，Model 实例稳定；派生逻辑从投影移进 Turn | 无 |
+| 1. 打点 | 投影（①②）、engine 分发（③）、React 提交（④⑤，`Profiler` 无法再细分）按 5 秒窗口汇总，并记录 item 数和堆大小，用真实长会话记录基线 | 无 |
+| 2a. Model 和 Service | 新包；`ConversationStore`、`V2Conversation` 迁入，Model 实例稳定；派生逻辑从投影移进 Turn；测试假后端移到 `LocalV2Transport` 层 | 无 |
 | 2b. 增量提交 | 第 10 节；merge 保留未变化消息的引用并改为有序插入 | ①、②，③ 的大部分 |
 | 3. 转录 | 按轮次的行 computed 和不依赖内容的结构索引；view 直接读 Model；engine 不再持有 assistant 内容，只留 reducer 需要的轮次和用户消息 | ③、④ |
 | 3b. 列表 | 列表和未读迁入 `ConversationListModel`；**删除** rail 的分页查询层，本地列表本来就全在内存里 | 列表的全量计算 |

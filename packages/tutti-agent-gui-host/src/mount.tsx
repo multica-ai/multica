@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, Profiler, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
 import { AgentGUIStartupShell } from "@tutti-os/agent-gui/startup-shell";
 import { Button } from "@tutti-os/ui-system/components";
 import { AGENT_GUI_ROOT_CLASS, applyAgentGuiAppearance, syncAgentGuiDocument } from "./agent-gui-appearance";
@@ -70,7 +70,7 @@ export default function AgentGuiMount({ client, initial, localConversations, onR
     {state.error
       ? <Rendered onRendered={onRendered}><ErrorView error={state.error} chinese={chinese} onRetry={retry} /></Rendered>
       : state.handle && root
-        ? <Rendered onRendered={onRendered}><AgentGuiErrorBoundary key={attempt} chinese={chinese} onRetry={retry}><AgentGuiApplication client={client} initial={initial} handle={state.handle} root={root} /></AgentGuiErrorBoundary></Rendered>
+        ? <Rendered onRendered={onRendered}><AgentGuiErrorBoundary key={attempt} chinese={chinese} onRetry={retry}><Profiler id="agent-gui" onRender={(_id, _phase, actualDuration) => state.handle?.rendered(actualDuration)}><AgentGuiApplication client={client} initial={initial} handle={state.handle} root={root} /></Profiler></AgentGuiErrorBoundary></Rendered>
         : <AgentGUIStartupShell loadingLabel="Loading Agent GUI" />}
   </div>;
 }
