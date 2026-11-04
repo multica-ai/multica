@@ -58,9 +58,10 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
-// callbackHostFlag lets users override the host/IP that goes into the OAuth
-// cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
-// auto-detected LAN IP isn't the one the browser can reach.
+// callbackHostFlag lets users override the host that goes into the OAuth
+// cli_callback URL when the auto-detected address isn't one the browser can
+// reach. The value must pass isSupportedCallbackHost; hostnames other than
+// localhost are rejected because the web login never accepts them.
 const callbackHostFlag = "callback-host"
 
 const callbackHostFlagHelp = "Callback host reachable from the browser: localhost, 127.0.0.1, or an RFC 1918 IPv4 address. For SSH-only machines, use the printed tunnel hint instead."
@@ -266,7 +267,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
 	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
-	// cannot reach. The callback URL is always an IPv4 literal or hostname,
+	// cannot reach. The callback host is always localhost or an IPv4 literal,
 	// so an IPv4 listener is what the browser actually needs.
 	listener, err := net.Listen("tcp4", bindAddr+":0")
 	if err != nil {
