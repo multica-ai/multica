@@ -213,7 +213,7 @@ func TestWakeupKeepsItsInputWhenTheWaitingRunDoesNotTakeIt(t *testing.T) {
 		f, s, issue, agent := conditionFixture(t)
 		member := parseTestUUID(t, f.UserID)
 		host := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "every", IntervalSeconds: 3600, Instruction: "Scheduled check"})
-		if err := s.Trigger(ctx, issue, host.ID, member); err != nil {
+		if err := s.Trigger(ctx, issue, host.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); err != nil {
 			t.Fatal(err)
 		}
 		w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "Independent once-only work"})
@@ -234,7 +234,7 @@ func TestWakeupKeepsItsInputWhenTheWaitingRunDoesNotTakeIt(t *testing.T) {
 		f, s, issue, agent := conditionFixture(t)
 		member := parseTestUUID(t, f.UserID)
 		host := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "every", IntervalSeconds: 3600, Instruction: "Scheduled check"})
-		if err := s.Trigger(ctx, issue, host.ID, member); err != nil {
+		if err := s.Trigger(ctx, issue, host.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); err != nil {
 			t.Fatal(err)
 		}
 		var waiting string

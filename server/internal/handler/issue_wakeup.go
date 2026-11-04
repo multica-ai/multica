@@ -352,12 +352,17 @@ func (h *Handler) TriggerIssueWakeup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.wakeupMember(w, r, issue)
-	if !ok {
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originator == "" {
+		writeError(w, 403, "a human originator is required")
 		return
 	}
 	svc := service.IssueWakeupService{Tasks: h.TaskService}
-	if err := svc.Trigger(r.Context(), issue.ID, id, member); err != nil {
+	if err := svc.Trigger(r.Context(), issue.ID, id, service.WakeupTriggerInput{
+		MemberID: parseUUID(originator), ActorType: actorType, ActorID: parseUUID(actorID),
+		SourceTaskID: h.wakeupSourceTaskID(r),
+	}); err != nil {
 		wakeupError(w, err)
 		return
 	}

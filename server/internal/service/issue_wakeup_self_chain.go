@@ -41,26 +41,25 @@ func guardWakeupSelfChain(ctx context.Context, q *db.Queries, issue db.Issue, so
 			return nil
 		}
 		for _, fact := range stored.Evidence.Facts {
-			actor, _, _ := receiptActor(db.IssueWakeupReceipt{Payload: fact.Payload})
-			if actor == "member" || fact.EventType == wakeupManualEventType {
+			var actor struct {
+				Type          string `json:"actor_type"`
+				ID            string `json:"actor_id"`
+				MemberActorID string `json:"member_actor_id"`
+			}
+			if err = json.Unmarshal(fact.Payload, &actor); err != nil {
+				return fmt.Errorf("read wakeup continuation actor: %w", err)
+			}
+			if (actor.Type == "member" && actor.ID != "") ||
+				(fact.EventType == wakeupConditionEventType && actor.MemberActorID != "") {
 				return nil
 			}
 		}
-		id, err := wakeupUUID(stored.WakeupID)
-		if err != nil {
-			return err
-		}
-		w, err := q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: id, WorkspaceID: issue.WorkspaceID})
-		if errors.Is(err, pgx.ErrNoRows) {
+		// Dispatch snapshots the rule's source onto its run. Updating or
+		// deleting the consumed rule cannot rewrite that run's ancestry.
+		if !task.DelegatedFromTaskID.Valid {
 			return nil
 		}
-		if err != nil {
-			return fmt.Errorf("read wakeup continuation rule: %w", err)
-		}
-		if w.IssueID != issue.ID || !w.SourceTaskID.Valid {
-			return nil
-		}
-		source = w.SourceTaskID
+		source = task.DelegatedFromTaskID
 	}
 	return fmt.Errorf("%w: agent self-continuation wakeup chain exceeds %d links; escalate to a human before scheduling another continuation", ErrWakeupInput, wakeupSelfChainLimit)
 }

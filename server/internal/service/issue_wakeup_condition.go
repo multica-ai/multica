@@ -426,57 +426,67 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 // They only prompt an early evaluation and never become run inputs.
 const conditionHintSQL = "wakeup_id=$1 AND processed_at IS NULL AND event_type NOT IN ('condition.met','wakeup.timeout','wakeup.manual')"
 
-// consumeConditionHints marks the pending hints processed. It also returns the
-// agent runs that caused them, or nil when any hint came from elsewhere (a
-// person, the platform, or several merged events), so a satisfied condition
-// can tell whether the target agent brought it about itself.
-func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool, []string, error) {
+type conditionHints struct {
+	present       bool
+	causes        []string
+	memberActorID string
+}
+
+// consumeConditionHints marks the pending hints processed. Agent causes are
+// complete only when every hint names its source runs. Member participation is
+// tracked separately: missing agent causes can also mean platform polling.
+func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (conditionHints, error) {
+	var hints conditionHints
 	rows, err := tx.Query(ctx, "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE "+conditionHintSQL+" RETURNING payload", id)
 	if err != nil {
-		return false, nil, err
+		return hints, err
 	}
 	defer rows.Close()
-	hinted, complete := false, true
-	var causes []string
+	complete := true
 	for rows.Next() {
 		var raw []byte
 		if err = rows.Scan(&raw); err != nil {
-			return false, nil, err
+			return hints, err
 		}
-		hinted = true
+		hints.present = true
 		var p struct {
 			SourceTaskID  string   `json:"source_task_id"`
 			SourceTaskIDs []string `json:"source_task_ids"`
 			Count         int64    `json:"coalesced_count"`
+			ActorType     string   `json:"actor_type"`
+			ActorID       string   `json:"actor_id"`
 		}
 		_ = json.Unmarshal(raw, &p)
+		if p.ActorType == "member" && p.ActorID != "" {
+			hints.memberActorID = p.ActorID
+		}
 		switch {
 		case p.Count <= 1 && p.SourceTaskID != "":
-			causes = append(causes, p.SourceTaskID)
+			hints.causes = append(hints.causes, p.SourceTaskID)
 		case len(p.SourceTaskIDs) > 0:
-			causes = append(causes, p.SourceTaskIDs...)
+			hints.causes = append(hints.causes, p.SourceTaskIDs...)
 		default:
 			complete = false
 		}
 	}
 	if err = rows.Err(); err != nil {
-		return false, nil, err
+		return hints, err
 	}
 	if !complete {
-		causes = nil
+		hints.causes = nil
 	}
-	return hinted, causes, nil
+	return hints, nil
 }
 
 // pollCondition evaluates a condition rule when it is due or a related event
 // arrived, and returns the next scheduled evaluation. A newly satisfied
 // predicate becomes one condition.met input for the ordinary dispatch below.
 func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) (pgtype.Timestamptz, error) {
-	hinted, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	hints, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return w.NextFireAt, err
 	}
-	if !hinted && w.NextFireAt.Valid && w.NextFireAt.Time.After(now) {
+	if !hints.present && w.NextFireAt.Valid && w.NextFireAt.Time.After(now) {
 		return w.NextFireAt, nil
 	}
 	met, fingerprint, observed, err := s.evaluateCondition(ctx, tx, q, w)
@@ -491,7 +501,7 @@ func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db
 	state := w.ConditionState
 	if met {
 		if conditionNewlyMet(state, fingerprint) {
-			if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
+			if err = recordConditionMet(ctx, q, w, observed, hints, now); err != nil {
 				return w.NextFireAt, err
 			}
 		}
@@ -711,11 +721,14 @@ func stageProgress(children []subIssue) (bool, string, map[string]any) {
 }
 
 // recordConditionMet turns a newly satisfied condition into one run input. It
-// names the agent runs whose changes satisfied it, when all of them are known.
-func recordConditionMet(ctx context.Context, q *db.Queries, w db.IssueWakeup, observed map[string]any, causes []string, now time.Time) error {
+// names the known agent causes and a member who participated in its hints.
+func recordConditionMet(ctx context.Context, q *db.Queries, w db.IssueWakeup, observed map[string]any, hints conditionHints, now time.Time) error {
 	facts := map[string]any{"condition": json.RawMessage(w.Condition), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)}
-	if len(causes) > 0 {
-		facts["source_task_ids"] = causes
+	if len(hints.causes) > 0 {
+		facts["source_task_ids"] = hints.causes
+	}
+	if hints.memberActorID != "" {
+		facts["member_actor_id"] = hints.memberActorID
 	}
 	payload, _ := json.Marshal(facts)
 	_, err := q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: "condition:" + now.UTC().Format(time.RFC3339Nano), EventType: wakeupConditionEventType, Payload: payload})

@@ -466,7 +466,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	// A parked parent holds: nothing fires and nothing is marked as seen, so
 	// a stage that closed meanwhile wakes the assignee once it leaves backlog.
 	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
-		if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+		if _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -475,7 +475,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
 		return err
 	}
-	_, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	hints, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return err
 	}
@@ -486,7 +486,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	state := w.ConditionState
 	switch {
 	case met && fingerprint != state:
-		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
+		if err = recordConditionMet(ctx, q, w, observed, hints, now); err != nil {
 			return err
 		}
 		state = fingerprint

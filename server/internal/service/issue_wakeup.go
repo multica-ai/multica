@@ -1102,7 +1102,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			if next, err = s.pollCondition(ctx, tx, q, w, now); err != nil {
 				return err
 			}
-		} else if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+		} else if _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
 	}

@@ -88,7 +88,7 @@ func mergeWakeupEvidence(w db.IssueWakeup, previous db.AgentTaskQueue, receipts 
 			var fields map[string]json.RawMessage
 			_ = json.Unmarshal(payload, &fields)
 			refs := map[string]json.RawMessage{}
-			for _, key := range []string{"event_id", "occurred_at", "first_occurred_at", "coalesced_count", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id", "actor_type", "actor_id"} {
+			for _, key := range []string{"event_id", "occurred_at", "first_occurred_at", "coalesced_count", "task_id", "source_task_id", "comment_id", "thread_id", "attachment_id", "agent_id", "actor_type", "actor_id", "member_actor_id"} {
 				if value := fields[key]; len(value) > 0 && len(value) <= 256 {
 					refs[key] = value
 				}

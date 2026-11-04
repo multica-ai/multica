@@ -68,7 +68,8 @@ func TestWakeupBurstPausesTheRule(t *testing.T) {
 		t.Fatalf("paused rule kept %d pending inputs", n)
 	}
 	// "Wake now" is refused until someone turns the rule back on.
-	if err := s.Trigger(context.Background(), issue, w.ID, parseTestUUID(t, f.UserID)); !errors.Is(err, ErrWakeupInput) {
+	member := parseTestUUID(t, f.UserID)
+	if err := s.Trigger(context.Background(), issue, w.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); !errors.Is(err, ErrWakeupInput) {
 		t.Fatalf("wake now on a paused rule: %v", err)
 	}
 }
@@ -138,7 +139,7 @@ func TestWakeupTriggerDeleteAndCheckIn(t *testing.T) {
 	ctx := context.Background()
 	member := parseTestUUID(t, f.UserID)
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "every", IntervalSeconds: 3600, Instruction: "Check the migration"})
-	if err := s.Trigger(ctx, issue, w.ID, member); err != nil {
+	if err := s.Trigger(ctx, issue, w.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); err != nil {
 		t.Fatal(err)
 	}
 	if n := wakeRuns(t, f, w.ID); n != 1 {
@@ -168,7 +169,7 @@ func TestWakeupTriggerDeleteAndCheckIn(t *testing.T) {
 		t.Fatalf("check-in timeline entries = %d, want 1", n)
 	}
 	// Deleting withdraws queued runs and removes the rule.
-	if err = s.Trigger(ctx, issue, w.ID, member); err != nil {
+	if err = s.Trigger(ctx, issue, w.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Delete(ctx, issue, w.ID, member); err != nil {

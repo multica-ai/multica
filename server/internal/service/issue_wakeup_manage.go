@@ -50,19 +50,27 @@ func lockManagedWakeup(ctx context.Context, tx pgx.Tx, q *db.Queries, issueID, i
 	return issue, w, nil
 }
 
+// WakeupTriggerInput separates the permission originator from the request actor.
+type WakeupTriggerInput struct {
+	MemberID     pgtype.UUID
+	ActorType    string
+	ActorID      pgtype.UUID
+	SourceTaskID pgtype.UUID
+}
+
 // Trigger ("wake now") queues one run of the rule immediately, as if its
 // trigger had happened. It goes through ordinary dispatch, so it merges with
 // a queued run and re-checks the creator's permission to invoke the agent. A
 // rule someone turned off, or one the platform stopped for a loop or burst,
 // must be turned on first.
-func (s *IssueWakeupService) Trigger(ctx context.Context, issueID, id, member pgtype.UUID) error {
+func (s *IssueWakeupService) Trigger(ctx context.Context, issueID, id pgtype.UUID, in WakeupTriggerInput) error {
 	tx, err := s.Tasks.TxStarter.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	q := s.Tasks.Queries.WithTx(tx)
-	issue, w, err := lockManagedWakeup(ctx, tx, q, issueID, id, member)
+	issue, w, err := lockManagedWakeup(ctx, tx, q, issueID, id, in.MemberID)
 	if err != nil {
 		return err
 	}
@@ -80,7 +88,7 @@ func (s *IssueWakeupService) Trigger(ctx context.Context, issueID, id, member pg
 	if err != nil {
 		return ErrWakeupForbidden
 	}
-	if err = s.authorize(ctx, q, w.WorkspaceID, member, agent); err != nil {
+	if err = s.authorize(ctx, q, w.WorkspaceID, in.MemberID, agent); err != nil {
 		return err
 	}
 	var now time.Time
@@ -88,8 +96,12 @@ func (s *IssueWakeupService) Trigger(ctx context.Context, issueID, id, member pg
 		return err
 	}
 	key := "manual:" + util.UUIDToString(dbid.NewV7())
-	payload, _ := json.Marshal(map[string]any{"event_id": key, "requested_at": now.UTC().Format(time.RFC3339),
-		"actor_type": "member", "actor_id": util.UUIDToString(member)})
+	facts := map[string]any{"event_id": key, "requested_at": now.UTC().Format(time.RFC3339),
+		"actor_type": in.ActorType, "actor_id": util.UUIDToString(in.ActorID)}
+	if in.SourceTaskID.Valid {
+		facts["source_task_id"] = util.UUIDToString(in.SourceTaskID)
+	}
+	payload, _ := json.Marshal(facts)
 	if _, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: key, EventType: wakeupManualEventType, Payload: payload}); err != nil {
 		return err
 	}

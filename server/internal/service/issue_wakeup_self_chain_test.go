@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -18,6 +19,9 @@ func TestIssueWakeupSelfContinuation(t *testing.T) {
 		reset      string
 		reply      bool
 		event      bool
+		deleteRule bool
+		updateRule bool
+		condition  string
 		wantRefuse bool
 	}{
 		{name: "refuses ninth fresh one shot", wantRefuse: true},
@@ -26,9 +30,14 @@ func TestIssueWakeupSelfContinuation(t *testing.T) {
 		{name: "member created wakeup resets chain", reset: "wakeup"},
 		{name: "member wake now resets chain", reset: "manual"},
 		{name: "member filtered reply remains allowed", reply: true},
+		{name: "deleted consumed rule preserves ancestry", deleteRule: true, wantRefuse: true},
+		{name: "agent update preserves member created parent", reset: "wakeup", updateRule: true},
+		{name: "member satisfied condition resets chain", condition: "member"},
+		{name: "agent satisfied condition keeps chain", condition: "agent", wantRefuse: true},
+		{name: "platform satisfied condition keeps chain", condition: "system", wantRefuse: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f, s, issue, agent := wakeFixture(t)
+			f, s, issue, agent := conditionFixture(t)
 			ctx := context.Background()
 			member := parseTestUUID(t, f.UserID)
 			f.Exec(t, "UPDATE issue SET status='blocked' WHERE id=$1", issue)
@@ -50,15 +59,50 @@ func TestIssueWakeupSelfContinuation(t *testing.T) {
 						in.Kind, in.AfterSeconds, in.EventTypes = "event", 0, []string{"comment.created"}
 					}
 				}
+				if link == 7 && tc.condition != "" {
+					in.Kind, in.AfterSeconds = "event", 0
+					in.Condition = condition(t, map[string]any{"type": "issue_field", "field": "status", "value": "in_review"})
+				}
 				w, err := s.Create(ctx, issue, member, creator, in)
 				if err != nil {
 					t.Fatalf("link %d: %v", link+1, err)
 				}
 				switch {
+				case link == 7 && tc.condition != "":
+					actorID, actorSource := f.UserID, ""
+					if tc.condition == "agent" {
+						other := f.privateAgentOwnedBy(t, f.UserID, "condition-writer")
+						actorID = other
+						actorSource = f.Task(t, other, testutil.Cols{
+							"issue_id": issue, "status": "completed",
+							"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + other + "')"),
+						})
+					}
+					if tc.condition == "system" {
+						actorID = ""
+					}
+					tx, err := f.Pool.Begin(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer func() {
+						if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+							t.Error(err)
+						}
+					}()
+					if _, err = tx.Exec(ctx, "SELECT set_config('multica.actor_type',$1,true),set_config('multica.actor_id',$2,true),set_config('multica.source_task_id',$3,true)", tc.condition, actorID, actorSource); err != nil {
+						t.Fatal(err)
+					}
+					if _, err = f.q.WithTx(tx).UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue, WorkspaceID: parseTestUUID(t, f.WorkspaceID), Status: "in_review"}); err != nil {
+						t.Fatal(err)
+					}
+					if err = tx.Commit(ctx); err != nil {
+						t.Fatal(err)
+					}
 				case link == 4 && tc.reset == "comment":
 					f.Comment(t, util.UUIDToString(issue), "Human provided new information")
 				case link == 4 && tc.reset == "manual":
-					if err = s.Trigger(ctx, issue, w.ID, member); err != nil {
+					if err = s.Trigger(ctx, issue, w.ID, WakeupTriggerInput{MemberID: member, ActorType: "member", ActorID: member}); err != nil {
 						t.Fatal(err)
 					}
 				default:
@@ -73,6 +117,22 @@ func TestIssueWakeupSelfContinuation(t *testing.T) {
 					t.Fatalf("link %d did not start exactly one run: task=%s fires=%d", link+1, util.UUIDToString(fired.LastTaskID), fired.FireCount)
 				}
 				source = fired.LastTaskID
+				f.Exec(t, "UPDATE agent_task_queue SET status='running',started_at=now() WHERE id=$1", source)
+				if link == 4 && tc.updateRule {
+					if _, err = s.Save(ctx, issue, member, source, w.ID, in); err != nil {
+						t.Fatal(err)
+					}
+					// Management re-enables the old rule, but this test only
+					// continues the already-started run.
+					if _, err = s.Disable(ctx, issue, w.ID, member); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if link == 7 && tc.deleteRule {
+					if err = s.Delete(ctx, issue, w.ID, member); err != nil {
+						t.Fatal(err)
+					}
+				}
 				f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE id=$1", source)
 			}
 
