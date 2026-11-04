@@ -12,9 +12,6 @@ import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("react-resizable-panels", () => ({
-  useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -41,11 +38,6 @@ vi.mock("../../navigation", () => ({
   useReportNavigating: () => {},
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => false }));
-vi.mock("@multica/ui/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  ResizablePanel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  ResizableHandle: () => null,
-}));
 vi.mock("./inbox-list", () => ({
   InboxList: ({ items, onSelect }: { items: InboxItem[]; onSelect: (item: InboxItem) => void }) => (
     <div>{items.map((row) => (
@@ -104,6 +96,30 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const page = (items: InboxItem[]): ArchivedInboxPage => ({ items, hasMore: false, nextCursor: null });
+
+it.each([false, true])("clears an older unread assignment when opening a read row via URL=%s", async (viaUrl) => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  if (viaUrl) searchParams.set("issue", "issue-a");
+  let rows = [
+    item({ id: "comment", read: true, created_at: "2026-06-15T08:01:00Z" }),
+    item({ id: "assigned", type: "issue_assigned", severity: "action_required" }),
+  ];
+  const listInbox = vi.fn(async () => rows);
+  const markInboxRead = vi.fn(async () => {
+    rows = rows.map((row) => ({ ...row, read: true }));
+    return rows[0]!;
+  });
+  setApiInstance({ listInbox, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+
+  renderPage();
+  const row = await screen.findByText("comment");
+  if (!viaUrl) fireEvent.click(row);
+
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(markInboxRead).toHaveBeenCalledExactlyOnceWith("comment"));
+  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+  expect(qc.getQueryData<InboxItem[]>(inboxKeys.list("workspace-1"))?.every((row) => row.read)).toBe(true);
+});
 
 function archivedFixture() {
   searchParams = new URLSearchParams("view=archived");

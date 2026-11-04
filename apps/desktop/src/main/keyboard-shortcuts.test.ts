@@ -358,6 +358,34 @@ describe("handleAppShortcut — open settings (Cmd/Ctrl+,)", () => {
   });
 });
 
+describe("handleAppShortcut — new window (Cmd/Ctrl+Shift+N)", () => {
+  it('returns "new-window" on Cmd+Shift+N (macOS) and Ctrl+Shift+N elsewhere', () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(key("N", { meta: true, shift: true }), wc, "darwin"),
+    ).toBe("new-window");
+    expect(
+      handleAppShortcut(key("N", { control: true, shift: true }), wc, "win32"),
+    ).toBe("new-window");
+  });
+
+  it("leaves the bare Cmd/Ctrl+N chord to the renderer", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("n", { meta: true }), wc, "darwin")).toBe(false);
+  });
+
+  it("swallows auto-repeat without opening a window per repeat", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        { ...key("N", { meta: true, shift: true }), isAutoRepeat: true },
+        wc,
+        "darwin",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("handleAppShortcut — close tab (Cmd/Ctrl+W)", () => {
   it('returns "close-tab" on Cmd+W (macOS)', () => {
     const wc = makeWc();

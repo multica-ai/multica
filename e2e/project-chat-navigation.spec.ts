@@ -160,6 +160,10 @@ test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, cont
     await expect(chats.getByRole("link")).toHaveCount(2);
     await expect(chats.getByRole("link").first()).toContainText("Alpha recent");
     await expect(chats.getByText("Latest Alpha summary")).toBeVisible();
+    await chats.getByRole("button", { name: "Chats", exact: true }).click();
+    await expect(chats.getByRole("link")).toHaveCount(0);
+    await chats.getByRole("button", { name: "Chats", exact: true }).click();
+    await expect(chats.getByRole("link")).toHaveCount(2);
   }
   await page.screenshot({ path: testInfo.outputPath(baseline ? "base-project.png" : "head-project.png"), fullPage: true });
   if (!baseline) {
@@ -195,7 +199,7 @@ test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, cont
     await expect(page.getByText("New conversation", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(content, { exact: true }).first()).toBeVisible();
     // Reopen through the list to verify the sent transcript remains reachable.
-    const row = (title: string) => page.locator('div[tabindex="0"]').filter({ has: page.getByText(title, { exact: true }) });
+    const row = (title: string) => page.locator('div[tabindex="0"]:not([data-virtuoso-scroller])').filter({ has: page.getByText(title, { exact: true }) });
     await row("Beta conversation").click();
     await expect(page).toHaveURL(/session=44444444-4444-4444-8444-444444444446/);
     await row("New conversation").click();
@@ -207,7 +211,7 @@ test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, cont
     return;
   }
   // Archiving advances within Alpha, never into another project's row.
-  const selectedRow = page.locator('div[tabindex="0"]').filter({ has: page.getByText("Alpha recent", { exact: true }) });
+  const selectedRow = page.locator('div[tabindex="0"]:not([data-virtuoso-scroller])').filter({ has: page.getByText("Alpha recent", { exact: true }) });
   await selectedRow.hover();
   await selectedRow.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page).toHaveURL(/session=44444444-4444-4444-8444-444444444445/);
@@ -223,7 +227,7 @@ test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, cont
   await page.getByRole("button", { name: "Clear project filter" }).click();
   await expect(filter).toContainText("All projects");
   // Delete from the archive: no invisible selection remains.
-  const row = page.locator('div[tabindex="0"]').filter({ has: page.getByText("Alpha recent", { exact: true }) });
+  const row = page.locator('div[tabindex="0"]:not([data-virtuoso-scroller])').filter({ has: page.getByText("Alpha recent", { exact: true }) });
   await row.click();
   await row.hover();
   await row.getByRole("button", { name: /Delete chat/ }).click();

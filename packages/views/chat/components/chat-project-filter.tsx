@@ -17,7 +17,7 @@ export function ChatProjectFilter({ projects, projectId, onChange }: {
     ...projects.map((project) => ({ value: project.id, label: project.title })),
   ];
   return (
-    <div className="flex min-w-0 items-center gap-1 px-3 py-2">
+    <div className="flex min-w-0 shrink-0 items-center gap-1 px-3 py-2">
       <Select items={items} value={projectId ?? ""} onValueChange={(value) => onChange(value || null)}>
         <SelectTrigger size="sm" aria-label={t(($) => $.project_filter.label)} className="min-w-0 flex-1">
           <SelectValue className="truncate" />

@@ -35,7 +35,6 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
@@ -48,33 +47,6 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
-
-// Concave tab flares need an opaque backing beneath translucent border arcs
-// to avoid compositing a second keyline over the content ring. Read that backdrop
-// from SIDEBAR_WRAPPER_FILL_CLASS rather than duplicating the wrapper's fill rule.
-// Mask the transparent notch so the backing cannot paint over a neighboring hover
-// pill, while retaining backing beneath the arc's antialiasing.
-const TAB_FLARE_RADIUS = 10;
-const tabFlareGradient = (side: "left" | "right") => {
-  const r = TAB_FLARE_RADIUS;
-  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
-};
-const tabFlareNotchMask = (side: "left" | "right") => {
-  const r = TAB_FLARE_RADIUS;
-  return `radial-gradient(circle at top ${side}, transparent ${r - 1.6}px, black ${r - 1.2}px)`;
-};
-// The flares are mirror images: the offset overlaps the tab edge by 1px so arc
-// and side border meet, and gradient and mask share the corner the offset picks.
-const tabFlareStyle = (side: "left" | "right"): React.CSSProperties => {
-  const overhang = -TAB_FLARE_RADIUS + 1;
-  const mask = tabFlareNotchMask(side);
-  return {
-    ...(side === "left" ? { left: overhang } : { right: overhang }),
-    backgroundImage: tabFlareGradient(side),
-    maskImage: mask,
-    WebkitMaskImage: mask,
-  };
-};
 
 type TabSnapshot = {
   workspaceSlug: string | null;
@@ -164,7 +136,6 @@ function SortableTabItem({
   canCloseOthers,
   isNew,
   shouldReduceMotion,
-  showSeparator,
 }: {
   tab: Tab;
   isActive: boolean;
@@ -177,11 +148,6 @@ function SortableTabItem({
   canCloseOthers: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
-  /**
-   * Hairline on the tab's left edge — hidden next to the active tab, and
-   * faded out while either of the two tabs it divides is hovered.
-   */
-  showSeparator: boolean;
 }) {
   const { t } = useT("settings");
   const setActiveTab = useTabStore((s) => s.setActiveTab);
@@ -296,14 +262,11 @@ function SortableTabItem({
       data-tab-entering={isEntering ? "true" : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        // The 36px frame contains a centered 32px content row and a 4px
-        // bottom connector. Keep the connector clickable without letting it
-        // shift the icon, title, or hover actions below the toolbar center.
-        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 pb-1 text-caption transition-colors",
+        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
         "select-none cursor-default",
         isActive
-          ? "font-medium text-foreground"
-          : "text-muted-foreground hover:text-sidebar-accent-foreground",
+          ? "text-foreground"
+          : "text-muted-foreground hover:text-foreground",
         isDragging && "opacity-60",
       )}
     >
@@ -347,7 +310,7 @@ function SortableTabItem({
       style={style}
       data-tab-frame
       data-tab-id={tab.id}
-      className={cn("h-9 w-40 min-w-32", isActive && "z-10")}
+      className={cn("h-full w-56 min-w-32", isActive && "z-10")}
     >
       <motion.div
         className="group/tab relative size-full"
@@ -356,46 +319,19 @@ function SortableTabItem({
         transition={{ duration: isEntering ? 0.18 : 0, ease: TAB_ENTRY_EASE }}
         onAnimationComplete={() => setIsEntering(false)}
       >
-        {isActive ? (
-          // Merged-tab chrome: a bordered cap, a borderless base whose fill
-          // runs into the content card below (covering its top ring), and two
-          // flares whose arcs hand the keyline over to the card's ring. The
-          // flares overlap the tab edge by 1px so arc and side border meet.
-          <span
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-0",
-              isDragging && "opacity-60",
-            )}
-          >
-            {/* Keep the fill inside the translucent keyline so it matches the
-                flare arcs and content card ring. */}
-            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
-            <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
-            <span
-              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
-              style={tabFlareStyle("left")}
-            />
-            <span
-              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
-              style={tabFlareStyle("right")}
-            />
-          </span>
-        ) : (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
-          />
-        )}
-        {showSeparator && (
-          // Fades in step with the neighbouring hover pill: both use a bare
-          // transition-opacity, so the hairline clears exactly as the pill
-          // arrives rather than lingering 2px off its rounded edge.
-          <span
-            aria-hidden
-            className="pointer-events-none absolute left-0 top-2 h-4 w-px bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
-          />
-        )}
+        {/* Every tab is a pill on the title bar; the active one is made of
+            the content card's own material so it reads as the card's tab
+            without having to join it. */}
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg transition-colors",
+            isActive
+              ? "bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border"
+              : "bg-page-canvas/50 group-hover/tab:bg-page-canvas/80",
+            isDragging && "opacity-60",
+          )}
+        />
         <ContextMenu>
           <TooltipHint label={tab.pinned ? tabName : undefined} side="bottom">
             <ContextMenuTrigger render={tabButton} />
@@ -445,7 +381,7 @@ function SortableTabItem({
         {showAddedHighlight && (
           <motion.span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+            className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
             initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
             animate={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
@@ -491,7 +427,7 @@ function NewTabEdgeFeedback({
       key={`${signal.tabId}-${signal.sequence}`}
       aria-hidden
       data-new-tab-edge-feedback="true"
-      className="pointer-events-none absolute top-1 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
+      className="pointer-events-none absolute inset-y-1.5 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
       initial={{
         opacity: shouldReduceMotion ? 0.45 : 0,
         x: shouldReduceMotion ? 0 : 4,
@@ -646,7 +582,7 @@ export function TabBar() {
   };
 
   return (
-    <div className="flex h-full w-full min-w-0 max-w-full items-center justify-start gap-0.5 px-2">
+    <div className="flex h-full w-full min-w-0 max-w-full items-center justify-start gap-1.5 px-2">
       <div className="relative flex h-full min-w-0 flex-1 items-center">
         <DndContext
           sensors={sensors}
@@ -654,48 +590,36 @@ export function TabBar() {
           modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
           onDragEnd={handleDragEnd}
         >
-          {/* px-4 keeps the active tab's flares inside the scroller's clip
-              (overflow clips at the padding box) and clears the content
-              card's rounded top-left corner below the first tab. */}
+          {/* px-px keeps the active pill's ring inside the scroller's clip. */}
           <div
             ref={tabScrollRef}
             data-tab-scroll-container
-            className="no-scrollbar flex h-full min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden overscroll-x-contain px-4"
+            className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain px-px"
             style={tabFadeStyle}
           >
             <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
-              {tabs.map((tab, index) => {
-                const previousTab = index > 0 ? tabs[index - 1] : null;
-                return (
-                  <Fragment key={tab.id}>
-                    <SortableTabItem
-                      tab={tab}
-                      isActive={tab.id === activeTabId}
-                      isOnly={tabs.length === 1}
-                      canCloseOthers={tabs.some(
-                        (candidate) => candidate.id !== tab.id && !candidate.pinned,
-                      )}
-                      isNew={addedTabIdSet.has(tab.id)}
-                      shouldReduceMotion={shouldReduceMotion}
-                      showSeparator={
-                        !!previousTab &&
-                        tab.id !== activeTabId &&
-                        previousTab.id !== activeTabId &&
-                        // the pinned-zone divider already separates this pair
-                        !(previousTab.pinned && !tab.pinned)
-                      }
-                    />
-                    {tab.pinned &&
-                      index === pinnedCount - 1 &&
-                      unpinnedCount > 0 && (
-                        <div
-                          aria-hidden
-                          className="mx-1 mb-3 h-4 w-px shrink-0 self-end bg-surface-border"
-                        />
-                      )}
-                  </Fragment>
-                );
-              })}
+              {tabs.map((tab, index) => (
+                <Fragment key={tab.id}>
+                  <SortableTabItem
+                    tab={tab}
+                    isActive={tab.id === activeTabId}
+                    isOnly={tabs.length === 1}
+                    canCloseOthers={tabs.some(
+                      (candidate) => candidate.id !== tab.id && !candidate.pinned,
+                    )}
+                    isNew={addedTabIdSet.has(tab.id)}
+                    shouldReduceMotion={shouldReduceMotion}
+                  />
+                  {tab.pinned &&
+                    index === pinnedCount - 1 &&
+                    unpinnedCount > 0 && (
+                      <div
+                        aria-hidden
+                        className="h-4 w-px shrink-0 bg-surface-border"
+                      />
+                    )}
+                </Fragment>
+              ))}
             </SortableContext>
           </div>
         </DndContext>

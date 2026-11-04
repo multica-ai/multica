@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -78,6 +80,7 @@ var agentGitExcludePatterns = []string{
 	".codebuddy",
 	".pi",
 	".omp",
+	".zcode",
 }
 
 const repoCacheGitTimeout = 10 * time.Minute
@@ -776,6 +779,10 @@ type WorktreeResult struct {
 	// that no remote-tracking ref reaches.
 	UncommittedFiles int `json:"uncommitted_files,omitempty"`
 	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
+	// FetchError is set when refreshing the cache from the remote failed and
+	// the checkout was based on what the cache already held, so it may be
+	// behind the remote. It carries the redacted git error for the caller.
+	FetchError string `json:"fetch_error,omitempty"`
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -840,13 +847,15 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// to the modern remote-tracking layout on first run, so subsequent fetches
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
+	var fetchErr string
 	if err := gitFetchContext(ctx, barePath); err != nil {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		// Non-fatal: preserve cached state and continue, but make the warning
-		// loud enough that it's findable in the daemon log. The agent will
-		// receive an older snapshot than the remote head.
+		// Non-fatal: preserve cached state and continue. The agent will
+		// receive an older snapshot than the remote head, so the result
+		// carries the error back to the CLI as well as the daemon log.
+		fetchErr = redact.Text(err.Error())
 		c.logger.Warn("repo checkout: fetch failed, agent will see possibly stale code",
 			"url", params.RepoURL,
 			"error", err,
@@ -888,6 +897,19 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	dirName := repoNameFromURL(params.RepoURL)
 	worktreePath := filepath.Join(params.WorkDir, dirName)
 
+	if reason := orphanedWorktreeReason(worktreePath); reason != "" {
+		movedTo, err := moveAside(worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("move orphaned worktree aside: %w", err)
+		}
+		c.logger.Warn("repo checkout: moved orphaned worktree aside",
+			"url", params.RepoURL,
+			"path", worktreePath,
+			"reason", reason,
+			"moved_to", movedTo,
+		)
+	}
+
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
 	// that omits the mode hint. This also makes provider transitions on a reused
@@ -917,6 +939,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: isolated checkout ready", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -947,6 +970,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
+		result.FetchError = fetchErr
 		c.logCheckoutReady("repo checkout: existing worktree updated", params.RepoURL, baseRef, result)
 		return result, nil
 	}
@@ -985,6 +1009,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	return &WorktreeResult{
 		Path:       worktreePath,
 		BranchName: actualBranch,
+		FetchError: fetchErr,
 	}, nil
 }
 
@@ -1492,9 +1517,115 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 		err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
 	}
 	if err != nil {
+		// A cancelled git is killed before it can clean up, and the leftover
+		// tree would otherwise be reused by every later checkout of this
+		// workdir. Any other failure leaves the path alone: the pre-check only
+		// holds under this repo's lock, and a repo from another cache with the
+		// same basename may have created the path since (see
+		// createIsolatedCheckoutContext).
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			removePartialWorktree(gitRoot, worktreePath)
+		}
 		return "", err
 	}
 	return branchName, nil
+}
+
+// removePartialWorktree removes a checkout a cancelled `git worktree add` left
+// behind, with its registration in gitRoot. A tree whose .git file points into
+// another bare cache belongs to someone else and is kept.
+func removePartialWorktree(gitRoot, worktreePath string) {
+	if adminDir, ok := worktreeAdminDir(worktreePath); !ok || samePath(filepath.Dir(adminDir), filepath.Join(gitRoot, "worktrees")) {
+		_ = os.RemoveAll(worktreePath)
+	}
+	adminDirs, _ := filepath.Glob(filepath.Join(gitRoot, "worktrees", "*"))
+	for _, adminDir := range adminDirs {
+		if owner, ok := worktreeRegistrationOwner(adminDir); ok && samePath(owner, worktreePath) {
+			_ = os.RemoveAll(adminDir)
+		}
+	}
+}
+
+// orphanedWorktreeReason reports why a linked worktree's .git file no longer
+// leads back to it, or "" when it does (or the path is not a linked worktree).
+// A checkout killed mid-add can lose its registration in the bare cache, and
+// git then gives the registration's name, taken from the directory basename,
+// to the next checkout with the same basename. Git commands in the orphan
+// then read, and can rewrite, that other checkout's index and HEAD.
+func orphanedWorktreeReason(worktreePath string) string {
+	adminDir, ok := worktreeAdminDir(worktreePath)
+	if !ok {
+		return ""
+	}
+	owner, ok := worktreeRegistrationOwner(adminDir)
+	if !ok {
+		return "registration " + adminDir + " is missing"
+	}
+	if !samePath(owner, worktreePath) {
+		return "registration " + adminDir + " belongs to " + owner
+	}
+	return ""
+}
+
+// worktreeAdminDir returns the registration a linked worktree's .git file
+// points at.
+func worktreeAdminDir(worktreePath string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return "", false
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return "", false
+	}
+	return resolveGitPath(worktreePath, strings.TrimSpace(gitdir)), true
+}
+
+// worktreeRegistrationOwner returns the worktree directory a registration in
+// <bare>/worktrees/ points back to.
+func worktreeRegistrationOwner(adminDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(adminDir, "gitdir"))
+	if err != nil {
+		return "", false
+	}
+	return filepath.Dir(resolveGitPath(adminDir, strings.TrimSpace(string(data)))), true
+}
+
+// resolveGitPath resolves a path git recorded, which is relative to base when
+// worktree.useRelativePaths is set.
+func resolveGitPath(base, path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(base, path)
+}
+
+// samePath compares paths after resolving symlinks (git records /private/var
+// for macOS's /var) and Windows junctions, including paths that no longer
+// exist.
+func samePath(a, b string) bool {
+	canonical := func(path string) string {
+		if resolved, err := util.ResolveSymlinksBestEffort(path); err == nil {
+			return resolved
+		}
+		return filepath.Clean(path)
+	}
+	return canonical(a) == canonical(b)
+}
+
+// moveAside renames path to a sibling instead of deleting it: an orphaned tree
+// can still hold files an agent wrote. Its .git file still points at a
+// registration another checkout may now own, so it is renamed too, and git
+// run in the moved tree cannot touch that checkout.
+func moveAside(path string) (string, error) {
+	dest := fmt.Sprintf("%s.orphaned-%d", path, time.Now().UnixNano())
+	if err := os.Rename(path, dest); err != nil {
+		return "", err
+	}
+	if err := os.Rename(filepath.Join(dest, ".git"), filepath.Join(dest, ".git.orphaned")); err != nil {
+		return "", fmt.Errorf("moved to %s but could not disable its .git file: %w", dest, err)
+	}
+	return dest, nil
 }
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
