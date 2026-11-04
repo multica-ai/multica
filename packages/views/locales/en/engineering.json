@@ -1,38 +1,76 @@
 {
   "title": "Engineering overview",
-  "summary": {
-    "label": "Project engineering at a glance",
-    "decisions": "Decisions waiting",
-    "stage": "Current stage",
-    "blocked": "Blocked tasks",
-    "recent": "Latest decision"
+  "views": {
+    "label": "Engineering views",
+    "overview": "Overview",
+    "baseline": "Project baseline",
+    "pending": "Revisions waiting for review"
+  },
+  "hero": {
+    "allComplete": "All delivery stages are complete.",
+    "allCompleteHint": "The project is ready for acceptance and archiving.",
+    "review": "All {{count}} tasks in Stage {{stage}} are complete.",
+    "reviewHint": "Time to review the outcome before unlocking the next stage.",
+    "empty": "Start planning delivery from Stage {{stage}}.",
+    "emptyHint": "Add a stage and give it a clear outcome.",
+    "current": "You are in Stage {{stage}} \"{{title}}\", with {{closed}}/{{total}} tasks complete.",
+    "blocked": "{{count}} tasks are blocked and need your attention.",
+    "unblocked": "Nothing is blocked."
   },
   "stage": {
-    "title": "Engineering stages and delivery strategy",
-    "flowLabel": "Engineering stages",
+    "flowLabel": "Delivery stages",
     "summaryLabel": "Delivery strategy",
-    "defaults": {
-      "1": "Discovery",
-      "2": "Specification and baseline",
-      "3": "Incremental delivery",
-      "4": "Four-axis review",
-      "5": "Acceptance and archive"
+    "summaryEmpty": "No delivery strategy has been written yet.",
+    "editSummary": "Edit strategy",
+    "label": "Stage {{number}}",
+    "default": "Stage {{number}}",
+    "add": "Add stage",
+    "newStage": "New stage",
+    "nameLabel": "Stage name",
+    "goalLabel": "Stage goal",
+    "edit": "Edit name and goal",
+    "moveEarlier": "Move stage earlier",
+    "moveLater": "Move stage later",
+    "makeCurrent": "Set as current stage",
+    "completedCount": "{{closed}}/{{total}} complete",
+    "reviewAction": "Review Stage {{stage}} and unlock the next stage",
+    "reviewDialogTitle": "Review Stage {{stage}}",
+    "reviewDialogDescription": "All work in \"{{title}}\" is complete. Confirm the outcome against the baseline before moving the current stage to Stage {{next}}.",
+    "reviewTasksComplete": "{{closed}}/{{total}} tasks complete",
+    "confirmAdvance": "Unlock Stage {{next}}",
+    "status": {
+      "completed": "Complete",
+      "review": "Review needed",
+      "current": "Current",
+      "locked": "Locked"
     }
   },
   "decisions": {
-    "title": "Decisions waiting for you",
-    "count": "{{count}} waiting",
-    "emptyTitle": "No decisions are waiting for you",
-    "noComment": "No explanatory comment is available yet"
+    "title": "Waiting for you",
+    "emptyTitle": "Nothing needs your attention right now.",
+    "loading": "Loading the latest context",
+    "blockedHint": "A blocked task is waiting for a decision",
+    "baselinePending": "Baseline revision v{{number}} needs confirmation",
+    "reviewPending": "Review Stage {{stage}} and unlock the next stage",
+    "reviewHint": "All tasks are complete. Check the outcome before moving on."
   },
   "progress": {
-    "title": "Stage progress and blockers",
-    "emptyTitle": "No tasks in this project",
-    "unstaged": "Without a stage",
-    "stage": "Stage {{number}}",
-    "closed": "{{count}} of {{total}} closed",
-    "blocked": "{{count}} blocked",
-    "percent": "{{percent}}% closed"
+    "blockedGroup": "Blocked",
+    "reviewGroup": "In review",
+    "progressGroup": "In progress",
+    "todoGroup": "To start",
+    "emptyStage": "No tasks are assigned to this stage yet.",
+    "showCompleted": "Show {{count}} completed tasks",
+    "hideCompleted": "Hide {{count}} completed tasks",
+    "outside": "Outside the mainline",
+    "outsideHint": "Unstaged open tasks do not affect stage progress or unlocking.",
+    "outsideEmpty": "No open tasks outside the delivery stages."
+  },
+  "skills": {
+    "title": "Strixnova engineering skill bindings",
+    "loading": "Checking active agent skill bindings",
+    "unavailable": "Skill bindings could not be loaded. Engineering management remains available.",
+    "empty": "No active agent is bound to Strixnova engineering skills. Automatic agent-side engineering capabilities take effect after the skills are bound; this page remains fully available."
   },
   "recent": {
     "title": "What changed since your last visit",
@@ -40,32 +78,65 @@
     "noSummary": "Baseline revision decided"
   },
   "baseline": {
-    "title": "Managed baseline and revision approval",
+    "title": "Engineering baseline",
     "chaptersLabel": "Baseline chapters",
-    "adoptedTitle": "Adopted baseline",
-    "candidateTitle": "Candidate and structured diff",
-    "adoptedLabel": "Adopted",
-    "candidateLabel": "Candidate",
-    "noAdopted": "No baseline has been adopted in this chapter",
-    "noCandidate": "No candidate is waiting in this chapter",
+    "reviewLabel": "Baseline revision review",
+    "revisionWaiting": "Revision v{{number}}",
+    "changeCount": "{{count}} changes",
+    "sourceIssue": "Source task",
+    "reviewModeLabel": "Revision display",
+    "baseMode": "Current v{{number}}",
+    "compareMode": "Compare v{{number}}",
+    "previousChange": "Previous change",
+    "nextChange": "Next change",
     "candidateMissing": "The requested revision was not found",
     "candidateMissingDescription": "The link does not match any current or historical revision. No other candidate was selected.",
-    "warningTitle": "Rule downgrade warnings",
-    "unchanged": "{{count}} unchanged anchors",
     "added": "Added",
     "modified": "Modified",
     "removed": "Removed",
-    "noChanges": "No anchor changes",
+    "removedSection": "This section is removed by the candidate.",
+    "noChanges": "No section changes",
     "openIssuesTitle": "Open tasks after the decision",
     "inFlight": "In flight",
     "queued": "Queued",
     "openIssuesTruncated": "Only the first 200 open tasks are shown.",
     "readOnlyRevision": "This historical revision is read-only and cannot be adopted from this view."
   },
+  "wiki": {
+    "meta": "{{chapters}} chapters · {{sections}} sections",
+    "lensLabel": "Perspective",
+    "lens": {
+      "understand": "Project understanding",
+      "manage": "Project management"
+    },
+    "tocLabel": "Baseline contents",
+    "searchPlaceholder": "Search the baseline",
+    "searchCount": "{{count}} matches",
+    "searchEmpty": "No results for \"{{query}}\"",
+    "readProgress": "Read {{read}}/{{total}} sections",
+    "continueReading": "Continue",
+    "startReading": "Start here",
+    "allRead": "All sections read",
+    "read": "Read",
+    "untitled": "Introduction",
+    "whyLabel": "Why this rule exists",
+    "whyShort": "Why",
+    "exampleShort": "Example",
+    "relatedConcepts": "Related concepts",
+    "backlinks": "Referenced by",
+    "linkedIssues": "Linked tasks",
+    "latestRevision": "Latest revision v{{number}}",
+    "referenceCount": "Referenced by {{count}} sections",
+    "goToSection": "Go to section",
+    "openInOverview": "Open",
+    "noStage": "No delivery stage",
+    "backTo": "Back to \"{{title}}\"",
+    "emptyChapter": "No baseline content has been adopted in this chapter."
+  },
   "chapters": {
-    "overview": "Overview",
+    "overview": "Project overview",
     "domain_rules": "Domain and rules",
-    "architecture": "Architecture",
+    "architecture": "Architecture and decisions",
     "exclusions_and_risks": "Exclusions and risks"
   },
   "status": {
@@ -73,7 +144,7 @@
     "adopted": "Adopted",
     "superseded": "Superseded",
     "withdrawn": "Withdrawn",
-    "rejected": "Rejected",
+    "rejected": "Returned",
     "unknown": "Unknown"
   },
   "credentials": {
@@ -81,13 +152,6 @@
     "pat": "Confirmed with a personal token",
     "agent_task": "Decided by an agent",
     "unknown": "Unknown credential"
-  },
-  "warnings": {
-    "rule_removed": "{{anchor}} removes a mandatory rule",
-    "rule_shrunk": "{{anchor}} substantially weakens a mandatory rule",
-    "rule_deferred": "{{anchor}} defers a mandatory rule",
-    "defer_missing_pool": "{{anchor}} is deferred without a non-blocking pool task",
-    "unknown": "{{anchor}} has an unrecognized rule warning"
   },
   "history": {
     "title": "Revision history",
@@ -104,19 +168,23 @@
   },
   "actions": {
     "save": "Save",
-    "reject": "Reject",
+    "cancel": "Cancel",
+    "close": "Close",
+    "expand": "Show more",
+    "collapse": "Show less",
+    "reject": "Return for changes",
     "adopt": "Adopt",
     "enable": "Enable overview"
   },
   "disabled": {
     "title": "Engineering overview is not enabled",
     "description": "This project keeps its regular interface. Ask a workspace owner or admin to enable the overview.",
-    "adminDescription": "Enable Strixnova to see stages, decisions, progress, and the managed baseline here."
+    "adminDescription": "Enable Strixnova to see delivery stages, decisions, progress, and the managed baseline here."
   },
   "errors": {
     "title": "Engineering data is unavailable",
     "overview": "The project engineering response could not be loaded or was invalid. Try again later.",
-    "timeline": "The decision comment could not be loaded.",
+    "timeline": "The decision context could not be loaded.",
     "decisionIssues": "Tasks waiting for a decision could not be loaded.",
     "graph": "Project stage progress could not be loaded.",
     "history": "Revision history could not be loaded.",
@@ -129,7 +197,7 @@
   "messages": {
     "configSaved": "Engineering settings saved",
     "adopted": "Candidate adopted",
-    "rejected": "Candidate rejected",
+    "rejected": "Candidate returned for changes",
     "serverAuthoritative": "Permissions and revision checks are verified by the server"
   }
 }

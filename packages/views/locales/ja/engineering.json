@@ -1,30 +1,203 @@
 {
   "title": "工程概要",
-  "summary": { "label": "プロジェクト工程の概要", "decisions": "承認待ち", "stage": "現在の段階", "blocked": "ブロック中のタスク", "recent": "最近の承認" },
+  "views": {
+    "label": "工程ビュー",
+    "overview": "概要",
+    "baseline": "プロジェクト基線",
+    "pending": "確認待ちの改訂があります"
+  },
+  "hero": {
+    "allComplete": "すべての交付ステージが完了しました。",
+    "allCompleteHint": "受け入れとアーカイブに進めます。",
+    "review": "Stage {{stage}} の {{count}} 件のタスクがすべて完了しました。",
+    "reviewHint": "結果を振り返り、次のステージを解放しましょう。",
+    "empty": "Stage {{stage}} から交付を計画しましょう。",
+    "emptyHint": "ステージを追加し、成果を一文で示してください。",
+    "current": "現在は Stage {{stage}}「{{title}}」で、{{closed}}/{{total}} 件が完了しています。",
+    "blocked": "{{count}} 件がブロックされ、対応を待っています。",
+    "unblocked": "ブロックされている項目はありません。"
+  },
   "stage": {
-    "title": "工程段階と推進方針", "flowLabel": "工程段階", "summaryLabel": "推進方針",
-    "defaults": { "1": "0→1 要件探索", "2": "仕様と基線の確定", "3": "段階的な開発", "4": "四軸レビュー", "5": "受入とアーカイブ" }
+    "flowLabel": "交付ステージ",
+    "summaryLabel": "推進方針",
+    "summaryEmpty": "推進方針はまだありません。",
+    "editSummary": "方針を編集",
+    "label": "Stage {{number}}",
+    "default": "ステージ {{number}}",
+    "add": "ステージを追加",
+    "newStage": "新しいステージ",
+    "nameLabel": "ステージ名",
+    "goalLabel": "ステージ目標",
+    "edit": "名前と目標を編集",
+    "moveEarlier": "ステージを前へ移動",
+    "moveLater": "ステージを後へ移動",
+    "makeCurrent": "現在のステージに設定",
+    "completedCount": "{{closed}}/{{total}} 完了",
+    "reviewAction": "Stage {{stage}} を振り返り、次を解放",
+    "reviewDialogTitle": "Stage {{stage}} の振り返り",
+    "reviewDialogDescription": "「{{title}}」の作業はすべて完了しました。基線と照合して結果を確認し、現在のステージを Stage {{next}} へ進めてください。",
+    "reviewTasksComplete": "{{closed}}/{{total}} 件のタスクが完了",
+    "confirmAdvance": "Stage {{next}} を解放",
+    "status": {
+      "completed": "完了",
+      "review": "振り返り待ち",
+      "current": "進行中",
+      "locked": "未解放"
+    }
   },
-  "decisions": { "title": "承認が必要な事項", "count": "{{count}} 件承認待ち", "emptyTitle": "現在承認待ちの事項はありません", "noComment": "説明コメントはまだありません" },
+  "decisions": {
+    "title": "対応が必要な項目",
+    "emptyTitle": "今すぐ対応が必要な項目はありません。",
+    "loading": "最新のコンテキストを読み込み中",
+    "blockedHint": "ブロックされたタスクが決定を待っています",
+    "baselinePending": "基線改訂 v{{number}} の確認が必要です",
+    "reviewPending": "Stage {{stage}} を振り返り、次を解放",
+    "reviewHint": "すべてのタスクが完了しました。結果を確認して次へ進みましょう。"
+  },
   "progress": {
-    "title": "段階別の進捗とブロッカー", "emptyTitle": "このプロジェクトにはタスクがありません", "unstaged": "段階未設定", "stage": "第 {{number}} 段階", "closed": "{{total}} 件中 {{count}} 件完了", "blocked": "{{count}} 件ブロック中", "percent": "{{percent}}% 完了"
+    "blockedGroup": "ブロック中",
+    "reviewGroup": "レビュー中",
+    "progressGroup": "進行中",
+    "todoGroup": "未着手",
+    "emptyStage": "このステージにはまだタスクがありません。",
+    "showCompleted": "完了した {{count}} 件を表示",
+    "hideCompleted": "完了した {{count}} 件を隠す",
+    "outside": "メインライン外",
+    "outsideHint": "ステージ未設定の未完了タスクです。進捗と解放条件には影響しません。",
+    "outsideEmpty": "交付ステージ外の未完了タスクはありません。"
   },
-  "recent": { "title": "前回確認後の決定事項", "empty": "承認済みの基線版はまだありません", "noSummary": "基線版が承認されました" },
+  "skills": {
+    "title": "Strixnova 工程 skill のバインド状態",
+    "loading": "アクティブなエージェントの skill を確認中",
+    "unavailable": "skill のバインド状態を読み込めませんでした。工程管理機能は引き続き利用できます。",
+    "empty": "アクティブなエージェントに Strixnova 工程 skill はバインドされていません。エージェント側の自動工程機能はバインド後に有効になりますが、このページの機能には影響しません。"
+  },
+  "recent": {
+    "title": "前回以降の変更",
+    "empty": "決定済みの基線版はまだありません",
+    "noSummary": "基線版が決定されました"
+  },
   "baseline": {
-    "title": "管理基線と改訂承認", "chaptersLabel": "基線の章", "adoptedTitle": "採用済み基線", "candidateTitle": "候補と構造化 Diff", "adoptedLabel": "採用済み", "candidateLabel": "候補", "noAdopted": "この章には採用済み基線がありません", "noCandidate": "この章に承認待ちの候補はありません", "candidateMissing": "指定された改訂版が見つかりません", "candidateMissingDescription": "現在・履歴のいずれの版にも一致しないため、別の候補は選択していません。", "warningTitle": "必須ルールの downgrade 警告", "unchanged": "{{count}} 個のアンカーは未変更", "added": "追加", "modified": "変更", "removed": "削除", "noChanges": "アンカーの変更はありません", "openIssuesTitle": "承認後の未完了タスク", "inFlight": "進行中", "queued": "待機中", "openIssuesTruncated": "最初の 200 件のみ表示しています。", "readOnlyRevision": "これは読み取り専用の履歴版で、ここから採用することはできません。"
+    "title": "工程基線",
+    "chaptersLabel": "基線チャプター",
+    "reviewLabel": "基線改訂のレビュー",
+    "revisionWaiting": "改訂 v{{number}}",
+    "changeCount": "{{count}} 件の変更",
+    "sourceIssue": "元タスク",
+    "reviewModeLabel": "改訂の表示",
+    "baseMode": "正本 v{{number}}",
+    "compareMode": "比較 v{{number}}",
+    "previousChange": "前の変更",
+    "nextChange": "次の変更",
+    "candidateMissing": "指定された改訂が見つかりません",
+    "candidateMissingDescription": "現在または過去のどの改訂にも一致しません。別の候補は選択されていません。",
+    "added": "追加",
+    "modified": "変更",
+    "removed": "削除",
+    "removedSection": "この候補ではこのセクションが削除されます。",
+    "noChanges": "セクションの変更はありません",
+    "openIssuesTitle": "決定後の未完了タスク",
+    "inFlight": "進行中",
+    "queued": "キュー待ち",
+    "openIssuesTruncated": "未完了タスクの最初の 200 件のみを表示しています。",
+    "readOnlyRevision": "これは読み取り専用の過去の改訂です。このビューでは採用できません。"
   },
-  "chapters": { "overview": "プロジェクト概要", "domain_rules": "領域用語と必須ルール", "architecture": "アーキテクチャと技術決定", "exclusions_and_risks": "対象外・延期・リスク" },
-  "status": { "candidate": "承認待ち", "adopted": "採用済み", "superseded": "新版に置換済み", "withdrawn": "撤回済み", "rejected": "却下済み", "unknown": "不明な状態" },
-  "credentials": { "session": "ダッシュボードで承認", "pat": "個人トークンで承認", "agent_task": "エージェントが決定", "unknown": "不明な認証情報" },
-  "warnings": { "rule_removed": "{{anchor}} が必須ルールを削除しています", "rule_shrunk": "{{anchor}} が必須ルールを大幅に縮小しています", "rule_deferred": "{{anchor}} が必須ルールを延期しています", "defer_missing_pool": "{{anchor}} の延期先となる非ブロッキングプールのタスクがありません", "unknown": "{{anchor}} に不明なルール警告があります" },
-  "history": { "title": "改訂履歴", "revision": "第 {{number}} 版", "empty": "この章に改訂履歴はありません", "more": "以前の版を読み込む" },
+  "wiki": {
+    "meta": "{{chapters}} 章 · {{sections}} 節",
+    "lensLabel": "視点",
+    "lens": {
+      "understand": "プロジェクト理解",
+      "manage": "プロジェクト管理"
+    },
+    "tocLabel": "基線の目次",
+    "searchPlaceholder": "基線内を検索",
+    "searchCount": "{{count}} 件一致",
+    "searchEmpty": "「{{query}}」は見つかりませんでした",
+    "readProgress": "{{read}}/{{total}} 節を読了",
+    "continueReading": "続きを読む",
+    "startReading": "ここから読む",
+    "allRead": "すべて読了しました",
+    "read": "読了",
+    "untitled": "はじめに",
+    "whyLabel": "この規則がある理由",
+    "whyShort": "理由",
+    "exampleShort": "例",
+    "relatedConcepts": "関連概念",
+    "backlinks": "被参照",
+    "linkedIssues": "関連タスク",
+    "latestRevision": "最新の改訂 v{{number}}",
+    "referenceCount": "{{count}} 個のセクションから参照",
+    "goToSection": "セクションへ移動",
+    "openInOverview": "開く",
+    "noStage": "ステージ未設定",
+    "backTo": "「{{title}}」に戻る",
+    "emptyChapter": "この章には採用済みの基線がありません。"
+  },
+  "chapters": {
+    "overview": "プロジェクト概要",
+    "domain_rules": "領域とルール",
+    "architecture": "アーキテクチャと決定",
+    "exclusions_and_risks": "対象外とリスク"
+  },
+  "status": {
+    "candidate": "確認待ち",
+    "adopted": "採用済み",
+    "superseded": "新版に置き換え済み",
+    "withdrawn": "撤回済み",
+    "rejected": "差し戻し済み",
+    "unknown": "不明"
+  },
+  "credentials": {
+    "session": "ダッシュボードで確認",
+    "pat": "個人トークンで確認",
+    "agent_task": "エージェントが決定",
+    "unknown": "不明な認証情報"
+  },
+  "history": {
+    "title": "改訂履歴",
+    "revision": "第 {{number}} 版",
+    "empty": "この章の改訂はありません",
+    "more": "過去の改訂を読み込む"
+  },
   "settings": {
-    "title": "工程設定", "enabledLabel": "工程概要を有効にする", "enabledHint": "無効にしてもプロジェクトデータは変わりません。", "decidersLabel": "決定者", "decidersHint": "ワークスペースの owner と admin は常に含まれます。誰も選択しない場合は人間のプロジェクトリードを使用します。"
+    "title": "工程設定",
+    "enabledLabel": "工程概要を有効化",
+    "enabledHint": "無効にしてもプロジェクトデータは変わらず、概要だけが非表示になります。",
+    "decidersLabel": "決定者",
+    "decidersHint": "ワークスペースの owner と admin は常に含まれます。未選択の場合は人間のプロジェクトリードが決定します。"
   },
-  "actions": { "save": "保存", "reject": "却下", "adopt": "採用", "enable": "有効にする" },
-  "disabled": { "title": "工程概要は有効ではありません", "description": "通常のプロジェクト画面のままです。ワークスペースの owner または admin に有効化を依頼してください。", "adminDescription": "Strixnova を有効にすると、段階・承認待ち・進捗・管理基線をここで確認できます。" },
+  "actions": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "expand": "全文を表示",
+    "collapse": "折りたたむ",
+    "reject": "修正を依頼",
+    "adopt": "採用",
+    "enable": "概要を有効化"
+  },
+  "disabled": {
+    "title": "工程概要は有効ではありません",
+    "description": "プロジェクトは通常のインターフェースのままです。ワークスペースの owner または admin に有効化を依頼してください。",
+    "adminDescription": "Strixnova を有効にすると、交付ステージ、決定事項、進捗、管理された基線をここで確認できます。"
+  },
   "errors": {
-    "title": "工程データを取得できません", "overview": "工程データの読み込みに失敗したか、応答が無効です。後でもう一度お試しください。", "timeline": "説明コメントを読み込めませんでした。", "decisionIssues": "承認待ちタスクを読み込めませんでした。", "graph": "段階別の進捗を読み込めませんでした。", "history": "改訂履歴を読み込めませんでした。", "chapter": "この基線の章はサーバー応答にありません。", "decisionTitle": "候補を承認できませんでした", "decision": "候補が変更または承認済みの可能性があります。現在の版を確認して再試行してください。", "configTitle": "工程設定を保存できませんでした", "config": "変更は適用されていません。権限を確認して再試行してください。"
+    "title": "工程データを利用できません",
+    "overview": "工程データの読み込みに失敗したか、応答が無効です。しばらくしてから再試行してください。",
+    "timeline": "決定コンテキストを読み込めませんでした。",
+    "decisionIssues": "決定待ちのタスクを読み込めませんでした。",
+    "graph": "ステージの進捗を読み込めませんでした。",
+    "history": "改訂履歴を読み込めませんでした。",
+    "chapter": "この基線チャプターはサーバー応答にありません。",
+    "decisionTitle": "候補を処理できませんでした",
+    "decision": "候補が変更されたか、すでに処理された可能性があります。現在の改訂を確認して再試行してください。",
+    "configTitle": "工程設定を保存できませんでした",
+    "config": "変更は適用されませんでした。権限を確認して再試行してください。"
   },
-  "messages": { "configSaved": "工程設定を保存しました", "adopted": "候補を採用しました", "rejected": "候補を却下しました", "serverAuthoritative": "権限と版の検証はサーバーで行われます" }
+  "messages": {
+    "configSaved": "工程設定を保存しました",
+    "adopted": "候補を採用しました",
+    "rejected": "候補を修正依頼に戻しました",
+    "serverAuthoritative": "権限と版のチェックはサーバーで検証されます"
+  }
 }

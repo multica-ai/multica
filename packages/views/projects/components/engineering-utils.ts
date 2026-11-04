@@ -1,5 +1,5 @@
-import type { BaselineChapter, EngineeringConfig, IssueGraphNode } from "@multica/core/api";
-import type { Member, Project, TimelineEntry } from "@multica/core/types";
+import type { BaselineChapter, EngineeringConfig, EngineeringStage, IssueGraphNode } from "@multica/core/api";
+import type { Agent, Member, Project, TimelineEntry } from "@multica/core/types";
 
 export const ENGINEERING_CHAPTERS: readonly BaselineChapter[] = [
   "overview",
@@ -8,29 +8,31 @@ export const ENGINEERING_CHAPTERS: readonly BaselineChapter[] = [
   "exclusions_and_risks",
 ];
 
-export const RULE_CUT_WARNINGS = new Set(["rule_removed", "rule_shrunk", "rule_deferred"]);
+export const STRIXNOVA_ENGINEERING_SKILLS = [
+  "strixnova-discovery",
+  "strixnova-architecture-and-slicing",
+  "strixnova-tdd-and-debugging",
+  "strixnova-deck",
+] as const;
 
-export function engineeringStageTitles(markdown: string | undefined): Map<number, string> {
-  const titles = new Map<number, string>();
-  if (!markdown) return titles;
-  const pattern = /^### \[Stage-(\d+)\][ \t]+(.+)$/gm;
-  for (const match of markdown.matchAll(pattern)) {
-    const stage = Number(match[1] ?? 0);
-    const title = match[2]?.trim();
-    if (stage > 0 && title && !titles.has(stage)) titles.set(stage, title);
-  }
-  return titles;
+function decisionCard(content: string, language: "html" | "markdown"): boolean {
+  return new RegExp(`^ {0,3}\`\`\`${language} title="决策卡[^"]*"`, "m").test(content);
 }
 
-export function selectEngineeringComment(entries: readonly TimelineEntry[]): TimelineEntry | null {
-  const comments = entries
-    .filter((entry) => entry.type === "comment" && !entry.deleted_at && entry.content?.trim())
+export function selectEngineeringComment(
+  entries: readonly TimelineEntry[],
+  deciderIds: readonly string[] = [],
+): TimelineEntry | null {
+  const roots = entries
+    .filter((entry) => entry.type === "comment" && !entry.parent_id && !entry.deleted_at && entry.content?.trim())
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
-  const roots = comments.filter((entry) => !entry.parent_id);
-  return roots.find((entry) => {
-    const firstLine = entry.content!.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
-    return /^需要你定\s*\d+\s*件事/.test(firstLine.trim());
-  }) ?? comments[0] ?? null;
+  const unresolved = roots.filter((entry) => !entry.resolved_at);
+  const mentionsDecider = (entry: TimelineEntry) => deciderIds.some((id) => entry.content?.includes(`mention://member/${id}`));
+  return unresolved.find((entry) => decisionCard(entry.content!, "html") || mentionsDecider(entry))
+    ?? unresolved.find((entry) => decisionCard(entry.content!, "markdown"))
+    ?? unresolved[0]
+    ?? roots[0]
+    ?? null;
 }
 
 export interface EngineeringPermissions {
@@ -59,31 +61,92 @@ export function engineeringPermissions(
   };
 }
 
+export type EngineeringStageStatus = "completed" | "review" | "current" | "locked";
+
 export interface EngineeringStageSummary {
-  stage: number | null;
+  stage: number;
+  title: string;
+  goal: string;
+  status: EngineeringStageStatus;
   total: number;
   closed: number;
   blocked: number;
-  open: IssueGraphNode[];
+  inReview: number;
+  inProgress: number;
+  todo: number;
+  tasks: IssueGraphNode[];
 }
 
-export function summarizeEngineeringStages(nodes: readonly IssueGraphNode[]): EngineeringStageSummary[] {
-  const groups = new Map<number | null, EngineeringStageSummary>();
+export interface EngineeringRoadmap {
+  stages: EngineeringStageSummary[];
+  outside: IssueGraphNode[];
+}
+
+export function isClosedEngineeringNode(node: IssueGraphNode): boolean {
+  return node.statusCategory === "done" || node.statusCategory === "closed" || node.statusCategory === "cancelled";
+}
+
+export function buildEngineeringRoadmap(
+  nodes: readonly IssueGraphNode[],
+  configuredStages: readonly EngineeringStage[],
+  currentStage: number,
+): EngineeringRoadmap {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const tasksByStage = new Map<number, IssueGraphNode[]>();
+  const outside: IssueGraphNode[] = [];
   for (const node of nodes) {
-    const key = node.stage;
-    const group = groups.get(key) ?? { stage: key, total: 0, closed: 0, blocked: 0, open: [] };
-    group.total += 1;
-    if (node.statusCategory === "done" || node.statusCategory === "closed") {
-      group.closed += 1;
-    } else {
-      if (node.status === "blocked") group.blocked += 1;
-      group.open.push(node);
+    if (node.stage !== null) {
+      const parent = node.parentIssueId ? nodeById.get(node.parentIssueId) : undefined;
+      if (parent && isClosedEngineeringNode(parent)) continue;
+      const tasks = tasksByStage.get(node.stage) ?? [];
+      tasks.push(node);
+      tasksByStage.set(node.stage, tasks);
+    } else if (!isClosedEngineeringNode(node)) {
+      outside.push(node);
     }
-    groups.set(key, group);
   }
-  return [...groups.values()].sort((a, b) => {
-    if (a.stage === null) return 1;
-    if (b.stage === null) return -1;
-    return a.stage - b.stage;
+
+  const configuredByStage = new Map(configuredStages.map((stage) => [stage.stage, stage]));
+  const stageNumbers = new Set<number>([...configuredByStage.keys(), ...tasksByStage.keys(), currentStage]);
+  const stages = [...stageNumbers].sort((a, b) => a - b).map((stage) => {
+    const configured = configuredByStage.get(stage);
+    const tasks = tasksByStage.get(stage) ?? [];
+    const closed = tasks.filter(isClosedEngineeringNode).length;
+    const status: EngineeringStageStatus = stage < currentStage
+      ? "completed"
+      : stage > currentStage
+        ? "locked"
+        : tasks.length > 0 && closed === tasks.length ? "review" : "current";
+    return {
+      stage,
+      title: configured?.title ?? "",
+      goal: configured?.goal ?? "",
+      status,
+      total: tasks.length,
+      closed,
+      blocked: tasks.filter((node) => !isClosedEngineeringNode(node) && node.status === "blocked").length,
+      inReview: tasks.filter((node) => !isClosedEngineeringNode(node) && node.status === "in_review").length,
+      inProgress: tasks.filter((node) => !isClosedEngineeringNode(node) && node.status === "in_progress").length,
+      todo: tasks.filter((node) => !isClosedEngineeringNode(node) && node.statusCategory === "unstarted").length,
+      tasks,
+    };
+  });
+  return { stages, outside };
+}
+
+export interface StrixnovaSkillBinding {
+  agent: Agent;
+  skills: string[];
+}
+
+export function strixnovaSkillBindings(agents: readonly Agent[]): StrixnovaSkillBinding[] {
+  const coreSkills = new Set<string>(STRIXNOVA_ENGINEERING_SKILLS);
+  return agents.flatMap((agent) => {
+    if (agent.archived_at) return [];
+    const skills = (agent.skills ?? [])
+      .filter((skill) => skill.enabled !== false && coreSkills.has(skill.name))
+      .map((skill) => skill.name)
+      .sort((a, b) => STRIXNOVA_ENGINEERING_SKILLS.indexOf(a as typeof STRIXNOVA_ENGINEERING_SKILLS[number]) - STRIXNOVA_ENGINEERING_SKILLS.indexOf(b as typeof STRIXNOVA_ENGINEERING_SKILLS[number]));
+    return skills.length ? [{ agent, skills }] : [];
   });
 }

@@ -1,30 +1,203 @@
 {
   "title": "엔지니어링 개요",
-  "summary": { "label": "프로젝트 엔지니어링 요약", "decisions": "결정 대기", "stage": "현재 단계", "blocked": "차단된 태스크", "recent": "최근 결정" },
+  "views": {
+    "label": "엔지니어링 보기",
+    "overview": "개요",
+    "baseline": "프로젝트 기준",
+    "pending": "검토가 필요한 수정 사항"
+  },
+  "hero": {
+    "allComplete": "모든 제공 단계가 완료되었습니다.",
+    "allCompleteHint": "프로젝트를 검수하고 보관할 수 있습니다.",
+    "review": "Stage {{stage}}의 작업 {{count}}개가 모두 완료되었습니다.",
+    "reviewHint": "결과를 회고하고 다음 단계를 여세요.",
+    "empty": "Stage {{stage}}에서 제공 계획을 시작하세요.",
+    "emptyHint": "단계를 추가하고 달성할 결과를 적어 보세요.",
+    "current": "현재 Stage {{stage}} ‘{{title}}’이며 {{closed}}/{{total}}개가 완료되었습니다.",
+    "blocked": "{{count}}개 작업이 막혀 있어 확인이 필요합니다.",
+    "unblocked": "막힌 항목이 없습니다."
+  },
   "stage": {
-    "title": "엔지니어링 단계와 추진 전략", "flowLabel": "엔지니어링 단계", "summaryLabel": "추진 전략",
-    "defaults": { "1": "0→1 요구사항 탐색", "2": "명세와 기준선 확정", "3": "증분 개발", "4": "4축 검토", "5": "검수와 보관" }
+    "flowLabel": "제공 단계",
+    "summaryLabel": "추진 방침",
+    "summaryEmpty": "아직 작성된 추진 방침이 없습니다.",
+    "editSummary": "방침 편집",
+    "label": "Stage {{number}}",
+    "default": "단계 {{number}}",
+    "add": "단계 추가",
+    "newStage": "새 단계",
+    "nameLabel": "단계 이름",
+    "goalLabel": "단계 목표",
+    "edit": "이름과 목표 편집",
+    "moveEarlier": "단계를 앞으로 이동",
+    "moveLater": "단계를 뒤로 이동",
+    "makeCurrent": "현재 주력 단계로 설정",
+    "completedCount": "{{closed}}/{{total}} 완료",
+    "reviewAction": "Stage {{stage}} 회고 후 다음 단계 열기",
+    "reviewDialogTitle": "Stage {{stage}} 회고",
+    "reviewDialogDescription": "‘{{title}}’의 작업이 모두 완료되었습니다. 기준과 결과를 대조한 후 주력 단계를 Stage {{next}}(으)로 옮기세요.",
+    "reviewTasksComplete": "작업 {{closed}}/{{total}} 완료",
+    "confirmAdvance": "Stage {{next}} 열기",
+    "status": {
+      "completed": "완료",
+      "review": "회고 필요",
+      "current": "주력 단계",
+      "locked": "잠김"
+    }
   },
-  "decisions": { "title": "결정이 필요한 사항", "count": "{{count}}건 대기 중", "emptyTitle": "현재 결정이 필요한 사항이 없습니다", "noComment": "아직 설명 댓글이 없습니다" },
+  "decisions": {
+    "title": "확인할 항목",
+    "emptyTitle": "지금 확인이 필요한 항목이 없습니다.",
+    "loading": "최신 맥락을 불러오는 중",
+    "blockedHint": "막힌 작업이 결정을 기다리고 있습니다",
+    "baselinePending": "기준 수정 v{{number}} 확인 필요",
+    "reviewPending": "Stage {{stage}} 회고 후 다음 단계 열기",
+    "reviewHint": "모든 작업이 완료되었습니다. 결과를 확인하고 다음으로 이동하세요."
+  },
   "progress": {
-    "title": "단계별 진행과 차단", "emptyTitle": "이 프로젝트에는 태스크가 없습니다", "unstaged": "단계 없음", "stage": "{{number}}단계", "closed": "{{total}}개 중 {{count}}개 완료", "blocked": "{{count}}개 차단됨", "percent": "{{percent}}% 완료"
+    "blockedGroup": "막힘",
+    "reviewGroup": "검토 중",
+    "progressGroup": "진행 중",
+    "todoGroup": "시작 전",
+    "emptyStage": "이 단계에는 아직 작업이 없습니다.",
+    "showCompleted": "완료한 작업 {{count}}개 펼치기",
+    "hideCompleted": "완료한 작업 {{count}}개 접기",
+    "outside": "주요 흐름 밖",
+    "outsideHint": "단계가 없는 미완료 작업으로, 단계 진행과 잠금 해제에 영향을 주지 않습니다.",
+    "outsideEmpty": "제공 단계 밖에 미완료 작업이 없습니다."
   },
-  "recent": { "title": "지난 확인 이후 결정된 사항", "empty": "아직 결정된 기준선 버전이 없습니다", "noSummary": "기준선 버전이 결정되었습니다" },
+  "skills": {
+    "title": "Strixnova 엔지니어링 skill 연결 상태",
+    "loading": "활성 에이전트의 skill 연결을 확인하는 중",
+    "unavailable": "skill 연결 상태를 불러오지 못했습니다. 엔지니어링 관리 기능은 계속 사용할 수 있습니다.",
+    "empty": "활성 에이전트에 Strixnova 엔지니어링 skill이 연결되어 있지 않습니다. 에이전트의 자동 엔지니어링 기능은 skill 연결 후 활성화되지만, 이 페이지의 모든 기능은 그대로 사용할 수 있습니다."
+  },
+  "recent": {
+    "title": "지난 방문 이후 변경 사항",
+    "empty": "아직 결정된 기준 버전이 없습니다",
+    "noSummary": "기준 버전이 결정되었습니다"
+  },
   "baseline": {
-    "title": "관리 기준선과 수정 승인", "chaptersLabel": "기준선 장", "adoptedTitle": "채택된 기준선", "candidateTitle": "후보와 구조화된 Diff", "adoptedLabel": "채택됨", "candidateLabel": "후보", "noAdopted": "이 장에는 채택된 기준선이 없습니다", "noCandidate": "이 장에는 승인 대기 후보가 없습니다", "candidateMissing": "요청한 수정 버전을 찾을 수 없습니다", "candidateMissingDescription": "현재 또는 이전 버전과 일치하지 않아 다른 후보를 선택하지 않았습니다.", "warningTitle": "필수 규칙 downgrade 경고", "unchanged": "앵커 {{count}}개는 변경되지 않음", "added": "추가됨", "modified": "수정됨", "removed": "삭제됨", "noChanges": "앵커 변경이 없습니다", "openIssuesTitle": "결정 후 미완료 태스크", "inFlight": "진행 중", "queued": "대기 중", "openIssuesTruncated": "처음 200개의 미완료 태스크만 표시합니다.", "readOnlyRevision": "읽기 전용 이전 버전으로, 여기에서 채택할 수 없습니다."
+    "title": "엔지니어링 기준",
+    "chaptersLabel": "기준 장",
+    "reviewLabel": "기준 수정 검토",
+    "revisionWaiting": "수정 v{{number}}",
+    "changeCount": "변경 {{count}}건",
+    "sourceIssue": "원본 작업",
+    "reviewModeLabel": "수정 표시 방식",
+    "baseMode": "정본 v{{number}}",
+    "compareMode": "비교 v{{number}}",
+    "previousChange": "이전 변경",
+    "nextChange": "다음 변경",
+    "candidateMissing": "요청한 수정 버전을 찾을 수 없습니다",
+    "candidateMissingDescription": "현재 또는 이전 버전과 일치하지 않습니다. 다른 후보는 선택하지 않았습니다.",
+    "added": "추가됨",
+    "modified": "수정됨",
+    "removed": "삭제됨",
+    "removedSection": "이 후보에서는 이 섹션이 삭제됩니다.",
+    "noChanges": "섹션 변경 사항이 없습니다",
+    "openIssuesTitle": "결정 후 미완료 작업",
+    "inFlight": "진행 중",
+    "queued": "대기 중",
+    "openIssuesTruncated": "미완료 작업 중 처음 200개만 표시합니다.",
+    "readOnlyRevision": "이전 수정 버전은 읽기 전용이며 이 화면에서 채택할 수 없습니다."
   },
-  "chapters": { "overview": "프로젝트 개요", "domain_rules": "도메인 용어와 필수 규칙", "architecture": "아키텍처와 기술 결정", "exclusions_and_risks": "제외 사항·연기·위험" },
-  "status": { "candidate": "승인 대기", "adopted": "채택됨", "superseded": "새 버전으로 대첨됨", "withdrawn": "철회됨", "rejected": "거절됨", "unknown": "알 수 없는 상태" },
-  "credentials": { "session": "대시보드에서 확인", "pat": "개인 토큰으로 확인", "agent_task": "에이전트가 결정", "unknown": "알 수 없는 자격 증명" },
-  "warnings": { "rule_removed": "{{anchor}}이 필수 규칙을 삭제합니다", "rule_shrunk": "{{anchor}}이 필수 규칙을 크게 축소합니다", "rule_deferred": "{{anchor}}이 필수 규칙을 연기합니다", "defer_missing_pool": "{{anchor}}의 연기에 비차단 최적화 풀 태스크가 없습니다", "unknown": "{{anchor}}에 알 수 없는 규칙 경고가 있습니다" },
-  "history": { "title": "버전 기록", "revision": "제 {{number}}판", "empty": "이 장에는 버전 기록이 없습니다", "more": "이전 버전 불러오기" },
+  "wiki": {
+    "meta": "장 {{chapters}}개 · 섹션 {{sections}}개",
+    "lensLabel": "관점",
+    "lens": {
+      "understand": "프로젝트 이해",
+      "manage": "프로젝트 관리"
+    },
+    "tocLabel": "기준 목차",
+    "searchPlaceholder": "기준에서 검색",
+    "searchCount": "일치 {{count}}건",
+    "searchEmpty": "‘{{query}}’에 대한 결과가 없습니다",
+    "readProgress": "섹션 {{read}}/{{total}}개 읽음",
+    "continueReading": "이어 읽기",
+    "startReading": "여기서 시작",
+    "allRead": "모두 읽었습니다",
+    "read": "읽음",
+    "untitled": "소개",
+    "whyLabel": "이렇게 규정한 이유",
+    "whyShort": "이유",
+    "exampleShort": "예시",
+    "relatedConcepts": "관련 개념",
+    "backlinks": "참조됨",
+    "linkedIssues": "연결된 작업",
+    "latestRevision": "최근 수정 v{{number}}",
+    "referenceCount": "섹션 {{count}}개에서 참조",
+    "goToSection": "섹션으로 이동",
+    "openInOverview": "열기",
+    "noStage": "단계 없음",
+    "backTo": "‘{{title}}’(으)로 돌아가기",
+    "emptyChapter": "이 장에는 채택된 기준 내용이 없습니다."
+  },
+  "chapters": {
+    "overview": "프로젝트 개요",
+    "domain_rules": "도메인과 규칙",
+    "architecture": "아키텍처와 결정",
+    "exclusions_and_risks": "제외 사항과 위험"
+  },
+  "status": {
+    "candidate": "확인 대기",
+    "adopted": "채택됨",
+    "superseded": "새 버전으로 대첨됨",
+    "withdrawn": "철회됨",
+    "rejected": "수정 요청됨",
+    "unknown": "알 수 없음"
+  },
+  "credentials": {
+    "session": "대시보드에서 확인",
+    "pat": "개인 토큰으로 확인",
+    "agent_task": "에이전트가 결정",
+    "unknown": "알 수 없는 자격 증명"
+  },
+  "history": {
+    "title": "수정 이력",
+    "revision": "{{number}}판",
+    "empty": "이 장의 수정 이력이 없습니다",
+    "more": "이전 수정 불러오기"
+  },
   "settings": {
-    "title": "엔지니어링 설정", "enabledLabel": "엔지니어링 개요 사용", "enabledHint": "이 옵션을 꺼도 프로젝트 데이터는 변경되지 않습니다.", "decidersLabel": "결정자", "decidersHint": "워크스페이스 owner와 admin은 항상 포함됩니다. 선택한 사람이 없으면 사람 프로젝트 리드가 결정합니다."
+    "title": "엔지니어링 설정",
+    "enabledLabel": "엔지니어링 개요 사용",
+    "enabledHint": "사용 중지하면 프로젝트 데이터는 유지하고 개요만 숨깁니다.",
+    "decidersLabel": "결정자",
+    "decidersHint": "워크스페이스 owner와 admin은 항상 포함됩니다. 선택된 사람이 없으면 사람 프로젝트 리드가 결정합니다."
   },
-  "actions": { "save": "저장", "reject": "거절", "adopt": "채택", "enable": "사용" },
-  "disabled": { "title": "엔지니어링 개요가 활성화되지 않았습니다", "description": "프로젝트는 기존 화면을 유지합니다. 워크스페이스 owner 또는 admin에게 활성화를 요청하세요.", "adminDescription": "Strixnova를 활성화하면 단계·결정 대기·진행·관리 기준선을 여기에서 볼 수 있습니다." },
+  "actions": {
+    "save": "저장",
+    "cancel": "취소",
+    "close": "닫기",
+    "expand": "전체 보기",
+    "collapse": "접기",
+    "reject": "수정 요청",
+    "adopt": "채택",
+    "enable": "개요 사용"
+  },
+  "disabled": {
+    "title": "엔지니어링 개요가 활성화되지 않았습니다",
+    "description": "프로젝트는 기존 화면을 유지합니다. 워크스페이스 owner나 admin에게 활성화를 요청하세요.",
+    "adminDescription": "Strixnova를 활성화하면 제공 단계, 결정 사항, 진행 상황과 관리되는 기준을 여기에서 볼 수 있습니다."
+  },
   "errors": {
-    "title": "엔지니어링 데이터를 불러올 수 없습니다", "overview": "엔지니어링 응답을 불러오지 못했거나 응답이 잘못되었습니다. 나중에 다시 시도하세요.", "timeline": "설명 댓글을 불러오지 못했습니다.", "decisionIssues": "결정 대기 태스크를 불러오지 못했습니다.", "graph": "단계별 진행을 불러오지 못했습니다.", "history": "버전 기록을 불러오지 못했습니다.", "chapter": "서버 응답에 이 기준선 장이 없습니다.", "decisionTitle": "후보를 결정하지 못했습니다", "decision": "후보가 변경되었거나 이미 결정되었을 수 있습니다. 현재 버전을 확인한 후 다시 시도하세요.", "configTitle": "엔지니어링 설정을 저장하지 못했습니다", "config": "변경 사항이 적용되지 않았습니다. 권한을 확인하고 다시 시도하세요."
+    "title": "엔지니어링 데이터를 사용할 수 없습니다",
+    "overview": "프로젝트 엔지니어링 응답을 불러오지 못했거나 응답이 잘못되었습니다. 잠시 후 다시 시도하세요.",
+    "timeline": "결정 맥락을 불러오지 못했습니다.",
+    "decisionIssues": "결정 대기 작업을 불러오지 못했습니다.",
+    "graph": "프로젝트 단계 진행 상황을 불러오지 못했습니다.",
+    "history": "수정 이력을 불러오지 못했습니다.",
+    "chapter": "서버 응답에 이 기준 장이 없습니다.",
+    "decisionTitle": "후보를 처리하지 못했습니다",
+    "decision": "후보가 변경되었거나 이미 처리되었을 수 있습니다. 현재 버전을 확인한 후 다시 시도하세요.",
+    "configTitle": "엔지니어링 설정을 저장하지 못했습니다",
+    "config": "변경 사항이 적용되지 않았습니다. 권한을 확인하고 다시 시도하세요."
   },
-  "messages": { "configSaved": "엔지니어링 설정을 저장했습니다", "adopted": "후보를 채택했습니다", "rejected": "후보를 거절했습니다", "serverAuthoritative": "권한과 버전 검증은 서버에서 수행됩니다" }
+  "messages": {
+    "configSaved": "엔지니어링 설정을 저장했습니다",
+    "adopted": "후보를 채택했습니다",
+    "rejected": "후보에 수정을 요청했습니다",
+    "serverAuthoritative": "권한과 버전 검사는 서버에서 확인합니다"
+  }
 }

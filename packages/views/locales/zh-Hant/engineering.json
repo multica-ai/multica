@@ -1,0 +1,203 @@
+{
+  "title": "工程總覽",
+  "views": {
+    "label": "工程視圖",
+    "overview": "總覽",
+    "baseline": "專案基線",
+    "pending": "有修訂待確認"
+  },
+  "hero": {
+    "allComplete": "所有交付階段都完成了。",
+    "allCompleteHint": "專案可以驗收並收尾歸檔。",
+    "review": "Stage {{stage}} 的 {{count}} 項任務全部完成。",
+    "reviewHint": "該復盤了：確認沒有偏差，再解鎖下一階段。",
+    "empty": "從 Stage {{stage}} 開始規劃交付。",
+    "emptyHint": "新增一個階段，寫清這一階段要交付什麼。",
+    "current": "現在在 Stage {{stage}}「{{title}}」，已完成 {{closed}}/{{total}}。",
+    "blocked": "其中 {{count}} 項被卡住，在等你。",
+    "unblocked": "沒有被卡住的事項。"
+  },
+  "stage": {
+    "flowLabel": "交付階段",
+    "summaryLabel": "推進方針",
+    "summaryEmpty": "還沒有寫下推進方針。",
+    "editSummary": "編輯方針",
+    "label": "Stage {{number}}",
+    "default": "階段 {{number}}",
+    "add": "新增階段",
+    "newStage": "新階段",
+    "nameLabel": "階段名稱",
+    "goalLabel": "階段目標",
+    "edit": "改名稱與目標",
+    "moveEarlier": "前移階段",
+    "moveLater": "後移階段",
+    "makeCurrent": "設為主攻階段",
+    "completedCount": "{{closed}}/{{total}} 完成",
+    "reviewAction": "復盤 Stage {{stage}}，解鎖下一階段",
+    "reviewDialogTitle": "復盤 Stage {{stage}}",
+    "reviewDialogDescription": "「{{title}}」的任務已全部完成。請對照基線確認結果，再將主攻階段推進到 Stage {{next}}。",
+    "reviewTasksComplete": "任務 {{closed}}/{{total}} 完成",
+    "confirmAdvance": "解鎖 Stage {{next}}",
+    "status": {
+      "completed": "已完成",
+      "review": "待復盤",
+      "current": "主攻中",
+      "locked": "未解鎖"
+    }
+  },
+  "decisions": {
+    "title": "等你處理",
+    "emptyTitle": "眼下沒有要你處理的事，團隊正在繼續推進。",
+    "loading": "正在載入最新上下文",
+    "blockedHint": "阻塞任務正在等待拍板",
+    "baselinePending": "基線修訂 v{{number}} 待確認",
+    "reviewPending": "復盤 Stage {{stage}}，解鎖下一階段",
+    "reviewHint": "任務已全部完成，確認結果後再往下走。"
+  },
+  "progress": {
+    "blockedGroup": "卡住了",
+    "reviewGroup": "審閱中",
+    "progressGroup": "進行中",
+    "todoGroup": "待開始",
+    "emptyStage": "這個階段還沒有任務。",
+    "showCompleted": "展開已完成的 {{count}} 項",
+    "hideCompleted": "收起已完成的 {{count}} 項",
+    "outside": "主線之外",
+    "outsideHint": "未分階段的未關閉任務，不影響階段推進與解鎖。",
+    "outsideEmpty": "主線之外沒有未關閉任務。"
+  },
+  "skills": {
+    "title": "Strixnova 工程技能綁定狀態",
+    "loading": "正在檢查活躍智能體的 skill 綁定",
+    "unavailable": "暫時無法讀取 skill 綁定狀態，工程管理功能仍可正常使用。",
+    "empty": "目前尚無活躍智能體綁定 Strixnova 工程管理系列 skill。智能體側自動工程管理能力需綁定 skill 後生效；本頁面的啟用與所有功能不受影響。"
+  },
+  "recent": {
+    "title": "上次看過之後，定了什麼",
+    "empty": "還沒有已拍板的基線版本",
+    "noSummary": "基線版本已拍板"
+  },
+  "baseline": {
+    "title": "工程基線",
+    "chaptersLabel": "基線章節",
+    "reviewLabel": "待確認的基線修訂",
+    "revisionWaiting": "修訂 v{{number}}",
+    "changeCount": "{{count}} 處變更",
+    "sourceIssue": "來源任務",
+    "reviewModeLabel": "修訂顯示方式",
+    "baseMode": "正本 v{{number}}",
+    "compareMode": "對照 v{{number}}",
+    "previousChange": "上一處變更",
+    "nextChange": "下一處變更",
+    "candidateMissing": "找不到連結指定的修訂版本",
+    "candidateMissingDescription": "該連結不匹配任何目前或歷史版本，未替你改選其他候選。",
+    "added": "新增",
+    "modified": "修改",
+    "removed": "刪除",
+    "removedSection": "候選修訂將刪除本小節。",
+    "noChanges": "沒有小節變化",
+    "openIssuesTitle": "拍板後的未完成任務",
+    "inFlight": "在途",
+    "queued": "排隊",
+    "openIssuesTruncated": "僅顯示前 200 項未完成任務。",
+    "readOnlyRevision": "這是歷史版本的唯讀視圖，不能在此處採用。"
+  },
+  "wiki": {
+    "meta": "{{chapters}} 章 · {{sections}} 節",
+    "lensLabel": "視角",
+    "lens": {
+      "understand": "專案理解",
+      "manage": "專案管理"
+    },
+    "tocLabel": "基線目錄",
+    "searchPlaceholder": "在基線中查找",
+    "searchCount": "{{count}} 處匹配",
+    "searchEmpty": "沒有找到「{{query}}」",
+    "readProgress": "已讀 {{read}}/{{total}} 節",
+    "continueReading": "接著讀",
+    "startReading": "從這裡開始",
+    "allRead": "全部讀完了",
+    "read": "已讀",
+    "untitled": "引言",
+    "whyLabel": "為什麼這樣規定",
+    "whyShort": "為什麼",
+    "exampleShort": "例",
+    "relatedConcepts": "相關概念",
+    "backlinks": "被引用",
+    "linkedIssues": "關聯任務",
+    "latestRevision": "最近修訂 v{{number}}",
+    "referenceCount": "被 {{count}} 個小節引用",
+    "goToSection": "跳轉到該節",
+    "openInOverview": "開啟",
+    "noStage": "未分階段",
+    "backTo": "返回「{{title}}」",
+    "emptyChapter": "本章還沒有已採用的基線內容。"
+  },
+  "chapters": {
+    "overview": "專案概覽",
+    "domain_rules": "領域詞彙與核心規則",
+    "architecture": "架構與關鍵技術決定",
+    "exclusions_and_risks": "明確不做、延後與風險"
+  },
+  "status": {
+    "candidate": "待確認",
+    "adopted": "已採用",
+    "superseded": "已被新版取代",
+    "withdrawn": "已撤回",
+    "rejected": "已退回",
+    "unknown": "未知狀態"
+  },
+  "credentials": {
+    "session": "看板確認",
+    "pat": "經個人令牌",
+    "agent_task": "智能體執行",
+    "unknown": "未知憑據"
+  },
+  "history": {
+    "title": "修訂歷史",
+    "revision": "第 {{number}} 版",
+    "empty": "本章還沒有歷史版本",
+    "more": "載入更早版本"
+  },
+  "settings": {
+    "title": "工程設定",
+    "enabledLabel": "啟用工程總覽",
+    "enabledHint": "關閉後隱藏總覽，不改變專案資料。",
+    "decidersLabel": "決定人",
+    "decidersHint": "工作區 owner 和 admin 始終是決定人。未選擇任何人時，由人類專案負責人拍板。"
+  },
+  "actions": {
+    "save": "儲存",
+    "cancel": "取消",
+    "close": "關閉",
+    "expand": "展開全文",
+    "collapse": "收起",
+    "reject": "退回修改",
+    "adopt": "採用",
+    "enable": "啟用總覽"
+  },
+  "disabled": {
+    "title": "尚未啟用工程總覽",
+    "description": "專案仍保持原有介面。請聯絡工作區 owner 或 admin 啟用。",
+    "adminDescription": "啟用 Strixnova 後，可在這裡查看交付階段、待拍板事項、進展和受管基線。"
+  },
+  "errors": {
+    "title": "暫時無法讀取工程資料",
+    "overview": "專案工程資料載入失敗或回應無效，請稍後重試。",
+    "timeline": "決策上下文載入失敗。",
+    "decisionIssues": "待拍板任務載入失敗。",
+    "graph": "專案階段進展載入失敗。",
+    "history": "歷史版本載入失敗。",
+    "chapter": "伺服器回應中沒有這個基線章節。",
+    "decisionTitle": "候選未能完成處理",
+    "decision": "候選可能已變化或已處理，請核對目前版本後重試。",
+    "configTitle": "工程設定未儲存",
+    "config": "修改未生效，請檢查權限後重試。"
+  },
+  "messages": {
+    "configSaved": "工程設定已儲存",
+    "adopted": "候選已採用",
+    "rejected": "候選已退回修改",
+    "serverAuthoritative": "權限與版本校驗均由伺服器執行"
+  }
+}
