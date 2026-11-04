@@ -46,10 +46,22 @@ function responseFor(path: string, rows: ReturnType<typeof sessions>): unknown {
     case "/api/issue-statuses": return { statuses: [] };
     case "/api/properties": return { properties: [], total: 0 };
     case "/api/quick-actions": return { quick_actions: [] };
+    case "/api/search-index/manifest": return {
+      cursor: "0", issue_count: 0, comment_count: 0, project_count: 0, text_bytes: 0,
+    };
+    case "/api/search-index/snapshot": return {
+      issues: [], comments: [], projects: [], next_after_number: 0, done: true,
+    };
+    case "/api/search-index/changes": return {
+      issues: [], comments: [], projects: [], deleted: { issues: [], comments: [], projects: [] },
+      cursor: "0", has_more: false,
+    };
     case `/api/workspaces/${wsId}/members`:
     case "/api/agents": case "/api/runtimes": case "/api/squads":
     case "/api/agent-task-snapshot": case "/api/invitations": case "/api/inbox":
     case "/api/inbox/unread-summary": case "/api/pins": case "/api/assignee-frequency":
+    case "/api/skills": case "/api/autopilots":
+    case "/api/agent-run-counts": case "/api/agent-activity-30d":
       return [];
   }
   const match = /^\/api\/chat\/sessions\/([^/]+)(.*)$/.exec(path);
