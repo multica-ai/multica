@@ -129,8 +129,12 @@ Editing configuration does not change runs already running. Later runs use the a
 Environment variables suit limited-privilege credentials the agent needs at run time, such as a read-only API key or a single-scope token.
 
 <Callout type="warning">
-**`custom_env` values are stored in plaintext in the Multica server database** — they are not "stays on this machine" data. Agent list and detail endpoints no longer return any env values, only an opaque count; only workspace `owner`s and `admin`s can unlock and modify values, and every read or change leaves an audit record. A running agent cannot call the admin endpoints to read another agent's variables.
+**`custom_env` values are stored in plaintext in the Multica server database** — they are not "stays on this machine" data. Agent list and detail endpoints no longer return any env values, only an opaque count; only the agent owner or workspace `owner`s and `admin`s can unlock and modify values, and every read or change leaves an audit record. A running agent cannot call the admin endpoints to read another agent's variables.
 </Callout>
+
+Each variable can also have an optional note, such as its purpose or rotation instructions. Notes are saved separately from values and are never passed to the agent process. They are stored in the server database and revealed through the same restricted, audited environment editor. The agent owner or a workspace owner/admin can access this editor.
+
+Renaming a key in the row editor carries its note. Bulk editing and dotenv paste keep notes for matching keys; new keys start without a note, and deleted keys lose their notes. Dotenv comments are not imported as notes.
 
 Do not use production database admin passwords or other high-value long-lived credentials.
 

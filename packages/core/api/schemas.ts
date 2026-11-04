@@ -4028,3 +4028,11 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+
+/** Env values and notes must stay on the dedicated, audited endpoint. */
+export const AgentEnvResponseSchema = z.object({
+  agent_id: z.string().default(""),
+  custom_env: z.record(z.string(), z.string()),
+  custom_env_notes: z.record(z.string(), z.string()).optional(),
+});

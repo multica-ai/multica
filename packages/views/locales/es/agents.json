@@ -556,6 +556,9 @@
       "char_count_other": "{{count}} caracteres"
     },
     "env": {
+      "bulk_notes_notice": "Las notas se conservan para las claves que no cambian. Usa las filas para renombrar una clave y conservar su nota.",
+      "note_placeholder": "Nota (opcional)",
+      "note_aria": "Nota para {{key}}",
       "intro_readonly": "Se inyectan en el proceso del agente al arrancar. Solo los propietarios y administradores del espacio de trabajo pueden leer o editar los valores; cada revelación y edición queda registrada en el registro de auditoría del espacio de trabajo.",
       "empty_readonly": "No hay variables de entorno configuradas.",
       "intro_prefix": "Se inyectan en el proceso del agente al arrancar (p. ej. ",

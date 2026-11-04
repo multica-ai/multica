@@ -574,6 +574,9 @@
       "char_count_other": "{{count}} caractères"
     },
     "env": {
+      "bulk_notes_notice": "Les notes sont conservées pour les clés inchangées. Utilisez les lignes pour renommer une clé en gardant sa note.",
+      "note_placeholder": "Note (facultative)",
+      "note_aria": "Note pour {{key}}",
       "intro_readonly": "Injectées dans le processus de l'agent au lancement. Seuls les propriétaires et administrateurs de l'espace de travail peuvent lire ou modifier les valeurs ; chaque affichage et chaque modification sont consignés dans le journal d'audit de l'espace de travail.",
       "empty_readonly": "Aucune variable d'environnement configurée.",
       "intro_prefix": "Injectées dans le processus de l'agent au lancement (par exemple ",

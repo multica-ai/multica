@@ -2021,6 +2021,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := rawFields["custom_env_notes"]; ok {
+		writeError(w, http.StatusBadRequest, "custom_env_notes is only accepted on PUT /api/agents/{id}/env")
+		return
+	}
+
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
 	}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -424,5 +424,162 @@ describe("EnvTab values that bulk text cannot represent", () => {
     expect(updateAgentEnv.mock.calls[0]?.[1]).toEqual({
       custom_env: { TRICKY: 'foo" #bar', NEW: "" },
     });
+  });
+});
+
+describe("EnvTab notes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAgentEnv.mockResolvedValue({
+      custom_env: { API_BASE_URL: "https://staging.example.test" },
+      custom_env_notes: { API_BASE_URL: "Staging API" },
+    });
+    updateAgentEnv.mockImplementation(async (_id, body) => {
+      getAgentEnv.mockResolvedValue(body);
+      return body;
+    });
+  });
+
+  it("edits only a note, saves, and retains it on reopen without revealing the value", async () => {
+    const user = userEvent.setup();
+    const view = renderTab();
+    expect(getAgentEnv).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("textbox", { name: /note/i }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    const note = screen.getByRole("textbox", { name: /note/i });
+    expect(note).toHaveValue("Staging API");
+    expect(screen.getByPlaceholderText("value")).toHaveAttribute(
+      "type",
+      "password",
+    );
+    await user.clear(note);
+    await user.type(note, "Rotate with the staging deployment");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
+        custom_env: { API_BASE_URL: "https://staging.example.test" },
+        custom_env_notes: {
+          API_BASE_URL: "Rotate with the staging deployment",
+        },
+      }),
+    );
+    view.unmount();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    expect(screen.getByRole("textbox", { name: /note/i })).toHaveValue(
+      "Rotate with the staging deployment",
+    );
+  });
+
+  it("adds an optional note to a new variable and clears it independently", async () => {
+    getAgentEnv.mockResolvedValue({ custom_env: {}, custom_env_notes: {} });
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    await user.type(screen.getByPlaceholderText("KEY"), "NEW");
+    await user.type(screen.getByPlaceholderText("value"), "new value");
+    const note = screen.getByRole("textbox", { name: /note/i });
+    await user.type(note, "Rotation instructions");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled(),
+    );
+    await user.clear(screen.getByRole("textbox", { name: /note/i }));
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(updateAgentEnv.mock.lastCall?.[1]).toEqual({
+      custom_env: { NEW: "new value" },
+      custom_env_notes: {},
+    });
+  });
+
+  it("carries a note on row rename and removes it with its variable", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    await user.clear(screen.getByPlaceholderText("KEY"));
+    await user.type(screen.getByPlaceholderText("KEY"), "RENAMED");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled(),
+    );
+    expect(updateAgentEnv.mock.lastCall?.[1]).toEqual({
+      custom_env: { RENAMED: "https://staging.example.test" },
+      custom_env_notes: { RENAMED: "Staging API" },
+    });
+    await user.click(screen.getByRole("button", { name: /remove/i }));
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(updateAgentEnv.mock.lastCall?.[1]).toEqual({
+      custom_env: {},
+      custom_env_notes: {},
+    });
+  });
+
+  it("keeps notes by key across temporary bulk edits and rejects duplicate keys", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    await user.click(screen.getByRole("button", { name: /bulk edit/i }));
+    const bulk = screen.getByRole("textbox", { name: /bulk edit/i });
+    expect(bulk).not.toHaveValue(expect.stringContaining("Staging API"));
+    await user.clear(bulk);
+    await user.type(bulk, "API_BASE_URL=new{Enter}API_BASE_URL=duplicate");
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+    expect(updateAgentEnv).not.toHaveBeenCalled();
+    await user.clear(bulk);
+    await user.type(bulk, "API_BASE_URL=new{Enter}OTHER=other");
+    await user.click(screen.getByRole("button", { name: /edit as rows/i }));
+    expect(
+      screen
+        .getAllByRole("textbox", { name: /note/i })
+        .map((el) => (el as HTMLInputElement).value),
+    ).toEqual(["Staging API", ""]);
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(updateAgentEnv.mock.lastCall?.[1]).toEqual({
+      custom_env: { API_BASE_URL: "new", OTHER: "other" },
+      custom_env_notes: { API_BASE_URL: "Staging API" },
+    });
+  });
+
+  it("preserves notes on dotenv paste for matching keys without importing comments", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    fireEvent.paste(screen.getByPlaceholderText("KEY"), {
+      clipboardData: {
+        getData: () => "# comment is not a note\nAPI_BASE_URL=pasted\nNEW=new",
+      },
+    });
+    expect(
+      screen
+        .getAllByRole("textbox", { name: /note/i })
+        .map((el) => (el as HTMLInputElement).value),
+    ).toEqual(["Staging API", ""]);
+    expect(screen.getAllByPlaceholderText("value")[0]).toHaveAttribute(
+      "type",
+      "password",
+    );
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(updateAgentEnv.mock.lastCall?.[1]).toEqual({
+      custom_env: { API_BASE_URL: "pasted", NEW: "new" },
+      custom_env_notes: { API_BASE_URL: "Staging API" },
+    });
+  });
+
+  it("keeps a note draft when saving fails", async () => {
+    updateAgentEnv.mockRejectedValue(new Error("Synthetic save failure"));
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    await user.type(screen.getByRole("textbox", { name: /note/i }), " updated");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Synthetic save failure"),
+    );
+    expect(screen.getByRole("textbox", { name: /note/i })).toHaveValue(
+      "Staging API updated",
+    );
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeEnabled();
   });
 });
