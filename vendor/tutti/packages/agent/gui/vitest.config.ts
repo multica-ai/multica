@@ -11,7 +11,6 @@ const domTypeScriptTests = [
   "agent-gui/agentGuiNode/controller/useAgentGUIConversationSelectionController.spec.ts",
   "agent-gui/agentGuiNode/controller/useAgentGUISubmitInteractionActions.spec.ts",
   "agent-gui/agentGuiNode/model/agentGuiComposerGate.spec.ts",
-  "agent-message-center/messageCenterFilterPreferences.spec.ts",
   "build/cssSafeSvgDataUrl.spec.ts",
   "shared/agentConversation/lib/copyImageToClipboard.spec.ts",
   "workbench/contribution.test.ts",
