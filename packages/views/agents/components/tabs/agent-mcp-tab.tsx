@@ -13,10 +13,12 @@ import {
 } from "@multica/core/composio";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { buttonVariants } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ComposioToolkitLogo } from "../../../common/composio-toolkit-logo";
 import { AppLink } from "../../../navigation";
 import { useT } from "../../../i18n";
+import { ObjectSectionEmpty } from "../../../layout/object-page";
 
 /**
  * Creator-only MCP tab on the agent detail page (MUL-3870). Lets the agent
@@ -157,18 +159,19 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
           {t(($) => $.tab_body.composio_mcp.load_failed)}
         </p>
       ) : activeSlugs.length === 0 ? (
-        <div className="space-y-2 rounded-lg border border-dashed p-6 text-center">
-          <p className="text-body font-medium">
-            {t(($) => $.tab_body.composio_mcp.empty_title)}
-          </p>
-          <AppLink
-            href={settingsHref}
-            className="inline-flex items-center gap-1.5 text-caption font-medium text-primary hover:underline"
-          >
-            <Plug className="h-3 w-3" />
-            {t(($) => $.tab_body.composio_mcp.empty_link_to_settings)}
-          </AppLink>
-        </div>
+        <ObjectSectionEmpty
+          icon={Plug}
+          title={t(($) => $.tab_body.composio_mcp.empty_title)}
+          description={t(($) => $.tab_body.composio_mcp.empty_link_to_settings)}
+          action={
+            <AppLink
+              href={settingsHref}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              {t(($) => $.tab_body.composio_mcp.open_settings)}
+            </AppLink>
+          }
+        />
       ) : (
         <ul className="divide-y rounded-lg border">
           {activeSlugs.map((slug) => {

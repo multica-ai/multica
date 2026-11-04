@@ -990,6 +990,7 @@ var thinkingDynamicCatalogProviders = map[string]bool{
 	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
+	"zcode":    true,
 }
 
 // acpCatalogThinkingProviders are the ACP runtimes that discover their effort

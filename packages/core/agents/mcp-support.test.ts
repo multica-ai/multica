@@ -8,6 +8,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("devin")).toBe(true);
     // Langcli dispatches to the claude backend.
     expect(providerSupportsMcpConfig("langcli")).toBe(true);
+    expect(providerSupportsMcpConfig("zcode")).toBe(true);
   });
   it("rejects providers whose runtime ignores mcp_config", () => {
     expect(providerSupportsMcpConfig("antigravity")).toBe(false);

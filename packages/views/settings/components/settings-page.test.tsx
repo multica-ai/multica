@@ -1,5 +1,5 @@
 import { fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { configStore } from "@multica/core/config";
@@ -189,7 +189,6 @@ describe("SettingsPage header", () => {
     { search: "", label: "Profile" },
     { search: "tab=preferences", label: "Preferences" },
     { search: "tab=shortcuts", label: "Shortcuts" },
-    { search: "tab=notifications", label: "Inbox" },
     { search: "tab=members", label: "Members" },
     { search: "tab=channels", label: "Messaging" },
     { search: "tab=mcp", label: "MCP servers" },
@@ -463,5 +462,66 @@ describe("SettingsPage search", () => {
       { target: { value: "plugins" } },
     );
     expect(screen.getByText("No matching settings")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage search for the browser notifications row", () => {
+  // The row only renders on web with the Notification API, so search must
+  // follow the same rule or a result opens the page and finds nothing.
+  class FakeNotification {
+    static permission: NotificationPermission = "default";
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function search(value: string) {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+      target: { value },
+    });
+  }
+
+  it("offers it on web when the Notification API exists", () => {
+    vi.stubGlobal("Notification", FakeNotification);
+    renderWithI18n(<SettingsPage />);
+    search("browser");
+    const results = screen.getByRole("listbox", { name: "Search settings" });
+    const option = within(results).getByRole("option", { name: /Browser notifications/ });
+    fireEvent.click(option);
+    expect(push).toHaveBeenCalledWith(
+      "/acme/settings?tab=notifications&section=browser",
+    );
+  });
+
+  it.each(["browser", "notifi"])("leaves it out on desktop when searching %s", (query) => {
+    // Electron exposes Notification too; the desktop shell alone rules it out.
+    vi.stubGlobal("Notification", FakeNotification);
+    vi.stubGlobal("desktopAPI", { pickDirectory: vi.fn() });
+    renderWithI18n(<SettingsPage />);
+    search(query);
+    expect(
+      screen.queryByRole("option", { name: /Browser notifications/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves it out where the Notification API is missing", () => {
+    vi.stubGlobal("Notification", undefined);
+    renderWithI18n(<SettingsPage />);
+    search("browser");
+    expect(
+      screen.queryByRole("option", { name: /Browser notifications/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the other notification results on desktop", () => {
+    vi.stubGlobal("Notification", FakeNotification);
+    vi.stubGlobal("desktopAPI", { pickDirectory: vi.fn() });
+    renderWithI18n(<SettingsPage />);
+    search("notifi");
+    const results = screen.getByRole("listbox", { name: "Search settings" });
+    expect(
+      within(results).getByRole("option", { name: /Show system notifications/ }),
+    ).toBeInTheDocument();
   });
 });

@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create or import a skill."
+      "description": "A skill is a reusable way of working for your agents. Create one, or import it from a runtime."
     },
     "no_matches": {
       "title": "No matches",

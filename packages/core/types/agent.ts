@@ -139,6 +139,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "muse",
   "devin",
   "zeroclaw",
+  "zcode",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -478,6 +479,10 @@ export interface AgentTask {
  * instead. Unlike the aggregate rows there is no `uncosted_*` split here: a
  * `task_usage` row is priced or it isn't, so "uncosted" is just "all of them
  * when cost_usd_ticks is absent", which is what the estimator already assumes.
+ *
+ * `credits_micros` is the charge of a provider that bills in its own credits
+ * instead of exposing tokens (Qoder Cloud Agents), in millionths of a credit.
+ * It has no USD rate and is shown beside the cost, never folded into it.
  */
 export interface TaskUsage {
   provider?: string;
@@ -487,6 +492,7 @@ export interface TaskUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd_ticks?: number;
+  credits_micros?: number;
 }
 
 /**

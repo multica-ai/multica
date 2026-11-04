@@ -32,6 +32,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   // Langcli reuses the claude backend, which reads ExecOptions.McpConfig and
   // passes --mcp-config/--strict-mcp-config.
   "langcli",
+  "zcode",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

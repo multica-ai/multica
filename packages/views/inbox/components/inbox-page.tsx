@@ -26,9 +26,8 @@ import {
   inboxListOptions,
   archivedInboxPagesOptions,
   archivedInboxLookupOptions,
-  groupInboxItemsBySection,
+  deduplicateInboxItems,
   deduplicateArchivedInboxItems,
-  isInboxItemUnread,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
@@ -72,8 +71,7 @@ import {
   ListChecks,
   ArrowLeft,
 } from "@multica/ui/icons";
-import type { InboxItem, InboxSection } from "@multica/core/types";
-import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
+import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -102,7 +100,7 @@ import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
-import { ACTIVITY_SECTION_PARAM, ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
+import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
@@ -127,13 +125,10 @@ export function InboxPage() {
   const urlIssue = searchParams.get("issue") ?? "";
   const urlView: InboxView =
     searchParams.get("view") === ARCHIVED_VIEW_PARAM ? "archived" : "inbox";
-  const urlSection: InboxSection =
-    searchParams.get("section") === ACTIVITY_SECTION_PARAM ? "activity" : "action";
   const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
   const [view, setViewState] = useState<InboxView>(() => urlView);
-  const [section, setSectionState] = useState<InboxSection>(() => urlSection);
   // The row the user opened under the unread filter. Opening it marks it read,
   // so the filter would otherwise drop the row before the detail finishes
   // mounting. Scoped to the selection: moving away releases it.
@@ -151,9 +146,6 @@ export function InboxPage() {
   useEffect(() => {
     setViewState(urlView);
   }, [urlView]);
-  useEffect(() => {
-    setSectionState(urlSection);
-  }, [urlSection]);
 
   const wsId = useWorkspaceId();
   const isArchivedView = view === "archived";
@@ -162,8 +154,7 @@ export function InboxPage() {
   const { data: rawItems = [], isLoading: loading } = useQuery({
     ...inboxListOptions(wsId), enabled: !isArchivedView,
   });
-  const sections = useMemo(() => groupInboxItemsBySection(rawItems), [rawItems]);
-  const items = sections[section];
+  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   const archiveQuery = useInfiniteQuery({
     ...archivedInboxPagesOptions(wsId, filters), enabled: isArchivedView,
   });
@@ -270,10 +261,9 @@ export function InboxPage() {
   // carry the other one — a bare `?issue=` would silently drop the user out of
   // the archived view on the next selection.
   const buildInboxUrl = useCallback(
-    (nextView: InboxView, key: string, nextSection: InboxSection) => {
+    (nextView: InboxView, key: string) => {
       const params = new URLSearchParams();
       if (nextView === "archived") params.set("view", ARCHIVED_VIEW_PARAM);
-      else if (nextSection === "activity") params.set("section", ACTIVITY_SECTION_PARAM);
       if (key) params.set("issue", key);
       const query = params.toString();
       const inboxPath = wsPaths.inbox();
@@ -284,8 +274,8 @@ export function InboxPage() {
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
-    replace(buildInboxUrl(view, key, section));
-  }, [replace, buildInboxUrl, view, section]);
+    replace(buildInboxUrl(view, key));
+  }, [replace, buildInboxUrl, view]);
 
   // Switching views always clears the selection: the two lists are mutually
   // exclusive, so a key carried across would never resolve, and the fallback
@@ -293,16 +283,7 @@ export function InboxPage() {
   const setView = useCallback((nextView: InboxView) => {
     setViewState(nextView);
     setSelectedKeyState("");
-    replace(buildInboxUrl(nextView, "", section));
-  }, [replace, buildInboxUrl, section]);
-
-  // Switching sections clears the selection unless a key is carried on
-  // purpose: the deep-link fallback below moves a link to the section that
-  // holds its issue.
-  const setSection = useCallback((nextSection: InboxSection, key = "") => {
-    setSectionState(nextSection);
-    setSelectedKeyState(key);
-    replace(buildInboxUrl("inbox", key, nextSection));
+    replace(buildInboxUrl(nextView, ""));
   }, [replace, buildInboxUrl]);
 
   // Applying a filter can remove the open row from the list. Clear that local
@@ -334,22 +315,10 @@ export function InboxPage() {
       setSelectedKey("");
       return;
     }
-    // A link that never resolved may name an issue the other section holds
-    // (an issue with only activity, say): open it there.
-    if (!isArchivedView) {
-      const otherSection: InboxSection = section === "action" ? "activity" : "action";
-      if (sections[otherSection].some((i) => (i.issue_id ?? i.id) === selectedKey)) {
-        setSection(otherSection, selectedKey);
-        return;
-      }
-    }
     replace(wsPaths.issueDetail(selectedKey));
   }, [
     viewLoading,
     isArchivedView,
-    section,
-    sections,
-    setSection,
     archivedError,
     lookupLoading,
     lookupError,
@@ -392,7 +361,7 @@ export function InboxPage() {
   // in handleSelect so URL-driven selection triggers it too.
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
-  const selectedRead = selected ? !isInboxItemUnread(selected) : undefined;
+  const selectedRead = selected?.read;
   useEffect(() => {
     if (!selectedId || selectedRead) return;
     if (manualUnreadIdRef.current === selectedId) return;
@@ -592,7 +561,7 @@ export function InboxPage() {
   };
 
   const handleArchiveAllRead = () => {
-    const readKeys = items.filter((i) => !isInboxItemUnread(i)).map((i) => i.issue_id ?? i.id);
+    const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey("");
     archiveAllReadMutation.mutate(undefined, {
       onError: (err) =>
@@ -775,11 +744,7 @@ export function InboxPage() {
         emptyLabel={
           hasActiveFilters && visibleItems.length === 0
             ? t(($) => $.filters.empty)
-            : isArchivedView
-              ? undefined
-              : section === "activity"
-                ? t(($) => $.sections.activity_empty)
-                : t(($) => $.sections.action_empty)
+            : undefined
         }
         emptyAction={
           hasActiveFilters && visibleItems.length === 0 ? (
@@ -796,28 +761,9 @@ export function InboxPage() {
     </InboxContextMenuProvider>
   );
 
-  const sectionTabs = isArchivedView ? null : (
-    <Tabs
-      value={section}
-      onValueChange={(value) => setSection(value as InboxSection)}
-      className="shrink-0 px-3 pb-2"
-    >
-      <TabsList className="w-full">
-        <TabsTrigger value="action">
-          {t(($) => $.sections.action)}
-          {unreadCount > 0 && (
-            <span className="text-caption tabular-nums text-brand">{unreadCount}</span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="activity">{t(($) => $.sections.activity)}</TabsTrigger>
-      </TabsList>
-    </Tabs>
-  );
-
   const listPanel = (
     <>
       {listHeader}
-      {sectionTabs}
       {lookupLoading && (
         <p role="status" className="shrink-0 border-b px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.list.loading_selection)}
@@ -1086,7 +1032,7 @@ export function InboxPage() {
   if (viewLoading) {
     return (
       <div className="flex min-h-0 flex-1">
-        <ListColumn collapsed={listCollapsed}>
+        <ListColumn collapsed={listCollapsed} width="list">
           <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
             <Skeleton className="h-5 w-16" />
           </div>
@@ -1112,7 +1058,7 @@ export function InboxPage() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed}>{listPanel}</ListColumn>
+      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {detailContent ?? (
           <>
@@ -1136,11 +1082,7 @@ export function InboxPage() {
                 ? t(($) => $.detail.select_prompt)
                 : isArchivedView
                   ? t(($) => $.list.archived_empty)
-                  : rawItems.some((i) => !i.archived)
-                    ? section === "activity"
-                      ? t(($) => $.sections.activity_empty)
-                      : t(($) => $.sections.action_empty)
-                    : t(($) => $.detail.empty)}
+                  : t(($) => $.detail.empty)}
             </p>
           </div>
           </>

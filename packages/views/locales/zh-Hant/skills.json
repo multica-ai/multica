@@ -22,7 +22,7 @@
     },
     "empty": {
       "title": "還沒有 skill",
-      "description": "建立或匯入一個 skill。"
+      "description": "skill 是 AI 代理可重複使用的做事方法。建立一個，或從執行時匯入。"
     },
     "no_matches": {
       "title": "無匹配",

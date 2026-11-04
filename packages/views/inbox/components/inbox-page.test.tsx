@@ -74,16 +74,8 @@ vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
   archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
-  groupInboxItemsBySection: (items: InboxItem[]) => {
-    const active = items.filter((i) => !i.archived);
-    return {
-      action: active.filter((i) => i.section !== "activity"),
-      activity: active.filter((i) => i.section === "activity"),
-    };
-  },
+  deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
-  inboxItemSection: (item: InboxItem) => (item.section === "activity" ? "activity" : "action"),
-  isInboxItemUnread: (item: InboxItem) => !item.read && item.section !== "activity",
   useInboxUnreadCount: () => 2,
 }));
 
@@ -330,16 +322,16 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
-  // The list takes the space panel's width, so its divider lines up with the
-  // panel's when switching spaces.
-  it("sizes the desktop list with the shared panel width", () => {
+  // Inbox rows need more room than the nav's labels, so the list is sized by
+  // the list width rather than the space panel's.
+  it("sizes the desktop list with the list column width", () => {
     reset();
     layout.width = DESKTOP;
 
     const { container } = render(<InboxPage />);
 
     expect(container.querySelector("[data-slot='list-column']")).toHaveClass(
-      "w-(--sidebar-width)",
+      "w-[min(var(--list-column-width),40vw)]",
     );
   });
 
@@ -1120,49 +1112,5 @@ describe("InboxPage", () => {
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
-  });
-});
-
-describe("InboxPage sections", () => {
-  const mention = () =>
-    item({ id: "mention", issue_id: "issue-a", type: "mentioned", actor_type: "member", section: "action", read: false });
-  const status = () =>
-    item({ id: "status", issue_id: "issue-b", type: "status_changed", section: "activity", read: false });
-  const rows = () => screen.queryAllByTestId("row").map((row) => row.textContent);
-
-  it("opens on the action section and switches to activity", () => {
-    reset();
-    listData.active = [mention(), status()];
-    render(<InboxPage />);
-
-    expect(rows()).toEqual(["mention"]);
-    // Activity is never unread, so its tab carries no count.
-    expect(screen.getAllByRole("tab")[1]!.textContent).not.toMatch(/\d/);
-    fireEvent.click(screen.getAllByRole("tab")[1]!);
-
-    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?section=activity");
-    expect(rows()).toEqual(["status"]);
-  });
-
-  it("does not auto-mark an opened activity row read", () => {
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [mention(), status()];
-    searchParams = new URLSearchParams("section=activity&issue=issue-b");
-    render(<InboxPage />);
-
-    expect(rows()).toEqual(["status"]);
-    expect(issueDetailProps.at(-1)?.issueId).toBe("issue-b");
-    expect(markReadMutate).not.toHaveBeenCalled();
-  });
-
-  it("moves a link to the section that holds its issue instead of leaving the inbox", () => {
-    reset();
-    listData.active = [mention(), status()];
-    searchParams = new URLSearchParams("issue=issue-b");
-    render(<InboxPage />);
-
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?section=activity&issue=issue-b");
-    expect(replace).not.toHaveBeenCalledWith("/acme/issues/issue-b");
   });
 });

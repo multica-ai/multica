@@ -47,7 +47,15 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent, then assign it issues."
+    "description": "An agent picks up the issues assigned to it and works through them on your runtime.",
+    "setup": {
+      "label": "Setup steps",
+      "runtime": "Connect a runtime",
+      "agent": "Create an agent",
+      "issue": "Assign it an issue",
+      "done": "(done)",
+      "connect_runtime": "Connect"
+    }
   },
   "no_matches": {
     "title": "No matches",
@@ -722,6 +730,7 @@
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
       "empty_link_to_settings": "Connect one in Settings → Integrations",
+      "open_settings": "Open settings",
       "connected": "Connected",
       "toggle_aria": "Allow {{toolkit}} for this agent",
       "saving": "Saving…",

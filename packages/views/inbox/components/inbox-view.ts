@@ -13,10 +13,3 @@
 export type InboxView = "inbox" | "archived";
 
 export const ARCHIVED_VIEW_PARAM = "archived";
-
-/**
- * The main list's section, persisted as `?section=activity`; no parameter
- * means "action". A link that names an issue without a section (an OS banner,
- * a shared URL) still resolves: the page switches to the section that holds it.
- */
-export const ACTIVITY_SECTION_PARAM = "activity";
