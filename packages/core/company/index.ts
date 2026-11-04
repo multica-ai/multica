@@ -28,6 +28,7 @@ export * from "./squad-attention-schema";
 export * from "./squad-attention-queries";
 export * from "./brief-store";
 export * from "./secretary-chat";
+export * from "./secretary-desk";
 export * from "./company-template-types";
 export * from "./company-template-schema";
 export * from "./company-template-mutations";

@@ -50,6 +50,8 @@ server/multica
 # Test artifacts
 test-results/
 apps/web/test-results/
+# Secretary evaluation outputs and score sheets (dated, per run)
+e2e/secretary-eval/results/
 
 # context (agent workspace)
 .context
