@@ -31,6 +31,37 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
     expect(preprocessLinks(source)).toBe(source)
   })
 
+  it.each([
+    ['a quote at a blank line', '> ```\n> https://inside.example', '\n\n'],
+    ['a quote at a line without >', '> ```\n> https://inside.example', '\n'],
+    ['a list item at a blank line', '- ```\n  https://inside.example', '\n\n'],
+    ['a list item at an unindented line', '- ```\n  https://inside.example', '\n'],
+    ['a list nested in a quote', '> - ```\n>   https://inside.example', '\n> '],
+  ])('ends an unclosed fence with %s', (_, code, separator) => {
+    const source = `${code}${separator}https://outside.example`
+    const [range, ...rest] = findFencedCodeRanges(source)
+    expect(rest).toEqual([])
+    expect(range!.start).toBe(0)
+    expect(range!.end).toBeGreaterThanOrEqual(code.length)
+    expect(range!.end).toBeLessThan(source.indexOf('https://outside.example'))
+    expect(preprocessLinks(source)).toBe(
+      `${code}${separator}[https://outside.example](https://outside.example)`,
+    )
+  })
+
+  it('keeps blank lines inside a list item fence', () => {
+    const source = '- ```\n  a\n\n  https://example.com\n  ```'
+    expect(findFencedCodeRanges(source)).toEqual([{ start: 0, end: source.length }])
+  })
+
+  it('lets a line that ends the container open a new fence', () => {
+    const source = '> ```\n> a\n```\nhttps://example.com'
+    expect(findFencedCodeRanges(source)).toEqual([
+      { start: 0, end: 9 },
+      { start: 10, end: source.length },
+    ])
+  })
+
   it.each(['> ', '> > ', '   '])('protects fences with the prefix %j', (prefix) => {
     const source = `${prefix}\`\`\`\`\n${prefix}\`\`\`\n${prefix}https://example.com\n${prefix}\`\`\`\``
     expect(preprocessLinks(source)).toBe(source)
@@ -74,6 +105,13 @@ it('does not join inline code across a blank paragraph boundary', () => {
   const source = 'before `unmatched\n\nhttps://example.com\n` after'
   expect(preprocessLinks(source)).toBe(
     'before `unmatched\n\n[https://example.com](https://example.com)\n` after',
+  )
+})
+
+it('does not join inline code across a CRLF blank line', () => {
+  const source = 'before `unmatched\r\n\r\nhttps://example.com\r\n` after'
+  expect(preprocessLinks(source)).toBe(
+    'before `unmatched\r\n\r\n[https://example.com](https://example.com)\r\n` after',
   )
 })
 

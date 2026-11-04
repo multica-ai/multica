@@ -73,12 +73,21 @@ export function shouldAutoLink(value: string): boolean {
   )
 }
 
-interface FenceLine {
+/**
+ * A block container written before a fence on its opening line. `indent` is
+ * the list item's content column, measured from where its parent's content
+ * starts.
+ */
+type FenceContainer = { kind: 'quote' } | { kind: 'list'; indent: number }
+
+interface FenceRun {
   marker: string
   length: number
   suffix: string
-  quoteDepth: number
-  hasListMarker: boolean
+}
+
+interface FenceLine extends FenceRun {
+  containers: FenceContainer[]
 }
 
 function isSpace(char: string | undefined): boolean {
@@ -89,10 +98,21 @@ function isDigit(char: string | undefined): boolean {
   return char !== undefined && char >= '0' && char <= '9'
 }
 
+function parseFenceRun(line: string, cursor: number): FenceRun | undefined {
+  while (isSpace(line[cursor])) cursor += 1
+  const marker = line[cursor]
+  if (marker !== '`' && marker !== '~') return undefined
+  const start = cursor
+  while (line[cursor] === marker) cursor += 1
+  const length = cursor - start
+  if (length < 3) return undefined
+  return { marker, length, suffix: line.slice(cursor) }
+}
+
 function parseFenceLine(line: string): FenceLine | undefined {
+  const containers: FenceContainer[] = []
   let cursor = 0
-  let quoteDepth = 0
-  let hasListMarker = false
+  let contentStart = 0
 
   // Consume each space and container marker once; ambiguous whitespace must
   // never be redistributed between nested quantifiers on a non-fence line.
@@ -100,61 +120,93 @@ function parseFenceLine(line: string): FenceLine | undefined {
     while (isSpace(line[cursor])) cursor += 1
     const char = line[cursor]
     if (char === '>') {
-      quoteDepth += 1
       cursor += 1
+      if (isSpace(line[cursor])) cursor += 1
+      containers.push({ kind: 'quote' })
     } else if ((char === '-' || char === '+' || char === '*') && isSpace(line[cursor + 1])) {
-      hasListMarker = true
       cursor += 1
+      while (isSpace(line[cursor])) cursor += 1
+      containers.push({ kind: 'list', indent: cursor - contentStart })
     } else if (isDigit(char)) {
       while (isDigit(line[cursor])) cursor += 1
       if ((line[cursor] !== '.' && line[cursor] !== ')') || !isSpace(line[cursor + 1])) {
         return undefined
       }
-      hasListMarker = true
       cursor += 1
+      while (isSpace(line[cursor])) cursor += 1
+      containers.push({ kind: 'list', indent: cursor - contentStart })
     } else {
       break
     }
+    contentStart = cursor
   }
 
-  const marker = line[cursor]
-  if (marker !== '`' && marker !== '~') return undefined
-  const start = cursor
-  while (line[cursor] === marker) cursor += 1
-  const length = cursor - start
-  if (length < 3) return undefined
-  return { marker, length, suffix: line.slice(cursor), quoteDepth, hasListMarker }
+  const run = parseFenceRun(line, cursor)
+  return run && { ...run, containers }
+}
+
+/**
+ * Consume the prefixes of the containers that hold an open fence. Returns the
+ * offset where the fence content starts, or -1 when this line ends one of the
+ * containers. Fenced code is never a lazy continuation, so a quote ends at the
+ * first line without its `>` and a list item at the first non-blank line that
+ * does not reach its content column.
+ */
+function consumeContainers(line: string, containers: FenceContainer[]): number {
+  let cursor = 0
+  for (const container of containers) {
+    if (container.kind === 'quote') {
+      while (isSpace(line[cursor])) cursor += 1
+      if (line[cursor] !== '>') return -1
+      cursor += 1
+      if (isSpace(line[cursor])) cursor += 1
+    } else {
+      const start = cursor
+      while (cursor - start < container.indent && isSpace(line[cursor])) cursor += 1
+      if (cursor - start < container.indent && line.slice(cursor).trim() !== '') return -1
+    }
+  }
+  return cursor
 }
 
 /** Find complete fenced blocks, retaining the opening marker and its length. */
 export function findFencedCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
-  let opening: { start: number; marker: string; length: number; quoteDepth: number } | undefined
+  let opening: ({ start: number } & FenceLine) | undefined
   let offset = 0
 
   for (const line of text.split('\n')) {
-    const fence = parseFenceLine(line)
-    if (fence) {
-      if (!opening) {
-        // Backtick fence info strings cannot themselves contain backticks.
-        if (fence.marker === '~' || !fence.suffix.includes('`')) {
-          opening = { start: offset, marker: fence.marker, length: fence.length, quoteDepth: fence.quoteDepth }
-        }
-      } else if (
-        !fence.hasListMarker &&
-        fence.quoteDepth === opening.quoteDepth &&
-        fence.marker === opening.marker &&
-        fence.length >= opening.length &&
-        fence.suffix.trim() === ''
-      ) {
-        ranges.push({ start: opening.start, end: offset + line.length })
+    if (opening) {
+      const content = consumeContainers(line, opening.containers)
+      if (content === -1) {
+        // The container closed the fence; this line may open another one.
+        ranges.push({ start: opening.start, end: offset - 1 })
         opening = undefined
+      } else {
+        const fence = parseFenceRun(line, content)
+        if (
+          fence &&
+          fence.marker === opening.marker &&
+          fence.length >= opening.length &&
+          fence.suffix.trim() === ''
+        ) {
+          ranges.push({ start: opening.start, end: offset + line.length })
+          opening = undefined
+        }
+        offset += line.length + 1
+        continue
       }
+    }
+
+    const fence = parseFenceLine(line)
+    // Backtick fence info strings cannot themselves contain backticks.
+    if (fence && (fence.marker === '~' || !fence.suffix.includes('`'))) {
+      opening = { start: offset, ...fence }
     }
     offset += line.length + 1
   }
 
-  // CommonMark keeps an unclosed fence literal through the end of the document.
+  // CommonMark keeps an unclosed fence literal through the end of its container.
   if (opening) ranges.push({ start: opening.start, end: text.length })
   return ranges
 }
@@ -190,8 +242,9 @@ export function findCodeRanges(text: string): CodeRange[] {
 
   // Find inline code spans with matching backtick runs.
   // Ignore spans inside fenced code or math blocks.
-  // Inline code can span soft line breaks, but not a blank paragraph boundary.
-  const inlineRegex = /(?<!`)(`+)(?!`)((?:[^\n]|\n(?![ \t]*\n))*?)(?<!`)\1(?!`)/g
+  // Inline code can span soft line breaks, but not a blank paragraph boundary
+  // (LF or CRLF).
+  const inlineRegex = /(?<!`)(`+)(?!`)((?:[^\n]|\n(?![ \t]*\r?\n))*?)(?<!`)\1(?!`)/g
   while ((match = inlineRegex.exec(text)) !== null) {
     const pos = match.index
     const end = pos + match[0].length
