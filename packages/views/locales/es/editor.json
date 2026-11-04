@@ -28,9 +28,9 @@
       "task_list": "Lista de tareas"
     },
     "sub_issue": {
-      "tooltip": "Crear subincidencia a partir de la selección",
+      "tooltip": "Crear subtarea a partir de la selección",
       "created": "Creada {{identifier}}",
-      "create_failed": "No se pudo crear la subincidencia"
+      "create_failed": "No se ha podido crear la subtarea"
     }
   },
   "image": {
@@ -39,12 +39,12 @@
     "copy_link": "Copiar enlace",
     "delete": "Eliminar",
     "link_copied": "Enlace copiado",
-    "copy_link_failed": "No se pudo copiar el enlace",
+    "copy_link_failed": "No se ha podido copiar el enlace",
     "copy_image": "Copiar imagen",
     "image_copied": "Imagen copiada",
-    "copy_image_failed": "No se pudo copiar la imagen",
+    "copy_image_failed": "No se ha podido copiar la imagen",
     "canvas_label": "Lienzo de imagen. Arrastra para desplazar, rueda para hacer zoom, doble clic para alternar el tamaño real.",
-    "unavailable": "Esa imagen ya no está disponible - se omitió."
+    "unavailable": "Esa imagen ya no está disponible: se omitió."
   },
   "canvas": {
     "zoom_in": "Acercar",
@@ -53,10 +53,10 @@
     "zoom_actual": "Tamaño real"
   },
   "attachment": {
-    "download_failed": "No se pudo obtener un enlace de descarga. Inténtalo de nuevo en un momento.",
+    "download_failed": "No se ha podido obtener un enlace de descarga. Inténtalo de nuevo en un momento.",
     "preview": "Vista previa",
     "preview_loading": "Cargando vista previa…",
-    "preview_failed": "No se pudo cargar la vista previa",
+    "preview_failed": "No se ha podido cargar la vista previa",
     "preview_too_large": "El archivo es demasiado grande para previsualizar. Descárgalo.",
     "preview_unsupported": "Este tipo de archivo no se puede previsualizar.",
     "close": "Cerrar",
@@ -78,7 +78,7 @@
     "view_mode": "Vista",
     "view_tree": "Árbol",
     "view_raw": "Sin formato",
-    "structured_parse_failed": "No se pudo analizar este archivo, así que se muestra como texto.",
+    "structured_parse_failed": "No se ha podido analizar este archivo, así que se muestra como texto.",
     "tree_show_more": "Mostrar más (quedan {{count}})",
     "tree_items_one": "{{count}} elemento",
     "tree_items_other": "{{count}} elementos",
@@ -97,14 +97,14 @@
     "copy_link": "Copiar enlace",
     "open_link": "Abrir enlace",
     "link_copied": "Enlace copiado",
-    "copy_failed": "No se pudo copiar"
+    "copy_failed": "No se ha podido copiar"
   },
   "mention": {
     "group_users": "Usuarios",
-    "group_issues": "Incidencias",
+    "group_issues": "Tareas",
     "all_members": "Todos los miembros",
     "agent_badge": "Agente",
-    "squad_badge": "Equipo",
+    "squad_badge": "Squad",
     "searching": "Buscando...",
     "no_results": "Sin resultados",
     "group_current": "Página actual",
@@ -116,7 +116,7 @@
     "no_skills_configured": "No hay skills configuradas",
     "no_results": "Ninguna skill coincide",
     "commands": {
-      "note": "Añadir una nota - no activará ningún agente"
+      "note": "Añadir una nota: no activará ningún agente"
     }
   },
   "code_block": {
@@ -131,19 +131,19 @@
     "uploading": "Subiendo {{filename}}"
   },
   "upload": {
-    "failed": "No se pudo subir {{filename}}: {{reason}}",
+    "failed": "No se ha podido subir {{filename}}: {{reason}}",
     "in_progress": "Subiendo…",
-    "interrupted": "Subida interrumpida - el archivo no se guardó. Adjúntalo de nuevo.",
+    "interrupted": "Subida interrumpida: el archivo no se guardó. Adjúntalo de nuevo.",
     "remove": "Quitar",
     "uploading_label": "Subiendo {{filename}}…",
-    "failed_label": "No se pudo subir {{filename}}"
+    "failed_label": "No se ha podido subir {{filename}}"
   },
   "title_editor": {
     "title_aria_label": "Título"
   },
   "mermaid": {
     "diagram_label": "Diagrama Mermaid",
-    "render_error": "No se pudo renderizar el diagrama Mermaid.",
+    "render_error": "No se ha podido renderizar el diagrama Mermaid.",
     "rendering": "Renderizando diagrama…",
     "viewer_title": "Diagrama",
     "canvas_label": "Lienzo del diagrama. Arrastra para desplazar, rueda para hacer zoom.",
@@ -165,7 +165,7 @@
     "show_all": "Mostrar todo",
     "rendering": "Renderizando...",
     "error_html": "La vista previa encontró un error de script",
-    "error_mermaid": "No se pudo dibujar este diagrama",
+    "error_mermaid": "No se ha podido dibujar este diagrama",
     "error_at_line": "{{message}} (línea {{line}})",
     "view_source": "Ver fuente",
     "copy_error": "Copiar error"

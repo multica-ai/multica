@@ -11,14 +11,14 @@
       "slug_taken": "Esa URL de espacio de trabajo ya está en uso.",
       "slug_reserved": "Esa URL de espacio de trabajo está reservada y no se puede usar.",
       "slug_conflict_toast": "Elige otra URL de espacio de trabajo",
-      "create_failed": "No se pudo crear el espacio de trabajo"
+      "create_failed": "No se ha podido crear el espacio de trabajo"
     }
   },
   "new_page": {
     "back": "Volver",
     "log_out": "Cerrar sesión",
     "title": "Te damos la bienvenida a Multica",
-    "description": "Un solo espacio de trabajo donde tú y tus compañeros de trabajo IA colaboran codo a codo: toman incidencias, dejan comentarios y comparten el mismo contexto.",
+    "description": "Un solo espacio de trabajo donde tú y tus compañeros IA colaboráis codo a codo: tomáis tareas, dejáis comentarios y compartís el mismo contexto.",
     "invite_hint": "Podrás invitar a compañeros cuando tu espacio de trabajo esté listo."
   },
   "creation_disabled": {

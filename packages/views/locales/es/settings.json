@@ -1,12 +1,12 @@
 {
   "issue_statuses": {
-    "title": "Estados de incidencia",
+    "title": "Estados de tarea",
     "loading": "Cargando estados…",
     "add": "Añadir estado",
     "show_archived": "Mostrar archivados ({{count}})",
     "archived_badge": "Archivado",
-    "archived_hint": "Retirado de las nuevas asignaciones. Las incidencias que ya lo usan lo conservan.",
-    "reorder_failed": "No se pudo guardar el nuevo orden.",
+    "archived_hint": "Retirado de las nuevas asignaciones. Las tareas que ya lo usan lo conservan.",
+    "reorder_failed": "No se ha podido guardar el nuevo orden.",
     "actions": {
       "move_up": "Subir",
       "move_down": "Bajar",
@@ -43,19 +43,19 @@
       "cancel": "Cancelar",
       "save": "Guardar",
       "saving": "Guardando…",
-      "save_failed": "No se pudo guardar el estado."
+      "save_failed": "No se ha podido guardar el estado."
     },
     "archive_dialog": {
       "retry": "Reintentar el archivado",
       "title": "¿Archivar este estado?",
-      "description": "Saca todas las incidencias de \"{{name}}\" antes de archivarlo. Una vez vacío, desaparecerá de los tableros y de los selectores de estado.",
-      "in_use_title": "Mueve las incidencias antes de archivar",
-      "in_use": "Incidencias que aún usan este estado: {{count}}. Muévelas a otro estado, incluidas las completadas y las canceladas, e inténtalo de nuevo.",
-      "view_issues": "Ver incidencias",
+      "description": "Saca todas las tareas de \"{{name}}\" antes de archivarlo. Una vez vacío, desaparecerá de los tableros y de los selectores de estado.",
+      "in_use_title": "Mueve las tareas antes de archivar",
+      "in_use": "Tareas que aún usan este estado: {{count}}. Muévelas a otro estado, incluidas las completadas y las canceladas, e inténtalo de nuevo.",
+      "view_issues": "Ver tareas",
       "archiving": "Archivando...",
       "cancel": "Cancelar",
       "confirm": "Archivar",
-      "failed": "No se pudo archivar el estado."
+      "failed": "No se ha podido archivar el estado."
     },
     "category_labels": {
       "unstarted": "Sin empezar",
@@ -70,10 +70,10 @@
       "closed": "Trabajo que no se completará."
     },
     "built_in_descriptions": {
-      "backlog": "Aparcado. Asignar una incidencia aquí nunca inicia una ejecución de agente.",
-      "todo": "En cola. Mover una incidencia aquí inicia el agente asignado.",
+      "backlog": "Aparcado. Asignar una tarea aquí nunca inicia una ejecución de agente.",
+      "todo": "En cola. Mover una tarea aquí inicia el agente asignado.",
       "in_progress": "En desarrollo activo.",
-      "in_review": "Entregado, a la espera de revisión humana. Finaliza la ejecución del piloto automático.",
+      "in_review": "Entregada, a la espera de revisión humana. Finaliza la ejecución de la automatización.",
       "blocked": "Detenido por una dependencia externa.",
       "done": "Completado.",
       "cancelled": "Se decidió no hacerlo."
@@ -87,7 +87,7 @@
   },
   "quick_actions": {
     "title": "Acciones rápidas",
-    "description": "Ejecuta un agente y un prompt predefinidos desde el panel lateral de una incidencia.",
+    "description": "Ejecuta un agente y un prompt predefinidos desde el panel lateral de una tarea.",
     "add": "Nueva acción rápida",
     "search_placeholder": "Buscar acciones rápidas",
     "loading": "Cargando acciones rápidas…",
@@ -121,23 +121,23 @@
     "used_count": "Usada {{count}} veces",
     "create_title": "Nueva acción rápida",
     "edit_title": "Editar acción rápida",
-    "dialog_description": "Se ejecuta como un comentario en la incidencia, como una @mención.",
+    "dialog_description": "Se ejecuta como un comentario en la tarea, como una @mención.",
     "field_name": "Nombre",
     "field_name_placeholder": "Revisión de código",
     "field_target": "Se ejecuta como",
     "field_prompt": "Prompt",
-    "field_prompt_placeholder": "Revisa el código vinculado a esta incidencia. Céntrate en la corrección y los casos límite.",
-    "prompt_hint": "Se envía tal cual. El agente ya ve la incidencia.",
-    "template_not_supported": "Las variables aún no se admiten: elimina {{token}}. El agente ya lee esta incidencia.",
+    "field_prompt_placeholder": "Revisa el código vinculado a esta tarea. Céntrate en la corrección y los casos límite.",
+    "prompt_hint": "Se envía tal cual. El agente ya ve la tarea.",
+    "template_not_supported": "Las variables aún no se admiten: elimina {{token}}. El agente ya lee esta tarea.",
     "delete_title": "¿Eliminar esta acción rápida?",
-    "delete_description": "Desaparecerá del panel lateral de todas las incidencias. Las ejecuciones anteriores quedan en el registro de ejecución. Archívala si puede que la quieras recuperar.",
+    "delete_description": "Desaparecerá del panel lateral de todas las tareas. Las ejecuciones anteriores quedan en el registro de ejecución. Archívala si puede que la quieras recuperar.",
     "no_target": "Sin objetivo",
     "no_target_hint": "Publica un mensaje sin mencionar a nadie."
   },
   "auto_save": {
     "saving": "Guardando…",
     "saved": "Guardado",
-    "failed": "No se pudo guardar",
+    "failed": "No se ha podido guardar",
     "toast_saved": "Cambios guardados"
   },
   "preferences": {
@@ -156,13 +156,13 @@
       "japanese": "日本語",
       "french": "Français",
       "spanish": "Español",
-      "sync_failed": "Idioma guardado en este dispositivo, pero no se pudo sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior."
+      "sync_failed": "Idioma guardado en este dispositivo, pero no se ha podido sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior."
     },
     "timezone": {
       "title": "Zona horaria de visualización",
       "browser_suffix": " (navegador)",
       "hint": "Se usa para fechas y gráficas en todos tus espacios de trabajo.",
-      "sync_failed": "No se pudo guardar tu preferencia de zona horaria.",
+      "sync_failed": "No se ha podido guardar tu preferencia de zona horaria.",
       "empty": "Ninguna zona horaria coincide",
       "search": "Buscar zonas horarias..."
     },
@@ -183,7 +183,7 @@
       "quick": "Crear con agente",
       "unsupported": "No disponible al crear con un agente"
     },
-    "issue_fields_title": "Campos al crear incidencias",
+    "issue_fields_title": "Campos al crear tareas",
     "region_title": "Idioma y región"
   },
   "shortcuts": {
@@ -221,8 +221,8 @@
         "description": "Buscar contenido o ejecutar comandos."
       },
       "createIssue": {
-        "label": "Crear incidencia",
-        "description": "Abre tu flujo de creación de incidencias preferido."
+        "label": "Crear tarea",
+        "description": "Abre tu flujo de creación de tareas preferido."
       },
       "toggleSidebar": {
         "label": "Mostrar u ocultar la barra lateral izquierda",
@@ -237,8 +237,8 @@
         "description": "Abre o cierra la ventana de chat flotante. Al abrirla, el foco va al campo de mensaje."
       },
       "findInIssue": {
-        "label": "Buscar en la incidencia",
-        "description": "Busca dentro del detalle de la incidencia abierta."
+        "label": "Buscar en la tarea",
+        "description": "Busca dentro del detalle de la tarea abierta."
       },
       "archiveInboxItem": {
         "label": "Archivar notificación",
@@ -246,7 +246,7 @@
       },
       "send": {
         "label": "Enviar",
-        "description": "También envía nuevas incidencias."
+        "description": "También envía nuevas tareas."
       },
       "goBack": {
         "label": "Ir atrás",
@@ -265,19 +265,19 @@
         "description": "Abre el chat del espacio de trabajo."
       },
       "goMyIssues": {
-        "label": "Ir a Mis incidencias",
-        "description": "Abre las incidencias asignadas a ti."
+        "label": "Ir a Mis tareas",
+        "description": "Abre las tareas asignadas a ti."
       },
       "goIssues": {
-        "label": "Ir a Incidencias",
-        "description": "Abre la lista de incidencias."
+        "label": "Ir a Tareas",
+        "description": "Abre la lista de tareas."
       },
       "goProjects": {
         "label": "Ir a Proyectos",
         "description": "Abre la lista de proyectos."
       },
       "goAutopilots": {
-        "label": "Ir a Piloto automático",
+        "label": "Ir a Automatizaciones",
         "description": "Abre las automatizaciones del espacio de trabajo."
       },
       "goAgents": {
@@ -285,8 +285,8 @@
         "description": "Abre la lista de agentes."
       },
       "goSquads": {
-        "label": "Ir a Equipos",
-        "description": "Abre la lista de equipos."
+        "label": "Ir a Squads",
+        "description": "Abre la lista de squads."
       },
       "goUsage": {
         "label": "Ir a Uso",
@@ -307,7 +307,7 @@
     },
     "fixed": {
       "title": "Atajos de sistema fijos",
-      "description": "No personalizables. Los atajos de zoom y pestañas solo se aplican en Escritorio.",
+      "description": "No personalizables. Los atajos de zoom y pestañas solo se aplican en la app de escritorio.",
       "open_settings": "Abrir Configuración",
       "close_tab": "Cerrar pestaña activa",
       "select_tab_1_to_8": "Seleccionar pestaña 1-8",
@@ -338,7 +338,7 @@
       "hint": "Mayús+Clic abre la otra opción.",
       "page": "Página completa",
       "peek": "Vista previa lateral",
-      "title": "Apertura de incidencias"
+      "title": "Apertura de tareas"
     }
   },
   "mcp": {
@@ -366,9 +366,9 @@
     "updated_toast": "Servidor MCP compartido actualizado",
     "renamed_toast": "Servidor MCP compartido renombrado",
     "removed_toast": "Servidor MCP compartido eliminado",
-    "save_failed_toast": "No se pudo guardar el servidor MCP compartido",
-    "rename_failed_toast": "No se pudo renombrar el servidor MCP compartido",
-    "remove_failed_toast": "No se pudo eliminar el servidor MCP compartido"
+    "save_failed_toast": "No se ha podido guardar el servidor MCP compartido",
+    "rename_failed_toast": "No se ha podido renombrar el servidor MCP compartido",
+    "remove_failed_toast": "No se ha podido eliminar el servidor MCP compartido"
   },
   "page": {
     "title": "Configuración",
@@ -378,7 +378,7 @@
       "profile": "Perfil",
       "preferences": "Preferencias",
       "shortcuts": "Atajos",
-      "issue": "Incidencia",
+      "issue": "Tarea",
       "notifications": "Notificaciones",
       "tokens": "Tokens de API",
       "general": "General",
@@ -386,7 +386,7 @@
       "labs": "Labs",
       "members": "Miembros",
       "labels": "Etiquetas",
-      "issue_statuses": "Estados de incidencia",
+      "issue_statuses": "Estados de tarea",
       "properties": "Propiedades",
       "quick_actions": "Acciones rápidas",
       "plugins": "Plugins",
@@ -401,7 +401,7 @@
     "groups": {
       "personal": "Personal",
       "workspace": "Espacio de trabajo",
-      "issues": "Configuración de incidencias",
+      "issues": "Configuración de tareas",
       "connections": "Conexiones y extensiones",
       "device": "Aplicación de escritorio"
     },
@@ -416,7 +416,7 @@
   "plugins": {
     "title": "Plugins",
     "loading": "Cargando Plugins",
-    "load_failed": "No se pudieron cargar los Plugins",
+    "load_failed": "No se han podido cargar los Plugins",
     "load_failed_description": "Inténtalo de nuevo. Los Plugins instalados no se ven afectados.",
     "empty": "Aún no hay Plugins instalados.",
     "action_failed": "La acción del Plugin falló",
@@ -466,8 +466,8 @@
       "secret_set": "Guardado: introduce un valor nuevo para reemplazarlo"
     },
     "scopes": {
-      "issues_read": "Leer incidencias",
-      "issues_write": "Crear y editar incidencias",
+      "issues_read": "Leer tareas",
+      "issues_write": "Crear y editar tareas",
       "comments_read": "Leer comentarios",
       "comments_write": "Publicar comentarios",
       "tasks_read": "Leer ejecuciones de agentes",
@@ -485,7 +485,7 @@
       "badge": "MCP",
       "description": "Elige las herramientas que los agentes pueden usar. Las herramientas nuevas necesitan aprobación aparte.",
       "loading": "Cargando herramientas",
-      "unreachable": "No se pudo alcanzar el servidor MCP del Plugin.",
+      "unreachable": "No se ha podido alcanzar el servidor MCP del Plugin.",
       "empty": "Este servidor MCP no ofrece herramientas por ahora.",
       "drifted": "Esquema modificado",
       "save": "Guardar aprobaciones",
@@ -506,7 +506,7 @@
   },
   "properties": {
     "title": "Propiedades",
-    "description": "Añade campos personalizados a las incidencias.",
+    "description": "Añade campos personalizados a las tareas.",
     "search_placeholder": "Filtrar por nombre...",
     "new_property": "Nueva propiedad",
     "show_archived": "Mostrar archivadas",
@@ -517,13 +517,13 @@
       "usage": "Usada por",
       "updated": "Actualizado"
     },
-    "usage_count_one": "{{count}} incidencia",
-    "usage_count_other": "{{count}} incidencias",
+    "usage_count_one": "{{count}} tarea",
+    "usage_count_other": "{{count}} tareas",
     "loading": "Cargando propiedades...",
     "empty": "Aún no hay propiedades",
     "empty_hint": "Por ejemplo, Severidad o Entorno.",
     "no_results": "Ninguna propiedad coincide",
-    "save_failed": "No se pudo guardar la propiedad",
+    "save_failed": "No se ha podido guardar la propiedad",
     "limit_hint": "{{count}}/{{max}} propiedades activas",
     "archived_badge": "Archivada",
     "types": {
@@ -568,17 +568,17 @@
     },
     "archive_dialog": {
       "title": "¿Archivar propiedad?",
-      "description": "\"{{name}}\" se ocultará de los selectores y filtros. Los valores existentes en las incidencias se conservan. Puedes restaurarla más adelante.",
+      "description": "\"{{name}}\" se ocultará de los selectores y filtros. Los valores existentes en las tareas se conservan. Puedes restaurarla más adelante.",
       "cancel": "Cancelar",
       "confirm": "Archivar propiedad",
-      "failed": "No se pudo archivar la propiedad"
+      "failed": "No se ha podido archivar la propiedad"
     }
   },
   "labels": {
     "title": "Etiquetas",
-    "description": "Las etiquetas de incidencias y las de skills son independientes.",
+    "description": "Las etiquetas de tareas y las de skills son independientes.",
     "scopes": {
-      "issue": "Incidencias",
+      "issue": "Tareas",
       "skill": "Skills"
     },
     "search_placeholder": "Filtrar por nombre o descripción...",
@@ -593,7 +593,7 @@
     "loading": "Cargando etiquetas...",
     "empty": "Aún no hay etiquetas de {{scope}}",
     "no_results": "Ninguna etiqueta coincide",
-    "save_failed": "No se pudo guardar la etiqueta",
+    "save_failed": "No se ha podido guardar la etiqueta",
     "actions": {
       "open": "Acciones de {{name}}",
       "edit": "Editar",
@@ -617,7 +617,7 @@
       "description": "¿Eliminar \"{{name}}\"? Se quitará de {{count}} recursos. No se puede deshacer.",
       "cancel": "Cancelar",
       "confirm": "Eliminar etiqueta",
-      "failed": "No se pudo eliminar la etiqueta"
+      "failed": "No se ha podido eliminar la etiqueta"
     }
   },
   "account": {
@@ -636,20 +636,20 @@
   },
   "notifications": {
     "title": "Notificaciones de la bandeja",
-    "description": "Los eventos silenciados siguen visibles en la incidencia.",
+    "description": "Los eventos silenciados siguen visibles en la tarea.",
     "toast_failed": "Error al actualizar la configuración de notificaciones",
     "groups": {
       "assignments": {
         "label": "Asignaciones",
-        "description": "Cuando te asignan o te quitan de una incidencia"
+        "description": "Cuando te asignan o te quitan de una tarea"
       },
       "status_changes": {
         "label": "Cambios de estado",
-        "description": "Cuando una incidencia que sigues cambia de estado (p. ej. pendiente, en curso, completado)"
+        "description": "Cuando una tarea que sigues cambia de estado (p. ej. pendiente, en curso, completado)"
       },
       "comments": {
         "label": "Comentarios",
-        "description": "Comentarios nuevos en incidencias que sigues"
+        "description": "Comentarios nuevos en tareas que sigues"
       },
       "mentions": {
         "label": "Menciones",
@@ -657,7 +657,7 @@
       },
       "updates": {
         "label": "Prioridad y fecha de entrega",
-        "description": "Cuando cambian la prioridad o la fecha de entrega de incidencias que sigues"
+        "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
       },
       "agent_activity": {
         "label": "Actividad de agentes",
@@ -682,7 +682,7 @@
     "description": "Los tokens de acceso personal permiten que la CLI y las integraciones externas se autentiquen con tu cuenta. Usa uno con multica login --token o como token Bearer al llamar a la API.",
     "security_note": "Un token concede acceso completo a tu cuenta: trátalo como una contraseña.",
     "empty": "Aún no hay tokens de API.",
-    "load_failed": "No se pudieron cargar tus tokens de API. Recarga la página para reintentarlo.",
+    "load_failed": "No se han podido cargar tus tokens de API. Recarga la página para reintentarlo.",
     "name_placeholder": "Nombre del token (p. ej. Mi CLI)",
     "expiry": {
       "30": "30 días",
@@ -734,8 +734,8 @@
     "context_label": "Contexto",
     "context_placeholder": "Información de fondo y contexto para los agentes de IA que trabajan en este espacio de trabajo",
     "slug_label": "Slug",
-    "issue_prefix_label": "Prefijo de incidencia",
-    "issue_prefix_hint": "Se usa en números de incidencia como {{example}}.",
+    "issue_prefix_label": "Prefijo de tarea",
+    "issue_prefix_hint": "Se usa en números de tarea como {{example}}.",
     "save": "Guardar",
     "saving": "Guardando...",
     "toast_save_failed": "Error al guardar la configuración del espacio de trabajo",
@@ -758,11 +758,11 @@
     "confirm_action": "Confirmar",
     "change_prefix": "Cambiar prefijo...",
     "context_hint": "Se da a cada agente de este espacio de trabajo en cada ejecución.",
-    "copy_failed": "No se pudo copiar al portapapeles",
+    "copy_failed": "No se ha podido copiar al portapapeles",
     "copy_slug": "Copiar slug",
     "prefix_confirm_action": "Cambiar a {{prefix}}",
-    "prefix_dialog_description": "Todas las incidencias se renumeran, incluidas las completadas y canceladas.",
-    "prefix_dialog_title": "Cambiar el prefijo de incidencia",
+    "prefix_dialog_description": "Todas las tareas se renumeran, incluidas las completadas y canceladas.",
+    "prefix_dialog_title": "Cambiar el prefijo de tarea",
     "prefix_external_warning": "Las claves antiguas como {{oldExample}} en títulos de PR, nombres de rama, documentación y chat no se actualizan, así que esos enlaces dejan de funcionar.",
     "prefix_new_label": "Nuevo prefijo",
     "prefix_rule": "Solo letras y números, hasta 10 caracteres.",
@@ -770,7 +770,7 @@
   },
   "delete_workspace_dialog": {
     "title": "Eliminar espacio de trabajo",
-    "description": "No se puede deshacer. Todas las incidencias, agentes, chats e historial de ejecuciones se eliminarán de forma permanente.",
+    "description": "No se puede deshacer. Todas las tareas, agentes, chats e historial de ejecuciones se eliminarán de forma permanente.",
     "type_to_confirm_prefix": "Para confirmar, escribe",
     "type_to_confirm_suffix": " abajo.",
     "cancel": "Cancelar",
@@ -802,20 +802,20 @@
     "toast_disconnect_failed": "Error al desconectar la GitHub App",
     "toast_disconnected": "GitHub App desconectada",
     "feature_pr_sidebar_label": "Barra lateral de pull requests",
-    "feature_pr_sidebar_description": "Muestra los pull requests vinculados dentro de la barra lateral del detalle de la incidencia.",
+    "feature_pr_sidebar_description": "Muestra los pull requests vinculados dentro de la barra lateral del detalle de la tarea.",
     "feature_co_author_label": "Trailer Co-authored-by",
     "feature_co_author_description_prefix": "Añade",
     "feature_co_author_description_suffix": "a los commits creados por agentes.",
-    "feature_auto_link_label": "Vincular incidencias y PR automáticamente",
+    "feature_auto_link_label": "Vincular tareas y PR automáticamente",
     "toast_failed": "Error al actualizar la configuración de GitHub",
-    "feature_auto_link_description": "Enlaza un PR con la incidencia cuyo ID, p. ej. {{example}}, aparece en su título o nombre de rama, o tras “Closes” en su descripción.",
+    "feature_auto_link_description": "Enlaza un PR con la tarea cuyo ID, p. ej. {{example}}, aparece en su título o nombre de rama, o tras “Closes” en su descripción.",
     "pause": "Pausar funciones de GitHub",
     "resume": "Reanudar funciones de GitHub",
     "status_paused": "En pausa"
   },
   "vcs": {
     "section_title": "Proveedores de Git (self-hosted)",
-    "page_description": "Conecta una instancia self-hosted de Forgejo, Gitea o GitLab para reflejar pull requests en incidencias. Cada conexión usa un token de acceso; los agentes suben ramas y abren PRs con las credenciales Git del propio runtime.",
+    "page_description": "Conecta una instancia self-hosted de Forgejo, Gitea o GitLab para reflejar pull requests en tareas. Cada conexión usa un token de acceso; los agentes suben ramas y abren PRs con las credenciales Git del propio runtime.",
     "connect_title": "Conectar una instancia de proveedor",
     "connected_as": "Conectado como {{login}}",
     "form_provider_label": "Proveedor",
@@ -836,21 +836,21 @@
     "webhook_secret_warning": "Copia el secreto ahora. Solo se muestra una vez y no se puede recuperar después.",
     "copy": "Copiar",
     "copied": "Copiado al portapapeles",
-    "copy_failed": "No se pudo copiar",
+    "copy_failed": "No se ha podido copiar",
     "disconnect_confirm_title": "¿Desconectar este proveedor?",
-    "disconnect_confirm_description": "Los pull requests reflejados y sus enlaces a incidencias de esta conexión se eliminarán. No se puede deshacer.",
+    "disconnect_confirm_description": "Los pull requests reflejados y sus enlaces a tareas de esta conexión se eliminarán. No se puede deshacer.",
     "disconnect_confirm_cancel": "Cancelar",
     "disconnect_confirm_action": "Desconectar",
-    "toast_connect_failed": "No se pudo conectar con el proveedor",
+    "toast_connect_failed": "No se ha podido conectar con el proveedor",
     "toast_disconnected": "Proveedor desconectado",
-    "toast_disconnect_failed": "No se pudo desconectar",
+    "toast_disconnect_failed": "No se ha podido desconectar",
     "regenerate_webhook": "Regenerar webhook",
     "rotate_confirm_title": "¿Regenerar el secreto del webhook?",
     "rotate_confirm_description": "El secreto actual dejará de funcionar inmediatamente. Las entregas de tu proveedor de Git fallarán hasta que actualices el secreto del webhook en la configuración del proveedor.",
     "rotate_confirm_cancel": "Cancelar",
     "rotate_confirm_action": "Regenerar",
     "rotating": "Regenerando...",
-    "toast_rotate_failed": "No se pudo regenerar el secreto del webhook",
+    "toast_rotate_failed": "No se ha podido regenerar el secreto del webhook",
     "connect_another": "Conectar otro",
     "connection_actions": "Acciones de {{url}}",
     "hosts_hint": "GitLab, Gitea o Forgejo.",
@@ -858,7 +858,7 @@
   },
   "lark": {
     "section_title": "Lark",
-    "page_description": "Chatea con agentes en Lark o usa /issue para crear una incidencia.",
+    "page_description": "Chatea con agentes en Lark o usa /issue para crear una tarea.",
     "not_enabled_title": "La integración con Lark no está activada",
     "not_enabled_description_prefix": "Define",
     "not_enabled_description_suffix": "en el servidor para activar las instalaciones de Lark Bot.",
@@ -868,7 +868,7 @@
     "connected_bots": "Bots",
     "loading": "Cargando…",
     "empty_title": "Aún no hay bots conectados",
-    "empty_description_prefix": "Abre un Agente en este espacio de trabajo y haz clic en",
+    "empty_description_prefix": "Abre un agente en este espacio de trabajo y haz clic en",
     "empty_description_cta": "Vincular a Lark",
     "empty_description_suffix": "para instalar un Bot para él.",
     "revoked_badge": "revocado",
@@ -899,7 +899,7 @@
     "agent_bot_silent_hint_link": "Solución de problemas",
     "agent_bot_manage_tooltip_feishu": "Abre la página de la app de este Bot en Feishu: gestiona alcances, edita el nombre visible y solicita permisos adicionales.",
     "agent_bot_manage_tooltip_lark": "Abre la página de la app de este Bot en Lark: gestiona alcances, edita el nombre visible y solicita permisos adicionales.",
-    "agent_bot_disconnect_tooltip": "Desvincula este Lark Bot del Agente. El bot dejará de recibir mensajes de Lark.",
+    "agent_bot_disconnect_tooltip": "Desvincula este Lark Bot del agente. El bot dejará de recibir mensajes de Lark.",
     "install_dialog_title": "Vincular a Lark",
     "install_dialog_description": "Abre Lark en tu móvil y escanea el código de abajo para crear un PersonalAgent Bot.",
     "install_dialog_description_for_agent": "Abre Lark en tu móvil y escanea el código de abajo para crear un Bot para {{agent}}.",
@@ -925,8 +925,8 @@
     "install_error_access_denied": "Instalación cancelada en Lark.",
     "install_error_protocol": "Lark rechazó la instalación: inténtalo de nuevo.",
     "install_error_bot_info": "Autorizado, pero Multica no pudo obtener la identidad del Bot. Inténtalo de nuevo.",
-    "install_error_conflict": "No se pudo guardar la instalación. Puede que otro bot ya esté vinculado a este agente.",
-    "install_error_installer_bind": "Bot instalado, pero no se pudo vincular tu identidad de Lark. Inténtalo de nuevo o contacta con soporte.",
+    "install_error_conflict": "No se ha podido guardar la instalación. Puede que otro bot ya esté vinculado a este agente.",
+    "install_error_installer_bind": "Bot instalado, pero no se ha podido vincular tu identidad de Lark. Inténtalo de nuevo o contacta con soporte.",
     "install_error_session_lost": "La sesión de instalación caducó o se perdió. Escanea de nuevo para empezar de cero.",
     "install_error_forbidden": "Ya no tienes permiso para instalar Lark Bots en este espacio de trabajo. Pide a un administrador que continúe.",
     "install_error_generic": "La instalación falló. Inténtalo de nuevo.",
@@ -951,15 +951,15 @@
     "connected": "Conectado",
     "disconnect": "Desconectar",
     "disconnecting": "Desconectando…",
-    "connect_failed": "No se pudo iniciar la conexión. Inténtalo de nuevo.",
-    "disconnect_failed": "No se pudo desconectar. Inténtalo de nuevo.",
+    "connect_failed": "No se ha podido iniciar la conexión. Inténtalo de nuevo.",
+    "disconnect_failed": "No se ha podido desconectar. Inténtalo de nuevo.",
     "toast_disconnected": "Desconectado",
     "disconnect_confirm_title": "¿Desconectar esta app?",
     "disconnect_confirm_description": "Tu cuenta conectada se revocará en Composio y tus agentes perderán acceso a este toolkit. Puedes volver a conectarla más tarde.",
     "disconnect_confirm_cancel": "Cancelar",
-    "connections_load_failed": "No se pudieron cargar tus conexiones existentes; el estado de conexión puede estar incompleto.",
+    "connections_load_failed": "No se han podido cargar tus conexiones existentes; el estado de conexión puede estar incompleto.",
     "toast_connected": "Conectado",
-    "toast_connect_failed": "No se pudo completar la conexión. Inténtalo de nuevo.",
+    "toast_connect_failed": "No se ha podido completar la conexión. Inténtalo de nuevo.",
     "last_used": "Último uso {{when}}",
     "last_used_never": "Nunca usado",
     "expired": "Token caducado",
@@ -967,7 +967,7 @@
   },
   "slack": {
     "section_title": "Slack",
-    "page_description": "Chatea con agentes en Slack o usa /issue para crear una incidencia.",
+    "page_description": "Chatea con agentes en Slack o usa /issue para crear una tarea.",
     "not_enabled_title": "La integración con Slack no está activada",
     "not_enabled_description_prefix": "Define",
     "not_enabled_description_suffix": "en el servidor para activar las instalaciones del bot de Slack.",
@@ -977,7 +977,7 @@
     "connected_bots": "Bots conectados",
     "loading": "Cargando…",
     "empty_title": "Aún no hay bots conectados",
-    "empty_description_prefix": "Abre un Agente en este espacio de trabajo y haz clic en",
+    "empty_description_prefix": "Abre un agente en este espacio de trabajo y haz clic en",
     "empty_description_cta": "Conectar Slack",
     "empty_description_suffix": "para instalar un bot para él.",
     "revoked_badge": "revocado",
@@ -992,9 +992,9 @@
     "bind_button": "Conectar Slack",
     "bind_button_title": "Conectar {{agent}} a un bot de Slack",
     "connecting": "Abriendo Slack…",
-    "connect_failed_toast": "No se pudo iniciar la instalación de Slack",
+    "connect_failed_toast": "No se ha podido iniciar la instalación de Slack",
     "agent_bot_connected_label": "Conectado a Slack",
-    "agent_bot_disconnect_tooltip": "Desvincula este bot de Slack del Agente. El bot dejará de recibir mensajes de Slack.",
+    "agent_bot_disconnect_tooltip": "Desvincula este bot de Slack del agente. El bot dejará de recibir mensajes de Slack.",
     "agent_bot_manage_link": "Abrir en Slack",
     "agent_bot_manage_tooltip": "Abre el espacio de trabajo de Slack de este bot.",
     "byo_dialog_title": "Conectar un bot de Slack",
@@ -1006,12 +1006,12 @@
     "byo_submitting": "Conectando…",
     "byo_cancel": "Cancelar",
     "byo_success_toast": "Bot de Slack conectado",
-    "byo_failed_toast": "No se pudo conectar el bot de Slack"
+    "byo_failed_toast": "No se ha podido conectar el bot de Slack"
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "Chatea con agentes en DingTalk o usa /issue para crear una incidencia.",
-    "agent_page_description": "Chatea con este agente en DingTalk o usa /issue para crear una incidencia.",
+    "page_description": "Chatea con agentes en DingTalk o usa /issue para crear una tarea.",
+    "agent_page_description": "Chatea con este agente en DingTalk o usa /issue para crear una tarea.",
     "groups_title": "Grupos recientes",
     "groups_description": "Un grupo aparece después de que un miembro del espacio de trabajo vincule su cuenta de DingTalk y @mencione a este bot allí. Por defecto se muestran los grupos activos en los últimos 90 días.",
     "groups_loading": "Cargando grupos…",
@@ -1019,7 +1019,7 @@
     "groups_no_recent": "Ningún grupo estuvo activo en los últimos 90 días.",
     "groups_inactive": "Inactivo desde hace tiempo ({{count}})",
     "groups_load_more": "Cargar más",
-    "groups_error": "No se pudieron cargar los grupos de DingTalk.",
+    "groups_error": "No se han podido cargar los grupos de DingTalk.",
     "groups_retry": "Reintentar",
     "group_untitled": "Grupo de DingTalk sin título",
     "groups_count": "{{count}}",
@@ -1033,7 +1033,7 @@
     "group_forget_cancel": "Cancelar",
     "group_forget_confirm": "Olvidar grupo",
     "group_forget_success": "Grupo eliminado del inventario",
-    "group_forget_failed": "No se pudo eliminar el grupo",
+    "group_forget_failed": "No se ha podido eliminar el grupo",
     "bot_identity_unavailable": "Identidad no disponible",
     "bot_permission_tooltip_prefix": "En DingTalk Open Platform, concede a la app de este bot el permiso",
     "bot_permission_tooltip_suffix": "y vuelve a @mencionar al bot en un grupo de DingTalk donde esté añadido.",
@@ -1045,7 +1045,7 @@
     "deleted_agent": "Agente eliminado",
     "loading": "Cargando…",
     "empty_title": "Aún no hay bots conectados",
-    "empty_description_prefix": "Abre un Agente en este espacio de trabajo y haz clic en",
+    "empty_description_prefix": "Abre un agente en este espacio de trabajo y haz clic en",
     "empty_description_cta": "Conectar DingTalk",
     "empty_description_suffix": "para instalar un robot para él.",
     "revoked_badge": "revocado",
@@ -1061,7 +1061,7 @@
     "bind_button": "Conectar DingTalk",
     "bind_button_title": "Conectar {{agent}} a un bot de DingTalk",
     "agent_bot_connected_label": "Bot conectado:",
-    "agent_bot_disconnect_tooltip": "Desvincula este bot de DingTalk del Agente. El bot dejará de recibir mensajes de DingTalk.",
+    "agent_bot_disconnect_tooltip": "Desvincula este bot de DingTalk del agente. El bot dejará de recibir mensajes de DingTalk.",
     "byo_dialog_title": "Conectar un bot de DingTalk",
     "byo_docs_link": "Paso a paso: conecta tu agente de Multica a DingTalk",
     "byo_appkey_label": "AppKey (client id)",
@@ -1070,11 +1070,11 @@
     "byo_submitting": "Conectando…",
     "byo_cancel": "Cancelar",
     "byo_success_toast": "Bot de DingTalk conectado",
-    "byo_failed_toast": "No se pudo conectar el bot de DingTalk"
+    "byo_failed_toast": "No se ha podido conectar el bot de DingTalk"
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "Chatea con agentes en WeCom o crea incidencias con /issue. No necesitas una URL de callback pública.",
+    "page_description": "Chatea con agentes en WeCom o crea tareas con /issue. No necesitas una URL de callback pública.",
     "not_enabled_title": "La integración con WeCom no está activada",
     "not_enabled_description_prefix": "Define",
     "not_enabled_description_suffix": "en el servidor para activar las instalaciones de smart bots de WeCom.",
@@ -1084,7 +1084,7 @@
     "connected_bots": "Bots conectados",
     "loading": "Cargando…",
     "empty_title": "Aún no hay bots conectados",
-    "empty_description_prefix": "Abre un Agente en este espacio de trabajo y haz clic en",
+    "empty_description_prefix": "Abre un agente en este espacio de trabajo y haz clic en",
     "empty_description_cta": "Conectar WeCom",
     "empty_description_suffix": "para instalar un smart bot para él.",
     "revoked_badge": "revocado",
@@ -1100,7 +1100,7 @@
     "bind_button_title": "Conectar {{agent}} a un smart bot de WeCom",
     "agent_bot_connected_label": "Conectado a WeCom",
     "agent_bot_connected_label_with_id": "Conectado a WeCom: {{botId}}",
-    "agent_bot_disconnect_tooltip": "Desvincula este smart bot del Agente. El bot dejará de recibir mensajes de WeCom.",
+    "agent_bot_disconnect_tooltip": "Desvincula este smart bot del agente. El bot dejará de recibir mensajes de WeCom.",
     "byo_dialog_title": "Conectar un smart bot de WeCom",
     "byo_bot_id_label": "Bot ID",
     "byo_bot_id_placeholder": "p. ej. aibot_xxxxxxxxxxxxxxxx",
@@ -1114,13 +1114,13 @@
     "byo_cancel": "Cancelar",
     "byo_success_toast": "Bot de WeCom conectado",
     "byo_conflict_same_workspace": "Este bot ya está conectado a otro Agente de este espacio de trabajo. Desconéctalo allí primero y luego conéctalo aquí.",
-    "byo_conflict_archived_agent": "Este bot está conectado a un Agente archivado de este espacio de trabajo. Restaura ese Agente, o desconecta su bot, antes de conectarlo aquí.",
+    "byo_conflict_archived_agent": "Este bot está conectado a un agente archivado de este espacio de trabajo. Restaura ese agente, o desconecta su bot, antes de conectarlo aquí.",
     "byo_conflict_other_workspace": "Este bot ya está conectado a otro espacio de trabajo de Multica. Desconéctalo allí antes de conectarlo aquí.",
-    "byo_rejected": "No se pudo conectar el bot. Comprueba el Bot ID y el secreto en la consola de administración de WeCom, y que sea un smart bot con la conexión larga activada.",
+    "byo_rejected": "No se ha podido conectar el bot. Comprueba el Bot ID y el secreto en la consola de administración de WeCom, y que sea un smart bot con la conexión larga activada.",
     "byo_credentials_rejected": "WeCom rechazó este Bot ID y secreto. Comprueba ambos en la consola de administración de WeCom, y que sea un smart bot con la conexión larga activada.",
-    "byo_credentials_unverifiable": "No se pudo contactar con WeCom para verificar este bot. Tus credenciales no se modificaron: inténtalo de nuevo en un momento.",
-    "byo_install_failed": "No se pudo guardar este bot: algo falló en nuestro lado. Tus credenciales no se modificaron; inténtalo de nuevo y contacta con soporte si sigue fallando.",
-    "byo_failed_toast": "No se pudo conectar el bot de WeCom",
+    "byo_credentials_unverifiable": "No se ha podido contactar con WeCom para verificar este bot. Tus credenciales no se modificaron: inténtalo de nuevo en un momento.",
+    "byo_install_failed": "No se ha podido guardar este bot: algo falló en nuestro lado. Tus credenciales no se modificaron; inténtalo de nuevo y contacta con soporte si sigue fallando.",
+    "byo_failed_toast": "No se ha podido conectar el bot de WeCom",
     "scan_option_title": "Crear un bot nuevo",
     "scan_option_description": "Escanea un código QR en WeCom para crear y conectar un bot inteligente nuevo.",
     "byo_option_title": "Conectar un bot existente",
@@ -1133,19 +1133,19 @@
     "scan_again": "Obtener un código nuevo",
     "scan_close": "Cerrar",
     "scan_error_expired": "El código QR caducó antes de escanearlo.",
-    "scan_error_generate_failed": "No se pudo obtener un código QR de WeCom. Vuelve a intentarlo en un momento.",
+    "scan_error_generate_failed": "No se ha podido obtener un código QR de WeCom. Vuelve a intentarlo en un momento.",
     "scan_error_integration_unconfigured": "La instalación mediante escaneo no está habilitada en este servidor.",
     "scan_error_installation_conflict": "Este bot ya está conectado en otro lugar. Desconéctalo allí y vuelve a escanear.",
-    "scan_error_bind_failed": "El bot se creó en WeCom, pero no se pudo conectar a este agente. Elimínalo en WeCom y vuelve a escanear.",
+    "scan_error_bind_failed": "El bot se creó en WeCom, pero no se ha podido conectar a este agente. Elimínalo en WeCom y vuelve a escanear.",
     "scan_error_wecom_protocol_error": "WeCom devolvió una respuesta inesperada.",
-    "scan_error_internal_error": "Algo salió mal. Inténtalo de nuevo.",
+    "scan_error_internal_error": "Algo ha ido mal. Inténtalo de nuevo.",
     "scan_error_session_lost": "Esta sesión de instalación ya no está disponible. Obtén un código nuevo.",
     "scan_error_already_connected": "Este agente ya tiene un bot de WeCom conectado. Desconéctalo primero.",
     "scan_error_rate_limited": "Demasiados intentos. Espera unos minutos y vuelve a intentarlo."
   },
   "telegram": {
     "section_title": "Telegram",
-    "page_description": "Chatea con agentes en Telegram o usa /issue para crear una incidencia.",
+    "page_description": "Chatea con agentes en Telegram o usa /issue para crear una tarea.",
     "not_enabled_title": "La integración con Telegram no está activada",
     "not_enabled_description_prefix": "Define",
     "not_enabled_description_suffix": "en el servidor para activar las instalaciones de bots de Telegram.",
@@ -1156,7 +1156,7 @@
     "loading": "Cargando…",
     "load_failed": "Error al cargar las instalaciones de Telegram",
     "empty_title": "Aún no hay bots conectados",
-    "empty_description_prefix": "Abre un Agente en este espacio de trabajo y haz clic en",
+    "empty_description_prefix": "Abre un agente en este espacio de trabajo y haz clic en",
     "empty_description_cta": "Conectar Telegram",
     "empty_description_suffix": "para instalar un bot para él.",
     "revoked_badge": "revocado",
@@ -1171,7 +1171,7 @@
     "bind_button": "Conectar Telegram",
     "bind_button_title": "Conectar {{agent}} a un bot de Telegram",
     "agent_bot_connected_label": "Conectado a Telegram",
-    "agent_bot_disconnect_tooltip": "Desvincula este bot de Telegram del Agente. El bot dejará de recibir mensajes de Telegram.",
+    "agent_bot_disconnect_tooltip": "Desvincula este bot de Telegram del agente. El bot dejará de recibir mensajes de Telegram.",
     "agent_bot_manage_link": "Abrir en Telegram",
     "agent_bot_manage_tooltip": "Abre un chat con este bot en Telegram.",
     "connect_dialog_title": "Conectar un bot de Telegram",
@@ -1182,7 +1182,7 @@
     "connect_submitting": "Conectando…",
     "connect_cancel": "Cancelar",
     "connect_success_toast": "Bot de Telegram conectado",
-    "connect_failed_toast": "No se pudo conectar el bot de Telegram"
+    "connect_failed_toast": "No se ha podido conectar el bot de Telegram"
   },
   "repositories": {
     "section_title": "Repositorios",
@@ -1194,13 +1194,13 @@
     "choose_from_github": "Elegir desde GitHub",
     "github_not_configured": "La conexión con GitHub no está configurada en esta instalación.",
     "github_browse_not_configured": "Para explorar repositorios se requieren GITHUB_APP_ID y GITHUB_APP_PRIVATE_KEY.",
-    "github_connect_failed": "No se pudo conectar con GitHub. Inténtalo de nuevo.",
+    "github_connect_failed": "No se ha podido conectar con GitHub. Inténtalo de nuevo.",
     "github_picker_title": "Elegir repositorios de GitHub",
     "github_picker_description": "Las entradas manuales existentes no cambian.",
     "github_account": "Cuenta de GitHub",
     "github_search_placeholder": "Buscar en los repositorios cargados",
     "github_loading": "Cargando repositorios…",
-    "github_load_failed": "No se pudieron cargar los repositorios de GitHub. Comprueba el acceso de la instalación e inténtalo de nuevo.",
+    "github_load_failed": "No se han podido cargar los repositorios de GitHub. Comprueba el acceso de la instalación e inténtalo de nuevo.",
     "github_empty": "Esta instalación no tiene repositorios accesibles.",
     "github_no_search_results": "Ningún repositorio cargado coincide con esta búsqueda.",
     "github_private": "Privado",
@@ -1237,7 +1237,7 @@
     },
     "tab_bar": {
       "pin": "Fijar pestaña",
-      "unpin": "Desfijar pestaña",
+      "unpin": "Dejar de fijar pestaña",
       "close": "Cerrar pestaña",
       "close_others": "Cerrar las demás pestañas",
       "open_window": "Abrir en ventana nueva",
@@ -1269,7 +1269,7 @@
       "auto_start_title": "Inicio automático al arrancar",
       "auto_start_description": "Se inicia automáticamente cuando inicias sesión.",
       "auto_stop_title": "Detención automática al salir",
-      "auto_stop_description": "Detiene el daemon cuando se cierra Escritorio.",
+      "auto_stop_description": "Detiene el daemon cuando se cierra la app de escritorio.",
       "cli_status": "Estado de la CLI",
       "cli_checking": "Comprobando…",
       "cli_installed": "La CLI de multica está instalada y disponible en PATH.",
@@ -1328,7 +1328,7 @@
       "not_running": "El daemon no está en ejecución",
       "not_running_description": "Inicia el daemon para ver los logs aquí.",
       "waiting_logs": "Esperando logs…",
-      "reconnect_failed": "No se pudo reconectar el daemon",
+      "reconnect_failed": "No se ha podido reconectar el daemon",
       "try_again_moment": "Inténtalo de nuevo en un momento.",
       "try_again": "Inténtalo de nuevo."
     }
@@ -1340,15 +1340,15 @@
     "inviting": "Invitando...",
     "toast_invitation_sent": "Invitación enviada",
     "toast_invitation_failed": "Error al enviar la invitación",
-    "toast_seat_capacity_unavailable": "No se pudo verificar la capacidad de miembros. Inténtalo de nuevo.",
-    "toast_seat_capacity_rate_limited": "La capacidad de miembros está ocupada. Inténtalo en breve.",
-    "seat_purchase_title": "¿Añadir un asiento para enviar esta invitación?",
-    "seat_purchase_description": "No hay ningún asiento comprado disponible para {{email}}. Revisa la estimación de Stripe y aprueba la compra y la invitación a la vez.",
-    "purchase_seat_and_invite": "Comprar 1 asiento e invitar",
+    "toast_seat_capacity_unavailable": "No se ha podido verificar la capacidad de miembros. Inténtalo de nuevo.",
+    "toast_seat_capacity_rate_limited": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos segundos.",
+    "seat_purchase_title": "¿Añadir un puesto para enviar esta invitación?",
+    "seat_purchase_description": "No hay ningún puesto comprado disponible para {{email}}. Revisa la estimación de Stripe y aprueba la compra y la invitación a la vez.",
+    "purchase_seat_and_invite": "Comprar 1 puesto e invitar",
     "retry_seat_purchase": "Reintentar compra",
-    "seat_purchase_waiting": "Esperando a que Stripe confirme el nuevo asiento. Mantén esta página abierta para que la invitación se envíe automáticamente; si la cierras, el asiento comprado se conserva y podrás invitar de nuevo más tarde.",
-    "seat_purchase_timeout": "La compra del asiento se envió, pero la confirmación está tardando más de lo esperado. No se envió ninguna invitación. Reintenta la invitación cuando Facturación muestre un asiento disponible.",
-    "seat_purchase_capacity_taken": "El asiento comprado ya no está disponible, así que no se envió la invitación. Revisa los asientos actuales antes de reintentarlo.",
+    "seat_purchase_waiting": "Esperando a que Stripe confirme el nuevo puesto. Mantén esta página abierta para que la invitación se envíe automáticamente; si la cierras, el puesto comprado se conserva y podrás invitar de nuevo más tarde.",
+    "seat_purchase_timeout": "La compra del puesto se envió, pero la confirmación está tardando más de lo esperado. No se envió ninguna invitación. Reintenta la invitación cuando Facturación muestre un puesto disponible.",
+    "seat_purchase_capacity_taken": "El puesto comprado ya no está disponible, así que no se envió la invitación. Revisa los puestos actuales antes de reintentarlo.",
     "no_members": "No se encontraron miembros.",
     "revoke_invitation_title": "Revocar invitación",
     "revoke_invitation_description": "¿Revocar la invitación a {{email}}? Ya no podrá unirse a este espacio de trabajo.",
@@ -1377,7 +1377,7 @@
       },
       "member": {
         "label": "Miembro",
-        "description": "Crea incidencias y trabaja en ellas"
+        "description": "Crea tareas y trabaja en ellas"
       }
     },
     "share_links_create_title": "Crear enlace de invitación",
@@ -1401,7 +1401,7 @@
     "expiry_label": "Caduca después de",
     "invitation_meta": "Enviada {{sent}} · Caduca {{expires}}",
     "joined": "Se unió el {{date}}",
-    "manage_seats": "Gestionar asientos",
+    "manage_seats": "Gestionar puestos",
     "member_actions": "Acciones de {{name}}",
     "members_label": "Miembros",
     "no_invitations": "No hay invitaciones pendientes.",
@@ -1411,7 +1411,7 @@
     "revoke_invitation_aria": "Revocar invitación de {{email}}",
     "role_label": "Rol",
     "search_placeholder": "Buscar por nombre o correo electrónico",
-    "seats_used": "{{used}} de {{purchased}} asientos usados",
+    "seats_used": "{{used}} de {{purchased}} puestos usados",
     "share_links_description": "Cualquiera con el enlace puede unirse con el rol elegido hasta que caduque o lo revoques.",
     "share_links_label": "Enlaces de invitación",
     "you": "Tú"
@@ -1428,7 +1428,7 @@
   "code": {
     "github_actions": "Acciones de GitHub",
     "hosting_title": "Alojamiento de código",
-    "pr_linking_title": "Pull requests e incidencias"
+    "pr_linking_title": "Pull requests y tareas"
   },
   "layout": {
     "read_only": {
@@ -1458,26 +1458,26 @@
     "none": "No asignada a ningún agente"
   },
   "pr_merge_status": {
-    "description": "Se aplica cuando todos los PR enlazados a una incidencia se hayan fusionado, y solo a fusiones a partir de ahora.",
-    "label": "Al fusionarse los PR, mover la incidencia a",
+    "description": "Se aplica cuando todos los PR enlazados a una tarea se hayan fusionado, y solo a fusiones a partir de ahora.",
+    "label": "Al fusionarse los PR, mover la tarea a",
     "none": "No cambiar"
   },
   "wakeups": {
     "admin_only": "Solo los propietarios y administradores pueden cambiar estos valores predeterminados.",
     "builtin": "Instrucción integrada",
-    "child_done_description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subincidencias se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
-    "child_done_title": "Al terminar las subincidencias",
-    "customized_one": "{{count}} incidencia abierta tiene su propio ajuste e ignora este valor predeterminado.",
-    "customized_other": "{{count}} incidencias abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
-    "description": "Reglas de la plataforma que se aplican a cada incidencia. Cada incidencia puede cambiarlas en su sección de Despertares.",
+    "child_done_description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subtareas se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
+    "child_done_title": "Al terminar las subtareas",
+    "customized_one": "{{count}} tarea abierta tiene su propio ajuste e ignora este valor predeterminado.",
+    "customized_other": "{{count}} tareas abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
+    "description": "Reglas de la plataforma que se aplican a cada tarea. Cada tarea puede cambiarlas en su sección de Despertares.",
     "enabled": "Activado por defecto",
     "instruction": "Instrucción predeterminada",
     "instruction_hint": "Se envía al agente despertado. Déjala vacía para usar la instrucción integrada de abajo.",
     "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
     "instruction_placeholder": "Déjala vacía para usar la instrucción integrada",
-    "load_error": "No se pudieron cargar los valores predeterminados de despertares.",
+    "load_error": "No se han podido cargar los valores predeterminados de despertares.",
     "save": "Guardar",
-    "save_error": "No se pudo guardar el valor predeterminado.",
+    "save_error": "No se ha podido guardar el valor predeterminado.",
     "saving": "Guardando…"
   }
 }

@@ -55,7 +55,7 @@
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
-    "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de piloto automático para el periodo actual. No se iniciarán más ejecuciones de piloto automático hasta que se reinicie la cuota {{resetAt}}.",
+    "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
     "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
     "archive": "Archivar",
     "unarchive": "Desarchivar"
@@ -80,9 +80,9 @@
     "quick_create_done": "Creada con agente",
     "quick_create_failed": "Error al crear con agente",
     "quick_create_unconfirmed": "Creación con agente sin confirmar",
-    "autopilot_paused": "Piloto automático en pausa",
-    "children_done": "Sub-incidencias finalizadas",
-    "autopilot_quota_exceeded": "Límite de ejecuciones de piloto automático alcanzado"
+    "autopilot_paused": "Automatización en pausa",
+    "children_done": "Sub-tareas finalizadas",
+    "autopilot_quota_exceeded": "Límite de ejecuciones de automatizaciones alcanzado"
   },
   "labels": {
     "set_status_to": "Establecer estado en",
@@ -97,7 +97,7 @@
     "created_with_agent": "Creada con agente: {{identifier}}",
     "failed_with_detail": "Falló: {{detail}}",
     "autopilot_quota_blocked": "Ejecución bloqueada porque se alcanzó el límite",
-    "children_done_stage": "Sub-incidencias de la etapa {{stage}} finalizadas"
+    "children_done_stage": "Sub-tareas de la etapa {{stage}} finalizadas"
   },
   "toasts": {
     "source_context_retry_started": "Reintento iniciado con el contexto original",
@@ -105,19 +105,19 @@
     "unarchived": "Notificación restaurada"
   },
   "errors": {
-    "archived_lookup_failed": "No se pudo cargar la notificación enlazada",
-    "source_context_retry_failed": "No se pudo reintentar con el contexto original",
+    "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
+    "source_context_retry_failed": "No se ha podido reintentar con el contexto original",
     "source_context_retry_unavailable": "Este contexto ya no se puede reintentar. Vuelve a empezar desde el punto de ramificación.",
-    "mark_read_failed": "No se pudo marcar como leído",
-    "mark_unread_failed": "No se pudo marcar como no leído",
-    "archive_failed": "No se pudo archivar",
-    "mark_done_failed": "No se pudo marcar como hecho",
-    "mark_all_read_failed": "No se pudo marcar todo como leído",
-    "archive_all_failed": "No se pudo archivar todo",
-    "archive_all_read_failed": "No se pudo archivar los elementos leídos",
-    "archive_completed_failed": "No se pudo archivar lo completado",
-    "unarchive_failed": "No se pudo desarchivar",
-    "archived_load_failed": "No se pudieron cargar las notificaciones archivadas",
-    "filters_load_failed": "No se pudieron cargar los filtros"
+    "mark_read_failed": "No se ha podido marcar como leído",
+    "mark_unread_failed": "No se ha podido marcar como no leído",
+    "archive_failed": "No se ha podido archivar",
+    "mark_done_failed": "No se ha podido marcar como hecho",
+    "mark_all_read_failed": "No se ha podido marcar todo como leído",
+    "archive_all_failed": "No se ha podido archivar todo",
+    "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
+    "archive_completed_failed": "No se ha podido archivar lo completado",
+    "unarchive_failed": "No se ha podido desarchivar",
+    "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
+    "filters_load_failed": "No se han podido cargar los filtros"
   }
 }

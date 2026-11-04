@@ -604,7 +604,7 @@ describe("TabBar locale", () => {
     },
     es: {
       pin: "Fijar pestaña",
-      unpin: "Desfijar pestaña",
+      unpin: "Dejar de fijar pestaña",
       close: "Cerrar pestaña",
       closeOthers: "Cerrar las demás pestañas",
       openWindow: "Abrir en ventana nueva",

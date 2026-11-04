@@ -9,7 +9,7 @@
     "go_to_dashboard": "Ir al panel"
   },
   "accepted": {
-    "title": "¡Te uniste a {{workspace_name}}!",
+    "title": "¡Te has unido a {{workspace_name}}!",
     "redirecting": "Redirigiendo al espacio de trabajo..."
   },
   "declined": {
@@ -22,8 +22,8 @@
     "fallback_workspace_name": "espacio de trabajo",
     "invited_role_admin": "te invitó a unirte como administrador.",
     "invited_role_member": "te invitó a unirte como miembro.",
-    "already_handled_accepted": "Esta invitación ya fue aceptada.",
-    "already_handled_declined": "Esta invitación ya fue rechazada.",
+    "already_handled_accepted": "Esta invitación ya se ha aceptado.",
+    "already_handled_declined": "Esta invitación ya se ha rechazado.",
     "expired": "Esta invitación ha caducado.",
     "decline": "Rechazar",
     "declining": "Rechazando...",
@@ -31,8 +31,8 @@
     "joining": "Uniéndose..."
   },
   "errors": {
-    "accept_failed": "No se pudo aceptar la invitación",
-    "decline_failed": "No se pudo rechazar la invitación"
+    "accept_failed": "No se ha podido aceptar la invitación",
+    "decline_failed": "No se ha podido rechazar la invitación"
   },
   "batch": {
     "log_out": "Cerrar sesión",
@@ -45,7 +45,7 @@
     "submit_join_one": "Unirse a 1 espacio de trabajo",
     "submit_join_other": "Unirse a {{count}} espacios de trabajo",
     "joining": "Uniéndose...",
-    "error_generic": "No se pudieron procesar las invitaciones. Inténtalo de nuevo.",
+    "error_generic": "No se han podido procesar las invitaciones. Inténtalo de nuevo.",
     "row_workspace_fallback": "Espacio de trabajo",
     "row_inviter_fallback": "Alguien",
     "row_invited_admin": "{{inviter}} te invitó como administrador",
