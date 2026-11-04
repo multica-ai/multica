@@ -1871,6 +1871,8 @@
     "brief_save_unavailable": "本工作区尚未设置知识库",
     "brief_earlier": "更早的简报",
     "brief_proposals": "本简报中的提案",
+    "setup_trigger": "公司设置",
+    "setup_trigger_offer": "下一步",
     "setup_title": "设置你的公司",
     "setup_intro": "秘书每天早上阅读公司情况，并告诉你哪些事需要你决定。",
     "setup_check_runtime": "Hermes 运行时在线",

@@ -1944,6 +1944,8 @@
     "brief_save_unavailable": "Les connaissances ne sont pas configurées pour cet espace de travail",
     "brief_earlier": "Briefings précédents",
     "brief_proposals": "Propositions de ce briefing",
+    "setup_trigger": "Configuration",
+    "setup_trigger_offer": "Étape suivante",
     "setup_title": "Configurer votre entreprise",
     "setup_intro": "Chaque matin, le secrétaire passe l'entreprise en revue et vous indique ce qui demande une décision.",
     "setup_check_runtime": "Environnement Hermes en ligne",

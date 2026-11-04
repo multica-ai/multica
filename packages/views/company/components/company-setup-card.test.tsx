@@ -77,7 +77,7 @@ describe("CompanySetupCard", () => {
   });
   afterEach(cleanup);
 
-  function setup(readiness: CompanySetupReadiness) {
+  function setup(readiness: CompanySetupReadiness, { open = true }: { open?: boolean } = {}) {
     api.getCompanySetup.mockResolvedValue(readiness);
     queryClient.setQueryData(companySetupKeys.all("ws-1"), readiness);
     renderWithI18n(
@@ -85,7 +85,16 @@ describe("CompanySetupCard", () => {
         <CompanySetupCard />
       </QueryClientProvider>,
     );
+    // The checklist lives behind the header trigger; open it for the content assertions.
+    const trigger = screen.queryByRole("button", { name: /Company setup|Next step/ });
+    if (trigger && open) fireEvent.click(trigger);
   }
+
+  it("keeps the checklist out of the page until the trigger opens it", () => {
+    setup(NOT_SET_UP, { open: false });
+    expect(screen.queryByText("Hermes runtime online")).toBeNull();
+    expect(screen.getByRole("button", { name: /Company setup/ }).textContent).toContain("1/5");
+  });
 
   it("shows the install guide and a retry when the Hermes runtime is missing", () => {
     setup({ ...NOT_SET_UP, runtime_online: false });

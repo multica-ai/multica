@@ -1871,6 +1871,8 @@
     "brief_save_unavailable": "このワークスペースではナレッジが設定されていません",
     "brief_earlier": "過去のブリーフ",
     "brief_proposals": "このブリーフの提案",
+    "setup_trigger": "会社セットアップ",
+    "setup_trigger_offer": "次のステップ",
     "setup_title": "会社をセットアップ",
     "setup_intro": "秘書は毎朝会社の状況を確認し、判断が必要なことを知らせます。",
     "setup_check_runtime": "Hermes ランタイムがオンライン",

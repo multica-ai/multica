@@ -272,6 +272,7 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         canManage={canManage}
         onSelect={selectFloor}
       >
+        <CompanySetupCard />
         <CompanyBriefButton focusBriefId={briefFocus} />
         {pendingAll.length > 0 ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
@@ -283,7 +284,6 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       {canManage && layout.unseatedSquads.length > 0 ? (
         <CompanySeatBanner count={layout.unseatedSquads.length} pending={seating} onSeatAll={seatAll} />
       ) : null}
-      <CompanySetupCard />
       {firstRun ? (
         <CompanyFirstRun />
       ) : (

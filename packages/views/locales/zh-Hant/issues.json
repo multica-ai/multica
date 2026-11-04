@@ -1871,6 +1871,8 @@
     "brief_save_unavailable": "此工作區尚未設定知識庫",
     "brief_earlier": "較早的簡報",
     "brief_proposals": "本簡報中的提案",
+    "setup_trigger": "公司設定",
+    "setup_trigger_offer": "下一步",
     "setup_title": "設定你的公司",
     "setup_intro": "秘書每天早上閱讀公司狀況，並告訴你哪些事需要你決定。",
     "setup_check_runtime": "Hermes 執行環境在線上",

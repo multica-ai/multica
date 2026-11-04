@@ -1871,6 +1871,8 @@
     "brief_save_unavailable": "이 워크스페이스에는 지식 베이스가 설정되지 않았습니다",
     "brief_earlier": "이전 브리프",
     "brief_proposals": "이 브리프의 제안",
+    "setup_trigger": "회사 설정",
+    "setup_trigger_offer": "다음 단계",
     "setup_title": "회사 설정하기",
     "setup_intro": "비서가 매일 아침 회사 상황을 살펴보고, 결정이 필요한 일을 알려 줍니다.",
     "setup_check_runtime": "Hermes 런타임 온라인",
