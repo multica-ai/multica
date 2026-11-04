@@ -231,6 +231,9 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../../packages/vitest-setup
       '@tailwindcss/vite':
         specifier: ^4
         version: 4.2.2(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
@@ -594,6 +597,9 @@ importers:
       '@multica/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../../packages/vitest-setup
       '@tailwindcss/postcss':
         specifier: 'catalog:'
         version: 4.2.2
@@ -667,6 +673,9 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../vitest-setup
       '@testing-library/react':
         specifier: 'catalog:'
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -838,6 +847,9 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../vitest-setup
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.9.1
@@ -1082,6 +1094,9 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@multica/vitest-setup':
+        specifier: workspace:*
+        version: link:../vitest-setup
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.9.1
@@ -1127,6 +1142,8 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(@typescript/typescript6@6.0.2))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.0))
+
+  packages/vitest-setup: {}
 
 packages:
 
