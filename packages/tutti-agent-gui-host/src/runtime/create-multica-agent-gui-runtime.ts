@@ -207,6 +207,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       if (result.activation.mode === "new") target.dispatch({ type: "session/upserted", session: result.session });
       else if (result.detail) target.dispatch({ type: "session/detailSnapshotReceived", childSessions: result.detail.childSessions, session: result.detail.session, turns: result.detail.turns, workspaceId });
     },
+    loadSession: (id) => loadSession(id),
     updateActivationSettings: async (id, settings) => { await composer.applyActivationSettings(id, settings); },
     describeActivationError: (error) => ({
       code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.trim() || null : null,
@@ -706,10 +707,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
 
   async function executeExtension(command: EngineExtensionCommand, options?: { signal?: AbortSignal }): Promise<unknown> {
     switch (command.type) {
-      case "session/reconcile":
-        // Nothing can be read for a conversation still being created; its answer brings the state.
-        if (!desktopQueue.activations.isCreating(command.agentSessionId)) await loadSession(command.agentSessionId);
-        return { status: "applied" };
       default: return unsupported(command.type);
     }
   }

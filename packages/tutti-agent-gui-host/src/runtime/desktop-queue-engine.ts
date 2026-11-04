@@ -1,8 +1,8 @@
-import type { AgentActivityMessage, AgentSessionActivationInput, AgentSessionEngine, EngineQueuedPrompt, PendingActivationIntentRecord, PromptQueueRecord } from "@tutti-os/agent-activity-core";
+import type { AgentActivityMessage, AgentSessionActivationInput, AgentSessionEngine, EngineQueuedPrompt, PendingActivationIntentRecord, PromptQueueRecord, SessionReconcileRecord } from "@tutti-os/agent-activity-core";
 import { selectEngineInteraction, selectEngineSubmitWouldBeVisibleInQueue, selectEngineTurn, selectLatestStopTargetSubmitForSession } from "@tutti-os/agent-activity-core";
 import { reaction } from "mobx";
 import { PromptService, type PromptQueueAction, type PromptServiceOptions, type PromptStatus } from "@multica/conversation-client/services";
-import { ActivationService, type ActivationServiceOptions } from "@multica/conversation-client/services";
+import { ActivationService, SessionLoadService, type ActivationServiceOptions } from "@multica/conversation-client/services";
 import type { ActivationModel } from "@multica/conversation-client/models";
 import type { LocalPromptQueue } from "@multica/core/local-conversation/protocol";
 import type { DesktopPendingStore } from "./desktop-pending-store";
@@ -50,6 +50,7 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
   applyActivationResult(engine: AgentSessionEngine, request: AgentSessionActivationInput, result: ActivationResult): void;
   updateActivationSettings: Activations<ActivationResult>["updateSettings"];
   describeActivationError: Activations<ActivationResult>["describeError"];
+  loadSession(agentSessionId: string): Promise<unknown>;
   locale?(): string;
   enqueue(input: SubmitInput): Promise<LocalPromptQueue>;
   update(id: string, action: PromptQueueAction, requestId?: string): Promise<LocalPromptQueue>;
@@ -109,7 +110,12 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
     activate: options.activate,
     applyResult: (request, result) => options.applyActivationResult(engine, request, result),
     updateSettings: options.updateActivationSettings,
-    reconcile: (id) => base.dispatch({ type: "session/reconcileRequested", agentSessionId: id, needsMessages: false, needsState: true, workspaceId }),
+    reconcile: (id) => loads.request(id, { state: true, messages: false }),
+    describeError: options.describeActivationError,
+  });
+  const loads = new SessionLoadService({
+    canLoad: (id) => !activations.isCreating(id) && base.getSnapshot().sessionLifecycle.deletedSessionIds[id] !== true,
+    load: options.loadSession,
     describeError: options.describeActivationError,
   });
   const listeners = new Set<Parameters<AgentSessionEngine["subscribe"]>[0]>();
@@ -117,10 +123,11 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
   let lastBase: typeof cached;
   let lastRevision = -1;
   let lastActivationRevision = -1;
+  let lastLoadRevision = -1;
   let disposed = false;
   const snapshot = () => {
     const state = base.getSnapshot();
-    if (cached && state === lastBase && service.revision === lastRevision && activations.revision === lastActivationRevision) return cached;
+    if (cached && state === lastBase && service.revision === lastRevision && activations.revision === lastActivationRevision && loads.revision === lastLoadRevision) return cached;
     const records = { ...state.promptQueue.recordsBySessionId };
     const submits = { ...state.pendingIntents.submitsByClientSubmitId };
     const activationsByRequestId: Record<string, PendingActivationIntentRecord> = {};
@@ -156,12 +163,19 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
         suspendReason: queue?.paused || error || service.pending(id).some((item) => item.restored) ? "user_stop" : null, uncertainDelivery: null,
       } satisfies PromptQueueRecord;
     }
-    lastBase = state; lastRevision = service.revision; lastActivationRevision = activations.revision;
-    return cached = { ...state, promptQueue: { ...state.promptQueue, recordsBySessionId: records }, pendingIntents: { ...state.pendingIntents, submitsByClientSubmitId: submits, activationsByRequestId, inactiveSessionIds } };
+    lastBase = state; lastRevision = service.revision; lastActivationRevision = activations.revision; lastLoadRevision = loads.revision;
+    const recordsBySessionId = Object.fromEntries(loads.all().map((record) => [record.agentSessionId, {
+      agentSessionId: record.agentSessionId, workspaceId, appliedHistoryRevision: null, authoritativeMessagesRequired: false,
+      errorCode: record.errorCode, errorMessage: record.errorMessage, inFlightCommandId: record.inFlight ? `load:${record.agentSessionId}` : null,
+      inFlightLive: false, inFlightScope: record.inFlight, messageRefreshScheduled: false, messagesHydrated: record.messagesHydrated, pendingLive: false,
+      pendingMessages: record.pendingMessages, pendingMessagesImmediate: record.pendingMessages, pendingState: record.pendingState, requiredHistoryRevision: null,
+    } satisfies SessionReconcileRecord]));
+    return cached = { ...state, sessionReconcile: { ...state.sessionReconcile, recordsBySessionId }, promptQueue: { ...state.promptQueue, recordsBySessionId: records }, pendingIntents: { ...state.pendingIntents, submitsByClientSubmitId: submits, activationsByRequestId, inactiveSessionIds } };
   };
   const notify = () => { for (const listener of listeners) listener(snapshot()); };
   const stopPresenting = reaction(() => service.revision, notify);
   const stopPresentingActivations = reaction(() => activations.revision, notify);
+  const stopPresentingLoads = reaction(() => loads.revision, notify);
   const unsubscribe = base.subscribe(() => { service.lifecycleChanged(); notify(); });
   const engine: AgentSessionEngine = { ...base,
     getSnapshot: snapshot,
@@ -200,6 +214,7 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
           return;
         case "activation/failureCleared": activations.clearFailure(intent.agentSessionId.trim()); return;
         case "activation/unactivateRequested": activations.unactivate(intent.agentSessionId); return;
+        case "session/reconcileRequested": loads.request(intent.agentSessionId, { state: intent.needsState, messages: intent.needsMessages }); return;
       }
       if ("agentSessionId" in intent && typeof intent.agentSessionId === "string") {
         const id = intent.agentSessionId;
@@ -211,13 +226,16 @@ export function createDesktopQueueEngine<ActivationResult>(base: AgentSessionEng
       }
       base.dispatch(intent, dispatchOptions);
       switch (intent.type) {
-        case "session/upserted": case "session/detailSnapshotReceived": case "session/historyAuthoritativeSnapshotReceived":
+        case "session/upserted": case "session/detailSnapshotReceived":
+          activations.observeSessions([intent.session]); break;
+        case "session/historyAuthoritativeSnapshotReceived":
+          loads.markHydrated(intent.agentSessionId);
           activations.observeSessions([intent.session]); break;
         case "session/snapshotReceived": activations.observeSessions(intent.sessions); break;
-        case "session/removed": activations.removeSession(intent.agentSessionId); break;
+        case "session/removed": activations.removeSession(intent.agentSessionId); loads.remove(intent.agentSessionId); break;
       }
     },
-    dispose() { activations.dispose(); service.dispose(); stopPresenting(); stopPresentingActivations(); unsubscribe(); listeners.clear(); base.dispose(); },
+    dispose() { activations.dispose(); loads.dispose(); service.dispose(); stopPresenting(); stopPresentingActivations(); stopPresentingLoads(); unsubscribe(); listeners.clear(); base.dispose(); },
   };
   return { engine, activations, prompts: service, receive: (id: string, queue?: LocalPromptQueue) => service.receive(id, queue) };
 }

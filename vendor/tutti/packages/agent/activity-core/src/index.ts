@@ -147,3 +147,4 @@ export type {
   AgentActivityInteraction
 } from "./types.ts";
 export { providerForkBindingAllowsAttempt } from "./sessionFork.types.ts";
+export type { SessionReconcileRecord } from "./engine/sessionReconcile.types.ts";
