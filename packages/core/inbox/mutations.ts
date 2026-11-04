@@ -47,6 +47,27 @@ export function useMarkInboxRead() {
   });
 }
 
+/**
+ * Read every unread notification on one issue: what viewing the issue outside
+ * the inbox does (MUL-8588). The caller passes the workspace id it already
+ * holds.
+ *
+ * Not optimistic. Outside the inbox the list is usually not loaded, and only
+ * the server knows which of the issue's rows are unread. The caches refresh
+ * unless the server reports that no row changed, so opening an issue with
+ * nothing unread costs no inbox refetch. A response without a count is treated
+ * as a change: skipping the refresh then could leave the badge stale.
+ */
+export function useMarkIssueInboxRead(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (issueId: string) => api.markIssueInboxRead(issueId),
+    onSuccess: (result) => {
+      if (result.count !== 0) refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
 export function useRetrySourceContextQuickCreate() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

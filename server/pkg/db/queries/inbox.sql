@@ -183,6 +183,18 @@ GROUP BY newest.workspace_id;
 UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;
 
+-- name: MarkInboxReadByIssue :execrows
+-- Reading an issue outside the inbox (its page, a side peek, the Unread view)
+-- reads its notifications too, so the inbox does not ask about the same issue
+-- again (MUL-8588). Every unread row in the issue's group, not just the newest:
+-- the group the inbox renders is read once its newest row is, and older unread
+-- siblings would otherwise stay in CountUnreadInbox. Archived rows are left as
+-- they are, as in MarkAllInboxRead, which also keeps the lookup on the partial
+-- index idx_inbox_active_by_issue.
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND issue_id = $3 AND archived = false AND read = false;
+
 -- name: ArchiveAllInbox :execrows
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;

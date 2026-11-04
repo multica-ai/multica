@@ -654,6 +654,33 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 	return i, err
 }
 
+const markInboxReadByIssue = `-- name: MarkInboxReadByIssue :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND issue_id = $3 AND archived = false AND read = false
+`
+
+type MarkInboxReadByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Reading an issue outside the inbox (its page, a side peek, the Unread view)
+// reads its notifications too, so the inbox does not ask about the same issue
+// again (MUL-8588). Every unread row in the issue's group, not just the newest:
+// the group the inbox renders is read once its newest row is, and older unread
+// siblings would otherwise stay in CountUnreadInbox. Archived rows are left as
+// they are, as in MarkAllInboxRead, which also keeps the lookup on the partial
+// index idx_inbox_active_by_issue.
+func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInboxReadByIssue, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markInboxUnread = `-- name: MarkInboxUnread :one
 UPDATE inbox_item SET read = false
 WHERE id = $1

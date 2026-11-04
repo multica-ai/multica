@@ -8,6 +8,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
+import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -131,13 +132,29 @@ const PROJECT = {
   updated_at: "",
 } as unknown as Project;
 
-function renderPanel(initialPath: string, pins: PinnedItem[] = [], projects: Project[] = []) {
+function renderPanel(
+  initialPath: string,
+  pins: PinnedItem[] = [],
+  projects: Project[] = [],
+  unreadIssueIds: string[] = [],
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(projectListOptions("ws-1").queryKey, { projects, total: projects.length });
   qc.setQueryData(pinListOptions("ws-1", "u1").queryKey, pins);
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
   qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, EMPTY_ISSUE_VIEW_PREFERENCE);
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+  qc.setQueryData(
+    issueUnreadOptions("ws-1").queryKey,
+    unreadIssueIds.map((issue_id) => ({
+      issue_id,
+      outcome: "completed" as const,
+      agent_id: null,
+      task_id: null,
+      comment_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+    })),
+  );
 
   function Harness() {
     const [pathname, setPathname] = useState(initialPath);
@@ -323,5 +340,51 @@ describe("WorkPanel issue highlight", () => {
 
     fireEvent.click(allIssues());
     expect(screen.queryByRole("link", { name: "Launched" })).toBeNull();
+  });
+});
+
+describe("WorkPanel Unread row after its last issue is read", () => {
+  const unreadRow = (scope: Pick<typeof screen, "queryByRole"> = screen) =>
+    scope.queryByRole("link", { name: /^Unread/ });
+
+  async function openAndReadLastUnread() {
+    useSidebarTreeStore.setState({ expanded: ["view:unread"] });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: ISSUE }], total: 1, next_cursor: null });
+    const qc = renderPanel("/acme/my-issues", [], [], [ISSUE.id]);
+    // The unread dot's label is part of the link's name until it is read.
+    fireEvent.click(await screen.findByRole("link", { name: new RegExp(`^${ISSUE.title}`) }));
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [], total: 0, next_cursor: null });
+    await act(async () => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+      qc.setQueryData(issueUnreadOptions("ws-1").queryKey, []);
+    });
+    await waitFor(() => expect(unreadRow()?.closest("li")).toHaveTextContent(/^Unread/));
+    expect(unreadRow()?.closest("li")).not.toHaveTextContent("Unread1");
+    expect(issueRow()).toHaveAttribute("aria-current", "page");
+    return qc;
+  }
+
+  it("keeps the row and the open issue in the hover peek", async () => {
+    await openAndReadLastUnread();
+    fireEvent.click(screen.getByRole("button", { name: "Open peek" }));
+    const peek = within(screen.getByTestId("peek"));
+    expect(unreadRow(peek)).not.toBeNull();
+    expect(peek.getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps the row and the open issue when the compact sheet reopens", async () => {
+    await openAndReadLastUnread();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
+    expect(unreadRow()).not.toBeNull();
+    expect(issueRow()).toHaveAttribute("aria-current", "page");
+  });
+
+  it("drops the row once the issue is no longer the page", async () => {
+    await openAndReadLastUnread();
+    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+    await screen.findByRole("link", { name: "All issues" });
+    expect(unreadRow()).toBeNull();
   });
 });

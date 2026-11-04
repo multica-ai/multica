@@ -4,8 +4,10 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { builtinSidebarSource, viewSidebarSource } from "@multica/core/issues/sidebar-list";
+import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { renderWithI18n } from "../../test/i18n";
@@ -45,6 +47,7 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-1",
 }));
+
 const adapter: NavigationAdapter = {
   push: vi.fn(),
   replace: vi.fn(),
@@ -69,21 +72,23 @@ let listIssueUnread: ReturnType<typeof vi.fn>;
 let listIssueTableRows: ReturnType<typeof vi.fn>;
 let listIssueStatuses: ReturnType<typeof vi.fn>;
 
-function renderSection() {
+function renderSection({ activeIssueId = null }: { activeIssueId?: string | null } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(
+  const tree = (issueId: string | null) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={adapter}>
         <ViewsSection
           wsId="ws-1"
-          pathname="/acme/issues"
+          pathname={issueId ? `/acme/issues/${issueId}` : "/acme/issues"}
           plainRowsLit
           issueLitInTree={false}
-          activeIssueId={null}
+          activeIssueId={issueId}
         />
       </NavigationProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = renderWithI18n(tree(activeIssueId));
+  return { ...view, qc, openIssue: (issueId: string | null) => view.rerender(tree(issueId)) };
 }
 
 beforeEach(() => {
@@ -105,6 +110,7 @@ beforeEach(() => {
     getIssueViewPreference: vi.fn(() => new Promise(() => {})),
   } as unknown as ApiClient);
   useActiveIssueViewStore.setState({ active: {} });
+  useSidebarKeptStore.setState({ held: {} });
   actions.sidebar.items = [{ id: "view:v1", kind: "view", view: UNREAD_VIEW }];
   useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [viewSidebarSource("v1")] });
 });
@@ -216,6 +222,26 @@ describe("ViewsSection built-in Unread view", () => {
     const link = await screen.findByRole("link", { name: /^Unread/ });
     expect(link).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: /^All issues/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("stays while the last unread issue is open and read, until another page opens", async () => {
+    listIssueUnread.mockResolvedValue([mark("a")]);
+    const { qc, openIssue } = renderSection({ activeIssueId: "a" });
+    await screen.findByRole("link", { name: /^Unread/ });
+
+    qc.setQueryData(issueUnreadOptions("ws-1").queryKey, []);
+    await waitFor(() => expect(screen.getByRole("link", { name: /^Unread/ }).closest("li")).toHaveTextContent(/^Unread$/));
+
+    openIssue(null);
+    await waitFor(() => expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull());
+  });
+
+  it("does not show for an open issue that was already read", async () => {
+    listIssueUnread.mockResolvedValue([]);
+    renderSection({ activeIssueId: "a" });
+    await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
+    await screen.findByRole("link", { name: "All issues" });
+    expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull();
   });
 });
 

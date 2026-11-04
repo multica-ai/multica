@@ -627,8 +627,14 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+
 	params := db.UpdateSkillParams{
-		ID: parseUUID(id),
+		ID: skill.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
@@ -686,6 +692,15 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		for i, f := range files {
 			fileResps[i] = skillFileToResponse(f)
 		}
+	}
+
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -2173,13 +2188,14 @@ func skillImportConflictReason() string {
 
 func (h *Handler) createImportedSkillWithName(ctx context.Context, workspaceID, creatorID pgtype.UUID, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest) (SkillWithFilesResponse, error) {
 	return h.createSkillWithFiles(ctx, skillCreateInput{
-		WorkspaceID: workspaceID,
-		CreatorID:   creatorID,
-		Name:        name,
-		Description: imported.description,
-		Content:     imported.content,
-		Config:      config,
-		Files:       files,
+		VersionSource: skillVersionSourceImport,
+		WorkspaceID:   workspaceID,
+		CreatorID:     creatorID,
+		Name:          name,
+		Description:   imported.description,
+		Content:       imported.content,
+		Config:        config,
+		Files:         files,
 	})
 }
 
@@ -2524,6 +2540,14 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// The baseline runs before TouchSkill: it locks the skill row (the same
+	// lock TouchSkill and UpdateSkill take, so lock order is unchanged) and
+	// stamps a pre-versioning skill's baseline with its real updated_at.
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
 	// Touch the parent first so its row lock is taken before the file write,
 	// in the same order UpdateSkill takes them.
 	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
@@ -2545,6 +2569,14 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Warn("upsert skill file failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
@@ -2593,6 +2625,11 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
 	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
 		ID:          skill.ID,
 		WorkspaceID: skill.WorkspaceID,
@@ -2606,6 +2643,14 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := qtx.DeleteSkillFile(r.Context(), file.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
