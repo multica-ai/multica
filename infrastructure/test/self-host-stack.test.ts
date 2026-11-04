@@ -219,6 +219,15 @@ describe('bootstrap', () => {
     expect(script).toContain('chmod 0600 "${APP_DIR}/.env"');
   });
 
+  it('ships container stdout to CloudWatch, not just the bootstrap log', () => {
+    // With no mail provider the backend prints the sign-in code to stdout.
+    // Nothing else carries it off the instance, and the security group opens
+    // no shell port, so losing this means losing the only way to sign in.
+    const script = userData(synth().template);
+    expect(script).toContain('/var/lib/docker/containers/*/*-json.log');
+    expect(script).toContain('/var/log/cloud-init-output.log');
+  });
+
   it('substitutes every placeholder', () => {
     expect(userData(synth().template)).not.toMatch(/@@\w+@@/);
   });

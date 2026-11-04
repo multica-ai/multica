@@ -254,6 +254,11 @@ UNIT
 # ---------------------------------------------------------------------------
 # Start
 # ---------------------------------------------------------------------------
+# Container stdout goes to CloudWatch alongside the bootstrap log. Without a
+# mail provider the backend prints the sign-in code to stdout and nowhere
+# else, so this is the only way to read it without a shell on the instance.
+# Tailing the json logs rather than switching the containers to the awslogs
+# driver keeps `docker compose logs` working for anyone who does have one.
 log "Configuring the CloudWatch agent"
 install -d -m 0755 /opt/aws/amazon-cloudwatch-agent/etc
 cat >/opt/aws/amazon-cloudwatch-agent/etc/multica.json <<CWAGENT
@@ -267,6 +272,12 @@ cat >/opt/aws/amazon-cloudwatch-agent/etc/multica.json <<CWAGENT
             "file_path": "/var/log/cloud-init-output.log",
             "log_group_name": "${LOG_GROUP}",
             "log_stream_name": "{instance_id}/bootstrap",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/lib/docker/containers/*/*-json.log",
+            "log_group_name": "${LOG_GROUP}",
+            "log_stream_name": "{instance_id}/containers",
             "timezone": "UTC"
           }
         ]
