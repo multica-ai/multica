@@ -17,8 +17,8 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 	}
 	chat := t.ChatSessionID != ""
 	quickCreate := !chat && t.IssueID == "" && t.QuickCreatePrompt != ""
-	if (t.IssueID != "") == (chat || quickCreate) || t.IsLeaderTask {
-		return nil, fmt.Errorf("Qoder bridge currently supports issue, chat and quick-create runs only")
+	if (t.IssueID != "") == (chat || quickCreate) || t.IsLeaderTask && t.IssueID == "" {
+		return nil, fmt.Errorf("Qoder bridge currently supports issue, squad leader, chat and quick-create runs only")
 	}
 	if !strings.HasPrefix(t.AuthToken, "mat_") {
 		return nil, fmt.Errorf("claim is missing a task-scoped credential")
@@ -61,6 +61,9 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 	}
 	if t.Agent != nil {
 		fmt.Fprintf(&p, "\nAgent instructions:\n%s\n", t.Agent.Instructions)
+	}
+	if r.Leader != nil {
+		p.WriteString(leaderBridgeNote)
 	}
 	fmt.Fprintf(&p, "\nWorkspace context:\n%s\n\nProject:\n%s\n%s\n", t.WorkspaceContext, t.ProjectTitle, t.ProjectDescription)
 	if t.HandoffNote != "" {
@@ -140,13 +143,18 @@ func (b *Bridge) issuePrompt(ctx context.Context, t *claimedTask, r *run, p *str
 	if err := taskAPI.call(ctx, http.MethodGet, "/api/issues/"+url.PathEscape(t.IssueID), nil, &issue); err != nil {
 		return fmt.Errorf("read issue: %w", err)
 	}
-	p.WriteString("Complete the following Multica issue in your Qoder environment. Return a final summary including code changes, tests and branch/PR/MR links when available. This bridge does not expose a local Multica daemon.\n")
+	if t.IsLeaderTask {
+		r.Leader = &squadLeader{IssueID: t.IssueID, TriggerCommentID: t.TriggerCommentID, token: t.AuthToken}
+		p.WriteString("You lead a Multica squad on the following issue. Follow the Squad Operating Protocol in your agent instructions: coordinate, do not do the work yourself. This bridge does not expose a local Multica daemon.\n")
+	} else {
+		p.WriteString("Complete the following Multica issue in your Qoder environment. Return a final summary including code changes, tests and branch/PR/MR links when available. This bridge does not expose a local Multica daemon.\n")
+	}
 	if t.PriorSessionID != "" {
 		r.PriorSessionID = t.PriorSessionID
 		p.WriteString("This is a follow-up on the same issue. If the earlier conversation is not in your context, rely on the issue and comments below.\n")
 	}
 	fmt.Fprintf(p, "\nRun: %s\nIssue: %s\n\n%s\n\n%s\n", t.ID, t.IssueIdentifier, issue.Title, issue.Description)
-	if t.IssueIdentifier != "" {
+	if t.IssueIdentifier != "" && !t.IsLeaderTask {
 		fmt.Fprintf(p, "\nWhen you change code, push a new branch named %s (never the default branch), open a pull request whose title starts with \"%s: \", and put the pull request link in your final summary. Multica links the pull request to this issue through that identifier.\n", BranchName(t.IssueIdentifier, issue.Title), t.IssueIdentifier)
 	}
 	return b.attachIssueFiles(ctx, &taskAPI, issue.Attachments, r, p)

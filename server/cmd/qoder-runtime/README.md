@@ -144,7 +144,11 @@ GitHub integration links the pull request back to the issue.
 
 ## Current boundaries
 
-This is a PoC for issue runs and chat turns. Squad coordination, local
+This is a PoC for issue runs, chat turns and squad leader turns. A squad leader
+has no Multica CLI in its Qoder session: it ends its turn with an `OUTCOME:` /
+`REASON:` header and the delegation comment, and the bridge posts the comment
+(which triggers the mentioned members) and records the squad evaluation with the
+task credential. A leader cannot change the issue status. Local
 directories, chat message attachments, binary non-image issue attachments, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 file transfer and billing/usage conversion are not implemented. Set up a Qoder

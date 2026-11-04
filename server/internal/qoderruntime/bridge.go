@@ -619,6 +619,11 @@ func (b *Bridge) deliver(ctx context.Context, r *run) error {
 	if err := b.reportCredits(ctx, r); err != nil {
 		return err
 	}
+	if r.Leader != nil && r.Outcome == "completed" {
+		if err := b.deliverLeader(ctx, r); err != nil {
+			return err
+		}
+	}
 	body := map[string]any{"session_id": r.SessionID}
 	suffix := "/complete"
 	if r.Outcome == "completed" {
