@@ -68,6 +68,47 @@ func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellCommand(t *testing.
 	}
 }
 
+// An omp runtime uses the Pi protocol, but must execute omp's own launcher.
+// npm installs both scripts in the same directory when pi and omp coexist.
+func TestChoosePiInvocation_UsesResolvedLauncherScript(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "omp.cmd")
+	ompPS1 := filepath.Join(dir, "omp.ps1")
+	writeFile(t, cmdPath, "@echo off\r\n")
+	writeFile(t, ompPS1, "# fake omp.ps1\r\n")
+	writeFile(t, filepath.Join(dir, "pi.ps1"), "# fake pi.ps1\r\n")
+
+	fakePS := filepath.Join(dir, "powershell.exe")
+	writeFile(t, fakePS, "")
+	stubPowerShell(t, fakePS, true)
+
+	args := []string{"-p", "--mode", "json", "--model", "grox/deepseek-v4.1-flash"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gotExec, gotArgs := choosePiInvocation("omp", cmdPath, args, logger)
+	if gotExec != fakePS {
+		t.Errorf("argv0: got %q want %q", gotExec, fakePS)
+	}
+	wantArgs := append([]string{
+		"-NoProfile", "-ExecutionPolicy", "Bypass",
+		"-Command", "& '" + ompPS1 + "' @args",
+	}, args...)
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Errorf("argv mismatch:\n got  %#v\n want %#v", gotArgs, wantArgs)
+	}
+}
+
+func TestPlatformPiInvocation_DoesNotUseAnotherRuntimeScript(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "omp.cmd")
+	writeFile(t, cmdPath, "@echo off\r\n")
+	writeFile(t, filepath.Join(dir, "pi.ps1"), "# fake pi.ps1\r\n")
+	stubPowerShell(t, filepath.Join(dir, "powershell.exe"), true)
+
+	if _, _, ok := platformPiInvocation(cmdPath, nil, nil); ok {
+		t.Fatal("expected omp.cmd to remain unchanged when omp.ps1 is missing")
+	}
+}
+
 // TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand pins the model
 // discovery path: --mode rpc takes the same -Command route as every other Pi
 // invocation, since the route is now unconditional.
