@@ -104,7 +104,7 @@ func TestOperatingReviewDescriptionCarriesCharterAndGoals(t *testing.T) {
 		"weekly-digest (report, weekly)",
 		"Never spend money.",
 		"Escalate to the boss on anything irreversible.",
-		"Goals: none recorded yet",
+		"Goals: see \"Your goals this period\" in your briefing",
 		"1. Compare last week's outputs with the charter",
 		"4. File it as a proposal (the attention limits apply)",
 		"5. Draft updates for stale knowledge-base documents (drafts only).",

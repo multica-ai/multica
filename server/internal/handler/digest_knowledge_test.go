@@ -167,3 +167,42 @@ func TestDigest_KnowledgeIsIsolatedByWorkspace(t *testing.T) {
 		t.Fatalf("workspace B sees A's knowledge: %+v", inB)
 	}
 }
+
+// An automatic publish (a system writer's, here) is listed in the window it
+// happened in, and not in a later one: the brief's FYI names each one once.
+func TestDigest_AutomaticPublishesAreListedForTheFYI(t *testing.T) {
+	useKnowledge(t)
+	e := newDigestEnv(t)
+	enableDigestKnowledge(t, e.WorkspaceID)
+
+	ctx := context.Background()
+	view, _, err := testHandler.Knowledge.CreateDocument(ctx, parseUUID(e.WorkspaceID),
+		service.KnowledgeActor{Type: service.KnowledgeActorSystem},
+		service.KnowledgeDocumentInput{KB: "decisions", Title: "Auto decision record", Content: "Body of the record", Publish: true})
+	if err != nil {
+		t.Fatalf("system publish: %v", err)
+	}
+
+	d := e.digest(t, digestAnySince)
+	if d.Knowledge.AutoPublished.Count != 1 || len(d.Knowledge.AutoPublished.Items) != 1 {
+		t.Fatalf("auto published = %+v, want one listed", d.Knowledge.AutoPublished)
+	}
+	got := d.Knowledge.AutoPublished.Items[0]
+	if got.LinkID != view.ID || got.Title != "Auto decision record" || got.KnowledgeBase != "decisions" || got.Mode != "auto" {
+		t.Fatalf("auto publish item = %+v", got)
+	}
+	if got.PublishedAt == "" {
+		t.Fatalf("auto publish lacks published_at: %+v", got)
+	}
+
+	// Moved two days back, the publish falls outside the last hour's window.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE governance_event SET created_at = now() - interval '2 days' WHERE workspace_id = $1 AND kind = 'auto_publish'`,
+		e.WorkspaceID); err != nil {
+		t.Fatalf("backdate the governance entry: %v", err)
+	}
+	recent := e.digest(t, time.Now().Add(-time.Hour))
+	if recent.Knowledge.AutoPublished.Count != 0 || len(recent.Knowledge.AutoPublished.Items) != 0 {
+		t.Fatalf("a window after the publish still lists it: %+v", recent.Knowledge.AutoPublished)
+	}
+}

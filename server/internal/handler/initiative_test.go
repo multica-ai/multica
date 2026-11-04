@@ -290,7 +290,6 @@ func TestInitiative_CreateNeedsAnAdminAndAValidBody(t *testing.T) {
 	// Malformed input is refused before anything is written.
 	for name, body := range map[string]map[string]any{
 		"no title":     {"thesis": "y"},
-		"no thesis":    {"title": "x"},
 		"bad pipeline": {"title": "x", "thesis": "y", "pipeline_id": "not-a-uuid"},
 		"long title":   {"title": strings.Repeat("a", 201), "thesis": "y"},
 	} {
@@ -302,6 +301,10 @@ func TestInitiative_CreateNeedsAnAdminAndAValidBody(t *testing.T) {
 	req := fx.as(newRequest("POST", "/api/initiatives", nil), fx.AdminID)
 	req.Body = io.NopCloser(strings.NewReader("{not json"))
 	testutil.Call(t, testHandler.CreateInitiative, req).Want(http.StatusBadRequest)
+
+	// Spec 3.1 gives the thesis column an empty default: a title alone is enough.
+	testutil.Call(t, testHandler.CreateInitiative,
+		fx.as(newRequest("POST", "/api/initiatives", map[string]any{"title": "Thesis later"}), fx.AdminID)).Want(http.StatusCreated)
 }
 
 func TestInitiative_AdminStartsAtValidateWithChecklistAndHandoff(t *testing.T) {
@@ -808,6 +811,27 @@ func TestInitiative_ScaleStartsAFollowOnAtDefineAndKeepsOperating(t *testing.T) 
 	dbfx.QueryRow(t, `SELECT stage_key FROM initiative WHERE workspace_id = $1 AND title = $2`, fx.ID, "Scaling (scaled)").Scan(&follow)
 	if follow != "define" {
 		t.Fatalf("the follow-on starts at define, got %q", follow)
+	}
+
+	// Spec 3.6: Learn runs when an initiative is scaled, so the original gets a
+	// retrospective candidate of its own, under the scaled trigger.
+	var scaledEvents int
+	dbfx.QueryRow(t, `SELECT count(*) FROM initiative_stage_event WHERE initiative_id = $1 AND kind = 'scaled'`, created.ID).Scan(&scaledEvents)
+	if scaledEvents != 1 {
+		t.Fatalf("scaled events on the original = %d, want 1", scaledEvents)
+	}
+	candidates, err := (&service.RetroService{Queries: testHandler.Queries}).Candidates(context.Background(), parseUUID(fx.ID), time.Now())
+	if err != nil {
+		t.Fatalf("retro candidates: %v", err)
+	}
+	found := false
+	for _, c := range candidates {
+		if c.Trigger == service.RetroTriggerInitiativeScaled && c.SubjectID == parseUUID(created.ID) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no initiative_scaled retrospective candidate for the scaled initiative: %+v", candidates)
 	}
 }
 

@@ -6,11 +6,13 @@ import {
   FALLBACK_KNOWLEDGE_ACCESS,
   FALLBACK_KNOWLEDGE_MODEL_CHECKS,
   FALLBACK_KNOWLEDGE_OWNER_LOGIN,
+  FALLBACK_KNOWLEDGE_REPO_SYNC,
   FALLBACK_KNOWLEDGE_SOURCES,
   KnowledgeAccessSchema,
   KnowledgeBaseSettingsSchema,
   KnowledgeModelChecksSchema,
   KnowledgeOwnerLoginSchema,
+  KnowledgeRepoSyncSchema,
   KnowledgeSourcesSchema,
 } from "./platform-schemas";
 import { knowledgeAccessOptions, knowledgePlatformKeys } from "./platform-queries";
@@ -40,6 +42,41 @@ const source = {
   error_message: "401 from Notion: integration token expired",
   total_items_synced: 42,
 };
+
+describe("knowledge repo sync schema", () => {
+  it("parses the setting and the last run's outcome", () => {
+    const parsed = parseWithFallback(
+      {
+        enabled: true,
+        repo_url: "https://example.test/acme/app.git",
+        branch: "main",
+        docs_path: "docs",
+        knowledge_base_key: "engineering",
+        last_synced_at: "2026-11-02T03:00:00Z",
+        last_error: "docs/a.md: lacks the required headings",
+      },
+      KnowledgeRepoSyncSchema,
+      FALLBACK_KNOWLEDGE_REPO_SYNC,
+      { endpoint: "GET /api/knowledge/repo-sync" },
+    );
+    expect(parsed).toMatchObject({ enabled: true, knowledge_base_key: "engineering", last_error: "docs/a.md: lacks the required headings" });
+  });
+
+  it("defaults an older server's setting to off, on main and docs, and never to syncing", () => {
+    const parsed = KnowledgeRepoSyncSchema.parse({});
+    expect(parsed).toMatchObject({ enabled: false, branch: "main", docs_path: "docs", knowledge_base_key: "engineering", last_synced_at: null, last_error: "" });
+  });
+
+  it("falls back to off when the setting is malformed", () => {
+    const parsed = parseWithFallback(
+      { enabled: "yes please", branch: 7 },
+      KnowledgeRepoSyncSchema,
+      FALLBACK_KNOWLEDGE_REPO_SYNC,
+      { endpoint: "GET /api/knowledge/repo-sync" },
+    );
+    expect(parsed.enabled).toBe(false);
+  });
+});
 
 describe("knowledge sources schema", () => {
   it("parses a failed source with its last sync and error", () => {

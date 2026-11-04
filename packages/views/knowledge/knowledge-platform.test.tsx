@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import type { KnowledgeBase } from "@multica/core/knowledge";
+import type { KnowledgeBase, KnowledgeRepoSync } from "@multica/core/knowledge";
 import { renderWithI18n } from "../test/i18n";
 import { KnowledgeUploadPanel } from "./knowledge-upload";
 import { KnowledgeSetupPanel } from "./knowledge-setup";
@@ -21,6 +21,9 @@ vi.mock("@multica/core/api", () => ({
     deleteKnowledgeGrant: vi.fn(),
     testKnowledgeModels: vi.fn(),
     revealKnowledgeOwnerPassword: vi.fn(),
+    getKnowledgeRepoSync: vi.fn(),
+    updateKnowledgeRepoSync: vi.fn(),
+    runKnowledgeRepoSync: vi.fn(),
     listSquads: vi.fn().mockResolvedValue([]),
     listAgents: vi.fn().mockResolvedValue([]),
     listOfficeFloors: vi.fn().mockResolvedValue([]),
@@ -189,5 +192,63 @@ describe("KnowledgeSetupPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /test models/i }));
     expect(await screen.findByText("rerank-model")).toBeInTheDocument();
     expect(screen.getByText("upstream returned 404")).toBeInTheDocument();
+  });
+});
+
+describe("KnowledgeSetupPanel repository docs sync", () => {
+  const off: KnowledgeRepoSync = {
+    enabled: false,
+    repo_url: "",
+    branch: "main",
+    docs_path: "docs",
+    knowledge_base_key: "engineering",
+    last_synced_at: null,
+    last_error: "",
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.listKnowledgeSources).mockResolvedValue({ state: "ready", ui_url: "", sources: [] });
+  });
+
+  it("saves the address, then syncs and shows the failed files of that run", async () => {
+    // A stand-in server: each save and run changes what the next read returns.
+    let server: KnowledgeRepoSync = { ...off };
+    vi.mocked(api.getKnowledgeRepoSync).mockImplementation(async () => server);
+    vi.mocked(api.updateKnowledgeRepoSync).mockImplementation(async (req) => {
+      server = { ...server, ...req, last_synced_at: null, last_error: "" };
+      return server;
+    });
+    vi.mocked(api.runKnowledgeRepoSync).mockImplementation(async () => {
+      server = { ...server, last_synced_at: "2026-11-02T03:00:00Z", last_error: "docs/adr/0002.md: lacks the required headings" };
+      return server;
+    });
+    mount(<KnowledgeSetupPanel wsId="ws-1" knowledgeBases={bases} />);
+
+    const address = await screen.findByLabelText(/repository address/i);
+    fireEvent.change(address, { target: { value: "https://example.test/acme/app.git" } });
+    fireEvent.click(screen.getByRole("switch", { name: /sync this repository every day/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(api.updateKnowledgeRepoSync).toHaveBeenCalledWith({
+        enabled: true,
+        repo_url: "https://example.test/acme/app.git",
+        branch: "main",
+        docs_path: "docs",
+        knowledge_base_key: "engineering",
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /sync now/i }));
+    expect(await screen.findByText("docs/adr/0002.md: lacks the required headings")).toBeInTheDocument();
+    expect(api.runKnowledgeRepoSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer a sync until a repository address is saved", async () => {
+    vi.mocked(api.getKnowledgeRepoSync).mockResolvedValue(off);
+    mount(<KnowledgeSetupPanel wsId="ws-1" knowledgeBases={bases} />);
+
+    expect(await screen.findByRole("button", { name: /sync now/i })).toHaveAttribute("disabled");
+    expect(screen.getByText(/never synced/i)).toBeInTheDocument();
   });
 });

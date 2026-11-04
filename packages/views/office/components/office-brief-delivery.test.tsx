@@ -124,6 +124,24 @@ describe("OfficeBriefDelivery", () => {
     expect(mocks.update).toHaveBeenCalledWith({ brief_push: true, binding_id: "b1", quiet_hours: null });
   });
 
+  it("names DingTalk, WeCom and Lark chats by their settings titles", async () => {
+    mocks.get.mockResolvedValue(UNLINKED);
+    mocks.list.mockResolvedValue([
+      { id: "d1", channel: "dingtalk", label: "" },
+      { id: "w1", channel: "wecom", label: "Ops" },
+      { id: "f1", channel: "feishu", label: "" },
+    ] satisfies BriefPushBinding[]);
+    renderPanel();
+
+    const select = await chatSelect();
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      "Choose a chat",
+      "DingTalk",
+      "WeCom · Ops",
+      "Lark",
+    ]);
+  });
+
   it("pre-selects the saved chat and sends its id when the push switch changes", async () => {
     renderPanel();
 

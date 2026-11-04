@@ -141,6 +141,19 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	}
 }
 
+// TestVersionProbeTimeoutCoversSlowHermesStartup pins the shared `--version`
+// bound above the ~35s a real Hermes install takes, so the daemon registers it
+// instead of skipping it as "version detection failed: signal: killed". The
+// hang test above proves a probe past this bound still fails.
+func TestVersionProbeTimeoutCoversSlowHermesStartup(t *testing.T) {
+	if versionProbeTimeout < 60*time.Second {
+		t.Fatalf("versionProbeTimeout = %v; must cover a ~35s Hermes --version", versionProbeTimeout)
+	}
+	if detectVersionTimeout != versionProbeTimeout {
+		t.Fatalf("detectVersionTimeout = %v, want the shared versionProbeTimeout %v", detectVersionTimeout, versionProbeTimeout)
+	}
+}
+
 func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	t.Parallel()
 

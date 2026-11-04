@@ -36,14 +36,24 @@ func TestResolvePublishModeKindOverBaseOverDefault(t *testing.T) {
 	}
 }
 
-// TestSquadMayAutoPublishStub pins the stand-in for the autonomy check. Phase 4
-// (11.9) replaces it; until then every squad may publish after review.
-func TestSquadMayAutoPublishStub(t *testing.T) {
-	if !squadMayAutoPublish(context.Background(), pgtype.UUID{}) {
-		t.Fatal("the autonomy stub must return true until phase 4")
+// TestSquadMayAutoPublishFollowsAutonomy pins the L2 check (spec 4.3): a squad
+// publishes its drafts without a person only at autonomy level L2 or above.
+func TestSquadMayAutoPublishFollowsAutonomy(t *testing.T) {
+	p := newPolicyFixture(t)
+	e := p.e
+	ctx := context.Background()
+	// The fixture's author squad is at L2 (see newPolicyFixture); the critic's is at the default L1.
+	if ok, err := e.svc.squadMayAutoPublish(ctx, e.ws, mustUUID(t, p.authorSquad)); err != nil || !ok {
+		t.Fatalf("an L2 squad: ok=%v err=%v, want true", ok, err)
 	}
-	if !squadMayAutoPublish(context.Background(), pgtype.UUID{Valid: true, Bytes: [16]byte{1}}) {
-		t.Fatal("the autonomy stub must return true for every squad until phase 4")
+	if ok, err := e.svc.squadMayAutoPublish(ctx, e.ws, mustUUID(t, p.criticSquad)); err != nil || ok {
+		t.Fatalf("an L1 squad: ok=%v err=%v, want false", ok, err)
+	}
+	if ok, err := e.svc.squadMayAutoPublish(ctx, e.ws, pgtype.UUID{}); err != nil || ok {
+		t.Fatalf("no squad: ok=%v err=%v, want false", ok, err)
+	}
+	if ok, err := e.svc.squadMayAutoPublish(ctx, e.ws, mustUUID(t, "00000000-0000-4000-8000-000000000001")); err != nil || ok {
+		t.Fatalf("an unknown squad: ok=%v err=%v, want false", ok, err)
 	}
 }
 
@@ -93,6 +103,11 @@ func newPolicyFixture(t *testing.T) *policyFixture {
 	fx.SquadMember(t, authorSquad, "agent", peer)
 	criticSquad := fx.Squad(t, "Critics", critic)
 	fx.SquadMember(t, criticSquad, "agent", critic)
+	// The author's squad is at L2, so its drafts may publish after review (spec 4.3).
+	if _, err := e.pool.Exec(context.Background(),
+		`UPDATE squad SET autonomy_level = 2 WHERE id = $1`, mustUUID(t, authorSquad)); err != nil {
+		t.Fatal(err)
+	}
 	return &policyFixture{e: e, author: e.liveAgent, critic: critic, peer: peer, authorSquad: authorSquad, criticSquad: criticSquad}
 }
 

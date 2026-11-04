@@ -1651,6 +1651,32 @@ describe("AutopilotRunSchema", () => {
     expect(parsed.reason_code).toBeUndefined();
   });
 
+  it("reads a held run's flag and its hold reason, and defaults held to false", () => {
+    const held = parseWithFallback(
+      { ...baseRun, held: true, reason_code: "budget_hold" },
+      AutopilotRunSchema,
+      FALLBACK_AUTOPILOT_RUN,
+      ENDPOINT,
+    );
+    expect(held.held).toBe(true);
+    expect(held.status).toBe("issue_created");
+    expect(held.reason_code).toBe("budget_hold");
+
+    const older = parseWithFallback(baseRun, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
+    expect(older.held).toBe(false);
+  });
+
+  it("degrades a malformed held flag to the fallback instead of showing the run as held", () => {
+    const parsed = parseWithFallback(
+      { ...baseRun, held: "yes" },
+      AutopilotRunSchema,
+      FALLBACK_AUTOPILOT_RUN,
+      ENDPOINT,
+    );
+    expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
+    expect(parsed.held).toBeFalsy();
+  });
+
   it("degrades a malformed response to a non-success fallback (never a false success)", () => {
     const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
     expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);

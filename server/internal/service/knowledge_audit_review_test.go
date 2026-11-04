@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +27,8 @@ func (e *knowledgeEnv) reviewIssueCount(t *testing.T) int {
 }
 
 // K1: a due document owned by a squad gets one review request from that squad,
-// a second run does not repeat it, and a document without an owning squad is
-// reported rather than requested.
+// and a second run does not repeat it. A document without an owning squad is
+// requested from the Executive Office, or reported when there is none.
 func TestFreshnessReviewRequestsOnceFromTheOwningSquad(t *testing.T) {
 	e := newKnowledgeEnv(t).enabled()
 	ctx := context.Background()
@@ -171,5 +172,36 @@ func TestTaxonomyAuditRepairsNothingOnATruncatedListing(t *testing.T) {
 	}
 	if n := e.linkCount(); n != 1 {
 		t.Fatalf("a partial audit repaired the registry: %d links, want 1", n)
+	}
+}
+
+// Spec 3.3: a due document with no owning squad gets its request from the
+// Executive Office, the Librarian's squad, so a draft update can follow. Without
+// that squad the document is only reported (the test above).
+func TestFreshnessReviewSendsAnUnownedDocumentToTheExecutiveOffice(t *testing.T) {
+	e := newKnowledgeEnv(t).enabled()
+	ctx := context.Background()
+	exec := testutil.New(e.pool, e.wsID, e.userID).Squad(t, "Executive Office", e.liveAgent)
+	past := pgtype.Date{Time: time.Now().AddDate(0, 0, -3), Valid: true}
+	e.mustCreate(memberActor(e), KnowledgeDocumentInput{KB: "company", Title: "Orphan policy", Kind: "policy",
+		Publish: true, Content: policyBody, ValidUntil: past})
+
+	report, err := e.svc.FreshnessReview(ctx, e.ws, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Counts["review_requested"] != 1 || report.Counts["review_no_squad"] != 0 {
+		t.Fatalf("counts = %v, want the unowned document requested", report.Counts)
+	}
+	var assigneeType, assigneeID, body string
+	if err := e.pool.QueryRow(ctx, `SELECT assignee_type, COALESCE(assignee_id::text, ''), description FROM issue
+		WHERE workspace_id = $1 AND title = 'Review request: Orphan policy'`, e.wsID).Scan(&assigneeType, &assigneeID, &body); err != nil {
+		t.Fatal(err)
+	}
+	if assigneeType != "squad" || assigneeID != exec {
+		t.Fatalf("request assigned to %s %s, want the Executive Office squad %s", assigneeType, assigneeID, exec)
+	}
+	if !strings.Contains(body, "No squad owns this document") {
+		t.Fatalf("request body does not say the document is unowned: %q", body)
 	}
 }

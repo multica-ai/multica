@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paths, isGlobalPath } from "./paths";
+import { paths, isGlobalPath, parseGovernanceTab } from "./paths";
 
 describe("paths.workspace(slug)", () => {
   const ws = paths.workspace("acme");
@@ -42,6 +42,21 @@ describe("paths.workspace(slug)", () => {
     expect(ws.pipeline()).toBe("/acme/pipeline");
     expect(ws.pipelineForSquad("sq-1")).toBe("/acme/pipeline?squad=sq-1");
     expect(ws.pipelineForSquad("sq 1")).toBe("/acme/pipeline?squad=sq%201");
+  });
+
+  it("builds the governance route with an optional tab query", () => {
+    expect(ws.governance()).toBe("/acme/governance");
+    expect(ws.governance("goals")).toBe("/acme/governance?tab=goals");
+    expect(ws.governance("controls")).toBe("/acme/governance?tab=controls");
+    expect(ws.governance("log")).toBe("/acme/governance?tab=log");
+  });
+
+  it("parses the governance tab, defaulting to goals", () => {
+    expect(parseGovernanceTab("log")).toBe("log");
+    expect(parseGovernanceTab("controls")).toBe("controls");
+    expect(parseGovernanceTab("unknown-tab")).toBe("goals");
+    expect(parseGovernanceTab("")).toBe("goals");
+    expect(parseGovernanceTab(null)).toBe("goals");
   });
 
   it("URL-encodes special characters in ids", () => {

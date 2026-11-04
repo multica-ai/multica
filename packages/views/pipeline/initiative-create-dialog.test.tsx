@@ -53,14 +53,24 @@ describe("InitiativeCreateDialog", () => {
     expect(screen.queryByText("Experiments")).toBeNull();
   });
 
-  it("requires a title and a thesis before it creates anything", async () => {
+  it("requires a title, and leaves the thesis optional", async () => {
     renderDialog();
     await screen.findByText("Default");
     fireEvent.click(screen.getByRole("button", { name: "Create initiative" }));
 
     expect(screen.getByText("A title is required.")).toBeTruthy();
-    expect(screen.getByText("A thesis is required: say why this is worth doing.")).toBeTruthy();
     expect(api.createInitiative).not.toHaveBeenCalled();
+  });
+
+  it("creates an initiative without a thesis when none is given", async () => {
+    renderDialog();
+    await screen.findByText("Default");
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Ledger clean-up" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create initiative" }));
+
+    await waitFor(() =>
+      expect(api.createInitiative).toHaveBeenCalledWith({ pipeline_id: "pl-1", title: "Ledger clean-up", thesis: "" }),
+    );
   });
 
   it("creates the initiative in the chosen pipeline, then closes", async () => {
