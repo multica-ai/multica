@@ -19,7 +19,7 @@ import type { ChatSession } from "../types/chat";
  * badge.
  */
 export function countUnreadChatMessages(
-  sessions: readonly ChatSession[] | undefined,
+  sessions: readonly Pick<ChatSession, "id" | "unread_count">[] | undefined,
   excludeSessionId?: string | null,
 ): number {
   if (!sessions) return 0;

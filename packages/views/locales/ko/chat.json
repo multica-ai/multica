@@ -227,6 +227,11 @@
     }
   },
   "list": {
+    "loading": "채팅 불러오는 중...",
+    "load_failed": "채팅을 불러올 수 없습니다",
+    "retry": "다시 시도",
+    "load_more": "더 보기",
+    "no_archived": "보관된 채팅이 없습니다",
     "typing": "입력 중…",
     "failed": "전송 실패",
     "you_prefix": "나: ",

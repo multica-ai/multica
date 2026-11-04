@@ -227,6 +227,11 @@
     }
   },
   "list": {
+    "loading": "チャットを読み込み中...",
+    "load_failed": "チャットを読み込めませんでした",
+    "retry": "再試行",
+    "load_more": "さらに読み込む",
+    "no_archived": "アーカイブされたチャットはありません",
     "typing": "入力中…",
     "failed": "送信失敗",
     "you_prefix": "あなた：",

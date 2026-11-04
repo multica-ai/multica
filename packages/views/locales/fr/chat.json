@@ -231,6 +231,11 @@
     }
   },
   "list": {
+    "loading": "Chargement des discussions...",
+    "load_failed": "Impossible de charger les discussions",
+    "retry": "Réessayer",
+    "load_more": "Charger plus",
+    "no_archived": "Aucune discussion archivée",
     "typing": "Rédaction…",
     "failed": "Échec de l'envoi",
     "you_prefix": "Vous : ",

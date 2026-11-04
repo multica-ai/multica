@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionOptions } from "@multica/core/chat/queries";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -67,10 +67,8 @@ function seed(qc: QueryClient) {
     icon: "🚀",
     title: "Apollo",
   } as never);
-  qc.setQueryData(chatSessionsOptions("ws1").queryKey, [
-    { id: "s1", title: "Deploy plan", status: "active" },
-    { id: "s2", title: "  ", status: "active" },
-  ] as never);
+  qc.setQueryData(chatSessionOptions("ws1", "s1").queryKey, { id: "s1", title: "Deploy plan", status: "active" } as never);
+  qc.setQueryData(chatSessionOptions("ws1", "s2").queryKey, { id: "s2", title: "  ", status: "active" } as never);
   qc.setQueryData(inboxListOptions("ws1").queryKey, [
     { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
     { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },

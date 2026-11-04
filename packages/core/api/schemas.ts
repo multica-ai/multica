@@ -22,6 +22,8 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  ChatSessionsPage,
+  ChatSessionSummary,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -2224,6 +2226,20 @@ export const ChatSessionListSchema = z
   .transform((sessions) => sessions.filter((session) => session.id !== ""))
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+export const ChatSessionsPageSchema = z.object({
+  sessions: ChatSessionListSchema,
+  next_cursor: z.string().nullable().catch(null),
+  has_more: z.boolean().catch(false),
+}).loose();
+export const EMPTY_CHAT_SESSIONS_PAGE: ChatSessionsPage = { sessions: [], next_cursor: null, has_more: false };
+
+export const ChatSessionSummarySchema = z.object({
+  active_count: z.number().int().nonnegative().catch(0),
+  archived_count: z.number().int().nonnegative().catch(0),
+  unread_by_session: z.record(z.string(), z.number().int().nonnegative()).catch({}),
+}).loose();
+export const EMPTY_CHAT_SESSION_SUMMARY: ChatSessionSummary = { active_count: 0, archived_count: 0, unread_by_session: {} };
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer

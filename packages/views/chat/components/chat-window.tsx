@@ -1,5 +1,7 @@
 "use client";
 
+import { useChatSessionList, useCurrentChatSession, type ChatSessionList } from "@multica/core/chat/use-session-list";
+import { ChatSessionListStatus } from "./chat-session-list-status";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
@@ -47,7 +49,7 @@ import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
-  chatSessionsOptions,
+  chatSessionSummaryOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
@@ -118,11 +120,10 @@ export function ChatWindow() {
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  // Single sessions cache — eliminates the separate active/all queries
-  // that used to drift during the WS-invalidate window.
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
-    chatSessionsOptions(wsId),
-  );
+  const sessionList = useChatSessionList(wsId, "active", isOpen);
+  const { data: sessions } = sessionList;
+  const selectedSession = useCurrentChatSession(wsId, activeSessionId, sessions);
+  const { data: sessionSummary } = useQuery(chatSessionSummaryOptions(wsId));
   const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
     projectListOptions(wsId),
   );
@@ -185,9 +186,7 @@ export function ChatWindow() {
   // pre-existing rows with status='archived' may still exist) are excluded
   // from the history dropdown. If one is still the active session, ChatInput
   // is disabled and the server still rejects POST /messages for it.
-  const currentSession = activeSessionId
-    ? sessions.find((s) => s.id === activeSessionId)
-    : null;
+  const currentSession = selectedSession.data;
   const isSessionArchived = currentSession?.status === "archived";
   const candidateProjectId = currentSession
     ? currentSession.project_id ?? null
@@ -288,24 +287,14 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, []);
 
-  // Self-heal a dangling `activeSessionId` (persisted / restored from storage)
-  // that points at a session which was deleted or lost access: once the
-  // sessions list has loaded and doesn't contain it — with no in-flight
-  // pending task exempting a just-created session — clear it so the
-  // floating window shows the new-chat state instead of an editable empty chat
-  // whose send would POST into a nonexistent session. Same fix the shared
-  // controller applies for the tab (kept in sync via `hasInFlightPendingTask`).
-  // The earlier "no self-heal" note was about a naive version keyed on stale
-  // `allSessions`; the in-flight-pending-task signal here exempts the
-  // freshly-created session (handleSend seeds its pending task from the send
-  // response BEFORE setActiveSession), so it is never mistaken for stale.
+  // A session outside the loaded pages may still exist. Clear a selection
+  // only when its detail endpoint confirms that it is no longer accessible.
   useEffect(() => {
-    if (!activeSessionId || !sessionsLoaded) return;
-    if (sessions.some((s) => s.id === activeSessionId)) return;
+    if (!activeSessionId || !selectedSession.unavailable) return;
     if (hasInFlightPendingTask(qc, activeSessionId)) return;
     uiLogger.info("clearing dangling activeSessionId (floating)", { sessionId: activeSessionId });
     setActiveSession(null);
-  }, [activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
+  }, [activeSessionId, selectedSession.unavailable, qc, setActiveSession]);
 
   // WS events are handled globally in useRealtimeSync — the query cache
   // stays current even when this window is closed. See packages/core/realtime/.
@@ -319,7 +308,7 @@ export function ChatWindow() {
   // backgrounded must stay unread so the sidebar badges it (MUL-4485), then
   // clears when the user refocuses and this effect re-runs.
   const currentHasUnread =
-    sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
+    !!activeSessionId && (sessionSummary?.unread_by_session[activeSessionId] ?? 0) > 0;
   useEffect(() => {
     if (!isOpen || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
@@ -361,8 +350,7 @@ export function ChatWindow() {
       // session — fall through and create a fresh one instead of POSTing 404.
       if (
         activeSessionId &&
-        (!sessionsLoaded ||
-          sessions.some((s) => s.id === activeSessionId) ||
+        (!selectedSession.unavailable ||
           hasInFlightPendingTask(qc, activeSessionId))
       ) {
         return activeSessionId;
@@ -390,8 +378,7 @@ export function ChatWindow() {
       activeAgent,
       activeProjectId,
       createSession,
-      sessions,
-      sessionsLoaded,
+      selectedSession.unavailable,
       qc,
     ],
   );
@@ -839,6 +826,8 @@ export function ChatWindow() {
           </Tooltip>
           <SessionDropdown
             sessions={sessions}
+            currentSession={currentSession}
+            sessionList={sessionList}
             // Use the full agent list (incl. archived) so historical
             // sessions can still resolve their avatar.
             agents={agents}
@@ -1158,11 +1147,15 @@ interface SessionRowAction extends RowActionItem {
  */
 function SessionDropdown({
   sessions,
+  currentSession,
+  sessionList,
   agents,
   activeSessionId,
   onSelectSession,
 }: {
   sessions: ChatSession[];
+  currentSession: ChatSession | null;
+  sessionList: ChatSessionList;
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
@@ -1170,7 +1163,8 @@ function SessionDropdown({
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const activeSession = currentSession;
+  const { data: summary } = useQuery(chatSessionSummaryOptions(wsId));
   const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
   const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
 
@@ -1257,12 +1251,8 @@ function SessionDropdown({
   // - inside the trigger: the current chat's own live state
   // - beside the trigger: aggregate activity from other chats
   const currentSessionRunning = activeSessionId ? inFlightSessionIds.has(activeSessionId) : false;
-  const otherRunningCount = sessions.filter(
-    (s) => s.id !== activeSessionId && inFlightSessionIds.has(s.id),
-  ).length;
-  const otherUnreadCount = sessions.filter(
-    (s) => s.id !== activeSessionId && s.has_unread,
-  ).length;
+  const otherRunningCount = Array.from(inFlightSessionIds).filter((id) => id !== activeSessionId).length;
+  const otherUnreadCount = Object.keys(summary?.unread_by_session ?? {}).filter((id) => id !== activeSessionId).length;
 
   // Archive (not hard-delete) is the reversible, one-click default here — the
   // same safety model as ChatThreadList. The floating window offers NO
@@ -1587,7 +1577,7 @@ function SessionDropdown({
         >
           {historySessions.length === 0 ? (
             <div className="px-2 py-1.5 text-caption text-muted-foreground">
-              {t(($) => $.window.no_previous)}
+              {sessionList.isSuccess && t(($) => $.window.no_previous)}
             </div>
           ) : (
             <div role="group" aria-label={t(($) => $.window.history_group)}>
@@ -1598,10 +1588,14 @@ function SessionDropdown({
                 sessions={historySessions}
                 renderRow={renderRow}
                 estimatedRowHeight={44}
-                maxHeight={320}
+                maxHeight={280}
+                endReached={() => {
+                  if (sessionList.hasNextPage && !sessionList.isFetching && !sessionList.isError) void sessionList.fetchNextPage();
+                }}
               />
             </div>
           )}
+          <ChatSessionListStatus query={sessionList} />
         </PopoverContent>
       </Popover>
     </>

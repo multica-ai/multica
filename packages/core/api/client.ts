@@ -99,6 +99,8 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ChatSessionsPage,
+  ChatSessionSummary,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -274,6 +276,10 @@ import {
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
+  ChatSessionsPageSchema,
+  ChatSessionSummarySchema,
+  EMPTY_CHAT_SESSIONS_PAGE,
+  EMPTY_CHAT_SESSION_SUMMARY,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -3837,6 +3843,22 @@ export class ApiClient {
     });
     return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
       endpoint: "GET /api/chat/sessions",
+    });
+  }
+
+  async listChatSessionsPage(params: { status: "active" | "archived"; cursor?: string | null }): Promise<ChatSessionsPage> {
+    const query = new URLSearchParams({ status: params.status, limit: "50" });
+    if (params.cursor) query.set("cursor", params.cursor);
+    const raw: unknown = await this.fetch(`/api/chat/sessions/page?${query}`);
+    return parseWithFallback(raw, ChatSessionsPageSchema, EMPTY_CHAT_SESSIONS_PAGE, {
+      endpoint: "GET /api/chat/sessions/page",
+    });
+  }
+
+  async getChatSessionSummary(): Promise<ChatSessionSummary> {
+    const raw: unknown = await this.fetch("/api/chat/sessions/summary");
+    return parseWithFallback(raw, ChatSessionSummarySchema, EMPTY_CHAT_SESSION_SUMMARY, {
+      endpoint: "GET /api/chat/sessions/summary",
     });
   }
 

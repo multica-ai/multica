@@ -24,8 +24,49 @@ CHAT_LIST_BASELINE=1 PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm exec playwri
 ```
 
 `scripts/perf-compare.mjs` remains scoped to the comment-typing scenario below;
-its report format and comparisons are unchanged. Session data is still fetched
-in full: these checks measure rendering, not API pagination or network savings.
+its report format and comparisons are unchanged. The rendering fixture deliberately supplies all
+rows in one synthetic page. It measures rendering independently of pagination.
+
+## Chat session pagination
+
+`chat-session-pagination.spec.ts` uses the production UI with deterministic
+synthetic HTTP/WS data: 500 active chats, 1,500 archived chats, and an 8 KiB
+last-message body per chat. It checks all three list entries, fetching the next
+page, archive-on-open, old-session deep links, and an empty active list with an
+archive. Build with `NEXT_PUBLIC_API_URL=''` so browser API calls stay on the
+fixture origin; unexpected origins are blocked and fail the run. Each scenario attaches the exact chat request paths, row counts,
+uncompressed JSON bytes, and an illustrative readiness sample. No latency or
+bandwidth delay is injected. These browser timings are not backend benchmarks.
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-pagination.spec.ts
+# Run the same fixture against main before this change:
+CHAT_PAGINATION_BASELINE=1 PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-pagination.spec.ts
+```
+
+The companion Go benchmark exercises the real handlers and PostgreSQL queries
+with 2,000 generated chats (500 active / 1,500 archived). It reports response
+bytes, allocations, and handler time for the preserved full-list endpoint,
+the active first page, the summary, and the archive first page. Run against an
+isolated, migrated local database; the fixture cleans up after itself.
+
+```bash
+cd server
+DATABASE_URL='postgres://multica:multica@localhost:5432/your_isolated_database?sslmode=disable' go test ./internal/handler -run '^$' -bench BenchmarkChatSessionListPayload -benchtime=3x -benchmem -count=3
+```
+
+Pages default to 50 rows (maximum 100) and cap preview content at 256 Unicode
+characters. The database selects a visible page before reading preview bodies.
+The summary returns counts and unread-message counts by session without message
+bodies, so badges do not depend on how many pages are loaded. Archive queries
+are disabled while that view is closed; a realtime invalidation does not fetch
+an unopened archive. Full messages and stored content are unchanged.
+
+The existing full-list API remains available for installed clients and other
+consumers. Roll out the backend before the new Web/Desktop renderer; the new
+renderer requires `/api/chat/sessions/page` and `/api/chat/sessions/summary`.
+There is no migration or daemon/CLI protocol change. Roll back the renderer
+before rolling back the backend.
 
 ## What it runs against
 

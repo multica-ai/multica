@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatStore } from "@multica/core/chat";
 import { useSetChatSessionArchived } from "@multica/core/chat/mutations";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { useChatSessionList } from "@multica/core/chat/use-session-list";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   filterInboxItems,
@@ -19,7 +19,7 @@ import {
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { Agent, ChatSession, InboxItem } from "@multica/core/types";
+import type { Agent, InboxItem } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { ChatThreadList } from "../../chat/components/chat-thread-list";
 import { useT } from "../../i18n";
@@ -29,7 +29,6 @@ import { useNavigation } from "../../navigation";
 import { PanelCount, PanelHeader } from "../panel-nav";
 
 const EMPTY_INBOX: InboxItem[] = [];
-const EMPTY_SESSIONS: ChatSession[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
 /**
@@ -81,7 +80,8 @@ export function ChatPeek() {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
-  const { data: sessions = EMPTY_SESSIONS } = useQuery(chatSessionsOptions(wsId));
+  const sessionList = useChatSessionList(wsId);
+  const { data: sessions } = sessionList;
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const setArchived = useSetChatSessionArchived();
@@ -92,6 +92,7 @@ export function ChatPeek() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         <ChatThreadList
           sessions={sessions}
+          sessionList={sessionList}
           agents={agents}
           activeSessionId={activeSessionId}
           onSelectSession={(session) => push(`${p.chat()}?session=${session.id}`)}

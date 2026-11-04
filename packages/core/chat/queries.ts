@@ -32,9 +32,11 @@ export const QUICK_ACTIONS_PENDING_TIMEOUT_MS = 12_000;
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
-  /** Full sessions list (active + archived); the dropdown splits locally. */
+  /** Shared invalidation prefix for the legacy list, pages, and summary. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
-  session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
+  sessionPages: (wsId: string, status?: "active" | "archived") => [...chatKeys.sessions(wsId), "pages", ...(status ? [status] : [])] as const,
+  sessionSummary: (wsId: string) => [...chatKeys.sessions(wsId), "summary"] as const,
+  session: (wsId: string, id: string) => [...chatKeys.sessions(wsId), "detail", id] as const,
   messagesAll: () => ["chat", "messages"] as const,
   messages: (sessionId: string) => [...chatKeys.messagesAll(), sessionId] as const,
   messagesPageAll: () => ["chat", "messages-page"] as const,
@@ -78,6 +80,24 @@ export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
+    staleTime: Infinity,
+  });
+}
+
+export function chatSessionPagesOptions(wsId: string, status: "active" | "archived" = "active") {
+  return infiniteQueryOptions({
+    queryKey: chatKeys.sessionPages(wsId, status),
+    queryFn: ({ pageParam }) => api.listChatSessionsPage({ status, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
+    staleTime: Infinity,
+  });
+}
+
+export function chatSessionSummaryOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.sessionSummary(wsId),
+    queryFn: () => api.getChatSessionSummary(),
     staleTime: Infinity,
   });
 }

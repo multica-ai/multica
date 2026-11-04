@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useChatSessionList, type ChatSessionList } from "@multica/core/chat/use-session-list";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -19,7 +20,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
-import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
+import { pendingChatTasksOptions, chatKeys, sortChatSessions, chatSessionSummaryOptions } from "@multica/core/chat/queries";
 import {
   useDeleteChatSession,
   useSetChatSessionArchived,
@@ -39,6 +40,7 @@ import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useLocale, useT } from "../../i18n";
 import { SessionHistoryList } from "./session-history-list";
+import { ChatSessionListStatus } from "./chat-session-list-status";
 
 const apiLogger = createLogger("chat.api");
 
@@ -77,17 +79,18 @@ function toPreview(content: string): string {
  * the reversible, one-click default so nothing is destroyed by accident. A
  * footer entry ("Archived · N") switches to the "archived" view, which lists
  * archived chats and is the ONLY place a chat can be hard-deleted (hover →
- * unarchive + delete). Both views read the same flat sessions cache and split
- * on `status` locally.
+ * unarchive + delete). Archive pages are requested only while that view is open.
  */
 export function ChatThreadList({
   sessions,
+  sessionList,
   agents,
   activeSessionId,
   onSelectSession,
   onArchive,
 }: {
   sessions: ChatSession[];
+  sessionList: ChatSessionList;
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
@@ -112,26 +115,15 @@ export function ChatThreadList({
   const getShareableUrl = navigation?.getShareableUrl;
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
-  // Split the flat cache locally: active chats fill the default history view,
-  // archived chats fill the "Archived" view. Both sorted pinned-first (then by
-  // activity) so the list stays ordered even after an optimistic pin/archive or
-  // a WS patch mutates the flat cache in place.
-  const historySessions = useMemo(
-    () => sortChatSessions(sessions.filter((s) => s.status !== "archived")),
-    [sessions],
-  );
-  const archivedSessions = useMemo(
-    () => sortChatSessions(sessions.filter((s) => s.status === "archived")),
-    [sessions],
-  );
-
-  // Which view is showing. Falls back to history when the archived list drains
-  // (last chat unarchived / deleted) so we never strand the user on an empty
-  // archive.
+  const historySessions = useMemo(() => sortChatSessions(sessions), [sessions]);
   const [view, setView] = useState<"history" | "archived">("history");
-  useEffect(() => {
-    if (view === "archived" && archivedSessions.length === 0) setView("history");
-  }, [view, archivedSessions.length]);
+  const archiveList = useChatSessionList(wsId, "archived", view === "archived");
+  const archivedSessions = archiveList.data;
+  const { data: summary } = useQuery(chatSessionSummaryOptions(wsId));
+  const visibleList = view === "archived" ? archiveList : sessionList;
+  const loadNext = () => {
+    if (visibleList.hasNextPage && !visibleList.isFetching && !visibleList.isError) void visibleList.fetchNextPage();
+  };
 
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
@@ -492,49 +484,52 @@ export function ChatThreadList({
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
           <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-            {archivedSessions.length}
+            {summary?.archived_count ?? ""}
           </span>
         </button>
         <div className="min-h-0 flex-1">
-          <SessionHistoryList sessions={archivedSessions} renderRow={renderRow} />
+          {archivedSessions.length > 0 && <SessionHistoryList sessions={archivedSessions} renderRow={renderRow} endReached={loadNext} />}
+          {archiveList.isSuccess && archivedSessions.length === 0 && <div className="p-2 text-caption text-muted-foreground">{t(($) => $.list.no_archived)}</div>}
         </div>
+        <ChatSessionListStatus query={archiveList} />
       </div>
     );
   }
 
   // History (default) view: active rows + a footer entry into the archive.
-  const archivedEntry = archivedSessions.length > 0 && (
+  const archivedEntry = (
     <button
       type="button"
       onClick={() => setView("archived")}
-      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="mt-1 flex h-10 w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="flex size-9 shrink-0 items-center justify-center">
         <Archive className="size-4" />
       </span>
       <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{summary?.archived_count ?? ""}</span>
       <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
     </button>
   );
 
   if (historySessions.length === 0) {
     return (
-      <>
-        <div className="px-2 py-1.5 text-caption text-muted-foreground">
-          {t(($) => $.window.no_previous)}
-        </div>
+      <div className="flex h-full min-h-0 flex-col">
+        {sessionList.isSuccess && <div className="px-2 py-1.5 text-caption text-muted-foreground">{t(($) => $.window.no_previous)}</div>}
+        <ChatSessionListStatus query={sessionList} />
         {archivedEntry}
-      </>
+      </div>
     );
   }
 
   return (
-    <SessionHistoryList
-      sessions={historySessions}
-      renderRow={renderRow}
-      footer={archivedEntry}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1">
+        <SessionHistoryList sessions={historySessions} renderRow={renderRow} endReached={loadNext} />
+      </div>
+      <ChatSessionListStatus query={sessionList} />
+      {archivedEntry}
+    </div>
   );
 }
 
