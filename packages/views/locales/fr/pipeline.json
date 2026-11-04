@@ -173,7 +173,6 @@
     "title_required": "Un titre est requis.",
     "title_too_long": "Le titre ne doit pas dépasser 200 caractères.",
     "thesis_label": "Thèse",
-    "thesis_required": "Une thèse est requise : dites pourquoi cela vaut la peine.",
     "thesis_too_long": "La thèse est trop longue.",
     "pipeline_label": "Pipeline",
     "no_pipeline": "Cet espace de travail n’a pas de pipeline où démarrer une initiative.",

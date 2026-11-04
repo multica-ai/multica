@@ -1,0 +1,447 @@
+{
+  "title": "ガバナンス",
+  "tabs": {
+    "goals": "目標",
+    "budgets": "予算",
+    "autonomy": "自律性",
+    "reviews": "レビュー",
+    "log": "ログ",
+    "controls": "管理"
+  },
+  "placeholder": {
+    "title": "まだ表示するものはありません"
+  },
+  "autonomy": {
+    "note": "正直な限界：Multica は実行中にランタイムが何をするかを検査できないため、レベルによってエージェントが認証情報で許可された外部 API を呼び出すことを止めることはできません。Multica が管理するのは、そこを通過するもの、つまり実行されるルーティン、共有記録への公開、あなた抜きで決定される提案、作成されるイニシアチブ、支出、そして各憲章の境界です。外部に影響するものは、ローンチゲートなど基盤が管理するゲートの背後、またはエージェント自身の権限設定の背後に残ります。L3 は無監督を意味しません。",
+    "levels_heading": "各レベルで許可される内容",
+    "levels": {
+      "suggest": {
+        "name": "提案のみ",
+        "body": "定期実行は保留されます。担当やメンションがあった時のみ動き、提案の提出は引き続き可能です。"
+      },
+      "work": {
+        "name": "作業",
+        "body": "定期実行が動きます。調査、分析、ナレッジの下書き作成、提案の提出を行います。すべての判断はボスが行います。"
+      },
+      "trusted": {
+        "name": "信頼",
+        "body": "作業と同じですが、ナレッジの下書きは確認後に公開できます。常時承認でその提案を承認できます。"
+      },
+      "autonomous": {
+        "name": "自律",
+        "body": "信頼と同じですが、常時承認は自分の機会から、最初の段階でイニシアチブを作成できます（上限と予算の範囲内）。"
+      }
+    },
+    "boss_only_note": "ローンチと組織変更は、どのレベルでも常にボスが決定します。お金はすべてのレベルで予算によって制限されます。",
+    "squads_heading": "スクワッドのレベル",
+    "squads_empty": "スクワッドはまだありません。",
+    "read_only": "レベルを変更できるのはオーナーと管理者だけです。",
+    "level_tag": "L{{level}}",
+    "default_level": "まだ既定のレベルです。変更はありません。",
+    "level_label": "レベル",
+    "reason_label": "理由",
+    "reason_placeholder": "このレベルの理由は？理由はガバナンスログに残ります。",
+    "save_level": "レベルを保存",
+    "level_saved": "自律レベルを保存しました",
+    "level_save_failed": "レベルを変更できませんでした。もう一度お試しください。",
+    "panel_heading": "自律性",
+    "policies_heading": "常時承認",
+    "policies_note": "常時承認は、適切なレベルのスクワッドからの提案のうち狭い範囲を承認し、後からブリーフで確認できます。組織変更、ローンチゲート、予算引き上げ、緊急の提案、他の常時承認には適用されません。",
+    "policies_empty": "常時承認はまだありません。",
+    "policies_load_failed": "常時承認を読み込めませんでした。",
+    "policy_kind": {
+      "decision": "決定",
+      "opportunity": "機会"
+    },
+    "policy_active": "有効",
+    "policy_revoked": "取り消し済み",
+    "policy_flagged": "レビューで承認の一部が取り消されました",
+    "policy_scope_squads": "{{count}} スクワッド",
+    "policy_scope_any": "適切なレベルのすべてのスクワッド",
+    "policy_week": "今週 {{count}} / {{max}} 件の承認",
+    "policy_until": "{{date}} まで",
+    "policy_history": "履歴",
+    "policy_history_hide": "履歴を隠す",
+    "policy_revoke": "取り消す",
+    "policy_revoked_toast": "常時承認を取り消しました",
+    "policy_revoke_failed": "常時承認を取り消せませんでした。もう一度お試しください。",
+    "history_empty": "この常時承認で承認された提案はまだありません。",
+    "history_load_failed": "履歴を読み込めませんでした。",
+    "history_reversed": "レビューで取り消し: {{note}}",
+    "create_heading": "新しい常時承認",
+    "create_name": "名前",
+    "create_kind": "種類",
+    "create_squads": "スクワッド",
+    "create_squads_hint": "すべて未選択のままにすると、適切なレベルのすべてのスクワッドが対象になります。",
+    "create_max_per_week": "週あたりの承認上限",
+    "create_max_cost": "コストの上限（マイクロ単位、任意）",
+    "create_submit": "常時承認を作成",
+    "create_done": "常時承認を作成しました",
+    "create_failed": "常時承認を作成できませんでした。入力内容を確認してもう一度お試しください。"
+  },
+  "controls": {
+    "state_heading": "会社の状態",
+    "state": {
+      "running": "稼働中",
+      "paused": "一時停止中",
+      "quiet": "静穏",
+      "unknown": "不明"
+    },
+    "in_force": "現在の状態: {{state}}",
+    "pause": "一時停止",
+    "resume": "再開",
+    "pause_hint": "ルーチンと委任された実行は待機します。チャットとセクレタリーは引き続き使えます。",
+    "stop_work": "一時停止して実行中の作業も止める",
+    "stop_confirm_title": "一時停止して実行中の作業も止めますか？",
+    "stop_confirm_description": "実行中のルーチンと委任されたタスクはキャンセルされます。キューにあるタスクは再開まで待機します。",
+    "stop_confirm_action": "一時停止して止める",
+    "cancel": "キャンセル",
+    "state_save_failed": "会社の状態を変更できませんでした。もう一度お試しください。",
+    "quiet_heading": "静穏時間",
+    "quiet_enabled": "有効",
+    "quiet_from": "開始",
+    "quiet_until": "終了",
+    "quiet_timezone": "タイムゾーン",
+    "quiet_hint": "ルーチンの実行は時間帯が終わるまで待機します。人が開始した実行は保留されません。",
+    "quiet_save": "静穏時間を保存",
+    "quiet_saved": "静穏時間を保存しました",
+    "quiet_save_failed": "静穏時間を保存できませんでした。もう一度お試しください。",
+    "state_load_failed": "会社の状態を読み込めませんでした。",
+    "read_only": "これらの設定を変更できるのはオーナーと管理者だけです。",
+    "quiet_hour": "時",
+    "quiet_minute": "分",
+    "digest_heading": "ダイジェストの元データ",
+    "digest_mode": {
+      "auto": "自動",
+      "squads": "チーム",
+      "floors": "フロア"
+    },
+    "digest_note": "自動は有効なチームが{{threshold}}を超えるとフロアのブリーフを読みます。現在{{count}}チームのため、秘書は今{{resolved}}を読みます。",
+    "digest_save_failed": "ダイジェストの元データを変更できませんでした。もう一度お試しください。"
+  },
+  "log": {
+    "filter_kind": "種類",
+    "filter_actor": "アクターの種類",
+    "filter_subject": "対象の種類",
+    "all": "すべて",
+    "column_kind": "種類",
+    "column_actor": "アクター",
+    "column_subject": "対象",
+    "column_summary": "概要",
+    "column_time": "日時",
+    "kind": {
+      "policy_auto_approve": "ポリシーにより自動承認",
+      "policy_created": "ポリシーを作成",
+      "policy_revoked": "ポリシーを取り消し",
+      "budget_set": "予算を設定",
+      "budget_extended": "予算を延長",
+      "budget_hold": "予算により実行を保留",
+      "budget_release": "予算による保留を解除",
+      "autonomy_changed": "自律性を変更",
+      "org_change_applied": "組織変更を適用",
+      "org_change_reverted": "組織変更を元に戻す",
+      "auto_publish": "自動公開",
+      "initiative_forced": "イニシアチブを強制移動",
+      "company_paused": "会社を一時停止",
+      "company_resumed": "会社を再開",
+      "goal_activated": "目標を有効化",
+      "goal_imported": "目標をインポート",
+      "review_published": "レビューを公開",
+      "unknown": "不明なイベント"
+    },
+    "actor_type": {
+      "member": "メンバー",
+      "agent": "エージェント",
+      "system": "システム",
+      "policy": "ポリシー",
+      "unknown": "不明"
+    },
+    "subject_type": {
+      "company": "会社",
+      "floor": "フロア",
+      "squad": "スクワッド",
+      "agent": "エージェント",
+      "initiative": "イニシアチブ",
+      "budget": "予算",
+      "approval_policy": "承認ポリシー",
+      "proposal": "提案",
+      "goal": "目標",
+      "review": "レビュー"
+    },
+    "empty": "条件に一致するガバナンスイベントはありません。",
+    "load_failed": "ガバナンスログを読み込めませんでした。",
+    "load_more": "さらに読み込む",
+    "export": "CSV を書き出す",
+    "export_failed": "ログを書き出せませんでした。"
+  },
+  "pulse": {
+    "label": "会社のパルス",
+    "decisions": "あなたの判断待ち {{count}} 件",
+    "goals_at_risk": "リスクのある目標 {{count}} 件",
+    "budgets": "ソフトラインを超えた予算 {{count}} 件",
+    "holds": "予算の保留 {{count}} 件",
+    "stalled": "停滞しているイニシアチブ {{count}} 件",
+    "routines_late": "遅延しているルーティン {{count}} 件",
+    "runtimes_offline": "オフラインのランタイム {{count}} 件",
+    "quiet": "対応が必要なものはありません"
+  },
+  "health": {
+    "heading": "システムの健全性",
+    "unreadable": "システムの健全性を読み取れませんでした。",
+    "nothing_at_risk": "注意が必要なものはありません。",
+    "risks_label": "リスク",
+    "jobs_heading": "定期ジョブ",
+    "no_jobs": "まだ実行された定期ジョブはありません。",
+    "col_job": "ジョブ",
+    "col_last_success": "最終成功",
+    "col_state": "状態",
+    "never_succeeded": "未実行",
+    "stuck": "停止中",
+    "ok": "正常",
+    "deliveries_label": "過去24時間の配信失敗",
+    "deliveries_value": "{{count}}",
+    "knowledge_label": "ナレッジベース",
+    "knowledge_not_offered": "このデプロイでは有効になっていません",
+    "knowledge_state": {
+      "ready": "準備完了",
+      "offline": "オフライン",
+      "provisioning": "セットアップ中",
+      "failed": "失敗",
+      "disabled": "無効",
+      "unknown": "不明"
+    },
+    "budget_gate_label": "予算ゲート",
+    "budget_gate_not_reported": "まだ報告がありません",
+    "budget_gate_no_cache": "キャッシュされたカウンターはまだありません",
+    "budget_gate_age": "カウンターは {{seconds}} 秒前に更新"
+  },
+  "reviews_tab": {
+    "empty": "表示できるレビューはまだありません。レビューは、オーナー、管理者、レビュー対象チームのリーダーに表示されます。",
+    "loading": "レビューを読み込み中",
+    "rating": {
+      "exceeds": "期待を上回る",
+      "meets": "期待どおり",
+      "below": "期待を下回る",
+      "at_risk": "要注意",
+      "unknown": "未評価"
+    },
+    "subject": {
+      "agent": "エージェント",
+      "squad": "スクワッド",
+      "company": "会社",
+      "unknown": "対象"
+    },
+    "period": {
+      "week": "{{start}} の週",
+      "month": "{{start}} の月",
+      "unknown": "{{start}} の期間"
+    },
+    "recommendation": {
+      "observe": "記録のみ、変更なし",
+      "filed": "ボスの判断のために提出済み",
+      "refused": "未提出"
+    },
+    "change": {
+      "instruction_change": "指示の変更",
+      "skill_change": "スキルの変更",
+      "charter_change": "憲章の変更",
+      "autonomy_change": "自律レベルの変更",
+      "hire": "採用",
+      "retire": "退任",
+      "move": "異動",
+      "merge_squads": "スクワッドの統合",
+      "unretire": "復帰",
+      "unmerge": "スクワッドの分割",
+      "observe": "観察"
+    },
+    "proposal": "提案 {{id}}",
+    "figures": "スコアカードの数値",
+    "generic": "推奨事項",
+    "no_recommendations": "推奨事項はありません"
+  },
+  "goals": {
+    "loading": "目標を読み込んでいます…",
+    "load_failed": "目標を読み込めませんでした。",
+    "tree": {
+      "company": "会社",
+      "unnamed": "{{scope}}（一覧にありません）"
+    },
+    "scope": {
+      "company": "会社",
+      "floor": "フロア",
+      "squad": "スクワッド",
+      "initiative": "イニシアチブ"
+    },
+    "status": {
+      "draft": "下書き",
+      "active": "進行中",
+      "achieved": "達成",
+      "missed": "未達",
+      "dropped": "中止",
+      "unknown": "不明"
+    },
+    "confidence": {
+      "on_track": "順調",
+      "at_risk": "リスクあり",
+      "off_track": "遅れ",
+      "unknown": "まだ測定値なし",
+      "overridden": "（オーナーの判断）"
+    },
+    "progress": "{{percent}}%",
+    "progress_none": "まだ測定値なし",
+    "no_reading": "測定値なし",
+    "detail": {
+      "load_failed": "この目標を読み込めませんでした。",
+      "action_failed": "目標を変更できませんでした。もう一度お試しください。",
+      "close": "閉じる",
+      "period": "{{start}} から {{end}}",
+      "override_note": "測定値からは {{derived}} です。オーナーが次のように設定しました：{{note}}",
+      "key_results": "主要な結果",
+      "kr_title": "主要な結果",
+      "kr_range": "開始 → 目標",
+      "kr_now": "最新",
+      "kr_progress": "進捗",
+      "kr_trend": "測定値",
+      "kr_from_to": "{{start}} → {{target}}",
+      "kr_trend_label": "{{title}} の測定値",
+      "child_goals": "この目標の下にある目標",
+      "source_proposal": "提案 {{id}} で設定",
+      "activate": "有効にする",
+      "close_as": {
+        "achieved": "達成にする",
+        "missed": "未達にする",
+        "dropped": "中止する"
+      },
+      "override_heading": "オーナーの確信度",
+      "override_clear": "測定値を使う",
+      "override_why": "この確信度の理由",
+      "override_save": "確信度を保存",
+      "override_saved": "確信度を保存しました"
+    },
+    "create": {
+      "button": "新しい目標",
+      "title": "新しい目標",
+      "scope": "範囲",
+      "target_floor": "フロア",
+      "target_initiative": "イニシアチブ",
+      "target_required": "この目標の対象を選んでください。",
+      "title_label": "タイトル",
+      "title_required": "目標にタイトルを付けてください。",
+      "title_too_long": "タイトルは200文字以内にしてください。",
+      "why_label": "理由（任意）",
+      "period_start": "開始",
+      "period_end": "終了",
+      "period_required": "期間の開始日と終了日を両方入力してください。",
+      "period_order": "終了日は開始日より後にしてください。",
+      "owner": "担当",
+      "owner_type": "担当の種類",
+      "owner_types": {
+        "squad": "スクワッド",
+        "member": "メンバー",
+        "agent": "エージェント"
+      },
+      "owner_required": "担当を選択してください。",
+      "key_results": "主要結果",
+      "kr_title": "主要結果",
+      "kr_metric": "指標",
+      "kr_start": "開始値",
+      "kr_target": "目標値",
+      "kr_add": "主要結果を追加",
+      "kr_remove": "削除",
+      "kr_title_required": "主要結果ごとにタイトルを付けてください。",
+      "kr_metric_required": "主要結果ごとに指標を選択してください。",
+      "kr_values_required": "開始値と目標値を入力してください。",
+      "kr_values_equal": "目標値は開始値と異なる必要があります。",
+      "submit": "目標を作成",
+      "cancel": "キャンセル",
+      "created": "目標を作成しました",
+      "failed": "目標を作成できませんでした。入力内容を確認して、もう一度お試しください。"
+    }
+  },
+  "reading": {
+    "title": "測定値を追加",
+    "metric": "指標",
+    "value": "値",
+    "note": "メモ",
+    "submit": "測定値を追加",
+    "saved": "測定値を追加しました",
+    "failed": "測定値を追加できませんでした。",
+    "no_metrics": "指標はまだありません",
+    "scope_note": "この測定値は {{scope}} のものです。"
+  },
+  "budgets": {
+    "title": "予算",
+    "read_only": "予算を変更できるのはオーナーと管理者だけです。",
+    "scope": {
+      "company": "会社",
+      "floor": "フロア",
+      "squad": "スクワッド",
+      "initiative": "イニシアチブ"
+    },
+    "period": {
+      "week": "週次",
+      "month": "月次",
+      "quarter": "四半期"
+    },
+    "mode": {
+      "warn": "警告のみ",
+      "hold": "上限で実行を保留"
+    },
+    "state": {
+      "ok": "予算内",
+      "soft": "上限に近い",
+      "hard": "上限到達",
+      "unknown": "不明"
+    },
+    "spent": "{{limit}} のうち {{spent}} を使用",
+    "spent_label": "上限に対する支出",
+    "elapsed": "期間の {{percent}}% が経過",
+    "overrun": "このペースでは {{date}} に上限に達します",
+    "no_overrun": "このペースでは期間中は上限内に収まります",
+    "holds_count": "{{count}} 件保留",
+    "history": "履歴",
+    "history_empty": "まだ期間の記録はありません。",
+    "columns": {
+      "period": "期間",
+      "spent": "支出",
+      "extended": "延長",
+      "runs": "実行",
+      "state": "状態"
+    },
+    "amount_label": "期間ごとの新しい金額（ドル）",
+    "amount_placeholder": "金額",
+    "set_amount": "金額を設定",
+    "save_failed": "予算を保存できませんでした。もう一度お試しください。",
+    "holds_title": "予算で保留中の実行",
+    "holds_empty": "予算によって保留されている実行はありません。",
+    "release": "保留を解除",
+    "release_hint": "上限でも保留された実行を一度だけ開始できるようにします。",
+    "extend": "延長",
+    "extend_amount": "この期間に追加する金額（ドル）",
+    "extended": "期間の上限を延長しました。",
+    "released": "保留中の実行 {{count}} 件を解除しました。",
+    "create": {
+      "button": "新しい予算",
+      "title": "新しい予算",
+      "scope": "範囲",
+      "target_required": "この予算の対象となる{{scope}}を選んでください。",
+      "period": "期間",
+      "amount": "期間ごとの金額（ドル）",
+      "amount_required": "0 以上の金額を入力してください。",
+      "soft_percent": "上限のこの割合で警告（%）",
+      "soft_invalid": "1から100までの整数の割合を入力してください。",
+      "mode": "上限に達したとき",
+      "classes": "対象の実行",
+      "class": {
+        "routine": "定例",
+        "delegated": "委任"
+      },
+      "classes_required": "少なくとも1つの実行の種類を選んでください。",
+      "submit": "予算を作成",
+      "cancel": "キャンセル",
+      "created": "予算を作成しました",
+      "failed": "予算を作成できませんでした。入力内容を確認して、もう一度お試しください。",
+      "exists": "この範囲と期間の予算は既にあります。"
+    }
+  }
+}

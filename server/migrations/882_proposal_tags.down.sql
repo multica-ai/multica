@@ -1,0 +1,1 @@
+ALTER TABLE proposal DROP COLUMN IF EXISTS tags;

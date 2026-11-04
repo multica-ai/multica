@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS key_result_pkey_uidx;

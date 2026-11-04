@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS org_change_application_proposal_uidx;

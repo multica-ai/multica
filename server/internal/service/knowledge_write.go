@@ -415,6 +415,14 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 			return KnowledgeDocumentView{}, false, err
 		}
 		publishNow = mode == PublishModeAuto
+		if publishNow {
+			// A paused company's drafts wait for a person (spec 4.5).
+			paused, err := s.autoPublishPaused(ctx, workspaceID)
+			if err != nil {
+				return KnowledgeDocumentView{}, false, err
+			}
+			publishNow = !paused
+		}
 		if authorSq, err = s.agentSquad(ctx, actor); err != nil {
 			return KnowledgeDocumentView{}, false, err
 		}
@@ -443,6 +451,16 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 	if err != nil {
 		return KnowledgeDocumentView{}, false, fmt.Errorf("load knowledge write: %w", err)
 	}
+	// A budget request states its amount in its body; the plan gate reads it (spec 4.2).
+	if in.Kind == budgetRequestKind {
+		if amount, ok := parseBudgetRequestAmount(in.Content); ok {
+			if err := s.Queries.SetKnowledgeLinkAmount(ctx, db.SetKnowledgeLinkAmountParams{
+				ID: link.ID, WorkspaceID: workspaceID, AmountMicros: amount,
+			}); err != nil {
+				return KnowledgeDocumentView{}, false, fmt.Errorf("record budget request amount: %w", err)
+			}
+		}
+	}
 	if claimed == 0 && link.State != KnowledgeLinkFailed {
 		// A retry of a write that already landed.
 		view, err := s.linkView(ctx, workspaceID, link)
@@ -460,9 +478,13 @@ func (s *KnowledgeService) CreateDocument(ctx context.Context, workspaceID pgtyp
 		return KnowledgeDocumentView{}, false, err
 	}
 	if settled.State == KnowledgeLinkPublished && mode == PublishModeAuto && actor.Type != KnowledgeActorMember {
+		actorType := GovernanceActorPolicy
+		if actor.Type == KnowledgeActorSystem {
+			actorType = GovernanceActorSystem
+		}
 		s.recordAutoPublish(ctx, AutoPublishEvent{
 			WorkspaceID: workspaceID, LinkID: settled.ID, KnowledgeBase: base.Key, Kind: in.Kind,
-			Mode: PublishModeAuto, AuthorSquadID: authorSq,
+			Mode: PublishModeAuto, ActorType: actorType, AuthorSquadID: authorSq,
 		})
 	}
 	s.linkInitiativeArtifact(ctx, settled, actor)

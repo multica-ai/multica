@@ -330,3 +330,83 @@ export function stageGatePayloadOf(proposal: Pick<Proposal, "payload">): StageGa
     endpoint: "proposal.payload (stage_gate)",
   });
 }
+
+/** A charter as an `org_change` of type `charter_change` proposes it. */
+export interface OrgChangeCharter {
+  mission: string;
+  responsibilities: { key: string; text: string }[];
+  outputs: { key: string; kind: string; kb_key: string; cadence_hint: string }[];
+  boundaries: string;
+  escalation: string;
+  intake: string;
+  response_hours: number;
+}
+
+/**
+ * An `org_change` proposal's fields (spec 4.6). `type` selects which of the
+ * others are set: instructions for `instruction_change`, the charter for
+ * `charter_change`, and the rationale for all of them.
+ */
+export interface OrgChangePayload {
+  type: string;
+  agent_id: string;
+  squad_id: string;
+  instructions: string;
+  diff_summary: string;
+  charter: OrgChangeCharter | null;
+  rationale: string;
+}
+
+const OrgChangeCharterSchema = z
+  .object({
+    mission: z.string().default(""),
+    responsibilities: z
+      .array(z.object({ key: z.string().default(""), text: z.string().default("") }).loose())
+      .catch([]),
+    outputs: z
+      .array(
+        z
+          .object({
+            key: z.string().default(""),
+            kind: z.string().default(""),
+            kb_key: z.string().default(""),
+            cadence_hint: z.string().default(""),
+          })
+          .loose(),
+      )
+      .catch([]),
+    boundaries: z.string().default(""),
+    escalation: z.string().default(""),
+    intake: z.string().default(""),
+    response_hours: z.number().default(0),
+  })
+  .loose();
+
+const OrgChangePayloadSchema = z
+  .object({
+    type: z.string().default(""),
+    agent_id: z.string().default(""),
+    squad_id: z.string().default(""),
+    instructions: z.string().default(""),
+    diff_summary: z.string().default(""),
+    charter: OrgChangeCharterSchema.nullable().catch(null).default(null),
+    rationale: z.string().default(""),
+  })
+  .loose();
+
+const EMPTY_ORG_CHANGE_PAYLOAD: OrgChangePayload = {
+  type: "",
+  agent_id: "",
+  squad_id: "",
+  instructions: "",
+  diff_summary: "",
+  charter: null,
+  rationale: "",
+};
+
+/** The organisation-change fields of a proposal; defaults when the payload is not one. */
+export function orgChangePayloadOf(proposal: Pick<Proposal, "payload">): OrgChangePayload {
+  return parseWithFallback(proposal.payload, OrgChangePayloadSchema, EMPTY_ORG_CHANGE_PAYLOAD, {
+    endpoint: "proposal.payload (org_change)",
+  });
+}

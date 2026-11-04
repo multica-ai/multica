@@ -496,9 +496,6 @@ func (h *Handler) CreateInitiative(w http.ResponseWriter, r *http.Request) {
 	case len([]rune(req.Title)) > initiativeMaxTitle:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("title must be at most %d characters", initiativeMaxTitle))
 		return
-	case req.Thesis == "":
-		writeError(w, http.StatusBadRequest, "thesis is required: say why this is worth doing")
-		return
 	case len(req.Thesis) > initiativeMaxThesis:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thesis must be at most %d characters", initiativeMaxThesis))
 		return
@@ -799,6 +796,10 @@ func decodeInitiativeBody(w http.ResponseWriter, r *http.Request, into any) bool
 		return true
 	}
 	if err := json.NewDecoder(r.Body).Decode(into); err != nil && !errors.Is(err, errEmptyBody) {
+		if isBodyTooLarge(err) {
+			writeBodyTooLarge(w, governanceJSONBodyLimit)
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return false
 	}

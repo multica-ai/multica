@@ -230,6 +230,12 @@ func ensureSecretary(ctx context.Context, q *db.Queries, in OfficeSetupInput, ws
 	if err := q.AssignKnowledgeMcpToAgent(ctx, db.AssignKnowledgeMcpToAgentParams{AgentID: agent.ID, WorkspaceID: in.WorkspaceID}); err != nil {
 		return db.Agent{}, nil, err
 	}
+	if _, err := WriteAgentInstructionRevision(ctx, q, in.WorkspaceID, agent.ID, in.SecretaryInstructions, InstructionChange{
+		Source: InstructionSourceHuman,
+		Actor:  GovernanceActor{Type: GovernanceActorMember, ID: in.Actor.UserID},
+	}); err != nil {
+		return db.Agent{}, nil, err
+	}
 	return agent, &agent, nil
 }
 

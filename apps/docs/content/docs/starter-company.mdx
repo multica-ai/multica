@@ -1,0 +1,62 @@
+---
+title: Starter company
+description: Set up a working company in one run. The starter company creates the floors, squads, charters, routines, and the Secretary and Librarian, from templates you choose.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The **starter company** is a ready-made structure for a digital company: a Secretary, a Librarian, and squads for research, product, build, launch, and governance. You choose which squads to create, and it creates the floors, charters, routines, and a company budget with them.
+
+Use it on a workspace that is new or nearly empty. It does not remove anything, and running it again creates nothing twice.
+
+## The wizard
+
+Open the Office and start the company wizard. It walks through four steps:
+
+1. **Runtime.** The runtime the new agents run on. Choose one that is online.
+2. **Selection.** The squads to create. Each card shows the squad's mission and its routines.
+3. **Estimate.** An estimate of the cost of the selected routines.
+4. **Start options.** Choose one of three:
+   - `all`: every routine starts active.
+   - `per_floor`: each floor's lead routine starts active, and the rest start paused.
+   - `leave_paused`: every routine starts paused, and you start them one by one.
+
+The wizard calls `POST /api/office/company-template/apply`. The response is a report that lists each floor, squad, agent, and routine it created or found. If the run stops partway, run it again. It resumes from the report and creates only what is missing.
+
+## What it creates
+
+The squads are grouped by floor. The floor names are fixed in English so that a rerun finds them.
+
+| Floor | Squads |
+| --- | --- |
+| Executive | **Executive Office**: the Secretary and the Librarian, with the daily brief and weekly review routines and the Librarian's routines |
+| Research | **Market Research**, **Opportunity Lab**, **Competitor Intelligence**, **Customer Voice** |
+| Product | **Product Discovery**, **Product Analysis**, **Planning** |
+| Build | **Build** |
+| Launch | **Release & Ops**, **Growth & GTM**, **Support** |
+| Governance | **Finance & Risk**, **People & Performance** |
+
+Every squad gets a charter with its mission, responsibilities, outputs, and boundaries, and the routines in its card. The squads' instructions are written for the card's role. Each agent gets the instructions of its role, and the shared instructions that every squad follows.
+
+The **People & Performance** squad holds the reviewer agent used by [reviews](/reviews-and-org-changes). The **Executive Office** squad holds the Librarian, which keeps the [knowledge base](/knowledge-taxonomy) in order.
+
+The pipeline's stages are owned by these squads: Validate by Product Discovery, Define by Product Analysis, Plan by Planning, Build and Learn by Build, Launch by Release & Ops, and Operate by Support. See [Pipeline and initiatives](/pipeline).
+
+## The company budget
+
+The starter company creates one company budget of $500 a month in `warn` mode. It warns at 80 percent and does not hold any run, so nothing stops silently. Floor and squad shares are not set by the starter company. Create them from the Budgets tab if you want them. See [Budgets](/budgets).
+
+## Limits
+
+- It needs at least one online runtime. Agents are created on the runtime you choose.
+- The starter company does not create initiatives. Those come from approved opportunities and your own requests.
+
+<Callout type="info">
+Every squad starts at autonomy level 1. Raise a squad's level later from the Autonomy tab. See [Autonomy and approvals](/autonomy-and-approvals).
+</Callout>
+
+## Next steps
+
+- [Secretary and briefs](/secretary) for the Executive Office's daily work.
+- [Charters and routines](/charters-and-routines) for editing the charters and routines the company starts with.
+- [Company as code](/company-as-code) for exporting this structure to a second workspace.

@@ -9,6 +9,7 @@ import (
 
 	proposalkinds "github.com/multica-ai/multica/server/internal/service/proposal_kinds"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // The weekly metrics routine a launch starts (spec 3.6): 09:00 on Mondays, in
@@ -90,13 +91,17 @@ type RetroHook interface {
 	OnInitiativeClosed(ctx context.Context, q *db.Queries, ini db.Initiative, reason string) error
 }
 
-// NoopRetroHook is the hook until phase 4 (11.16) provides the retrospective.
-// Closing an initiative records it and does nothing else.
-type NoopRetroHook struct{}
+// RetroRequestHook records the retrospective request a close creates (spec 4.7).
+// It runs inside the close's transaction, so the request exists if and only if the
+// close committed. The retrospective run turns pending requests into the trigger's
+// issue (RetroService.EvaluateWorkspace), so a close is never lost.
+type RetroRequestHook struct{}
 
-// OnInitiativeClosed does nothing.
-func (NoopRetroHook) OnInitiativeClosed(context.Context, *db.Queries, db.Initiative, string) error {
-	return nil
+// OnInitiativeClosed writes the request for the closed initiative.
+func (RetroRequestHook) OnInitiativeClosed(ctx context.Context, q *db.Queries, ini db.Initiative, _ string) error {
+	return q.InsertRetroRequest(ctx, db.InsertRetroRequestParams{
+		ID: dbid.NewV7(), WorkspaceID: ini.WorkspaceID, TriggerKind: RetroTriggerInitiativeClosed, SubjectID: ini.ID,
+	})
 }
 
 // applyOperateOutcome settles a review gate's outcome, inside the decision
@@ -114,7 +119,7 @@ func (s *InitiativeService) applyOperateOutcome(ctx context.Context, q *db.Queri
 	case proposalkinds.OutcomeContinue:
 		return s.recordEvent(ctx, q, ini, InitiativeEventAdvanced, StageOperate, StageOperate, actor, "Continue: the boss chose to keep operating.", d.Proposal.ID)
 	case proposalkinds.OutcomeScale:
-		if err := s.recordEvent(ctx, q, ini, InitiativeEventAdvanced, StageOperate, StageOperate, actor, "Scale: a follow-on initiative starts at Define.", d.Proposal.ID); err != nil {
+		if err := s.recordEvent(ctx, q, ini, InitiativeEventScaled, StageOperate, StageOperate, actor, "Scale: a follow-on initiative starts at Define.", d.Proposal.ID); err != nil {
 			return err
 		}
 		_, err := s.openInTx(ctx, d.Tx, q, CreateInitiativeParams{

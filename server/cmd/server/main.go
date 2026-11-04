@@ -852,6 +852,27 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.ProposalExpiryJob(h)); err != nil {
 		slog.Error("scheduler: register proposal expiry", "error", err)
 	}
+	// Governance (spec 4.6): nightly scorecards, the probation verdicts and the
+	// monthly review routine.
+	if err := schedulerMgr.Register(scheduler.ScorecardJob(h)); err != nil {
+		slog.Error("scheduler: register scorecards", "error", err)
+	}
+	if err := schedulerMgr.Register(scheduler.ProbationJob(h)); err != nil {
+		slog.Error("scheduler: register org change probation", "error", err)
+	}
+	if err := schedulerMgr.Register(scheduler.ReviewRoutineJob(h)); err != nil {
+		slog.Error("scheduler: register monthly review routine", "error", err)
+	}
+	// Daily: the built-in metric readings of every workspace, the derived
+	// confidence of active goals, and the retention pass (spec 4.1, 4.9).
+	if err := schedulerMgr.Register(scheduler.MetricNightlyJob(h)); err != nil {
+		slog.Error("scheduler: register metric nightly", "error", err)
+	}
+	// Daily: each chartered squad's planning issue for the quarter, once per
+	// squad and quarter (spec 4.1).
+	if err := schedulerMgr.Register(scheduler.PlanningCycleJob(h)); err != nil {
+		slog.Error("scheduler: register planning cycle", "error", err)
+	}
 	// Hourly: WeKnora tenants of deleted workspaces are removed once their
 	// seven-day hold has passed; a failed removal is retried with backoff
 	// (plan 10.14). Without a knowledge sidecar it does nothing.
@@ -863,6 +884,16 @@ func main() {
 	// (spec 3.1, 3.6).
 	if err := schedulerMgr.Register(scheduler.InitiativeSweepJob(h)); err != nil {
 		slog.Error("scheduler: register initiative sweep", "error", err)
+	}
+	// Hourly: the retrospective triggers (spec 4.7). A subject that trips one
+	// gets a retrospective issue for its leader, once per 14-day window.
+	if err := schedulerMgr.Register(scheduler.RetroTriggerJob(&service.RetroService{Queries: queries, Issues: h.IssueService})); err != nil {
+		slog.Error("scheduler: register retro triggers", "error", err)
+	}
+	// Weekly: the policy section of the weekly review, which lists the
+	// auto-approvals reversed on review and the policies behind them (spec 4.4).
+	if err := schedulerMgr.Register(scheduler.WeeklyPolicyReviewJob(&service.ApprovalPolicyService{Queries: queries})); err != nil {
+		slog.Error("scheduler: register weekly policy review", "error", err)
 	}
 	// The Librarian of the starter company (plan 10.9): a workspace set up before
 	// phase 3 gets it from this hourly job, which does nothing once it has it.
@@ -887,6 +918,16 @@ func main() {
 	registerBriefPushListeners(bus, h.BriefPush)
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	// Budgets (spec 4.2): book task costs into the budget periods each minute,
+	// and release the holds of ended tasks and rolled periods.
+	budgetAccounting := &service.BudgetAccounting{Queries: queries, TxStarter: pool}
+	if err := schedulerMgr.Register(scheduler.BudgetAccountingJob(budgetAccounting, queries, time.Now)); err != nil {
+		slog.Warn("scheduler: failed to register budget_accounting job", "error", err)
+	}
+	// Quiet hours defer routine runs; this sweep dispatches them when the window closes (spec 4.5).
+	if err := schedulerMgr.Register(scheduler.AutopilotQuietDispatchJob(autopilotSvc)); err != nil {
+		slog.Warn("scheduler: failed to register autopilot_quiet_dispatch job", "error", err)
 	}
 	// Manifest-declared Plugin schedules share the same durable lease and retry
 	// machinery. The job is inert while plugins_v1 is disabled.

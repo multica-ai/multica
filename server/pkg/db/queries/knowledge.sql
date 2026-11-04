@@ -140,3 +140,8 @@ RETURNING *;
 -- Records the freshness review request the Librarian opened for a document.
 UPDATE knowledge_link SET review_issue_id = sqlc.arg('review_issue_id')::uuid
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: SetKnowledgeLinkAmount :exec
+-- The amount a budget_request document states (migration 889), set at write.
+UPDATE knowledge_link SET amount_micros = sqlc.arg('amount_micros')::bigint
+WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid;

@@ -405,6 +405,7 @@ func (m *Manager) runClaimed(
 				"duration_ms", dur, "handler_error", handlerErr.Error(), "error", err)
 			return
 		}
+		recordJobOutcome(context.Background(), m.pool, job.Name, dbTime, false, handlerErr.Error())
 		log.Warn("scheduler: handler failed",
 			"duration_ms", dur,
 			"error_code", errCode,
@@ -424,6 +425,7 @@ func (m *Manager) runClaimed(
 			"duration_ms", dur, "error", err)
 		return
 	}
+	recordJobOutcome(context.Background(), m.pool, job.Name, dbTime, true, "")
 	log.Info("scheduler: handler succeeded",
 		"duration_ms", dur,
 		"rows_affected", res.RowsAffected)

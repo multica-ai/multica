@@ -81,11 +81,11 @@ func (q *Queries) CountRecentUrgentProposalsBySquad(ctx context.Context, arg Cou
 const createProposal = `-- name: CreateProposal :one
 INSERT INTO proposal (
     id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason,
-    created_by_type, created_by_id, expires_at, kind, payload
+    created_by_type, created_by_id, expires_at, kind, payload, tags
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, now() + $10::interval,
-    $11::text, $12::jsonb
-) RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+    $11::text, $12::jsonb, $13::text[]
+) RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type CreateProposalParams struct {
@@ -101,6 +101,7 @@ type CreateProposalParams struct {
 	ExpiryWindow   pgtype.Interval `json:"expiry_window"`
 	Kind           string          `json:"kind"`
 	Payload        []byte          `json:"payload"`
+	Tags           []string        `json:"tags"`
 }
 
 // expiry_window is the time a pending proposal waits for a decision; the
@@ -119,6 +120,7 @@ func (q *Queries) CreateProposal(ctx context.Context, arg CreateProposalParams) 
 		arg.ExpiryWindow,
 		arg.Kind,
 		arg.Payload,
+		arg.Tags,
 	)
 	var i Proposal
 	err := row.Scan(
@@ -141,6 +143,11 @@ func (q *Queries) CreateProposal(ctx context.Context, arg CreateProposalParams) 
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -149,7 +156,7 @@ const decideProposal = `-- name: DecideProposal :one
 UPDATE proposal
 SET state = $3, decided_by = $4, decided_at = now(), decision_note = $5, snoozed_until = NULL
 WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type DecideProposalParams struct {
@@ -189,6 +196,11 @@ func (q *Queries) DecideProposal(ctx context.Context, arg DecideProposalParams) 
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -207,7 +219,7 @@ const expireProposal = `-- name: ExpireProposal :one
 UPDATE proposal
 SET state = 'expired', decided_at = now(), decision_note = '', snoozed_until = NULL
 WHERE id = $1 AND workspace_id = $2 AND state = 'pending' AND expires_at <= now()
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type ExpireProposalParams struct {
@@ -240,6 +252,11 @@ func (q *Queries) ExpireProposal(ctx context.Context, arg ExpireProposalParams) 
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -266,7 +283,7 @@ func (q *Queries) GetOldestWorkspaceOwnerMember(ctx context.Context, workspaceID
 }
 
 const getProposalInWorkspace = `-- name: GetProposalInWorkspace :one
-SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload FROM proposal WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags FROM proposal WHERE id = $1 AND workspace_id = $2
 `
 
 type GetProposalInWorkspaceParams struct {
@@ -297,12 +314,17 @@ func (q *Queries) GetProposalInWorkspace(ctx context.Context, arg GetProposalInW
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
 
 const getProposalWithIssue = `-- name: GetProposalWithIssue :one
-SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, p.decided_by_policy_id, p.estimated_cost_micros, p.reversed_at, p.reversal_note, p.tags, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.id = $1 AND p.workspace_id = $2
@@ -343,6 +365,11 @@ func (q *Queries) GetProposalWithIssue(ctx context.Context, arg GetProposalWithI
 		&i.Proposal.SnoozedUntil,
 		&i.Proposal.Kind,
 		&i.Proposal.Payload,
+		&i.Proposal.DecidedByPolicyID,
+		&i.Proposal.EstimatedCostMicros,
+		&i.Proposal.ReversedAt,
+		&i.Proposal.ReversalNote,
+		&i.Proposal.Tags,
 		&i.IssueTitle,
 		&i.IssueNumber,
 		&i.IssueStatus,
@@ -405,7 +432,7 @@ func (q *Queries) ListDueProposals(ctx context.Context, limit int32) ([]ListDueP
 }
 
 const listProposals = `-- name: ListProposals :many
-SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, p.decided_by_policy_id, p.estimated_cost_micros, p.reversed_at, p.reversal_note, p.tags, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.workspace_id = $1
@@ -458,6 +485,11 @@ func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([
 			&i.Proposal.SnoozedUntil,
 			&i.Proposal.Kind,
 			&i.Proposal.Payload,
+			&i.Proposal.DecidedByPolicyID,
+			&i.Proposal.EstimatedCostMicros,
+			&i.Proposal.ReversedAt,
+			&i.Proposal.ReversalNote,
+			&i.Proposal.Tags,
 			&i.IssueTitle,
 			&i.IssueNumber,
 			&i.IssueStatus,
@@ -525,7 +557,7 @@ func (q *Queries) ListRecentProposalsForPriorArt(ctx context.Context, arg ListRe
 }
 
 const lockProposalInWorkspace = `-- name: LockProposalInWorkspace :one
-SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload FROM proposal WHERE id = $1 AND workspace_id = $2 FOR UPDATE
+SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags FROM proposal WHERE id = $1 AND workspace_id = $2 FOR UPDATE
 `
 
 type LockProposalInWorkspaceParams struct {
@@ -558,6 +590,11 @@ func (q *Queries) LockProposalInWorkspace(ctx context.Context, arg LockProposalI
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -578,7 +615,7 @@ const requestProposalRevision = `-- name: RequestProposalRevision :one
 UPDATE proposal
 SET state = 'revising', decided_by = $3, decided_at = now(), decision_note = $4, snoozed_until = NULL
 WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type RequestProposalRevisionParams struct {
@@ -618,6 +655,11 @@ func (q *Queries) RequestProposalRevision(ctx context.Context, arg RequestPropos
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -627,7 +669,7 @@ UPDATE proposal
 SET state = 'pending', revision = revision + 1, decided_by = NULL, decided_at = NULL,
     decision_note = '', expires_at = now() + $3::interval
 WHERE id = $1 AND workspace_id = $2 AND state = 'revising'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type ResubmitProposalParams struct {
@@ -663,6 +705,11 @@ func (q *Queries) ResubmitProposal(ctx context.Context, arg ResubmitProposalPara
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -671,7 +718,7 @@ const revertProposalDecision = `-- name: RevertProposalDecision :one
 UPDATE proposal
 SET state = 'pending', decided_by = NULL, decided_at = NULL, decision_note = ''
 WHERE id = $1 AND workspace_id = $2 AND state <> 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type RevertProposalDecisionParams struct {
@@ -704,6 +751,11 @@ func (q *Queries) RevertProposalDecision(ctx context.Context, arg RevertProposal
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -713,7 +765,7 @@ UPDATE proposal
 SET snoozed_until = $3::timestamptz,
     expires_at = GREATEST(expires_at, $3::timestamptz + $4::interval)
 WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until, kind, payload, decided_by_policy_id, estimated_cost_micros, reversed_at, reversal_note, tags
 `
 
 type SnoozeProposalParams struct {
@@ -754,6 +806,11 @@ func (q *Queries) SnoozeProposal(ctx context.Context, arg SnoozeProposalParams) 
 		&i.SnoozedUntil,
 		&i.Kind,
 		&i.Payload,
+		&i.DecidedByPolicyID,
+		&i.EstimatedCostMicros,
+		&i.ReversedAt,
+		&i.ReversalNote,
+		&i.Tags,
 	)
 	return i, err
 }

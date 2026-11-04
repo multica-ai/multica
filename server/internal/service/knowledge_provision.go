@@ -77,13 +77,18 @@ func (s *KnowledgeService) llmSpec(role string) (knowledge.ModelSpec, bool) {
 		return knowledge.ModelSpec{}, false
 	}
 	spec := knowledge.ModelSpec{Provider: "generic", BaseURL: s.LLM.BaseURL, APIKey: s.LLM.APIKey}
+	// Chat and vision calls are non-streaming, and some OpenAI-compatible
+	// gateways stream unless told otherwise. The rerank role takes no such field.
+	nonStreaming := map[string]any{"stream": false}
 	switch role {
 	case KnowledgeModelChat:
 		spec.Name, spec.Type = s.LLM.ChatModel, knowledge.ModelTypeKnowledgeQA
+		spec.ExtraBody = nonStreaming
 	case KnowledgeModelRerank:
 		spec.Name, spec.Type = s.LLM.RerankModel, knowledge.ModelTypeRerank
 	case KnowledgeModelVision:
 		spec.Name, spec.Type = s.LLM.VisionModel, knowledge.ModelTypeVLLM
+		spec.ExtraBody = nonStreaming
 	default:
 		return knowledge.ModelSpec{}, false
 	}

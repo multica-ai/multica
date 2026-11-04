@@ -1,0 +1,69 @@
+---
+title: Pipeline and initiatives
+description: An initiative is one venture moving through the company, stage by stage, from validation to learning. The pipeline shows every initiative and who owns each stage.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+An **initiative** is one venture: a product, a feature line, or a market experiment. You think about it as "how is the invoicing tool doing?". It is not a project, which is a body of work, and not an issue, which is a task.
+
+An initiative moves through the **pipeline**, a fixed sequence of stages. Each stage has an owning squad and the artifacts it must produce, usually knowledge documents.
+
+## The stages
+
+The default pipeline has seven stages. Each stage is also an issue status, so the initiative's backing issue follows its progress.
+
+| Stage | Owned by the starter company's squad | Typical artifacts |
+| --- | --- | --- |
+| Validate | Product Discovery | Validation report |
+| Define | Product Analysis | Product brief, analysis |
+| Plan | Planning | Roadmap, budget request, PRD |
+| Build | Build | Test report, release candidate |
+| Launch | Release & Ops | Launch plan, launch checklist |
+| Operate | Support | Metrics report |
+| Learn | Build | Retrospective |
+
+The Launch gate is always your decision. The Plan gate approves a budget request, and the Operate stage ends with a review gate that takes one of three outcomes: continue, scale, or sunset. The starter company creates these squads. See [Starter company](/starter-company).
+
+## Starting an initiative
+
+An initiative starts in one of two ways:
+
+- **An approved opportunity.** A squad files an `opportunity` proposal with a thesis. Approving it creates the initiative at its target stage, `validate` by default.
+- **Directly.** Create one from the Pipeline page, or with `POST /api/initiatives`. The CLI has no create command.
+
+## The board and the initiative panel
+
+The **Pipeline** page shows a board with one column per stage and one card per initiative. Open a card for its panel. The panel shows the thesis, the current stage and owning squad, the required artifacts (with **Waive** for an artifact you do not need), the gates waiting on you, the initiative's comments, and the timeline of stage changes.
+
+Admins can also **Force** an initiative to a stage. Force is recorded in the governance log.
+
+## Moving an initiative
+
+The owning squad moves its stage by attesting it. The initiative advances when its artifacts are in place.
+
+```bash
+multica initiative list
+multica initiative show <id>
+multica initiative attest <id>   # as the owning squad: advances when artifacts are in place
+multica initiative advance <id>  # past the current stage when its exit allows it
+multica initiative shelve <id>   # pause the initiative; owners and admins only
+```
+
+Other moves are API and app actions: send an initiative back to an earlier stage, close it, or resume a shelved one. Shelving and closing are recorded in the governance log.
+
+A stage gate needs your decision. The system files a `stage_gate` proposal when a gate stage is ready. Approving it advances the initiative. Rejecting it sends the initiative back and wakes its leader. See [Proposals](/proposals).
+
+<Callout type="info">
+A launch is never automatic. Whatever your autonomy level, the Launch gate is your decision. See [Autonomy and approvals](/autonomy-and-approvals).
+</Callout>
+
+## Where the work lives
+
+Documents an initiative produces go into the **ventures** knowledge base, in one folder per initiative. See [Knowledge taxonomy](/knowledge-taxonomy). Each stage's builds and kickoffs are issues in the initiative's board project.
+
+## Next steps
+
+- [Proposals](/proposals) for the opportunity and gate kinds.
+- [Budgets](/budgets) for the budget that a Plan gate approves.
+- [Knowledge taxonomy](/knowledge-taxonomy) for the documents each stage requires.

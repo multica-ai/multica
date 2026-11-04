@@ -222,7 +222,7 @@ func (q *Queries) GetKnowledgeBaseByKey(ctx context.Context, arg GetKnowledgeBas
 }
 
 const getKnowledgeLink = `-- name: GetKnowledgeLink :one
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link WHERE id = $1 AND workspace_id = $2
 `
 
 type GetKnowledgeLinkParams struct {
@@ -265,12 +265,13 @@ func (q *Queries) GetKnowledgeLink(ctx context.Context, arg GetKnowledgeLinkPara
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewIssueID,
+		&i.AmountMicros,
 	)
 	return i, err
 }
 
 const getKnowledgeLinkByKey = `-- name: GetKnowledgeLinkByKey :one
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2
 `
 
 type GetKnowledgeLinkByKeyParams struct {
@@ -313,12 +314,13 @@ func (q *Queries) GetKnowledgeLinkByKey(ctx context.Context, arg GetKnowledgeLin
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewIssueID,
+		&i.AmountMicros,
 	)
 	return i, err
 }
 
 const getKnowledgeLinksByDocumentIDs = `-- name: GetKnowledgeLinksByDocumentIDs :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link
 WHERE workspace_id = $1
   AND weknora_knowledge_id = ANY($2::text[])
   AND state = 'published'
@@ -372,6 +374,7 @@ func (q *Queries) GetKnowledgeLinksByDocumentIDs(ctx context.Context, arg GetKno
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewIssueID,
+			&i.AmountMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -465,7 +468,7 @@ func (q *Queries) ListKnowledgeBases(ctx context.Context, workspaceID pgtype.UUI
 }
 
 const listKnowledgeLinks = `-- name: ListKnowledgeLinks :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link
 WHERE workspace_id = $1
   AND ($2::uuid IS NULL OR knowledge_base_id = $2::uuid)
   AND ($3::text IS NULL OR state = $3::text)
@@ -521,6 +524,7 @@ func (q *Queries) ListKnowledgeLinks(ctx context.Context, arg ListKnowledgeLinks
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewIssueID,
+			&i.AmountMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -533,7 +537,7 @@ func (q *Queries) ListKnowledgeLinks(ctx context.Context, arg ListKnowledgeLinks
 }
 
 const listPublishedKnowledgeLinks = `-- name: ListPublishedKnowledgeLinks :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link
 WHERE workspace_id = $1 AND state = 'published'
 ORDER BY created_at DESC, id DESC
 LIMIT 5000
@@ -583,6 +587,7 @@ func (q *Queries) ListPublishedKnowledgeLinks(ctx context.Context, workspaceID p
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewIssueID,
+			&i.AmountMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -595,7 +600,7 @@ func (q *Queries) ListPublishedKnowledgeLinks(ctx context.Context, workspaceID p
 }
 
 const listRetryableKnowledgeLinks = `-- name: ListRetryableKnowledgeLinks :many
-SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id FROM knowledge_link
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros FROM knowledge_link
 WHERE workspace_id = $1 AND state = 'failed' AND created_by_type = 'system'
 ORDER BY created_at ASC
 LIMIT 20
@@ -643,6 +648,7 @@ func (q *Queries) ListRetryableKnowledgeLinks(ctx context.Context, workspaceID p
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewIssueID,
+			&i.AmountMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -680,6 +686,23 @@ func (q *Queries) ListSupersededLinkIDs(ctx context.Context, workspaceID pgtype.
 	return items, nil
 }
 
+const setKnowledgeLinkAmount = `-- name: SetKnowledgeLinkAmount :exec
+UPDATE knowledge_link SET amount_micros = $1::bigint
+WHERE id = $2::uuid AND workspace_id = $3::uuid
+`
+
+type SetKnowledgeLinkAmountParams struct {
+	AmountMicros int64       `json:"amount_micros"`
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+}
+
+// The amount a budget_request document states (migration 889), set at write.
+func (q *Queries) SetKnowledgeLinkAmount(ctx context.Context, arg SetKnowledgeLinkAmountParams) error {
+	_, err := q.db.Exec(ctx, setKnowledgeLinkAmount, arg.AmountMicros, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const setKnowledgeLinkReview = `-- name: SetKnowledgeLinkReview :one
 UPDATE knowledge_link SET
     review_verdict = $1::text,
@@ -688,7 +711,7 @@ UPDATE knowledge_link SET
     review_note = $4::text,
     reviewed_at = now()
 WHERE id = $5 AND workspace_id = $6
-RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id
+RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros
 `
 
 type SetKnowledgeLinkReviewParams struct {
@@ -744,6 +767,7 @@ func (q *Queries) SetKnowledgeLinkReview(ctx context.Context, arg SetKnowledgeLi
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewIssueID,
+		&i.AmountMicros,
 	)
 	return i, err
 }
@@ -790,7 +814,7 @@ UPDATE knowledge_link SET
     pending_content = CASE WHEN $2::text = 'failed' THEN pending_content ELSE '' END,
     published_at = CASE WHEN $2::text = 'published' THEN COALESCE(published_at, now()) ELSE published_at END
 WHERE id = $4 AND workspace_id = $5
-RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id
+RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error, kind, initiative_id, stage_key, squad_id, confidence, valid_until, supersedes_link_id, tags, review_verdict, review_by_id, review_squad_id, review_note, reviewed_at, review_issue_id, amount_micros
 `
 
 type SettleKnowledgeLinkParams struct {
@@ -845,6 +869,7 @@ func (q *Queries) SettleKnowledgeLink(ctx context.Context, arg SettleKnowledgeLi
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewIssueID,
+		&i.AmountMicros,
 	)
 	return i, err
 }

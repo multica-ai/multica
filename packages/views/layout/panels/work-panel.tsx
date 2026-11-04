@@ -15,7 +15,7 @@ import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
-import { Building2, Workflow } from "@multica/ui/icons";
+import { Building2, Shield, Workflow } from "@multica/ui/icons";
 import { CollapseNavButton } from "../page-header";
 import { PanelBody, PanelHeader, PanelLink, PanelList, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
@@ -148,6 +148,12 @@ export function WorkPanel() {
               icon={<Workflow className="size-4 shrink-0" />}
               label={t(($) => $.nav.pipeline)}
               active={pathname === p.pipeline()}
+            />
+            <PanelLink
+              href={p.governance()}
+              icon={<Shield className="size-4 shrink-0" />}
+              label={t(($) => $.nav.governance)}
+              active={pathname === p.governance()}
             />
           </PanelList>
 

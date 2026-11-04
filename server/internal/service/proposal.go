@@ -171,6 +171,9 @@ type ProposalService struct {
 	DecisionSearch DecisionSearcher
 	// AppURL is the web app origin, for the link in the decision record.
 	AppURL string
+	// Budget reads a squad's remaining budget for the standing approval rules
+	// (spec 4.4). Nil means a costed filing is never auto-approved.
+	Budget SquadBudgetReader
 }
 
 // NewProposalService builds the proposal service. initiatives serves the kinds
@@ -206,6 +209,10 @@ type ProposalCreateParams struct {
 	// SystemFiled marks a filing the system makes (a stage gate). Only those
 	// may file a kind the squads may not.
 	SystemFiled bool
+	// EstimatedCostMicros is the filing's cost estimate, nil when it gives none.
+	// A standing approval needs it to fit a policy's cost limit and the squad's
+	// remaining budget (spec 4.4).
+	EstimatedCostMicros *int64
 }
 
 // ProposalCreateResult carries the new rows. Events are the caller's to
@@ -216,6 +223,9 @@ type ProposalCreateResult struct {
 	// Related lists earlier proposals and decisions that look related. It is
 	// computed after the commit and is empty when the lookup fails.
 	Related []ProposalRelated
+	// AutoDecision is set when a standing approval decided the filing at once.
+	// Proposal and Issue then show that decision. The caller publishes its events.
+	AutoDecision *ProposalDecideResult
 }
 
 // Create writes the proposal and its backing issue in one transaction.
@@ -336,6 +346,7 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 		ExpiryWindow:   proposalExpiryInterval(),
 		Kind:           kind.Key(),
 		Payload:        payload,
+		Tags:           proposalkinds.ProposalTags(payload),
 	})
 	if err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("create proposal: %w", err)
@@ -354,11 +365,33 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 		return ProposalCreateResult{}, fmt.Errorf("record proposal revision: %w", err)
 	}
 
+	if p.EstimatedCostMicros != nil {
+		if err := qtx.SetProposalEstimatedCost(ctx, db.SetProposalEstimatedCostParams{
+			ID: proposal.ID, WorkspaceID: p.WorkspaceID, EstimatedCostMicros: *p.EstimatedCostMicros,
+		}); err != nil {
+			return ProposalCreateResult{}, fmt.Errorf("record cost estimate: %w", err)
+		}
+		proposal.EstimatedCostMicros = pgtype.Int8{Int64: *p.EstimatedCostMicros, Valid: true}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
-	related := s.findPriorArt(ctx, p.WorkspaceID, proposal.ID, p.Content.Title, p.Content.Summary)
-	return ProposalCreateResult{Proposal: proposal, Issue: issue, Related: related}, nil
+	res := ProposalCreateResult{Proposal: proposal, Issue: issue}
+	// The standing approval step runs once the filing is committed, under the
+	// workspace proposal lock. A failure leaves the filing pending for the boss.
+	decided, err := s.applyStandingApproval(ctx, p.WorkspaceID, proposal.ID)
+	switch {
+	case err != nil:
+		slog.Warn("standing approval check failed; the proposal waits for the boss",
+			"proposal_id", util.UUIDToString(proposal.ID), "error", err)
+	case decided != nil:
+		res.Proposal = decided.Proposal
+		res.Issue = decided.Issue
+		res.AutoDecision = decided
+	}
+	res.Related = s.findPriorArt(ctx, p.WorkspaceID, res.Proposal.ID, p.Content.Title, p.Content.Summary)
+	return res, nil
 }
 
 func liveSquad(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.UUID) (db.Squad, error) {
@@ -471,6 +504,14 @@ type ProposalDecideParams struct {
 	// Kickoff is passed through to IssueService.Create for the handoff
 	// kickoff issue, so the handler can supply its issue:created payload.
 	Kickoff IssueCreateOpts
+	// Policy, when set, makes the decision a standing approval (spec 4.4): the
+	// policy is the decider of record, and DeciderID is its accountable member.
+	Policy *ProposalPolicyDecision
+}
+
+// ProposalPolicyDecision names the policy that approved a proposal.
+type ProposalPolicyDecision struct {
+	ID pgtype.UUID
 }
 
 // ProposalDecideResult carries the changed rows so the caller can publish
@@ -487,6 +528,10 @@ type ProposalDecideResult struct {
 	// Project and Kickoff are set when an approval hands off to a squad.
 	Project *db.Project
 	Kickoff *db.Issue
+	// prev and prevIssue are the proposal and its issue before the decision, kept
+	// so finishSettle can revert it when the kickoff fails.
+	prev      db.Proposal
+	prevIssue db.Issue
 }
 
 // Decide settles a proposal according to the decision.
@@ -545,6 +590,21 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 	defer tx.Rollback(ctx)
 	qtx := s.Issues.Queries.WithTx(tx)
 
+	result, err := s.settleInTx(ctx, tx, qtx, p)
+	if err != nil {
+		return ProposalDecideResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("commit: %w", err)
+	}
+	return s.finishSettle(ctx, p, result)
+}
+
+// settleInTx applies a decision inside the caller's transaction. tx is that
+// transaction and qtx is bound to it; the caller commits and then calls
+// finishSettle. A policy decision (p.Policy) records the policy as the decider of
+// record in place of a member; p.DeciderID is then the policy's accountable member.
+func (s *ProposalService) settleInTx(ctx context.Context, tx pgx.Tx, qtx *db.Queries, p ProposalDecideParams) (ProposalDecideResult, error) {
 	current, err := lockOpenProposal(ctx, qtx, p.WorkspaceID, p.ProposalID)
 	if err != nil {
 		return ProposalDecideResult{}, err
@@ -554,7 +614,7 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 		return ProposalDecideResult{}, fmt.Errorf("load proposal issue: %w", err)
 	}
 
-	result := ProposalDecideResult{PrevIssueStatus: issue.Status}
+	result := ProposalDecideResult{PrevIssueStatus: issue.Status, prev: current, prevIssue: issue}
 	state, issueStatus := ProposalStateApproved, "done"
 	if p.Decision == ProposalDecisionReject {
 		state, issueStatus = ProposalStateRejected, "cancelled"
@@ -574,17 +634,37 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 			return ProposalDecideResult{}, mapKindError(err)
 		}
 		result.Project = effect.Project
+		if effect.Policy != nil {
+			// A standing_approval decision created a policy: the log records it
+			// in the same transaction as the approval.
+			if err := recordPolicyCreated(ctx, qtx, *effect.Policy, GovernanceActor{Type: GovernanceActorMember, ID: p.DeciderID}); err != nil {
+				return ProposalDecideResult{}, err
+			}
+		}
 	}
 
+	// A policy decides without a member, so decided_by stays empty.
+	decidedBy := p.DeciderID
+	if p.Policy != nil {
+		decidedBy = pgtype.UUID{}
+	}
 	decided, err := qtx.DecideProposal(ctx, db.DecideProposalParams{
 		ID: p.ProposalID, WorkspaceID: p.WorkspaceID,
-		State: state, DecidedBy: p.DeciderID, DecisionNote: p.Note,
+		State: state, DecidedBy: decidedBy, DecisionNote: p.Note,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ProposalDecideResult{}, ErrProposalAlreadyDecided
 		}
 		return ProposalDecideResult{}, fmt.Errorf("decide proposal: %w", err)
+	}
+	if p.Policy != nil {
+		if err := qtx.SetProposalPolicyDecision(ctx, db.SetProposalPolicyDecisionParams{
+			ID: p.ProposalID, WorkspaceID: p.WorkspaceID, PolicyID: p.Policy.ID,
+		}); err != nil {
+			return ProposalDecideResult{}, fmt.Errorf("record policy decision: %w", err)
+		}
+		decided.DecidedByPolicyID = p.Policy.ID
 	}
 	result.Proposal = decided
 
@@ -610,17 +690,20 @@ func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (P
 			return ProposalDecideResult{}, mapKindError(err)
 		}
 	}
+	return result, nil
+}
 
-	if err := tx.Commit(ctx); err != nil {
-		return ProposalDecideResult{}, fmt.Errorf("commit: %w", err)
-	}
-
+// finishSettle runs what a committed decision still owes: the handoff kickoff
+// issue, and the knowledge record. A kickoff that cannot be created reverts the
+// decision and returns the error, so the caller never sees an approval whose work
+// did not start.
+func (s *ProposalService) finishSettle(ctx context.Context, p ProposalDecideParams, result ProposalDecideResult) (ProposalDecideResult, error) {
 	if result.Project != nil {
-		kickoff, err := s.createKickoff(ctx, p, current, result.Issue, *result.Project)
+		kickoff, err := s.createKickoff(ctx, p, result.prev, result.Issue, *result.Project)
 		if err != nil {
-			if revertErr := s.revertDecision(ctx, current, issue, *result.Project); revertErr != nil {
+			if revertErr := s.revertDecision(ctx, result.prev, result.prevIssue, *result.Project); revertErr != nil {
 				slog.Error("revert proposal decision after kickoff failure failed",
-					"proposal_id", util.UUIDToString(current.ID), "error", revertErr)
+					"proposal_id", util.UUIDToString(result.prev.ID), "error", revertErr)
 			}
 			return ProposalDecideResult{}, err
 		}
@@ -1002,6 +1085,12 @@ func (s *ProposalService) revertDecision(ctx context.Context, proposal db.Propos
 	defer tx.Rollback(ctx)
 	qtx := s.Issues.Queries.WithTx(tx)
 	if _, err := qtx.RevertProposalDecision(ctx, db.RevertProposalDecisionParams{ID: proposal.ID, WorkspaceID: proposal.WorkspaceID}); err != nil {
+		return err
+	}
+	// A reverted standing approval no longer names its policy as the decider.
+	if err := qtx.SetProposalPolicyDecision(ctx, db.SetProposalPolicyDecisionParams{
+		ID: proposal.ID, WorkspaceID: proposal.WorkspaceID,
+	}); err != nil {
 		return err
 	}
 	if _, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{

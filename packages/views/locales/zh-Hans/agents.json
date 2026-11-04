@@ -518,6 +518,14 @@
         "people_performance": {
           "name": "人员负责人",
           "description": "对照章程审查各小组的记录，并报告延误或沉默的事项。不设定目标。"
+        },
+        "people_reviewer": {
+          "name": "人员评审员",
+          "description": "每月为每个有评分的小组或智能体发布一份评审，并附上由老板决定的建议。不设定目标。"
+        },
+        "floor_chief": {
+          "name": "楼层负责人",
+          "description": "根据楼层摘要，每天为秘书撰写楼层简报。不做决定，也不改动任何小组。"
         }
       }
     },
@@ -1167,5 +1175,28 @@
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "修订历史",
+    "show": "查看修订历史",
+    "hide": "隐藏修订历史",
+    "loading": "正在加载修订…",
+    "load_failed": "无法加载修订历史。",
+    "empty": "还没有保存的修订。",
+    "revision_label": "修订 {{revision}}",
+    "current": "当前",
+    "source": {
+      "human": "已编辑",
+      "proposal": "来自已批准的提案",
+      "rollback": "已恢复",
+      "unknown": "已更改"
+    },
+    "show_text": "查看内容",
+    "hide_text": "隐藏内容",
+    "restore": "恢复",
+    "restore_named": "恢复修订 {{revision}}",
+    "restored": "已恢复修订 {{revision}}",
+    "restore_failed": "无法恢复此修订，请重试。",
+    "restore_unchanged": "智能体已经使用这些指令。"
+  }
 }

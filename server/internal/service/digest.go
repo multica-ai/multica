@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -225,6 +226,32 @@ type DigestKnowledge struct {
 	// Retrieval is the latest eval run against the previous one. Nil until a
 	// run is recorded. A fall beyond EvalDropThreshold carries a risk line.
 	Retrieval *DigestRetrieval `json:"retrieval"`
+	// AutoPublished lists the documents Multica published without a person
+	// pressing publish since the window opened (spec 3.3). The brief's FYI names
+	// each one. Count is the total, Items is capped at DigestAutoPublishMax.
+	AutoPublished DigestAutoPublishList `json:"auto_published"`
+}
+
+// DigestAutoPublishMax bounds the automatic publishes the digest lists, newest first.
+const DigestAutoPublishMax = 20
+
+// DigestAutoPublishList is the automatic publishes in the window.
+type DigestAutoPublishList struct {
+	Count int                 `json:"count"`
+	Items []DigestAutoPublish `json:"items"`
+}
+
+// DigestAutoPublish is one document published automatically: by an
+// auto_after_review verdict of another squad, or by an auto policy.
+type DigestAutoPublish struct {
+	LinkID        string `json:"link_id"`
+	Title         string `json:"title"`
+	KnowledgeBase string `json:"knowledge_base"`
+	Kind          string `json:"kind"`
+	Mode          string `json:"mode"`
+	AuthorSquadID string `json:"author_squad_id"`
+	CriticSquadID string `json:"critic_squad_id"`
+	PublishedAt   string `json:"published_at"`
 }
 
 // Digest is the whole response of GET /api/office/digest.
@@ -246,6 +273,72 @@ type Digest struct {
 	// OverdueRequests are squad requests the receiving squad has not answered
 	// within its response_hours (spec 3.5).
 	OverdueRequests []DigestOverdueRequest `json:"overdue_requests"`
+	// People lists the reviews published since the window opened, with the
+	// organisation changes they recommended (spec 4.6).
+	People DigestPeople `json:"people"`
+	// AutoApproved are proposals a standing approval decided in the window. The
+	// brief's FYI names each one as "Auto-approved by policy" (spec 4.4).
+	AutoApproved []DigestAutoApproval `json:"auto_approved"`
+	// Budget is the brief's Budget section: budgets at or above their soft line
+	// and the holds in force (spec 4.2).
+	Budget DigestBudget `json:"budget"`
+	// Mode is the source the Secretary reads: squads, or floors when the company
+	// is large (spec 4.8). In floors mode Squads is empty and Floors carries each
+	// floor's latest brief and whether a squad on it needs the boss.
+	Mode   string        `json:"mode"`
+	Scope  DigestScope   `json:"scope"`
+	Floors []DigestFloor `json:"floors"`
+	// Goals are the active goals the brief reports: those whose state changed
+	// since the last brief and those at risk or off track (spec 4.1).
+	Goals []DigestGoal `json:"goals"`
+	// SystemRisks are risk lines about the system itself: a stuck scheduled job
+	// (spec 4.9).
+	SystemRisks []string `json:"system_risks"`
+}
+
+// DigestScope says whose digest this is: the company's, or one floor's.
+//
+// The counts are the totals inside the scope. A floor digest counts only the
+// floor's squads, the initiatives those squads own, and the budgets and goals
+// attached to the floor, its squads or those initiatives. The company's usage
+// totals, knowledge, inquiries, reviews and runtimes belong to no floor: a floor
+// digest reports the usage totals as zero, and the other sections as the company's.
+type DigestScope struct {
+	Type    string            `json:"type"`
+	FloorID *string           `json:"floor_id"`
+	Counts  DigestScopeCounts `json:"counts"`
+}
+
+// DigestScopeCounts are the totals of a scope.
+type DigestScopeCounts struct {
+	Squads           int `json:"squads"`
+	Initiatives      int `json:"initiatives"`
+	PendingDecisions int `json:"pending_decisions"`
+	Budgets          int `json:"budgets"`
+	Goals            int `json:"goals"`
+}
+
+// DigestFloor is one floor's line in a floors-mode digest.
+type DigestFloor struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	ChiefAgentID *string `json:"chief_agent_id"`
+	SquadCount   int     `json:"squad_count"`
+	// Flagged is set when a squad on the floor needs the boss's attention: a
+	// pending proposal, blocked or failed work, stale work, an off-track routine
+	// or silence. The Secretary drills into a flagged floor with floor_id.
+	Flagged bool `json:"flagged"`
+	// Brief is the floor's latest brief in the last day and a half; nil when the
+	// chief has not published one.
+	Brief *DigestFloorBrief `json:"brief"`
+}
+
+// DigestFloorBrief is a floor chief's brief as the company digest carries it.
+type DigestFloorBrief struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+	Body      string `json:"body"`
 }
 
 // DigestInitiative is one initiative's place in its pipeline. Stalled is set
@@ -268,6 +361,20 @@ type DigestInitiative struct {
 	PendingGateProposalID *string  `json:"pending_gate_proposal_id"`
 }
 
+// DigestAutoApprovalMax bounds the auto-approvals the digest lists, newest first.
+const DigestAutoApprovalMax = 20
+
+// DigestAutoApproval is one proposal a standing approval approved.
+type DigestAutoApproval struct {
+	ProposalID string `json:"proposal_id"`
+	Identifier string `json:"identifier"`
+	Title      string `json:"title"`
+	SquadID    string `json:"squad_id"`
+	PolicyID   string `json:"policy_id"`
+	PolicyName string `json:"policy_name"`
+	DecidedAt  string `json:"decided_at"`
+}
+
 // DigestOverdueRequest is a squad request past the receiving squad's response time.
 type DigestOverdueRequest struct {
 	IssueID      string `json:"issue_id"`
@@ -282,6 +389,11 @@ type DigestService struct {
 	Queries *db.Queries
 	// Now is the clock; nil means time.Now. Tests pin it.
 	Now func() time.Time
+	// FloorID, when valid, scopes the digest to one floor's squads (a floor
+	// chief's digest). Invalid means the whole company.
+	FloorID pgtype.UUID
+	// Mode is squads or floors (see ResolveDigestMode). Empty means squads.
+	Mode string
 }
 
 func NewDigestService(q *db.Queries) *DigestService { return &DigestService{Queries: q} }
@@ -391,6 +503,59 @@ func rankSquads(all []DigestSquad) (full []DigestSquad, omitted int, quiet Diges
 	return full, omitted, quiet
 }
 
+// digestScope is the set of objects a digest counts. The company digest counts
+// everything. A floor digest counts only the floor's squads (sc.squads), the
+// initiatives those squads own (sc.initiatives), and the budgets and goals
+// attached to the floor, to one of its squads, or to one of those initiatives.
+type digestScope struct {
+	floor       bool
+	floorID     pgtype.UUID
+	squads      map[string]bool
+	squadIDs    []pgtype.UUID
+	initiatives map[string]bool
+}
+
+// keeps reports whether an object with this scope type and id belongs to the
+// digest's scope. A company object belongs to the company digest only.
+func (sc digestScope) keeps(scopeType string, scopeID pgtype.UUID) bool {
+	if !sc.floor {
+		return true
+	}
+	id := util.UUIDToString(scopeID)
+	switch scopeType {
+	case ScopeFloor:
+		return scopeID == sc.floorID
+	case ScopeSquad:
+		return sc.squads[id]
+	case ScopeInitiative:
+		return sc.initiatives[id]
+	}
+	return false
+}
+
+// digestScopeOf reads the floor's squads and initiatives for a floor digest. The
+// company digest returns the zero scope, which keeps everything.
+func (s *DigestService) digestScopeOf(ctx context.Context, workspaceID pgtype.UUID, all []DigestSquad) (digestScope, error) {
+	if !s.FloorID.Valid {
+		return digestScope{}, nil
+	}
+	sc := digestScope{floor: true, floorID: s.FloorID, squads: map[string]bool{}, initiatives: map[string]bool{}}
+	for _, sq := range all {
+		sc.squads[sq.ID] = true
+		sc.squadIDs = append(sc.squadIDs, util.MustParseUUID(sq.ID))
+	}
+	list, err := s.Queries.ListInitiatives(ctx, db.ListInitiativesParams{WorkspaceID: workspaceID})
+	if err != nil {
+		return digestScope{}, fmt.Errorf("digest floor initiatives: %w", err)
+	}
+	for _, ini := range list {
+		if ini.OwnerSquadID.Valid && sc.squads[util.UUIDToString(ini.OwnerSquadID)] {
+			sc.initiatives[util.UUIDToString(ini.ID)] = true
+		}
+	}
+	return sc, nil
+}
+
 // Compute builds the digest for the workspace since the given time.
 // issuePrefix is the workspace's issue prefix, for identifiers and mentions.
 func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, since time.Time, issuePrefix string) (Digest, error) {
@@ -408,6 +573,9 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	}
 	all := make([]DigestSquad, 0, len(rows))
 	for _, r := range rows {
+		if s.FloorID.Valid && (!r.FloorID.Valid || r.FloorID != s.FloorID) {
+			continue
+		}
 		all = append(all, DigestSquad{
 			ID:                   util.UUIDToString(r.SquadID),
 			Name:                 r.Name,
@@ -430,6 +598,12 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	}
 
 	squads, omitted, quiet := rankSquads(all)
+	floorsMode := s.Mode == DigestModeFloors && !s.FloorID.Valid
+	if floorsMode {
+		omitted += len(squads)
+		squads = []DigestSquad{}
+		quiet.Squads = []DigestQuietSquad{}
+	}
 
 	// Details only for the squads reported in full.
 	if len(squads) > 0 {
@@ -464,12 +638,16 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		}
 	}
 
-	ws, err := s.computeWorkspace(ctx, workspaceID, sinceTS)
+	sc, err := s.digestScopeOf(ctx, workspaceID, all)
+	if err != nil {
+		return Digest{}, err
+	}
+	ws, err := s.computeWorkspace(ctx, workspaceID, sinceTS, sc)
 	if err != nil {
 		return Digest{}, err
 	}
 	ws.RoutinesNotOnTime = offTrack
-	know, err := s.computeKnowledge(ctx, workspaceID, now)
+	know, err := s.computeKnowledge(ctx, workspaceID, now, since)
 	if err != nil {
 		return Digest{}, err
 	}
@@ -481,11 +659,61 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	goals, goalCount, err := s.computeGoals(ctx, workspaceID, since, now, sc)
+	if err != nil {
+		return Digest{}, err
+	}
 	overdue, err := s.computeOverdueRequests(ctx, workspaceID, now, issuePrefix)
 	if err != nil {
 		return Digest{}, err
 	}
+	people, err := s.computePeople(ctx, workspaceID, sinceTS)
+	if err != nil {
+		return Digest{}, err
+	}
+	autoApproved, err := s.computeAutoApproved(ctx, workspaceID, since, issuePrefix, sc)
+	if err != nil {
+		return Digest{}, err
+	}
 
+	if sc.floor {
+		routinesOffTrack := 0
+		for _, sq := range all {
+			routinesOffTrack += sq.routinesOffTrack
+		}
+		pipeline = filterPipelineToSquads(pipeline, sc.squads)
+		overdue = filterOverdueToSquads(overdue, sc.squads)
+		ws.RoutinesNotOnTime = floorRoutineRefs(ws.RoutinesNotOnTime, sc.squads, routinesOffTrack)
+	}
+	scope := DigestScope{Type: "company"}
+	if sc.floor {
+		scope = DigestScope{Type: "floor", FloorID: util.UUIDToPtr(s.FloorID)}
+	}
+	floors := []DigestFloor{}
+	if floorsMode {
+		floors, err = s.computeFloors(ctx, workspaceID, now, all)
+		if err != nil {
+			return Digest{}, err
+		}
+	}
+	risks := s.systemRisks(ctx, now)
+
+	mode := DigestModeSquads
+	if floorsMode {
+		mode = DigestModeFloors
+	}
+	budget, budgetCount, err := s.computeBudget(ctx, workspaceID, now, sc)
+	if err != nil {
+		return Digest{}, err
+	}
+	pendingDecisions := 0
+	for _, sq := range all {
+		pendingDecisions += sq.PendingProposalCount
+	}
+	scope.Counts = DigestScopeCounts{
+		Squads: len(all), Initiatives: len(pipeline), PendingDecisions: pendingDecisions,
+		Budgets: budgetCount, Goals: goalCount,
+	}
 	return Digest{
 		Since:             since.UTC().Format(time.RFC3339),
 		Until:             now.UTC().Format(time.RFC3339),
@@ -497,6 +725,14 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		Inquiries:         inquiries,
 		Pipeline:          pipeline,
 		OverdueRequests:   overdue,
+		People:            people,
+		AutoApproved:      autoApproved,
+		Budget:            budget,
+		Mode:              mode,
+		Scope:             scope,
+		Floors:            floors,
+		Goals:             goals,
+		SystemRisks:       risks,
 	}, nil
 }
 
@@ -590,6 +826,32 @@ func (s *DigestService) computePipeline(ctx context.Context, workspaceID pgtype.
 			item.Blockers = append(item.Blockers, fmt.Sprintf("stalled: %d days in %s, SLA %d", days, stage.Name, stage.SLADays))
 		}
 		out = append(out, item)
+	}
+	return out, nil
+}
+
+// computeAutoApproved lists the proposals a standing approval approved since the
+// window's start, newest first.
+func (s *DigestService) computeAutoApproved(ctx context.Context, workspaceID pgtype.UUID, since time.Time, prefix string, sc digestScope) ([]DigestAutoApproval, error) {
+	var squadIDs []pgtype.UUID
+	if sc.floor {
+		squadIDs = sc.squadIDs
+	}
+	rows, err := (&ApprovalPolicyService{Queries: s.Queries}).ListRecentAutoApprovals(ctx, workspaceID, since, DigestAutoApprovalMax, squadIDs)
+	if err != nil {
+		return nil, fmt.Errorf("digest auto-approvals: %w", err)
+	}
+	out := make([]DigestAutoApproval, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DigestAutoApproval{
+			ProposalID: util.UUIDToString(r.ProposalID),
+			Identifier: IssueIdentifier(prefix, r.IssueNumber),
+			Title:      r.Title,
+			SquadID:    util.UUIDToString(r.SquadID),
+			PolicyID:   util.UUIDToString(r.PolicyID),
+			PolicyName: r.PolicyName,
+			DecidedAt:  r.DecidedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	return out, nil
 }
@@ -716,8 +978,11 @@ func (s *DigestService) attachRoutines(ctx context.Context, workspaceID pgtype.U
 // computeKnowledge reads the knowledge registry only, never the sidecar: the
 // digest is cheap and must answer while knowledge is offline. A workspace that
 // is not ready has no rows in the joins, so the section comes back empty.
-func (s *DigestService) computeKnowledge(ctx context.Context, workspaceID pgtype.UUID, now time.Time) (DigestKnowledge, error) {
-	know := DigestKnowledge{StalePublished: DigestKnowledgeStaleList{Items: []DigestKnowledgeDocRef{}}}
+func (s *DigestService) computeKnowledge(ctx context.Context, workspaceID pgtype.UUID, now, since time.Time) (DigestKnowledge, error) {
+	know := DigestKnowledge{
+		StalePublished: DigestKnowledgeStaleList{Items: []DigestKnowledgeDocRef{}},
+		AutoPublished:  DigestAutoPublishList{Items: []DigestAutoPublish{}},
+	}
 
 	stale, err := s.Queries.DigestKnowledgeStale(ctx, db.DigestKnowledgeStaleParams{
 		WorkspaceID:     workspaceID,
@@ -733,6 +998,33 @@ func (s *DigestService) computeKnowledge(ctx context.Context, workspaceID pgtype
 			ID: util.UUIDToString(d.ID), Title: d.Title, KnowledgeBase: d.KnowledgeBase,
 			PublishedAt: d.PublishedAt.Time.UTC().Format(time.RFC3339),
 		})
+	}
+
+	autoRows, err := s.Queries.DigestAutoPublished(ctx, db.DigestAutoPublishedParams{
+		WorkspaceID: workspaceID, Since: pgtype.Timestamptz{Time: since, Valid: true}, RowLimit: DigestAutoPublishMax,
+	})
+	if err != nil {
+		return know, fmt.Errorf("digest automatic publishes: %w", err)
+	}
+	for _, r := range autoRows {
+		know.AutoPublished.Count = int(r.TotalCount)
+		item := DigestAutoPublish{
+			LinkID: util.UUIDToString(r.LinkID), Title: r.Title,
+			PublishedAt: r.CreatedAt.Time.UTC().Format(time.RFC3339),
+		}
+		var d struct {
+			KnowledgeBase string `json:"knowledge_base"`
+			Kind          string `json:"kind"`
+			Mode          string `json:"mode"`
+			AuthorSquad   string `json:"author_squad_id"`
+			CriticSquad   string `json:"critic_squad_id"`
+		}
+		if err := json.Unmarshal(r.Details, &d); err != nil {
+			return know, fmt.Errorf("digest automatic publish details: %w", err)
+		}
+		item.KnowledgeBase, item.Kind, item.Mode = d.KnowledgeBase, d.Kind, d.Mode
+		item.AuthorSquadID, item.CriticSquadID = d.AuthorSquad, d.CriticSquad
+		know.AutoPublished.Items = append(know.AutoPublished.Items, item)
 	}
 
 	drafts, err := s.Queries.DigestKnowledgePendingDrafts(ctx, workspaceID)
@@ -757,26 +1049,34 @@ func digestIssueRef(prefix, id string, number int32, title string) DigestIssueRe
 	}
 }
 
-func (s *DigestService) computeWorkspace(ctx context.Context, workspaceID pgtype.UUID, since pgtype.Timestamptz) (DigestWorkspace, error) {
+func (s *DigestService) computeWorkspace(ctx context.Context, workspaceID pgtype.UUID, since pgtype.Timestamptz, sc digestScope) (DigestWorkspace, error) {
 	ws := DigestWorkspace{
 		OfflineRuntimes: DigestRuntimeList{Items: []DigestRuntimeRef{}},
 		AgentsFailed:    DigestAgentList{Items: []DigestAgentRef{}},
 		UnseatedSquads:  DigestSquadList{Items: []DigestSquadRef{}},
 	}
 
-	runs, err := s.Queries.DigestWorkspaceRuns(ctx, db.DigestWorkspaceRunsParams{WorkspaceID: workspaceID, Since: since})
-	if err != nil {
-		return ws, fmt.Errorf("digest workspace runs: %w", err)
-	}
-	ws.Runs, ws.FailedRuns = int(runs.Runs), int(runs.FailedRuns)
+	if sc.floor {
+		runs, err := s.Queries.DigestFloorRuns(ctx, db.DigestFloorRunsParams{SquadIds: sc.squadIDs, Since: since})
+		if err != nil {
+			return ws, fmt.Errorf("digest floor runs: %w", err)
+		}
+		ws.Runs, ws.FailedRuns = int(runs.Runs), int(runs.FailedRuns)
+	} else {
+		runs, err := s.Queries.DigestWorkspaceRuns(ctx, db.DigestWorkspaceRunsParams{WorkspaceID: workspaceID, Since: since})
+		if err != nil {
+			return ws, fmt.Errorf("digest workspace runs: %w", err)
+		}
+		ws.Runs, ws.FailedRuns = int(runs.Runs), int(runs.FailedRuns)
 
-	usage, err := s.Queries.DigestWorkspaceUsage(ctx, db.DigestWorkspaceUsageParams{WorkspaceID: workspaceID, Since: since})
-	if err != nil {
-		return ws, fmt.Errorf("digest workspace usage: %w", err)
+		usage, err := s.Queries.DigestWorkspaceUsage(ctx, db.DigestWorkspaceUsageParams{WorkspaceID: workspaceID, Since: since})
+		if err != nil {
+			return ws, fmt.Errorf("digest workspace usage: %w", err)
+		}
+		ws.InputTokens, ws.OutputTokens = usage.InputTokens, usage.OutputTokens
+		// Ticks are 1e-10 USD.
+		ws.ReportedCostUSD = float64(usage.CostUsdTicks) / 1e10
 	}
-	ws.InputTokens, ws.OutputTokens = usage.InputTokens, usage.OutputTokens
-	// Ticks are 1e-10 USD.
-	ws.ReportedCostUSD = float64(usage.CostUsdTicks) / 1e10
 
 	runtimes, err := s.Queries.DigestOfflineRuntimes(ctx, db.DigestOfflineRuntimesParams{WorkspaceID: workspaceID, RowLimit: DigestWorkspaceListLimit})
 	if err != nil {
@@ -785,6 +1085,21 @@ func (s *DigestService) computeWorkspace(ctx context.Context, workspaceID pgtype
 	for _, r := range runtimes {
 		ws.OfflineRuntimes.Count = int(r.TotalCount)
 		ws.OfflineRuntimes.Items = append(ws.OfflineRuntimes.Items, DigestRuntimeRef{ID: util.UUIDToString(r.ID), Name: r.Name, Provider: r.Provider})
+	}
+
+	if sc.floor {
+		agents, err := s.Queries.DigestFloorAgentsWithFailedRuns(ctx, db.DigestFloorAgentsWithFailedRunsParams{
+			WorkspaceID: workspaceID, SquadIds: sc.squadIDs, Since: since, RowLimit: DigestWorkspaceListLimit,
+		})
+		if err != nil {
+			return ws, fmt.Errorf("digest floor agents with failed runs: %w", err)
+		}
+		for _, a := range agents {
+			ws.AgentsFailed.Count = int(a.TotalCount)
+			ws.AgentsFailed.Items = append(ws.AgentsFailed.Items, DigestAgentRef{ID: util.UUIDToString(a.ID), Name: a.Name, FailedRuns: int(a.FailedRuns)})
+		}
+		// A squad on a floor has a seat, so the floor has no unseated squads.
+		return ws, nil
 	}
 
 	agents, err := s.Queries.DigestAgentsWithFailedRuns(ctx, db.DigestAgentsWithFailedRunsParams{WorkspaceID: workspaceID, Since: since, RowLimit: DigestWorkspaceListLimit})
@@ -805,4 +1120,57 @@ func (s *DigestService) computeWorkspace(ctx context.Context, workspaceID pgtype
 		ws.UnseatedSquads.Items = append(ws.UnseatedSquads.Items, DigestSquadRef{ID: util.UUIDToString(sq.ID), Name: sq.Name})
 	}
 	return ws, nil
+}
+
+// DigestPeople is the brief's People section.
+type DigestPeople struct {
+	Count   int               `json:"count"`
+	Reviews []DigestReviewRef `json:"reviews"`
+}
+
+// DigestReviewRef is one review in the People section: its subject, rating and
+// period, and each recommendation with the proposal filed for it, if any.
+type DigestReviewRef struct {
+	ID              string                 `json:"id"`
+	SubjectType     string                 `json:"subject_type"`
+	SubjectID       string                 `json:"subject_id"`
+	Rating          string                 `json:"rating"`
+	PeriodStart     string                 `json:"period_start"`
+	PeriodEnd       string                 `json:"period_end"`
+	Recommendations []ReviewRecommendation `json:"recommendations"`
+}
+
+// DigestReviewsLimit bounds the reviews the People section lists.
+const DigestReviewsLimit = 10
+
+// computePeople lists the reviews published since the window opened, with their
+// recommendations as stored.
+func (s *DigestService) computePeople(ctx context.Context, workspaceID pgtype.UUID, since pgtype.Timestamptz) (DigestPeople, error) {
+	rows, err := s.Queries.ListReviews(ctx, db.ListReviewsParams{
+		WorkspaceID: workspaceID,
+		Since:       since,
+		RowLimit:    DigestReviewsLimit,
+	})
+	if err != nil {
+		return DigestPeople{}, fmt.Errorf("digest reviews: %w", err)
+	}
+	out := DigestPeople{Count: len(rows), Reviews: make([]DigestReviewRef, 0, len(rows))}
+	for _, r := range rows {
+		recs := []ReviewRecommendation{}
+		if len(r.Recommendations) > 0 {
+			if err := json.Unmarshal(r.Recommendations, &recs); err != nil {
+				return DigestPeople{}, fmt.Errorf("digest review recommendations: %w", err)
+			}
+		}
+		out.Reviews = append(out.Reviews, DigestReviewRef{
+			ID:              util.UUIDToString(r.ID),
+			SubjectType:     r.SubjectType,
+			SubjectID:       util.UUIDToString(r.SubjectID),
+			Rating:          r.Rating,
+			PeriodStart:     r.PeriodStart.Time.Format("2006-01-02"),
+			PeriodEnd:       r.PeriodEnd.Time.Format("2006-01-02"),
+			Recommendations: recs,
+		})
+	}
+	return out, nil
 }

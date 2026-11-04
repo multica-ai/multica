@@ -38,6 +38,21 @@ export interface KnowledgeSources {
   sources: KnowledgeSource[];
 }
 
+/** The repo-docs sync setting and the outcome of its last run (plan 10.12). */
+export interface KnowledgeRepoSync {
+  enabled: boolean;
+  repo_url: string;
+  branch: string;
+  docs_path: string;
+  knowledge_base_key: string;
+  /** Null until a run has synced the repository. */
+  last_synced_at: string | null;
+  /** The failures of the last run, one per line; empty when it had none. */
+  last_error: string;
+}
+
+export type KnowledgeRepoSyncRequest = Omit<KnowledgeRepoSync, "last_synced_at" | "last_error">;
+
 export interface KnowledgeGrant {
   subject_type: KnowledgeSubjectType | "unknown";
   subject_id: string;

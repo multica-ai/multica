@@ -101,6 +101,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_outbound_card_message":         workspaceDelete,
 	"lark_user_binding":                  workspaceDelete,
 	"maintenance_job":                    workspaceDeleteKeep, // Global maintenance audit history, not workspace-owned.
+	"job_status":                         workspaceDeleteKeep, // Global scheduler state (one row per job), not workspace-owned.
 	"member":                             workspaceDelete,
 	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
@@ -114,6 +115,24 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"initiative":                         workspaceDelete,
 	"initiative_artifact":                workspaceDelete,
 	"initiative_stage_event":             workspaceDelete,
+	"governance_event":                   workspaceDelete,
+	"scorecard":                          workspaceDelete,
+	"review":                             workspaceDelete,
+	"agent_instruction_revision":         workspaceDelete,
+	"org_change_application":             workspaceDelete,
+	"budget":                             workspaceDelete,
+	"budget_period":                      workspaceDelete,
+	"budget_hold":                        workspaceDelete,
+	"goal":                               workspaceDelete,
+	"key_result":                         workspaceDelete,
+	"metric":                             workspaceDelete,
+	"metric_reading":                     workspaceDelete,
+	"metric_webhook_token":               workspaceDelete,
+	"retro_request":                      workspaceDelete,
+	"planning_cycle":                     workspaceDelete,
+	"approval_policy":                    workspaceDelete,
+	"retro_trigger":                      workspaceDelete,
+	"floor_chief":                        workspaceDelete,
 	"pipeline":                           workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"workspace_knowledge":                workspaceDelete, // the WeKnora tenant is not removed here

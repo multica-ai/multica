@@ -1008,6 +1008,14 @@ export const COMPANY_SQUAD_CARDS: readonly CompanySquadCard[] = [
         runtime: "worker",
         role: "Squad leader; squad record against charter",
       },
+      {
+        key: "people_reviewer",
+        name: "People Reviewer",
+        description: "Reviews each squad and agent once a month from its scorecard, cites the figures, and recommends changes for the boss to decide.",
+        agentTemplate: "people_reviewer",
+        runtime: "worker",
+        role: "Reviewer; monthly reviews from scorecards",
+      },
     ],
     routines: [],
     stages: [],
@@ -1020,7 +1028,7 @@ export const COMPANY_SQUAD_CARDS: readonly CompanySquadCard[] = [
       outputs: [
         { key: "performance_report", kind: "report", cadenceHint: "weekly" },
       ],
-      boundaries: "Reports on squads, not on individuals. Sets no targets and changes no agent. Goals and scorecards come in a later release.",
+      boundaries: "Reports on squads, not on individuals. Sets no targets and changes no agent. Goals and scorecards are read, never set here.",
       escalation: "A squad silent for a week is raised with its leader; the boss hears of it if it persists.",
       intake: "Requests for a squad's record come as request issues assigned to this squad.",
     },

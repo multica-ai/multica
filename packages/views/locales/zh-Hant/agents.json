@@ -518,6 +518,14 @@
         "people_performance": {
           "name": "人員負責人",
           "description": "對照章程審查各小組的紀錄，並回報延誤或沉默的事項。不設定目標。"
+        },
+        "people_reviewer": {
+          "name": "人員評審員",
+          "description": "每月為每個有評分的小組或代理發布一份評審，並附上由老闆決定的建議。不設定目標。"
+        },
+        "floor_chief": {
+          "name": "樓層負責人",
+          "description": "根據樓層摘要，每天為秘書撰寫樓層簡報。不做決定，也不更動任何小組。"
         }
       }
     },
@@ -1167,5 +1175,28 @@
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "修訂歷史",
+    "show": "檢視修訂歷史",
+    "hide": "隱藏修訂歷史",
+    "loading": "正在載入修訂…",
+    "load_failed": "無法載入修訂歷史。",
+    "empty": "尚無儲存的修訂。",
+    "revision_label": "修訂 {{revision}}",
+    "current": "目前",
+    "source": {
+      "human": "已編輯",
+      "proposal": "來自已核准的提案",
+      "rollback": "已還原",
+      "unknown": "已變更"
+    },
+    "show_text": "檢視內容",
+    "hide_text": "隱藏內容",
+    "restore": "還原",
+    "restore_named": "還原修訂 {{revision}}",
+    "restored": "已還原修訂 {{revision}}",
+    "restore_failed": "無法還原此修訂，請再試一次。",
+    "restore_unchanged": "智能體已經使用這些指令。"
+  }
 }

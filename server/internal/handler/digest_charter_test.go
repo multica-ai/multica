@@ -145,7 +145,12 @@ func TestDigest_CharterSectionAndWorkspaceCounts(t *testing.T) {
 	other.digestRoutine(t, z, "Foreign failure", true, false, "failed")
 
 	d := e.digestRaw(t)
-	assertDigestKeys(t, "digest", d, "since", "until", "workspace", "squads", "omitted_squad_count", "quiet", "knowledge", "inquiries", "pipeline", "overdue_requests")
+	// The phase 4 keys (goals, people, auto_approved, budget, mode, floors, scope,
+	// system_risks) are spec-intended; see digest.go's Digest struct.
+	assertDigestKeys(t, "digest", d,
+		"since", "until", "workspace", "squads", "omitted_squad_count", "quiet", "knowledge",
+		"inquiries", "pipeline", "goals", "overdue_requests", "people", "auto_approved", "budget",
+		"mode", "scope", "floors", "system_risks")
 
 	ws := digestObjectAt(t, "workspace", d["workspace"])
 	off := digestObjectAt(t, "workspace.routines_not_on_time", ws["routines_not_on_time"])

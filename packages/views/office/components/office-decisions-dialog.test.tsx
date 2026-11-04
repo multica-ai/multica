@@ -2,12 +2,20 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import { proposalKeys, snoozeDateBounds, type Proposal } from "@multica/core/office";
-import type { Squad } from "@multica/core/types";
+import {
+  charterKeys,
+  emptySquadCharter,
+  proposalKeys,
+  snoozeDateBounds,
+  type Proposal,
+  type SquadCharter,
+} from "@multica/core/office";
+import type { Agent, Squad } from "@multica/core/types";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { OfficeDecisionsDialog } from "./office-decisions-dialog";
 
@@ -384,4 +392,146 @@ describe("OfficeDecisionsDialog", () => {
       expect(await screen.findByText("Couldn't load the revision history")).toBeTruthy();
     });
   });
+
+  describe("organisation changes", () => {
+    const CURRENT_AGENT = {
+      id: "ag-1",
+      workspace_id: "ws-1",
+      name: "Ada",
+      instructions: "Line one\nOld line",
+    } as unknown as Agent;
+
+    const CURRENT_CHARTER: SquadCharter = {
+      ...emptySquadCharter("sq-1"),
+      mission: "Old mission",
+      revision: 3,
+    };
+
+    function orgChange(id: string, payload: Record<string, unknown>, extra: Partial<Proposal> = {}) {
+      return proposal(id, {
+        kind: "org_change",
+        squad_id: "sq-1",
+        payload,
+        ...extra,
+      });
+    }
+
+    function renderOrgChange(focusIdValue: string | null, proposals: Proposal[]) {
+      const onClose = vi.fn();
+      renderWithI18n(
+        <QueryClientProvider client={queryClient}>
+          <OfficeDecisionsDialog
+            open
+            proposals={proposals}
+            squads={SQUADS}
+            canDecide
+            focusId={focusIdValue}
+            onClose={onClose}
+          />
+        </QueryClientProvider>,
+      );
+    }
+
+    /** The diff lines of the selected proposal, as the kind and text each one draws. */
+    function diffLines() {
+      return Array.from(document.querySelectorAll("[data-diff-kind]")).map((line) => ({
+        kind: line.getAttribute("data-diff-kind"),
+        text: line.textContent ?? "",
+      }));
+    }
+
+    it("renders a pending instruction change as a diff against the agent's current instructions", async () => {
+      queryClient.setQueryData(workspaceKeys.agent("ws-1", "ag-1"), CURRENT_AGENT);
+      renderOrgChange(null, [
+        orgChange("oc", {
+          type: "instruction_change",
+          agent_id: "ag-1",
+          instructions: "Line one\nNew line",
+          diff_summary: "Replaces the second rule",
+          rationale: "The old rule misled replies",
+        }),
+      ]);
+
+      expect(await screen.findByText("Replaces the second rule")).toBeTruthy();
+      expect(screen.getByText("The old rule misled replies")).toBeTruthy();
+      await waitForDiff();
+      expect(diffLines()).toEqual([
+        { kind: "same", text: "  Line one" },
+        { kind: "removed", text: "- Old line" },
+        { kind: "added", text: "+ New line" },
+      ]);
+    });
+
+    it("renders a pending charter change as a diff of the charter's fields", async () => {
+      queryClient.setQueryData(charterKeys.charter("ws-1", "sq-1"), CURRENT_CHARTER);
+      renderOrgChange(null, [
+        orgChange("oc", {
+          type: "charter_change",
+          squad_id: "sq-1",
+          charter: {
+            mission: "New mission",
+            responsibilities: [],
+            outputs: [],
+            boundaries: "",
+            escalation: "",
+            intake: "",
+            response_hours: 48,
+          },
+          rationale: "Narrower scope",
+        }),
+      ]);
+
+      await waitForDiff();
+      const removed = diffLines().filter((line) => line.kind === "removed");
+      const added = diffLines().filter((line) => line.kind === "added");
+      expect(removed.map((line) => line.text)).toEqual(["- Old mission"]);
+      expect(added.map((line) => line.text)).toEqual(["+ New mission"]);
+      expect(screen.getByText("Narrower scope")).toBeTruthy();
+    });
+
+    it("shows the summary, not a diff, once an instruction change is decided", async () => {
+      queryClient.setQueryData(workspaceKeys.agent("ws-1", "ag-1"), CURRENT_AGENT);
+      renderOrgChange("oc", [
+        orgChange(
+          "oc",
+          {
+            type: "instruction_change",
+            agent_id: "ag-1",
+            instructions: "Line one\nNew line",
+            diff_summary: "Replaces the second rule",
+            rationale: "",
+          },
+          { state: "approved", issue_status: "done" },
+        ),
+      ]);
+
+      expect(await screen.findByText("Replaces the second rule", {}, { timeout: 3000 })).toBeTruthy();
+      expect(diffLines()).toEqual([]);
+    });
+
+    it("names other organisation changes by type and shows their rationale", async () => {
+      renderOrgChange(null, [
+        orgChange("oc", { type: "hire", rationale: "Needed for the launch" }),
+      ]);
+
+      expect(await screen.findByText("Hire")).toBeTruthy();
+      expect(screen.getByText("Needed for the launch")).toBeTruthy();
+      expect(diffLines()).toEqual([]);
+    });
+
+    it("says when the current version cannot be read for the comparison", async () => {
+      // No agent is cached and the test API has no getAgent, so the read fails.
+      renderOrgChange(null, [
+        orgChange("oc", { type: "instruction_change", agent_id: "ag-1", instructions: "New" }),
+      ]);
+
+      expect(await screen.findByText("Couldn't load the current version to compare.", {}, { timeout: 3000 })).toBeTruthy();
+    });
+  });
 });
+
+function waitForDiff() {
+  return waitFor(() => {
+    if (document.querySelectorAll("[data-diff-kind]").length === 0) throw new Error("diff not drawn yet");
+  });
+}

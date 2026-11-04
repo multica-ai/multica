@@ -1,0 +1,447 @@
+{
+  "title": "治理",
+  "tabs": {
+    "goals": "目標",
+    "budgets": "預算",
+    "autonomy": "自主等級",
+    "reviews": "評核",
+    "log": "紀錄",
+    "controls": "控制"
+  },
+  "placeholder": {
+    "title": "尚無內容"
+  },
+  "autonomy": {
+    "note": "誠實的限制：Multica 無法檢查執行環境在一次執行中做了什麼，因此等級無法阻止智慧代理呼叫其憑證允許的外部 API。Multica 控制的是經過它的內容：哪些例行任務執行、什麼內容發布到共享紀錄、哪些提案在沒有您參與的情況下被決定、建立哪些計畫、花費多少，以及每份章程的界線。有外部影響的操作仍受平台掌控的關卡約束，例如上線關卡，或智慧代理自身的權限設定。L3 並不代表無人監督。",
+    "levels_heading": "各級別允許的內容",
+    "levels": {
+      "suggest": {
+        "name": "建議",
+        "body": "例行執行會被暫停。只有有人指派或提及時才執行，但仍可提交提案。"
+      },
+      "work": {
+        "name": "工作",
+        "body": "例行執行照常進行。小組可研究、分析、撰寫知識草稿並提交提案。所有決定由老闆做出。"
+      },
+      "trusted": {
+        "name": "信任",
+        "body": "與「工作」相同，但知識草稿可在審核後發布。常設核准可核准其提案。"
+      },
+      "autonomous": {
+        "name": "自主",
+        "body": "與「信任」相同，且常設核准可在第一階段根據其自身機會建立專案（須在上限與預算內）。"
+      }
+    },
+    "boss_only_note": "發布上線與組織變更在任何級別下都始終由老闆決定。資金在任何級別下都受預算約束。",
+    "squads_heading": "小組級別",
+    "squads_empty": "尚無小組。",
+    "read_only": "只有擁有者與管理員可以變更級別。",
+    "level_tag": "L{{level}}",
+    "default_level": "仍為預設級別，尚未變更。",
+    "level_label": "級別",
+    "reason_label": "原因",
+    "reason_placeholder": "為什麼選擇這個級別？原因會保存在治理紀錄中。",
+    "save_level": "儲存級別",
+    "level_saved": "已儲存自主級別",
+    "level_save_failed": "無法變更級別，請再試一次。",
+    "panel_heading": "自主級別",
+    "policies_heading": "常設核准",
+    "policies_note": "常設核准會核准來自適當級別小組的一類狹窄提案，之後您可在簡報中查看。它從不涵蓋組織變更、發布閘門、預算提高、緊急提案或其他常設核准。",
+    "policies_empty": "尚無常設核准。",
+    "policies_load_failed": "無法載入常設核准。",
+    "policy_kind": {
+      "decision": "決定",
+      "opportunity": "機會"
+    },
+    "policy_active": "生效中",
+    "policy_revoked": "已撤銷",
+    "policy_flagged": "一次審查撤銷了其中一項核准",
+    "policy_scope_squads": "{{count}} 個小組",
+    "policy_scope_any": "任何適當級別的小組",
+    "policy_week": "本週 {{count}} / {{max}} 項核准",
+    "policy_until": "截至 {{date}}",
+    "policy_history": "歷史",
+    "policy_history_hide": "隱藏歷史",
+    "policy_revoke": "撤銷",
+    "policy_revoked_toast": "已撤銷常設核准",
+    "policy_revoke_failed": "無法撤銷常設核准，請再試一次。",
+    "history_empty": "此常設核准尚未核准任何提案。",
+    "history_load_failed": "無法載入歷史。",
+    "history_reversed": "審查中被撤銷：{{note}}",
+    "create_heading": "新增常設核准",
+    "create_name": "名稱",
+    "create_kind": "類型",
+    "create_squads": "小組",
+    "create_squads_hint": "全部不勾選即適用於任何適當級別的小組。",
+    "create_max_per_week": "每週最多核准數",
+    "create_max_cost": "最高成本（微單位，選填）",
+    "create_submit": "建立常設核准",
+    "create_done": "已建立常設核准",
+    "create_failed": "無法建立常設核准，請檢查輸入後再試一次。"
+  },
+  "controls": {
+    "state_heading": "公司狀態",
+    "state": {
+      "running": "運作中",
+      "paused": "已暫停",
+      "quiet": "安靜時段",
+      "unknown": "未知"
+    },
+    "in_force": "目前生效：{{state}}",
+    "pause": "暫停",
+    "resume": "恢復",
+    "pause_hint": "例行與委派的執行會等待。聊天與秘書仍可正常使用。",
+    "stop_work": "暫停並停止進行中的工作",
+    "stop_confirm_title": "暫停並停止進行中的工作？",
+    "stop_confirm_description": "正在執行的例行與委派任務將被取消。佇列中的任務會等到恢復後再執行。",
+    "stop_confirm_action": "暫停並停止",
+    "cancel": "取消",
+    "state_save_failed": "無法變更公司狀態，請再試一次。",
+    "quiet_heading": "安靜時段",
+    "quiet_enabled": "啟用",
+    "quiet_from": "開始",
+    "quiet_until": "結束",
+    "quiet_timezone": "時區",
+    "quiet_hint": "例行執行會等到時段結束。由人員發起的執行不會被攔下。",
+    "quiet_save": "儲存安靜時段",
+    "quiet_saved": "已儲存安靜時段",
+    "quiet_save_failed": "無法儲存安靜時段，請再試一次。",
+    "state_load_failed": "無法載入公司狀態。",
+    "read_only": "只有擁有者和管理員可以變更這些設定。",
+    "quiet_hour": "時",
+    "quiet_minute": "分",
+    "digest_heading": "摘要來源",
+    "digest_mode": {
+      "auto": "自動",
+      "squads": "小隊",
+      "floors": "樓層"
+    },
+    "digest_note": "自動模式在活躍小隊超過 {{threshold}} 個時讀取樓層簡報。目前有 {{count}} 個，因此秘書現在讀取{{resolved}}。",
+    "digest_save_failed": "無法變更摘要來源，請重試。"
+  },
+  "log": {
+    "filter_kind": "類型",
+    "filter_actor": "執行者類型",
+    "filter_subject": "對象類型",
+    "all": "全部",
+    "column_kind": "類型",
+    "column_actor": "執行者",
+    "column_subject": "對象",
+    "column_summary": "摘要",
+    "column_time": "時間",
+    "kind": {
+      "policy_auto_approve": "政策自動核准",
+      "policy_created": "已建立政策",
+      "policy_revoked": "已撤銷政策",
+      "budget_set": "已設定預算",
+      "budget_extended": "已延長預算",
+      "budget_hold": "預算暫停執行",
+      "budget_release": "預算暫停已解除",
+      "autonomy_changed": "自主等級已變更",
+      "org_change_applied": "已套用組織變更",
+      "org_change_reverted": "已還原組織變更",
+      "auto_publish": "自動發布",
+      "initiative_forced": "強制移動專項",
+      "company_paused": "公司已暫停",
+      "company_resumed": "公司已恢復",
+      "goal_activated": "目標已啟用",
+      "goal_imported": "目標已匯入",
+      "review_published": "評核已發布",
+      "unknown": "未知事件"
+    },
+    "actor_type": {
+      "member": "成員",
+      "agent": "智慧體",
+      "system": "系統",
+      "policy": "政策",
+      "unknown": "未知"
+    },
+    "subject_type": {
+      "company": "公司",
+      "floor": "樓層",
+      "squad": "小隊",
+      "agent": "智慧體",
+      "initiative": "專項",
+      "budget": "預算",
+      "approval_policy": "核准政策",
+      "proposal": "提案",
+      "goal": "目標",
+      "review": "評核"
+    },
+    "empty": "沒有符合這些篩選條件的治理事件。",
+    "load_failed": "無法載入治理紀錄。",
+    "load_more": "載入更多",
+    "export": "匯出 CSV",
+    "export_failed": "無法匯出紀錄。"
+  },
+  "pulse": {
+    "label": "公司脈搏",
+    "decisions": "{{count}} 項等你決定",
+    "goals_at_risk": "{{count}} 個目標有風險",
+    "budgets": "{{count}} 個預算超過軟線",
+    "holds": "{{count}} 個預算暫停",
+    "stalled": "{{count}} 個停滯的專案",
+    "routines_late": "{{count}} 個例行任務逾期",
+    "runtimes_offline": "{{count}} 個執行環境離線",
+    "quiet": "暫無需要你處理的事"
+  },
+  "health": {
+    "heading": "系統健康",
+    "unreadable": "無法讀取系統健康狀況。",
+    "nothing_at_risk": "沒有需要注意的事項。",
+    "risks_label": "風險",
+    "jobs_heading": "定時任務",
+    "no_jobs": "尚無定時任務執行過。",
+    "col_job": "任務",
+    "col_last_success": "上次成功",
+    "col_state": "狀態",
+    "never_succeeded": "從未",
+    "stuck": "卡住",
+    "ok": "正常",
+    "deliveries_label": "過去 24 小時投遞失敗",
+    "deliveries_value": "{{count}}",
+    "knowledge_label": "知識庫",
+    "knowledge_not_offered": "本部署未啟用",
+    "knowledge_state": {
+      "ready": "就緒",
+      "offline": "離線",
+      "provisioning": "設定中",
+      "failed": "失敗",
+      "disabled": "已關閉",
+      "unknown": "未知"
+    },
+    "budget_gate_label": "預算閘門",
+    "budget_gate_not_reported": "尚未回報",
+    "budget_gate_no_cache": "尚無快取計數",
+    "budget_gate_age": "計數 {{seconds}} 秒前更新"
+  },
+  "reviews_tab": {
+    "empty": "目前沒有你可以查看的評估。評估對擁有者、管理員以及被評估小組的負責人可見。",
+    "loading": "正在載入評估",
+    "rating": {
+      "exceeds": "超出預期",
+      "meets": "符合預期",
+      "below": "低於預期",
+      "at_risk": "有風險",
+      "unknown": "未評級"
+    },
+    "subject": {
+      "agent": "智能體",
+      "squad": "小組",
+      "company": "公司",
+      "unknown": "對象"
+    },
+    "period": {
+      "week": "{{start}} 當週",
+      "month": "{{start}} 當月",
+      "unknown": "{{start}} 起的週期"
+    },
+    "recommendation": {
+      "observe": "已記錄，不做變更",
+      "filed": "已提交老闆決定",
+      "refused": "未提交"
+    },
+    "change": {
+      "instruction_change": "指令變更",
+      "skill_change": "技能變更",
+      "charter_change": "章程變更",
+      "autonomy_change": "自主級別變更",
+      "hire": "招聘",
+      "retire": "退役",
+      "move": "調動",
+      "merge_squads": "合併小組",
+      "unretire": "復原",
+      "unmerge": "拆分小組",
+      "observe": "觀察"
+    },
+    "proposal": "提案 {{id}}",
+    "figures": "記分卡數據",
+    "generic": "建議",
+    "no_recommendations": "沒有建議"
+  },
+  "goals": {
+    "loading": "正在載入目標…",
+    "load_failed": "無法載入目標。",
+    "tree": {
+      "company": "公司",
+      "unnamed": "{{scope}}（不在清單中）"
+    },
+    "scope": {
+      "company": "公司",
+      "floor": "樓層",
+      "squad": "小隊",
+      "initiative": "專案"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "進行中",
+      "achieved": "已達成",
+      "missed": "未達成",
+      "dropped": "已放棄",
+      "unknown": "未知"
+    },
+    "confidence": {
+      "on_track": "進展正常",
+      "at_risk": "有風險",
+      "off_track": "偏離軌道",
+      "unknown": "尚無讀數",
+      "overridden": "（負責人判斷）"
+    },
+    "progress": "{{percent}}%",
+    "progress_none": "尚無讀數",
+    "no_reading": "尚無讀數",
+    "detail": {
+      "load_failed": "無法載入此目標。",
+      "action_failed": "無法變更目標，請再試一次。",
+      "close": "關閉",
+      "period": "{{start}} 至 {{end}}",
+      "override_note": "讀數顯示為 {{derived}}，負責人改為：{{note}}",
+      "key_results": "關鍵結果",
+      "kr_title": "關鍵結果",
+      "kr_range": "起點 → 目標",
+      "kr_now": "最新",
+      "kr_progress": "進度",
+      "kr_trend": "讀數",
+      "kr_from_to": "{{start}} → {{target}}",
+      "kr_trend_label": "{{title}} 的讀數",
+      "child_goals": "此目標下的目標",
+      "source_proposal": "由提案 {{id}} 設定",
+      "activate": "啟用",
+      "close_as": {
+        "achieved": "標記為已達成",
+        "missed": "標記為未達成",
+        "dropped": "放棄"
+      },
+      "override_heading": "負責人的信心",
+      "override_clear": "使用讀數",
+      "override_why": "此信心判斷的理由",
+      "override_save": "儲存信心",
+      "override_saved": "已儲存信心"
+    },
+    "create": {
+      "button": "新增目標",
+      "title": "新增目標",
+      "scope": "範圍",
+      "target_floor": "樓層",
+      "target_initiative": "專案",
+      "target_required": "請選擇這個目標針對的對象。",
+      "title_label": "標題",
+      "title_required": "請為目標填寫標題。",
+      "title_too_long": "標題不能超過 200 個字元。",
+      "why_label": "原因（選填）",
+      "period_start": "開始",
+      "period_end": "結束",
+      "period_required": "請填寫期間的開始和結束日期。",
+      "period_order": "結束日期必須晚於開始日期。",
+      "owner": "負責人",
+      "owner_type": "負責人類型",
+      "owner_types": {
+        "squad": "小隊",
+        "member": "成員",
+        "agent": "智能體"
+      },
+      "owner_required": "請選擇負責人。",
+      "key_results": "關鍵結果",
+      "kr_title": "關鍵結果",
+      "kr_metric": "指標",
+      "kr_start": "起始值",
+      "kr_target": "目標值",
+      "kr_add": "新增關鍵結果",
+      "kr_remove": "移除",
+      "kr_title_required": "請為每個關鍵結果填寫標題。",
+      "kr_metric_required": "請為每個關鍵結果選擇指標。",
+      "kr_values_required": "請填寫起始值和目標值。",
+      "kr_values_equal": "目標值必須與起始值不同。",
+      "submit": "建立目標",
+      "cancel": "取消",
+      "created": "目標已建立",
+      "failed": "無法建立目標。請檢查填寫內容後再試一次。"
+    }
+  },
+  "reading": {
+    "title": "新增讀數",
+    "metric": "指標",
+    "value": "數值",
+    "note": "備註",
+    "submit": "新增讀數",
+    "saved": "已新增讀數",
+    "failed": "無法新增讀數。",
+    "scope_note": "此讀數屬於{{scope}}。",
+    "no_metrics": "尚無指標"
+  },
+  "budgets": {
+    "title": "預算",
+    "read_only": "只有擁有者或管理員可以修改預算。",
+    "scope": {
+      "company": "公司",
+      "floor": "樓層",
+      "squad": "小組",
+      "initiative": "專案"
+    },
+    "period": {
+      "week": "每週",
+      "month": "每月",
+      "quarter": "每季"
+    },
+    "mode": {
+      "warn": "僅提醒",
+      "hold": "達到上限時保留執行"
+    },
+    "state": {
+      "ok": "預算內",
+      "soft": "接近上限",
+      "hard": "已達上限",
+      "unknown": "未知"
+    },
+    "spent": "已花費 {{spent}}，上限 {{limit}}",
+    "spent_label": "相對上限的支出",
+    "elapsed": "已過去本期的 {{percent}}%",
+    "overrun": "依此速度，將於 {{date}} 達到上限",
+    "no_overrun": "依此速度，本期不會超出上限",
+    "holds_count": "{{count}} 個被保留",
+    "history": "歷史",
+    "history_empty": "尚無期間紀錄。",
+    "columns": {
+      "period": "期間",
+      "spent": "花費",
+      "extended": "已延長",
+      "runs": "執行",
+      "state": "狀態"
+    },
+    "amount_label": "每期新金額（美元）",
+    "amount_placeholder": "金額",
+    "set_amount": "設定金額",
+    "save_failed": "預算儲存失敗，請重試。",
+    "holds_title": "因預算被保留的執行",
+    "holds_empty": "沒有因預算被保留的執行。",
+    "release": "解除保留",
+    "release_hint": "讓被保留的執行即使達到上限也能開始一次。",
+    "extend": "延長",
+    "extend_amount": "本期要增加的金額（美元）",
+    "extended": "已延長本期上限。",
+    "released": "已解除 {{count}} 個保留的執行。",
+    "create": {
+      "button": "新增預算",
+      "title": "新增預算",
+      "scope": "範圍",
+      "target_required": "請選擇此預算涵蓋的{{scope}}。",
+      "period": "週期",
+      "amount": "每個週期的金額（美元）",
+      "amount_required": "請輸入不小於 0 的金額。",
+      "soft_percent": "達到上限的此比例時警告（%）",
+      "soft_invalid": "請輸入 1 到 100 之間的整數百分比。",
+      "mode": "達到上限時",
+      "classes": "適用的運行",
+      "class": {
+        "routine": "例行",
+        "delegated": "委派"
+      },
+      "classes_required": "至少選擇一種運行。",
+      "submit": "建立預算",
+      "cancel": "取消",
+      "created": "預算已建立",
+      "failed": "無法建立預算。請檢查填寫內容後再試一次。",
+      "exists": "此範圍與週期的預算已存在。"
+    }
+  }
+}

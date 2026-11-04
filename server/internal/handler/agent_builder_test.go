@@ -49,6 +49,17 @@ func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 
 	first := create("builder-model-a")
 	second := create("builder-model-b")
+	// Each carrier's instructions are its first revision (spec 4.6).
+	for _, id := range []string{first.BuilderAgentID, second.BuilderAgentID} {
+		var revisions int
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1`, id).Scan(&revisions); err != nil {
+			t.Fatalf("count builder revisions: %v", err)
+		}
+		if revisions != 1 {
+			t.Fatalf("builder carrier %s has %d instruction revisions, want its first one", id, revisions)
+		}
+	}
 	if first.BuilderAgentID == second.BuilderAgentID {
 		t.Fatalf("builder sessions unexpectedly shared an agent: %s", first.BuilderAgentID)
 	}

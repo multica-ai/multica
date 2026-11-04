@@ -1,0 +1,80 @@
+---
+title: 目標とメトリクス
+description: 目標は、会社が何を目指すのかを示します。主要な結果はメトリクスに対する進捗を追跡します。メトリクスは、組み込みの計算、手動の記録、または自社製品からの webhook から得られます。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**目標**は、会社、フロア、スクワッド、またはイニシアチブが一定期間に何を目指すかを示す文です。目標には **主要な結果（key result）** が含まれ、各主要な結果は一つの **メトリクス** を追跡します。進捗と確度はメトリクスから計算されるため、誰かが状況報告を書かなくても、目標の現在地が分かります。
+
+## メトリクス
+
+メトリクスは、単位と向きを持つ名前付きの系列です。各読み取り値には、値、時刻、スコープ（会社、フロア、スクワッド、イニシアチブ）があります。メトリクスの出所は三つです。
+
+**組み込み** は、ワークスペース自身の記録から毎晩計算されます。
+
+| 領域 | メトリクス |
+| --- | --- |
+| 配信 | `delivery.issues_done`、`delivery.cycle_time_days`、`delivery.rework_rate` |
+| 実行 | `runs.count`、`runs.success_rate`、`runs.cost_usd` |
+| プロポーザル | `proposals.acceptance_rate`、`proposals.decision_hours` |
+| ルーティン | `routines.compliance_rate` |
+| パイプライン | `pipeline.initiatives_active`、`pipeline.stalled`、`pipeline.stage_days` |
+| ナレッジ | `knowledge.docs_published`、`knowledge.fresh_ratio`、`knowledge.retrieval_hit_rate` |
+| ブリーフ | `brief.usefulness` |
+
+`knowledge.*` のメトリクスと `brief.usefulness` は会社スコープのみです。実行コストは、プロバイダーが報告した分だけを数えます。
+
+**手動** の読み取り値は、メンバーまたはエージェントが記録します。
+
+```bash
+multica metric list
+multica metric report --key runs.count --scope squad:<squad-id> --value 42 --note "Checked by hand"
+multica metric report --key mrr --scope initiative:<initiative-id> --value 1200 --observed-at 2026-11-01T09:00:00Z
+```
+
+`--scope` には `company`（既定）、`floor:<id>`、`squad:<id>`、`initiative:<id>` を指定します。組み込みメトリクスは手動の記録を受け付けません。
+
+**Webhook** の読み取り値は、製品の外からの数値（登録数、売上、稼働率など）を取り込みます。ワークスペースのメンバーの個人アクセストークン（[認証トークン](/auth-tokens)を参照）で送信します。
+
+```bash
+curl -X POST "$MULTICA_API/api/metrics/signups/readings" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"value": 128, "scope_type": "company", "source": "webhook", "note": "Weekly export"}'
+```
+
+ボディには `value`、`scope_type`、`scope_id`（会社スコープ以外では必須）、`observed_at`、`note`、`source` を指定します。ワークスペースごと、メトリクスごとに毎分60件までに制限されています。報告によって作成されたメトリクスは、ボディの名前、単位、向きを使います。16 KiB を超える報告は拒否されます。
+
+読み取り値は90日間そのまま保持されます。それより古いものは、一日につき一つの値に縮約されます。
+
+## 目標と主要な結果
+
+主要な結果は、メトリクスの最新の読み取り値を、開始値と目標値と比較します。
+
+- 進捗は、開始値から目標値までの距離のうち、どれだけ進んだかの割合で、0から1の範囲に収められます。向きは差の符号で決まります。
+- 目標の進捗は、その主要な結果の加重平均です。各重みは1から10です。
+- 確度は、期間の始点から終点までの直線と進捗を比べて決まります。進捗が、期待される割合から10ポイントを引いた値以上なら `on_track`（順調）、30ポイントまでの範囲なら `at_risk`（リスクあり）、それより低ければ `off_track`（逸脱）です。まだ読み取り値がなければ `unknown`（不明）です。
+
+オーナーは、メモを添えて確度を上書きできます。上書きされた確度には、その旨が表示されます。
+
+目標には次のステータスがあります。`draft`（下書き）、`active`（有効）、`achieved`（達成）、`missed`（未達）、`dropped`（中止）。目標を有効にするには、少なくとも一つの主要な結果が必要です。主要な結果のない目標は、サーバーが拒否します。
+
+**誰が目標を設定するか。** あなたと管理者は、会社とフロアの目標を **Goals**（目標）タブで作成します。スクワッドの目標は計画サイクルから生まれます。各期間の始めに、憲章を持つスクワッドごとに、プラットフォームが計画用の Issue を開きます。その内容は会社の目標とそのスクワッドの憲章です。リーダーは `goal` プロポーザルで答え、承認すると目標が有効になります。[プロポーザル](/proposals)を参照してください。
+
+リーダーのブリーフには、そのスクワッドの有効な主要な結果が **Your goals this period**（今期のあなたの目標）として並びます。スクワッドの運用レビューは、これらに対する進捗を報告します。
+
+<Callout type="info">
+**ガバナンス** の Goals タブでは、目標を会社、フロア、スクワッド、イニシアチブのツリーとして表示します。各主要な結果にはスパークラインがあります。ブリーフの **Goals** セクションは、状態が変わった目標と、リスクがあるか逸脱している目標を、動いたメトリクスとともに示します。
+</Callout>
+
+## 制限
+
+- 目標とメトリクスのエンドポイントは、`GET` と `POST /api/goals`、`GET`、`PATCH`、`DELETE /api/goals/{id}`、`POST /api/goals/{id}/activate`、`POST /api/goals/{id}/status`、`PUT /api/goals/{id}/confidence`、`GET /api/metrics`、`GET` と `POST /api/metrics/{key}/readings` です。目標には CLI コマンドはありません。
+- 会社のインポートでは、スクワッド範囲およびイニシアチブ範囲の目標は引き継がれません。[Company as code](/company-as-code)を参照してください。
+
+## 次のステップ
+
+- [予算](/budgets)：目標が追跡できる支出の数値。
+- [レビューと組織変更](/reviews-and-org-changes)：同じ記録から作られるスコアカード。
+- [秘書とブリーフ](/secretary)：目標が毎日のブリーフにどう届くか。

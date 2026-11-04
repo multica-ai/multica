@@ -2139,7 +2139,12 @@
         "name": "人员与绩效",
         "description": "每周对照章程审查各小组的记录，并报告延误或沉默的事项。"
       }
-    }
+    },
+    "decision_change_instructions": "指令",
+    "decision_change_charter": "章程",
+    "decision_change_unreadable": "无法加载当前版本进行对比。",
+    "decision_change_removed": "删除",
+    "decision_change_added": "新增"
   },
   "views": {
     "builtin": {

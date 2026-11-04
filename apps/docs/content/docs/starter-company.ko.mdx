@@ -1,0 +1,62 @@
+---
+title: 스타터 회사
+description: 한 번의 실행으로 동작하는 회사를 세웁니다. 스타터 회사는 당신이 고른 템플릿으로 층, 스쿼드, 헌장, 루틴, 그리고 비서와 사서를 만듭니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**스타터 회사**는 디지털 회사를 위한 기성 구조입니다. 비서, 사서, 그리고 리서치, 제품, 구축, 출시, 거버넌스를 맡는 스쿼드가 들어 있습니다. 만들 스쿼드를 고르면, 층, 헌장, 루틴, 회사 예산도 함께 만들어집니다.
+
+새 워크스페이스나 거의 빈 워크스페이스에서 사용하세요. 기존 항목을 지우지 않으며, 다시 실행해도 중복으로 만들어지지 않습니다.
+
+## 마법사
+
+오피스를 열고 회사 마법사를 시작합니다. 네 단계로 진행합니다.
+
+1. **런타임.** 새 에이전트가 실행될 런타임입니다. 온라인 상태인 것을 고르세요.
+2. **선택.** 만들 스쿼드입니다. 각 카드에는 스쿼드의 미션과 루틴이 표시됩니다.
+3. **견적.** 선택한 루틴의 비용 추정치입니다.
+4. **시작 옵션.** 세 가지 중 하나를 고릅니다.
+   - `all`: 모든 루틴이 활성 상태로 시작합니다.
+   - `per_floor`: 각 층의 대표 루틴이 활성 상태로 시작하고, 나머지는 일시 정지됩니다.
+   - `leave_paused`: 모든 루틴이 일시 정지 상태로 시작하며, 당신이 하나씩 시작합니다.
+
+마법사는 `POST /api/office/company-template/apply`를 호출합니다. 응답은 만들었거나 찾은 층, 스쿼드, 에이전트, 루틴을 나열한 보고서입니다. 실행이 중간에 멈추면 다시 실행하세요. 보고서가 가리키는 곳부터 이어서 진행하며, 빠진 것만 만듭니다.
+
+## 만들어지는 것
+
+스쿼드는 층별로 묶입니다. 층 이름은 영어로 고정되어 있어서, 다시 실행해도 같은 층을 찾습니다.
+
+| 층 | 스쿼드 |
+| --- | --- |
+| Executive(경영) | **Executive Office**: 비서와 사서. 일일 브리프와 주간 리뷰 루틴, 사서의 루틴 포함 |
+| Research(리서치) | **Market Research**, **Opportunity Lab**, **Competitor Intelligence**, **Customer Voice** |
+| Product(제품) | **Product Discovery**, **Product Analysis**, **Planning** |
+| Build(구축) | **Build** |
+| Launch(출시) | **Release & Ops**, **Growth & GTM**, **Support** |
+| Governance(거버넌스) | **Finance & Risk**, **People & Performance** |
+
+각 스쿼드는 미션, 책임 범위, 결과물, 경계를 담은 헌장과, 카드에 있는 루틴을 받습니다. 스쿼드의 지시문은 카드의 역할에 맞게 쓰여 있습니다. 각 에이전트는 자기 역할의 지시문과, 모든 스쿼드가 따르는 공통 지시문을 받습니다.
+
+**People & Performance** 스쿼드는 [리뷰](/reviews-and-org-changes)에 쓰이는 리뷰어 에이전트를 가집니다. **Executive Office** 스쿼드는 [지식 베이스](/knowledge-taxonomy)를 정돈된 상태로 유지하는 사서를 가집니다.
+
+파이프라인 단계는 다음 스쿼드가 맡습니다. Validate는 Product Discovery, Define은 Product Analysis, Plan은 Planning, Build와 Learn은 Build, Launch는 Release & Ops, Operate는 Support입니다. [파이프라인과 이니셔티브](/pipeline)를 참고하세요.
+
+## 회사 예산
+
+스타터 회사는 회사 전체를 대상으로 하는 예산을 하나 만듭니다. 월 500달러이며 `warn`(경고만) 모드입니다. 80%에서 경고하고 어떤 실행도 보류하지 않으므로, 아무도 모르는 사이에 멈추는 일은 없습니다. 스타터 회사는 층과 스쿼드별 배분을 설정하지 않습니다. 필요하면 Budgets 탭에서 만드세요. [예산](/budgets)을 참고하세요.
+
+## 제한 사항
+
+- 온라인 런타임이 최소 하나 필요합니다. 에이전트는 당신이 고른 런타임에서 만들어집니다.
+- 스타터 회사는 이니셔티브를 만들지 않습니다. 이니셔티브는 승인된 기회와 당신의 요청에서 나옵니다.
+
+<Callout type="info">
+각 스쿼드는 자율성 수준 1로 시작합니다. 나중에 Autonomy 탭에서 수준을 올릴 수 있습니다. [자율성과 승인](/autonomy-and-approvals)을 참고하세요.
+</Callout>
+
+## 다음 단계
+
+- [비서와 브리프](/secretary): Executive Office의 일상 업무.
+- [헌장과 루틴](/charters-and-routines): 회사가 처음 가지는 헌장과 루틴을 편집하기.
+- [Company as code](/company-as-code): 이 구조를 다른 워크스페이스로 내보내기.

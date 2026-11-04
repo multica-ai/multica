@@ -40,6 +40,8 @@ type SquadResponse struct {
 	// while the squad is unseated.
 	FloorID    *string `json:"floor_id"`
 	OfficeSlot *int16  `json:"office_slot"`
+	// AutonomyLevel is the squad's autonomy level, 0 (Suggest) to 3 (Autonomous).
+	AutonomyLevel int32 `json:"autonomy_level"`
 }
 
 type SquadMemberPreviewResponse struct {
@@ -83,6 +85,7 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		UpdatedAt:     timestampToString(s.UpdatedAt),
 		ArchivedAt:    timestampToPtr(s.ArchivedAt),
 		ArchivedBy:    uuidToPtr(s.ArchivedBy),
+		AutonomyLevel: s.AutonomyLevel,
 		MemberPreview: []SquadMemberPreviewResponse{},
 		FloorID:       uuidToPtr(s.FloorID),
 		OfficeSlot:    officeSlot,

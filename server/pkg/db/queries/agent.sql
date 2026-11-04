@@ -818,6 +818,9 @@ WHERE id = (
     WHERE atq.agent_id = @agent_id
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
+      -- Tasks the budget or company gate refused in this claim call: skipped, so
+      -- the claim reaches the next candidate instead of retrying the same row.
+      AND NOT (atq.id = ANY(COALESCE(sqlc.narg('excluded_task_ids')::uuid[], '{}'::uuid[])))
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
           SELECT 1

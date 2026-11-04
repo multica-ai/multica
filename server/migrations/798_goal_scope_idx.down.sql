@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS goal_scope_idx;

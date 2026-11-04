@@ -1,0 +1,1 @@
+ALTER TABLE budget DROP CONSTRAINT IF EXISTS budget_pkey;

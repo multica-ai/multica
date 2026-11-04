@@ -1,0 +1,3 @@
+ALTER TABLE brief DROP CONSTRAINT IF EXISTS brief_scope_check;
+ALTER TABLE brief DROP COLUMN IF EXISTS scope_id;
+ALTER TABLE brief DROP COLUMN IF EXISTS scope_type;

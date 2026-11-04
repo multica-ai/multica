@@ -218,7 +218,12 @@ func runBriefDigest(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	var digest map[string]any
-	path := "/api/office/digest?" + url.Values{"since": {since.UTC().Format(time.RFC3339)}}.Encode()
+	query := url.Values{"since": {since.UTC().Format(time.RFC3339)}}
+	// A floor chief's digest, or the Secretary's drill into a flagged floor (spec 4.8).
+	if floor, _ := cmd.Flags().GetString("floor"); floor != "" {
+		query.Set("floor_id", strings.TrimSpace(floor))
+	}
+	path := "/api/office/digest?" + query.Encode()
 	if err := client.GetJSON(ctx, path, &digest); err != nil {
 		return fmt.Errorf("get digest: %w", err)
 	}
@@ -367,6 +372,16 @@ func runBriefPublish(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	req := map[string]any{"kind": kind, "title": title, "body": body, "proposal_ids": trimmedAll(proposals)}
+	// A floor brief names its floor; a company brief names none (spec 4.8).
+	if scope, _ := cmd.Flags().GetString("scope"); scope == "floor" {
+		floor, _ := cmd.Flags().GetString("floor")
+		if strings.TrimSpace(floor) == "" {
+			return fmt.Errorf("--floor is required with --scope floor: the floor's id")
+		}
+		req["scope_type"], req["scope_id"] = "floor", strings.TrimSpace(floor)
+	} else if floor, _ := cmd.Flags().GetString("floor"); floor != "" {
+		return fmt.Errorf("--floor applies only with --scope floor")
+	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/briefs", req, &result); err != nil {
 		return briefRefusalError(err)
@@ -495,6 +510,8 @@ func addBriefPublishFlags(cmd *cobra.Command) {
 	cmd.Flags().String("title", "", "Title of the brief (at most 200 characters) — required")
 	cmd.Flags().String("file", "", "Markdown file with the brief, or - for stdin — required")
 	cmd.Flags().StringArray("proposal", nil, "A proposal id the brief raises; repeat for more")
+	cmd.Flags().String("scope", "company", "company, or floor for a floor chief's brief")
+	cmd.Flags().String("floor", "", "The floor's id, with --scope floor")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -524,6 +541,7 @@ func addBriefFeedbackFlags(cmd *cobra.Command) {
 
 func addBriefDigestFlags(cmd *cobra.Command) {
 	cmd.Flags().String("since", "24h", "Look back this far: a duration (30m, 24h, 7d) or an RFC 3339 timestamp")
+	cmd.Flags().String("floor", "", "Only this floor's digest, by floor id: a floor chief's view or a drill into a flagged floor")
 	cmd.Flags().Bool("json", false, "Print JSON (same as --output json)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }

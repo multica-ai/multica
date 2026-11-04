@@ -171,7 +171,6 @@
     "title_required": "제목을 입력해야 합니다.",
     "title_too_long": "제목은 200자 이하여야 합니다.",
     "thesis_label": "가설",
-    "thesis_required": "가설을 입력해야 합니다. 왜 가치가 있는지 적어 주세요.",
     "thesis_too_long": "가설이 너무 깁니다.",
     "pipeline_label": "파이프라인",
     "no_pipeline": "이 워크스페이스에는 이니셔티브를 시작할 파이프라인이 없습니다.",

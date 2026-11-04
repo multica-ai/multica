@@ -6,6 +6,7 @@ import {
   ProposalRevisionListSchema,
   ProposalSchema,
   opportunityPayloadOf,
+  orgChangePayloadOf,
   stageGatePayloadOf,
   type Proposal,
   type ProposalRevision,
@@ -330,5 +331,47 @@ describe("ProposalSchema kinds and payloads", () => {
       payload: { initiative_id: "i1", from: "validate", to: "define", artifact_ids: ["a1"] },
     });
     expect(stageGatePayloadOf(ok).artifact_ids).toEqual(["a1"]);
+  });
+});
+
+describe("orgChangePayloadOf", () => {
+  const withPayload = (payload: unknown) => ({ payload }) as Pick<Proposal, "payload">;
+
+  it("reads an instruction change's agent and new instructions", () => {
+    const fields = orgChangePayloadOf(
+      withPayload({ type: "instruction_change", agent_id: "ag-1", instructions: "Be brief.", diff_summary: "Shorter", rationale: "Replies ran long" }),
+    );
+    expect(fields).toMatchObject({ type: "instruction_change", agent_id: "ag-1", instructions: "Be brief.", charter: null });
+  });
+
+  it("reads a charter change's fields, with its responsibilities and outputs", () => {
+    const fields = orgChangePayloadOf(
+      withPayload({
+        type: "charter_change",
+        squad_id: "sq-1",
+        charter: {
+          mission: "Research",
+          responsibilities: [{ key: "r1", text: "Track competitors" }],
+          outputs: [{ key: "o1", kind: "report", kb_key: "", cadence_hint: "weekly" }],
+          boundaries: "",
+          escalation: "",
+          intake: "",
+          response_hours: 48,
+        },
+      }),
+    );
+    expect(fields.charter?.mission).toBe("Research");
+    expect(fields.charter?.responsibilities).toEqual([{ key: "r1", text: "Track competitors" }]);
+    expect(fields.charter?.response_hours).toBe(48);
+  });
+
+  it("reads a malformed charter as no charter instead of failing the proposal", () => {
+    const fields = orgChangePayloadOf(withPayload({ type: "charter_change", squad_id: "sq-1", charter: { mission: 7, responsibilities: "x" } }));
+    expect(fields.charter).toBeNull();
+    expect(fields.squad_id).toBe("sq-1");
+  });
+
+  it("reads a payload that is not an object as empty", () => {
+    expect(orgChangePayloadOf(withPayload("nope"))).toMatchObject({ type: "", agent_id: "", charter: null });
   });
 });

@@ -1,0 +1,79 @@
+---
+title: Chartes et routines
+description: La charte d'un squad décrit à quoi il sert et ce qu'il vous doit. Ses routines sont le travail récurrent qui la fait vivre, et la plateforme vérifie qu'elles ont bien été exécutées.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un squad doté d'une charte a une mission permanente. La charte précise sa mission, les livrables qu'il doit, ce qu'il ne doit pas faire et quand il vous fait remonter une question. Ses routines sont les exécutions planifiées qui produisent ces livrables. Un squad sans charte n'agit que lorsqu'on lui assigne du travail.
+
+## La charte
+
+Ouvrez le panneau du squad et choisissez l'onglet **Charter**. Les membres peuvent lire la charte. Les propriétaires, les administrateurs et le créateur du squad peuvent la modifier.
+
+| Champ | Rôle |
+| --- | --- |
+| Mission | La raison d'être du squad, jusqu'à 2 000 caractères |
+| Responsibilities | Les domaines couverts par le squad, chacun avec un court texte |
+| Outputs | Ce que le squad produit, son type et sa cadence, par exemple un rapport de marché hebdomadaire |
+| Boundaries | Ce que le squad ne doit pas faire, par exemple dépenser de l'argent ou modifier l'organisation |
+| Escalation | Quand il doit vous demander une décision |
+| Intake | Ce que les autres squads peuvent demander au squad |
+| Response hours | Le délai de réponse du squad à une demande, de 1 à 720, 48 par défaut |
+
+Chaque enregistrement incrémente la révision de la charte. Si quelqu'un a enregistré une révision plus récente depuis l'ouverture du formulaire, l'enregistrement est refusé avec un conflit, afin que vous puissiez voir l'autre modification avant d'écraser.
+
+Le responsable du squad reçoit un bloc géré par le système, **Your charter** (Votre charte), construit à partir de ces champs. Il est suivi de règles permanentes : chercher dans les connaissances de l'entreprise avant de commencer, soumettre des propositions plutôt que d'agir sur l'argent, les effets extérieurs ou les changements d'organisation, enregistrer `no action` avec une raison plutôt que de remplir pour remplir, et respecter les limites d'attention.
+
+<Callout type="info">
+La charte remplace à cet effet la description du squad. La description reste une étiquette d'une ligne, et les instructions restent les règles d'acheminement du responsable.
+</Callout>
+
+## Les routines
+
+Une routine est un [automatisme](/autopilots) ordinaire lié à un squad, avec un objectif et un livrable attendu. Elle n'ajoute pas de second planificateur : la planification, l'historique des exécutions et **Run now** (Exécuter maintenant) appartiennent à l'automatisme.
+
+Ouvrez la liste **Routines** dans le panneau du squad pour en ajouter une.
+
+- **Lier un automatisme existant**, ou **en créer un** à partir d'une cadence : `daily` (quotidienne), `weekdays` (jours ouvrés), `weekly` (hebdomadaire), `biweekly` (bimensuelle), `monthly` (mensuelle), ou une expression cron.
+- Donnez-lui un objectif de 200 caractères au maximum, par exemple « Veille concurrentielle hebdomadaire ».
+- Choisissez le livrable attendu : aucun, un ticket, une proposition, un document de connaissance ou un rapport.
+
+Depuis la liste, vous pouvez exécuter une routine maintenant, la suspendre ou la retirer. Retirer une routine la délie, et vous pouvez en même temps suspendre son automatisme.
+
+La liste affiche l'état de chaque routine ainsi que ses dernière et prochaine exécutions. Les états sont :
+
+| État | Signification |
+| --- | --- |
+| `on_time` | La dernière exécution s'est terminée et a produit le livrable attendu, ou a enregistré `no action` avec une raison |
+| `no_output` | La dernière exécution s'est terminée, mais rien n'a été produit et aucun `no action` n'a été enregistré |
+| `late` | La prochaine exécution a dépassé de plus de la marge de grâce, 24 heures par défaut |
+| `failed` | La dernière exécution a échoué |
+| `paused` | L'automatisme est suspendu |
+| `held` | Un contrôle de l'entreprise retient l'exécution, par exemple une [pause](/controls-and-log) ou une limite de [budget](/budgets) |
+| `never_ran` | Créée, et la première heure planifiée n'est pas encore arrivée |
+
+La plateforme déduit cet état de l'historique des exécutions et des enregistrements créés par le squad. Le squad ne le déclare pas lui-même.
+
+## La revue opérationnelle
+
+La première fois qu'une charte est enregistrée, la plateforme crée pour le squad une routine hebdomadaire nommée **Operating review** (Revue opérationnelle). Ses instructions demandent au squad de :
+
+1. comparer les livrables de la semaine précédente avec la charte, et lister ce qui était en retard ou manquant ;
+2. chercher dans les connaissances de l'entreprise les décisions antérieures et les documents périmés de son domaine ;
+3. nommer au plus une chose qui mérite d'être faite sans que personne ne l'ait demandée, avec des preuves ;
+4. la soumettre comme proposition, dans les limites d'attention, ou enregistrer `no action` avec une raison ;
+5. rédiger des mises à jour des documents de connaissance périmés. Brouillons uniquement.
+
+La revue est une routine comme les autres. Sa conformité est mesurée, et vous pouvez la suspendre depuis la liste des routines.
+
+## Limites
+
+- Les chartes et les routines se gèrent dans l'application. La CLI `multica` n'a pas de commandes pour les chartes ni les routines. L'API est `GET` et `PUT /api/squads/{id}/charter`, `GET` et `POST /api/squads/{id}/routines`, et `DELETE /api/squads/{id}/routines/{routine_id}`.
+- Une routine retenue par une pause de l'entreprise ou par les heures calmes apparaît comme `held`, et non `failed`. Voir [Contrôles et journal](/controls-and-log).
+
+## Étapes suivantes
+
+- [Automatisations](/autopilots) pour les planifications derrière chaque routine.
+- [Propositions](/proposals) pour savoir comment les constats d'une routine atteignent votre décision.
+- [Entreprise de départ](/starter-company) pour les chartes et routines créées pour chaque carte de squad.

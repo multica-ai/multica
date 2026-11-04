@@ -124,6 +124,28 @@ func TestEnsureModelFindsByTypeAndNameBeforeCreating(t *testing.T) {
 	}
 }
 
+// WeKnora sends no "stream" key on a non-streaming call, and the 9router gateway
+// streams when the key is absent. The model's extra_body must carry stream:false
+// so that the summary and Wiki calls get a JSON body back.
+func TestEnsureModelSendsExtraBodyInCompatSpec(t *testing.T) {
+	m := newMock(t).on("GET /api/v1/models", 200, []byte(`{"success":true,"data":[]}`)).
+		onFixture("POST /api/v1/models", 201, "model_create_chat")
+	_, err := newClient(t, m).Workspace(wsKey).EnsureModel(context.Background(), ModelSpec{
+		Name: "summary-chat", Type: ModelTypeKnowledgeQA, Provider: "generic", BaseURL: "http://172.17.0.1:20128/v1",
+		APIKey: "sk-llm", ExtraBody: map[string]any{"stream": false},
+	})
+	if err != nil {
+		t.Fatalf("EnsureModel: %v", err)
+	}
+	params := decode(t, m.requests("POST", "/api/v1/models")[0].Body)["parameters"].(map[string]any)
+	spec, _ := params["spec"].(map[string]any)
+	compat, _ := spec["compat"].(map[string]any)
+	extra, _ := compat["extra_body"].(map[string]any)
+	if extra["stream"] != false {
+		t.Fatalf("create body parameters = %v, want spec.compat.extra_body.stream false", params)
+	}
+}
+
 func TestEnsureModelRequiresEndpoint(t *testing.T) {
 	m := newMock(t)
 	_, err := newClient(t, m).Workspace(wsKey).EnsureModel(context.Background(), ModelSpec{Name: "x", Type: ModelTypeKnowledgeQA})

@@ -1,0 +1,3 @@
+ALTER TABLE issue DROP COLUMN IF EXISTS last_reopened_at;
+ALTER TABLE issue DROP COLUMN IF EXISTS reopen_count;
+ALTER TABLE issue DROP COLUMN IF EXISTS done_at;

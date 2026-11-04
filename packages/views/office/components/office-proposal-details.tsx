@@ -21,7 +21,7 @@ import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT, useTimeAgo } from "../../i18n";
 import { AppLink } from "../../navigation";
 import { humanizeKey } from "../../pipeline/key-label";
-
+import { OrgChangeSummary } from "./office-org-change-summary";
 
 /** A snooze date as the server stores it (midnight UTC), shown on the UTC day it names. */
 export function formatSnoozeDate(iso: string): string {
@@ -77,8 +77,9 @@ export function OfficeProposalKindLabel({ kind }: { kind: ProposalKind }) {
 
 /**
  * What a kind asks the boss, beyond its title: an opportunity's thesis and
- * evidence, a stage gate's artifact checklist and the leader's attestation.
- * A decision, or a kind this client does not know, shows nothing extra.
+ * evidence, a stage gate's artifact checklist and the leader's attestation, an
+ * organisation change's diff. A decision, or a kind this client does not know,
+ * shows nothing extra.
  */
 export function OfficeProposalKindSummary({ proposal }: { proposal: Proposal }) {
   switch (proposal.kind) {
@@ -86,6 +87,8 @@ export function OfficeProposalKindSummary({ proposal }: { proposal: Proposal }) 
       return <OpportunitySummary proposal={proposal} />;
     case "stage_gate":
       return <StageGateSummary proposal={proposal} />;
+    case "org_change":
+      return <OrgChangeSummary proposal={proposal} />;
     default:
       return null;
   }

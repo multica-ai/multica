@@ -93,6 +93,17 @@ func newOwnerDaemonRequest(method, path string, body any) *http.Request {
 	return newRequest(method, path, body)
 }
 
+// claimTestAgent gives a claim test its own runtime and agent. The shared
+// workspace collects agents and queued tasks from other tests, so an unordered
+// pick of a workspace agent, or the shared runtime's queue, can hand the claim
+// someone else's work.
+func claimTestAgent(t *testing.T, name string) (agentID, runtimeID string) {
+	t.Helper()
+	runtimeID = dbfx.Runtime(t, name+" runtime "+uuid.NewString())
+	agentID = dbfx.Agent(t, name+" "+uuid.NewString(), runtimeID)
+	return agentID, runtimeID
+}
+
 func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID string) *http.Request {
 	var buf bytes.Buffer
 	if body != nil {
@@ -2135,11 +2146,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`)
 
 	// Agent + runtime + queued task in this project.
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	agentID, runtimeID := claimTestAgent(t, "Claim test")
 
 	issueID := dbfx.Issue(t, "project repo override", testutil.Cols{
 		"project_id": projectID,
@@ -2201,11 +2208,7 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 		"description": projectDescription,
 	})
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	agentID, runtimeID := claimTestAgent(t, "Claim test")
 
 	issueID := dbfx.Issue(t, "project description", testutil.Cols{
 		"project_id": projectID,
@@ -2290,11 +2293,7 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	projectID := dbfx.Project(t, "Claim project without repos")
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	agentID, runtimeID := claimTestAgent(t, "Claim test")
 
 	issueID := dbfx.Issue(t, "no project repos", testutil.Cols{
 		"project_id": projectID,
@@ -2336,10 +2335,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testi
 
 	ctx := context.Background()
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+	agentID, runtimeID := claimTestAgent(t, "Run-only autopilot claim")
 
 	const projectDescription = "Use only the bound project resources."
 	projectID := dbfx.Project(t, "Run-only autopilot project", testutil.Cols{
@@ -2476,11 +2472,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	}
 
 	// Local agent/runtime (belongs to testWorkspace).
-	var localAgentID, localRuntimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&localAgentID, &localRuntimeID)
+	localAgentID, localRuntimeID := claimTestAgent(t, "Mismatch local claim")
 
 	// Foreign workspace with its own issue — what the misrouted task will
 	// resolve to.

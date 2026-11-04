@@ -2139,7 +2139,12 @@
         "name": "人材 & パフォーマンス",
         "description": "各チームの実績をチャーターと照らし合わせて毎週確認し、遅れている項目や沈黙しているチームを報告します。"
       }
-    }
+    },
+    "decision_change_instructions": "指示文",
+    "decision_change_charter": "憲章",
+    "decision_change_unreadable": "比較するための現在の版を読み込めませんでした。",
+    "decision_change_removed": "削除",
+    "decision_change_added": "追加"
   },
   "views": {
     "builtin": {

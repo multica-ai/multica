@@ -20,7 +20,7 @@ Only owners and admins can enable knowledge. Open **Knowledge** and press **Enab
 Enabling creates a separate store for the workspace, then:
 
 - the embedding model, chosen by the operator;
-- five knowledge bases, listed below;
+- six knowledge bases, listed below;
 - a read-only MCP endpoint named `company-read`, given to every agent in the workspace, including agents you create later.
 
 The page shows one of these states:
@@ -33,9 +33,9 @@ The page shows one of these states:
 | **Offline** | The sidecar is not answering. Runs continue without company knowledge. |
 | **Setup failed** | Setup stopped partway. **Retry setup** picks up where it stopped. |
 
-## The five knowledge bases
+## The knowledge bases
 
-Each knowledge base has a key that the CLI uses, such as `market`. Members and agents can create drafts in any of them except `decisions`, which only Multica writes to.
+Each knowledge base has a key that the CLI uses, such as `market`. Members and agents can create drafts in any of them except `decisions`, which only Multica writes to. Each document has a kind, which sets its headings and review interval. See [Knowledge taxonomy](/knowledge-taxonomy).
 
 | Key | Name | Typical contents |
 | --- | --- | --- |
@@ -44,6 +44,7 @@ Each knowledge base has a key that the CLI uses, such as `market`. Members and a
 | `product` | Product | PRDs, specs, roadmap, analyses, user research |
 | `engineering` | Engineering | Architecture decisions, runbooks, post-mortems |
 | `decisions` | Decisions | Every proposal decision with its note, and every published brief |
+| `ventures` | Ventures | One folder per initiative: its validation, analysis, budget request, and launch documents |
 
 ## Drafts and publishing
 
@@ -52,6 +53,7 @@ A knowledge base is shared and long-lived. So writing and publishing are separat
 - **Members and agents create drafts.** A draft is saved but not searchable. It appears in the **Drafts** tab.
 - **A person publishes.** Owners and admins press **Publish** in the Drafts tab, and the document becomes searchable. **Discard** deletes a draft instead.
 - **Multica publishes its own records.** Each proposal decision and each brief is written to `decisions` at once, so the decision history is searchable without a manual step.
+- **A publish policy can publish for a person.** Each knowledge base and each kind can be set to publish drafts after a critic's review, or at once. Manual is the default. See [Knowledge taxonomy](/knowledge-taxonomy).
 
 To save a draft from the command line:
 
@@ -63,9 +65,7 @@ multica knowledge add --kb market --title "Competitor page" --url https://exampl
 
 Give exactly one of `--file`, `--text`, or `--url`. A URL is fetched only when the draft is published. `--source-issue` records where the document came from, so the document can link back to that issue. `--idempotency-key` makes a retry return the same draft instead of creating a second one; by default it is derived from the arguments.
 
-<Callout type="info">
-Upload from the Knowledge page and **Save to knowledge** on an issue or brief are not in this release. Use the CLI to save a file or a page.
-</Callout>
+You can also upload a file from the Knowledge page, or use **Save to knowledge** on an issue to save its content as a draft.
 
 ## Search and browse
 
@@ -100,12 +100,13 @@ This runs whenever knowledge is ready. There is no switch for it in this release
 
 The Knowledge page shows **Open in WeKnora** when the operator has configured the WeKnora web interface. It opens that interface in a new tab. Use it for settings the Knowledge page does not cover, such as chunking, data-source sync, and wiki generation. WeKnora handles its own sign-in.
 
-## What is not in this release
+## Ask the Secretary
 
-- Saving from an issue, a comment, or a brief with **Save to knowledge**.
-- Uploading files from the Knowledge page.
-- **Ask the Secretary** from the Knowledge page.
-- Automatic publishing, freshness reviews, and single sign-on into WeKnora.
+The Knowledge page has **Ask the Secretary**. The Secretary searches the knowledge base first and cites the documents it uses. See [Secretary and briefs](/secretary).
+
+## Freshness
+
+Documents have a review date set by their kind. The Librarian files a review request for each document past its date, and the taxonomy routine repairs broken links between documents. See [Knowledge taxonomy](/knowledge-taxonomy).
 
 ## Operators
 

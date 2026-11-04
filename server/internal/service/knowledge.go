@@ -75,8 +75,8 @@ type KnowledgeService struct {
 	UIURL string
 	// PingTimeout bounds the reachability check Status makes. Default 2s.
 	PingTimeout time.Duration
-	// Governance records automatic publishes. Nil means NoopGovernance until
-	// phase 4 (11.4) wires the governance log.
+	// Governance records automatic publishes. Nil means the governance log
+	// (NewAutoPublishGovernance).
 	Governance GovernanceRecorder
 	// LLM is the chat, rerank and vision endpoint WeKnora uses. Nil or empty
 	// means no model is registered and Wiki and summaries stay off.

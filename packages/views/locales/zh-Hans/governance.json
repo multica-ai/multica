@@ -1,0 +1,447 @@
+{
+  "title": "治理",
+  "tabs": {
+    "goals": "目标",
+    "budgets": "预算",
+    "autonomy": "自主级别",
+    "reviews": "评审",
+    "log": "日志",
+    "controls": "控制"
+  },
+  "placeholder": {
+    "title": "暂无内容"
+  },
+  "autonomy": {
+    "note": "诚实的限制：Multica 无法检查运行时在一次运行内部做了什么，因此等级无法阻止智能体调用其凭据允许的外部 API。Multica 控制的是经过它的内容：哪些例行任务运行、什么内容发布到共享记录、哪些提案在没有您参与的情况下被决定、创建哪些计划、花费多少，以及每份章程的边界。有外部影响的操作仍受平台掌控的关卡约束，例如上线关卡，或智能体自身的权限设置。L3 并不意味着无人监督。",
+    "levels_heading": "各级别允许的内容",
+    "levels": {
+      "suggest": {
+        "name": "建议",
+        "body": "例行运行会被暂停。只有有人分配或提及时才运行，但仍可提交提案。"
+      },
+      "work": {
+        "name": "工作",
+        "body": "例行运行正常进行。小组可研究、分析、撰写知识草稿并提交提案。所有决定由老板做出。"
+      },
+      "trusted": {
+        "name": "信任",
+        "body": "与“工作”相同，但知识草稿可在审核后发布。常设批准可批准其提案。"
+      },
+      "autonomous": {
+        "name": "自主",
+        "body": "与“信任”相同，且常设批准可在首个阶段基于其自身机会创建项目（须在上限和预算内）。"
+      }
+    },
+    "boss_only_note": "发布上线和组织变更在任何级别下都始终由老板决定。资金在任何级别下都受预算约束。",
+    "squads_heading": "小组级别",
+    "squads_empty": "暂无小组。",
+    "read_only": "只有所有者和管理员可以更改级别。",
+    "level_tag": "L{{level}}",
+    "default_level": "仍为默认级别，尚未更改。",
+    "level_label": "级别",
+    "reason_label": "原因",
+    "reason_placeholder": "为什么选择这个级别？原因会保存在治理日志中。",
+    "save_level": "保存级别",
+    "level_saved": "已保存自主级别",
+    "level_save_failed": "无法更改级别，请重试。",
+    "panel_heading": "自主级别",
+    "policies_heading": "常设批准",
+    "policies_note": "常设批准会批准来自合适级别小组的一类狭窄提案，之后您可在简报中查看。它从不涵盖组织变更、发布闸门、预算提高、紧急提案或其他常设批准。",
+    "policies_empty": "暂无常设批准。",
+    "policies_load_failed": "无法加载常设批准。",
+    "policy_kind": {
+      "decision": "决定",
+      "opportunity": "机会"
+    },
+    "policy_active": "生效中",
+    "policy_revoked": "已撤销",
+    "policy_flagged": "一次审查撤销了其中一项批准",
+    "policy_scope_squads": "{{count}} 个小组",
+    "policy_scope_any": "任何合适级别的小组",
+    "policy_week": "本周 {{count}} / {{max}} 项批准",
+    "policy_until": "截至 {{date}}",
+    "policy_history": "历史",
+    "policy_history_hide": "隐藏历史",
+    "policy_revoke": "撤销",
+    "policy_revoked_toast": "已撤销常设批准",
+    "policy_revoke_failed": "无法撤销常设批准，请重试。",
+    "history_empty": "此常设批准尚未批准任何提案。",
+    "history_load_failed": "无法加载历史。",
+    "history_reversed": "审查中被撤销：{{note}}",
+    "create_heading": "新建常设批准",
+    "create_name": "名称",
+    "create_kind": "类型",
+    "create_squads": "小组",
+    "create_squads_hint": "全部不勾选即适用于任何合适级别的小组。",
+    "create_max_per_week": "每周最多批准数",
+    "create_max_cost": "最高成本（微单位，可选）",
+    "create_submit": "创建常设批准",
+    "create_done": "已创建常设批准",
+    "create_failed": "无法创建常设批准，请检查输入后重试。"
+  },
+  "controls": {
+    "state_heading": "公司状态",
+    "state": {
+      "running": "运行中",
+      "paused": "已暂停",
+      "quiet": "安静时段",
+      "unknown": "未知"
+    },
+    "in_force": "当前生效：{{state}}",
+    "pause": "暂停",
+    "resume": "恢复",
+    "pause_hint": "例行和委派的运行将等待。聊天和秘书仍可正常使用。",
+    "stop_work": "暂停并停止正在进行的工作",
+    "stop_confirm_title": "暂停并停止正在进行的工作？",
+    "stop_confirm_description": "正在运行的例行和委派任务将被取消。排队中的任务会等到恢复后再执行。",
+    "stop_confirm_action": "暂停并停止",
+    "cancel": "取消",
+    "state_save_failed": "无法更改公司状态，请重试。",
+    "quiet_heading": "安静时段",
+    "quiet_enabled": "启用",
+    "quiet_from": "开始",
+    "quiet_until": "结束",
+    "quiet_timezone": "时区",
+    "quiet_hint": "例行运行会等到时段结束。由人发起的运行不会被拦下。",
+    "quiet_save": "保存安静时段",
+    "quiet_saved": "安静时段已保存",
+    "quiet_save_failed": "无法保存安静时段，请重试。",
+    "state_load_failed": "无法加载公司状态。",
+    "read_only": "只有所有者和管理员可以更改这些设置。",
+    "quiet_hour": "时",
+    "quiet_minute": "分",
+    "digest_heading": "摘要来源",
+    "digest_mode": {
+      "auto": "自动",
+      "squads": "小队",
+      "floors": "楼层"
+    },
+    "digest_note": "自动模式在活跃小队超过 {{threshold}} 个时读取楼层简报。当前有 {{count}} 个，因此秘书现在读取{{resolved}}。",
+    "digest_save_failed": "无法更改摘要来源，请重试。"
+  },
+  "log": {
+    "filter_kind": "类型",
+    "filter_actor": "执行者类型",
+    "filter_subject": "对象类型",
+    "all": "全部",
+    "column_kind": "类型",
+    "column_actor": "执行者",
+    "column_subject": "对象",
+    "column_summary": "摘要",
+    "column_time": "时间",
+    "kind": {
+      "policy_auto_approve": "政策自动批准",
+      "policy_created": "已创建政策",
+      "policy_revoked": "已撤销政策",
+      "budget_set": "已设置预算",
+      "budget_extended": "已延长预算",
+      "budget_hold": "预算暂缓运行",
+      "budget_release": "预算暂缓已解除",
+      "autonomy_changed": "自主级别已变更",
+      "org_change_applied": "已应用组织变更",
+      "org_change_reverted": "已撤销组织变更",
+      "auto_publish": "自动发布",
+      "initiative_forced": "强制移动专项",
+      "company_paused": "公司已暂停",
+      "company_resumed": "公司已恢复",
+      "goal_activated": "目标已启用",
+      "goal_imported": "目标已导入",
+      "review_published": "评审已发布",
+      "unknown": "未知事件"
+    },
+    "actor_type": {
+      "member": "成员",
+      "agent": "智能体",
+      "system": "系统",
+      "policy": "政策",
+      "unknown": "未知"
+    },
+    "subject_type": {
+      "company": "公司",
+      "floor": "楼层",
+      "squad": "小组",
+      "agent": "智能体",
+      "initiative": "专项",
+      "budget": "预算",
+      "approval_policy": "审批政策",
+      "proposal": "提案",
+      "goal": "目标",
+      "review": "评审"
+    },
+    "empty": "没有符合这些筛选条件的治理事件。",
+    "load_failed": "无法加载治理日志。",
+    "load_more": "加载更多",
+    "export": "导出 CSV",
+    "export_failed": "无法导出日志。"
+  },
+  "pulse": {
+    "label": "公司脉搏",
+    "decisions": "{{count}} 项等你决定",
+    "goals_at_risk": "{{count}} 个目标有风险",
+    "budgets": "{{count}} 个预算超过软线",
+    "holds": "{{count}} 个预算暂停",
+    "stalled": "{{count}} 个停滞的项目",
+    "routines_late": "{{count}} 个例行任务逾期",
+    "runtimes_offline": "{{count}} 个运行时离线",
+    "quiet": "暂无需要你处理的事"
+  },
+  "health": {
+    "heading": "系统健康",
+    "unreadable": "无法读取系统健康状况。",
+    "nothing_at_risk": "没有需要注意的事项。",
+    "risks_label": "风险",
+    "jobs_heading": "定时任务",
+    "no_jobs": "尚无定时任务运行过。",
+    "col_job": "任务",
+    "col_last_success": "上次成功",
+    "col_state": "状态",
+    "never_succeeded": "从未",
+    "stuck": "卡住",
+    "ok": "正常",
+    "deliveries_label": "过去 24 小时投递失败",
+    "deliveries_value": "{{count}}",
+    "knowledge_label": "知识库",
+    "knowledge_not_offered": "本部署未启用",
+    "knowledge_state": {
+      "ready": "就绪",
+      "offline": "离线",
+      "provisioning": "设置中",
+      "failed": "失败",
+      "disabled": "已关闭",
+      "unknown": "未知"
+    },
+    "budget_gate_label": "预算闸门",
+    "budget_gate_not_reported": "尚未报告",
+    "budget_gate_no_cache": "尚无缓存计数",
+    "budget_gate_age": "计数 {{seconds}} 秒前刷新"
+  },
+  "reviews_tab": {
+    "empty": "目前没有你可以查看的评估。评估对所有者、管理员以及被评估小组的负责人可见。",
+    "loading": "正在加载评估",
+    "rating": {
+      "exceeds": "超出预期",
+      "meets": "符合预期",
+      "below": "低于预期",
+      "at_risk": "有风险",
+      "unknown": "未评级"
+    },
+    "subject": {
+      "agent": "智能体",
+      "squad": "小组",
+      "company": "公司",
+      "unknown": "对象"
+    },
+    "period": {
+      "week": "{{start}} 当周",
+      "month": "{{start}} 当月",
+      "unknown": "{{start}} 起的周期"
+    },
+    "recommendation": {
+      "observe": "已记录，不做变更",
+      "filed": "已提交老板决定",
+      "refused": "未提交"
+    },
+    "change": {
+      "instruction_change": "指令变更",
+      "skill_change": "技能变更",
+      "charter_change": "章程变更",
+      "autonomy_change": "自主级别变更",
+      "hire": "招聘",
+      "retire": "退役",
+      "move": "调动",
+      "merge_squads": "合并小组",
+      "unretire": "恢复",
+      "unmerge": "拆分小组",
+      "observe": "观察"
+    },
+    "proposal": "提案 {{id}}",
+    "figures": "记分卡数据",
+    "generic": "建议",
+    "no_recommendations": "没有建议"
+  },
+  "goals": {
+    "loading": "正在加载目标…",
+    "load_failed": "无法加载目标。",
+    "tree": {
+      "company": "公司",
+      "unnamed": "{{scope}}（不在列表中）"
+    },
+    "scope": {
+      "company": "公司",
+      "floor": "楼层",
+      "squad": "小队",
+      "initiative": "项目"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "进行中",
+      "achieved": "已达成",
+      "missed": "未达成",
+      "dropped": "已放弃",
+      "unknown": "未知"
+    },
+    "confidence": {
+      "on_track": "进展正常",
+      "at_risk": "有风险",
+      "off_track": "偏离轨道",
+      "unknown": "暂无读数",
+      "overridden": "（负责人判断）"
+    },
+    "progress": "{{percent}}%",
+    "progress_none": "暂无读数",
+    "no_reading": "暂无读数",
+    "detail": {
+      "load_failed": "无法加载此目标。",
+      "action_failed": "无法更改目标，请重试。",
+      "close": "关闭",
+      "period": "{{start}} 至 {{end}}",
+      "override_note": "读数显示为 {{derived}}，负责人改为：{{note}}",
+      "key_results": "关键结果",
+      "kr_title": "关键结果",
+      "kr_range": "起点 → 目标",
+      "kr_now": "最新",
+      "kr_progress": "进度",
+      "kr_trend": "读数",
+      "kr_from_to": "{{start}} → {{target}}",
+      "kr_trend_label": "{{title}} 的读数",
+      "child_goals": "此目标下的目标",
+      "source_proposal": "由提案 {{id}} 设定",
+      "activate": "启用",
+      "close_as": {
+        "achieved": "标记为已达成",
+        "missed": "标记为未达成",
+        "dropped": "放弃"
+      },
+      "override_heading": "负责人的信心",
+      "override_clear": "使用读数",
+      "override_why": "此信心判断的理由",
+      "override_save": "保存信心",
+      "override_saved": "已保存信心"
+    },
+    "create": {
+      "button": "新建目标",
+      "title": "新建目标",
+      "scope": "范围",
+      "target_floor": "楼层",
+      "target_initiative": "项目",
+      "target_required": "请选择这个目标针对的对象。",
+      "title_label": "标题",
+      "title_required": "请为目标填写标题。",
+      "title_too_long": "标题不能超过 200 个字符。",
+      "why_label": "原因（可选）",
+      "period_start": "开始",
+      "period_end": "结束",
+      "period_required": "请填写期间的开始和结束日期。",
+      "period_order": "结束日期必须晚于开始日期。",
+      "owner": "负责人",
+      "owner_type": "负责人类型",
+      "owner_types": {
+        "squad": "小队",
+        "member": "成员",
+        "agent": "智能体"
+      },
+      "owner_required": "请选择负责人。",
+      "key_results": "关键结果",
+      "kr_title": "关键结果",
+      "kr_metric": "指标",
+      "kr_start": "起始值",
+      "kr_target": "目标值",
+      "kr_add": "添加关键结果",
+      "kr_remove": "移除",
+      "kr_title_required": "请为每个关键结果填写标题。",
+      "kr_metric_required": "请为每个关键结果选择指标。",
+      "kr_values_required": "请填写起始值和目标值。",
+      "kr_values_equal": "目标值必须与起始值不同。",
+      "submit": "创建目标",
+      "cancel": "取消",
+      "created": "目标已创建",
+      "failed": "无法创建目标。请检查填写内容后重试。"
+    }
+  },
+  "reading": {
+    "title": "添加读数",
+    "metric": "指标",
+    "value": "数值",
+    "note": "备注",
+    "submit": "添加读数",
+    "saved": "已添加读数",
+    "failed": "无法添加读数。",
+    "no_metrics": "暂无指标",
+    "scope_note": "此读数属于{{scope}}。"
+  },
+  "budgets": {
+    "title": "预算",
+    "read_only": "只有所有者或管理员可以修改预算。",
+    "scope": {
+      "company": "公司",
+      "floor": "楼层",
+      "squad": "小组",
+      "initiative": "项目"
+    },
+    "period": {
+      "week": "每周",
+      "month": "每月",
+      "quarter": "每季度"
+    },
+    "mode": {
+      "warn": "仅提醒",
+      "hold": "达到上限时保留运行"
+    },
+    "state": {
+      "ok": "预算内",
+      "soft": "接近上限",
+      "hard": "已达上限",
+      "unknown": "未知"
+    },
+    "spent": "已花费 {{spent}}，上限 {{limit}}",
+    "spent_label": "相对上限的支出",
+    "elapsed": "已过去本期的 {{percent}}%",
+    "overrun": "按此速度，将于 {{date}} 达到上限",
+    "no_overrun": "按此速度，本期不会超出上限",
+    "holds_count": "{{count}} 个被保留",
+    "history": "历史",
+    "history_empty": "尚无期间记录。",
+    "columns": {
+      "period": "期间",
+      "spent": "花费",
+      "extended": "已延长",
+      "runs": "运行",
+      "state": "状态"
+    },
+    "amount_label": "每期新金额（美元）",
+    "amount_placeholder": "金额",
+    "set_amount": "设置金额",
+    "save_failed": "预算保存失败，请重试。",
+    "holds_title": "因预算被保留的运行",
+    "holds_empty": "没有因预算被保留的运行。",
+    "release": "解除保留",
+    "release_hint": "让被保留的运行即使达到上限也能开始一次。",
+    "extend": "延长",
+    "extend_amount": "本期要增加的金额（美元）",
+    "extended": "已延长本期上限。",
+    "released": "已解除 {{count}} 个保留的运行。",
+    "create": {
+      "button": "新建预算",
+      "title": "新建预算",
+      "scope": "范围",
+      "target_required": "请选择此预算所覆盖的{{scope}}。",
+      "period": "周期",
+      "amount": "每个周期的金额（美元）",
+      "amount_required": "请输入不小于 0 的金额。",
+      "soft_percent": "达到上限的此比例时警告（%）",
+      "soft_invalid": "请输入 1 到 100 之间的整数百分比。",
+      "mode": "达到上限时",
+      "classes": "适用的运行",
+      "class": {
+        "routine": "例行",
+        "delegated": "委派"
+      },
+      "classes_required": "至少选择一种运行。",
+      "submit": "创建预算",
+      "cancel": "取消",
+      "created": "预算已创建",
+      "failed": "无法创建预算。请检查填写内容后重试。",
+      "exists": "该范围和周期的预算已存在。"
+    }
+  }
+}

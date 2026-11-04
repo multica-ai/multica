@@ -242,15 +242,45 @@ func (s *KnowledgeService) FreshnessReview(ctx context.Context, workspaceID pgty
 	return report, nil
 }
 
+// executiveOfficeSquadName is the starter company's Executive Office squad, the
+// Librarian's home. It takes the review requests of documents no squad owns.
+const executiveOfficeSquadName = "Executive Office"
+
+// executiveOfficeSquad returns the workspace's Executive Office squad, or the
+// zero id when the starter company has not installed one.
+func (s *KnowledgeService) executiveOfficeSquad(ctx context.Context, workspaceID pgtype.UUID) (pgtype.UUID, error) {
+	squads, err := s.Queries.ListSquads(ctx, workspaceID)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("list squads: %w", err)
+	}
+	for _, sq := range squads {
+		if sq.Name == executiveOfficeSquadName {
+			return sq.ID, nil
+		}
+	}
+	return pgtype.UUID{}, nil
+}
+
 // requestReview opens the review request of a due document, unless one stands,
-// and returns the finding reason. The document's owning squad is the squad of
-// the agent that wrote it; a document without one is not requested. A request
-// stands while its issue is open, and for knowledgeReviewWindow after it was
-// opened, so a closed request is not repeated at once.
+// and returns the finding reason. The request goes to the document's owning
+// squad, the squad of the agent that wrote it. A document with no owning squad
+// goes to the Executive Office squad, which drafts a superseding update or asks
+// the boss; with no Executive Office squad it is reported and not requested. A
+// request stands while its issue is open, and for knowledgeReviewWindow after it
+// was opened, so a closed request is not repeated at once.
 func (s *KnowledgeService) requestReview(ctx context.Context, workspaceID pgtype.UUID, l db.KnowledgeLink, now time.Time) (string, error) {
-	if !l.SquadID.Valid {
-		slog.Info("knowledge: a due document has no owning squad; not requested", "link_id", util.UUIDToString(l.ID), "workspace_id", util.UUIDToString(workspaceID))
-		return "review_no_squad", nil
+	assignee := l.SquadID
+	ownerless := !assignee.Valid
+	if ownerless {
+		exec, err := s.executiveOfficeSquad(ctx, workspaceID)
+		if err != nil {
+			return "", err
+		}
+		if !exec.Valid {
+			slog.Info("knowledge: a due document has no owning squad and no Executive Office; not requested", "link_id", util.UUIDToString(l.ID), "workspace_id", util.UUIDToString(workspaceID))
+			return "review_no_squad", nil
+		}
+		assignee = exec
 	}
 	if l.ReviewIssueID.Valid {
 		prev, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: l.ReviewIssueID, WorkspaceID: workspaceID})
@@ -276,11 +306,11 @@ func (s *KnowledgeService) requestReview(ctx context.Context, workspaceID pgtype
 	res, err := s.Issues.Create(ctx, IssueCreateParams{
 		WorkspaceID:    workspaceID,
 		Title:          "Review request: " + l.Title,
-		Description:    pgtype.Text{String: reviewRequestBody(l), Valid: true},
+		Description:    pgtype.Text{String: reviewRequestBody(l, ownerless), Valid: true},
 		Status:         "todo",
 		Priority:       "none",
 		AssigneeType:   pgtype.Text{String: "squad", Valid: true},
-		AssigneeID:     l.SquadID,
+		AssigneeID:     assignee,
 		CreatorType:    "member",
 		CreatorID:      owners[0],
 		AllowDuplicate: true,
@@ -298,7 +328,7 @@ func (s *KnowledgeService) requestReview(ctx context.Context, workspaceID pgtype
 
 // reviewRequestBody names the document the request is about, by its registry
 // link and its WeKnora id, so the owning squad can find it with the CLI.
-func reviewRequestBody(l db.KnowledgeLink) string {
+func reviewRequestBody(l db.KnowledgeLink, ownerless bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "The Librarian's freshness review found the knowledge document %q due for review.\n\n", l.Title)
 	fmt.Fprintf(&b, "- Kind: %s\n", l.Kind)
@@ -306,6 +336,10 @@ func reviewRequestBody(l db.KnowledgeLink) string {
 		fmt.Fprintf(&b, "- Valid until: %s\n", l.ValidUntil.Time.Format("2006-01-02"))
 	}
 	fmt.Fprintf(&b, "- Knowledge link: %s\n- WeKnora document: %s\n\n", util.UUIDToString(l.ID), l.WeknoraKnowledgeID)
+	if ownerless {
+		b.WriteString("No squad owns this document, so the request comes to the Executive Office. Draft an update that supersedes it, or ask the boss who should own it. Close this request when that is done.\n")
+		return b.String()
+	}
 	b.WriteString("Check the document. Publish a version that supersedes it, or set a new valid_until date. Close this request when that is done.\n")
 	return b.String()
 }

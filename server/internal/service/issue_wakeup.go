@@ -1283,6 +1283,32 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	}
 	var chain []string
 	if !taskExists {
+		// The company's controls hold a routine firing while the company is
+		// paused or in quiet hours. Inputs stay pending and fire at the first
+		// tick after the hold lifts.
+		verdict, err := CompanyVerdict(ctx, q, w.WorkspaceID, wakeupRunClass(manual), now)
+		if err != nil {
+			return err
+		}
+		// A squad at L0 (Suggest) runs routines only when someone assigns or
+		// mentions it (spec 4.3). A wakeup is a routine run unless a person fired
+		// it, so an issue assigned to an L0 squad holds it too.
+		if verdict.Admit && !manual {
+			if verdict, err = wakeupAutonomyVerdict(ctx, q, issue); err != nil {
+				return err
+			}
+		}
+		if !verdict.Admit {
+			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: w.Enabled, NextFireAt: next}); err != nil {
+				return err
+			}
+			if timedOut {
+				if err = markTimedOut(); err != nil {
+					return err
+				}
+			}
+			return commit()
+		}
 		var loop bool
 		if chain, loop, err = wakeupChain(ctx, q, w, receipts); err != nil {
 			return err

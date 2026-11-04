@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS approval_policy_workspace_active_idx;

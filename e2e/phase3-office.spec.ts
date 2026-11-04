@@ -183,10 +183,11 @@ test("the starter company installs on an empty workspace, and a second apply cha
     expect(await api.listSquads()).toHaveLength(0);
 
     const first = await installCompany(api, runtimeId);
-    // Only the ventures step may fail. The policies step after it is the last step.
+    // Only the ventures step may fail. The company budget step (phase 4, spec 4.2) runs
+    // last, after the policies step, so it is the final step of the apply.
     const failed = first.steps.filter((step) => step.status === "failed");
     expect(failed.every((step) => step.key === WEKNORA_STEP)).toBe(true);
-    expect(first.steps.at(-1)?.key).toBe("knowledge:policies");
+    expect(first.steps.at(-1)?.key).toBe("budgets:company");
     expect(first.unowned_stages).toEqual([]);
     expect(first.pipeline_id).not.toBeNull();
 

@@ -189,6 +189,26 @@
       "unknown": "未知"
     }
   },
+  "repo": {
+    "title": "程式庫文件",
+    "description": "把程式庫的 docs 目錄保存到工程知識庫中。每個 Markdown 檔案成為一份參考文件，每個檔案都需要 Summary 標題。",
+    "load_error": "無法載入程式庫同步設定",
+    "enabled": "每天同步此程式庫",
+    "repo_url": "程式庫位址（https）",
+    "branch": "分支",
+    "docs_path": "docs 目錄",
+    "base": "知識庫",
+    "save": "儲存",
+    "run": "立即同步",
+    "last_sync": "上次同步 {{when}}",
+    "never_synced": "從未同步",
+    "last_error": "上次同步有失敗的檔案，請查看下方",
+    "toast": {
+      "saved": "程式庫同步設定已儲存",
+      "synced": "程式庫已同步",
+      "failed": "無法儲存程式庫同步設定"
+    }
+  },
   "bases": {
     "title": "知識庫",
     "description": "可將知識庫限定給指定的小組、樓層或智慧代理。Wiki 最多開啟三個知識庫；摘要會產生模型呼叫費用。",

@@ -1,0 +1,62 @@
+---
+title: Autonomie et approbations
+description: Chaque squad a un niveau d'autonomie qui fixe la latitude dont il dispose sans vous demander. Les approbations permanentes vous permettent d'autoriser à l'avance une catégorie étroite de propositions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Certaines décisions ne devraient pas attendre votre accord à chaque fois. **L'autonomie** fixe ce qu'un squad peut faire sans demander, et une **approbation permanente** autorise à l'avance une catégorie étroite de propositions. Vous en voyez le résultat après coup, et non avant.
+
+## Niveaux d'autonomie
+
+Chaque squad a un niveau de 0 à 3. Le niveau par défaut est 1. Seuls vous ou un administrateur le modifiez, et chaque changement est enregistré dans le journal de gouvernance. Une revue peut recommander un changement, déposé sous forme de proposition.
+
+| Niveau | Nom | Ce que la plateforme autorise |
+| --- | --- | --- |
+| L0 | Suggest (Suggérer) | Les routines du squad sont suspendues. Il n'agit que si quelqu'un l'assigne ou le mentionne. Il peut toujours déposer des propositions. |
+| L1 | Work (Travailler) | Les routines s'exécutent. Le squad recherche, analyse, rédige des brouillons de connaissances et dépose des propositions. Chaque décision vous revient. |
+| L2 | Trusted (De confiance) | Comme L1. Ses brouillons de connaissances peuvent être publiés après relecture. Les approbations permanentes peuvent approuver ses propositions. |
+| L3 | Autonomous (Autonome) | Comme L2. Les approbations permanentes peuvent en plus créer des initiatives à partir de ses propres opportunités, à la première étape, dans les limites des plafonds et du budget. |
+
+Deux choses ne dépendent jamais du niveau : un **lancement** vous revient toujours, tout comme chaque **changement d'organisation**. Les dépenses restent toujours bornées par les [budgets](/budgets).
+
+<Callout type="warning">
+L'autonomie limite ce que fait la plateforme : quelles routines s'exécutent, ce qui est publié dans le registre partagé, quelles propositions sont décidées sans vous, quelles initiatives sont créées et combien est dépensé. Elle ne limite pas ce que fait un agent à l'intérieur d'une exécution. Un agent peut appeler un service externe que ses identifiants autorisent. Limitez la portée de ces identifiants, et placez une porte externe devant toute action ayant des effets hors de l'espace de travail.
+</Callout>
+
+L'onglet Autonomy de **Gouvernance** liste le niveau de chaque squad et permet de le modifier. Le panneau du squad et le bureau affichent le niveau sous forme d'étiquette. L'API est `GET` et `PUT /api/squads/{id}/autonomy`.
+
+## Approbations permanentes
+
+Une **politique** décrit une catégorie de propositions que vous avez approuvée à l'avance :
+
+- un **type**, parmi les types de proposition (`decision`, `opportunity` ou `goal`). Les types jamais éligibles sont refusés : `org_change`, les portes de lancement, `budget`, `stage_gate` et `standing_approval` lui-même ;
+- un **critère de correspondance** : les squads ou étages couverts, un coût maximal, et les champs que la charge utile doit égaler. Une correspondance sur des étiquettes est refusée, car les propositions n'en portent pas ;
+- un **plafond hebdomadaire**, de 1 à 50, 3 par défaut ;
+- une date de **validité** facultative, et un indicateur d'activité.
+
+Lorsqu'un squad dépose une proposition, le moteur de politiques vérifie chaque politique active. Une politique ne s'applique que si le squad déposant est au niveau L2 ou plus, et au niveau L3 pour les opportunités qui créent des initiatives. La proposition doit correspondre, le plafond hebdomadaire ne doit pas être épuisé, et la proposition ne doit pas être urgente. Son coût estimé doit rentrer dans le maximum de la politique et dans le budget restant du squad.
+
+Une correspondance approuve la proposition au nom de la politique elle-même, l'applique comme le ferait l'approbation d'une personne, et enregistre un événement de gouvernance. Le brief suivant la liste sous **Auto-approved by policy** (Approuvée automatiquement par politique). Une politique qui a approuvé automatiquement une chose ensuite infirmée lors d'une revue est signalée dans la revue hebdomadaire.
+
+Seuls vous ou un administrateur créez une politique. Un agent peut proposer une politique sous forme de proposition `standing_approval`, que vous approuvez comme toute autre proposition. Aucun agent ne peut modifier une politique ni le niveau d'autonomie.
+
+Pour révoquer une politique, ouvrez **Policies** (Politiques) dans l'onglet Autonomy et révoquez-la. La révocation prend effet immédiatement et est enregistrée.
+
+```bash
+curl -X POST "$MULTICA_API/api/approval-policies" -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $WORKSPACE_ID" -H "Content-Type: application/json" \
+  -d '{"name": "Pilot follow-ups", "kind": "decision", "match": {"squad_ids": ["<squad-id>"], "max_cost_micros": 5000000}, "max_per_week": 2}'
+```
+
+Les autres points d'entrée des politiques sont `GET /api/approval-policies`, `POST /api/approval-policies/{id}/revoke` et `GET /api/approval-policies/{id}/auto-approvals`. La CLI n'a pas de commandes de politique.
+
+## Publication des connaissances et autonomie
+
+Les brouillons de connaissances d'un squad de niveau inférieur à L2 ne se publient pas automatiquement, quelle que soit la politique de publication. Voir [Taxonomie des connaissances](/knowledge-taxonomy).
+
+## Étapes suivantes
+
+- [Propositions](/proposals) pour ce qu'une approbation permanente peut correspondre.
+- [Budgets](/budgets) pour la limite de dépenses, à chaque niveau.
+- [Contrôles et journal](/controls-and-log) pour la pause et la piste d'audit.

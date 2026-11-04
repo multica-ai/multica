@@ -41,6 +41,21 @@ const full = {
       items: [{ id: "k1", title: "Pricing 2024", knowledge_base: "market", published_at: "2026-06-01T00:00:00Z" }],
     },
     pending_drafts: 3,
+    auto_published: {
+      count: 1,
+      items: [
+        {
+          link_id: "l1",
+          title: "Ledger ADR",
+          knowledge_base: "engineering",
+          kind: "adr",
+          mode: "auto_after_review",
+          author_squad_id: "s1",
+          critic_squad_id: "s2",
+          published_at: "2026-07-02T09:00:00Z",
+        },
+      ],
+    },
   },
 };
 
@@ -55,24 +70,30 @@ describe("DigestSchema", () => {
     expect(d.knowledge.pending_drafts).toBe(3);
     expect(d.knowledge.stale_published.count).toBe(12);
     expect(d.knowledge.stale_published.items[0]).toMatchObject({ title: "Pricing 2024", knowledge_base: "market" });
+    expect(d.knowledge.auto_published.items[0]).toMatchObject({ title: "Ledger ADR", mode: "auto_after_review", critic_squad_id: "s2" });
   });
 
   it("fills defaults for everything an older server omits", () => {
     const d = parseWithFallback({ since: "x" }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
     expect(d).toMatchObject({ since: "x", squads: [], omitted_squad_count: 0, quiet: { count: 0, squads: [] } });
     expect(d.workspace.offline_runtimes).toEqual({ count: 0, items: [] });
-    expect(d.knowledge).toEqual({ stale_published: { count: 0, items: [] }, pending_drafts: 0 });
+    expect(d.knowledge).toEqual({
+      stale_published: { count: 0, items: [] },
+      pending_drafts: 0,
+      auto_published: { count: 0, items: [] },
+    });
   });
 
   it("treats a null knowledge list as empty and keeps the counts", () => {
     const d = parseWithFallback(
-      { ...full, knowledge: { stale_published: { count: 2, items: null }, pending_drafts: 1 } },
+      { ...full, knowledge: { stale_published: { count: 2, items: null }, pending_drafts: 1, auto_published: { count: 0, items: null } } },
       DigestSchema,
       FALLBACK_DIGEST,
       { endpoint: "t" },
     );
     expect(d.knowledge.stale_published).toEqual({ count: 2, items: [] });
     expect(d.knowledge.pending_drafts).toBe(1);
+    expect(d.knowledge.auto_published).toEqual({ count: 0, items: [] });
   });
 
   it("falls back to an empty knowledge section when the section is malformed", () => {

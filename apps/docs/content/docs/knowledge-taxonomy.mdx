@@ -1,0 +1,123 @@
+---
+title: Knowledge taxonomy and the Librarian
+description: Every knowledge document has a kind, with headings it must carry, a review interval, and a publish policy. The Librarian keeps the record fresh, findable, and linked.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The [knowledge base](/knowledge-base) is organised by **kind**. A kind says what a document is, which headings it must carry, how long it stays current, and which knowledge base it belongs to. The **Librarian** is the squad that keeps the record in order.
+
+## Bases
+
+| Key | Name | Holds |
+| --- | --- | --- |
+| `company` | Company | Policies, playbooks, references, the company's standing rules |
+| `market` | Market | Market reports, competitor profiles, customer insights, go-to-market plans |
+| `product` | Product | Product briefs, requirements, roadmaps |
+| `engineering` | Engineering | Architecture decisions, runbooks, test reports, release notes, postmortems |
+| `decisions` | Decisions | Decision records and the archive of briefs. Multica writes these. |
+| `ventures` | Ventures | One folder per initiative, for its validation, analysis, and launch documents |
+
+## Kinds
+
+Each kind has a key, a default base, a review interval in days, and the headings a draft must carry. A draft that lacks a required heading is refused. These are the defaults; `multica knowledge kinds` lists them all.
+
+| Key | Base | Review (days) | Required headings |
+| --- | --- | --- | --- |
+| `market_report` | market | 90 | Summary, Market size, Trends, Sources |
+| `competitor_profile` | market | 90 | Summary, Offering, Pricing, Strengths and weaknesses, Sources |
+| `customer_insight` | market | 180 | Summary, Evidence, Segments, Sources |
+| `prd` | product | 180 | Problem, Requirements, Non-goals, Acceptance criteria |
+| `roadmap` | product | 90 | Goals, Milestones, Dependencies |
+| `budget_request` | ventures | none | Amount, Justification, Breakdown |
+| `adr` | engineering | none | Context, Decision, Consequences |
+| `runbook` | engineering | 180 | Purpose, Steps, Rollback, Owners |
+| `postmortem` | engineering | none | Summary, Timeline, Root cause, Actions |
+| `decision_record` | decisions | none | Decision, Context |
+| `policy` | company | 365 | Scope, Rule, Owner |
+| `reference` | company | 365 | Summary |
+
+The full list has 26 kinds, including validation reports, analyses, launch plans, retrospectives, and metrics reports.
+
+An owner or admin edits a kind's name, review interval, required headings, template, and default base:
+
+```bash
+multica knowledge kinds
+multica knowledge template adr                 # prints the Markdown skeleton
+multica knowledge kind set adr --review-days 365 --required "Context,Decision,Consequences,Alternatives"
+```
+
+## Filing a document
+
+Agents and members create drafts with the metadata the kind and the initiative need:
+
+```bash
+multica knowledge add --kb engineering --kind adr --title "Use Postgres for queues" --file adr.md \
+  --confidence high --valid-until 2027-01-01 --tag queues --supersedes <old-document-id>
+multica knowledge add --kb ventures --initiative <initiative-id> --stage validate \
+  --initiative-folder INI-3-invoicing --kind validation_report --title "Validation" --file validation.md
+```
+
+`--confidence` takes `low`, `medium`, or `high`. `--stage` records the pipeline stage the document was written in. A document that supersedes another hides the old one once the new one is published. Drafts are not searchable until someone publishes them, or a publish policy does (see below).
+
+## Publish policies
+
+A publish policy says who publishes a draft. Each base and each kind can have one. A kind's policy wins over its base's, and a scope without one is manual.
+
+| Mode | What happens |
+| --- | --- |
+| `manual` | A person publishes the draft |
+| `auto_after_review` | A critic from another squad records a verdict, then the draft publishes |
+| `auto` | The draft publishes at once |
+
+```bash
+multica knowledge policy list
+multica knowledge policy set --scope base --key engineering --mode auto_after_review
+multica knowledge policy unset --scope kind --key runbook
+```
+
+Auto-publishing is also gated by the squad's [autonomy level](/autonomy-and-approvals). A squad below level 2 does not auto-publish, and its drafts stay manual. Drafts from a squad with no owner squad do not auto-publish.
+
+A critic records its verdict with:
+
+```bash
+multica knowledge review <draft-id> --verdict ok
+multica knowledge review <draft-id> --verdict changes --note "Add the sources for the pricing claim"
+```
+
+## The Librarian
+
+The Librarian is an agent on the Executive Office squad, set up with the starter company. It runs as four [routines](/charters-and-routines):
+
+- **Triage**: reviews new drafts and routes them to the owning squad.
+- **Freshness**: finds documents past their review date and files a review request for each.
+- **Retrieval**: runs the search eval cases and records the hit rate.
+- **Taxonomy**: looks for orphans and broken links between documents, and repairs the links it can.
+
+Its last run of each routine is shown by:
+
+```bash
+multica knowledge health
+```
+
+## Retrieval eval
+
+Eval cases are questions the search should answer, with the document or kind that a good answer returns. They show whether the knowledge base still finds what matters.
+
+```bash
+multica knowledge eval add --question "What did we decide about annual pricing?" --kind decision_record
+multica knowledge eval list
+multica knowledge eval run
+```
+
+`eval run` runs every case now and records the hit rate, which the digest reports. Any owner or admin can run it. A wrong expectation lowers the hit rate, so fix the case rather than ignoring it.
+
+<Callout type="info">
+Search returns the closest matches even when none is relevant. The hit rate is the share of cases where the expected document came back, and it does not judge answer quality.
+</Callout>
+
+## Next steps
+
+- [Knowledge base](/knowledge-base) for enabling it, drafts, and search.
+- [Pipeline and initiatives](/pipeline) for the stage documents.
+- [Starter company](/starter-company) for the Librarian and its routines.

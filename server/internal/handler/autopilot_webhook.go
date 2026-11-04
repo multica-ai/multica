@@ -603,6 +603,14 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		"autopilot_id": uuidToString(autopilot.ID),
 		"trigger_id":   uuidToString(trigRow.ID),
 	}
+	if run.Status == "deferred" {
+		respBody = map[string]any{
+			"status":      "deferred",
+			"delivery_id": uuidToString(delivery.ID),
+			"run_id":      uuidToString(run.ID),
+			"reason":      "quiet_hours",
+		}
+	}
 	if run.Status == "skipped" {
 		respBody = map[string]any{
 			"status":      "skipped",

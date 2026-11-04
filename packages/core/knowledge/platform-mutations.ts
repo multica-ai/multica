@@ -8,6 +8,8 @@ import type {
   KnowledgeBaseSettingsPatch,
   KnowledgeModelChecks,
   KnowledgeOwnerLogin,
+  KnowledgeRepoSync,
+  KnowledgeRepoSyncRequest,
   KnowledgeSubjectType,
   UploadKnowledgeDocumentParams,
 } from "./platform-types";
@@ -76,6 +78,30 @@ export function useUpdateKnowledgeBaseSettings(wsId: string) {
   return useMutation<KnowledgeBaseSettings, Error, { key: string } & KnowledgeBaseSettingsPatch>({
     mutationFn: ({ key, ...patch }) => api.updateKnowledgeBaseSettings(key, patch),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.bases(wsId) });
+    },
+  });
+}
+
+/** Saves the repo-docs sync setting. Turning it on does not clone anything. */
+export function useSaveKnowledgeRepoSync(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation<KnowledgeRepoSync, Error, KnowledgeRepoSyncRequest>({
+    mutationFn: (req) => api.updateKnowledgeRepoSync(req),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgePlatformKeys.repoSync(wsId) });
+    },
+  });
+}
+
+/** Syncs the repository now and returns the setting with the run's outcome. */
+export function useRunKnowledgeRepoSync(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation<KnowledgeRepoSync, Error, void>({
+    mutationFn: () => api.runKnowledgeRepoSync(),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgePlatformKeys.repoSync(wsId) });
+      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(wsId) });
       qc.invalidateQueries({ queryKey: knowledgeKeys.bases(wsId) });
     },
   });

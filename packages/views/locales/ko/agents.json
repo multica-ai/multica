@@ -1112,6 +1112,14 @@
         "people_performance": {
           "name": "인재 리드",
           "description": "각 스쿼드의 실적을 헌장과 비교해 검토하고, 지연되거나 침묵하는 항목을 보고합니다. 목표는 정하지 않습니다."
+        },
+        "people_reviewer": {
+          "name": "인재 리뷰어",
+          "description": "채점된 스쿼드와 에이전트마다 월간 리뷰를 게시하고, 대표가 결정할 제안을 덧붙입니다. 목표는 정하지 않습니다."
+        },
+        "floor_chief": {
+          "name": "층 책임자",
+          "description": "층의 다이제스트로 비서를 위한 일일 층 보고서를 작성합니다. 결정하거나 팀을 바꾸지 않습니다."
         }
       }
     },
@@ -1167,5 +1175,28 @@
       "next": "다음"
     }
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "수정 기록",
+    "show": "기록 보기",
+    "hide": "기록 숨기기",
+    "loading": "수정 기록을 불러오는 중…",
+    "load_failed": "수정 기록을 불러올 수 없습니다.",
+    "empty": "저장된 수정 기록이 아직 없습니다.",
+    "revision_label": "수정 {{revision}}",
+    "current": "현재",
+    "source": {
+      "human": "편집",
+      "proposal": "승인된 제안에 따른 변경",
+      "rollback": "복원",
+      "unknown": "변경"
+    },
+    "show_text": "본문 보기",
+    "hide_text": "본문 숨기기",
+    "restore": "복원",
+    "restore_named": "수정 {{revision}} 복원",
+    "restored": "수정 {{revision}}을(를) 복원했습니다",
+    "restore_failed": "이 수정을 복원할 수 없습니다. 다시 시도하세요.",
+    "restore_unchanged": "에이전트에 이미 이 지침이 있습니다."
+  }
 }

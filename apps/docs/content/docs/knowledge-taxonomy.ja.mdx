@@ -1,0 +1,123 @@
+---
+title: ナレッジの分類とライブラリアン
+description: すべてのナレッジドキュメントには種類があります。種類によって、必須の見出し、レビュー間隔、公開ポリシーが決まります。ライブラリアンは、記録を最新で探しやすく、相互にリンクされた状態に保ちます。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+[ナレッジベース](/knowledge-base)は **種類（kind）** で整理されています。種類は、ドキュメントが何であるか、どの見出しを含まなければならないか、どのくらいの期間有効か、どのナレッジベースに属するかを定めます。**ライブラリアン** は、この記録を整理しておくスクワッドです。
+
+## ナレッジベース
+
+| キー | 名前 | 内容 |
+| --- | --- | --- |
+| `company` | Company | ポリシー、プレイブック、リファレンス、会社の常設ルール |
+| `market` | Market | 市場レポート、競合プロファイル、顧客インサイト、市場展開計画 |
+| `product` | Product | プロダクトブリーフ、要件、ロードマップ |
+| `engineering` | Engineering | アーキテクチャ決定、ランブック、テストレポート、リリースノート、事後分析 |
+| `decisions` | Decisions | 決定の記録とブリーフのアーカイブ。Multica が書き込みます。 |
+| `ventures` | Ventures | イニシアチブごとのフォルダー。検証、分析、予算申請、公開のドキュメントを格納します |
+
+## 種類
+
+各種類には、キー、既定のナレッジベース、日数で表したレビュー間隔、そして下書きが含まなければならない見出しがあります。必須の見出しを欠いた下書きは拒否されます。以下は既定値です。`multica knowledge kinds` ですべてを一覧できます。
+
+| キー | ナレッジベース | レビュー（日） | 必須の見出し |
+| --- | --- | --- | --- |
+| `market_report` | market | 90 | Summary、Market size、Trends、Sources |
+| `competitor_profile` | market | 90 | Summary、Offering、Pricing、Strengths and weaknesses、Sources |
+| `customer_insight` | market | 180 | Summary、Evidence、Segments、Sources |
+| `prd` | product | 180 | Problem、Requirements、Non-goals、Acceptance criteria |
+| `roadmap` | product | 90 | Goals、Milestones、Dependencies |
+| `budget_request` | ventures | なし | Amount、Justification、Breakdown |
+| `adr` | engineering | なし | Context、Decision、Consequences |
+| `runbook` | engineering | 180 | Purpose、Steps、Rollback、Owners |
+| `postmortem` | engineering | なし | Summary、Timeline、Root cause、Actions |
+| `decision_record` | decisions | なし | Decision、Context |
+| `policy` | company | 365 | Scope、Rule、Owner |
+| `reference` | company | 365 | Summary |
+
+全体では26種類あり、検証レポート、分析、公開計画、振り返り、メトリクスレポートなども含まれます。
+
+オーナーまたは管理者は、種類の名前、レビュー間隔、必須の見出し、テンプレート、既定のナレッジベースを編集できます。
+
+```bash
+multica knowledge kinds
+multica knowledge template adr                 # Markdown の雛形を表示
+multica knowledge kind set adr --review-days 365 --required "Context,Decision,Consequences,Alternatives"
+```
+
+## ドキュメントを登録する
+
+メンバーとエージェントは、種類とイニシアチブに必要なメタデータを付けて下書きを作成します。
+
+```bash
+multica knowledge add --kb engineering --kind adr --title "Use Postgres for queues" --file adr.md \
+  --confidence high --valid-until 2027-01-01 --tag queues --supersedes <old-document-id>
+multica knowledge add --kb ventures --initiative <initiative-id> --stage validate \
+  --initiative-folder INI-3-invoicing --kind validation_report --title "Validation" --file validation.md
+```
+
+`--confidence` には `low`、`medium`、`high` を指定します。`--stage` は、ドキュメントが書かれたパイプラインのステージを記録します。置き換え先が公開されると、古いドキュメントは非表示になります。下書きは、誰かが公開するか、公開ポリシーによって公開されるまで検索できません。
+
+## 公開ポリシー
+
+公開ポリシーは、下書きを誰が公開するかを定めます。ナレッジベースごとにも種類ごとにも設定できます。種類のポリシーはナレッジベースのポリシーより優先されます。ポリシーがない範囲は手動です。
+
+| モード | 動作 |
+| --- | --- |
+| `manual` | 人が下書きを公開する |
+| `auto_after_review` | 別のスクワッドのレビュアーが結論を記録した後、下書きが公開される |
+| `auto` | 下書きが直ちに公開される |
+
+```bash
+multica knowledge policy list
+multica knowledge policy set --scope base --key engineering --mode auto_after_review
+multica knowledge policy unset --scope kind --key runbook
+```
+
+自動公開は、スクワッドの[自律性レベル](/autonomy-and-approvals)にも制限されます。レベル2未満のスクワッドは自動公開せず、その下書きは手動のままです。所属スクワッドのない下書きは自動公開されません。
+
+レビュアーは次のように結論を記録します。
+
+```bash
+multica knowledge review <draft-id> --verdict ok
+multica knowledge review <draft-id> --verdict changes --note "Add the sources for the pricing claim"
+```
+
+## ライブラリアン
+
+ライブラリアンは、スターター会社とともに設定される Executive Office スクワッドのエージェントです。四つの[ルーティン](/charters-and-routines)を実行します。
+
+- **トリアージ**：新しい下書きを確認し、担当スクワッドに振り分けます。
+- **鮮度**：レビュー期限を過ぎたドキュメントを見つけ、それぞれにレビュー依頼を作成します。
+- **検索**：検索の評価ケースを実行し、ヒット率を記録します。
+- **分類**：どこからも参照されていないドキュメントや、ドキュメント間の壊れたリンクを探し、修復できるものは修復します。
+
+各ルーティンの直近の実行は、次のコマンドで確認できます。
+
+```bash
+multica knowledge health
+```
+
+## 検索の評価
+
+評価ケースは、検索が答えるべき質問です。良い回答として返されるべきドキュメントや種類も添えます。ナレッジベースが今も重要なものを見つけられているかを示します。
+
+```bash
+multica knowledge eval add --question "What did we decide about annual pricing?" --kind decision_record
+multica knowledge eval list
+multica knowledge eval run
+```
+
+`eval run` はすべてのケースを今すぐ実行し、ヒット率を記録します。ヒット率はダイジェストに表示されます。オーナーまたは管理者なら誰でも実行できます。期待値が誤っているとヒット率が下がるので、無視せずにケースを修正してください。
+
+<Callout type="info">
+関連性がなくても、検索は最も近い候補を返します。ヒット率は、期待したドキュメントが返された件数の割合です。回答の質を評価するものではありません。
+</Callout>
+
+## 次のステップ
+
+- [ナレッジベース](/knowledge-base)：有効化、下書き、検索。
+- [パイプラインとイニシアチブ](/pipeline)：ステージごとのドキュメント。
+- [スターター会社](/starter-company)：ライブラリアンとそのルーティン。

@@ -530,6 +530,14 @@
         "people_performance": {
           "name": "People Lead",
           "description": "Reviews each squad's record against its charter and reports what is late or silent. Sets no targets."
+        },
+        "people_reviewer": {
+          "name": "People Reviewer",
+          "description": "Publishes a monthly review for each scored squad or agent, with proposals the boss decides on. Sets no targets."
+        },
+        "floor_chief": {
+          "name": "Floor Chief",
+          "description": "Writes the floor's daily brief for the Secretary from the floor's digest. Decides nothing and changes no squad."
         }
       }
     },
@@ -1193,5 +1201,28 @@
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "Revision history",
+    "show": "Show revisions",
+    "hide": "Hide revisions",
+    "loading": "Loading revisions…",
+    "load_failed": "Couldn't load the revision history.",
+    "empty": "No saved revisions yet.",
+    "revision_label": "Revision {{revision}}",
+    "current": "Current",
+    "source": {
+      "human": "Edited",
+      "proposal": "From an approved proposal",
+      "rollback": "Restored",
+      "unknown": "Changed"
+    },
+    "show_text": "Show text",
+    "hide_text": "Hide text",
+    "restore": "Restore",
+    "restore_named": "Restore revision {{revision}}",
+    "restored": "Restored revision {{revision}}",
+    "restore_failed": "Couldn't restore this revision. Try again.",
+    "restore_unchanged": "The agent already has these instructions."
+  }
 }

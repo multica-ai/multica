@@ -240,63 +240,87 @@ func (s *PipelineService) createDefault(ctx context.Context, q *db.Queries, ws p
 	if len(tpl) == 0 {
 		return InstallPipelineResult{}, errors.New("install pipeline: the template has no stages")
 	}
-	if err := issuestatus.Ensure(ctx, q, ws); err != nil {
-		return InstallPipelineResult{}, fmt.Errorf("seed issue statuses: %w", err)
+	stages, _, unowned, err := resolveStages(ctx, tpl, resolve)
+	if err != nil {
+		return InstallPipelineResult{}, err
 	}
-	for _, t := range tpl {
-		key := StatusKeyForStage(t.Key)
+	pipeline, err := writePipeline(ctx, q, ws, "Default", true, stages)
+	if err != nil {
+		return InstallPipelineResult{}, err
+	}
+	return InstallPipelineResult{Pipeline: pipeline, Created: true, UnownedStages: unowned}, nil
+}
+
+// writePipeline writes a pipeline with its stages inside q's transaction: the
+// stage statuses, the initiative workflow whose steps hand to the owning squads,
+// the board project and the pipeline row. The company import writes exported
+// pipelines through it as well (spec 4.9).
+func writePipeline(ctx context.Context, q *db.Queries, ws pgtype.UUID, name string, isDefault bool, stages []PipelineStage) (db.Pipeline, error) {
+	if len(stages) == 0 {
+		return db.Pipeline{}, errors.New("install pipeline: the pipeline has no stages")
+	}
+	if err := issuestatus.Ensure(ctx, q, ws); err != nil {
+		return db.Pipeline{}, fmt.Errorf("seed issue statuses: %w", err)
+	}
+	for _, st := range stages {
+		key := StatusKeyForStage(st.Key)
 		if _, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{WorkspaceID: ws, Key: key}); err == nil {
 			continue
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return InstallPipelineResult{}, fmt.Errorf("load stage status: %w", err)
+			return db.Pipeline{}, fmt.Errorf("load stage status: %w", err)
 		}
 		if _, err := q.CreateIssueStatusEntry(ctx, db.CreateIssueStatusEntryParams{
-			WorkspaceID: ws, Key: key, Name: t.Name, Description: t.Objective,
+			WorkspaceID: ws, Key: key, Name: st.Name, Description: st.Objective,
 			Category: issuestatus.CategoryStarted, Color: "#3b82f6", Icon: "circle",
 		}); err != nil {
-			return InstallPipelineResult{}, fmt.Errorf("create stage status %q: %w", key, err)
+			return db.Pipeline{}, fmt.Errorf("create stage status %q: %w", key, err)
 		}
 	}
 
-	stages, owners, unowned, err := resolveStages(ctx, tpl, resolve)
-	if err != nil {
-		return InstallPipelineResult{}, err
+	owners := make(map[string]pgtype.UUID, len(stages))
+	for _, st := range stages {
+		if st.OwnerSquadID == nil {
+			continue
+		}
+		if id, err := util.ParseUUID(*st.OwnerSquadID); err == nil {
+			owners[st.Key] = id
+		}
 	}
 	steps := stepsForStages(stages, owners)
 	encoded, err := issueworkflow.EncodeSteps(issueworkflow.Arrange(steps))
 	if err != nil {
-		return InstallPipelineResult{}, fmt.Errorf("encode pipeline workflow: %w", err)
+		return db.Pipeline{}, fmt.Errorf("encode pipeline workflow: %w", err)
 	}
 	workflow, err := q.CreateIssueWorkflow(ctx, db.CreateIssueWorkflowParams{
 		WorkspaceID:      ws,
 		Name:             "Initiative pipeline",
 		Description:      "The stages of the default pipeline. Each hands its issue to the owning squad.",
-		InitialStatusKey: StatusKeyForStage(tpl[0].Key),
+		InitialStatusKey: StatusKeyForStage(stages[0].Key),
 		Steps:            encoded,
 		OwnerID:          pgtype.UUID{},
 	})
 	if err != nil {
-		return InstallPipelineResult{}, fmt.Errorf("create pipeline workflow: %w", err)
+		return db.Pipeline{}, fmt.Errorf("create pipeline workflow: %w", err)
 	}
 	project, err := q.CreateProject(ctx, db.CreateProjectParams{
 		WorkspaceID: ws, Title: "Initiatives", Status: "planned", Priority: "none",
 		WorkflowID: workflow.ID,
 	})
 	if err != nil {
-		return InstallPipelineResult{}, fmt.Errorf("create initiative board project: %w", err)
+		return db.Pipeline{}, fmt.Errorf("create initiative board project: %w", err)
 	}
 	stagesJSON, err := marshalStages(stages)
 	if err != nil {
-		return InstallPipelineResult{}, err
+		return db.Pipeline{}, err
 	}
 	pipeline, err := q.CreatePipeline(ctx, db.CreatePipelineParams{
-		WorkspaceID: ws, Name: "Default", WorkflowID: workflow.ID, ProjectID: project.ID,
-		Stages: stagesJSON, IsDefault: true,
+		WorkspaceID: ws, Name: name, WorkflowID: workflow.ID, ProjectID: project.ID,
+		Stages: stagesJSON, IsDefault: isDefault,
 	})
 	if err != nil {
-		return InstallPipelineResult{}, fmt.Errorf("create default pipeline: %w", err)
+		return db.Pipeline{}, fmt.Errorf("create pipeline %q: %w", name, err)
 	}
-	return InstallPipelineResult{Pipeline: pipeline, Created: true, UnownedStages: unowned}, nil
+	return pipeline, nil
 }
 
 // fillUnownedStages gives an owner to each unowned stage whose key now resolves.

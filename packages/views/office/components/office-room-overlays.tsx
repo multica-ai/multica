@@ -36,6 +36,7 @@ export function OfficeRoomOverlays({
 }) {
   const { t } = useT("issues");
   const { t: tPipeline } = useT("pipeline");
+  const { t: tGovernance } = useT("governance");
   const { units } = stage;
   return (
     <>
@@ -82,6 +83,14 @@ export function OfficeRoomOverlays({
                 <Plus className="size-3" />
                 {t(($) => $.office.create_squad)}
               </button>
+            ) : null}
+            {room.squad ? (
+              <span
+                title={tGovernance(($) => $.autonomy.level_tag, { level: room.squad?.autonomy_level ?? 1 })}
+                className="pointer-events-none absolute left-0 top-0 rounded-[3px] bg-[#2c2418]/90 px-1.5 py-0.5 text-micro font-semibold text-[#fff8ea] shadow"
+              >
+                {tGovernance(($) => $.autonomy.level_tag, { level: room.squad?.autonomy_level ?? 1 })}
+              </span>
             ) : null}
             {room.overflow > 0 ? (
               <button

@@ -1458,6 +1458,85 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			// Budgets hold references to tasks; the holds go first, then the
+			// periods and the budgets.
+			name: "delete budgets",
+			run: func() error {
+				if err := qtx.DeleteWorkspaceBudgetHolds(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceBudgetPeriods(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspaceBudgets(ctx, requester.WorkspaceID)
+			},
+		},
+		{
+			// The governance log goes with its workspace; it is the one DELETE
+			// on governance_event (see governance_event.sql).
+			name: "delete governance log",
+			run:  func() error { return qtx.DeleteWorkspaceGovernanceEvents(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Org change applications, reviews, scorecards and instruction
+			// revisions. None has a foreign key, so their order does not matter.
+			name: "delete org records",
+			run: func() error {
+				if err := qtx.DeleteWorkspaceOrgChangeApplications(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceReviews(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceScorecards(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspaceAgentInstructionRevisions(ctx, requester.WorkspaceID)
+			},
+		},
+		{
+			// Goals and their key results, the planning issues' records, and the
+			// metrics with their readings. None of them has a foreign key.
+			name: "delete goals and metrics",
+			run: func() error {
+				if err := qtx.DeleteWorkspacePlanningCycles(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceKeyResults(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceGoals(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceMetricReadings(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceMetricTokens(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.DeleteWorkspaceRetroRequests(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspaceMetrics(ctx, requester.WorkspaceID)
+			},
+		},
+		{
+			// Retrospective triggers and floor chiefs have no foreign keys.
+			name: "delete retro triggers and floor chiefs",
+			run: func() error {
+				if err := qtx.DeleteWorkspaceRetroTriggers(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspaceFloorChiefs(ctx, requester.WorkspaceID)
+			},
+		},
+		{
+			// Standing approvals go with their workspace. Proposals refer to them by
+			// id only, so the order against the proposal rows does not matter.
+			name: "delete approval policies",
+			run:  func() error { return qtx.DeleteWorkspaceApprovalPolicies(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete plugin data",
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},

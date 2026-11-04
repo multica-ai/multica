@@ -1,0 +1,80 @@
+---
+title: Objectifs et métriques
+description: Les objectifs précisent ce vers quoi l'entreprise tend. Les résultats clés suivent la progression par rapport aux métriques, qui proviennent de calculs intégrés, de saisies manuelles ou d'un webhook de votre propre produit.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un **objectif** énonce ce que visent l'entreprise, un étage, un squad ou une initiative sur une période donnée. Un objectif contient des **résultats clés**, et chaque résultat clé suit une **métrique**. La progression et le niveau de confiance se calculent à partir des métriques : l'objectif indique où il en est sans que personne ait à rédiger de rapport d'état.
+
+## Métriques
+
+Une métrique est une série nommée, avec une unité et un sens. Chaque relevé a une valeur, un moment et une portée : l'entreprise, un étage, un squad ou une initiative. Les métriques proviennent de trois sources.
+
+**Intégrées** : calculées chaque nuit à partir des données de l'espace de travail :
+
+| Domaine | Métriques |
+| --- | --- |
+| Livraison | `delivery.issues_done`, `delivery.cycle_time_days`, `delivery.rework_rate` |
+| Exécutions | `runs.count`, `runs.success_rate`, `runs.cost_usd` |
+| Propositions | `proposals.acceptance_rate`, `proposals.decision_hours` |
+| Routines | `routines.compliance_rate` |
+| Pipeline | `pipeline.initiatives_active`, `pipeline.stalled`, `pipeline.stage_days` |
+| Connaissances | `knowledge.docs_published`, `knowledge.fresh_ratio`, `knowledge.retrieval_hit_rate` |
+| Brief | `brief.usefulness` |
+
+Les métriques `knowledge.*` et `brief.usefulness` ne s'appliquent qu'au périmètre de l'entreprise. Le coût d'exécution ne compte que ce que le fournisseur déclare.
+
+**Manuelles** : saisies par un membre ou un agent :
+
+```bash
+multica metric list
+multica metric report --key runs.count --scope squad:<squad-id> --value 42 --note "Checked by hand"
+multica metric report --key mrr --scope initiative:<initiative-id> --value 1200 --observed-at 2026-11-01T09:00:00Z
+```
+
+`--scope` accepte `company` (par défaut), `floor:<id>`, `squad:<id>` ou `initiative:<id>`. Les métriques intégrées refusent les saisies manuelles.
+
+**Webhook** : relevés provenant de l'extérieur du produit, comme les inscriptions, le chiffre d'affaires ou la disponibilité. Envoyez-les avec un jeton d'accès personnel d'un membre de l'espace de travail (voir [Jetons d'authentification](/auth-tokens)) :
+
+```bash
+curl -X POST "$MULTICA_API/api/metrics/signups/readings" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"value": 128, "scope_type": "company", "source": "webhook", "note": "Weekly export"}'
+```
+
+Le corps accepte `value`, `scope_type`, `scope_id` (requis hors périmètre entreprise), `observed_at`, `note` et `source`. Le point d'entrée est limité à 60 relevés par minute pour chaque espace de travail et chaque métrique. Une métrique créée par un relevé reprend son nom, son unité et son sens du corps de la requête. Les relevés de plus de 16 Kio sont refusés.
+
+Les relevés sont conservés en entier pendant 90 jours. Les plus anciens sont réduits à une valeur par jour.
+
+## Objectifs et résultats clés
+
+Un résultat clé compare le dernier relevé d'une métrique à une valeur de départ et à une cible :
+
+- Sa progression est la part du chemin parcouru entre le départ et la cible, bornée entre 0 et 1. Le sens est donné par le signe de l'écart.
+- La progression d'un objectif est la moyenne pondérée de ses résultats clés, chaque poids allant de 1 à 10.
+- La confiance compare la progression à une droite allant du début de la période à sa fin. Elle est `on_track` (dans les temps) si la progression atteint au moins la part attendue moins dix points, `at_risk` (à risque) jusqu'à trente points, et `off_track` (hors trajectoire) au-delà. Sans relevé, elle vaut `unknown` (inconnue).
+
+Le responsable peut remplacer la confiance par une note. Le remplacement est signalé comme tel.
+
+Un objectif a un statut : `draft` (brouillon), `active` (actif), `achieved` (atteint), `missed` (manqué) ou `dropped` (abandonné). Activer un objectif exige au moins un résultat clé. Le serveur refuse un objectif sans résultat clé.
+
+**Qui fixe les objectifs.** Vous et les administrateurs créez les objectifs de l'entreprise et des étages, dans l'onglet **Goals** (Objectifs). Les objectifs d'un squad proviennent d'un cycle de planification. Au début de chaque période, la plateforme ouvre pour chaque squad doté d'une charte un ticket de planification, qui contient les objectifs de l'entreprise et la charte du squad. Le responsable répond par une proposition `goal`, et son approbation active l'objectif. Voir [Propositions](/proposals).
+
+Le brief du responsable énumère les résultats clés actifs du squad sous le titre **Your goals this period** (Vos objectifs pour cette période). La revue opérationnelle du squad doit rendre compte de leur progression.
+
+<Callout type="info">
+L'onglet Goals de **Gouvernance** présente les objectifs sous forme d'arbre : entreprise, étages, squads et initiatives. Chaque résultat clé a une courbe de tendance. La section **Goals** du brief signale les objectifs qui ont changé d'état, et chaque objectif à risque ou hors trajectoire avec la métrique qui a bougé.
+</Callout>
+
+## Limites
+
+- Les points d'entrée des objectifs et des métriques sont `GET` et `POST /api/goals`, `GET`, `PATCH` et `DELETE /api/goals/{id}`, `POST /api/goals/{id}/activate`, `POST /api/goals/{id}/status`, `PUT /api/goals/{id}/confidence`, `GET /api/metrics`, ainsi que `GET` et `POST /api/metrics/{key}/readings`. Les objectifs n'ont pas de commande CLI.
+- L'import d'entreprise ne reprend pas les objectifs de portée squad ou initiative. Voir [Entreprise en code](/company-as-code).
+
+## Étapes suivantes
+
+- [Budgets](/budgets) pour les chiffres de dépense qu'un objectif peut suivre.
+- [Revues et changements d'organisation](/reviews-and-org-changes) pour les scorecards construits à partir des mêmes données.
+- [Secrétaire et briefs](/secretary) pour voir comment les objectifs atteignent le brief quotidien.

@@ -1,0 +1,447 @@
+{
+  "title": "Gouvernance",
+  "tabs": {
+    "goals": "Objectifs",
+    "budgets": "Budgets",
+    "autonomy": "Autonomie",
+    "reviews": "Évaluations",
+    "log": "Journal",
+    "controls": "Contrôles"
+  },
+  "placeholder": {
+    "title": "Rien à afficher pour l'instant"
+  },
+  "autonomy": {
+    "note": "La limite honnête : Multica ne peut pas inspecter ce qu'un environnement d'exécution fait pendant une exécution, donc un niveau ne peut pas empêcher un agent d'appeler une API externe que ses identifiants autorisent. Multica contrôle ce qui passe par elle : les routines exécutées, ce qui est publié dans la mémoire partagée, les propositions décidées sans vous, les initiatives créées, les dépenses et les limites de chaque charte. Tout ce qui a des effets externes reste derrière une porte que la plateforme contrôle, comme la porte de lancement, ou derrière les réglages de permission de l'agent. L3 ne signifie pas sans supervision.",
+    "levels_heading": "Ce que permet chaque niveau",
+    "levels": {
+      "suggest": {
+        "name": "Suggérer",
+        "body": "Les tâches routinières sont retenues. La squad n'agit que lorsqu'on lui assigne un travail ou la mentionne, et elle peut toujours déposer des propositions."
+      },
+      "work": {
+        "name": "Travail",
+        "body": "Les routines s'exécutent. La squad recherche, analyse, rédige des brouillons de connaissance et dépose des propositions. Chaque décision revient au patron."
+      },
+      "trusted": {
+        "name": "Confiance",
+        "body": "Comme Travail, et ses brouillons de connaissance peuvent être publiés après relecture. Les approbations permanentes peuvent approuver ses propositions."
+      },
+      "autonomous": {
+        "name": "Autonome",
+        "body": "Comme Confiance, et les approbations permanentes peuvent créer des initiatives à partir de ses propres opportunités, au premier stade, dans les plafonds et le budget."
+      }
+    },
+    "boss_only_note": "Le lancement et les changements d'organisation relèvent toujours de la décision du patron, à tous les niveaux. L'argent reste borné par les budgets à tous les niveaux.",
+    "squads_heading": "Niveaux des squads",
+    "squads_empty": "Aucune squad pour le moment.",
+    "read_only": "Seuls les propriétaires et les administrateurs peuvent modifier les niveaux.",
+    "level_tag": "N{{level}}",
+    "default_level": "Toujours au niveau par défaut. Aucun changement pour l'instant.",
+    "level_label": "Niveau",
+    "reason_label": "Motif",
+    "reason_placeholder": "Pourquoi ce niveau ? Le motif reste dans le journal de gouvernance.",
+    "save_level": "Enregistrer le niveau",
+    "level_saved": "Niveau d'autonomie enregistré",
+    "level_save_failed": "Impossible de modifier le niveau. Réessayez.",
+    "panel_heading": "Autonomie",
+    "policies_heading": "Approbations permanentes",
+    "policies_note": "Une approbation permanente approuve une catégorie étroite de propositions venant de squads au bon niveau ; vous les voyez ensuite dans le brief. Elle ne couvre jamais les changements d'organisation, les portes de lancement, les hausses de budget, les propositions urgentes ni les autres approbations permanentes.",
+    "policies_empty": "Aucune approbation permanente pour le moment.",
+    "policies_load_failed": "Impossible de charger les approbations permanentes.",
+    "policy_kind": {
+      "decision": "Décision",
+      "opportunity": "Opportunité"
+    },
+    "policy_active": "Active",
+    "policy_revoked": "Révoquée",
+    "policy_flagged": "Une revue a annulé l'une de ses approbations",
+    "policy_scope_squads": "{{count}} squads",
+    "policy_scope_any": "Toute squad au bon niveau",
+    "policy_week": "{{count}} sur {{max}} approbations cette semaine",
+    "policy_until": "Jusqu'au {{date}}",
+    "policy_history": "Historique",
+    "policy_history_hide": "Masquer l'historique",
+    "policy_revoke": "Révoquer",
+    "policy_revoked_toast": "Approbation permanente révoquée",
+    "policy_revoke_failed": "Impossible de révoquer l'approbation permanente. Réessayez.",
+    "history_empty": "Aucune proposition approuvée par cette approbation permanente pour le moment.",
+    "history_load_failed": "Impossible de charger l'historique.",
+    "history_reversed": "Annulée à la revue : {{note}}",
+    "create_heading": "Nouvelle approbation permanente",
+    "create_name": "Nom",
+    "create_kind": "Type",
+    "create_squads": "Squads",
+    "create_squads_hint": "Laissez tout décoché pour toute squad au bon niveau.",
+    "create_max_per_week": "Approbations maximum par semaine",
+    "create_max_cost": "Coût maximum, en micro-unités (facultatif)",
+    "create_submit": "Créer l'approbation permanente",
+    "create_done": "Approbation permanente créée",
+    "create_failed": "Impossible de créer l'approbation permanente. Vérifiez les champs et réessayez."
+  },
+  "controls": {
+    "state_heading": "État de l'entreprise",
+    "state": {
+      "running": "En cours",
+      "paused": "En pause",
+      "quiet": "Silencieuse",
+      "unknown": "Inconnu"
+    },
+    "in_force": "Actuellement en vigueur : {{state}}",
+    "pause": "Mettre en pause",
+    "resume": "Reprendre",
+    "pause_hint": "Les exécutions de routine et déléguées sont en attente. Le chat et le Secrétaire continuent de fonctionner.",
+    "stop_work": "Mettre en pause et arrêter le travail en cours",
+    "stop_confirm_title": "Mettre en pause et arrêter le travail en cours ?",
+    "stop_confirm_description": "Les tâches de routine et déléguées en cours sont annulées. Les tâches en file d'attente attendent la reprise.",
+    "stop_confirm_action": "Mettre en pause et arrêter",
+    "cancel": "Annuler",
+    "state_save_failed": "Impossible de modifier l'état de l'entreprise. Réessayez.",
+    "quiet_heading": "Heures calmes",
+    "quiet_enabled": "Activées",
+    "quiet_from": "De",
+    "quiet_until": "À",
+    "quiet_timezone": "Fuseau horaire",
+    "quiet_hint": "Les exécutions de routine attendent la fin de la plage. Les exécutions lancées par une personne ne sont pas retenues.",
+    "quiet_save": "Enregistrer les heures calmes",
+    "quiet_saved": "Heures calmes enregistrées",
+    "quiet_save_failed": "Impossible d'enregistrer les heures calmes. Réessayez.",
+    "state_load_failed": "Impossible de charger l'état de l'entreprise.",
+    "read_only": "Seuls les propriétaires et les administrateurs peuvent modifier ces réglages.",
+    "quiet_hour": "Heure",
+    "quiet_minute": "Minute",
+    "digest_heading": "Source du résumé",
+    "digest_mode": {
+      "auto": "Automatique",
+      "squads": "Escouades",
+      "floors": "Étages"
+    },
+    "digest_note": "Le mode automatique lit les briefs d'étage au-delà de {{threshold}} escouades actives. Vous en avez {{count}}, donc le Secrétaire lit {{resolved}} maintenant.",
+    "digest_save_failed": "Impossible de changer la source du résumé. Réessayez."
+  },
+  "log": {
+    "filter_kind": "Type",
+    "filter_actor": "Type d'acteur",
+    "filter_subject": "Type de sujet",
+    "all": "Tous",
+    "column_kind": "Type",
+    "column_actor": "Acteur",
+    "column_subject": "Sujet",
+    "column_summary": "Résumé",
+    "column_time": "Heure",
+    "kind": {
+      "policy_auto_approve": "Approuvé automatiquement par une politique",
+      "policy_created": "Politique créée",
+      "policy_revoked": "Politique révoquée",
+      "budget_set": "Budget défini",
+      "budget_extended": "Budget prolongé",
+      "budget_hold": "Exécution retenue par le budget",
+      "budget_release": "Retenue du budget levée",
+      "autonomy_changed": "Autonomie modifiée",
+      "org_change_applied": "Changement d'organisation appliqué",
+      "org_change_reverted": "Changement d'organisation annulé",
+      "auto_publish": "Publié automatiquement",
+      "initiative_forced": "Initiative déplacée manuellement",
+      "company_paused": "Entreprise mise en pause",
+      "company_resumed": "Entreprise reprise",
+      "goal_activated": "Objectif activé",
+      "goal_imported": "Objectif importé",
+      "review_published": "Évaluation publiée",
+      "unknown": "Événement inconnu"
+    },
+    "actor_type": {
+      "member": "Membre",
+      "agent": "Agent",
+      "system": "Système",
+      "policy": "Politique",
+      "unknown": "Inconnu"
+    },
+    "subject_type": {
+      "company": "Entreprise",
+      "floor": "Étage",
+      "squad": "Escouade",
+      "agent": "Agent",
+      "initiative": "Initiative",
+      "budget": "Budget",
+      "approval_policy": "Politique d'approbation",
+      "proposal": "Proposition",
+      "goal": "Objectif",
+      "review": "Évaluation"
+    },
+    "empty": "Aucun événement de gouvernance ne correspond à ces filtres.",
+    "load_failed": "Impossible de charger le journal de gouvernance.",
+    "load_more": "Charger plus",
+    "export": "Exporter en CSV",
+    "export_failed": "Impossible d'exporter le journal."
+  },
+  "pulse": {
+    "label": "Pouls de l'entreprise",
+    "decisions": "{{count}} en attente de vous",
+    "goals_at_risk": "{{count}} objectifs à risque",
+    "budgets": "{{count}} budgets au-delà du seuil",
+    "holds": "{{count}} blocages budgétaires",
+    "stalled": "{{count}} initiatives bloquées",
+    "routines_late": "{{count}} routines en retard",
+    "runtimes_offline": "{{count}} runtimes hors ligne",
+    "quiet": "Rien ne requiert votre attention"
+  },
+  "health": {
+    "heading": "Santé du système",
+    "unreadable": "La santé du système n'a pas pu être lue.",
+    "nothing_at_risk": "Rien ne requiert d'attention.",
+    "risks_label": "Risques",
+    "jobs_heading": "Tâches planifiées",
+    "no_jobs": "Aucune tâche planifiée n'a encore tourné.",
+    "col_job": "Tâche",
+    "col_last_success": "Dernier succès",
+    "col_state": "État",
+    "never_succeeded": "Jamais",
+    "stuck": "Bloquée",
+    "ok": "OK",
+    "deliveries_label": "Envois en échec, 24 dernières heures",
+    "deliveries_value": "{{count}}",
+    "knowledge_label": "Base de connaissances",
+    "knowledge_not_offered": "Non activée sur ce déploiement",
+    "knowledge_state": {
+      "ready": "Prête",
+      "offline": "Hors ligne",
+      "provisioning": "Installation",
+      "failed": "En échec",
+      "disabled": "Désactivée",
+      "unknown": "Inconnu"
+    },
+    "budget_gate_label": "Verrou budgétaire",
+    "budget_gate_not_reported": "Pas encore signalé",
+    "budget_gate_no_cache": "Aucun compteur en cache",
+    "budget_gate_age": "Compteurs actualisés il y a {{seconds}} s"
+  },
+  "reviews_tab": {
+    "empty": "Aucune évaluation visible pour vous pour l'instant. Les évaluations sont visibles des propriétaires, des administrateurs et du responsable de l'équipe évaluée.",
+    "loading": "Chargement des évaluations",
+    "rating": {
+      "exceeds": "Dépasse",
+      "meets": "Atteint",
+      "below": "En dessous",
+      "at_risk": "À risque",
+      "unknown": "Non noté"
+    },
+    "subject": {
+      "agent": "Agent",
+      "squad": "Équipe",
+      "company": "Entreprise",
+      "unknown": "Sujet"
+    },
+    "period": {
+      "week": "Semaine du {{start}}",
+      "month": "Mois de {{start}}",
+      "unknown": "Période {{start}}"
+    },
+    "recommendation": {
+      "observe": "Noté, sans changement",
+      "filed": "Soumis à la décision du patron",
+      "refused": "Non soumis"
+    },
+    "change": {
+      "instruction_change": "Modification des instructions",
+      "skill_change": "Modification des compétences",
+      "charter_change": "Modification de la charte",
+      "autonomy_change": "Modification de l'autonomie",
+      "hire": "Embauche",
+      "retire": "Retrait",
+      "move": "Changement d'équipe",
+      "merge_squads": "Fusion d'équipes",
+      "unretire": "Réactivation",
+      "unmerge": "Séparation d'équipes",
+      "observe": "Observation"
+    },
+    "proposal": "Proposition {{id}}",
+    "figures": "Indicateurs du tableau de bord",
+    "generic": "Recommandations",
+    "no_recommendations": "Aucune recommandation"
+  },
+  "goals": {
+    "loading": "Chargement des objectifs…",
+    "load_failed": "Impossible de charger les objectifs.",
+    "tree": {
+      "company": "Entreprise",
+      "unnamed": "{{scope}} (absent des listes)"
+    },
+    "scope": {
+      "company": "Entreprise",
+      "floor": "Étage",
+      "squad": "Équipe",
+      "initiative": "Initiative"
+    },
+    "status": {
+      "draft": "Brouillon",
+      "active": "Actif",
+      "achieved": "Atteint",
+      "missed": "Manqué",
+      "dropped": "Abandonné",
+      "unknown": "Inconnu"
+    },
+    "confidence": {
+      "on_track": "Dans les temps",
+      "at_risk": "À risque",
+      "off_track": "Hors piste",
+      "unknown": "Pas encore de mesure",
+      "overridden": "(choix du responsable)"
+    },
+    "progress": "{{percent}} %",
+    "progress_none": "Pas encore de mesure",
+    "no_reading": "Aucune mesure",
+    "detail": {
+      "load_failed": "Impossible de charger cet objectif.",
+      "action_failed": "Impossible de modifier l'objectif. Réessayez.",
+      "close": "Fermer",
+      "period": "du {{start}} au {{end}}",
+      "override_note": "Les mesures donnent {{derived}}. Le responsable a choisi autrement : {{note}}",
+      "key_results": "Résultats clés",
+      "kr_title": "Résultat clé",
+      "kr_range": "De → cible",
+      "kr_now": "Dernière",
+      "kr_progress": "Avancement",
+      "kr_trend": "Mesures",
+      "kr_from_to": "{{start}} → {{target}}",
+      "kr_trend_label": "Mesures de {{title}}",
+      "child_goals": "Objectifs rattachés",
+      "source_proposal": "Défini par la proposition {{id}}",
+      "activate": "Activer",
+      "close_as": {
+        "achieved": "Marquer atteint",
+        "missed": "Marquer manqué",
+        "dropped": "Abandonner"
+      },
+      "override_heading": "Confiance du responsable",
+      "override_clear": "Utiliser les mesures",
+      "override_why": "Pourquoi cette confiance",
+      "override_save": "Enregistrer la confiance",
+      "override_saved": "Confiance enregistrée"
+    },
+    "create": {
+      "button": "Nouvel objectif",
+      "title": "Nouvel objectif",
+      "scope": "Périmètre",
+      "target_floor": "Étage",
+      "target_initiative": "Initiative",
+      "target_required": "Choisissez ce à quoi sert cet objectif.",
+      "title_label": "Titre",
+      "title_required": "Donnez un titre à l'objectif.",
+      "title_too_long": "Limitez le titre à 200 caractères.",
+      "why_label": "Pourquoi (facultatif)",
+      "period_start": "Début",
+      "period_end": "Fin",
+      "period_required": "Renseignez les deux dates de la période.",
+      "period_order": "La fin doit être après le début.",
+      "owner": "Responsable",
+      "owner_type": "Type de responsable",
+      "owner_types": {
+        "squad": "Équipe",
+        "member": "Membre",
+        "agent": "Agent"
+      },
+      "owner_required": "Choisissez un responsable.",
+      "key_results": "Résultats clés",
+      "kr_title": "Résultat clé",
+      "kr_metric": "Indicateur",
+      "kr_start": "Valeur de départ",
+      "kr_target": "Valeur cible",
+      "kr_add": "Ajouter un résultat clé",
+      "kr_remove": "Retirer",
+      "kr_title_required": "Donnez un titre à chaque résultat clé.",
+      "kr_metric_required": "Choisissez un indicateur pour chaque résultat clé.",
+      "kr_values_required": "Saisissez une valeur de départ et une valeur cible.",
+      "kr_values_equal": "La cible doit être différente du départ.",
+      "submit": "Créer l'objectif",
+      "cancel": "Annuler",
+      "created": "Objectif créé",
+      "failed": "Impossible de créer l'objectif. Vérifiez les champs et réessayez."
+    }
+  },
+  "reading": {
+    "title": "Ajouter une mesure",
+    "metric": "Indicateur",
+    "value": "Valeur",
+    "note": "Note",
+    "submit": "Ajouter la mesure",
+    "saved": "Mesure ajoutée",
+    "failed": "Impossible d'ajouter la mesure.",
+    "no_metrics": "Aucun indicateur pour l'instant",
+    "scope_note": "La mesure concerne : {{scope}}."
+  },
+  "budgets": {
+    "title": "Budgets",
+    "read_only": "Seuls un propriétaire ou un administrateur modifie un budget.",
+    "scope": {
+      "company": "Entreprise",
+      "floor": "Étage",
+      "squad": "Équipe",
+      "initiative": "Initiative"
+    },
+    "period": {
+      "week": "Hebdomadaire",
+      "month": "Mensuel",
+      "quarter": "Trimestriel"
+    },
+    "mode": {
+      "warn": "avertit seulement",
+      "hold": "retient les exécutions à la limite"
+    },
+    "state": {
+      "ok": "Dans le budget",
+      "soft": "Proche de la limite",
+      "hard": "À la limite",
+      "unknown": "Inconnu"
+    },
+    "spent": "{{spent}} dépensés sur {{limit}}",
+    "spent_label": "Dépenses par rapport à la limite",
+    "elapsed": "{{percent}} % de la période écoulée",
+    "overrun": "À ce rythme, la limite sera atteinte le {{date}}",
+    "no_overrun": "À ce rythme, la limite tient pour la période",
+    "holds_count": "{{count}} retenues",
+    "history": "Historique",
+    "history_empty": "Aucune période n'a encore été enregistrée.",
+    "columns": {
+      "period": "Période",
+      "spent": "Dépensé",
+      "extended": "Étendu",
+      "runs": "Exécutions",
+      "state": "État"
+    },
+    "amount_label": "Nouveau montant par période, en dollars",
+    "amount_placeholder": "Montant",
+    "set_amount": "Définir le montant",
+    "save_failed": "Le budget n'a pas pu être enregistré. Réessayez.",
+    "holds_title": "Exécutions retenues par un budget",
+    "holds_empty": "Aucune exécution n'est retenue par un budget.",
+    "release": "Libérer les retenues",
+    "release_hint": "Laisse les exécutions retenues démarrer une fois, même à la limite.",
+    "extend": "Étendre",
+    "extend_amount": "Montant à ajouter à cette période, en dollars",
+    "extended": "La limite de la période a été étendue.",
+    "released": "{{count}} exécutions retenues libérées.",
+    "create": {
+      "button": "Nouveau budget",
+      "title": "Nouveau budget",
+      "scope": "Périmètre",
+      "target_required": "Choisissez le {{scope}} couvert par ce budget.",
+      "period": "Période",
+      "amount": "Montant par période, en dollars",
+      "amount_required": "Saisissez un montant égal ou supérieur à zéro.",
+      "soft_percent": "Alerte à ce pourcentage de la limite (%)",
+      "soft_invalid": "Saisissez un pourcentage entier de 1 à 100.",
+      "mode": "Quand la limite est atteinte",
+      "classes": "Exécutions concernées",
+      "class": {
+        "routine": "Routine",
+        "delegated": "Délégué"
+      },
+      "classes_required": "Choisissez au moins un type d'exécution.",
+      "submit": "Créer le budget",
+      "cancel": "Annuler",
+      "created": "Budget créé",
+      "failed": "Impossible de créer le budget. Vérifiez les champs et réessayez.",
+      "exists": "Un budget existe déjà pour ce périmètre et cette période."
+    }
+  }
+}

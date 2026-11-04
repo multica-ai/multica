@@ -1,0 +1,65 @@
+---
+title: Livraison vers les applications de messagerie
+description: Recevez le brief quotidien du secrétaire dans Telegram, Slack ou Lark, décidez des propositions depuis un bouton, et échangez avec le secrétaire depuis DingTalk et WeCom.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Le secrétaire peut vous joindre en dehors de l'application. Si vous l'acceptez, le brief quotidien est envoyé à votre application de messagerie, et dans Telegram, Slack et Lark vous pouvez décider des propositions à l'aide de boutons sous le message. Les autres applications de messagerie permettent d'échanger avec le secrétaire, mais elles ne reçoivent pas le brief.
+
+## Ce que fait chaque application
+
+| Application | Échanger avec le secrétaire et les agents | Envoi du brief | Décider par bouton |
+| --- | --- | --- | --- |
+| Telegram | Oui | Oui | Oui |
+| Slack | Oui | Oui | Oui |
+| Lark (Feishu) | Oui | Oui | Oui |
+| DingTalk | Oui | Non | Non |
+| WeCom | Oui | Non | Non |
+
+Configurez chaque application depuis sa propre page : [Telegram](/telegram-bot-integration), [Slack](/slack-bot-integration), [Lark](/lark-bot-integration) et [DingTalk](/dingtalk-bot-integration). Il n'existe pas de page de configuration séparée pour WeCom dans cette version : son opérateur le configure.
+
+<Callout type="info">
+La plateforme de messagerie doit déjà être connectée à votre compte Multica. L'envoi du brief utilise cette connexion, il n'en crée pas une.
+</Callout>
+
+## Activer l'envoi
+
+Chaque membre choisit pour lui-même, dans les réglages de brief du bureau :
+
+- **Brief push** (Envoi du brief) : activé ou désactivé. Désactivé par défaut.
+- **Chat** (Discussion) : vers quelle discussion connectée envoyer. Chaque membre en choisit une.
+- **Quiet hours** (Heures calmes) : une plage horaire, de 0 à 23 heures, pendant laquelle rien n'est envoyé. La plage peut traverser minuit. Un brief tombant dans la plage est différé jusqu'à sa fin.
+
+Les mêmes réglages sont accessibles via `GET` et `PUT /api/office/brief-push`. Les discussions que vous pouvez choisir sont à `GET /api/office/brief-push/bindings`.
+
+## Contenu du message
+
+L'envoi est volontairement court. Il comporte le titre du brief, le nombre de décisions en attente, les trois premières décisions avec leurs liens, et un lien vers le brief complet.
+
+La publication d'un brief ne fait que mettre en file une livraison pour chaque membre ayant activé l'envoi. Une tâche distincte se charge de l'envoi. Un envoi qui échoue est réessayé jusqu'à cinq fois, avec des attentes d'une, deux, quatre puis huit minutes entre les tentatives. Une livraison qui échoue encore est enregistrée comme échouée. Un échec de livraison ne fait jamais échouer le brief lui-même.
+
+## Décider avec un bouton
+
+Dans Telegram, Slack et Lark, chaque décision du message porte les boutons **approve** (approuver), **reject** (rejeter) et **snooze** (reporter). Chaque bouton transporte un jeton signé pour cette proposition et cette action. Le jeton est valable 24 heures.
+
+Lorsque vous appuyez sur un bouton, le serveur détermine quel membre Multica correspond à l'utilisateur de la messagerie, grâce à la connexion que vous avez établie. Seul un propriétaire ou un administrateur peut décider. Les agents n'appuient pas sur les boutons. Si l'utilisateur de la messagerie n'est ni propriétaire ni administrateur, le bouton répond par un lien vers l'application. Une décision déjà tranchée retire ses boutons du message.
+
+## Commandes dans la discussion
+
+Les membres liés à Multica peuvent envoyer ces commandes dans une discussion avec le secrétaire :
+
+- `/brief` renvoie le brief le plus récent.
+- `/decisions` liste les propositions en attente.
+
+La commande doit constituer toute la première ligne du message. `/briefing`, et une commande placée au milieu d'une phrase, ne sont pas reconnus.
+
+## Limites
+
+- DingTalk et WeCom ne reçoivent ni briefs ni boutons dans cette version. Leurs messages sont transmis au secrétaire et aux agents comme une conversation ordinaire.
+
+## Étapes suivantes
+
+- [Secrétaire et briefs](/secretary) pour le contenu d'un brief.
+- [Propositions](/proposals) pour l'effet des boutons approuver, rejeter et reporter.
+- [Canaux](/channels) pour la façon dont les applications de messagerie se relient aux agents.

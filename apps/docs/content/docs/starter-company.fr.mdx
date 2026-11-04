@@ -1,0 +1,62 @@
+---
+title: Entreprise de départ
+description: Mettez en place une entreprise fonctionnelle en une seule exécution. L'entreprise de départ crée les étages, les squads, les chartes, les routines, ainsi que le secrétaire et le bibliothécaire, à partir de modèles que vous choisissez.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+L'**entreprise de départ** est une structure prête à l'emploi pour une entreprise numérique : un secrétaire, un bibliothécaire, et des squads pour la recherche, le produit, la construction, le lancement et la gouvernance. Vous choisissez les squads à créer, et elle crée avec eux les étages, les chartes, les routines et un budget d'entreprise.
+
+Utilisez-la sur un espace de travail neuf ou presque vide. Elle ne supprime rien, et la relancer ne crée rien en double.
+
+## L'assistant
+
+Ouvrez le bureau et lancez l'assistant d'entreprise. Il comporte quatre étapes :
+
+1. **Runtime.** Le runtime sur lequel tourneront les nouveaux agents. Choisissez-en un qui est en ligne.
+2. **Sélection.** Les squads à créer. Chaque carte affiche la mission du squad et ses routines.
+3. **Estimation.** Une estimation du coût des routines sélectionnées.
+4. **Options de démarrage.** Trois choix :
+   - `all` : toutes les routines démarrent actives.
+   - `per_floor` : la routine principale de chaque étage démarre active, les autres sont en pause.
+   - `leave_paused` : toutes les routines démarrent en pause, et vous les lancez une à une.
+
+L'assistant appelle `POST /api/office/company-template/apply`. La réponse est un rapport qui liste chaque étage, squad, agent et routine créé ou trouvé. Si l'exécution s'interrompt en cours de route, relancez-la : elle reprend là où le rapport s'arrête et ne crée que ce qui manque.
+
+## Ce qu'elle crée
+
+Les squads sont regroupés par étage. Les noms d'étages restent en anglais, afin qu'une relance les retrouve.
+
+| Étage | Squads |
+| --- | --- |
+| Executive (Direction) | **Executive Office** : le secrétaire et le bibliothécaire, avec les routines de brief quotidien et de revue hebdomadaire, ainsi que les routines du bibliothécaire |
+| Research (Recherche) | **Market Research**, **Opportunity Lab**, **Competitor Intelligence**, **Customer Voice** |
+| Product (Produit) | **Product Discovery**, **Product Analysis**, **Planning** |
+| Build (Construction) | **Build** |
+| Launch (Lancement) | **Release & Ops**, **Growth & GTM**, **Support** |
+| Governance (Gouvernance) | **Finance & Risk**, **People & Performance** |
+
+Chaque squad reçoit une charte avec sa mission, ses responsabilités, ses livrables et ses limites, ainsi que les routines de sa carte. Les instructions du squad sont rédigées pour le rôle de la carte. Chaque agent reçoit les instructions de son rôle, ainsi que les instructions communes que suit chaque squad.
+
+Le squad **People & Performance** porte l'agent relecteur utilisé par les [revues](/reviews-and-org-changes). Le squad **Executive Office** porte le bibliothécaire, qui maintient la [base de connaissances](/knowledge-taxonomy) en ordre.
+
+Les étapes du pipeline sont assignées à ces squads : Validate à Product Discovery, Define à Product Analysis, Plan à Planning, Build et Learn à Build, Launch à Release & Ops, et Operate à Support. Voir [Pipeline et initiatives](/pipeline).
+
+## Budget de l'entreprise
+
+L'entreprise de départ crée un budget unique pour l'entreprise : 500 dollars par mois, en mode `warn` (alerte seulement). Il alerte à 80 % et ne suspend aucune exécution, de sorte que rien ne s'arrête en silence. L'entreprise de départ ne définit pas de parts par étage ou par squad. Si vous en voulez, créez-les depuis l'onglet Budgets. Voir [Budgets](/budgets).
+
+## Limites
+
+- Elle exige au moins un runtime en ligne. Les agents sont créés sur le runtime que vous choisissez.
+- L'entreprise de départ ne crée pas d'initiatives. Celles-ci proviennent des opportunités approuvées et de vos propres demandes.
+
+<Callout type="info">
+Chaque squad démarre au niveau d'autonomie 1. Vous pouvez relever le niveau d'un squad ensuite, depuis l'onglet Autonomy. Voir [Autonomie et approbations](/autonomy-and-approvals).
+</Callout>
+
+## Étapes suivantes
+
+- [Secrétaire et briefs](/secretary) pour le travail quotidien du Executive Office.
+- [Chartes et routines](/charters-and-routines) pour modifier les chartes et routines avec lesquelles l'entreprise démarre.
+- [Entreprise en code](/company-as-code) pour exporter cette structure vers un second espace de travail.

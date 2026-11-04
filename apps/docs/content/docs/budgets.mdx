@@ -1,0 +1,69 @@
+---
+title: Budgets
+description: A budget caps what a floor, squad, or initiative may spend in a period. It warns you as the limit approaches and can hold new automated runs when the limit is reached.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A **budget** sets a spending limit for one scope and one period. Spend is counted from the runs that scope made. As spend approaches the limit, the budget warns you. When it reaches the limit in `hold` mode, new automated runs in the scope wait, with a visible reason, until you act.
+
+## Setting a budget
+
+Open **Governance**, then the **Budgets** tab. Create a budget with:
+
+| Field | Meaning |
+| --- | --- |
+| Scope | Company, floor, squad, or initiative |
+| Period | Week, month, or quarter |
+| Amount | The limit for one period, in US dollars |
+| Soft limit | The share of the amount where the budget warns, 80 percent by default |
+| Mode | `warn` only warns. `hold` also holds new runs at the limit. |
+| Run classes | Which kinds of run the budget may hold. Routine and delegated runs by default. |
+
+The create dialog defaults to `warn`. A budget stored without a mode defaults to `hold`. A new budget you have not tested is safer in `warn`.
+
+Budgets are also created by a `budget` proposal. A squad leader files one with the amount, the reason, and the expected value. Approving it sets the budget. Approval of a Plan-stage gate in an initiative creates a `warn` budget of $100 a month. The starter company creates a `warn` budget of $500 a month for the company. See [Starter company](/starter-company).
+
+## Run classes
+
+Every run belongs to a class, which decides whether a budget can hold it:
+
+| Class | Started by | Held by a budget? |
+| --- | --- | --- |
+| `human` | A person, by commenting, chatting, or assigning | Never. You can always talk to the company. |
+| `routine` | An autopilot, a wakeup, or an operating review | Yes, if the budget's classes include it |
+| `delegated` | One squad's agent handing work to another, or a squad leader's dispatch | Yes, if the budget's classes include it |
+
+The Secretary's daily brief and its catch-up run are exempt.
+
+## How a hold works
+
+The check runs at the point where a queued task is handed to a daemon, and at autopilot dispatch. A budget in `hold` mode holds a task when its spend, plus the cost reserved for runs already in flight, has reached the amount plus any extension. The reservation for each in-flight run is the 90th percentile of recent run costs in the scope.
+
+A held task stays queued. It is not failed. The platform records one hold per task and shows it in the budget's holds list, with the reason **budget hold**. An autopilot run that is held is recorded as skipped with that reason. Holds clear when the budget is extended or raised, when you release them, when the period rolls over, or when the task is cancelled.
+
+The budget's counters are kept up to date as runs finish, so the check does not read run history on each claim. Figures can lag by seconds.
+
+## Your levers
+
+- **Extend** the current period by an amount. The extension is recorded.
+- **Raise** the budget.
+- **Release holds** once. Held tasks become claimable again.
+- Do nothing, and the period rolls over.
+
+A squad leader who needs more can file a `budget` proposal instead. Each extension, release, and hold appears in the [governance log](/controls-and-log).
+
+<Callout type="info">
+Spend is counted in the period in which a run was created, in UTC. Run cost comes from the provider when it reports one. Otherwise the server estimates it from the token counts and its own price table.
+</Callout>
+
+## Limits
+
+- Budgets are managed in the Budgets tab and through `GET` and `POST /api/budgets`, `PATCH /api/budgets/{id}`, `POST /api/budgets/{id}/extend`, `POST /api/budgets/{id}/release-holds`, `GET /api/budgets/{id}/periods`, and `GET /api/budget-holds`. The CLI has no budget commands.
+- Payloads are limited to 16 KiB.
+
+## Next steps
+
+- [Autonomy and approvals](/autonomy-and-approvals) for how budgets limit what a standing approval may spend.
+- [Controls and the log](/controls-and-log) for the pause that stops runs regardless of budget.
+- [Pipeline and initiatives](/pipeline) for the Plan gate's budget request.

@@ -1,0 +1,123 @@
+---
+title: Taxonomie des connaissances et le bibliothécaire
+description: Chaque document de connaissance a un type, avec les titres qu'il doit comporter, un intervalle de révision et une politique de publication. Le bibliothécaire garde le registre à jour, facile à trouver et relié.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+La [base de connaissances](/knowledge-base) est organisée par **type**. Un type indique ce qu'est un document, les titres qu'il doit comporter, la durée pendant laquelle il reste valable, et la base de connaissances à laquelle il appartient. Le **bibliothécaire** est le squad qui maintient le registre en ordre.
+
+## Bases
+
+| Clé | Nom | Contenu |
+| --- | --- | --- |
+| `company` | Company (Entreprise) | Politiques, procédures, références, règles permanentes de l'entreprise |
+| `market` | Market (Marché) | Rapports de marché, profils de concurrents, analyses clients, plans de mise sur le marché |
+| `product` | Product (Produit) | Briefs produit, exigences, feuilles de route |
+| `engineering` | Engineering (Ingénierie) | Décisions d'architecture, runbooks, rapports de tests, notes de version, post-mortems |
+| `decisions` | Decisions (Décisions) | Fiches de décision et archive des briefs. Écrite par Multica. |
+| `ventures` | Ventures (Entreprises) | Un dossier par initiative : ses documents de validation, d'analyse, de demande de budget et de lancement |
+
+## Types
+
+Chaque type a une clé, une base par défaut, un intervalle de révision en jours, et les titres qu'un brouillon doit comporter. Un brouillon qui ne comporte pas un titre obligatoire est refusé. Ce sont les valeurs par défaut ; `multica knowledge kinds` les liste toutes.
+
+| Clé | Base | Révision (jours) | Titres obligatoires |
+| --- | --- | --- | --- |
+| `market_report` | market | 90 | Summary, Market size, Trends, Sources |
+| `competitor_profile` | market | 90 | Summary, Offering, Pricing, Strengths and weaknesses, Sources |
+| `customer_insight` | market | 180 | Summary, Evidence, Segments, Sources |
+| `prd` | product | 180 | Problem, Requirements, Non-goals, Acceptance criteria |
+| `roadmap` | product | 90 | Goals, Milestones, Dependencies |
+| `budget_request` | ventures | aucune | Amount, Justification, Breakdown |
+| `adr` | engineering | aucune | Context, Decision, Consequences |
+| `runbook` | engineering | 180 | Purpose, Steps, Rollback, Owners |
+| `postmortem` | engineering | aucune | Summary, Timeline, Root cause, Actions |
+| `decision_record` | decisions | aucune | Decision, Context |
+| `policy` | company | 365 | Scope, Rule, Owner |
+| `reference` | company | 365 | Summary |
+
+La liste complète compte 26 types, y compris les rapports de validation, les analyses, les plans de lancement, les rétrospectives et les rapports de métriques.
+
+Un propriétaire ou un administrateur modifie le nom, l'intervalle de révision, les titres obligatoires, le modèle et la base par défaut d'un type :
+
+```bash
+multica knowledge kinds
+multica knowledge template adr                 # affiche le squelette Markdown
+multica knowledge kind set adr --review-days 365 --required "Context,Decision,Consequences,Alternatives"
+```
+
+## Déposer un document
+
+Les membres et les agents créent des brouillons avec les métadonnées dont le type et l'initiative ont besoin :
+
+```bash
+multica knowledge add --kb engineering --kind adr --title "Use Postgres for queues" --file adr.md \
+  --confidence high --valid-until 2027-01-01 --tag queues --supersedes <old-document-id>
+multica knowledge add --kb ventures --initiative <initiative-id> --stage validate \
+  --initiative-folder INI-3-invoicing --kind validation_report --title "Validation" --file validation.md
+```
+
+`--confidence` accepte `low`, `medium` ou `high`. `--stage` enregistre l'étape du pipeline dans laquelle le document a été rédigé. Un document qui en remplace un autre masque l'ancien une fois le nouveau publié. Les brouillons ne sont pas consultables tant que quelqu'un ne les publie pas, ou qu'une politique de publication ne le fait.
+
+## Politiques de publication
+
+Une politique de publication détermine qui publie un brouillon. Chaque base et chaque type peut en avoir une. La politique d'un type l'emporte sur celle de sa base, et un périmètre sans politique est manuel.
+
+| Mode | Effet |
+| --- | --- |
+| `manual` | Une personne publie le brouillon |
+| `auto_after_review` | Un relecteur d'une autre squad enregistre son verdict, puis le brouillon est publié |
+| `auto` | Le brouillon est publié immédiatement |
+
+```bash
+multica knowledge policy list
+multica knowledge policy set --scope base --key engineering --mode auto_after_review
+multica knowledge policy unset --scope kind --key runbook
+```
+
+La publication automatique est aussi soumise au [niveau d'autonomie](/autonomy-and-approvals) du squad. Un squad de niveau inférieur à 2 ne publie pas automatiquement, et ses brouillons restent manuels. Les brouillons sans squad d'appartenance ne sont pas publiés automatiquement.
+
+Un relecteur enregistre son verdict ainsi :
+
+```bash
+multica knowledge review <draft-id> --verdict ok
+multica knowledge review <draft-id> --verdict changes --note "Add the sources for the pricing claim"
+```
+
+## Le bibliothécaire
+
+Le bibliothécaire est un agent du squad Executive Office, mis en place avec l'entreprise de départ. Il exécute quatre [routines](/charters-and-routines) :
+
+- **Tri** : prend en charge les nouveaux brouillons et les confie au squad responsable.
+- **Fraîcheur** : repère les documents dont la date de révision est dépassée et dépose une demande de révision pour chacun.
+- **Recherche** : exécute les cas d'évaluation de la recherche et enregistre le taux de réussite.
+- **Taxonomie** : cherche les documents orphelins et les liens rompus entre documents, et répare les liens qu'il peut réparer.
+
+Sa dernière exécution de chaque routine s'affiche avec :
+
+```bash
+multica knowledge health
+```
+
+## Évaluation de la recherche
+
+Les cas d'évaluation sont des questions auxquelles la recherche doit répondre, avec le document ou le type qu'une bonne réponse doit renvoyer. Ils montrent si la base de connaissances trouve encore ce qui compte.
+
+```bash
+multica knowledge eval add --question "What did we decide about annual pricing?" --kind decision_record
+multica knowledge eval list
+multica knowledge eval run
+```
+
+`eval run` exécute tous les cas immédiatement et enregistre le taux de réussite, que le condensé signale. Tout propriétaire ou administrateur peut le lancer. Une attente erronée fait baisser le taux de réussite : corrigez le cas plutôt que de l'ignorer.
+
+<Callout type="info">
+La recherche renvoie les correspondances les plus proches même lorsque aucune n'est pertinente. Le taux de réussite est la proportion de cas où le document attendu est revenu. Il ne juge pas la qualité de la réponse.
+</Callout>
+
+## Étapes suivantes
+
+- [Base de connaissances](/knowledge-base) pour l'activer, les brouillons et la recherche.
+- [Pipeline et initiatives](/pipeline) pour les documents de chaque étape.
+- [Entreprise de départ](/starter-company) pour le bibliothécaire et ses routines.

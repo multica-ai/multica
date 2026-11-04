@@ -548,6 +548,80 @@ describe("runSquadQuickstart for every template", () => {
   );
 });
 
+// A re-run after an earlier run stopped at the charter save: the squad exists
+// with the template's leader and instructions but no charter.
+describe("runSquadQuickstart re-run for an existing squad", () => {
+  const leaderAgent = asAgent("ag-lead", SQUAD_ROLES.lead.name);
+  const quickstartSquad = {
+    id: "s",
+    name: greenfield.name,
+    archived_at: null,
+    leader_id: "ag-lead",
+    instructions: greenfield.instructions,
+  } as unknown as Squad;
+  const agentsAll = [leaderAgent] as Agent[];
+
+  it("saves the revision-0 charter on a squad an earlier run made", async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => agentsAll),
+      listSquads: vi.fn(async () => [quickstartSquad]),
+    });
+
+    const out = await runSquadQuickstart(client, greenfield, options);
+
+    expect(client.createSquad).not.toHaveBeenCalled();
+    expect(client.updateSquadCharter).toHaveBeenCalledTimes(1);
+    expect(client.updateSquadCharter.mock.calls[0]![0]).toBe("s");
+    expect(client.updateSquadCharter.mock.calls[0]![1]).toMatchObject({
+      revision: 0,
+      mission: greenfield.charter.mission,
+    });
+    expect(out.squad).toEqual({ id: "s", status: "existing" });
+  });
+
+  it("treats a 409 on that save as already chartered, with no error", async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => agentsAll),
+      listSquads: vi.fn(async () => [quickstartSquad]),
+      updateSquadCharter: vi.fn(async () => {
+        throw Object.assign(new Error("conflict"), { body: { code: "charter_revision_conflict" } });
+      }),
+    });
+
+    const out = await runSquadQuickstart(client, greenfield, options);
+
+    expect(out.squad).toEqual({ id: "s", status: "existing" });
+  });
+
+  it("reports any other charter refusal on the existing squad", async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => agentsAll),
+      listSquads: vi.fn(async () => [quickstartSquad]),
+      updateSquadCharter: vi.fn(async () => {
+        throw new Error("mission too long");
+      }),
+    });
+
+    const out = await runSquadQuickstart(client, greenfield, options);
+
+    expect(out.squad.error).toBe("charter: mission too long");
+  });
+
+  it("leaves a hand-made squad with the same name without a charter", async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => agentsAll),
+      listSquads: vi.fn(async () => [
+        { ...quickstartSquad, leader_id: "someone-else", instructions: "my own rules" },
+      ]),
+    });
+
+    const out = await runSquadQuickstart(client, greenfield, options);
+
+    expect(client.updateSquadCharter).not.toHaveBeenCalled();
+    expect(out.squad).toEqual({ id: "s", status: "existing" });
+  });
+});
+
 describe("planQuickstartAgents", () => {
   it("marks which agents will be reused", () => {
     const plan = planQuickstartAgents(greenfield, [

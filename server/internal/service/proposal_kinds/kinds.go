@@ -64,6 +64,8 @@ type Decision struct {
 type Effect struct {
 	// Project is the handoff project of a decision approved with a handoff squad.
 	Project *db.Project
+	// Policy is the standing approval a standing_approval decision created.
+	Policy *db.ApprovalPolicy
 }
 
 // Kind is one proposal kind.
@@ -103,16 +105,33 @@ type Registry struct {
 // NewRegistry registers every kind. initiatives serves the kinds that act on
 // initiatives.
 func NewRegistry(initiatives Initiatives) *Registry {
+	r := &Registry{kinds: map[string]Kind{}}
 	list := []Kind{
 		decisionKind{},
 		opportunityKind{initiatives: initiatives},
 		stageGateKind{initiatives: initiatives},
+		// A budget raise: a squad asks the boss for more money (spec 4.2).
+		budgetKind{},
+		// The standing approval kind validates a policy's kind against this registry.
+		standingApprovalKind{registry: r},
 	}
-	r := &Registry{kinds: make(map[string]Kind, len(list))}
 	for _, k := range list {
 		r.kinds[k.Key()] = k
 	}
 	return r
+}
+
+// Has reports whether a kind key is registered.
+func (r *Registry) Has(key string) bool {
+	_, ok := r.kinds[key]
+	return ok
+}
+
+// Register adds a kind that is wired after construction, for kinds whose
+// dependencies exist only once the service is built (org_change). A kind with
+// the same key replaces the earlier one.
+func (r *Registry) Register(k Kind) {
+	r.kinds[k.Key()] = k
 }
 
 // Lookup returns the handler for a kind key. The empty key is a decision, as

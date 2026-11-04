@@ -1,0 +1,80 @@
+---
+title: 목표와 지표
+description: 목표는 회사가 무엇을 향해 가는지를 정합니다. 핵심 결과는 지표에 대한 진행 상황을 추적합니다. 지표는 내장 계산, 수동 입력, 또는 당신의 제품에서 오는 webhook에서 나옵니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**목표**는 회사, 층, 스쿼드, 이니셔티브가 일정 기간 동안 달성하려는 것을 적은 문장입니다. 목표에는 **핵심 결과(key result)**가 들어 있고, 각 핵심 결과는 하나의 **지표**를 추적합니다. 진행률과 신뢰도는 지표로부터 계산되므로, 누군가 상태 보고서를 쓰지 않아도 목표가 지금 어디에 있는지 보여 줍니다.
+
+## 지표
+
+지표는 단위와 방향을 가진 이름 있는 시계열입니다. 각 측정값에는 값, 시각, 범위(회사, 층, 스쿼드, 이니셔티브)가 있습니다. 지표의 출처는 세 가지입니다.
+
+**내장** 지표는 워크스페이스 자체의 기록으로부터 매일 밤 계산됩니다.
+
+| 영역 | 지표 |
+| --- | --- |
+| 전달 | `delivery.issues_done`, `delivery.cycle_time_days`, `delivery.rework_rate` |
+| 실행 | `runs.count`, `runs.success_rate`, `runs.cost_usd` |
+| 제안 | `proposals.acceptance_rate`, `proposals.decision_hours` |
+| 루틴 | `routines.compliance_rate` |
+| 파이프라인 | `pipeline.initiatives_active`, `pipeline.stalled`, `pipeline.stage_days` |
+| 지식 | `knowledge.docs_published`, `knowledge.fresh_ratio`, `knowledge.retrieval_hit_rate` |
+| 브리프 | `brief.usefulness` |
+
+`knowledge.*` 지표와 `brief.usefulness`는 회사 범위에만 적용됩니다. 실행 비용은 제공자가 보고한 금액만 집계합니다.
+
+**수동** 측정값은 멤버나 에이전트가 기록합니다.
+
+```bash
+multica metric list
+multica metric report --key runs.count --scope squad:<squad-id> --value 42 --note "Checked by hand"
+multica metric report --key mrr --scope initiative:<initiative-id> --value 1200 --observed-at 2026-11-01T09:00:00Z
+```
+
+`--scope`에는 `company`(기본값), `floor:<id>`, `squad:<id>`, `initiative:<id>`를 씁니다. 내장 지표는 수동 기록을 받지 않습니다.
+
+**Webhook** 측정값은 외부에서 들어오는 수치를 위한 것입니다. 가입자 수, 매출, 가동률 같은 것입니다. 워크스페이스 멤버의 개인 액세스 토큰([인증 토큰](/auth-tokens) 참고)으로 보냅니다.
+
+```bash
+curl -X POST "$MULTICA_API/api/metrics/signups/readings" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"value": 128, "scope_type": "company", "source": "webhook", "note": "Weekly export"}'
+```
+
+본문에는 `value`, `scope_type`, `scope_id`(회사 범위가 아닌 경우 필수), `observed_at`, `note`, `source`를 넣습니다. 워크스페이스와 지표마다 분당 60건으로 제한됩니다. 보고로 만들어진 지표는 본문의 이름, 단위, 방향을 씁니다. 16 KiB를 넘는 보고는 거부됩니다.
+
+측정값은 90일 동안 원본 그대로 보관됩니다. 그보다 오래된 값은 하루에 하나의 값으로 줄어듭니다.
+
+## 목표와 핵심 결과
+
+핵심 결과는 지표의 최신 측정값을 시작값, 목표값과 비교합니다.
+
+- 진행률은 시작값에서 목표값까지 가운데 얼마나 왔는지의 비율이며, 0과 1 사이로 제한됩니다. 방향은 차이의 부호로 정해집니다.
+- 목표의 진행률은 핵심 결과들의 가중 평균입니다. 각 가중치는 1에서 10 사이입니다.
+- 신뢰도는 기간의 시작에서 끝까지 그은 직선과 진행률을 비교해 정해집니다. 진행률이 기대 비율에서 10점을 뺀 값 이상이면 `on_track`(순조), 30점까지 떨어지면 `at_risk`(위험), 그보다 낮으면 `off_track`(이탈)입니다. 측정값이 아직 없으면 `unknown`(알 수 없음)입니다.
+
+소유자는 메모와 함께 신뢰도를 덮어쓸 수 있습니다. 덮어쓴 신뢰도에는 그 사실이 표시됩니다.
+
+목표에는 상태가 있습니다. `draft`(초안), `active`(활성), `achieved`(달성), `missed`(미달), `dropped`(중단). 목표를 활성화하려면 핵심 결과가 최소 하나 있어야 합니다. 핵심 결과가 없는 목표는 서버가 거부합니다.
+
+**누가 목표를 정하나.** 당신과 관리자는 **Goals**(목표) 탭에서 회사와 층의 목표를 만듭니다. 스쿼드의 목표는 계획 주기에서 나옵니다. 각 기간이 시작되면 플랫폼은 헌장이 있는 스쿼드마다 계획 이슈를 엽니다. 이 이슈에는 회사 목표와 해당 스쿼드의 헌장이 들어 있습니다. 리더는 `goal` 제안으로 답하고, 승인하면 목표가 활성화됩니다. [제안](/proposals)을 참고하세요.
+
+리더의 브리프에는 스쿼드의 활성 핵심 결과가 **Your goals this period**(이번 기간 당신의 목표)로 나열됩니다. 스쿼드의 운영 검토는 이들에 대한 진행 상황을 보고합니다.
+
+<Callout type="info">
+**거버넌스**의 Goals 탭은 목표를 회사, 층, 스쿼드, 이니셔티브의 트리로 보여 줍니다. 각 핵심 결과에는 스파크라인이 있습니다. 브리프의 **Goals** 섹션은 상태가 바뀐 목표와, 위험하거나 이탈한 각 목표를 움직인 지표와 함께 알려 줍니다.
+</Callout>
+
+## 제한 사항
+
+- 목표와 지표의 API는 `GET`과 `POST /api/goals`, `GET`, `PATCH`, `DELETE /api/goals/{id}`, `POST /api/goals/{id}/activate`, `POST /api/goals/{id}/status`, `PUT /api/goals/{id}/confidence`, `GET /api/metrics`, `GET`과 `POST /api/metrics/{key}/readings`입니다. 목표에는 CLI 명령이 없습니다.
+- 회사 가져오기는 스쿼드 범위나 이니셔티브 범위의 목표를 가져오지 않습니다. [Company as code](/company-as-code)를 참고하세요.
+
+## 다음 단계
+
+- [예산](/budgets): 목표가 추적할 수 있는 지출 수치.
+- [리뷰와 조직 변경](/reviews-and-org-changes): 같은 기록으로 만들어지는 스코어카드.
+- [비서와 브리프](/secretary): 목표가 매일의 브리프에 들어가는 방식.

@@ -97,4 +97,16 @@ const (
 	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
+	// ReasonCompanyPaused: the company is paused, so a routine or delegated run
+	// does not start (spec 4.5).
+	ReasonCompanyPaused ReasonCode = "company_paused"
+	// ReasonQuietHours: the company is in its quiet window, so a routine run is
+	// deferred.
+	ReasonQuietHours ReasonCode = "quiet_hours"
+	// ReasonBudgetHold: a hold-mode budget covering the run is at its limit, so a
+	// routine or delegated run is held (spec 4.2).
+	ReasonBudgetHold ReasonCode = "budget_hold"
+	// ReasonAutonomyL0: the squad is at autonomy level L0, so its routine runs are
+	// held until someone assigns or mentions it (spec 4.3).
+	ReasonAutonomyL0 ReasonCode = "autonomy_l0"
 )

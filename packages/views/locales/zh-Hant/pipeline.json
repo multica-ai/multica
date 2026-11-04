@@ -171,7 +171,6 @@
     "title_required": "請填寫標題。",
     "title_too_long": "標題不能超過 200 個字元。",
     "thesis_label": "論點",
-    "thesis_required": "請填寫論點：說明為什麼值得做。",
     "thesis_too_long": "論點太長了。",
     "pipeline_label": "管線",
     "no_pipeline": "此工作區沒有可用於啟動專案的管線。",

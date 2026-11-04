@@ -20,5 +20,8 @@ export * from "./mcp-support";
 export * from "./openclaw-runtime-config";
 export * from "./runtime-binding";
 export * from "./instruction-templates";
+export * from "./instruction-revisions";
+export * from "./instruction-revisions-queries";
+export * from "./use-restore-agent-instruction-revision";
 
 export * from "./qoder-runtime-config";

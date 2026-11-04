@@ -530,6 +530,14 @@
         "people_performance": {
           "name": "Responsable personnes",
           "description": "Examine le bilan de chaque équipe au regard de sa charte et signale ce qui est en retard ou silencieux. Ne fixe aucun objectif."
+        },
+        "people_reviewer": {
+          "name": "Évaluateur personnes",
+          "description": "Publie chaque mois un bilan par équipe ou agent noté, avec des propositions que le patron décide. Ne fixe aucun objectif."
+        },
+        "floor_chief": {
+          "name": "Chef d'étage",
+          "description": "Rédige chaque jour le rapport de l'étage pour le Secrétaire, à partir de son digest. Ne décide rien et ne modifie aucune équipe."
         }
       }
     },
@@ -1193,5 +1201,28 @@
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {}
+  "actions": {},
+  "instruction_revisions": {
+    "title": "Historique des révisions",
+    "show": "Afficher l'historique",
+    "hide": "Masquer l'historique",
+    "loading": "Chargement des révisions…",
+    "load_failed": "Impossible de charger l'historique des révisions.",
+    "empty": "Aucune révision enregistrée pour l'instant.",
+    "revision_label": "Révision {{revision}}",
+    "current": "Actuelle",
+    "source": {
+      "human": "Modifiée",
+      "proposal": "Issue d'une proposition approuvée",
+      "rollback": "Restaurée",
+      "unknown": "Modifiée"
+    },
+    "show_text": "Afficher le texte",
+    "hide_text": "Masquer le texte",
+    "restore": "Restaurer",
+    "restore_named": "Restaurer la révision {{revision}}",
+    "restored": "Révision {{revision}} restaurée",
+    "restore_failed": "Impossible de restaurer cette révision. Réessayez.",
+    "restore_unchanged": "L'agent a déjà ces instructions."
+  }
 }

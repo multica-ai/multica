@@ -1,0 +1,86 @@
+---
+title: 控制与日志
+description: 一键暂停整个公司，设置每日安静时段，并查看所有改变公司治理方式的变更的治理日志。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+两个工具让你掌控全局。**公司控制**在整个工作区范围内停止自动工作，**治理日志**记录每一项改变公司治理方式的变更。日志不能被编辑或删除。
+
+## 公司状态
+
+公司处于以下三种状态之一：
+
+| 状态 | 例行任务和委派运行 | 聊天和你发起的运行 |
+| --- | --- | --- |
+| `running`（运行中） | 正常运行 | 正常运行 |
+| `paused`（已暂停） | 以原因 `company_paused` 暂停。自动化跳过，唤醒不触发。 | 继续工作 |
+| `quiet`（安静） | 推迟到安静时段结束，不会丢弃 | 继续工作 |
+
+公司暂停期间，自动知识发布和流水线自动推进会停止，标准授权也不适用。秘书的简报和聊天照常工作，因此你仍能查看公司状况并与之交流。
+
+**办公室**标题栏中的 **Pause**（暂停）即可暂停公司。选择 **stop running work**（停止运行中的工作）则还会取消正在进行的例行和委派运行：
+
+```bash
+multica company status
+multica company pause --stop-running
+multica company resume
+```
+
+所有者和管理员可以暂停和恢复。成员可以查看状态。
+
+### 安静时段
+
+安静时段是每天一段时间，按工作区时区计算，期间例行运行会被推迟。默认为 22:00 到 07:00。被推迟的运行会在时段结束时开始，不会丢失。
+
+```bash
+multica company quiet --enable --start 22:00 --end 07:00 --timezone Europe/Paris
+multica company quiet --disable
+```
+
+时间为时区内的 `HH:MM` 格式。安静时段也可以在 **Controls** 标签页中设置。
+
+<Callout type="info">
+暂停会在约一分钟内阻止例行运行。由 webhook 发起的运行在认领守护进程时会被暂停，因此运行列表可能在暂停期间显示为 `issue_created`，但该运行仍不会开始。
+</Callout>
+
+## 治理日志
+
+日志是只追加的记录，保存所有改变公司治理方式的操作，包括：
+
+- 创建、撤销和用于自动批准的提案策略；
+- 设置、延期、暂停和释放的预算；
+- 自主等级变更；
+- 已应用和已撤销的组织变更；
+- 自动知识发布；
+- 被强制推进阶段的倡议；
+- 公司的暂停与恢复；
+- 已激活的目标；
+- 已发布的评审。
+
+每条记录包括类型、操作者（人、智能体、系统或策略）、对象、摘要和详情。打开**治理**中的 **Log** 标签页，可以按类型、操作者或对象筛选，并导出 CSV。
+
+```bash
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/governance/events?kind=budget_hold"
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -o governance.csv "$MULTICA_API/api/governance/events.csv"
+```
+
+CSV 导出最多 50,000 行。超过时返回 HTTP 413，请缩小筛选范围后重新导出。
+
+日志在应用中没有更新或删除路径，只有删除整个工作区才会移除。保留期限不限。
+
+## 系统健康
+
+**Controls** 标签页显示每个计划任务最近一次成功的时间和延迟、交付失败情况、知识侧车的健康状况，以及预算闸门缓存的年龄。API 为 `GET /api/governance/health`。卡住的任务会在简报中作为风险项列出。
+
+## 限制
+
+- 公司状态的端点为 `GET` 和 `PUT /api/office/company-state`，以及 `PUT /api/office/quiet-hours`。上文的 CLI 命令即是对它们的封装。
+
+## 下一步
+
+- [预算](/budgets)：不暂停公司也能暂停运行的上限。
+- [自主与授权](/autonomy-and-approvals)：日志记录的策略。
+- [评审与组织变更](/reviews-and-org-changes)：应用和撤销时被日志记录的变更。

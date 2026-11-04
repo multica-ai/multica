@@ -1,0 +1,86 @@
+---
+title: Controls and the log
+description: Pause the whole company with one action, set a daily quiet window, and read the governance log of every change that alters how the company is governed.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Two tools keep you in control. **Company controls** stop automated work across the whole workspace, and the **governance log** records every change to how the company is governed. The log cannot be edited or deleted.
+
+## Company state
+
+The company is in one of three states:
+
+| State | Routine and delegated runs | Chat and runs you start |
+| --- | --- | --- |
+| `running` | Run normally | Run normally |
+| `paused` | Held with the reason `company_paused`. Autopilots skip, and wakeups do not fire. | Keep working |
+| `quiet` | Deferred to the end of the quiet window, not dropped | Keep working |
+
+While the company is paused, automatic knowledge publishing and pipeline auto-advance stop, and standing approvals do not apply. The Secretary's brief and chat keep working, so you can still see and talk to the company.
+
+**Pause** in the Office header pauses it. Pause with **stop running work** also cancels the routine and delegated runs already in progress:
+
+```bash
+multica company status
+multica company pause --stop-running
+multica company resume
+```
+
+Owners and admins can pause and resume. Members can read the state.
+
+### Quiet hours
+
+A quiet window is a daily period, in the workspace's timezone, in which routine runs are deferred. The default is 22:00 to 07:00. A deferred run starts when the window ends. Nothing is dropped.
+
+```bash
+multica company quiet --enable --start 22:00 --end 07:00 --timezone Europe/Paris
+multica company quiet --disable
+```
+
+Times are `HH:MM` in the timezone. Quiet hours can also be set in the **Controls** tab.
+
+<Callout type="info">
+A pause stops routine runs within about a minute. A run that a webhook starts is held when it claims a daemon, so the runs list can show it as `issue_created` while the company is paused. The run still does not start.
+</Callout>
+
+## The governance log
+
+The log is an append-only record of the actions that change how the company is governed. It covers:
+
+- proposal policies created, revoked, and used for an automatic approval;
+- budgets set, extended, held, and released;
+- autonomy level changes;
+- organisation changes applied and reverted;
+- automatic knowledge publishes;
+- initiatives forced to a stage;
+- the company paused and resumed;
+- goals activated;
+- reviews published.
+
+Each entry has its kind, the actor (a person, an agent, the system, or a policy), the subject, a summary, and details. Open the **Log** tab in **Governance** to filter by kind, actor, or subject, and to export CSV.
+
+```bash
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/governance/events?kind=budget_hold" 
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -o governance.csv "$MULTICA_API/api/governance/events.csv"
+```
+
+The CSV export is capped at 50,000 rows. Beyond that it returns HTTP 413, so narrow the filters and export again.
+
+The log has no update or delete path in the application. Only deleting the whole workspace removes it. Retention is indefinite.
+
+## System health
+
+The **Controls** tab shows the last success and lag of each scheduled job, delivery failures, the knowledge sidecar's health, and the age of the budget gate's cache. The API is `GET /api/governance/health`. A stuck job is a risk line in the brief.
+
+## Limits
+
+- The company-state endpoints are `GET` and `PUT /api/office/company-state` and `PUT /api/office/quiet-hours`. The CLI commands above wrap them.
+
+## Next steps
+
+- [Budgets](/budgets) for the limit that holds runs without pausing the company.
+- [Autonomy and approvals](/autonomy-and-approvals) for the policies the log records.
+- [Reviews and organisation changes](/reviews-and-org-changes) for the changes the log records when applied and reverted.

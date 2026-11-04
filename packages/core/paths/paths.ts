@@ -35,6 +35,19 @@ export function isMyAgentsSearch(searchParams: URLSearchParams): boolean {
   return searchParams.get("scope") === MY_AGENTS_SCOPE;
 }
 
+/**
+ * The Governance route's tabs. The selected tab is URL state (`?tab=`), so a
+ * tab can be linked to and survives a reload. Lives here because it is URL
+ * vocabulary shared by the links and the page that reads them.
+ */
+export const GOVERNANCE_TABS = ["goals", "budgets", "autonomy", "reviews", "log", "controls"] as const;
+export type GovernanceTab = (typeof GOVERNANCE_TABS)[number];
+
+/** The tab a `?tab=` value selects. A missing or unknown value is the default tab, goals. */
+export function parseGovernanceTab(value: string | null | undefined): GovernanceTab {
+  return (GOVERNANCE_TABS as readonly string[]).includes(value ?? "") ? (value as GovernanceTab) : "goals";
+}
+
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
@@ -74,6 +87,8 @@ function workspaceScoped(slug: string) {
     pipeline: () => `${ws}/pipeline`,
     // The pipeline board filtered to one owner squad (the Office room badge).
     pipelineForSquad: (squadId: string) => `${ws}/pipeline?squad=${encode(squadId)}`,
+    // The Governance route; `tab` selects one of GOVERNANCE_TABS (default: goals).
+    governance: (tab?: GovernanceTab) => (tab ? `${ws}/governance?tab=${tab}` : `${ws}/governance`),
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     chat: () => `${ws}/chat`,

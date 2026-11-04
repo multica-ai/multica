@@ -189,6 +189,26 @@
       "unknown": "未知"
     }
   },
+  "repo": {
+    "title": "代码库文档",
+    "description": "把代码库的 docs 目录保存到工程知识库中。每个 Markdown 文件成为一份参考文档，每个文件都需要 Summary 标题。",
+    "load_error": "无法加载代码库同步设置",
+    "enabled": "每天同步此代码库",
+    "repo_url": "代码库地址（https）",
+    "branch": "分支",
+    "docs_path": "docs 目录",
+    "base": "知识库",
+    "save": "保存",
+    "run": "立即同步",
+    "last_sync": "上次同步 {{when}}",
+    "never_synced": "从未同步",
+    "last_error": "上次同步有失败的文件，请查看下方",
+    "toast": {
+      "saved": "代码库同步设置已保存",
+      "synced": "代码库已同步",
+      "failed": "无法保存代码库同步设置"
+    }
+  },
   "bases": {
     "title": "知识库",
     "description": "可将知识库限定为指定的小组、楼层或智能体。Wiki 最多开启三个知识库；摘要会产生模型调用费用。",

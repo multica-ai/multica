@@ -12,11 +12,13 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { agentListOptions, squadListOptions, squadMemberStatusOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { autonomyLevelName, squadAutonomyOptions } from "@multica/core/governance";
 import type { SquadMemberStatus } from "@multica/core/types";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { AUTONOMY_LEVEL_KEYS } from "../../governance/autonomy-levels";
 import { useOfficeAdmin } from "../lib/use-office-admin";
 import { OfficeCharterTab } from "./office-charter-tab";
 import { OfficeRoutines } from "./office-routines";
@@ -83,6 +85,8 @@ function PanelBody({
   const { data: autopilots = [] } = useQuery(autopilotListOptions(wsId));
   const { data: proposals = [] } = useQuery(proposalListOptions(wsId, { state: "pending", squad_id: squadId }));
   const { data: routines = [] } = useQuery(squadRoutinesOptions(wsId, squadId));
+  const { data: autonomy } = useQuery(squadAutonomyOptions(wsId, squadId));
+  const { t: tGovernance } = useT("governance");
   const isOfficeAdmin = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -157,6 +161,19 @@ function PanelBody({
           })}
         </section>
         <OfficeSquadAttention squadId={squadId} canPin={isOfficeAdmin} />
+        <section aria-label={tGovernance(($) => $.autonomy.panel_heading)} className="flex flex-col gap-1">
+          <h3 className="text-caption font-medium text-muted-foreground">{tGovernance(($) => $.autonomy.panel_heading)}</h3>
+          <p className="text-body">
+            {tGovernance(($) => $.autonomy.level_tag, { level: autonomy?.level ?? squad?.autonomy_level ?? 1 })}
+            {" "}
+            {(() => {
+              const level = autonomy?.level ?? squad?.autonomy_level ?? 1;
+              const key = AUTONOMY_LEVEL_KEYS[level];
+              return key ? tGovernance(($) => $.autonomy.levels[key].name) : autonomyLevelName(level);
+            })()}
+          </p>
+          {autonomy?.reason ? <p className="text-caption text-muted-foreground">{autonomy.reason}</p> : null}
+        </section>
         <OfficeRoutines squadId={squadId} canManage={canManage} />
         {squadAutopilots.length > 0 ? (
           <section aria-label={t(($) => $.office.squad_autopilots)} className="flex flex-col gap-1">

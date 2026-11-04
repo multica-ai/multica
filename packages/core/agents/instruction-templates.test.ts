@@ -268,8 +268,11 @@ describe("secretary template", () => {
       "## Needs your decision",
       "## Progress",
       "## Pipeline",
+      "## Goals",
+      "## Budget",
       "## Blockers and risks",
       "## Watch",
+      "## People",
       "## FYI",
     ];
     const at = headings.map((h) => secretary.indexOf(h));
@@ -280,8 +283,8 @@ describe("secretary template", () => {
   });
 
   it("names the required routines not on time and the silent squads under Blockers and risks", () => {
-    const blockers = secretary.indexOf("5. ## Blockers and risks");
-    const watch = secretary.indexOf("6. ## Watch");
+    const blockers = secretary.indexOf("7. ## Blockers and risks");
+    const watch = secretary.indexOf("8. ## Watch");
     const sentence = secretary.indexOf("`routines_not_on_time`");
 
     expect(sentence).toBeGreaterThan(blockers);
@@ -292,8 +295,8 @@ describe("secretary template", () => {
   });
 
   it("names the overdue squad requests and a retrieval drop under Blockers and risks", () => {
-    const blockers = secretary.indexOf("5. ## Blockers and risks");
-    const watch = secretary.indexOf("6. ## Watch");
+    const blockers = secretary.indexOf("7. ## Blockers and risks");
+    const watch = secretary.indexOf("8. ## Watch");
     const section = secretary.slice(blockers, watch);
 
     expect(section).toContain("`overdue_requests`");
@@ -376,10 +379,12 @@ describe("secretary brief", () => {
   });
 
   it("lists stale knowledge under FYI, not as its own section", () => {
-    const fyi = secretary.slice(secretary.indexOf("7. ## FYI"));
+    const fyi = secretary.slice(secretary.indexOf("10. ## FYI"));
     expect(fyi).toContain("`knowledge.stale_published`");
     expect(fyi).toContain("more than 90 days ago");
-    expect(secretary.match(/^\d\. ## /gm)).toHaveLength(7);
+    expect(fyi).toContain("`knowledge.auto_published`");
+    expect(fyi).toContain("without a person");
+    expect(secretary.match(/^\d+\. ## /gm)).toHaveLength(10);
   });
 });
 
@@ -415,6 +420,7 @@ describe("company role templates", () => {
 
     expect(librarian).toContain("Daily draft triage");
     expect(librarian).toContain("Weekly freshness review");
+    expect(librarian).toContain("A document no squad owns comes to you");
     expect(librarian).toContain("Weekly retrieval check");
     expect(librarian).toContain("Monthly taxonomy audit");
     expect(librarian).toContain("You do not publish");
@@ -439,7 +445,7 @@ describe("company role templates", () => {
 
   it("asks the Secretary's brief for a Pipeline section only when the digest has pipeline data", () => {
     const secretary = instructionsOf("secretary");
-    const pipeline = secretary.slice(secretary.indexOf("4. ## Pipeline"), secretary.indexOf("5. ## Blockers and risks"));
+    const pipeline = secretary.slice(secretary.indexOf("4. ## Pipeline"), secretary.indexOf("5. ## Goals"));
 
     expect(pipeline).toContain("the digest's `pipeline` lists active initiatives");
     expect(pipeline).toContain("Leave the section out when it is empty");

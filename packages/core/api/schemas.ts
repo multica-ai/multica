@@ -2433,6 +2433,8 @@ export const SquadSchema = z.object({
   // Office seat. Older backends omit both; null means unseated.
   floor_id: z.string().nullable().optional().transform((v) => v ?? null),
   office_slot: z.number().nullable().optional().transform((v) => v ?? null),
+  // Autonomy (spec 4.3). Older backends omit it: a squad is at L1 until changed.
+  autonomy_level: z.number().int().nullish().transform((v) => v ?? 1),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2645,6 +2647,8 @@ export const AutopilotRunSchema = z.object({
   completed_at: z.string().nullable().default(null),
   failure_reason: z.string().nullable().default(null),
   reason_code: z.string().optional(),
+  // True while the claim gate holds the run's queued task; older servers omit it.
+  held: z.boolean().default(false),
   trigger_payload: z.unknown().default(null),
   result: z.unknown().default(null),
   created_at: z.string().default(""),

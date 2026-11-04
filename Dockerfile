@@ -26,7 +26,8 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_codex_u
 # --- Runtime stage ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+# git runs the repo-docs sync (knowledge_repo_sync); the sync needs it at run time.
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 

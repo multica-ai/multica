@@ -97,6 +97,10 @@ type wecomChannel struct {
 	// languages resolves the chat a receipt goes back to into the language
 	// it is written in. Nil puts every reader on the deployment default.
 	languages languageLookup
+
+	// actions decides a press of a brief card's button. Nil leaves presses
+	// unanswered.
+	actions channel.ActionHandler
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -499,6 +503,9 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			// can backoff and reconnect (which will in turn displace THAT
 			// one — the last writer wins).
 			return errors.New("wecom: received disconnected_event (superseded)")
+		case eventTemplateCard:
+			c.pressCard(ec, sender, log)
+			return nil
 		default:
 			log.Debug("wecom: event", "type", ec.Event.EventType)
 			return nil
@@ -631,6 +638,10 @@ type ChannelDeps struct {
 
 	// WSURL overrides DefaultWSURL. Same test-only intent as Dialer.
 	WSURL string
+
+	// Actions decides what a press of a brief card's button means (the same
+	// handler Telegram and Slack use). Nil leaves presses unanswered.
+	Actions channel.ActionHandler
 }
 
 // sendUnsupportedReceipt answers a message kind the adapter cannot read, once
@@ -774,6 +785,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			logger:         logger,
 			senders:        deps.Senders,
 			metrics:        orNopMetrics(deps.Metrics),
+			actions:        deps.Actions,
 		}, nil
 	}
 }

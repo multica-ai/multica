@@ -1,8 +1,10 @@
 # Digital company office: from squads on a floor to a governed digital company
 
 Status: phase 1 and the first slices of phases 2 and 3 are implemented and merged
-(PRs #25 and #26). Phases 2 (completion), 3 and 4 are specified below and not yet
-built. [Roadmap](#roadmap-and-requirements-trace) maps each part of this document to
+(PRs #25 and #26). Phase 4 is built on the working tree of `feat/digital-company-office-phase4`
+and uncommitted; its deviations are in [Phase 4 deviations](#phase-4-deviations), and
+the plan's [Implementation status](digital-company-office-plan.md#implementation-status)
+table says what is built for each workstream. [Roadmap](#roadmap-and-requirements-trace) maps each part of this document to
 the boss's original requirements.
 
 The [Decisions](#decisions) section records how the open questions of the first draft
@@ -989,13 +991,16 @@ text is kept for the reasoning. Phases 2 to 4 below are written against these fa
 - Phase 3 deviations
   - Migrations 736 to 773 are used. 769 holds the initiative timeline kinds; 770 holds the
     knowledge review pointer; 771 to 773 hold the repo-docs sync. Migration 759 is unused.
+    Migration 860 (the phase 3 audit) adds the `scaled` timeline kind and the
+    `initiative_scaled` retrospective trigger. It is outside 730 to 779 because that range is
+    spent.
   - Initiative artifacts, knowledge kinds, policies, eval cases, ACL grants and the new tables
     have no primary key. Each is keyed by a unique index, because the migration budget is
     spent on concurrent builds.
   - The build project uses the `SDLC Auto` workflow, the same one the quickstart creates,
     not the workspace Default. The workflow text is held in Go and can drift from the
     TypeScript template in `packages/core/squads/templates.ts`.
-  - Permissions for transitions: shelve, resume, close and force are workspace admins;
+  - Permissions for transitions: shelve, resume, close and force are workspace owners and admins;
     advance, attest and waive are the owning squad or an admin; send-back is the owning leader
     or an admin. Creating an initiative is an admin or the Secretary, as 3.1 says.
   - A rejected stage gate is filed again after seven days. The spec does not give a rule.
@@ -1007,7 +1012,6 @@ text is kept for the reasoning. Phases 2 to 4 below are written against these fa
     backfill for existing workspaces, not by setup.
   - Starter company apply writes the publish policies `decision_record` and `brief_archive` as
     `auto`. Other kinds keep the default `manual`. The spec names only the system writers.
-  - People & Performance is in the card list (plan 10.18d); the spec's 3.4 table omits it.
   - `per_floor` starts each floor's lead routine as well as the two routines; `leave_paused`
     starts only the brief and the Market Research scan.
   - The starter company's routines have no expected output (`none`). The operating review's
@@ -1030,23 +1034,32 @@ text is kept for the reasoning. Phases 2 to 4 below are written against these fa
     A held URL draft is checked at publish.
   - Freshness reviews open an issue for the owning squad. A document with an open request, or
     one opened in the last 30 days, gets no second request. A document without an owning squad
-    is reported, not requested. The issue creator is the first workspace owner.
+    is requested from the Executive Office squad, the Librarian's home, whose body says no squad
+    owns it; with no Executive Office squad it is reported only. The issue creator is the first
+    workspace owner.
   - The taxonomy audit repairs only orphaned link rows, and only when the listing is complete.
     Missing kinds are reported and not changed.
   - The repo-docs sync (10.12) has settings, tables, a daily job that is off by default, and a
-    git client with a fixed argument list. It has no HTTP endpoint and no UI. A file that lacks
-    a `## Summary` heading is recorded as a failure, because kind `reference` requires it.
-    Archiving a file removes its WeKnora document and link and keeps the sync record with
-    `archived_at`. Limits: 500 files, 1 MB each, https only, no submodules, no LFS.
+    git client with a fixed argument list. It has the endpoints `GET` and `PUT
+    /api/knowledge/repo-sync` and `POST /api/knowledge/repo-sync/run` (owners and admins), and a
+    section on the Knowledge setup page under Sources. Its git reading is tested against a local
+    repository in a test temp directory. A file that lacks a `## Summary` heading is recorded as
+    a failure, because kind `reference` requires it. Archiving a file removes its WeKnora
+    document and link and keeps the sync record with `archived_at`. Limits: 500 files, 1 MB each,
+    https only, no submodules, no LFS (LFS objects are not downloaded, so an LFS file fails its
+    heading check).
   - The WeKnora models step, owner logins and tenant deprovisioning are tested against fakes
     written from the upstream WeKnora source. None has run against a live WeKnora. The 10.11
     live check against the 9router endpoint was not run.
-  - Governance hooks are placeholders until phase 4: the governance writer is a no-op, the
-    autonomy check that gates auto-publish returns true, and the retrospective hook is a no-op.
-  - The brief FYI for automatic publishes (10.8) is not built.
-  - The wizard's run-cost estimate uses only the stated default. No measured average exists.
-  - Creating an initiative requires a thesis: the server returns 400 without one, and the UI
-    requires it too. Section 3.1 gives the column an empty default.
+  - The initiative close and scale retrospective hook (`RetroHook`) is a no-op. Phase 4's
+    retrospective job finds closed and scaled initiatives by reading the registry, so no hook
+    call is needed.
+  - The brief's FYI names automatic publishes from the digest's `knowledge.auto_published` list,
+    at most 20, newest first, for the window since the last brief.
+  - The wizard's run-cost estimate uses only the stated default (3.4 allows it). A measured
+    average is not built: `task_usage_hourly` holds only provider-reported cost, and runs
+    without one are priced client-side from a rate table, so a server-side average would
+    understate cost.
   - `multica proposal decide` sends a decision with its `outcome`, so an operate review gate can
     be decided from the CLI (3.6 names no command).
   - `PATCH /api/initiatives/{id}` sets `gate_days` for an initiative's 30 and 90-day reviews,
@@ -1571,6 +1584,7 @@ card ("Build your company").
 | Launch | Growth & GTM | Reach the market | Weekly growth review | stage Launch (go to market), Operate |
 | Launch | Support | Keep users | Daily triage; weekly knowledge write-back | stage Operate |
 | Governance | Finance & Risk | Money and risk | Weekly budget review (phase 4) | budgets, risk |
+| Governance | People & Performance | Each squad's record against its charter | Weekly review (phase 4 review job; the card has no routine) | reviews, organisation changes |
 
 Each squad is defined by a **squad card** in `packages/core/squads/company-template.ts`:
 name, floor, leader and member roles (each role references an agent instruction template),
@@ -2114,6 +2128,63 @@ the digest would otherwise omit squads, two additions keep it honest:
   a proposal; a later agent's search for the topic returns the postmortem.
 - With more than 30 squads, `digest_mode = auto` produces floor briefs and a company
   brief that reads them and stays within the length target.
+
+## Phase 4 deviations
+
+- `governance_event` has no primary key, because a primary key would build a non-concurrent index. Workspace teardown is the only delete path.
+- `workspace.company_state_updated_at` is added for the company state timestamp.
+- Pause holds agent auto-publish only. Decisions and brief archives still publish.
+- Quiet hours defer routine runs. Autopilot dispatch stores a deferred run, and a one-minute sweep dispatches it; it is not dispatched on the next schedule tick.
+- Held wakeups stay pending and are rechecked each tick until resume.
+- Webhook metric reports use the member's personal access token on the normal authenticated route, not a separate workspace token.
+- Personal access tokens act in every workspace their member belongs to. This is accepted; scoped tokens are out of scope.
+- `delivery.cycle_time_days` and `delivery.rework_rate` are not built, because there is no done timestamp or reopen history.
+- `knowledge.*` metrics and `brief.usefulness` are company-scope only.
+- `delivery.issues_done` is read the morning after.
+- Run cost counts provider-reported cost only.
+- Goals have two extra columns, `confidence_override` and `confidence_changed_at`.
+- The goal create dialog requires at least one key result, because the server refuses a goal with none.
+- `ClaimAgentTask` takes an exclusion list and walks past at most 16 refused candidates per call.
+- Hold release reason `admitted` is added.
+- Spend belongs to the task's creation period (UTC).
+- The per-task `accounted` column is added.
+- The cost estimate uses the server price table, not the TypeScript Analytics function. Equality with Analytics is not tested.
+- The reservation p90 is cached per process for 10 minutes.
+- Holds of ended tasks are released by the sweep, not in the cancel path.
+- Plan-gate approval creates a $100 per month warn budget. The artifact amount is not parsed.
+- The starter company creates a $500 per month warn budget. Squad and floor shares are not applied, because the cards carry none.
+- The budget create dialog defaults to warn mode. The column default is hold.
+- A `tags` match is refused in autonomy, because proposals carry no tags.
+- `ReverseAutoApproval` exists, but nothing calls it until the weekly review exists.
+- The `budget` kind and `stage_gate` are refused as standing-approval kinds. `stage_gate` is refused entirely.
+- L0 holds apply only to squad-assigned autopilot runs, not to wakeups.
+- Knowledge drafts without a squad no longer auto-publish.
+- The reviewer role is `people_reviewer`, because the schema forbids hyphens.
+- Scorecard proxies: done time is `issue.updated_at`; first-pass and intervention use completed-run counts and member comments; cost is provider-reported only; reopens are not tracked.
+- Runtime-offline and manually ended failures are not charged to the agent.
+- Only completed weeks and months are scored.
+- Revision history starts at the first recorded change. Builder carrier agents are not hooked.
+- The Reviews tab shows proposal IDs, not links, because no proposal route exists.
+- Probation applies to all eight org change types.
+- Hire, retire and merge cannot be reverted by any `org_change` payload, so a worse probation verdict files no rollback proposal. Open decision: add `unhire`, `unretire` and `unmerge` types, or accept this.
+- A charter change that creates a squad's first charter cannot be reverted; the revert is refused.
+- Retrospectives: the job registry reads `sys_cron_executions` instead of a `job_status` table.
+- The budget-hold trigger reads `governance_event` (`budget_hold`), because no `budget_hold` table exists.
+- Retro proposals reference org_change types.
+- The initiative-closed hook is a no-op; the hourly job covers closures.
+- Squad-scoped goals import as drafts. The export carries a draft or active squad goal; the import writes it as a draft, so the boss activates it. The import's governance entry (`goal_imported`) on the goal says so, because a goal has no details field and a note in `why` would change the structure. A squad goal that was active in the source is therefore a draft in the copy.
+- Initiatives are exported by identity (pipeline name, stage key, title), not pipeline id, because pipeline ids are per workspace. The import creates a missing initiative quiet: it gets its backing issue, its owner squad and its status (active, shelved or operating), but no handoff and no wake. Closed initiatives are history and are not exported.
+- Archived squads import archived after their members and routines are written. Archiving moves their routines to the leader and releases their agents' home squads, as archiving in the app does. Their routines stay paused.
+- Imported routines are created paused.
+- Progress, spend and secrets are excluded from company import.
+- `digest_mode` is a column, not a settings key, and has API and CLI only (no UI).
+- The floor brief routine is created when a chief is named: one daily autopilot, assigned to the chief, recorded on the floor chief row. Naming the same chief again reuses it. A chief replaced or cleared has its routine paused. Company import recreates it paused.
+- The floor-scoped digest counts its own squads, initiatives, pending decisions, budgets and goals, and its runs and failed runs (by the squad of each run). The usage totals (tokens and reported cost) are not attributed to a floor: the usage rollup has no squad, so a floor digest reports them as zero. Knowledge, inquiries, reviews and runtimes are company-level and appear in every digest.
+- CSV export is capped at 50,000 rows and returns HTTP 413 beyond that.
+- Request bodies are capped at 16 KiB for budget, goal and policy writes, 16 KiB for metric readings, and 8 MiB for import.
+- The probation scenario is skipped in Playwright: it needs the 14-day job, and a Go test covers the check. The retro scenario runs its retrospective through `POST /api/test/retro/evaluate`, which exists only when the server runs with `MULTICA_TEST_ROUTES=1` (not set by default, refused in production). The postmortem and search steps are skipped unless WeKnora is configured (`KNOWLEDGE_URL` is set).
+- Secretary brief wording and length need a live model and are not verified.
+- Known open product gap: webhook-triggered routine runs skip the company-state check at admission and are held at claim, so the runs list shows `issue_created` during a pause.
 
 ## Out of scope
 

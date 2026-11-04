@@ -1,0 +1,1 @@
+ALTER TABLE goal ADD CONSTRAINT goal_pkey PRIMARY KEY USING INDEX goal_pkey_uidx;

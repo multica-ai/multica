@@ -19,7 +19,8 @@ export type AutopilotRunStatus =
   | "running"
   | "completed"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "deferred";
 
 export type AutopilotRunSource = "schedule" | "manual" | "webhook" | "api" | "catchup";
 
@@ -130,6 +131,9 @@ export interface AutopilotRun {
   // "run now" UI localizes this instead of echoing the raw English reason.
   // Older servers omit it.
   reason_code?: string;
+  // True while the claim gate holds the run's queued task (spec 4.10(b)); the
+  // reason_code then names the hold. Older servers omit it.
+  held?: boolean;
   trigger_payload: unknown;
   result: unknown;
   created_at: string;

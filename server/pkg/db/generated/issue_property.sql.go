@@ -126,7 +126,7 @@ SET properties = properties - $1::text,
     END,
     updated_at = CASE WHEN properties ? $1::text THEN now() ELSE updated_at END
 WHERE id = $2::uuid AND workspace_id = $3::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
 `
 
 type DeleteIssuePropertyValueParams struct {
@@ -170,6 +170,9 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
 		&i.QueueOrder,
+		&i.DoneAt,
+		&i.ReopenCount,
+		&i.LastReopenedAt,
 	)
 	return i, err
 }
@@ -283,7 +286,7 @@ SET properties = jsonb_set(properties, ARRAY[$1::text], $2::jsonb, true),
     END,
     updated_at = CASE WHEN properties -> $1::text IS DISTINCT FROM $2::jsonb THEN now() ELSE updated_at END
 WHERE id = $3::uuid AND workspace_id = $4::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
 `
 
 type SetIssuePropertyValueParams struct {
@@ -336,6 +339,9 @@ func (q *Queries) SetIssuePropertyValue(ctx context.Context, arg SetIssuePropert
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
 		&i.QueueOrder,
+		&i.DoneAt,
+		&i.ReopenCount,
+		&i.LastReopenedAt,
 	)
 	return i, err
 }

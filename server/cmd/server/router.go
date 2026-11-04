@@ -937,6 +937,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				BotNames: botNames,
 				Logger:   slog.Default(),
 			})
+			// Brief push to a DingTalk member's direct message. Links only: DingTalk
+			// action cards have no callback, so the decision buttons are not signed
+			// for this app (dingtalk/notifier.go).
+			h.BriefPush.RegisterNotifier(dingtalk.TypeDingTalk, dingtalk.NewNotifier(queries, box.Open, dingtalkClient))
 			installSvc, installErr := dingtalk.NewInstallService(queries, pool, box, slog.Default())
 			if installErr != nil {
 				slog.Error("dingtalk: InstallService init failed; install disabled", "error", installErr)
@@ -1039,7 +1043,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// in the sender's profile language in a 1:1.
 					Languages: queries,
 					Logger:    slog.Default(),
+					// Presses of a brief card's button (plan 9.11) are decided by the
+					// same handler Telegram and Slack use.
+					Actions: channelActions,
 				})
+				// Brief push to a WeCom member's single chat. The decision buttons are
+				// signed with the same signer; their presses come back as
+				// template_card_event on the same connection.
+				h.BriefPush.RegisterNotifier(wecom.TypeWecom, wecom.NewNotifier(wecomSenders))
+				h.BriefPush.EnableActionButtons(actionSigner, wecom.TypeWecom)
 				// Streaming replies: WeCom's smart-bot protocol has no
 				// typing indicator, no reaction and no read receipt, so the
 				// only way to say "working on it" is to open the reply early.
@@ -1575,6 +1587,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
+	// Outside metric feeds report readings with a workspace metric token (spec
+	// 4.1). The token names the workspace, so the route takes no workspace header.
+	r.Post("/api/webhooks/metrics/{key}/readings", h.ReportMetricReadingByToken)
 	// GitHub App webhook (no Multica auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
@@ -2088,6 +2103,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/bases/{key}/settings", h.PatchKnowledgeBaseSettings)
 					r.Post("/models/test", h.TestKnowledgeModels)
 					r.Post("/owner-account/reveal", h.RevealKnowledgeOwnerPassword)
+					// The repo-docs sync setting and a run now (plan 10.12).
+					r.Get("/repo-sync", h.GetKnowledgeRepoSync)
+					r.Put("/repo-sync", h.UpdateKnowledgeRepoSync)
+					r.Post("/repo-sync/run", h.RunKnowledgeRepoSync)
 				})
 				// A person uploads a file and it is published at once: the
 				// person is the curator. Agents are refused by RequireHumanActor.
@@ -2296,6 +2315,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
 					r.Get("/charter", h.GetSquadCharter)
+					// Squad autonomy level (spec 4.3): reads for members; changes for owners and admins.
+					r.Get("/autonomy", h.GetSquadAutonomy)
+					r.Put("/autonomy", h.SetSquadAutonomy)
 					r.Put("/charter", h.UpdateSquadCharter)
 					r.Get("/attention", h.GetSquadAttention)
 					r.Put("/attention/pin", h.PinSquadAttention)
@@ -2304,6 +2326,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/routines/{routine_id}", h.DeleteSquadRoutine)
 				})
 			})
+
+			// Test-only routes (runbook phase 4). Registered only when MULTICA_TEST_ROUTES=1
+			// and APP_ENV is not production; otherwise they do not exist and answer 404.
+			if handler.TestRoutesEnabled() {
+				r.Post("/api/test/retro/evaluate", h.EvaluateRetrosForTest)
+			}
 
 			// Pipeline and initiatives (spec 3.1). Decisions on a stage gate go through
 			// /api/proposals; the routes here move an initiative directly.
@@ -2325,6 +2353,35 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Metrics and goals (spec 4.1). Reads are for every member. A reading is
+			// reported by a member or an agent, or by a member's token from outside
+			// (source "webhook"); the report is rate-limited per workspace and metric.
+			// Goals are written by the boss and admins; a squad's goal comes from a
+			// goal proposal.
+			r.Get("/api/metrics", h.ListMetrics)
+			r.Get("/api/metrics/{key}/readings", h.ListMetricReadings)
+			r.Post("/api/metrics/{key}/readings", h.ReportMetricReading)
+			// Workspace metric tokens for outside feeds (spec 4.1). Minting and
+			// revoking are for people, and for owners and admins.
+			r.Route("/api/metric-tokens", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListMetricWebhookTokens)
+				r.Post("/", h.CreateMetricWebhookToken)
+				r.Delete("/{id}", h.RevokeMetricWebhookToken)
+			})
+			r.Route("/api/goals", func(r chi.Router) {
+				r.Get("/", h.ListGoals)
+				r.Post("/", h.CreateGoal)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetGoal)
+					r.Patch("/", h.UpdateGoal)
+					r.Delete("/", h.DeleteGoal)
+					r.Post("/activate", h.ActivateGoal)
+					r.Post("/status", h.SetGoalStatus)
+					r.Put("/confidence", h.SetGoalConfidence)
+				})
+			})
+
 			// Proposals: a squad's request for a decision by the boss. Decisions
 			// are refused to agent actors inside the handler.
 			r.Route("/api/proposals", func(r chi.Router) {
@@ -2337,6 +2394,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/revision", h.ReviseProposal)
 				})
 			})
+			// Standing approvals (spec 4.4). Reads for members; creating and revoking
+			// are for owners and admins, decided in the handler. Flat registrations,
+			// as the office endpoints below are.
+			r.Get("/api/approval-policies", h.ListApprovalPolicies)
+			r.Post("/api/approval-policies", h.CreateApprovalPolicy)
+			r.Post("/api/approval-policies/{id}/revoke", h.RevokeApprovalPolicy)
+			r.Get("/api/approval-policies/{id}/auto-approvals", h.ListPolicyAutoApprovals)
 			// Digital company office: floors (owner/admin) and squad seats.
 			// Flat registrations on purpose: other office endpoints (digest,
 			// briefs) live under the same prefix, and a second r.Route on it
@@ -2348,11 +2412,49 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Put("/api/office/seats", h.PutOfficeSeats)
 			// The Secretary's digest: facts about the company, any member.
 			r.Get("/api/office/digest", h.GetOfficeDigest)
+			// Floor chiefs (spec 4.8): one agent per floor publishes its brief. Reads
+			// for members; changes for owners and admins, decided in the handler.
+			r.Get("/api/office/floors/{id}/chief", h.GetFloorChief)
+			r.Put("/api/office/floors/{id}/chief", h.SetFloorChief)
+			r.Delete("/api/office/floors/{id}/chief", h.ClearFloorChief)
+			// The digest source (auto, squads or floors) and the office pulse strip.
+			r.Get("/api/office/digest-mode", h.GetDigestMode)
+			r.Put("/api/office/digest-mode", h.SetDigestMode)
+			r.Get("/api/office/pulse", h.GetOfficePulse)
+			// Company as code (spec 4.9): the structure as a document, and its import.
+			r.Get("/api/office/export", h.ExportCompany)
+			r.Post("/api/office/import", h.ImportCompany)
 			// The Secretary setup and its readiness checklist (owner or admin).
 			// Setup is idempotent: a second POST changes nothing.
 			r.Get("/api/office/setup", h.GetOfficeSetup)
 			r.Post("/api/office/setup", h.SetupOffice)
 			r.Post("/api/office/company-template/apply", h.ApplyCompanyTemplate)
+			// Company controls (spec 4.5): the state and quiet hours. Reads for
+			// members; changes for owners and admins, decided in the handler.
+			r.Get("/api/office/company-state", h.GetCompanyState)
+			r.Put("/api/office/company-state", h.SetCompanyState)
+			r.Put("/api/office/quiet-hours", h.SetQuietHours)
+			// The governance log (spec 4.5). Read-only: no route writes an entry.
+			r.Get("/api/governance/events", h.ListGovernanceEvents)
+			r.Get("/api/governance/events.csv", h.ExportGovernanceEvents)
+			// Budgets (spec 4.2). Reads for members; writes are decided in the handler.
+			r.Get("/api/budgets", h.ListBudgets)
+			r.Post("/api/budgets", h.CreateBudget)
+			r.Patch("/api/budgets/{id}", h.UpdateBudget)
+			r.Post("/api/budgets/{id}/extend", h.ExtendBudget)
+			r.Post("/api/budgets/{id}/release-holds", h.ReleaseBudgetHolds)
+			r.Get("/api/budgets/{id}/periods", h.ListBudgetPeriods)
+			r.Get("/api/budget-holds", h.ListBudgetHolds)
+			// Scorecards and reviews (spec 4.6). Reads are limited to the owners,
+			// admins and the subject's leader; POST /api/reviews is the reviewer's.
+			r.Get("/api/scorecards", h.ListScorecards)
+			r.Route("/api/reviews", func(r chi.Router) {
+				r.Get("/", h.ListReviews)
+				r.Post("/", h.CreateReview)
+				r.Get("/{id}", h.GetReview)
+			})
+			// System health (spec 4.9): job lag, deliveries, WeKnora and the budget gate.
+			r.Get("/api/governance/health", h.GetGovernanceHealth)
 			// The caller's brief push to a chat app (plan 9.10). Member scope only:
 			// the handler reads and writes the caller's own row and refuses agents.
 			r.Get("/api/office/brief-push", h.GetBriefPushPreference)
@@ -2467,6 +2569,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					// The history of the agent's instructions and restoring one (spec 4.6).
+					r.Get("/instruction-revisions", h.ListAgentInstructionRevisions)
+					r.Post("/instruction-revisions/{revision}/restore", h.RestoreAgentInstructionRevision)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)

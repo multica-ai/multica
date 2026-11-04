@@ -65,19 +65,22 @@ type AutoPublishEvent struct {
 	KnowledgeBase string
 	Kind          string
 	Mode          string
+	// ActorType is GovernanceActorPolicy for a policy-governed draft and
+	// GovernanceActorSystem for a system writer.
+	ActorType     string
 	AuthorSquadID pgtype.UUID
 	CriticSquadID pgtype.UUID
 	OccurredAt    time.Time
 }
 
-// GovernanceRecorder receives the automatic publishes. The governance log of
-// phase 4 (11.4) implements it; until then NoopGovernance is wired and nothing
-// is kept. A failing recorder is logged and never fails the publish.
+// GovernanceRecorder receives the automatic publishes. When none is wired the
+// governance log records them (NewAutoPublishGovernance). A failing recorder is
+// logged and never fails the publish.
 type GovernanceRecorder interface {
 	RecordAutoPublish(ctx context.Context, ev AutoPublishEvent) error
 }
 
-// NoopGovernance records nothing. It is the implementation until phase 4.
+// NoopGovernance records nothing. Tests use it where the log is not under test.
 type NoopGovernance struct{}
 
 // RecordAutoPublish implements GovernanceRecorder.
@@ -86,7 +89,7 @@ func (NoopGovernance) RecordAutoPublish(context.Context, AutoPublishEvent) error
 func (s *KnowledgeService) recordAutoPublish(ctx context.Context, ev AutoPublishEvent) {
 	rec := s.Governance
 	if rec == nil {
-		rec = NoopGovernance{}
+		rec = NewAutoPublishGovernance(s.Queries)
 	}
 	ev.OccurredAt = time.Now()
 	if err := rec.RecordAutoPublish(ctx, ev); err != nil {
@@ -95,10 +98,29 @@ func (s *KnowledgeService) recordAutoPublish(ctx context.Context, ev AutoPublish
 }
 
 // squadMayAutoPublish reports whether a squad's documents may be published
-// without a person. Phase 4 (11.9) replaces this with the autonomy check: the
-// squad must be at level L2 or above. Until autonomy exists every squad passes,
-// which is the behaviour the phase 3 acceptance assumes.
-func squadMayAutoPublish(_ context.Context, _ pgtype.UUID) bool { return true }
+// without a person: the squad must be at autonomy level L2 or above (spec 4.3).
+// A draft with no squad, or from a squad that no longer exists, waits for a
+// person.
+func (s *KnowledgeService) squadMayAutoPublish(ctx context.Context, ws, squad pgtype.UUID) (bool, error) {
+	if !squad.Valid {
+		return false, nil
+	}
+	level, err := s.Queries.GetSquadAutonomyLevel(ctx, db.GetSquadAutonomyLevelParams{ID: squad, WorkspaceID: ws})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load squad autonomy level: %w", err)
+	}
+	return AutonomyAllowsAutoPublish(int(level)), nil
+}
+
+// autoPublishPaused reports whether an agent's automatic publish is refused
+// because the company is paused (spec 4.5). The draft then waits for a person,
+// as a manual draft does. Quiet hours do not refuse publishing.
+func (s *KnowledgeService) autoPublishPaused(ctx context.Context, ws pgtype.UUID) (bool, error) {
+	return CompanyIsPaused(ctx, s.Queries, ws)
+}
 
 // ListPublishPolicies returns the workspace's policy rows.
 func (s *KnowledgeService) ListPublishPolicies(ctx context.Context, workspaceID pgtype.UUID) ([]PublishPolicyView, error) {
@@ -240,7 +262,21 @@ func (s *KnowledgeService) ReviewDocument(ctx context.Context, workspaceID, link
 	if err != nil {
 		return KnowledgeDocumentView{}, err
 	}
-	if mode != PublishModeAfterReview || !squadMayAutoPublish(ctx, author) {
+	if mode != PublishModeAfterReview {
+		return s.linkView(ctx, workspaceID, link)
+	}
+	allowed, err := s.squadMayAutoPublish(ctx, workspaceID, author)
+	if err != nil {
+		return KnowledgeDocumentView{}, err
+	}
+	if !allowed {
+		return s.linkView(ctx, workspaceID, link)
+	}
+	paused, err := s.autoPublishPaused(ctx, workspaceID)
+	if err != nil {
+		return KnowledgeDocumentView{}, err
+	}
+	if paused {
 		return s.linkView(ctx, workspaceID, link)
 	}
 	view, err := s.PublishDocument(ctx, workspaceID, linkID, reviewer)
@@ -249,7 +285,7 @@ func (s *KnowledgeService) ReviewDocument(ctx context.Context, workspaceID, link
 	}
 	s.recordAutoPublish(ctx, AutoPublishEvent{
 		WorkspaceID: workspaceID, LinkID: linkID, KnowledgeBase: base.Key, Kind: link.Kind,
-		Mode: PublishModeAfterReview, AuthorSquadID: author, CriticSquadID: criticSquad,
+		Mode: PublishModeAfterReview, ActorType: GovernanceActorPolicy, AuthorSquadID: author, CriticSquadID: criticSquad,
 	})
 	return view, nil
 }

@@ -189,6 +189,26 @@
       "unknown": "Unknown"
     }
   },
+  "repo": {
+    "title": "Repository docs",
+    "description": "Keeps a repository's docs folder in the engineering knowledge base. Each Markdown file becomes a reference document; each file needs a Summary heading.",
+    "load_error": "Could not load the repository sync",
+    "enabled": "Sync this repository every day",
+    "repo_url": "Repository address (https)",
+    "branch": "Branch",
+    "docs_path": "Docs folder",
+    "base": "Knowledge base",
+    "save": "Save",
+    "run": "Sync now",
+    "last_sync": "Last sync {{when}}",
+    "never_synced": "Never synced",
+    "last_error": "The last sync had failures; see below",
+    "toast": {
+      "saved": "Repository sync saved",
+      "synced": "Repository synced",
+      "failed": "Could not save the repository sync"
+    }
+  },
   "bases": {
     "title": "Knowledge bases",
     "description": "Restrict a base to the squads, floors or agents you name. Wiki is limited to three bases; summaries cost model calls.",

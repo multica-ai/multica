@@ -5,6 +5,7 @@ import type {
   KnowledgeBaseSettings,
   KnowledgeModelChecks,
   KnowledgeOwnerLogin,
+  KnowledgeRepoSync,
   KnowledgeSources,
   KnowledgeSubjectType,
 } from "./platform-types";
@@ -71,6 +72,18 @@ export const KnowledgeSourcesSchema = z
   })
   .loose();
 
+export const KnowledgeRepoSyncSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    repo_url: z.string().default(""),
+    branch: z.string().default("main"),
+    docs_path: z.string().default("docs"),
+    knowledge_base_key: z.string().default("engineering"),
+    last_synced_at: z.string().nullish().transform((v) => v ?? null),
+    last_error: z.string().default(""),
+  })
+  .loose();
+
 export const KnowledgeGrantSchema = z
   .object({
     subject_type: SubjectTypeSchema,
@@ -130,6 +143,17 @@ export const FALLBACK_KNOWLEDGE_SOURCES: KnowledgeSources = {
   state: "unknown",
   ui_url: "",
   sources: [],
+};
+
+/** Read as off: a setting that cannot be read is never shown as syncing. */
+export const FALLBACK_KNOWLEDGE_REPO_SYNC: KnowledgeRepoSync = {
+  enabled: false,
+  repo_url: "",
+  branch: "main",
+  docs_path: "docs",
+  knowledge_base_key: "engineering",
+  last_synced_at: null,
+  last_error: "",
 };
 
 export const FALLBACK_KNOWLEDGE_ACCESS: KnowledgeAccess = {

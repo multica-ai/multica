@@ -139,7 +139,9 @@
     "running": "실행 중",
     "skipped": "건너뜀",
     "completed": "완료됨",
-    "failed": "실패함"
+    "failed": "실패함",
+    "deferred": "지연됨",
+    "held": "보류됨"
   },
   "run_source": {
     "schedule": "일정",
@@ -150,6 +152,11 @@
   },
   "run": {
     "issue_linked": "태스크 연결됨",
+    "held_reason": {
+      "company_paused": "보류됨: 회사가 일시 중지됨",
+      "budget_hold": "보류됨: 예산이 한도에 도달함",
+      "quiet_hours": "보류됨: 방해 금지 시간"
+    },
     "view_log": "실행 로그 보기",
     "skipped_group": {
       "label": "건너뜀",

@@ -171,7 +171,6 @@
     "title_required": "请填写标题。",
     "title_too_long": "标题不能超过 200 个字符。",
     "thesis_label": "论点",
-    "thesis_required": "请填写论点：说明为什么值得做。",
     "thesis_too_long": "论点太长了。",
     "pipeline_label": "管线",
     "no_pipeline": "此工作区没有可用于启动专项的管线。",

@@ -501,6 +501,8 @@ If the endpoint is on a private address, add its host to `KNOWLEDGE_SSRF_WHITELI
 
 `KNOWLEDGE_UPLOAD_MAX_MB` caps one uploaded file. The default is 50, WeKnora's own default; set it no higher than WeKnora's `MAX_FILE_SIZE_MB`.
 
+The repository docs sync (Knowledge, Sources, Repository docs) clones a repository's `docs` folder over https with the server's `git`, which the image includes. It is off until a workspace owner turns it on, and the server must be able to reach the repository's https address. Private repositories are not supported yet: the address is stored as typed and read back to owners, so it must not carry a credential.
+
 Each owner who enables knowledge also gets a WeKnora login, which is an admin of the workspace's WeKnora tenant, so they can use WeKnora's own interface. WeKnora creates those logins only for a system administrator, so the service user (`KNOWLEDGE_SERVICE_EMAIL`) must be one; bootstrap it with `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`. The owner's password is shown once from Setup and cannot be shown again.
 
 When a workspace is deleted, its WeKnora tenant is kept for seven days and then removed. The removal is retried if WeKnora is down. To keep a tenant, delete its `knowledge_tenant_deprovision` row while it is still held, by a direct database command run by an operator.

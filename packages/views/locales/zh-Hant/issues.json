@@ -2139,7 +2139,12 @@
         "name": "人員與績效",
         "description": "每週對照章程審查各小組的紀錄，並回報延誤或沉默的事項。"
       }
-    }
+    },
+    "decision_change_instructions": "指令",
+    "decision_change_charter": "章程",
+    "decision_change_unreadable": "無法載入目前版本進行比較。",
+    "decision_change_removed": "刪除",
+    "decision_change_added": "新增"
   },
   "views": {
     "builtin": {

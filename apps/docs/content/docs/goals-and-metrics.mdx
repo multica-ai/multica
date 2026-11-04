@@ -1,0 +1,80 @@
+---
+title: Goals and metrics
+description: Goals say what the company is for. Key results track progress against metrics, which come from built-in calculations, manual readings, or a webhook from your own product.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A **goal** is a statement of what the company, a floor, a squad, or an initiative is working toward in a period. A goal holds **key results**, and each key result follows one **metric**. Progress and confidence are calculated from the metrics, so the goal shows where it stands without anyone writing a status report.
+
+## Metrics
+
+A metric is a named series with a unit and a direction. Each reading has a value, a time, and a scope: the company, a floor, a squad, or an initiative. Metrics come from three sources.
+
+**Built-in** metrics are calculated nightly from the workspace's own records:
+
+| Area | Metrics |
+| --- | --- |
+| Delivery | `delivery.issues_done`, `delivery.cycle_time_days`, `delivery.rework_rate` |
+| Runs | `runs.count`, `runs.success_rate`, `runs.cost_usd` |
+| Proposals | `proposals.acceptance_rate`, `proposals.decision_hours` |
+| Routines | `routines.compliance_rate` |
+| Pipeline | `pipeline.initiatives_active`, `pipeline.stalled`, `pipeline.stage_days` |
+| Knowledge | `knowledge.docs_published`, `knowledge.fresh_ratio`, `knowledge.retrieval_hit_rate` |
+| Brief | `brief.usefulness` |
+
+`knowledge.*` metrics and `brief.usefulness` are company-scope only. Run cost counts only what the provider reports.
+
+**Manual** readings come from a member or an agent:
+
+```bash
+multica metric list
+multica metric report --key runs.count --scope squad:<squad-id> --value 42 --note "Checked by hand"
+multica metric report --key mrr --scope initiative:<initiative-id> --value 1200 --observed-at 2026-11-01T09:00:00Z
+```
+
+`--scope` takes `company` (the default), `floor:<id>`, `squad:<id>`, or `initiative:<id>`. Built-in metrics refuse manual readings.
+
+**Webhook** readings bring figures from outside the product, such as signups, revenue, or uptime. Post them with a personal access token of a workspace member (see [Auth tokens](/auth-tokens)):
+
+```bash
+curl -X POST "$MULTICA_API/api/metrics/signups/readings" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"value": 128, "scope_type": "company", "source": "webhook", "note": "Weekly export"}'
+```
+
+The body takes `value`, `scope_type`, `scope_id` (for non-company scopes), `observed_at`, `note`, and `source`. The endpoint is rate-limited to 60 reports per minute for each workspace and metric. A metric created by a report takes its name, unit, and direction from the body. Reports larger than 16 KiB are refused.
+
+Readings are kept in full for 90 days. Older readings are reduced to one value per day.
+
+## Goals and key results
+
+A key result compares a metric's latest reading with a start value and a target:
+
+- Its progress is the share of the way from the start to the target, clamped between 0 and 1. Direction is handled by the sign of the difference.
+- A goal's progress is the weighted mean of its key results, with each weight from 1 to 10.
+- Confidence compares progress with a straight line from the period's start to its end. It is `on_track` when progress is at least the expected share minus ten points, `at_risk` down to thirty points below, and `off_track` beyond that. With no reading yet it is `unknown`.
+
+The owner can override the confidence with a note. The override shows as one.
+
+A goal has a status: `draft`, `active`, `achieved`, `missed`, or `dropped`. Activating a goal requires at least one key result. The server refuses a goal without one.
+
+**Who sets goals.** You and admins create company and floor goals, in the **Goals** tab. A squad's goals come from a planning cycle. At the start of each period, the platform opens a planning issue for each squad with a charter. It contains the company goals and the squad's charter. The leader answers with a `goal` proposal, and approving it activates the goal. See [Proposals](/proposals).
+
+The leader's briefing lists the squad's active key results as **Your goals this period**. The squad's operating review reports progress against them.
+
+<Callout type="info">
+The Goals tab in **Governance** shows the goals as a tree: company, floors, squads, and initiatives. Each key result has a sparkline. The brief's **Goals** section names the goals that changed state, and each at-risk or off-track goal with the metric that moved.
+</Callout>
+
+## Limits
+
+- The goal and metric endpoints are `GET /api/goals`, `POST /api/goals`, `GET`, `PATCH`, and `DELETE /api/goals/{id}`, `POST /api/goals/{id}/activate`, `POST /api/goals/{id}/status`, `PUT /api/goals/{id}/confidence`, `GET /api/metrics`, and `GET` and `POST /api/metrics/{key}/readings`. Goals have no CLI command.
+- Company import does not carry squad-scoped or initiative-scoped goals. See [Company as code](/company-as-code).
+
+## Next steps
+
+- [Budgets](/budgets) for the spend figures a goal can track.
+- [Reviews and organisation changes](/reviews-and-org-changes) for scorecards built from the same records.
+- [Secretary and briefs](/secretary) for how goals reach the daily brief.

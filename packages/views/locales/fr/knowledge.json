@@ -189,6 +189,26 @@
       "unknown": "Inconnue"
     }
   },
+  "repo": {
+    "title": "Documentation du dépôt",
+    "description": "Garde le dossier de documentation d'un dépôt dans la base de connaissances d'ingénierie. Chaque fichier Markdown devient un document de référence ; chaque fichier doit avoir un titre Summary.",
+    "load_error": "Impossible de charger la synchronisation du dépôt",
+    "enabled": "Synchroniser ce dépôt chaque jour",
+    "repo_url": "Adresse du dépôt (https)",
+    "branch": "Branche",
+    "docs_path": "Dossier de documentation",
+    "base": "Base de connaissances",
+    "save": "Enregistrer",
+    "run": "Synchroniser maintenant",
+    "last_sync": "Dernière synchronisation {{when}}",
+    "never_synced": "Jamais synchronisé",
+    "last_error": "La dernière synchronisation a échoué pour certains fichiers ; voir ci-dessous",
+    "toast": {
+      "saved": "Synchronisation du dépôt enregistrée",
+      "synced": "Dépôt synchronisé",
+      "failed": "Impossible d'enregistrer la synchronisation du dépôt"
+    }
+  },
   "bases": {
     "title": "Bases de connaissances",
     "description": "Limitez une base aux équipes, étages ou agents désignés. Le Wiki est limité à trois bases ; les résumés coûtent des appels de modèle.",
