@@ -3064,6 +3064,11 @@ export class ApiClient {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
   }
 
+  /** Reads every unread notification the caller has on one issue. */
+  async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+  }
+
   async archiveAllInbox(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/archive-all", { method: "POST" });
   }

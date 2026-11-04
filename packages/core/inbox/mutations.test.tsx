@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { useMarkInboxRead, useMarkInboxUnread, useUnarchiveInbox } from "./mutations";
+import { useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useUnarchiveInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { createQueryClient } from "../query-client";
@@ -137,6 +137,50 @@ describe("useMarkInboxUnread", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(listCache(queryClient)).toEqual(active);
     expect(archivedCache(queryClient)).toEqual(archived);
+  });
+});
+
+describe("useMarkIssueInboxRead", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+  });
+
+  it("refreshes the inbox caches when the server read rows", async () => {
+    const markIssueInboxRead = vi.fn(async () => ({ count: 2 }));
+    setApiInstance({ markIssueInboxRead } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(markIssueInboxRead).toHaveBeenCalledWith("issue-1");
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all(WORKSPACE_ID) });
+  });
+
+  it("leaves the caches alone when the issue had nothing unread", async () => {
+    setApiInstance({
+      markIssueInboxRead: vi.fn(async () => ({ count: 0 })),
+    } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 

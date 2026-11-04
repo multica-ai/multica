@@ -2571,6 +2571,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
+				// Every unread notification on one issue, for reading the issue
+				// outside the inbox (MUL-8588).
+				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
