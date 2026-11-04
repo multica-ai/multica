@@ -12,7 +12,9 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
-import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { companyFloorsOptions } from "@multica/core/company";
+import { useAddSquadToCompany } from "../../company/lib/use-add-squad-to-company";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import {
   OBJECT_PAGE_BODY,
@@ -98,6 +100,28 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 const RECENT_WORK_LIMIT = 5;
 
 export function SquadDetailPage() {
+  const { pathname, push } = useNavigation();
+  const p = useWorkspacePaths();
+  const squadId = pathname.split("/").pop() ?? "";
+  return <SquadDetailView squadId={squadId} onDeleted={() => push(p.squads())} />;
+}
+
+/**
+ * A squad's full detail: profile, members, and recent work. The squad route
+ * mounts it, and so does the company hub. `onOpenAgent` and `onOpenIssue`
+ * keep navigation inside a host that shows agents and issues in place.
+ */
+export function SquadDetailView({
+  squadId,
+  onDeleted,
+  onOpenAgent,
+  onOpenIssue,
+}: {
+  squadId: string;
+  onDeleted: () => void;
+  onOpenAgent?: (agentId: string) => void;
+  onOpenIssue?: (issueId: string) => void;
+}) {
   const { t } = useT("squads");
   const { t: tLayout } = useT("layout");
   const { t: tCommon } = useT("common");
@@ -105,10 +129,8 @@ export function SquadDetailPage() {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const router = useNavigation();
-  const { pathname, push } = router;
+  const { push } = router;
   const queryClient = useQueryClient();
-  const squadId = pathname.split("/").pop() ?? "";
-
   const { data: squad, isError: squadError, refetch: refetchSquad } = useQuery<Squad>({
     queryKey: [...workspaceKeys.squads(wsId), squadId],
     queryFn: () => api.getSquad(squadId),
@@ -149,6 +171,9 @@ export function SquadDetailPage() {
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const { data: allSquads = [] } = useQuery(squadListOptions(wsId));
+  const { data: floors = [] } = useQuery(companyFloorsOptions(wsId));
+  const { addSquad, pending: addingToCompany } = useAddSquadToCompany(floors, allSquads);
 
   const currentUser = useAuthStore((s) => s.user);
   const myRole = useMemo(() => {
@@ -221,7 +246,7 @@ export function SquadDetailPage() {
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success(t(($) => $.archive_dialog.success)); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); onDeleted(); toast.success(t(($) => $.archive_dialog.success)); },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.archive_failed)),
   });
@@ -286,6 +311,11 @@ export function SquadDetailPage() {
       }
       actions={
         <>
+          {canManage && !archived && !squad.floor_id && (
+            <Button size="sm" variant="outline" disabled={addingToCompany} onClick={() => void addSquad(squad)}>
+              {t(($) => $.detail.add_to_company)}
+            </Button>
+          )}
           {!archived && (
             <Button size="sm" onClick={assignWork}>
               <Plus className="size-3.5" />
@@ -385,6 +415,8 @@ export function SquadDetailPage() {
         />
 
         <SquadMembersSection
+          onOpenAgent={onOpenAgent}
+          onOpenIssue={onOpenIssue}
           members={members}
           memberStatusById={memberStatusById}
           canManage={canManage && !archived}
@@ -405,6 +437,7 @@ export function SquadDetailPage() {
         />
 
         <SquadRecentWorkSection
+          onOpenIssue={onOpenIssue}
           issues={recentWork?.issues}
           loading={recentWorkPending}
         />
@@ -449,6 +482,35 @@ export function SquadDetailPage() {
         </AlertDialog>
       )}
     </ObjectPage>
+  );
+}
+
+/** An issue reference: opens in place when the host supplies `onOpenIssue`, else navigates to the issue. */
+function IssueLink({
+  issueId,
+  onOpenIssue,
+  className,
+  title,
+  children,
+}: {
+  issueId: string;
+  onOpenIssue?: (issueId: string) => void;
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  const p = useWorkspacePaths();
+  if (onOpenIssue) {
+    return (
+      <button type="button" onClick={() => onOpenIssue(issueId)} title={title} className={className}>
+        {children}
+      </button>
+    );
+  }
+  return (
+    <AppLink href={p.issueDetail(issueId)} title={title} className={className}>
+      {children}
+    </AppLink>
   );
 }
 
@@ -516,6 +578,8 @@ const SQUAD_STATUS_LABEL_KEYS = {
 } as const;
 
 function SquadMembersSection({
+  onOpenAgent,
+  onOpenIssue,
   members,
   memberStatusById,
   canManage,
@@ -528,6 +592,8 @@ function SquadMembersSection({
   onUpdateRole,
   setLeaderPending,
 }: {
+  onOpenAgent?: (agentId: string) => void;
+  onOpenIssue?: (issueId: string) => void;
   members: SquadMember[];
   memberStatusById: Map<string, SquadMemberStatus>;
   // When false, add/leader/remove controls and role editing are hidden; the
@@ -588,7 +654,17 @@ function SquadMembersSection({
                   hoverCardVariant="live"
                 />
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="truncate font-medium">{name}</span>
+                  {onOpenAgent && m.member_type === "agent" ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAgent(m.member_id)}
+                      className="truncate text-left font-medium hover:underline"
+                    >
+                      {name}
+                    </button>
+                  ) : (
+                    <span className="truncate font-medium">{name}</span>
+                  )}
                   {leader && (
                     <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm border px-1 text-caption text-muted-foreground">
                       <Crown className="size-3" />
@@ -612,13 +688,14 @@ function SquadMembersSection({
                     {statusValue === "working" && primaryIssue ? (
                       <>
                         <span className="shrink-0">{t(($) => $.detail.working_on)}</span>
-                        <AppLink
-                          href={p.issueDetail(primaryIssue.issue_id)}
+                        <IssueLink
+                          issueId={primaryIssue.issue_id}
+                          onOpenIssue={onOpenIssue}
                           title={primaryIssue.title}
                           className="shrink-0 font-mono uppercase transition-colors hover:text-foreground"
                         >
                           {primaryIssue.identifier}
-                        </AppLink>
+                        </IssueLink>
                         {primaryIssue.issue_status === "blocked" && (
                           <span className="shrink-0 text-micro uppercase tracking-wide text-warning">
                             {t(($) => $.members_tab.issue_status_blocked)}
@@ -655,7 +732,7 @@ function SquadMembersSection({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-auto min-w-44">
                       {m.member_type === "agent" && (
-                        <DropdownMenuItem onClick={() => push(p.agentDetail(m.member_id))}>
+                        <DropdownMenuItem onClick={() => (onOpenAgent ? onOpenAgent(m.member_id) : push(p.agentDetail(m.member_id)))}>
                           <Bot className="size-3.5" />
                           {t(($) => $.members_tab.view_agent_tooltip)}
                         </DropdownMenuItem>
@@ -789,16 +866,17 @@ function SquadInstructionsSection({
 }
 
 function SquadRecentWorkSection({
+  onOpenIssue,
   issues,
   loading,
 }: {
+  onOpenIssue?: (issueId: string) => void;
   issues: Issue[] | undefined;
   loading: boolean;
 }) {
   const { t } = useT("squads");
   const timeAgo = useTimeAgo();
   const wsId = useWorkspaceId();
-  const p = useWorkspacePaths();
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const statusLabel = useStatusLabel(wsId);
 
@@ -809,9 +887,10 @@ function SquadRecentWorkSection({
       ) : issues && issues.length > 0 ? (
         <ObjectSectionCard>
           {issues.map((issue) => (
-            <AppLink
+            <IssueLink
               key={issue.id}
-              href={p.issueDetail(issue.id)}
+              issueId={issue.id}
+              onOpenIssue={onOpenIssue}
               className="flex h-10 items-center gap-3 px-3 text-body transition-colors hover:bg-accent/50"
             >
               <StatusIcon
@@ -826,7 +905,7 @@ function SquadRecentWorkSection({
               <span className="shrink-0 text-caption text-muted-foreground">
                 {statusLabel(issue.status)} · {timeAgo(issue.updated_at)}
               </span>
-            </AppLink>
+            </IssueLink>
           ))}
         </ObjectSectionCard>
       ) : (

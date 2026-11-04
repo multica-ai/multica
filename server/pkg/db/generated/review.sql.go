@@ -203,7 +203,7 @@ func (q *Queries) GetReviewerAgent(ctx context.Context, workspaceID pgtype.UUID)
 }
 
 const getReviewerSquad = `-- name: GetReviewerSquad :one
-SELECT s.id, s.workspace_id, s.name, s.description, s.leader_id, s.creator_id, s.created_at, s.updated_at, s.archived_at, s.archived_by, s.avatar_url, s.instructions, s.floor_id, s.office_slot, s.autonomy_level FROM squad_member sm
+SELECT s.id, s.workspace_id, s.name, s.description, s.leader_id, s.creator_id, s.created_at, s.updated_at, s.archived_at, s.archived_by, s.avatar_url, s.instructions, s.floor_id, s.company_slot, s.autonomy_level FROM squad_member sm
 JOIN squad s ON s.id = sm.squad_id
 WHERE s.workspace_id = $1
   AND s.archived_at IS NULL
@@ -230,7 +230,7 @@ func (q *Queries) GetReviewerSquad(ctx context.Context, workspaceID pgtype.UUID)
 		&i.AvatarUrl,
 		&i.Instructions,
 		&i.FloorID,
-		&i.OfficeSlot,
+		&i.CompanySlot,
 		&i.AutonomyLevel,
 	)
 	return i, err

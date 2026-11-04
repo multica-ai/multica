@@ -58,7 +58,7 @@ Do not change any issue, proposal, or agent. Ask a leader only through a comment
 // SetFloorChiefIn names the chief of a floor inside q's transaction and makes the
 // chief's floor brief routine, once. It returns the floor_chief row.
 func SetFloorChiefIn(ctx context.Context, q *db.Queries, in FloorChiefInput) (db.FloorChief, error) {
-	floor, err := q.GetOfficeFloorByID(ctx, db.GetOfficeFloorByIDParams{ID: in.FloorID, WorkspaceID: in.WorkspaceID})
+	floor, err := q.GetCompanyFloorByID(ctx, db.GetCompanyFloorByIDParams{ID: in.FloorID, WorkspaceID: in.WorkspaceID})
 	if err != nil {
 		return db.FloorChief{}, fmt.Errorf("read floor: %w", err)
 	}
@@ -104,7 +104,7 @@ func SetFloorChiefIn(ctx context.Context, q *db.Queries, in FloorChiefInput) (db
 		return row, nil
 	}
 
-	timezone, err := resolveBriefTimezone(ctx, q, OfficeSetupInput{Timezone: in.Timezone, Actor: db.Member{UserID: in.ActorUserID}})
+	timezone, err := resolveBriefTimezone(ctx, q, CompanySetupInput{Timezone: in.Timezone, Actor: db.Member{UserID: in.ActorUserID}})
 	if err != nil {
 		return db.FloorChief{}, err
 	}

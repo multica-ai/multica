@@ -11,7 +11,7 @@ Utilisez-la sur un espace de travail neuf ou presque vide. Elle ne supprime rien
 
 ## L'assistant
 
-Ouvrez le bureau et lancez l'assistant d'entreprise. Il comporte quatre étapes :
+Ouvrez l'entreprise et lancez l'assistant d'entreprise. Il comporte quatre étapes :
 
 1. **Runtime.** Le runtime sur lequel tourneront les nouveaux agents. Choisissez-en un qui est en ligne.
 2. **Sélection.** Les squads à créer. Chaque carte affiche la mission du squad et ses routines.
@@ -21,7 +21,7 @@ Ouvrez le bureau et lancez l'assistant d'entreprise. Il comporte quatre étapes 
    - `per_floor` : la routine principale de chaque étage démarre active, les autres sont en pause.
    - `leave_paused` : toutes les routines démarrent en pause, et vous les lancez une à une.
 
-L'assistant appelle `POST /api/office/company-template/apply`. La réponse est un rapport qui liste chaque étage, squad, agent et routine créé ou trouvé. Si l'exécution s'interrompt en cours de route, relancez-la : elle reprend là où le rapport s'arrête et ne crée que ce qui manque.
+L'assistant appelle `POST /api/company/company-template/apply`. La réponse est un rapport qui liste chaque étage, squad, agent et routine créé ou trouvé. Si l'exécution s'interrompt en cours de route, relancez-la : elle reprend là où le rapport s'arrête et ne crée que ce qui manque.
 
 ## Ce qu'elle crée
 

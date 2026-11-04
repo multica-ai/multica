@@ -69,7 +69,7 @@ test("the Log tab filters its events by kind", async ({ browser }) => {
   try {
     // Two kinds of event: a budget is set, and the company is paused.
     await api(s, "POST", "/api/budgets", { scope_type: "company", period: "month", amount_micros: 5_000_000, mode: "warn" });
-    await api(s, "PUT", "/api/office/company-state", { state: "paused", stop_running: false });
+    await api(s, "PUT", "/api/company/company-state", { state: "paused", stop_running: false });
 
     const view = await openGovernance(browser, client, workspace.slug, "log");
     contexts.push(view.context);
@@ -235,7 +235,7 @@ test("the Reviews tab lists a review published in the API scenario", async ({ br
   try {
     // The same setup as the review scenario in phase4-governance.spec.ts: the starter
     // company's reviewer and the Build squad, then a review published by the reviewer.
-    await client.setupOffice();
+    await client.setupCompany();
     await client.applyStarterCompany({ runtime_id: runtimeId, squads: STARTER_SQUAD_KEYS, start: "leave_paused" });
     const build = ((await client.listSquads()) as any[]).find((sq) => sq.name === "Build")!;
     const leaderId = build.leader_id as string;

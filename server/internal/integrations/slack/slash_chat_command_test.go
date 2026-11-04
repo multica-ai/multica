@@ -67,13 +67,13 @@ func chatSlashCmd(command string) slack.SlashCommand {
 func TestSlashBriefAnswersALinkedMember(t *testing.T) {
 	actions := &fakeChatCommands{
 		handled: true,
-		reply:   channel.Message{Text: "Ship the launch\n\nBrief: https://app.example/acme/office?brief=b1"},
+		reply:   channel.Message{Text: "Ship the launch\n\nBrief: https://app.example/acme/company?brief=b1"},
 	}
 	p, captured, count := chatCommandProcessor(actions, linkedSlashQueries())
 
 	p.Handle(context.Background(), chatSlashCmd("/brief"))
 
-	if *count != 1 || *captured != "Ship the launch\n\nBrief: https://app.example/acme/office?brief=b1" {
+	if *count != 1 || *captured != "Ship the launch\n\nBrief: https://app.example/acme/company?brief=b1" {
 		t.Fatalf("reply = %q (%d replies), want the brief text once", *captured, *count)
 	}
 	got := actions.commands()
@@ -92,13 +92,13 @@ func TestSlashBriefAnswersALinkedMember(t *testing.T) {
 func TestSlashDecisionsNamesThePendingDecisions(t *testing.T) {
 	actions := &fakeChatCommands{
 		handled: true,
-		reply:   channel.Message{Text: "1 decision needs you:\n- Ship <beta> & more https://app.example/acme/office?decision=p1"},
+		reply:   channel.Message{Text: "1 decision needs you:\n- Ship <beta> & more https://app.example/acme/company?decision=p1"},
 	}
 	p, captured, _ := chatCommandProcessor(actions, linkedSlashQueries())
 
 	p.Handle(context.Background(), chatSlashCmd("/decisions"))
 
-	if !strings.Contains(*captured, "- Ship &lt;beta&gt; &amp; more https://app.example/acme/office?decision=p1") {
+	if !strings.Contains(*captured, "- Ship &lt;beta&gt; &amp; more https://app.example/acme/company?decision=p1") {
 		t.Fatalf("reply = %q, want the title escaped and the link kept", *captured)
 	}
 	if got := actions.commands(); len(got) != 1 || got[0].Name != channel.CommandDecisions {

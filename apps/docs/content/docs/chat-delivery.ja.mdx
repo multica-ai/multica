@@ -25,13 +25,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## オプトイン
 
-各メンバーは、オフィスのブリーフ設定で自分で選択します。
+各メンバーは、会社のブリーフ設定で自分で選択します。
 
 - **Brief push**（ブリーフ送信）：オンかオフか。既定はオフです。
 - **Chat**（チャット）：接続済みのどのチャットに送るか。メンバーごとに一つ選べます。
 - **Quiet hours**（静穏時間）：0〜23時の時間帯。その間は何も送信されません。時間帯は日付をまたいでもかまいません。時間帯に当たったブリーフは、時間帯が終わるまで保留されます。
 
-同じ設定は `GET` と `PUT /api/office/brief-push` で扱えます。選べるチャットの一覧は `GET /api/office/brief-push/bindings` です。
+同じ設定は `GET` と `PUT /api/company/brief-push` で扱えます。選べるチャットの一覧は `GET /api/company/brief-push/bindings` です。
 
 ## メッセージの内容
 

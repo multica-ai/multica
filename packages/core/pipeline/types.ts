@@ -1,4 +1,4 @@
-import type { ProposalState } from "../office/proposal-schema";
+import type { ProposalState } from "../company/proposal-schema";
 
 /**
  * How a stage hands on. `auto` advances when its required artifacts are in,

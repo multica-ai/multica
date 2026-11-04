@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// Size caps for the governance and office JSON bodies (spec 4.9). The product
+// Size caps for the governance and company JSON bodies (spec 4.9). The product
 // has no global body limit, so each of these handlers caps its own body before
 // decoding it: a request over the cap is answered 413 and never read into memory.
 const (

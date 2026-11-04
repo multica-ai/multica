@@ -93,7 +93,7 @@ SELECT
     )::bigint AS open_requests
 FROM squad s
 LEFT JOIN squad_charter c ON c.squad_id = s.id AND c.workspace_id = s.workspace_id
-LEFT JOIN office_floor f ON f.id = s.floor_id AND f.workspace_id = s.workspace_id
+LEFT JOIN company_floor f ON f.id = s.floor_id AND f.workspace_id = s.workspace_id
 WHERE s.workspace_id = $1::uuid AND s.archived_at IS NULL
 ORDER BY s.created_at ASC, s.id ASC
 `

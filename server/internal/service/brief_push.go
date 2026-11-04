@@ -392,12 +392,12 @@ func (s *BriefPushService) composeMessage(ctx context.Context, ws pgtype.UUID, b
 	if err != nil {
 		return channel.Message{}, fmt.Errorf("load workspace: %w", err)
 	}
-	office := briefPushOfficeURL(s.AppURL, workspace.Slug)
+	company := briefPushCompanyURL(s.AppURL, workspace.Slug)
 	headline := BriefHeadline(brief.Body)
 	if headline == "" {
 		headline = brief.Title
 	}
-	return renderBriefPush(headline, decisions, util.UUIDToString(brief.ID), office), nil
+	return renderBriefPush(headline, decisions, util.UUIDToString(brief.ID), company), nil
 }
 
 // briefPushDecision is one pending decision named in the push. The three tokens
@@ -431,14 +431,14 @@ func (s *BriefPushService) signDecisionButtons(ctx context.Context, decisions []
 	}
 }
 
-// renderBriefPush lays out the message. office is the Office URL, or "" when
+// renderBriefPush lays out the message. company is the Company URL, or "" when
 // no app URL is configured, in which case the message has no links. It is pure,
 // so the format is tested without a database.
 //
 // Each shown decision with signed buttons gets two rows: Approve and Reject, then
 // Snooze for seven days and Revise. Revise is a link, because its note needs
 // typing. The brief link comes first.
-func renderBriefPush(headline string, decisions []briefPushDecision, briefID, office string) channel.Message {
+func renderBriefPush(headline string, decisions []briefPushDecision, briefID, company string) channel.Message {
 	var b strings.Builder
 	b.WriteString(cutRunes(headline, briefPushHeadlineRunes))
 
@@ -456,38 +456,38 @@ func renderBriefPush(headline string, decisions []briefPushDecision, briefID, of
 		for _, d := range shown {
 			b.WriteString("\n- ")
 			b.WriteString(oneLine(cutRunes(d.Title, briefPushTitleRunes)))
-			if office != "" {
+			if company != "" {
 				b.WriteString(" ")
-				b.WriteString(office + "?" + url.Values{"decision": {d.ID}}.Encode())
+				b.WriteString(company + "?" + url.Values{"decision": {d.ID}}.Encode())
 			}
 		}
 		if extra := len(decisions) - len(shown); extra > 0 {
-			fmt.Fprintf(&b, "\n...and %d more in the Office.", extra)
+			fmt.Fprintf(&b, "\n...and %d more in the Company.", extra)
 		}
 	}
 
 	msg := channel.Message{Text: b.String()}
-	if office != "" {
-		briefURL := office + "?" + url.Values{"brief": {briefID}}.Encode()
+	if company != "" {
+		briefURL := company + "?" + url.Values{"brief": {briefID}}.Encode()
 		msg.Text += "\n\nBrief: " + briefURL
 		msg.Buttons = []channel.Button{{Label: "Open the brief", URL: briefURL}}
 	}
 	for _, d := range shown {
-		msg.Buttons = append(msg.Buttons, decisionButtons(d, office)...)
+		msg.Buttons = append(msg.Buttons, decisionButtons(d, company)...)
 	}
 	return msg
 }
 
 // decisionButtons is the button set for one decision, or none when it carries no
-// signed tokens. Each button's LinkURL is the decision's Office page, so a chat
+// signed tokens. Each button's LinkURL is the decision's Company page, so a chat
 // app without callbacks shows the link instead.
-func decisionButtons(d briefPushDecision, office string) []channel.Button {
+func decisionButtons(d briefPushDecision, company string) []channel.Button {
 	if d.Approve == "" {
 		return nil
 	}
 	link := ""
-	if office != "" {
-		link = office + "?" + url.Values{"decision": {d.ID}}.Encode()
+	if company != "" {
+		link = company + "?" + url.Values{"decision": {d.ID}}.Encode()
 	}
 	short := cutRunes(oneLine(d.Title), briefPushButtonTitleRunes)
 	buttons := []channel.Button{
@@ -501,18 +501,18 @@ func decisionButtons(d briefPushDecision, office string) []channel.Button {
 	return buttons
 }
 
-// OfficeURL is the Office page for a workspace, or "" when either part is
+// CompanyURL is the Company page for a workspace, or "" when either part is
 // unknown. Chat links and the brief push build their URLs from it.
-func OfficeURL(appURL, slug string) string { return briefPushOfficeURL(appURL, slug) }
+func CompanyURL(appURL, slug string) string { return briefPushCompanyURL(appURL, slug) }
 
-// briefPushOfficeURL is the Office page for a workspace, or "" when either part
+// briefPushCompanyURL is the Company page for a workspace, or "" when either part
 // is unknown.
-func briefPushOfficeURL(appURL, slug string) string {
+func briefPushCompanyURL(appURL, slug string) string {
 	appURL = strings.TrimRight(strings.TrimSpace(appURL), "/")
 	if appURL == "" || slug == "" {
 		return ""
 	}
-	return appURL + "/" + url.PathEscape(slug) + "/office"
+	return appURL + "/" + url.PathEscape(slug) + "/company"
 }
 
 // BriefHeadline is the Headline section of a brief, its lines joined and cut to

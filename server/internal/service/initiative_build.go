@@ -54,27 +54,8 @@ var ErrStageOwnerRequired = errors.New("this stage has no owning squad")
 // named after the squad is created, because the handlers are the squad's agents
 // and a workflow is shared by the whole workspace.
 func (s *InitiativeService) startBuild(ctx context.Context, q *db.Queries, ini db.Initiative, source db.Issue, owner pgtype.UUID, actor InitiativeActor) (pgtype.UUID, error) {
-	if !owner.Valid {
-		return pgtype.UUID{}, ErrBuildNeedsSDLCSquad
-	}
-	agents, err := s.sdlcAgentsOf(ctx, q, ini.WorkspaceID, owner)
+	agents, err := s.sdlcBuildSetup(ctx, q, ini.WorkspaceID, owner)
 	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	var missing []string
-	for _, r := range sdlcRoleAgents {
-		if _, ok := agents[r.role]; !ok {
-			missing = append(missing, r.name)
-		}
-	}
-	if len(missing) > 0 {
-		return pgtype.UUID{}, fmt.Errorf("%w: missing %s", ErrBuildNeedsSDLCSquad, strings.Join(missing, ", "))
-	}
-
-	if err := issuestatus.Ensure(ctx, q, ini.WorkspaceID); err != nil {
-		return pgtype.UUID{}, fmt.Errorf("seed issue statuses: %w", err)
-	}
-	if err := ensureQAStatus(ctx, q, ini.WorkspaceID); err != nil {
 		return pgtype.UUID{}, err
 	}
 	workflow, err := s.sdlcWorkflowFor(ctx, q, ini.WorkspaceID, owner, agents)
@@ -123,6 +104,46 @@ func (s *InitiativeService) startBuild(ctx context.Context, q *db.Queries, ini d
 	s.wakeAgent(ctx, q, kickoff, developer, actor,
 		fmt.Sprintf("The initiative INI-%d has reached its build stage. Build from this issue's workflow, starting with the developer step.", ini.Seq))
 	return project.ID, nil
+}
+
+// EnsureSDLCWorkflow returns the SDLC Auto workflow that hands to the squad's
+// agents, creating it (and the workspace's QA status) when it is missing. It is
+// the same setup a build stage runs, so a project assigned by hand gets the
+// workflow an initiative's build would.
+func (s *InitiativeService) EnsureSDLCWorkflow(ctx context.Context, q *db.Queries, ws, squad pgtype.UUID) (db.IssueWorkflow, error) {
+	agents, err := s.sdlcBuildSetup(ctx, q, ws, squad)
+	if err != nil {
+		return db.IssueWorkflow{}, err
+	}
+	return s.sdlcWorkflowFor(ctx, q, ws, squad, agents)
+}
+
+// sdlcBuildSetup checks the squad can run an SDLC build, seeds the statuses the
+// workflow uses, and returns the squad's SDLC agents by role.
+func (s *InitiativeService) sdlcBuildSetup(ctx context.Context, q *db.Queries, ws, squad pgtype.UUID) (map[string]pgtype.UUID, error) {
+	if !squad.Valid {
+		return nil, ErrBuildNeedsSDLCSquad
+	}
+	agents, err := s.sdlcAgentsOf(ctx, q, ws, squad)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for _, r := range sdlcRoleAgents {
+		if _, ok := agents[r.role]; !ok {
+			missing = append(missing, r.name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%w: missing %s", ErrBuildNeedsSDLCSquad, strings.Join(missing, ", "))
+	}
+	if err := issuestatus.Ensure(ctx, q, ws); err != nil {
+		return nil, fmt.Errorf("seed issue statuses: %w", err)
+	}
+	if err := ensureQAStatus(ctx, q, ws); err != nil {
+		return nil, err
+	}
+	return agents, nil
 }
 
 // sdlcAgentsOf maps the SDLC roles to the squad's agents with those names. An

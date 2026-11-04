@@ -23,6 +23,7 @@ import type skills from "../locales/en/skills.json";
 import type knowledge from "../locales/en/knowledge.json";
 import type pipeline from "../locales/en/pipeline.json";
 import type governance from "../locales/en/governance.json";
+import type company from "../locales/en/company.json";
 import type chat from "../locales/en/chat.json";
 import type modals from "../locales/en/modals.json";
 import type runtimes from "../locales/en/runtimes.json";
@@ -67,6 +68,7 @@ declare global {
     knowledge: typeof knowledge;
     pipeline: typeof pipeline;
     governance: typeof governance;
+    company: typeof company;
     chat: typeof chat;
     modals: typeof modals;
     runtimes: typeof runtimes;

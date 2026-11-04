@@ -773,6 +773,15 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CompanyFloor struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ContactSalesInquiry struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirstName       string             `json:"first_name"`
@@ -1695,15 +1704,6 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type OfficeFloor struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Position    int32              `json:"position"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type OrgChangeApplication struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -1887,6 +1887,7 @@ type Project struct {
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
 }
 
 type ProjectResource struct {
@@ -2109,7 +2110,7 @@ type Squad struct {
 	AvatarUrl     pgtype.Text        `json:"avatar_url"`
 	Instructions  string             `json:"instructions"`
 	FloorID       pgtype.UUID        `json:"floor_id"`
-	OfficeSlot    pgtype.Int2        `json:"office_slot"`
+	CompanySlot   pgtype.Int2        `json:"company_slot"`
 	AutonomyLevel int32              `json:"autonomy_level"`
 }
 

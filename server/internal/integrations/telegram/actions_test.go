@@ -21,7 +21,7 @@ const (
 	actionsOKBody        = `{"ok":true,"result":true}`
 	actionsSentBody      = `{"ok":true,"result":{"message_id":900,"chat":{"id":4242,"type":"private"},"date":1767225600,"text":"sent"}}`
 	actionsNotModified   = `{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`
-	actionsPressCallback = `{"update_id":10,"callback_query":{"id":"cbq-1","from":{"id":4242,"is_bot":false,"first_name":"Ada"},"data":"TOKEN_A","message":{"message_id":501,"from":{"id":111,"is_bot":true,"first_name":"Secretary"},"chat":{"id":4242,"type":"private"},"date":1767225600,"text":"Brief ready","reply_markup":{"inline_keyboard":[[{"text":"Approve: A","callback_data":"TOKEN_A"}],[{"text":"Reject: A","callback_data":"TOKEN_A2"}],[{"text":"Approve: B","callback_data":"TOKEN_B"}],[{"text":"Open the brief","url":"https://app.example/acme/office?brief=b1"}],[{"text":"Revise: A","url":"https://app.example/acme/office?decision=pA"}]]}}}}`
+	actionsPressCallback = `{"update_id":10,"callback_query":{"id":"cbq-1","from":{"id":4242,"is_bot":false,"first_name":"Ada"},"data":"TOKEN_A","message":{"message_id":501,"from":{"id":111,"is_bot":true,"first_name":"Secretary"},"chat":{"id":4242,"type":"private"},"date":1767225600,"text":"Brief ready","reply_markup":{"inline_keyboard":[[{"text":"Approve: A","callback_data":"TOKEN_A"}],[{"text":"Reject: A","callback_data":"TOKEN_A2"}],[{"text":"Approve: B","callback_data":"TOKEN_B"}],[{"text":"Open the brief","url":"https://app.example/acme/company?brief=b1"}],[{"text":"Revise: A","url":"https://app.example/acme/company?decision=pA"}]]}}}}`
 )
 
 // fakeActions is a channel.ActionHandler the tests script. Its keys map a
@@ -202,7 +202,7 @@ func TestPressSettledDecisionAnswersAndRemovesOnlyItsButtons(t *testing.T) {
 		t.Fatalf("decision B's button was removed: %v", gotB)
 	}
 	gotBrief := rows[1].([]any)[0].(map[string]any)
-	if gotBrief["url"] != "https://app.example/acme/office?brief=b1" {
+	if gotBrief["url"] != "https://app.example/acme/company?brief=b1" {
 		t.Fatalf("the brief link was removed: %v", gotBrief)
 	}
 	if engine := a.engineReached(); engine != 0 {
@@ -257,7 +257,7 @@ func TestPressFromABotIsPassedThroughAsAnAgent(t *testing.T) {
 func TestCommandBriefRepliesInTheChatAndSkipsTheAgent(t *testing.T) {
 	actions := &fakeActions{
 		handled: true,
-		reply:   channel.Message{Text: "Hire a designer, approve the pilot.\n\nBrief: https://app.example/acme/office?brief=b1"},
+		reply:   channel.Message{Text: "Hire a designer, approve the pilot.\n\nBrief: https://app.example/acme/company?brief=b1"},
 	}
 	a := newActionsChannel(t, actions)
 
@@ -282,8 +282,8 @@ func TestCommandDecisionsWithButtonsSendsTheKeyboard(t *testing.T) {
 	actions := &fakeActions{
 		handled: true,
 		reply: channel.Message{
-			Text:    "1 decision needs you:\n- Hire a designer https://app.example/acme/office?decision=pA",
-			Buttons: []channel.Button{{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"}},
+			Text:    "1 decision needs you:\n- Hire a designer https://app.example/acme/company?decision=pA",
+			Buttons: []channel.Button{{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"}},
 		},
 	}
 	a := newActionsChannel(t, actions)

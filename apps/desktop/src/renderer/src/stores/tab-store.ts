@@ -398,6 +398,11 @@ export function sanitizeTabPath(path: string, savedGroupSlug?: string): string |
   if (segments.length === 1) {
     return `/${firstSegment}/issues${suffix}`;
   }
+  // The office page was renamed to company; tabs saved before the rename follow it.
+  if (segments[1] === "office") {
+    segments[1] = "company";
+    return `/${segments.join("/")}${suffix}`;
+  }
   return path;
 }
 

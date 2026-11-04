@@ -54,16 +54,16 @@ export interface TestSquad {
   id: string;
   name: string;
   floor_id: string | null;
-  office_slot: number | null;
+  company_slot: number | null;
 }
 
-export interface TestOfficeFloor {
+export interface TestCompanyFloor {
   id: string;
   name: string;
   position: number;
 }
 
-export interface TestOfficeSeat {
+export interface TestCompanySeat {
   squad_id: string;
   floor_id: string | null;
   slot: number | null;
@@ -108,7 +108,7 @@ export interface TestSquadRoutine {
   state: string;
 }
 
-export interface TestOfficeIssue {
+export interface TestCompanyIssue {
   id: string;
   title: string;
   project_id: string | null;
@@ -601,26 +601,26 @@ export class TestApiClient {
     return squad;
   }
 
-  /** Create an office floor. Floors are not removed on cleanup: the E2E workspace is per run. */
-  async createOfficeFloor(name: string): Promise<TestOfficeFloor> {
-    const res = await this.authedFetch("/api/office/floors", {
+  /** Create an company floor. Floors are not removed on cleanup: the E2E workspace is per run. */
+  async createCompanyFloor(name: string): Promise<TestCompanyFloor> {
+    const res = await this.authedFetch("/api/company/floors", {
       method: "POST",
       body: JSON.stringify({ name }),
     });
     if (!res.ok) {
-      throw new Error(`create office floor failed: ${res.status} ${await res.text()}`);
+      throw new Error(`create company floor failed: ${res.status} ${await res.text()}`);
     }
-    return (await res.json()) as TestOfficeFloor;
+    return (await res.json()) as TestCompanyFloor;
   }
 
   /** Applies seat moves atomically; returns the squads as they stand afterwards. */
-  async seatOfficeSquads(seats: TestOfficeSeat[]): Promise<{ squads: TestSquad[] }> {
-    const res = await this.authedFetch("/api/office/seats", {
+  async seatCompanySquads(seats: TestCompanySeat[]): Promise<{ squads: TestSquad[] }> {
+    const res = await this.authedFetch("/api/company/seats", {
       method: "PUT",
       body: JSON.stringify(seats),
     });
     if (!res.ok) {
-      throw new Error(`seat office squads failed: ${res.status} ${await res.text()}`);
+      throw new Error(`seat company squads failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as { squads: TestSquad[] };
   }
@@ -710,12 +710,12 @@ export class TestApiClient {
     return (await res.json()) as TestSquadRoutine;
   }
 
-  async getIssue(id: string): Promise<TestOfficeIssue> {
+  async getIssue(id: string): Promise<TestCompanyIssue> {
     const res = await this.authedFetch(`/api/issues/${id}`);
     if (!res.ok) {
       throw new Error(`get issue failed: ${res.status} ${await res.text()}`);
     }
-    return (await res.json()) as TestOfficeIssue;
+    return (await res.json()) as TestCompanyIssue;
   }
 
   async getProject(id: string): Promise<TestProject> {
@@ -746,32 +746,32 @@ export class TestApiClient {
   }
 
   /**
-   * The Office's first-run setup: the Secretary, its Executive floor and squad, and
+   * The Company's first-run setup: the Secretary, its Executive floor and squad, and
    * the brief autopilots. It needs an online Hermes runtime (seedRuntime(name, "hermes")),
    * and the starter company's apply refuses until it has run.
    */
-  async setupOffice(secretaryInstructions = "Phase 3 acceptance Secretary."): Promise<void> {
-    const res = await this.authedFetch("/api/office/setup", {
+  async setupCompany(secretaryInstructions = "Phase 3 acceptance Secretary."): Promise<void> {
+    const res = await this.authedFetch("/api/company/setup", {
       method: "POST",
       body: JSON.stringify({ secretary_instructions: secretaryInstructions }),
     });
     if (!res.ok) {
-      throw new Error(`office setup failed: ${res.status} ${await res.text()}`);
+      throw new Error(`company setup failed: ${res.status} ${await res.text()}`);
     }
   }
 
-  /** The Office setup's readiness checklist (GET /api/office/setup). */
-  async officeSetup(): Promise<{ autopilot_daily: boolean; ready: boolean }> {
-    const res = await this.authedFetch("/api/office/setup");
+  /** The Company setup's readiness checklist (GET /api/company/setup). */
+  async companySetup(): Promise<{ autopilot_daily: boolean; ready: boolean }> {
+    const res = await this.authedFetch("/api/company/setup");
     if (!res.ok) {
-      throw new Error(`get office setup failed: ${res.status} ${await res.text()}`);
+      throw new Error(`get company setup failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as { autopilot_daily: boolean; ready: boolean };
   }
 
   /** Install the starter company (spec 3.4). A failed step is in the steps, not an error. */
   async applyStarterCompany(input: TestCompanyApplyInput): Promise<TestCompanyApplyResult> {
-    const res = await this.authedFetch("/api/office/company-template/apply", {
+    const res = await this.authedFetch("/api/company/company-template/apply", {
       method: "POST",
       body: JSON.stringify(input),
     });
@@ -781,12 +781,12 @@ export class TestApiClient {
     return (await res.json()) as TestCompanyApplyResult;
   }
 
-  async listFloors(): Promise<TestOfficeFloor[]> {
-    const res = await this.authedFetch("/api/office/floors");
+  async listFloors(): Promise<TestCompanyFloor[]> {
+    const res = await this.authedFetch("/api/company/floors");
     if (!res.ok) {
-      throw new Error(`list office floors failed: ${res.status} ${await res.text()}`);
+      throw new Error(`list company floors failed: ${res.status} ${await res.text()}`);
     }
-    return (await res.json()) as TestOfficeFloor[];
+    return (await res.json()) as TestCompanyFloor[];
   }
 
   async listSquads(): Promise<TestSquad[]> {

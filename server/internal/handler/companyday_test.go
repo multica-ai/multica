@@ -280,7 +280,7 @@ func TestCompanyDay(t *testing.T) {
 
 		// One click pauses the whole company; chat-style human runs still admit.
 		testutil.Call(t, testHandler.SetCompanyState,
-			d.as(newRequest("PUT", "/api/office/company-state", map[string]any{"state": "paused", "stop_running": true}), d.Owner)).
+			d.as(newRequest("PUT", "/api/company/company-state", map[string]any{"state": "paused", "stop_running": true}), d.Owner)).
 			Want(http.StatusOK)
 		routine, err := service.CompanyVerdict(ctx, testHandler.Queries, ws, service.RunClassRoutine, d.Clock.Now())
 		if err != nil || routine.Admit {
@@ -291,7 +291,7 @@ func TestCompanyDay(t *testing.T) {
 			t.Fatalf("a paused company still admits a human run: %+v err %v", human, err)
 		}
 		testutil.Call(t, testHandler.SetCompanyState,
-			d.as(newRequest("PUT", "/api/office/company-state", map[string]any{"state": "running"}), d.Owner)).
+			d.as(newRequest("PUT", "/api/company/company-state", map[string]any{"state": "running"}), d.Owner)).
 			Want(http.StatusOK)
 	})
 

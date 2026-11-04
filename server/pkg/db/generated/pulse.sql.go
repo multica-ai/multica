@@ -57,7 +57,7 @@ type CountPendingProposalsForPulseRow struct {
 	OldestCreatedAt pgtype.Timestamptz `json:"oldest_created_at"`
 }
 
-// The office pulse (spec 4.8) and the system health readings (spec 4.9). Every
+// The company pulse (spec 4.8) and the system health readings (spec 4.9). Every
 // query filters by workspace_id unless it reads the scheduler's own log.
 func (q *Queries) CountPendingProposalsForPulse(ctx context.Context, workspaceID pgtype.UUID) (CountPendingProposalsForPulseRow, error) {
 	row := q.db.QueryRow(ctx, countPendingProposalsForPulse, workspaceID)

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useDecideInitiativeGate, type InitiativeGate } from "@multica/core/pipeline";
-import type { GateOutcome } from "@multica/core/office";
+import type { GateOutcome } from "@multica/core/company";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../i18n";

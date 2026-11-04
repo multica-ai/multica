@@ -81,8 +81,8 @@ UPDATE workspace SET digest_mode = sqlc.arg('digest_mode')::text
 WHERE id = sqlc.arg('workspace_id')::uuid
 RETURNING digest_mode;
 
--- name: GetOfficeFloorByID :one
-SELECT id, name FROM office_floor
+-- name: GetCompanyFloorByID :one
+SELECT id, name FROM company_floor
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid;
 
 -- name: ListSquadsOnFloor :many

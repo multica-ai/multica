@@ -11,9 +11,9 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// The pulse (spec 4.8): a compact read of the company for the Office header
+// The pulse (spec 4.8): a compact read of the company for the Company header
 // strip. It is cached per workspace for a minute, so the header costs one
-// read per minute however many people have the Office open.
+// read per minute however many people have the Company open.
 
 // PulseTTL is how long a workspace's pulse is reused.
 const PulseTTL = time.Minute

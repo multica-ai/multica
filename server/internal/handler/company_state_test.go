@@ -53,7 +53,7 @@ func companyReq(userID, wsID, method, path string, body any) *http.Request {
 func TestCompanyState_ReadsAreOpenToMembersAndDefaultToRunning(t *testing.T) {
 	fx := newCompanyWorkspace(t)
 	var out CompanyStateResponse
-	testutil.Call(t, testHandler.GetCompanyState, companyReq(fx.Member, fx.ID, http.MethodGet, "/api/office/company-state", nil)).
+	testutil.Call(t, testHandler.GetCompanyState, companyReq(fx.Member, fx.ID, http.MethodGet, "/api/company/company-state", nil)).
 		Want(http.StatusOK).JSON(&out)
 	if out.State != "running" || out.Setting != "running" {
 		t.Fatalf("a new company is %+v, want running", out)
@@ -70,7 +70,7 @@ func TestCompanyState_OnlyOwnersAndAdminsChangeIt(t *testing.T) {
 	fx := newCompanyWorkspace(t)
 	put := func(userID string, body any) *testutil.Response {
 		return testutil.Call(t, testHandler.SetCompanyState,
-			companyReq(userID, fx.ID, http.MethodPut, "/api/office/company-state", body))
+			companyReq(userID, fx.ID, http.MethodPut, "/api/company/company-state", body))
 	}
 
 	put(fx.Member, map[string]any{"state": "paused"}).Want(http.StatusForbidden)
@@ -90,7 +90,7 @@ func TestCompanyState_ValidatesTheStateAndStopRunning(t *testing.T) {
 	fx := newCompanyWorkspace(t)
 	put := func(body any) *testutil.Response {
 		return testutil.Call(t, testHandler.SetCompanyState,
-			companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/office/company-state", body))
+			companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/company/company-state", body))
 	}
 	put(map[string]any{"state": "asleep"}).Want(http.StatusBadRequest)
 	put(map[string]any{"state": "running", "stop_running": true}).Want(http.StatusBadRequest)
@@ -101,7 +101,7 @@ func TestCompanyState_PauseAndStopPausesTheCompany(t *testing.T) {
 	fx := newCompanyWorkspace(t)
 	var out CompanyStateResponse
 	testutil.Call(t, testHandler.SetCompanyState,
-		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/office/company-state", map[string]any{"state": "paused", "stop_running": true})).
+		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/company/company-state", map[string]any{"state": "paused", "stop_running": true})).
 		Want(http.StatusOK).JSON(&out)
 	if out.State != "paused" {
 		t.Fatalf("pause and stop returned %+v, want paused", out)
@@ -118,7 +118,7 @@ func TestQuietHours_SavedByOwnersAndAdminsAndValidated(t *testing.T) {
 	quiet := map[string]any{"enabled": true, "start": "22:00", "end": "07:00", "timezone": "Europe/Paris"}
 	put := func(userID string, body any) *testutil.Response {
 		return testutil.Call(t, testHandler.SetQuietHours,
-			companyReq(userID, fx.ID, http.MethodPut, "/api/office/quiet-hours", body))
+			companyReq(userID, fx.ID, http.MethodPut, "/api/company/quiet-hours", body))
 	}
 
 	put(fx.Member, quiet).Want(http.StatusForbidden)
@@ -136,9 +136,9 @@ func TestQuietHours_SavedByOwnersAndAdminsAndValidated(t *testing.T) {
 func TestGovernance_ListFiltersPagesAndExportsCSV(t *testing.T) {
 	fx := newCompanyWorkspace(t)
 	testutil.Call(t, testHandler.SetCompanyState,
-		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/office/company-state", map[string]any{"state": "paused"})).Want(http.StatusOK)
+		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/company/company-state", map[string]any{"state": "paused"})).Want(http.StatusOK)
 	testutil.Call(t, testHandler.SetCompanyState,
-		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/office/company-state", map[string]any{"state": "running"})).Want(http.StatusOK)
+		companyReq(fx.Owner, fx.ID, http.MethodPut, "/api/company/company-state", map[string]any{"state": "running"})).Want(http.StatusOK)
 
 	list := func(userID, query string) *testutil.Response {
 		return testutil.Call(t, testHandler.ListGovernanceEvents,

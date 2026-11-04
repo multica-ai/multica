@@ -2,7 +2,7 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { GovernanceEventFilters } from "./types";
 import type { HealthReport } from "./health";
-import type { OfficePulse } from "./scale";
+import type { CompanyPulse } from "./scale";
 
 export const governanceKeys = {
   all: (wsId: string) => ["governance", wsId] as const,
@@ -18,7 +18,7 @@ export const governanceKeys = {
     ] as const,
 };
 
-/** The company's state and quiet hours. Shared by the Controls tab and the Office header. */
+/** The company's state and quiet hours. Shared by the Controls tab and the Company header. */
 export function companyStateOptions(wsId: string) {
   return queryOptions({
     queryKey: governanceKeys.companyState(wsId),
@@ -59,13 +59,13 @@ export function governanceHealthOptions(wsId: string) {
   });
 }
 
-export const officePulseKey = (wsId: string) => [...governanceKeys.all(wsId), "pulse"] as const;
+export const companyPulseKey = (wsId: string) => [...governanceKeys.all(wsId), "pulse"] as const;
 
-/** The office pulse, polled once a minute: the server's cache lasts that long. */
-export function officePulseOptions(wsId: string) {
+/** The company pulse, polled once a minute: the server's cache lasts that long. */
+export function companyPulseOptions(wsId: string) {
   return queryOptions({
-    queryKey: officePulseKey(wsId),
-    queryFn: (): Promise<OfficePulse> => api.getOfficePulse(),
+    queryKey: companyPulseKey(wsId),
+    queryFn: (): Promise<CompanyPulse> => api.getCompanyPulse(),
     enabled: !!wsId,
     staleTime: 60_000,
     refetchInterval: 60_000,

@@ -242,19 +242,19 @@ func (s *KnowledgeService) FreshnessReview(ctx context.Context, workspaceID pgty
 	return report, nil
 }
 
-// executiveOfficeSquadName is the starter company's Executive Office squad, the
+// executiveCompanySquadName is the starter company's Executive Company squad, the
 // Librarian's home. It takes the review requests of documents no squad owns.
-const executiveOfficeSquadName = "Executive Office"
+const executiveCompanySquadName = "Executive Office"
 
-// executiveOfficeSquad returns the workspace's Executive Office squad, or the
+// executiveCompanySquad returns the workspace's Executive Company squad, or the
 // zero id when the starter company has not installed one.
-func (s *KnowledgeService) executiveOfficeSquad(ctx context.Context, workspaceID pgtype.UUID) (pgtype.UUID, error) {
+func (s *KnowledgeService) executiveCompanySquad(ctx context.Context, workspaceID pgtype.UUID) (pgtype.UUID, error) {
 	squads, err := s.Queries.ListSquads(ctx, workspaceID)
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("list squads: %w", err)
 	}
 	for _, sq := range squads {
-		if sq.Name == executiveOfficeSquadName {
+		if sq.Name == executiveCompanySquadName {
 			return sq.ID, nil
 		}
 	}
@@ -264,15 +264,15 @@ func (s *KnowledgeService) executiveOfficeSquad(ctx context.Context, workspaceID
 // requestReview opens the review request of a due document, unless one stands,
 // and returns the finding reason. The request goes to the document's owning
 // squad, the squad of the agent that wrote it. A document with no owning squad
-// goes to the Executive Office squad, which drafts a superseding update or asks
-// the boss; with no Executive Office squad it is reported and not requested. A
+// goes to the Executive Company squad, which drafts a superseding update or asks
+// the boss; with no Executive Company squad it is reported and not requested. A
 // request stands while its issue is open, and for knowledgeReviewWindow after it
 // was opened, so a closed request is not repeated at once.
 func (s *KnowledgeService) requestReview(ctx context.Context, workspaceID pgtype.UUID, l db.KnowledgeLink, now time.Time) (string, error) {
 	assignee := l.SquadID
 	ownerless := !assignee.Valid
 	if ownerless {
-		exec, err := s.executiveOfficeSquad(ctx, workspaceID)
+		exec, err := s.executiveCompanySquad(ctx, workspaceID)
 		if err != nil {
 			return "", err
 		}

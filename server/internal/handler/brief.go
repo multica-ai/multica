@@ -268,7 +268,7 @@ func (h *Handler) parseBriefScope(w http.ResponseWriter, r *http.Request, worksp
 		writeError(w, http.StatusBadRequest, "scope_id must be a floor id")
 		return "", pgtype.UUID{}, false
 	}
-	if _, err := h.Queries.GetOfficeFloorByID(r.Context(), db.GetOfficeFloorByIDParams{ID: floorID, WorkspaceID: workspaceID}); err != nil {
+	if _, err := h.Queries.GetCompanyFloorByID(r.Context(), db.GetCompanyFloorByIDParams{ID: floorID, WorkspaceID: workspaceID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "floor not found")
 			return "", pgtype.UUID{}, false

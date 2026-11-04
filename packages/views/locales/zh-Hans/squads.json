@@ -80,6 +80,7 @@
   },
   "detail": {
     "assign_work": "分配工作",
+    "add_to_company": "加入公司",
     "copy_link": "复制链接",
     "link_copied": "已复制链接",
     "not_found": "未找到该小队",

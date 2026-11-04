@@ -54,7 +54,7 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    office: () => `${ws}/office`,
+    company: () => `${ws}/company`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
@@ -85,7 +85,7 @@ function workspaceScoped(slug: string) {
     squads: () => `${ws}/squads`,
     knowledge: () => `${ws}/knowledge`,
     pipeline: () => `${ws}/pipeline`,
-    // The pipeline board filtered to one owner squad (the Office room badge).
+    // The pipeline board filtered to one owner squad (the Company room badge).
     pipelineForSquad: (squadId: string) => `${ws}/pipeline?squad=${encode(squadId)}`,
     // The Governance route; `tab` selects one of GOVERNANCE_TABS (default: goals).
     governance: (tab?: GovernanceTab) => (tab ? `${ws}/governance?tab=${tab}` : `${ws}/governance`),

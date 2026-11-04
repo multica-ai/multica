@@ -55,7 +55,7 @@ func ResolveDigestMode(setting string, activeSquads int) string {
 // company's squad rows, already read for the digest, so the flag costs nothing
 // extra.
 func (s *DigestService) computeFloors(ctx context.Context, workspaceID pgtype.UUID, now time.Time, all []DigestSquad) ([]DigestFloor, error) {
-	floors, err := s.Queries.ListOfficeFloors(ctx, workspaceID)
+	floors, err := s.Queries.ListCompanyFloors(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("digest floors: %w", err)
 	}

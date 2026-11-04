@@ -47,6 +47,9 @@ type ProjectResponse struct {
 	// WorkflowID is the workflow this project uses; null means the workspace
 	// Default workflow. (MUL-7420)
 	WorkflowID *string `json:"workflow_id"`
+	// SquadID is the squad this project is assigned to, which its company room
+	// shows. Null when no squad has it.
+	SquadID *string `json:"squad_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -65,6 +68,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 		WorkflowID:  uuidToPtr(p.WorkflowID),
+		SquadID:     uuidToPtr(p.SquadID),
 	}
 }
 

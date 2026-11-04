@@ -111,7 +111,7 @@ func pressBlocks() []any {
 		map[string]any{"type": "actions", "block_id": "brief_actions_1", "elements": []any{
 			map[string]any{"type": "button", "action_id": "brief_action_1", "text": map[string]any{"type": "plain_text", "text": "Approve: Hire"}, "value": "p1:approve"},
 			map[string]any{"type": "button", "action_id": "brief_action_2", "text": map[string]any{"type": "plain_text", "text": "Reject: Hire"}, "value": "p1:reject"},
-			map[string]any{"type": "button", "action_id": "brief_action_3", "text": map[string]any{"type": "plain_text", "text": "Revise: Hire"}, "url": "https://app.example/acme/office?decision=p1"},
+			map[string]any{"type": "button", "action_id": "brief_action_3", "text": map[string]any{"type": "plain_text", "text": "Revise: Hire"}, "url": "https://app.example/acme/company?decision=p1"},
 		}},
 		map[string]any{"type": "actions", "block_id": "brief_actions_2", "elements": []any{
 			map[string]any{"type": "button", "action_id": "brief_action_4", "text": map[string]any{"type": "plain_text", "text": "Approve: Ship"}, "value": "p2:approve"},

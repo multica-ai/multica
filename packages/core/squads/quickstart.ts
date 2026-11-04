@@ -21,13 +21,13 @@ import {
   type SquadCharter,
   type SquadRoutine,
   type UpdateSquadCharterRequest,
-} from "../office/charter-schema";
-import { freeSlots } from "../office/seat-plan";
+} from "../company/charter-schema";
+import { freeSlots } from "../company/seat-plan";
 import type {
-  OfficeFloor,
-  OfficeSeatAssignment,
-  OfficeSeatsResponse,
-} from "../office/types";
+  CompanyFloor,
+  CompanySeatAssignment,
+  CompanySeatsResponse,
+} from "../company/types";
 import {
   SQUAD_ROLES,
   type SquadCharterTemplate,
@@ -47,9 +47,9 @@ export interface SquadQuickstartClient {
     description?: string;
     leader_id: string;
   }): Promise<Squad>;
-  listOfficeFloors(): Promise<OfficeFloor[]>;
-  createOfficeFloor(data: { name: string }): Promise<OfficeFloor>;
-  setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse>;
+  listCompanyFloors(): Promise<CompanyFloor[]>;
+  createCompanyFloor(data: { name: string }): Promise<CompanyFloor>;
+  setCompanySeats(seats: CompanySeatAssignment[]): Promise<CompanySeatsResponse>;
   updateSquad(id: string, data: { instructions?: string }): Promise<Squad>;
   updateSquadCharter(squadId: string, data: UpdateSquadCharterRequest): Promise<SquadCharter>;
   createSquadRoutine(squadId: string, data: CreateSquadRoutineRequest): Promise<SquadRoutine>;
@@ -180,16 +180,16 @@ function workflowSteps(
 }
 
 /**
- * The office floor with this name, created when the workspace has none. The
+ * The company floor with this name, created when the workspace has none. The
  * server only applies a squad's floor name when every floor is full, so the
  * squad is seated on this floor by a separate seat request.
  */
-async function ensureOfficeFloor(
+async function ensureCompanyFloor(
   client: SquadQuickstartClient,
   name: string,
-): Promise<OfficeFloor> {
-  const floors = await client.listOfficeFloors();
-  return floors.find((floor) => floor.name === name) ?? client.createOfficeFloor({ name });
+): Promise<CompanyFloor> {
+  const floors = await client.listCompanyFloors();
+  return floors.find((floor) => floor.name === name) ?? client.createCompanyFloor({ name });
 }
 
 /**
@@ -369,10 +369,10 @@ export async function runSquadQuickstart(
       const failures: string[] = [];
       // Set up the floor first. If that fails the squad is still created, and
       // its error says it has no seat on the floor.
-      let floor: OfficeFloor | null = null;
+      let floor: CompanyFloor | null = null;
       if (template.floorName) {
         try {
-          floor = await ensureOfficeFloor(client, template.floorName);
+          floor = await ensureCompanyFloor(client, template.floorName);
         } catch (err) {
           failures.push(`could not set up the ${template.floorName} floor: ${errorMessage(err)}`);
         }
@@ -390,9 +390,9 @@ export async function runSquadQuickstart(
         const slot = freeSlots(floor.id, squads)[0];
         if (slot === undefined) {
           failures.push(`no free seat on the ${template.floorName} floor`);
-        } else if (squad.floor_id !== floor.id || squad.office_slot !== slot) {
+        } else if (squad.floor_id !== floor.id || squad.company_slot !== slot) {
           try {
-            await client.setOfficeSeats([{ squad_id: squad.id, floor_id: floor.id, slot }]);
+            await client.setCompanySeats([{ squad_id: squad.id, floor_id: floor.id, slot }]);
           } catch (err) {
             failures.push(`seat on the ${template.floorName} floor: ${errorMessage(err)}`);
           }

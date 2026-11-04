@@ -27,6 +27,8 @@ export interface Project {
    * Optional because older servers do not send it. (MUL-7420)
    */
   workflow_id?: string | null;
+  /** The squad this project is assigned to; its company room shows it. Null when none. Older servers omit it. */
+  squad_id?: string | null;
 }
 
 export interface CreateProjectRequest {

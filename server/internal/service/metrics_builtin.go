@@ -126,7 +126,7 @@ func (s *MetricService) builtinScopes(ctx context.Context, q *db.Queries, ws pgt
 			floorSquads[key] = append(floorSquads[key], sq.ID)
 		}
 	}
-	floors, err := q.ListOfficeFloors(ctx, ws)
+	floors, err := q.ListCompanyFloors(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("list floors for metrics: %w", err)
 	}

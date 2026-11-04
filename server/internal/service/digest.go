@@ -254,7 +254,7 @@ type DigestAutoPublish struct {
 	PublishedAt   string `json:"published_at"`
 }
 
-// Digest is the whole response of GET /api/office/digest.
+// Digest is the whole response of GET /api/company/digest.
 type Digest struct {
 	Since     string          `json:"since"`
 	Until     string          `json:"until"`

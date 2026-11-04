@@ -61,22 +61,22 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/pptx/scripts/add_slide.py",
 					},
 					{
-						Name: "office",
-						Path: "skills/pptx/scripts/office",
+						Name: "company",
+						Path: "skills/pptx/scripts/company",
 						Type: "dir",
-						URL:  "https://api.github.com/repos/acme/skills/contents/skills/pptx/scripts/office?ref=main",
+						URL:  "https://api.github.com/repos/acme/skills/contents/skills/pptx/scripts/company?ref=main",
 					},
 				})
-			case "/repos/acme/skills/contents/skills/pptx/scripts/office":
+			case "/repos/acme/skills/contents/skills/pptx/scripts/company":
 				if got := r.URL.Query().Get("ref"); got != "main" {
-					t.Fatalf("office ref = %q, want main", got)
+					t.Fatalf("company ref = %q, want main", got)
 				}
 				writeJSON(w, http.StatusOK, []githubContentEntry{
 					{
 						Name:        "foo.py",
-						Path:        "skills/pptx/scripts/office/foo.py",
+						Path:        "skills/pptx/scripts/company/foo.py",
 						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/pptx/scripts/office/foo.py",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/pptx/scripts/company/foo.py",
 					},
 				})
 			default:
@@ -90,8 +90,8 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 				w.Write([]byte("editing"))
 			case "/acme/skills/main/skills/pptx/scripts/add_slide.py":
 				w.Write([]byte("print('slide')"))
-			case "/acme/skills/main/skills/pptx/scripts/office/foo.py":
-				w.Write([]byte("print('office')"))
+			case "/acme/skills/main/skills/pptx/scripts/company/foo.py":
+				w.Write([]byte("print('company')"))
 			default:
 				http.NotFound(w, r)
 			}
@@ -106,7 +106,7 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 	}
 
 	gotPaths := importedFilePaths(result.files)
-	wantPaths := []string{"editing.md", "scripts/add_slide.py", "scripts/office/foo.py"}
+	wantPaths := []string{"editing.md", "scripts/add_slide.py", "scripts/company/foo.py"}
 	if !equalStrings(gotPaths, wantPaths) {
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}

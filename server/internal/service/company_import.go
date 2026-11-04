@@ -133,7 +133,7 @@ func importPlan(ctx context.Context, q *db.Queries, tx pgx.Tx, workspaceID pgtyp
 	actor := GovernanceActor{Type: GovernanceActorMember, ID: opts.ActorID}
 
 	// Floors.
-	floors, err := q.ListOfficeFloors(ctx, workspaceID)
+	floors, err := q.ListCompanyFloors(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("import: list floors: %w", err)
 	}
@@ -144,8 +144,8 @@ func importPlan(ctx context.Context, q *db.Queries, tx pgx.Tx, workspaceID pgtyp
 		floorNameByID[util.UUIDToString(f.ID)] = f.Name
 	}
 	if write {
-		if err := q.LockOfficeLayout(ctx, workspaceID); err != nil {
-			return fmt.Errorf("import: lock office layout: %w", err)
+		if err := q.LockCompanyLayout(ctx, workspaceID); err != nil {
+			return fmt.Errorf("import: lock company layout: %w", err)
 		}
 	}
 	for _, f := range doc.Floors {
@@ -158,7 +158,7 @@ func importPlan(ctx context.Context, q *db.Queries, tx pgx.Tx, workspaceID pgtyp
 			report.add("floor", f.Name, ImportCreate, "")
 			continue
 		}
-		created, err := q.CreateOfficeFloor(ctx, db.CreateOfficeFloorParams{WorkspaceID: workspaceID, Name: f.Name})
+		created, err := q.CreateCompanyFloor(ctx, db.CreateCompanyFloorParams{WorkspaceID: workspaceID, Name: f.Name})
 		if err != nil {
 			return fmt.Errorf("import: create floor %q: %w", f.Name, err)
 		}
@@ -356,12 +356,12 @@ func importSquad(ctx context.Context, q *db.Queries, ws pgtype.UUID, opts Import
 			return db.Squad{}, err
 		}
 	}
-	if sq.Floor != "" && sq.OfficeSlot != nil {
+	if sq.Floor != "" && sq.CompanySlot != nil {
 		if floorID, ok := floorByName[sq.Floor]; ok {
-			if _, err := q.GetLiveSquadAtSeat(ctx, db.GetLiveSquadAtSeatParams{WorkspaceID: ws, FloorID: floorID, OfficeSlot: pgtype.Int2{Int16: int16(*sq.OfficeSlot), Valid: true}}); errors.Is(err, pgx.ErrNoRows) {
+			if _, err := q.GetLiveSquadAtSeat(ctx, db.GetLiveSquadAtSeatParams{WorkspaceID: ws, FloorID: floorID, CompanySlot: pgtype.Int2{Int16: int16(*sq.CompanySlot), Valid: true}}); errors.Is(err, pgx.ErrNoRows) {
 				if _, err := q.SetSquadSeat(ctx, db.SetSquadSeatParams{
 					ID: created.ID, WorkspaceID: ws,
-					FloorID: floorID, OfficeSlot: pgtype.Int2{Int16: int16(*sq.OfficeSlot), Valid: true},
+					FloorID: floorID, CompanySlot: pgtype.Int2{Int16: int16(*sq.CompanySlot), Valid: true},
 				}); err != nil {
 					return db.Squad{}, fmt.Errorf("import: seat %q: %w", sq.Name, err)
 				}

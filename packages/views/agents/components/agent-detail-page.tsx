@@ -112,9 +112,11 @@ function viewFromParams(params: URLSearchParams): string | null {
 
 interface AgentDetailPageProps {
   agentId: string;
+  /** Called after the agent is archived. Without it the page leaves for the agents list. */
+  onArchived?: () => void;
 }
 
-export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
+export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -768,7 +770,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 onClick={() => {
                   setConfirmArchive(false);
                   handleArchive(agent.id);
-                  navigation.push(paths.agents());
+                  if (onArchived) onArchived();
+                  else navigation.push(paths.agents());
                 }}
               >
                 {t(($) => $.detail.archive_dialog_confirm)}

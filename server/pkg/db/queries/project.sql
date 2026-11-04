@@ -62,3 +62,15 @@ FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: SetProjectSquad :one
+-- Assigns the project to a squad. The handler clears the squad's other projects first.
+UPDATE project SET squad_id = sqlc.narg('squad_id'), updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: ClearSquadFromOtherProjects :many
+-- A squad holds one project: assigning a project unassigns the squad's previous one.
+UPDATE project SET squad_id = NULL, updated_at = now()
+WHERE workspace_id = $1 AND squad_id = $2 AND id <> $3
+RETURNING *;

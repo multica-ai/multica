@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
-import { useNavigation } from "../navigation";
 import { ModalRegistry } from "../modals/registry";
 import { SourceBackfillModal } from "../onboarding";
 import { AppRail } from "./app-rail";
@@ -14,11 +13,6 @@ import { ShellRouteDataPrefetch } from "./route-data-prefetch";
 import { SpacePanel } from "./space-panel";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
-
-/** A workspace's office page: `/<slug>/office`. */
-const OFFICE_PATH = /^\/[^/]+\/office(?:\/|$)/;
-
-export const isOfficePath = (pathname: string) => OFFICE_PATH.test(pathname);
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -47,10 +41,6 @@ export function DashboardLayout({
   extra,
   loadingIndicator,
 }: DashboardLayoutProps) {
-  // The office is a picture to look at, so it opens with the nav panel folded away. Only the first
-  // render decides: opening the nav later, or coming back to the office, keeps what the user chose.
-  const { pathname } = useNavigation();
-  const [startsOnOffice] = useState(() => isOfficePath(pathname));
   return (
     <DashboardGuard
       loadingFallback={
@@ -59,7 +49,7 @@ export function DashboardLayout({
         </div>
       }
     >
-      <SidebarProvider defaultOpen={!startsOnOffice} className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
+      <SidebarProvider defaultOpen className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
         <AppShellProvider>
           <ShellRouteDataPrefetch>
             <GlobalShortcuts />

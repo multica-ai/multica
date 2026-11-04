@@ -108,6 +108,28 @@ func (q *Queries) DeleteWorkspaceFloorChiefs(ctx context.Context, workspaceID pg
 	return err
 }
 
+const getCompanyFloorByID = `-- name: GetCompanyFloorByID :one
+SELECT id, name FROM company_floor
+WHERE id = $1::uuid AND workspace_id = $2::uuid
+`
+
+type GetCompanyFloorByIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetCompanyFloorByIDRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+func (q *Queries) GetCompanyFloorByID(ctx context.Context, arg GetCompanyFloorByIDParams) (GetCompanyFloorByIDRow, error) {
+	row := q.db.QueryRow(ctx, getCompanyFloorByID, arg.ID, arg.WorkspaceID)
+	var i GetCompanyFloorByIDRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const getFloorChief = `-- name: GetFloorChief :one
 SELECT workspace_id, floor_id, agent_id, created_by, created_at, updated_at, brief_autopilot_id FROM floor_chief
 WHERE workspace_id = $1::uuid
@@ -131,28 +153,6 @@ func (q *Queries) GetFloorChief(ctx context.Context, arg GetFloorChiefParams) (F
 		&i.UpdatedAt,
 		&i.BriefAutopilotID,
 	)
-	return i, err
-}
-
-const getOfficeFloorByID = `-- name: GetOfficeFloorByID :one
-SELECT id, name FROM office_floor
-WHERE id = $1::uuid AND workspace_id = $2::uuid
-`
-
-type GetOfficeFloorByIDParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-type GetOfficeFloorByIDRow struct {
-	ID   pgtype.UUID `json:"id"`
-	Name string      `json:"name"`
-}
-
-func (q *Queries) GetOfficeFloorByID(ctx context.Context, arg GetOfficeFloorByIDParams) (GetOfficeFloorByIDRow, error) {
-	row := q.db.QueryRow(ctx, getOfficeFloorByID, arg.ID, arg.WorkspaceID)
-	var i GetOfficeFloorByIDRow
-	err := row.Scan(&i.ID, &i.Name)
 	return i, err
 }
 

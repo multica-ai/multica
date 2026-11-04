@@ -121,11 +121,11 @@ func slackNotifierBinding() channel.Binding {
 // the shape renderBriefPush builds: the brief link, then Approve and Reject on
 // one row, Snooze and Revise on the next.
 func slackNotifierMessage() channel.Message {
-	decision := "https://app.example/acme/office?decision=p1"
+	decision := "https://app.example/acme/company?decision=p1"
 	return channel.Message{
 		Text: "Hire a designer for the launch\n1 decision needs you:\n- Hire a designer " + decision,
 		Buttons: []channel.Button{
-			{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+			{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 			{Label: "Approve: Hire a designer", CallbackData: "tok-approve", LinkURL: decision},
 			{Label: "Reject: Hire a designer", CallbackData: "tok-reject", LinkURL: decision, SameRow: true},
 			{Label: "Snooze 7 days: Hire a designer", CallbackData: "tok-snooze", LinkURL: decision},
@@ -203,7 +203,7 @@ func TestSlackNotifierPostsBriefToTheMembersDirectMessage(t *testing.T) {
 	}
 
 	open := elementsOf(t, blocks[1])[0]
-	if open["url"] != "https://app.example/acme/office?brief=b1" || open["value"] != nil {
+	if open["url"] != "https://app.example/acme/company?brief=b1" || open["value"] != nil {
 		t.Fatalf("Open the brief = %v, want a link with no value", open)
 	}
 
@@ -218,7 +218,7 @@ func TestSlackNotifierPostsBriefToTheMembersDirectMessage(t *testing.T) {
 		t.Fatalf("snooze value = %v, want its token", snooze["value"])
 	}
 	// Revise needs a note, so it is a link into the app, not a press.
-	if revise["url"] != "https://app.example/acme/office?decision=p1" || revise["value"] != nil {
+	if revise["url"] != "https://app.example/acme/company?decision=p1" || revise["value"] != nil {
 		t.Fatalf("Revise = %v, want a link with no value", revise)
 	}
 
@@ -422,7 +422,7 @@ func TestSlackNotifierKeepsCallbackButtonsAndIgnoresLinkURL(t *testing.T) {
 	t.Parallel()
 	n, srv, _ := newSlackNotifierFixture(t, http.StatusOK, slackNotifierOKBody, nil)
 	msg := channel.Message{Text: "hello", Buttons: []channel.Button{
-		{Label: "Approve", CallbackData: "tok-approve", LinkURL: "https://app.example/acme/office?decision=p1"},
+		{Label: "Approve", CallbackData: "tok-approve", LinkURL: "https://app.example/acme/company?decision=p1"},
 	}}
 
 	if err := n.Send(context.Background(), slackNotifierBinding(), msg); err != nil {

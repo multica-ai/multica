@@ -25,7 +25,7 @@
     "./modals/registry": "./modals/registry.tsx",
     "./modals/create-issue": "./modals/create-issue.tsx",
     "./my-issues": "./my-issues/index.ts",
-    "./office": "./office/index.ts",
+    "./company": "./company/index.ts",
     "./pipeline": "./pipeline/index.ts",
     "./governance": "./governance/index.ts",
     "./skills": "./skills/index.ts",

@@ -2727,7 +2727,7 @@ export function createEnDict(
           "Issue trigger previews are easier to read",
         ],
         fixes: [
-          "Office 365 email delivery is more reliable",
+          "Company 365 email delivery is more reliable",
           "GitHub installation context and pending CI display are more reliable",
           "Codex runs fail quickly when the app server exits",
           "Self-healing runtimes can be deleted again, and incompatible models are cleared on runtime switch",

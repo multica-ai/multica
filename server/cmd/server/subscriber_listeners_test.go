@@ -399,7 +399,7 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 // mention) cannot hold an issue_subscriber row: user_type only admits
 // ('member','agent'). They must be skipped, not attempted; each attempt fails
 // the CHECK and logs "failed to add issue subscriber" (seen on the Playwright
-// office run with user_type=issue). A real member mention in the same
+// company run with user_type=issue). A real member mention in the same
 // description must still subscribe.
 func TestSubscriberIssueCreated_NonSubscriberMentionsAreSkipped(t *testing.T) {
 	queries := db.New(testPool)

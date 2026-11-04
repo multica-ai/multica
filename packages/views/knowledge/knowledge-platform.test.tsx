@@ -26,7 +26,7 @@ vi.mock("@multica/core/api", () => ({
     runKnowledgeRepoSync: vi.fn(),
     listSquads: vi.fn().mockResolvedValue([]),
     listAgents: vi.fn().mockResolvedValue([]),
-    listOfficeFloors: vi.fn().mockResolvedValue([]),
+    listCompanyFloors: vi.fn().mockResolvedValue([]),
   },
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.listSquads).mockResolvedValue([]);
   vi.mocked(api.listAgents).mockResolvedValue([]);
-  vi.mocked(api.listOfficeFloors).mockResolvedValue([]);
+  vi.mocked(api.listCompanyFloors).mockResolvedValue([]);
 });
 
 describe("KnowledgeUploadPanel", () => {

@@ -447,39 +447,39 @@ html[data-sidebar-resizing="true"] {
   color: var(--find-match-foreground);
 }
 
-/* Pixel Office. Sprites are two-frame sheets (200% wide); every animation is a
+/* Pixel Company. Sprites are two-frame sheets (200% wide); every animation is a
  * hard two-state toggle so motion stays on the pixel grid. */
-@keyframes office-sprite-frames {
+@keyframes company-sprite-frames {
   0%, 49.99% { background-position: 0% 0; }
   50%, 100% { background-position: 100% 0; }
 }
 
-@keyframes office-bob {
+@keyframes company-bob {
   0%, 49.99% { transform: translateY(0); }
   50%, 100% { transform: translateY(-2px); }
 }
 
-@keyframes office-siren {
+@keyframes company-siren {
   0%, 49.99% { opacity: 1; }
   50%, 100% { opacity: 0.25; }
 }
 
-.office-sprite-anim {
-  animation: office-sprite-frames var(--office-frame-duration, 0.6s) linear infinite;
+.company-sprite-anim {
+  animation: company-sprite-frames var(--company-frame-duration, 0.6s) linear infinite;
 }
 
-.office-bob {
-  animation: office-bob 0.3s linear infinite;
+.company-bob {
+  animation: company-bob 0.3s linear infinite;
 }
 
-.office-siren {
-  animation: office-siren 0.9s linear infinite;
+.company-siren {
+  animation: company-siren 0.9s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .office-sprite-anim,
-  .office-bob,
-  .office-siren {
+  .company-sprite-anim,
+  .company-bob,
+  .company-siren {
     animation: none;
   }
 }

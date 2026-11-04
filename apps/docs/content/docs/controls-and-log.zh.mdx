@@ -19,7 +19,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 公司暂停期间，自动知识发布和流水线自动推进会停止，标准授权也不适用。秘书的简报和聊天照常工作，因此你仍能查看公司状况并与之交流。
 
-**办公室**标题栏中的 **Pause**（暂停）即可暂停公司。选择 **stop running work**（停止运行中的工作）则还会取消正在进行的例行和委派运行：
+**公司**标题栏中的 **Pause**（暂停）即可暂停公司。选择 **stop running work**（停止运行中的工作）则还会取消正在进行的例行和委派运行：
 
 ```bash
 multica company status
@@ -77,7 +77,7 @@ CSV 导出最多 50,000 行。超过时返回 HTTP 413，请缩小筛选范围�
 
 ## 限制
 
-- 公司状态的端点为 `GET` 和 `PUT /api/office/company-state`，以及 `PUT /api/office/quiet-hours`。上文的 CLI 命令即是对它们的封装。
+- 公司状态的端点为 `GET` 和 `PUT /api/company/company-state`，以及 `PUT /api/company/quiet-hours`。上文的 CLI 命令即是对它们的封装。
 
 ## 下一步
 

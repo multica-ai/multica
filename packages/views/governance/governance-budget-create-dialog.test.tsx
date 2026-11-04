@@ -11,7 +11,7 @@ import { GovernanceBudgetCreateDialog } from "./governance-budget-create-dialog"
 
 const api = vi.hoisted(() => ({
   createBudget: vi.fn(),
-  listOfficeFloors: vi.fn(),
+  listCompanyFloors: vi.fn(),
   listInitiatives: vi.fn(),
   listSquads: vi.fn(),
 }));
@@ -46,7 +46,7 @@ describe("GovernanceBudgetCreateDialog", { timeout: 30_000 }, () => {
     api.createBudget.mockReset();
     toasts.success.mockReset();
     toasts.error.mockReset();
-    api.listOfficeFloors.mockResolvedValue([]);
+    api.listCompanyFloors.mockResolvedValue([]);
     api.listInitiatives.mockResolvedValue([]);
     api.listSquads.mockResolvedValue([
       { id: "sq-1", name: "Research", archived_at: null },

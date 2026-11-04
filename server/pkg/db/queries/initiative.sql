@@ -190,7 +190,7 @@ RETURNING *;
 -- filings are limited to the Research and Product floors (spec 3.2).
 SELECT COALESCE(f.name, '')::text AS floor_name
 FROM squad s
-LEFT JOIN office_floor f ON f.id = s.floor_id AND f.workspace_id = s.workspace_id
+LEFT JOIN company_floor f ON f.id = s.floor_id AND f.workspace_id = s.workspace_id
 WHERE s.id = sqlc.arg('squad_id')::uuid AND s.workspace_id = sqlc.arg('workspace_id')::uuid;
 
 -- name: GetInitiativeBudgetRequestAmount :one

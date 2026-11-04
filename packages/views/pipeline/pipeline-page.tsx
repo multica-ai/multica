@@ -40,7 +40,7 @@ const ALL_SQUADS = "";
 /**
  * The pipeline: one board per workspace, a column per stage of the default
  * pipeline. The owner squad and the status are read from the URL, so a link
- * from an Office room opens the board filtered to that squad. Selecting a card
+ * from an Company room opens the board filtered to that squad. Selecting a card
  * opens its initiative in a side panel.
  */
 export function PipelinePage() {

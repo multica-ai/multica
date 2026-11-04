@@ -588,7 +588,7 @@ What changes for operators:
 - **Secretary setup has no button yet.** Setup runs through the API. It needs an online Hermes runtime, and an owner's or admin's token:
 
 ```bash
-curl -X POST "$MULTICA_API_URL/api/office/setup" \
+curl -X POST "$MULTICA_API_URL/api/company/setup" \
   -H "Authorization: Bearer $MULTICA_TOKEN" \
   -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID" \
   -H 'Content-Type: application/json' \
@@ -597,7 +597,7 @@ curl -X POST "$MULTICA_API_URL/api/office/setup" \
 
 Setup is idempotent. It creates the Secretary, the Executive floor and squad, the daily brief autopilot, and the paused weekly review, and it returns the readiness checklist. A second call changes nothing that already exists.
 
-After upgrading, check the office: seat the squads you want on a floor, and see the [Office](https://multica.ai/docs/office) and [Secretary and briefs](https://multica.ai/docs/secretary) pages for what members will see.
+After upgrading, check the company: seat the squads you want on a floor, and see the [Company](https://multica.ai/docs/company) and [Secretary and briefs](https://multica.ai/docs/secretary) pages for what members will see.
 
 ---
 

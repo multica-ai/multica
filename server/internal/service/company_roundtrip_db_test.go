@@ -24,7 +24,7 @@ import (
 // structure (spec 4.9, plan 11.18). Routines come back paused; the comparison
 // ignores their status for that reason.
 func TestCompanyRoundTripReproducesStructureInAnEmptyWorkspace(t *testing.T) {
-	src, _ := officeWorkspace(t)
+	src, _ := companyWorkspace(t)
 	ctx := context.Background()
 	srcWS := util.MustParseUUID(src.WorkspaceID)
 	srcActor := GovernanceActor{Type: GovernanceActorMember, ID: util.MustParseUUID(src.UserID)}
@@ -35,8 +35,8 @@ func TestCompanyRoundTripReproducesStructureInAnEmptyWorkspace(t *testing.T) {
 	src.SquadMember(t, squadID, "agent", leader, testutil.Cols{"role": "leader"})
 	src.SquadMember(t, squadID, "agent", worker, testutil.Cols{"role": "member"})
 	src.Exec(t, `UPDATE agent SET home_squad_id = $1 WHERE id = ANY($2::uuid[])`, squadID, []string{leader, worker})
-	floorID := src.Insert(t, "office_floor", testutil.Cols{"workspace_id": src.WorkspaceID, "name": "RT Floor", "position": 0})
-	src.Exec(t, `UPDATE squad SET floor_id = $1, office_slot = 0 WHERE id = $2`, floorID, squadID)
+	floorID := src.Insert(t, "company_floor", testutil.Cols{"workspace_id": src.WorkspaceID, "name": "RT Floor", "position": 0})
+	src.Exec(t, `UPDATE squad SET floor_id = $1, company_slot = 0 WHERE id = $2`, floorID, squadID)
 	src.Exec(t, `INSERT INTO squad_charter (squad_id, workspace_id, mission, responsibilities, outputs, response_hours, operating_review_enabled, revision)
 		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 24, true, 1)`,
 		squadID, src.WorkspaceID, "Round trip the structure", `["keep the record"]`, `[]`)
@@ -219,7 +219,7 @@ func roundTripCounts(t *testing.T, f principalFixture) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	for _, table := range []string{"squad", "agent", "squad_charter", "squad_routine", "goal", "budget",
-		"approval_policy", "pipeline", "knowledge_kind", "office_floor", "initiative", "issue", "autopilot",
+		"approval_policy", "pipeline", "knowledge_kind", "company_floor", "initiative", "issue", "autopilot",
 		"floor_chief", "governance_event"} {
 		out[table] = f.Count(t, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE workspace_id = $1", table), f.WorkspaceID)
 	}
@@ -284,18 +284,18 @@ func canonicalStructure(t *testing.T, doc CompanyExport) string {
 // archived with its routines paused, a dry run writes nothing, and a second import
 // creates nothing.
 func TestCompanyRoundTripCarriesEverySquadGoalInitiativeScopeRevocationAndArchive(t *testing.T) {
-	src, _ := officeWorkspace(t)
+	src, _ := companyWorkspace(t)
 	ctx := context.Background()
 	srcWS := util.MustParseUUID(src.WorkspaceID)
 	srcActor := GovernanceActor{Type: GovernanceActorMember, ID: util.MustParseUUID(src.UserID)}
 	runtimeID, leader := ownerAndLeader(t, src, "RT2 Lead")
 	worker := src.Agent(t, "RT2 Worker", runtimeID)
 
-	floorID := src.Insert(t, "office_floor", testutil.Cols{"workspace_id": src.WorkspaceID, "name": "RT2 Floor", "position": 0})
+	floorID := src.Insert(t, "company_floor", testutil.Cols{"workspace_id": src.WorkspaceID, "name": "RT2 Floor", "position": 0})
 	squadID := src.Squad(t, "RT2 Squad", leader)
 	src.SquadMember(t, squadID, "agent", leader, testutil.Cols{"role": "leader"})
 	src.SquadMember(t, squadID, "agent", worker, testutil.Cols{"role": "member"})
-	src.Exec(t, `UPDATE squad SET floor_id = $1, office_slot = 0 WHERE id = $2`, floorID, squadID)
+	src.Exec(t, `UPDATE squad SET floor_id = $1, company_slot = 0 WHERE id = $2`, floorID, squadID)
 	archivedID := src.Squad(t, "RT2 Archived", leader)
 	src.SquadMember(t, archivedID, "agent", leader, testutil.Cols{"role": "leader"})
 	src.SquadMember(t, archivedID, "agent", worker, testutil.Cols{"role": "member"})
@@ -312,7 +312,7 @@ func TestCompanyRoundTripCarriesEverySquadGoalInitiativeScopeRevocationAndArchiv
 	}); err != nil {
 		t.Fatalf("archived squad routine: %v", err)
 	}
-	src.Exec(t, `UPDATE squad SET archived_at = now(), archived_by = $2, floor_id = NULL, office_slot = NULL WHERE id = $1`,
+	src.Exec(t, `UPDATE squad SET archived_at = now(), archived_by = $2, floor_id = NULL, company_slot = NULL WHERE id = $1`,
 		archivedID, srcActor.ID)
 	seedRoundTripMetric(t, src, srcWS)
 

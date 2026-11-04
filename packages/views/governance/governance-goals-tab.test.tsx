@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
   listMetrics: vi.fn(),
   listMetricReadings: vi.fn(),
   reportMetricReading: vi.fn(),
-  listOfficeFloors: vi.fn(),
+  listCompanyFloors: vi.fn(),
   listSquads: vi.fn(),
   listInitiatives: vi.fn(),
 }));
@@ -113,7 +113,7 @@ describe("GovernanceGoalsTab", () => {
     nav.replace.mockClear();
     role.value = "admin";
     api.listGoals.mockResolvedValue([goal()]);
-    api.listOfficeFloors.mockResolvedValue([]);
+    api.listCompanyFloors.mockResolvedValue([]);
     api.listSquads.mockResolvedValue([]);
     api.listInitiatives.mockResolvedValue([]);
     api.listMetrics.mockResolvedValue([metric]);

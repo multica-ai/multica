@@ -47,11 +47,11 @@ func notifierBinding(inst pgtype.UUID) channel.Binding {
 // decisionMessage is what renderBriefPush builds for one pending decision: the
 // text, then the signed callback buttons and the links.
 func decisionMessage() channel.Message {
-	const link = "https://app.example/acme/office?decision=p1"
+	const link = "https://app.example/acme/company?decision=p1"
 	return channel.Message{
 		Text: "Brief ready\n\n1 decision needs you:\n- Hire a designer",
 		Buttons: []channel.Button{
-			{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+			{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 			{Label: "Approve: Hire a designer", CallbackData: "token-approve", LinkURL: link},
 			{Label: "Reject: Hire a designer", CallbackData: "token-reject", LinkURL: link, SameRow: true},
 			{Label: "Snooze 7 days: Hire a designer", CallbackData: "token-snooze", LinkURL: link},
@@ -88,7 +88,7 @@ func TestNotifierSendsTheTextThenOneCardPerDecision(t *testing.T) {
 	if title := tc["main_title"].(map[string]any)["title"]; title != "Hire a designer" {
 		t.Fatalf("card title = %v, want the decision title", title)
 	}
-	if action := tc["card_action"].(map[string]any); action["url"] != "https://app.example/acme/office?decision=p1" {
+	if action := tc["card_action"].(map[string]any); action["url"] != "https://app.example/acme/company?decision=p1" {
 		t.Fatalf("card_action = %+v, want the decision page", action)
 	}
 	if task, _ := tc["task_id"].(string); !strings.HasPrefix(task, wecomCardTaskPrefix) {

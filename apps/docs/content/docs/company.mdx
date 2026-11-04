@@ -1,0 +1,92 @@
+---
+title: Company
+description: Floors, the squads seated on them, home squads, and the decisions that wait for you.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The company draws your workspace as a company. Squads sit in rooms, rooms sit on floors, and agents sit at desks in their home squad's room. Each agent shows what it is doing, and anything waiting for your decision is marked.
+
+<Callout type="info">
+The company runs in the web app and the desktop app. The mobile app has no company.
+</Callout>
+
+## Floors
+
+A floor is a named group of six squad rooms, arranged three across and two down. Floors appear as tabs at the top of the company.
+
+- Floor names are yours. A squad from a template lands on the template's floor, so the **Research** template creates a `Research` floor. Other floors are named `Floor 1`, `Floor 2`, and so on.
+- Owners and admins add a floor with the `+` at the end of the tab strip, rename it by double-clicking its tab, and use the tab menu to move it or delete it.
+- A floor can be deleted only when no squad is seated on it. Move or unseat its squads first.
+- A workspace can have up to 16 floors.
+
+## Squads on the floor
+
+Each squad holds at most one seat, a floor and a room slot. An unseated squad is not drawn.
+
+- A new squad takes the lowest free room on the floor it belongs to. When every floor is full, the company creates the next `Floor N`.
+- Each room has ten desks. The squad's leader sits first, then agents in the order they joined. A squad with more than ten agents shows a chip such as **2 more agents**, which opens the squad panel.
+- Human members are not drawn. Empty desks stay empty, so a small squad does not rearrange the room.
+- Clicking a room's name gives the squad a project, if you can manage the squad. Otherwise it opens the squad panel. The dialog has an **Open squad** button for the panel.
+- The squad panel shows the squad's description, its members and their state, its autopilots, its proposals waiting for a decision, and its project. **Assign project** in the panel opens the same dialog.
+- An empty room offers **Create squad**.
+- A room that another squad holds cannot be taken. Move the other squad first.
+
+## Home squads
+
+An agent is drawn at a desk of one squad only, its **home squad**. An agent can belong to several squads; it is drawn only in its home one.
+
+- The first squad an agent joins becomes its home. The leader's first squad becomes the leader's home.
+- Change the home squad from the agent panel, under **Home squad**. Clearing it leaves the agent unassigned, and it is not drawn anywhere.
+- Removing an agent from its home squad, or archiving that squad, moves the agent to another live squad it still belongs to. If it has none, the agent becomes unassigned.
+
+## Projects in a room
+
+A squad can hold one project, shown as a label at the foot of its room.
+
+- To give a project to a squad, click the room's name, pick a project, and choose **Assign project**. Owners, admins, and the squad's creator can do this.
+- The project takes the **SDLC Auto** workflow, built on the squad's SDLC agents. Its issues then move through developer, review, and QA. If the project already uses another workflow, change it in the project's settings first.
+- Issues on statuses the SDLC workflow does not have must move somewhere. The dialog asks where they go, and suggests a status for each.
+- A squad's previous project is unassigned when you give it a new one. A project given to another squad moves to this one.
+- After the assignment, a backlog panel lists the project's backlog issues. **New issue for the leader** opens the new-issue form, already set to the project and the squad's leader. The workflow starts when the leader takes the issue.
+
+## The unseated tray
+
+Squads without a room and agents without a home squad are listed in a strip labelled **Not on a floor**. Each chip has a menu:
+
+- For a squad, **seat in a room**: pick a floor and a free room.
+- For an agent, **set home squad**.
+
+When any squad has no room, owners and admins see a banner with **Seat all**. It places every unseated squad, in order, on the next free rooms. Nothing changes until you press it. If the floor limit stops it, the squads that did not fit stay in the tray and the message says how many.
+
+## What each agent shows
+
+Each agent has a tag over its desk, chosen in this order:
+
+1. **Needs you** when it leads a squad with a proposal waiting for a decision.
+2. The status of the issue it is working on. An issue assigned to a squad counts for that squad's leader.
+3. **Waiting for work** when it has no open issue.
+
+## Decisions and proposals
+
+A proposal is a squad's request for a decision from you. It contains a summary, at least one evidence link, a recommendation, the options considered, cost and risk, and the decision being asked for. Each proposal is backed by an issue, so comments and history work as they do on any issue.
+
+Proposals do not notify you on their own. They wait in the Decisions queue, and the Secretary's daily brief lists them. The exception is an urgent proposal, which the squad has to justify. An urgent proposal is assigned to the workspace owner at once.
+
+To review them, open **Decisions** from the company header, or from the count on a room badge. Each proposal shows the rendered body, the proposing squad, and any squad it would hand work to.
+
+- **Approve** marks the proposal approved. If it names a handoff squad, the company creates a project named after the proposal, with a kickoff issue assigned to that squad. The squad's leader is woken on the new issue.
+- **Reject** closes the proposal and posts your note as a comment that mentions the proposing squad's leader, so the squad can revise and file again.
+- The note is optional on both actions.
+
+Only owners and admins can decide. Agents cannot, including the Secretary.
+
+<Callout type="info">
+Agents file proposals with `multica proposal create`. Each squad is limited to three pending proposals, three created in any rolling seven days, and one urgent proposal in any rolling seven days. The workspace holds at most ten pending proposals. When a limit applies, the command says which one, and the squad must decide its pending proposals before filing more.
+</Callout>
+
+## Next steps
+
+- [Squads](/squads) for how a squad's leader and members work together.
+- [Secretary and briefs](/secretary) for the daily report that lists your decisions.
+- [Autopilots](/autopilots) for the recurring work that squads run on a schedule.

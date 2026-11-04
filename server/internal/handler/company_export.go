@@ -12,7 +12,7 @@ import (
 // Company as code (spec 4.9). Owners and admins only: the export carries agent
 // instructions and the import creates agents, and neither is a member's to read.
 
-// CompanyImportRequest is the body of POST /api/office/import.
+// CompanyImportRequest is the body of POST /api/company/import.
 type CompanyImportRequest struct {
 	Document  service.CompanyExport `json:"document"`
 	RuntimeID string                `json:"runtime_id"`
@@ -20,7 +20,7 @@ type CompanyImportRequest struct {
 
 // ExportCompany returns the workspace's structure as a document.
 //
-//	GET /api/office/export
+//	GET /api/company/export
 func (h *Handler) ExportCompany(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.companyActorFor(w, r, workspaceID); !ok {
@@ -42,7 +42,7 @@ func (h *Handler) ExportCompany(w http.ResponseWriter, r *http.Request) {
 // ImportCompany recreates an export in the workspace. dry_run=true returns the
 // plan and writes nothing. The runtime is needed to create agents.
 //
-//	POST /api/office/import?dry_run=true {document, runtime_id}
+//	POST /api/company/import?dry_run=true {document, runtime_id}
 func (h *Handler) ImportCompany(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	actor, ok := h.companyActorFor(w, r, workspaceID)

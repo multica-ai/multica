@@ -11,7 +11,7 @@ Use it on a workspace that is new or nearly empty. It does not remove anything, 
 
 ## The wizard
 
-Open the Office and start the company wizard. It walks through four steps:
+Open the Company and start the company wizard. It walks through four steps:
 
 1. **Runtime.** The runtime the new agents run on. Choose one that is online.
 2. **Selection.** The squads to create. Each card shows the squad's mission and its routines.
@@ -21,7 +21,7 @@ Open the Office and start the company wizard. It walks through four steps:
    - `per_floor`: each floor's lead routine starts active, and the rest start paused.
    - `leave_paused`: every routine starts paused, and you start them one by one.
 
-The wizard calls `POST /api/office/company-template/apply`. The response is a report that lists each floor, squad, agent, and routine it created or found. If the run stops partway, run it again. It resumes from the report and creates only what is missing.
+The wizard calls `POST /api/company/company-template/apply`. The response is a report that lists each floor, squad, agent, and routine it created or found. If the run stops partway, run it again. It resumes from the report and creates only what is missing.
 
 ## What it creates
 

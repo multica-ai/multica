@@ -62,7 +62,7 @@ export function stageColumns(
   return columns;
 }
 
-/** The number the Office room badge shows for a squad: the open initiatives it owns. */
+/** The number the Company room badge shows for a squad: the open initiatives it owns. */
 export function ownedOpenCount(initiatives: readonly Initiative[], squadId: string): number {
   return initiatives.filter((initiative) => initiative.owner_squad_id === squadId && isOpenInitiative(initiative))
     .length;

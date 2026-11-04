@@ -14,7 +14,7 @@ import (
 )
 
 // chatDecisionsLimit is how many pending decisions /decisions names. The rest
-// are counted, with a link to the Office.
+// are counted, with a link to the Company.
 const chatDecisionsLimit = 5
 
 const (
@@ -73,14 +73,14 @@ func (a *ChannelActions) latestBrief(ctx context.Context, workspaceID pgtype.UUI
 		headline = brief.Title
 	}
 	text := headline
-	if link := a.officeLinkQuery(ctx, workspaceID, url.Values{"brief": {uuidToString(brief.ID)}}); link != "" {
+	if link := a.companyLinkQuery(ctx, workspaceID, url.Values{"brief": {uuidToString(brief.ID)}}); link != "" {
 		text += "\n\nBrief: " + link
 	}
 	return channel.Message{Text: text}, nil
 }
 
 // pendingDecisions replies with up to chatDecisionsLimit pending proposals, each
-// with its title and its Office link. A snoozed proposal is left out until its
+// with its title and its Company link. A snoozed proposal is left out until its
 // snooze ends, as the brief push leaves it out.
 func (a *ChannelActions) pendingDecisions(ctx context.Context, workspaceID pgtype.UUID) (channel.Message, error) {
 	rows, err := a.h.Queries.ListProposals(ctx, db.ListProposalsParams{
@@ -114,13 +114,13 @@ func (a *ChannelActions) pendingDecisions(ctx context.Context, workspaceID pgtyp
 	}
 	for _, row := range shown {
 		b.WriteString("\n- " + oneLineChat(row.IssueTitle))
-		if link := a.officeLink(ctx, workspaceID, uuidToString(row.Proposal.ID)); link != "" {
+		if link := a.companyLink(ctx, workspaceID, uuidToString(row.Proposal.ID)); link != "" {
 			b.WriteString(" " + link)
 		}
 	}
 	if extra := len(pending) - len(shown); extra > 0 {
-		b.WriteString(fmt.Sprintf("\n...and %d more in the Office", extra))
-		if link := a.officeLink(ctx, workspaceID, ""); link != "" {
+		b.WriteString(fmt.Sprintf("\n...and %d more in the Company", extra))
+		if link := a.companyLink(ctx, workspaceID, ""); link != "" {
 			b.WriteString(": " + link)
 		}
 		b.WriteString(".")

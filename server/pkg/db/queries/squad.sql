@@ -74,23 +74,23 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveSquad :one
--- Archiving frees the squad's office seat. The partial unique index already
+-- Archiving frees the squad's company seat. The partial unique index already
 -- ignores archived rows; clearing the columns as well keeps archived squads
 -- from pointing at a floor that may later be deleted.
-UPDATE squad SET archived_at = now(), archived_by = $2, floor_id = NULL, office_slot = NULL, updated_at = now()
+UPDATE squad SET archived_at = now(), archived_by = $2, floor_id = NULL, company_slot = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: GetLiveSquadAtSeat :one
 SELECT * FROM squad
-WHERE workspace_id = $1 AND floor_id = $2 AND office_slot = $3 AND archived_at IS NULL;
+WHERE workspace_id = $1 AND floor_id = $2 AND company_slot = $3 AND archived_at IS NULL;
 
 -- name: SetSquadSeat :one
 -- Places a live squad on a seat, or unseats it when both columns are NULL. The
--- handler keeps floor_id and office_slot both set or both null.
+-- handler keeps floor_id and company_slot both set or both null.
 UPDATE squad SET
     floor_id = sqlc.narg('floor_id'),
-    office_slot = sqlc.narg('office_slot'),
+    company_slot = sqlc.narg('company_slot'),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id') AND archived_at IS NULL
 RETURNING *;

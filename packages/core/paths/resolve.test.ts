@@ -31,10 +31,10 @@ describe("resolvePostAuthDestination", () => {
     expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
   });
 
-  it("onboarded + workspace[0] → /<first.slug>/office", () => {
+  it("onboarded + workspace[0] → /<first.slug>/company", () => {
     const ws = [makeWs("acme"), makeWs("beta")];
     expect(resolvePostAuthDestination(ws, true)).toBe(
-      paths.workspace("acme").office(),
+      paths.workspace("acme").company(),
     );
   });
 

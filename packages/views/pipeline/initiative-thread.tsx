@@ -5,7 +5,7 @@ import { IssueDetail } from "../issues/components/issue-detail";
 
 /**
  * The backing issue's thread: its activity and comments, shown with the issue's
- * peek view, which the board's side peek and the Office agent panel already use.
+ * peek view, which the board's side peek and the Company agent panel already use.
  * The comment list and composer are IssueDetail's own; nothing is re-implemented
  * here. IssueDetail's properties sidebar is left out, as the peek has none.
  */

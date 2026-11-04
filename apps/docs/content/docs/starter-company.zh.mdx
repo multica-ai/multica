@@ -11,7 +11,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 向导
 
-打开办公室并启动公司向导，共四步：
+打开公司并启动公司向导，共四步：
 
 1. **运行时。** 新智能体所在的运行时。选择一个在线的运行时。
 2. **选择。** 要创建的小队。每张卡片显示小队的使命和例行任务。
@@ -21,7 +21,7 @@ import { Callout } from "fumadocs-ui/components/callout";
    - `per_floor`：每个楼层的主导例行任务启用，其余暂停。
    - `leave_paused`：所有例行任务保持暂停，由你逐个启动。
 
-向导调用 `POST /api/office/company-template/apply`。响应是一份报告，列出它创建或找到的每个楼层、小队、智能体和例行任务。若运行中途停止，再次运行即可：它会从报告处继续，只创建缺少的部分。
+向导调用 `POST /api/company/company-template/apply`。响应是一份报告，列出它创建或找到的每个楼层、小队、智能体和例行任务。若运行中途停止，再次运行即可：它会从报告处继续，只创建缺少的部分。
 
 ## 创建的内容
 
@@ -29,7 +29,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 | 楼层 | 小队 |
 | --- | --- |
-| Executive（执行） | **Executive Office**（执行办公室）：秘书和图书管理员，附每日简报和每周评审例行任务，以及图书管理员的例行任务 |
+| Executive（执行） | **Executive Office**（执行公司）：秘书和图书管理员，附每日简报和每周评审例行任务，以及图书管理员的例行任务 |
 | Research（研究） | **Market Research**、**Opportunity Lab**、**Competitor Intelligence**、**Customer Voice** |
 | Product（产品） | **Product Discovery**、**Product Analysis**、**Planning** |
 | Build（构建） | **Build** |
@@ -57,6 +57,6 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 下一步
 
-- [秘书与简报](/secretary)：执行办公室的日常工作。
+- [秘书与简报](/secretary)：执行公司的日常工作。
 - [章程与例行任务](/charters-and-routines)：编辑公司初始的章程和例行任务。
 - [公司即代码](/company-as-code)：把此结构导出到第二个工作区。

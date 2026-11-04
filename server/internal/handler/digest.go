@@ -13,12 +13,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// GetOfficeDigest returns the Secretary's digest: per-squad facts computed by
+// GetCompanyDigest returns the Secretary's digest: per-squad facts computed by
 // SQL and bounded in size. Any workspace member may read it.
 //
-//	GET /api/office/digest?since=<RFC 3339 timestamp>   (default: the last 24h)
-//	GET /api/office/digest?floor_id=<floor id>          (one floor's squads)
-func (h *Handler) GetOfficeDigest(w http.ResponseWriter, r *http.Request) {
+//	GET /api/company/digest?since=<RFC 3339 timestamp>   (default: the last 24h)
+//	GET /api/company/digest?floor_id=<floor id>          (one floor's squads)
+func (h *Handler) GetCompanyDigest(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
@@ -61,7 +61,7 @@ func (h *Handler) applyDigestScope(w http.ResponseWriter, r *http.Request, wsUUI
 		if !ok {
 			return false
 		}
-		if _, err := h.Queries.GetOfficeFloorByID(r.Context(), db.GetOfficeFloorByIDParams{ID: floorID, WorkspaceID: wsUUID}); err != nil {
+		if _, err := h.Queries.GetCompanyFloorByID(r.Context(), db.GetCompanyFloorByIDParams{ID: floorID, WorkspaceID: wsUUID}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "floor not found")
 				return false

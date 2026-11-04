@@ -35,8 +35,15 @@ vi.mock("@tanstack/react-query", () => ({
     isPending: false,
   }),
 }));
+vi.mock("@multica/core/company", () => ({
+  companyFloorsOptions: () => ({ queryKey: ["floors"] }),
+}));
+vi.mock("../../company/lib/use-add-squad-to-company", () => ({
+  useAddSquadToCompany: () => ({ addSquad: vi.fn(), pending: false }),
+}));
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
+  squadListOptions: () => ({ queryKey: ["squads-list"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   squadMemberStatusOptions: () => ({ queryKey: ["member-status"] }),
   workspaceKeys: { squads: () => ["squads"] },

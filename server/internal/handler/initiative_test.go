@@ -118,7 +118,7 @@ func cleanInitiativeRows(ws string) {
 		`DELETE FROM squad_routine WHERE workspace_id = $1`,
 		`DELETE FROM autopilot_trigger WHERE autopilot_id IN (SELECT id FROM autopilot WHERE workspace_id = $1)`,
 		`DELETE FROM autopilot WHERE workspace_id = $1`,
-		`DELETE FROM office_floor WHERE workspace_id = $1`,
+		`DELETE FROM company_floor WHERE workspace_id = $1`,
 		`DELETE FROM knowledge_link WHERE workspace_id = $1`,
 		`DELETE FROM knowledge_publish_policy WHERE workspace_id = $1`,
 		`DELETE FROM knowledge_kind WHERE workspace_id = $1`,
@@ -194,7 +194,7 @@ func (fx iniWorkspace) linkStage(t *testing.T, id string, kinds ...string) {
 // putSquadOnFloor seats a squad on a floor by name, as the starter company does.
 func (fx iniWorkspace) putSquadOnFloor(t *testing.T, squadID, floor string) {
 	t.Helper()
-	floorID := dbfx.Insert(t, "office_floor", testutil.Cols{"workspace_id": fx.ID, "name": floor, "position": 0})
+	floorID := dbfx.Insert(t, "company_floor", testutil.Cols{"workspace_id": fx.ID, "name": floor, "position": 0})
 	dbfx.Exec(t, `UPDATE squad SET floor_id = $1 WHERE id = $2`, floorID, squadID)
 }
 

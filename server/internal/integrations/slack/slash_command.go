@@ -203,7 +203,7 @@ func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.Sl
 // chatCommand answers /brief or /decisions for a member. The sender resolves as
 // it does for the other commands: installation, binding, then membership. An
 // answer is the chat command's text, escaped as mrkdwn, and its links are the
-// Office links the chat command builds.
+// Company links the chat command builds.
 func (p *SlashCommandProcessor) chatCommand(ctx context.Context, cmd slack.SlashCommand, name string) string {
 	if p.actions == nil {
 		return slashInternalErrorText

@@ -261,7 +261,7 @@ func (s *KnowledgeService) TestModels(ctx context.Context, workspaceID pgtype.UU
 	}
 	probes := map[string]knowledge.ModelProbe{
 		KnowledgeModelChat:   {Input: "Reply with OK."},
-		KnowledgeModelRerank: {Input: "office holidays", Documents: []string{"Office holiday schedule.", "Travel expense policy."}},
+		KnowledgeModelRerank: {Input: "company holidays", Documents: []string{"Company holiday schedule.", "Travel expense policy."}},
 	}
 	for _, role := range []string{KnowledgeModelChat, KnowledgeModelRerank, KnowledgeModelVision} {
 		spec, ok := s.llmSpec(role)

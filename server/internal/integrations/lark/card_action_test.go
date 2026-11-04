@@ -136,12 +136,12 @@ func newCardPressFake(t *testing.T, cardContent string) (*larkFakeServer, *cardP
 func briefCardWithTwoDecisions(t *testing.T) string {
 	t.Helper()
 	card, err := briefCard(channel.Message{
-		Text: "Weekly plan.\n\nBrief: https://app.example/acme/office?brief=b1",
+		Text: "Weekly plan.\n\nBrief: https://app.example/acme/company?brief=b1",
 		Buttons: []channel.Button{
-			{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+			{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 			{Label: "Approve: Hire", CallbackData: "approve:p1"},
 			{Label: "Reject: Hire", CallbackData: "reject:p1", SameRow: true},
-			{Label: "Revise: Hire", URL: "https://app.example/acme/office?decision=p1", SameRow: true},
+			{Label: "Revise: Hire", URL: "https://app.example/acme/company?decision=p1", SameRow: true},
 			{Label: "Approve: Budget", CallbackData: "approve:p2"},
 		},
 	})
@@ -200,7 +200,7 @@ func TestCardPressRefusalRepliesAndLeavesTheCardAlone(t *testing.T) {
 	fake, sent := newCardPressFake(t, briefCardWithTwoDecisions(t))
 	actions := &fakeCardActions{result: channel.PressResult{
 		Toast: "Only an owner or admin can decide",
-		Reply: "Only an owner or admin can decide from chat. Open the app: https://app.example/acme/office",
+		Reply: "Only an owner or admin can decide from chat. Open the app: https://app.example/acme/company",
 	}}
 	h := newPressHandler(t, fake, actions)
 
@@ -209,7 +209,7 @@ func TestCardPressRefusalRepliesAndLeavesTheCardAlone(t *testing.T) {
 
 	sent.mu.Lock()
 	defer sent.mu.Unlock()
-	if len(sent.dms) != 1 || !strings.Contains(sent.dms[0]["content"], "Open the app: https://app.example/acme/office") {
+	if len(sent.dms) != 1 || !strings.Contains(sent.dms[0]["content"], "Open the app: https://app.example/acme/company") {
 		t.Fatalf("refusal = %v, want the app link to the presser", sent.dms)
 	}
 	if len(sent.patches) != 0 {

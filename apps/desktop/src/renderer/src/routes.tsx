@@ -18,7 +18,7 @@ import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { OfficePage } from "@multica/views/office";
+import { CompanyPage } from "@multica/views/company";
 import { KnowledgePage } from "@multica/views/knowledge";
 import { PipelinePage } from "@multica/views/pipeline";
 import { GovernancePage } from "@multica/views/governance";
@@ -167,9 +167,9 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issue" },
           },
           {
-            path: "office",
-            element: <OfficePage />,
-            handle: { title: "Office" },
+            path: "company",
+            element: <CompanyPage />,
+            handle: { title: "Company" },
           },
           {
             path: "projects",

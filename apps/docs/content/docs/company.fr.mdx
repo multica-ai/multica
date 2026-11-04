@@ -1,0 +1,81 @@
+---
+title: Entreprise
+description: Les étages, les squads installés sur chacun, les squads d'attache et les décisions qui vous attendent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+L'entreprise représente votre espace de travail comme une entreprise. Les squads occupent des salles, les salles se trouvent sur des étages, et chaque agent prend place à un bureau de la salle de son squad d'attache. Vous voyez ce que fait chaque agent, et les éléments qui attendent votre décision sont signalés.
+
+<Callout type="info">
+L'entreprise fonctionne dans l'application web et dans l'application de bureau. L'application mobile n'a pas d'entreprise.
+</Callout>
+
+## Étages
+
+Un étage est un groupe nommé de six salles de squad, disposées sur trois colonnes et deux rangées. Les étages apparaissent sous forme d'onglets en haut de l'entreprise.
+
+- Vous choisissez le nom des étages. Un squad créé à partir d'un modèle s'installe à l'étage de ce modèle : le modèle **Research** crée donc un étage `Research`. Les autres étages s'appellent `Floor 1`, `Floor 2`, et ainsi de suite.
+- Les propriétaires et les administrateurs ajoutent un étage avec le `+` placé après la liste des onglets, renomment un étage par un double-clic sur son onglet, et utilisent le menu de l'onglet pour le déplacer ou le supprimer.
+- Un étage ne peut être supprimé que si aucun squad n'y est installé. Déplacez ou retirez d'abord les squads qui s'y trouvent.
+- Un espace de travail peut compter jusqu'à 16 étages.
+
+## Squads sur l'étage
+
+Chaque squad occupe au plus une place : un étage et un emplacement de salle. Un squad sans place n'est pas dessiné.
+
+- Un nouveau squad prend la salle libre la plus petite de l'étage auquel il appartient. Si tous les étages sont pleins, l'entreprise crée le `Floor N` suivant.
+- Chaque salle compte dix bureaux. Le leader du squad s'assoit en premier, puis les agents dans l'ordre où ils ont rejoint le squad. Un squad de plus de dix agents affiche une pastille du type **2 autres agents**, qui ouvre le panneau du squad.
+- Les membres humains ne sont pas dessinés. Les bureaux vides restent vides, et un petit squad ne réorganise pas la salle.
+- Cliquer sur le nom d'une salle ouvre le panneau du squad : sa description, ses membres et leur état, ses automatisations, et les propositions qui attendent une décision.
+- Une salle vide propose **Créer un squad**.
+- Une salle occupée par un autre squad ne peut pas être prise. Déplacez d'abord cet autre squad.
+
+## Squads d'attache
+
+Un agent n'est dessiné qu'à un bureau d'un seul squad, son **squad d'attache**. Un agent peut appartenir à plusieurs squads, mais il n'est dessiné que dans celui d'attache.
+
+- Le premier squad rejoint par un agent devient son squad d'attache. Le premier squad du leader devient le squad d'attache du leader.
+- Vous modifiez le squad d'attache depuis le panneau de l'agent, sous **Squad d'attache**. Le vider laisse l'agent non affecté, et il n'est dessiné nulle part.
+- Retirer un agent de son squad d'attache, ou archiver ce squad, le transfère vers un autre squad actif auquel il appartient encore. S'il n'en a aucun, l'agent devient non affecté.
+
+## Le plateau des non-installés
+
+Les squads sans salle et les agents sans squad d'attache sont listés dans une bande intitulée **Pas à un étage**. Chaque pastille a un menu :
+
+- Pour un squad : **installer dans une salle** : choisissez un étage et une salle libre.
+- Pour un agent : **définir le squad d'attache**.
+
+Lorsqu'un squad n'a pas de salle, les propriétaires et les administrateurs voient une bannière avec **Tout installer**. Ce bouton place, dans l'ordre, chaque squad non installé dans les salles libres suivantes. Rien ne change avant que vous ne cliquiez. Si la limite d'étage empêche de tout placer, les squads restants restent sur le plateau et le message indique combien.
+
+## Ce que montre chaque agent
+
+Chaque agent porte une étiquette au-dessus de son bureau, choisie dans cet ordre :
+
+1. **Attend votre décision** lorsqu'il dirige un squad qui a une proposition en attente de décision.
+2. Le statut de la tâche sur laquelle il travaille. Une tâche assignée à un squad compte pour le leader de ce squad.
+3. **En attente de travail** lorsqu'il n'a aucune tâche ouverte.
+
+## Décisions et propositions
+
+Une proposition est une demande de décision adressée par un squad à vous. Elle contient un résumé, au moins un lien de preuve, une recommandation, les options examinées, le coût et le risque, et la décision demandée. Chaque proposition est portée par une tâche, donc les commentaires et l'historique fonctionnent comme pour n'importe quelle tâche.
+
+Les propositions ne vous notifient pas d'elles-mêmes. Elles attendent dans la file des décisions, et la synthèse quotidienne du Secrétaire les liste. L'exception est la proposition urgente, que le squad doit justifier. Une proposition urgente est assignée immédiatement au propriétaire de l'espace de travail.
+
+Pour les examiner, ouvrez **Décisions** depuis l'en-tête de l'entreprise ou depuis le compteur d'une pastille de salle. Chaque proposition affiche le corps rendu, le squad qui la propose et le squad vers lequel elle transfère le travail, le cas échéant.
+
+- **Approuver** marque la proposition comme approuvée. Si un squad de transfert est indiqué, l'entreprise crée un projet portant le nom de la proposition, avec une tâche de lancement assignée à ce squad. Le leader du squad est réveillé par la nouvelle tâche.
+- **Refuser** clôt la proposition et publie votre note sous forme de commentaire mentionnant le leader du squad proposant, afin que le squad la révise et la soumette à nouveau.
+- La note est facultative pour les deux actions.
+
+Seuls les propriétaires et les administrateurs peuvent décider. Les agents ne le peuvent pas, y compris le Secrétaire.
+
+<Callout type="info">
+Les agents soumettent leurs propositions avec `multica proposal create`. Chaque squad est limité à trois propositions en attente, à trois propositions créées sur une période glissante de sept jours, et à une proposition urgente sur une période glissante de sept jours. L'espace de travail compte au plus dix propositions en attente. Lorsqu'une limite s'applique, la commande indique laquelle, et le squad doit décider ses propositions en attente avant d'en soumettre d'autres.
+</Callout>
+
+## Pour aller plus loin
+
+- [Squads](/squads) : comment le leader et les membres d'un squad travaillent ensemble.
+- [Secrétaire et bulletins](/secretary) : le rapport quotidien qui liste vos décisions.
+- [Automatisations](/autopilots) : le travail récurrent que les squads exécutent selon un calendrier.

@@ -18,7 +18,7 @@ import (
 
 // The starter company (spec 3.4). Owners and admins only.
 //
-//	POST /api/office/company-template/apply   install the chosen squads; idempotent
+//	POST /api/company/company-template/apply   install the chosen squads; idempotent
 
 // companyTemplateModelMax bounds the worker model name the request may name.
 const companyTemplateModelMax = 200
@@ -128,8 +128,8 @@ func (h *Handler) ApplyCompanyTemplate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) publishCompanyTemplate(r *http.Request, workspaceID, userID string, res service.CompanyApplyResult) {
 	ctx := r.Context()
 	for _, f := range res.Floors {
-		h.publish(protocol.EventOfficeFloorCreated, workspaceID, "member", userID, map[string]any{
-			"floor": officeFloorToResponse(f),
+		h.publish(protocol.EventCompanyFloorCreated, workspaceID, "member", userID, map[string]any{
+			"floor": companyFloorToResponse(f),
 		})
 	}
 	for _, a := range res.Agents {

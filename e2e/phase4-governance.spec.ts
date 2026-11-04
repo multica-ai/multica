@@ -191,7 +191,7 @@ test("(a) a goal with three key results shows progress from a built-in, a manual
 
     // The brief's Goals section reads the same goal and names the key result that
     // holds it back: the furthest behind its expected progress, here Signups (0.2).
-    const digest = await api<any>(s, "GET", "/api/office/digest");
+    const digest = await api<any>(s, "GET", "/api/company/digest");
     const briefGoal = digest.goals.find((g: any) => g.id === goal.id);
     expect(briefGoal, "the brief lists the goal").toBeTruthy();
     expect(briefGoal.confidence).toBe("at_risk");
@@ -387,7 +387,7 @@ test("(d) pause stops routine runs and not chat; resume restores them; quiet hou
     // Paused: a routine run that starts now is admitted with its issue and task
     // queued, and the claim gate holds the task. It is not skipped. A chat message
     // still runs, and the claim does not return the held task.
-    const paused = await api<any>(s, "PUT", "/api/office/company-state", { state: "paused", stop_running: false });
+    const paused = await api<any>(s, "PUT", "/api/company/company-state", { state: "paused", stop_running: false });
     expect(paused.state).toBe("paused");
 
     await postRoutineWebhook(s, routine.autopilot_id);
@@ -404,7 +404,7 @@ test("(d) pause stops routine runs and not chat; resume restores them; quiet hou
     expect(chatTasks, "the held routine task is not claimed while paused").not.toContain(pausedTask);
 
     // Resume: the held run is no longer held, and the claim runs its task.
-    await api(s, "PUT", "/api/office/company-state", { state: "running", stop_running: false });
+    await api(s, "PUT", "/api/company/company-state", { state: "running", stop_running: false });
     const resumed = await waitForWebhookRun(s, routine.autopilot_id, (r) => Boolean(r.task_id));
     expect(resumed.held, "resume releases the hold").toBe(false);
     expect(claimedIds(await claimTasks(s, runtimeId))).toEqual([pausedTask]);
@@ -424,7 +424,7 @@ test("(d) pause stops routine runs and not chat; resume restores them; quiet hou
       const d = new Date(now.getTime() + minutesFromNow * 60_000);
       return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
     };
-    await api(s, "PUT", "/api/office/quiet-hours", {
+    await api(s, "PUT", "/api/company/quiet-hours", {
       enabled: true, start: clock(-30), end: clock(30), timezone: "UTC",
     });
     await postRoutineWebhook(s, quiet.routine.autopilot_id);
@@ -435,7 +435,7 @@ test("(d) pause stops routine runs and not chat; resume restores them; quiet hou
 
     // The window closes (here: quiet hours are switched off). The deferred run is
     // released by the scheduler's sweep, which queues its task; the claim then runs it.
-    await api(s, "PUT", "/api/office/quiet-hours", {
+    await api(s, "PUT", "/api/company/quiet-hours", {
       enabled: false, start: clock(-30), end: clock(30), timezone: "UTC",
     });
     const quietTask = await waitForWebhookRun(s, quiet.routine.autopilot_id, (r) => Boolean(r.task_id), 120_000).then(
@@ -460,7 +460,7 @@ test("(e) a monthly review cites its scorecard and files an instruction change w
   const { api: t, workspace, s, runtimeId } = await freshWorkspace("review");
   try {
     // The starter company provides the People & Performance reviewer and the Build squad.
-    await t.setupOffice();
+    await t.setupCompany();
     await t.applyStarterCompany({ runtime_id: runtimeId, squads: STARTER_SQUAD_KEYS, start: "leave_paused" });
 
     const squads = (await t.listSquads()) as any[];
@@ -538,7 +538,7 @@ test("(f) a failed initiative produces a retrospective issue assigned to a leade
   try {
     // The starter pipeline is what an initiative runs through. The steps that need
     // WeKnora fail without it, and the pipeline step still installs.
-    await t.setupOffice();
+    await t.setupCompany();
     await t.applyStarterCompany({ runtime_id: runtimeId, squads: ["executive_office"], start: "leave_paused" });
     const pipelines = await t.listPipelines();
     const pipeline = pipelines.find((p) => p.is_default) ?? pipelines[0];
@@ -603,7 +603,7 @@ test("(f) the postmortem is published and a later search for its topic returns i
   try {
     const knowledge = await api<{ state: string }>(s, "GET", "/api/knowledge");
     test.skip(knowledge.state !== "ready", `needs WeKnora: knowledge is "${knowledge.state}" in this workspace`);
-    await t.setupOffice();
+    await t.setupCompany();
     await t.applyStarterCompany({ runtime_id: runtimeId, squads: ["executive_office"], start: "leave_paused" });
     const pipelines = await t.listPipelines();
     const pipeline = pipelines.find((p) => p.is_default) ?? pipelines[0];
@@ -641,7 +641,7 @@ test("(g) with more than 30 squads, digest_mode auto reads floors, and the compa
   test.setTimeout(300_000);
   const { api: t, s, runtimeId } = await freshWorkspace("scale");
   try {
-    await t.setupOffice();
+    await t.setupCompany();
     await t.applyStarterCompany({ runtime_id: runtimeId, squads: STARTER_SQUAD_KEYS, start: "leave_paused" });
 
     // Seventeen more squads on top of the fourteen starter squads: 31 in all.
@@ -651,13 +651,13 @@ test("(g) with more than 30 squads, digest_mode auto reads floors, and the compa
     }
 
     // Above thirty squads, auto reads the floors and not the squads.
-    const mode = await api<any>(s, "GET", "/api/office/digest-mode");
+    const mode = await api<any>(s, "GET", "/api/company/digest-mode");
     expect(mode.setting).toBe("auto");
     expect(mode.active_squads).toBe(31);
     expect(mode.resolved).toBe("floors");
 
     // The company digest is by floor: every squad is on a floor, and the floors are the starter's six.
-    const before = await api<any>(s, "GET", "/api/office/digest");
+    const before = await api<any>(s, "GET", "/api/company/digest");
     expect(before.mode).toBe("floors");
     expect(before.floors.map((f: any) => f.name).sort()).toEqual(["Build", "Executive", "Governance", "Launch", "Product", "Research"]);
     expect(before.floors.reduce((sum: number, f: any) => sum + f.squad_count, 0)).toBe(31);
@@ -688,7 +688,7 @@ test("(g) with more than 30 squads, digest_mode auto reads floors, and the compa
 
     // The company digest, which the Secretary's company brief reads, now carries each
     // floor's brief with its body.
-    const after = await api<any>(s, "GET", "/api/office/digest");
+    const after = await api<any>(s, "GET", "/api/company/digest");
     for (const floor of after.floors as any[]) {
       expect(floor.brief, `floor ${floor.name} carries its brief`).toBeTruthy();
       expect(floor.brief.title).toBe(`${floor.name} floor`);
@@ -696,7 +696,7 @@ test("(g) with more than 30 squads, digest_mode auto reads floors, and the compa
     }
 
     // A floor-scoped digest is the floor's own view, for the floor chief's brief.
-    const floorView = await api<any>(s, "GET", `/api/office/digest?floor_id=${after.floors[0].id}`);
+    const floorView = await api<any>(s, "GET", `/api/company/digest?floor_id=${after.floors[0].id}`);
     expect(floorView.scope.type).toBe("floor");
     expect(floorView.scope.floor_id).toBe(after.floors[0].id);
 
@@ -714,7 +714,7 @@ test("(g) with more than 30 squads, digest_mode auto reads floors, and the compa
         "## Blockers and risks",
         "None across the company.",
         "## FYI",
-        "The floor briefs are linked from the Office.",
+        "The floor briefs are linked from the Company.",
       ].join("\n"),
     });
     expect(company.status, await company.clone().text()).toBe(201);

@@ -120,7 +120,7 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
-	// HomeSquadID is the squad whose office room this agent is drawn in. Null
+	// HomeSquadID is the squad whose company room this agent is drawn in. Null
 	// when the agent is unassigned. Always a live squad the agent belongs to.
 	HomeSquadID *string `json:"home_squad_id"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
@@ -1824,7 +1824,7 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
-	// HomeSquadID sets the squad this agent is drawn in on the office. It is a
+	// HomeSquadID sets the squad this agent is drawn in on the company. It is a
 	// tri-state like thinking_level: omitted leaves it alone, null clears it, a
 	// squad id must name a live squad of the workspace the agent belongs to.
 	HomeSquadID *string `json:"home_squad_id"`

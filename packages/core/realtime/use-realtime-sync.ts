@@ -57,8 +57,8 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
-import { officeKeys } from "../office/queries";
-import { proposalKeys } from "../office/proposals";
+import { companyKeys } from "../company/queries";
+import { proposalKeys } from "../company/proposals";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showWebNotification,
@@ -661,7 +661,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
-    qc.invalidateQueries({ queryKey: officeKeys.floors(wsId) });
+    qc.invalidateQueries({ queryKey: companyKeys.floors(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
@@ -868,9 +868,9 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
         }
       },
-      office_floor: () => {
+      company_floor: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: officeKeys.floors(wsId) });
+        if (wsId) qc.invalidateQueries({ queryKey: companyKeys.floors(wsId) });
       },
       // Created, resubmitted, decided and expired proposals. A decision moves the
       // backing issue and may start a project, so refresh those as the decider's own

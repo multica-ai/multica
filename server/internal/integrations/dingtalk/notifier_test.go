@@ -151,10 +151,10 @@ func TestNotifierSendsActionCardWithLinkButtons(t *testing.T) {
 	msg := channel.Message{
 		Text: "Brief ready\n1 decision needs you:",
 		Buttons: []channel.Button{
-			{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+			{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 			// A callback button has no place on DingTalk: it becomes a link to its
 			// LinkURL, and is dropped when it has none.
-			{Label: "Approve: Hire a designer", CallbackData: "signed-token", LinkURL: "https://app.example/acme/office?decision=p1"},
+			{Label: "Approve: Hire a designer", CallbackData: "signed-token", LinkURL: "https://app.example/acme/company?decision=p1"},
 			{Label: "Approve: no link", CallbackData: "signed-token-2"},
 		},
 	}
@@ -172,10 +172,10 @@ func TestNotifierSendsActionCardWithLinkButtons(t *testing.T) {
 	if len(param.Btns) != 2 {
 		t.Fatalf("buttons = %+v, want the brief link and the decision link", param.Btns)
 	}
-	if param.Btns[0].ActionURL != "https://app.example/acme/office?brief=b1" {
+	if param.Btns[0].ActionURL != "https://app.example/acme/company?brief=b1" {
 		t.Fatalf("first button = %+v, want the brief link", param.Btns[0])
 	}
-	if param.Btns[1].ActionURL != "https://app.example/acme/office?decision=p1" {
+	if param.Btns[1].ActionURL != "https://app.example/acme/company?decision=p1" {
 		t.Fatalf("second button = %+v, want the callback button's link", param.Btns[1])
 	}
 	if strings.Contains(req.body["msgParam"].(string), "signed-token") {

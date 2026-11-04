@@ -73,9 +73,9 @@ func (e digestEnv) digestPendingProposalAt(t *testing.T, squadID, ago string) {
 // exact keys the TypeScript schema depends on.
 func (e digestEnv) digestRaw(t *testing.T) map[string]any {
 	t.Helper()
-	req := newRequest("GET", "/api/office/digest", nil)
+	req := newRequest("GET", "/api/company/digest", nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-	return testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK).Map()
+	return testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK).Map()
 }
 
 func digestJSONKeys(m map[string]any) []string {

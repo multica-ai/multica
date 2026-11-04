@@ -80,6 +80,7 @@
   },
   "detail": {
     "assign_work": "作業を割り当て",
+    "add_to_company": "会社に追加",
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "not_found": "スクワッドが見つかりません",

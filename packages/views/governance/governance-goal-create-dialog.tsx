@@ -11,7 +11,7 @@ import {
   type KeyResultInput,
 } from "@multica/core/governance";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { officeFloorsOptions } from "@multica/core/office";
+import { companyFloorsOptions } from "@multica/core/company";
 import { initiativeListOptions } from "@multica/core/pipeline";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
@@ -73,7 +73,7 @@ function CreateGoalForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useT("governance");
   const wsId = useWorkspaceId();
   const create = useCreateGoal(wsId);
-  const floors = useQuery(officeFloorsOptions(wsId));
+  const floors = useQuery(companyFloorsOptions(wsId));
   const initiatives = useQuery(initiativeListOptions(wsId));
   const squads = useQuery(squadListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));

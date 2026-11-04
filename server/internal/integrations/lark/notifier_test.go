@@ -130,8 +130,8 @@ func notifierBinding(t *testing.T) channel.Binding {
 // link, and the buttons renderBriefPush lays out (Approve and Reject on one row,
 // Snooze and Revise on the next).
 func briefMessageWithDecision() channel.Message {
-	const briefURL = "https://app.example/acme/office?brief=b1"
-	const decisionURL = "https://app.example/acme/office?decision=p1"
+	const briefURL = "https://app.example/acme/company?brief=b1"
+	const decisionURL = "https://app.example/acme/company?decision=p1"
 	return channel.Message{
 		Text: "Weekly plan is ready.\n\n1 decision needs you:\n- Hire a designer\n\nBrief: " + briefURL,
 		Buttons: []channel.Button{
@@ -185,7 +185,7 @@ func TestNotifierSendsPlainTextWhenThereAreNoButtons(t *testing.T) {
 	fake := newNotifierFake(t, http.StatusOK, nil, notifierSendOKBody)
 	n, _ := newNotifierUnderTest(t, fake, notifierInstallationRow(t, "active"))
 
-	err := n.Send(context.Background(), notifierBinding(t), channel.Message{Text: "Brief ready. Brief: https://app.example/acme/office?brief=b1"})
+	err := n.Send(context.Background(), notifierBinding(t), channel.Message{Text: "Brief ready. Brief: https://app.example/acme/company?brief=b1"})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestNotifierSendsACardWithDecisionButtons(t *testing.T) {
 		t.Fatalf("callback buttons = %d, want 3 (approve, reject, snooze)", callbacks)
 	}
 	revise := behaviorOf(t, rows[2][1])
-	if revise["type"] != "open_url" || revise["default_url"] != "https://app.example/acme/office?decision=p1" {
+	if revise["type"] != "open_url" || revise["default_url"] != "https://app.example/acme/company?decision=p1" {
 		t.Fatalf("revise behavior = %v, want the decision link", revise)
 	}
 }
