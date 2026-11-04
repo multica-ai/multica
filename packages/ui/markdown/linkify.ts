@@ -1,4 +1,6 @@
 import LinkifyIt from 'linkify-it'
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import type { Nodes } from 'mdast'
 
 /**
  * Linkify - URL and file path detection for markdown preprocessing
@@ -74,140 +76,33 @@ export function shouldAutoLink(value: string): boolean {
 }
 
 /**
- * A block container written before a fence on its opening line. `indent` is
- * the list item's content column, measured from where its parent's content
- * starts.
+ * Find block-code ranges using the same CommonMark parser as the read-only
+ * renderer. Container membership depends on preceding lines and tab columns,
+ * not just the prefix on a fence's opening line. Include indented code too:
+ * its literal backticks must not be mistaken for standalone fences.
  */
-type FenceContainer = { kind: 'quote' } | { kind: 'list'; indent: number }
+export function findBlockCodeRanges(text: string): CodeRange[] {
+  // Plain paragraphs and inline code need no block parse.
+  if (!/`{3}|~{3}| {4}|\t/.test(text)) return []
 
-interface FenceRun {
-  marker: string
-  length: number
-  suffix: string
-}
-
-interface FenceLine extends FenceRun {
-  containers: FenceContainer[]
-}
-
-function isSpace(char: string | undefined): boolean {
-  return char === ' ' || char === '\t'
-}
-
-function isDigit(char: string | undefined): boolean {
-  return char !== undefined && char >= '0' && char <= '9'
-}
-
-function parseFenceRun(line: string, cursor: number): FenceRun | undefined {
-  while (isSpace(line[cursor])) cursor += 1
-  const marker = line[cursor]
-  if (marker !== '`' && marker !== '~') return undefined
-  const start = cursor
-  while (line[cursor] === marker) cursor += 1
-  const length = cursor - start
-  if (length < 3) return undefined
-  return { marker, length, suffix: line.slice(cursor) }
-}
-
-function parseFenceLine(line: string): FenceLine | undefined {
-  const containers: FenceContainer[] = []
-  let cursor = 0
-  let contentStart = 0
-
-  // Consume each space and container marker once; ambiguous whitespace must
-  // never be redistributed between nested quantifiers on a non-fence line.
-  while (cursor < line.length) {
-    while (isSpace(line[cursor])) cursor += 1
-    const char = line[cursor]
-    if (char === '>') {
-      cursor += 1
-      if (isSpace(line[cursor])) cursor += 1
-      containers.push({ kind: 'quote' })
-    } else if ((char === '-' || char === '+' || char === '*') && isSpace(line[cursor + 1])) {
-      cursor += 1
-      while (isSpace(line[cursor])) cursor += 1
-      containers.push({ kind: 'list', indent: cursor - contentStart })
-    } else if (isDigit(char)) {
-      while (isDigit(line[cursor])) cursor += 1
-      if ((line[cursor] !== '.' && line[cursor] !== ')') || !isSpace(line[cursor + 1])) {
-        return undefined
-      }
-      cursor += 1
-      while (isSpace(line[cursor])) cursor += 1
-      containers.push({ kind: 'list', indent: cursor - contentStart })
-    } else {
-      break
-    }
-    contentStart = cursor
-  }
-
-  const run = parseFenceRun(line, cursor)
-  return run && { ...run, containers }
-}
-
-/**
- * Consume the prefixes of the containers that hold an open fence. Returns the
- * offset where the fence content starts, or -1 when this line ends one of the
- * containers. Fenced code is never a lazy continuation, so a quote ends at the
- * first line without its `>` and a list item at the first non-blank line that
- * does not reach its content column.
- */
-function consumeContainers(line: string, containers: FenceContainer[]): number {
-  let cursor = 0
-  for (const container of containers) {
-    if (container.kind === 'quote') {
-      while (isSpace(line[cursor])) cursor += 1
-      if (line[cursor] !== '>') return -1
-      cursor += 1
-      if (isSpace(line[cursor])) cursor += 1
-    } else {
-      const start = cursor
-      while (cursor - start < container.indent && isSpace(line[cursor])) cursor += 1
-      if (cursor - start < container.indent && line.slice(cursor).trim() !== '') return -1
-    }
-  }
-  return cursor
-}
-
-/** Find complete fenced blocks, retaining the opening marker and its length. */
-export function findFencedCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
-  let opening: ({ start: number } & FenceLine) | undefined
-  let offset = 0
-
-  for (const line of text.split('\n')) {
-    if (opening) {
-      const content = consumeContainers(line, opening.containers)
-      if (content === -1) {
-        // The container closed the fence; this line may open another one.
-        ranges.push({ start: opening.start, end: offset - 1 })
-        opening = undefined
-      } else {
-        const fence = parseFenceRun(line, content)
-        if (
-          fence &&
-          fence.marker === opening.marker &&
-          fence.length >= opening.length &&
-          fence.suffix.trim() === ''
-        ) {
-          ranges.push({ start: opening.start, end: offset + line.length })
-          opening = undefined
-        }
-        offset += line.length + 1
-        continue
+  const pending: Nodes[] = [fromMarkdown(text)]
+  while (pending.length > 0) {
+    const node = pending.pop()!
+    if (node.type === 'code') {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) {
+        // Include list/quote prefixes so chunking keeps the opening line.
+        ranges.push({ start: text.lastIndexOf('\n', start - 1) + 1, end })
+      }
+    } else if ('children' in node) {
+      // Reverse push preserves source order without recursion on nested lists.
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        pending.push(node.children[i]!)
       }
     }
-
-    const fence = parseFenceLine(line)
-    // Backtick fence info strings cannot themselves contain backticks.
-    if (fence && (fence.marker === '~' || !fence.suffix.includes('`'))) {
-      opening = { start: offset, ...fence }
-    }
-    offset += line.length + 1
   }
-
-  // CommonMark keeps an unclosed fence literal through the end of its container.
-  if (opening) ranges.push({ start: opening.start, end: text.length })
   return ranges
 }
 
@@ -216,8 +111,8 @@ export function findFencedCodeRanges(text: string): CodeRange[] {
  * These ranges should be excluded from link detection
  */
 export function findCodeRanges(text: string): CodeRange[] {
-  const fencedRanges = findFencedCodeRanges(text)
-  const ranges = [...fencedRanges]
+  const blockRanges = findBlockCodeRanges(text)
+  const ranges = [...blockRanges]
   let match
 
   // Find display math blocks ($$...$$)
@@ -248,10 +143,10 @@ export function findCodeRanges(text: string): CodeRange[] {
   while ((match = inlineRegex.exec(text)) !== null) {
     const pos = match.index
     const end = pos + match[0].length
-    // Never let a candidate consume an opener after a fenced block's closer.
-    const crossedFence = fencedRanges.find((r) => pos < r.end && end > r.start)
-    if (crossedFence) {
-      inlineRegex.lastIndex = crossedFence.end
+    // An inline span cannot cross a block-code boundary.
+    const crossedBlock = blockRanges.find((r) => pos < r.end && end > r.start)
+    if (crossedBlock) {
+      inlineRegex.lastIndex = crossedBlock.end
       continue
     }
     const insideOther = ranges.find((r) => pos >= r.start && pos < r.end)

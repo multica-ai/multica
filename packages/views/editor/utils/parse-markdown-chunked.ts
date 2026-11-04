@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
-import { findFencedCodeRanges } from "@multica/ui/markdown/linkify";
+import { findBlockCodeRanges } from "@multica/ui/markdown/linkify";
 
 /**
  * Above this source size, ContentEditor parses markdown in chunks instead of in
@@ -42,7 +42,7 @@ export function parseMarkdownChunked(
   const chunks: string[] = [];
   let current: string[] = [];
   let currentLen = 0;
-  const codeRanges = findFencedCodeRanges(markdown);
+  const codeRanges = findBlockCodeRanges(markdown);
   let rangeIndex = 0;
   let offset = 0;
 

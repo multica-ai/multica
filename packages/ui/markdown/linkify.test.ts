@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { performance } from 'node:perf_hooks'
-import { findCodeRanges, findFencedCodeRanges, preprocessLinks } from './linkify'
+import { findCodeRanges, findBlockCodeRanges, preprocessLinks } from './linkify'
 
 describe('fenced code boundaries used by preprocessing and chunked loading', () => {
   it.each([
@@ -17,7 +17,7 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
     const closing = opening.match(/^[`~]+/)![0]
     const block = `${opening}\n${inner}\nhttps://example.com\n${closing}`
     const source = `Intro\n\n${block}\n\nhttps://outside.example`
-    expect(findFencedCodeRanges(source)).toEqual([
+    expect(findBlockCodeRanges(source)).toEqual([
       { start: 7, end: 7 + block.length },
     ])
     expect(preprocessLinks(source)).toBe(
@@ -27,7 +27,7 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
 
   it('protects unclosed fences through the end of the input', () => {
     const source = 'Intro\n\n````\n```\nhttps://example.com'
-    expect(findFencedCodeRanges(source)).toEqual([{ start: 7, end: source.length }])
+    expect(findBlockCodeRanges(source)).toEqual([{ start: 7, end: source.length }])
     expect(preprocessLinks(source)).toBe(source)
   })
 
@@ -39,7 +39,7 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
     ['a list nested in a quote', '> - ```\n>   https://inside.example', '\n> '],
   ])('ends an unclosed fence with %s', (_, code, separator) => {
     const source = `${code}${separator}https://outside.example`
-    const [range, ...rest] = findFencedCodeRanges(source)
+    const [range, ...rest] = findBlockCodeRanges(source)
     expect(rest).toEqual([])
     expect(range!.start).toBe(0)
     expect(range!.end).toBeGreaterThanOrEqual(code.length)
@@ -51,12 +51,12 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
 
   it('keeps blank lines inside a list item fence', () => {
     const source = '- ```\n  a\n\n  https://example.com\n  ```'
-    expect(findFencedCodeRanges(source)).toEqual([{ start: 0, end: source.length }])
+    expect(findBlockCodeRanges(source)).toEqual([{ start: 0, end: source.length }])
   })
 
   it('lets a line that ends the container open a new fence', () => {
     const source = '> ```\n> a\n```\nhttps://example.com'
-    expect(findFencedCodeRanges(source)).toEqual([
+    expect(findBlockCodeRanges(source)).toEqual([
       { start: 0, end: 9 },
       { start: 10, end: source.length },
     ])
@@ -70,6 +70,39 @@ describe('fenced code boundaries used by preprocessing and chunked loading', () 
   it('protects a list code block with indented continuation lines', () => {
     const source = '- ````\n  ```\n  https://example.com\n  ````'
     expect(preprocessLinks(source)).toBe(source)
+  })
+
+  it.each([
+    ['- ', '\t'],
+    ['-\t', '\t'],
+    ['1. ', '\t'],
+    ['12) ', '\t'],
+    ['> - ', '>\t'],
+    ['- > ', '\t> '],
+  ])('keeps tab-indented code literal in %j', (prefix, continuation) => {
+    const source = `${prefix}\`\`\`\n${continuation}https://inside.example\n${continuation}\`\`\``
+    expect(preprocessLinks(source)).toBe(source)
+  })
+
+  it.each([
+    ['- item', '  '],
+    ['12) item', '    '],
+    ['> - item\n>', '>   '],
+    ['- parent\n  - child', '    '],
+    ['- item\nlazy continuation', '  '],
+  ])('ends a fence opened after %j at its container boundary', (item, prefix) => {
+    const code = `${item}\n\n${prefix}\`\`\`\n${prefix}https://inside.example`
+    const source = `${code}\n\nhttps://outside.example`
+    expect(preprocessLinks(source)).toBe(
+      `${code}\n\n[https://outside.example](https://outside.example)`,
+    )
+  })
+
+  it('keeps an indented code block containing fences literal', () => {
+    const source = '    ```\n    https://inside.example\n    ```\n\nhttps://outside.example'
+    expect(preprocessLinks(source)).toBe(
+      '    ```\n    https://inside.example\n    ```\n\n[https://outside.example](https://outside.example)',
+    )
   })
 
   it.each(['`', '``', '```'])('keeps matching %s inline spans protected', (ticks) => {
