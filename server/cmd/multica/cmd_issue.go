@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -3169,6 +3170,19 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.GetJSON(ctx, path, &result); err != nil {
+		var httpErr *cli.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusServiceUnavailable {
+			// Old servers have no structured code for this timeout. Match only
+			// their fixed JSON response; arbitrary 503 prose can contain secrets.
+			var body bytes.Buffer
+			if json.Compact(&body, []byte(httpErr.Body)) == nil && body.String() == `{"error":"search timed out; please refine your query or try again"}` {
+				msg := "Issue search timed out on the server. Refine your query before searching again."
+				if cli.DetectLanguage() == cli.LangZH {
+					msg = "服务端 issue 搜索超时。请缩小查询范围后再搜索。"
+				}
+				err = cli.WithUserMessage(msg, err)
+			}
+		}
 		return fmt.Errorf("search issues: %w", err)
 	}
 

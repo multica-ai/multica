@@ -1105,6 +1105,11 @@ layer.) The underlying detail is still available on demand (see `--debug`).
   generic "check your values / run with --help" hint.
 - **No leaked internals by default.** Raw URLs, status lines, JSON bodies, and
   the internal verb chain are hidden unless you ask for them.
+- **Issue search timeouts have specific guidance.** When `issue search` receives
+  the server's known HTTP 503 search-timeout response, it suggests refining the
+  query before searching again. Other 503 responses keep the generic service
+  error message. The exit code remains `1`; `MULTICA_HTTP_TIMEOUT` does not
+  change the server's search limit.
 
 ### Language
 
