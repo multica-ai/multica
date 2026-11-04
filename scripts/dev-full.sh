@@ -405,15 +405,15 @@ multica_logged_in() {
   [ -f "$MULTICA_PROFILE_CONFIG" ] && grep -q -E '"token"[[:space:]]*:[[:space:]]*"[^"]' "$MULTICA_PROFILE_CONFIG"
 }
 
-# The local profile records the API address. Setup is non-interactive and only runs
-# when the profile does not exist yet, so an existing login is never overwritten.
+# The local profile records the two addresses this stack answers on. `config set` writes
+# them without signing in. `setup self-host` is not used: it opens a browser for a login.
 setup_multica_profile() {
-  if [ -f "$MULTICA_PROFILE_CONFIG" ]; then
-    return 0
+  if ! make cli ARGS="--profile local config set server_url http://localhost:${PORT}" >/dev/null; then
+    echo "! Could not set server_url in the local CLI profile. Run make cli ARGS=\"--profile local config set server_url http://localhost:${PORT}\" by hand." >&2
   fi
-  info "Creating the local CLI profile (make cli ARGS=\"--profile local setup self-host\")"
-  make cli ARGS="--profile local setup self-host --port ${PORT} --frontend-port ${FRONTEND_PORT}" \
-    || echo "! Profile setup failed. Run the command above by hand, then make dev-full again." >&2
+  if ! make cli ARGS="--profile local config set app_url http://localhost:${FRONTEND_PORT}" >/dev/null; then
+    echo "! Could not set app_url in the local CLI profile. Run make cli ARGS=\"--profile local config set app_url http://localhost:${FRONTEND_PORT}\" by hand." >&2
+  fi
 }
 
 start_daemon() {

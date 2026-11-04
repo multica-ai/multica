@@ -206,17 +206,18 @@ The daemon runs the agents on this machine and registers the runtimes, Hermes in
 with Multica. The `make daemon` target uses the `local` profile, so the login must use the
 same profile.
 
-`make dev-full` does the first setup step itself when the profile does not exist, and starts
-the daemon once the profile has a login. Until then it prints the steps. By hand:
+`make dev-full` points the local profile at this stack on every run, and starts the daemon once
+the profile has a login. Until then it prints the steps. By hand:
 
 ```bash
-make cli ARGS="--profile local setup self-host"   # API on 8080, web on 3000
+make cli ARGS="--profile local config set server_url http://localhost:8080"   # dev-full runs these two
+make cli ARGS="--profile local config set app_url http://localhost:3000"
 make cli ARGS="--profile local login"             # opens the browser to sign in
 make daemon                                       # starts or restarts the local profile's daemon
 make cli ARGS="--profile local daemon status"     # confirms it is running
 ```
 
-Run the first two once, after the account and the first workspace exist, because the login
+Run the login once, after the account and the first workspace exist, because the login
 registers the workspaces it can see. `make daemon` is safe to run again. Stop it with
 `make cli ARGS="--profile local daemon stop"`.
 
