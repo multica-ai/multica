@@ -1026,6 +1026,47 @@ index 216df558..98f0af53 100644
  /// A floor slide's frame: its two floors composed.
  #[derive(Debug, Clone, Copy)]
  pub struct SlidePicture<'a> {
+diff --git a/crates/pixtuoid-scene/src/outside.rs b/crates/pixtuoid-scene/src/outside.rs
+index 7f00207c..cfc8b12b 100644
+--- a/crates/pixtuoid-scene/src/outside.rs
++++ b/crates/pixtuoid-scene/src/outside.rs
+@@ -27,7 +27,7 @@ pub(crate) struct Cell {
+ 
+ /// One window on a grid `d` cells to the layout unit, and what its glass
+ /// shows: the only surface a sky effect draws on.
+-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
++#[derive(Debug, Clone, PartialEq, Eq)]
+ pub(crate) struct WindowView {
+     bay: WindowBay,
+     /// The window's top row, in units.
+@@ -41,6 +41,27 @@ pub(crate) struct WindowView {
+     px: Vec<Option<Rgb>>,
+ }
+ 
++// Hashed by hand: the pixel grid is the bulk of a window, and hashing each cell's
++// `Option<Rgb>` as a separate value costs several hasher calls a cell. One word per
++// cell hashes the same content, and a window is fingerprinted every frame.
++impl std::hash::Hash for WindowView {
++    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
++        self.bay.hash(state);
++        self.top.hash(state);
++        self.h.hash(state);
++        self.glass_box.hash(state);
++        self.d.hash(state);
++        state.write_usize(self.px.len());
++        for cell in &self.px {
++            let word = match cell {
++                None => 0u32,
++                Some(c) => 1 << 24 | u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b),
++            };
++            state.write_u32(word);
++        }
++    }
++}
++
+ impl WindowView {
+     /// `bay`'s window over `rows`, on a grid `d` cells to the unit, each glass
+     /// cell in `base`.
 diff --git a/crates/pixtuoid-scene/src/sim/mod.rs b/crates/pixtuoid-scene/src/sim/mod.rs
 index 461e4772..c1ca6b0b 100644
 --- a/crates/pixtuoid-scene/src/sim/mod.rs
