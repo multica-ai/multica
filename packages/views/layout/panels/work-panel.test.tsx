@@ -343,9 +343,17 @@ describe("WorkPanel issue highlight", () => {
   });
 });
 
-describe("WorkPanel Unread row after its last issue is read", () => {
+describe("WorkPanel starred Unread view after its last issue is read", () => {
   const unreadRow = (scope: Pick<typeof screen, "queryByRole"> = screen) =>
     scope.queryByRole("link", { name: /^Unread/ });
+  const defaultItems = actions.sidebar.items;
+
+  beforeEach(() => {
+    actions.sidebar.items = [...defaultItems, { id: "builtin:unread", kind: "builtin", key: "unread" }];
+    return () => {
+      actions.sidebar.items = defaultItems;
+    };
+  });
 
   async function openAndReadLastUnread() {
     useSidebarTreeStore.setState({ expanded: ["view:unread"] });
@@ -380,11 +388,12 @@ describe("WorkPanel Unread row after its last issue is read", () => {
     expect(issueRow()).toHaveAttribute("aria-current", "page");
   });
 
-  it("drops the row once the issue is no longer the page", async () => {
+  it("keeps the row but drops the read issue once it is no longer the page", async () => {
     await openAndReadLastUnread();
     fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
     await screen.findByRole("link", { name: "All issues" });
-    expect(unreadRow()).toBeNull();
+    expect(unreadRow()).not.toBeNull();
+    await waitFor(() => expect(screen.queryByRole("link", { name: ISSUE.title })).toBeNull());
   });
 });
