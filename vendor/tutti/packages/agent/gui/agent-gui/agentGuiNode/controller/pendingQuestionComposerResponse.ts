@@ -58,13 +58,12 @@ export function resolvePendingQuestionComposerResponse(input: {
   pendingInteractions: readonly AgentActivityInteraction[];
   submitOptions?: Pick<
     AgentComposerSubmitOptions,
-    "capabilityRefs" | "requiredSettingsPatch" | "tuttiMode"
+    "capabilityRefs" | "requiredSettingsPatch"
   >;
 }): AgentInteractionResponseInput | null {
   if (
     input.submitOptions?.requiredSettingsPatch !== undefined ||
     Boolean(input.submitOptions?.capabilityRefs?.length) ||
-    input.submitOptions?.tuttiMode?.active === true ||
     input.content.length === 0 ||
     input.content.some((block) => block.type !== "text")
   ) {

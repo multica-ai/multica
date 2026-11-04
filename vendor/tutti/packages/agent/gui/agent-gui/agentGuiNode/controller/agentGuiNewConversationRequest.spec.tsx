@@ -1,3 +1,4 @@
+import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
   createAgentSessionEngine,
@@ -300,7 +301,9 @@ function renderNewConversationScenario(input: {
     current: {} as Record<string, AgentComposerDraft>
   };
   const submittedDraftSnapshotsRef = { current: {} };
-  const agentActivityRuntime = {} as AgentGUIRuntime;
+  const agentActivityRuntime = {
+    prompts: createTestPromptOperations()
+  } as unknown as AgentGUIRuntime;
   const setDraftByScopeKey = vi.fn();
   const persistActiveConversation = vi.fn();
   const conversationsRef = {
@@ -424,7 +427,6 @@ function renderNewConversationScenario(input: {
       setIsComposerHome: vi.fn(),
       setIsLoadingMessages: vi.fn(),
       submittedDraftSnapshotsRef,
-      tuttiModeDraftKey: "node-default:codex:local:codex",
       userProjectsRef: { current: input.userProjects },
       workspaceId: "workspace-1"
     });
@@ -440,25 +442,16 @@ function renderNewConversationScenario(input: {
       dataRef,
       draftByScopeKeyRef,
       executePromptRef: { current: vi.fn() },
-      goalControlSupported: true,
       isComposerHomeRef,
       isCurrentConversation: () => false,
       isRespondingToInteraction: false,
       isSessionMarkedNonResumable: () => false,
       persistActiveConversation: vi.fn(),
-      planActionsRef: {
-        current: {
-          feedback: vi.fn(),
-          implement: vi.fn(),
-          skip: vi.fn()
-        }
-      },
       promptImagesSupported: true,
       sessionEngine,
       setActiveConversationId: vi.fn(),
       setDetailError: vi.fn(),
       setDraftByScopeKey,
-      setGoalClearNoticeSequence: vi.fn(),
       setIntent: vi.fn(),
       startConversation,
       submitPromptRef: { current: vi.fn() },

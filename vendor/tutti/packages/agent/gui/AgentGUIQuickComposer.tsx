@@ -245,7 +245,6 @@ function AgentGUIQuickComposerInner({
         // connector control could only render as a dead trigger. Hiding it
         // also keeps the footer controls on one alignment baseline.
         capabilityMenuState={{ connectors: { enabled: false } }}
-        canGoalControl={false}
         canUploadAttachment={Boolean(
           selectedTargetCapabilities?.imageInput ||
           selectedTargetCapabilities?.workspaceReferences

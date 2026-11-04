@@ -280,3 +280,163 @@ func TestQueueResumeRetriesAMessageTheProviderNeverReceived(t *testing.T) {
 		t.Fatalf("re-enqueued a handled message: %+v, %v", again, err)
 	}
 }
+
+// queueUpdates returns the payloads of the conversation's queue.updated events.
+func queueUpdates(t *testing.T, f *serviceFixture, conversationID string) []map[string]any {
+	t.Helper()
+	rows, err := f.svc.Store().EventsAfter(context.Background(), conversationID, 0, 1<<40, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updates []map[string]any
+	for _, row := range rows {
+		if row.Type != "queue.updated" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(row.Payload), &payload); err != nil {
+			t.Fatal(err)
+		}
+		updates = append(updates, payload)
+	}
+	return updates
+}
+
+func TestQueueUpdatesSayWhatChangedAndWhy(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), false, TurnOrigin{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv-1", "remove", "a"); err != nil {
+		t.Fatal(err)
+	}
+	f.adapters[0].emit(t, turnDone)
+	eventually(t, "the remaining item", func() bool { return fmt.Sprint(f.sends(t)) == "[first b]" })
+	eventually(t, "its dispatch recorded", func() bool { return len(queueUpdates(t, f, "conv-1")) == 4 })
+
+	var got []string
+	for _, update := range queueUpdates(t, f, "conv-1") {
+		got = append(got, fmt.Sprint(update["reason"], update["request_ids"]))
+	}
+	want := "[enqueued[a] enqueued[a b] removed[b] dispatched[]]"
+	if fmt.Sprint(got) != want {
+		t.Fatalf("updates = %v, want %s", got, want)
+	}
+}
+
+func TestQueueDoesNotRestoreARemovedMessage(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false, TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv-1", "remove", "q1"); err != nil {
+		t.Fatal(err)
+	}
+	// A client retrying an enqueue whose answer it lost must not bring it back.
+	view, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "second"), false, TurnOrigin{})
+	if err != nil || len(view.Items) != 0 {
+		t.Fatalf("retried enqueue = %+v, %v", view, err)
+	}
+}
+
+func TestQueueRetryIgnoresHowTheMessageIsDisplayed(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	shown := func(at int) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"requestId":"q1","content":"second","display":{"id":"q1","clientSubmitId":"q1","createdAtUnixMs":%d}}`, at))
+	}
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", shown(1), false, TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	// A reload rebuilds the display with a new time; the message is the same.
+	view, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", shown(2), false, TurnOrigin{})
+	if err != nil || len(view.Items) != 1 {
+		t.Fatalf("retried enqueue = %+v, %v", view, err)
+	}
+}
+
+func TestSendNowOnAPausedQueueLeavesTheRestPaused(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), true, TurnOrigin{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv-1", "send_now", "b"); err != nil {
+		t.Fatal(err)
+	}
+	f.adapters[0].emit(t, `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["interrupted"]}`)
+	eventually(t, "the chosen item", func() bool { return fmt.Sprint(f.sends(t)) == "[first b]" })
+	eventually(t, "the chosen item leaving the queue", func() bool {
+		view, _ := f.svc.Queue(ctx, f.scopeID, "conv-1")
+		return len(view.Items) == 1
+	})
+	view, _ := f.svc.Queue(ctx, f.scopeID, "conv-1")
+	if !view.Paused {
+		t.Fatal("resuming one message resumed the whole queue")
+	}
+	f.adapters[0].emit(t, turnDone)
+	time.Sleep(50 * time.Millisecond)
+	if got := f.sends(t); fmt.Sprint(got) != "[first b]" {
+		t.Fatalf("a paused queue sent %v", got)
+	}
+}
+
+func TestPromptStatuses(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "sent", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"waiting", "removed"} {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), false, TurnOrigin{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv-1", "remove", "removed"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.PromptStatuses(ctx, f.scopeID, "conv-1", []string{"sent", "waiting", "removed", "never"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"sent": "delivered", "waiting": "queued", "removed": "removed", "never": "none"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("statuses = %v, want %v", got, want)
+	}
+	if _, err := f.svc.PromptStatuses(ctx, f.scopeID, "conv-1", make([]string, maxQueueItems+1)); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("too many ids = %v", err)
+	}
+}

@@ -291,7 +291,6 @@ export const EMPTY_PROMPT_TIPS: readonly AgentComposerPromptTip[] = [];
 export const EMPTY_PROVIDER_SKILLS: readonly AgentGUIProviderSkillOption[] = [];
 export const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
-export const GOAL_MODE_SLASH_COMMAND = "/goal";
 export const MENTION_PALETTE_DISMISS_INTERACTION_SELECTOR = [
   "[data-node-drag-handle]",
   '[data-workbench-drag-handle="true"]',

@@ -1,7 +1,7 @@
 import { action, makeObservable, observable } from "mobx";
 import "../mobx-config";
 import type { LocalV2Event, LocalV2History, LocalV2Snapshot, LocalV2SnapshotTurn, LocalV2Summary, LocalV2Queue } from "@multica/core/local-conversation/v2";
-import type { ConversationLocale, ConversationMessage } from "./conversation-message";
+import type { ConversationMessage } from "./conversation-message";
 import { InteractionModel } from "./interaction-model";
 import { ItemModel } from "./item-model";
 import { PromptQueueModel } from "./prompt-queue-model";
@@ -33,6 +33,11 @@ export class ConversationModel {
   summary: LocalV2Summary;
   hasOlderTurns = false;
   readonly queue: PromptQueueModel;
+
+  /** Per-turn lookups, so reading a turn costs that turn rather than the whole conversation. */
+  private readonly itemsByTurn = new Map<string, ItemModel[]>();
+  private readonly messagesByTurn = new Map<string | null, UserMessageModel[]>();
+  private readonly interactionsByTurn = new Map<string, InteractionModel[]>();
 
   seq = 0;
   storeGeneration = "";
@@ -66,9 +71,21 @@ export class ConversationModel {
     return new ConversationModel(snapshot);
   }
 
-  /** Becomes the snapshot, keeping older turns paged in when it continues them without a hole. */
-  replaceSnapshot(snapshot: LocalV2Snapshot): void {
+  /**
+   * Becomes the snapshot, keeping older turns paged in when it continues them
+   * without a hole. A snapshot older than the events applied here says nothing
+   * new, except for its queue, which the daemon reads after the rest. Sequences
+   * compare only within one store. `authoritative` is for when the daemon has said
+   * the cursor is ahead of its store, so a smaller sequence is the truth.
+   *
+   * Returns whether the snapshot was taken.
+   */
+  replaceSnapshot(snapshot: LocalV2Snapshot, options: { authoritative?: boolean } = {}): boolean {
     const sameStore = snapshot.store_generation === this.storeGeneration;
+    if (sameStore && !options.authoritative && snapshot.snapshot_seq < this.seq) {
+      this.queue.receive(snapshot.queue);
+      return false;
+    }
     const previous = {
       turns: [...this.turns.values()], items: [...this.items.values()],
       messages: [...this.messages.values()], interactions: [...this.interactions.values()],
@@ -77,10 +94,14 @@ export class ConversationModel {
     this.items.clear();
     this.messages.clear();
     this.interactions.clear();
+    this.itemsByTurn.clear();
+    this.messagesByTurn.clear();
+    this.interactionsByTurn.clear();
     this.usage = null;
     this.load(snapshot);
     this.queue.replace(snapshot.queue);
     if (sameStore) this.retainHistory(previous);
+    return true;
   }
 
   private load(snapshot: LocalV2Snapshot): void {
@@ -96,7 +117,7 @@ export class ConversationModel {
     for (const turn of snapshot.turns) this.addTurn(turn);
     for (const event of snapshot.open_background_items) this.applyEvent(event);
     for (const pending of snapshot.pending_interactions) {
-      if (!this.interactions.has(pending.interaction_id)) this.interactions.set(pending.interaction_id, new InteractionModel({
+      if (!this.interactions.has(pending.interaction_id)) this.setInteraction(new InteractionModel({
         id: pending.interaction_id, turnId: pending.turn_id, kind: pending.kind, request: pending.request, createdAt: pending.created_at,
       }));
     }
@@ -123,9 +144,9 @@ export class ConversationModel {
     if (!kept.length) return;
     const ids = new Set(kept.map((turn) => turn.id));
     for (const turn of kept) this.turns.set(turn.id, turn);
-    for (const item of previous.items) if (ids.has(item.turnId)) this.items.set(item.id, item);
-    for (const message of previous.messages) if (message.turnId && ids.has(message.turnId)) this.messages.set(message.id, message);
-    for (const interaction of previous.interactions) if (ids.has(interaction.turnId) && !this.interactions.has(interaction.id)) this.interactions.set(interaction.id, interaction);
+    for (const item of previous.items) if (ids.has(item.turnId)) this.setItem(item);
+    for (const message of previous.messages) if (message.turnId && ids.has(message.turnId)) this.setMessage(message);
+    for (const interaction of previous.interactions) if (ids.has(interaction.turnId) && !this.interactions.has(interaction.id)) this.setInteraction(interaction);
     this.hasOlderTurns = kept.at(-1)!.index > 0;
     this.sortTurns();
   }
@@ -159,7 +180,7 @@ export class ConversationModel {
     for (const message of turn.messages) {
       // Assistant rows repeat the turn's assistant_text items.
       if (message.role !== "user") continue;
-      this.messages.set(message.id, new UserMessageModel({
+      this.setMessage(new UserMessageModel({
         id: message.id, requestId: "", turnId: turn.id, content: message.content, attachmentIds: message.attachment_ids,
         steered: message.steered, failed: message.failed, createdAt: message.created_at,
       }));
@@ -201,17 +222,47 @@ export class ConversationModel {
   }
 
   /** Items of one turn in the order they started. */
-  turnItems(turnId: string): ItemModel[] {
-    return [...this.items.values()].filter((item) => item.turnId === turnId).sort((a, b) => a.order - b.order);
+  turnItems(turnId: string): readonly ItemModel[] { return this.itemsByTurn.get(turnId) ?? []; }
+
+  /** User messages of one turn; null is those with no turn. */
+  turnMessages(turnId: string | null): readonly UserMessageModel[] { return this.messagesByTurn.get(turnId) ?? []; }
+
+  turnInteractions(turnId: string): readonly InteractionModel[] { return this.interactionsByTurn.get(turnId) ?? []; }
+
+  /** Rows no loaded turn accounts for: a prompt before its turn starts, and questions of a turn not paged in. */
+  looseMessages(): ConversationMessage[] {
+    const rows: ConversationMessage[] = [];
+    for (const [turnId, messages] of this.messagesByTurn) {
+      if (turnId !== null && this.turns.has(turnId)) continue;
+      for (const message of messages) rows.push(message.toMessage());
+    }
+    for (const [turnId, interactions] of this.interactionsByTurn) {
+      if (this.turns.has(turnId)) continue;
+      for (const interaction of interactions) if (interaction.kind === "question") rows.push(interaction.toMessage());
+    }
+    return rows;
   }
 
-  /** The transcript's rows: user messages, then each turn's output, then questions. */
-  transcript(locale: ConversationLocale): ConversationMessage[] {
-    const rows: ConversationMessage[] = [];
-    for (const message of this.messages.values()) rows.push(message.toMessage());
-    for (const turn of this.turns.values()) rows.push(...turn.assistantMessages(locale));
-    for (const interaction of this.interactions.values()) if (interaction.kind === "question") rows.push(interaction.toMessage());
-    return rows;
+  private setItem(item: ItemModel): void {
+    this.items.set(item.id, item);
+    let list = this.itemsByTurn.get(item.turnId);
+    if (!list) this.itemsByTurn.set(item.turnId, list = []);
+    const at = list.findIndex((other) => other.id === item.id);
+    if (at >= 0) { list[at] = item; return; }
+    // Almost always the newest: an item arrives in the order it started, or a page arrives whole.
+    let index = list.length;
+    while (index > 0 && list[index - 1]!.order > item.order) index--;
+    list.splice(index, 0, item);
+  }
+
+  private setMessage(message: UserMessageModel): void {
+    this.messages.set(message.id, message);
+    replaceInBucket(this.messagesByTurn, message.turnId, message);
+  }
+
+  private setInteraction(interaction: InteractionModel): void {
+    this.interactions.set(interaction.id, interaction);
+    replaceInBucket(this.interactionsByTurn, interaction.turnId, interaction);
   }
 
   private applyEvent(event: LocalV2Event): void {
@@ -220,7 +271,7 @@ export class ConversationModel {
       case "user.message": {
         const id = text(payload.message_id);
         if (!id) return;
-        this.messages.set(id, new UserMessageModel({
+        this.setMessage(new UserMessageModel({
           id, requestId: text(payload.request_id), turnId: event.turn_id, content: text(payload.content),
           attachmentIds: Array.isArray(payload.attachment_ids) ? payload.attachment_ids.filter((value): value is string => typeof value === "string") : [],
           steered: payload.steered === true, failed: false, createdAt: event.created_at,
@@ -247,7 +298,7 @@ export class ConversationModel {
         let item = this.items.get(event.item_id);
         if (!item) {
           item = new ItemModel(event, event.item_id, event.turn_id);
-          this.items.set(item.id, item);
+          this.setItem(item);
         }
         item.applyEvent(event);
         return;
@@ -255,7 +306,7 @@ export class ConversationModel {
       case "interaction.requested": {
         const id = text(payload.interaction_id);
         if (!id || !event.turn_id) return;
-        this.interactions.set(id, new InteractionModel({ id, turnId: event.turn_id, kind: text(payload.kind), request: record(payload.request) ?? {}, createdAt: event.created_at }));
+        this.setInteraction(new InteractionModel({ id, turnId: event.turn_id, kind: text(payload.kind), request: record(payload.request) ?? {}, createdAt: event.created_at }));
         return;
       }
       case "interaction.resolved":
@@ -272,6 +323,14 @@ export class ConversationModel {
         return;
     }
   }
+}
+
+function replaceInBucket<K, T extends { id: string }>(buckets: Map<K, T[]>, key: K, value: T): void {
+  const list = buckets.get(key);
+  if (!list) { buckets.set(key, [value]); return; }
+  const at = list.findIndex((other) => other.id === value.id);
+  if (at >= 0) list[at] = value;
+  else list.push(value);
 }
 
 function turnStatus(value: string): TurnStatus {

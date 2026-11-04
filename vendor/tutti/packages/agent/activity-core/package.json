@@ -19,5 +19,8 @@
   "dependencies": {},
   "devDependencies": {
     "@types/node": "24.12.4"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"./src/**/*.test.ts\""
   }
 }

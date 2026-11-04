@@ -16,7 +16,6 @@ import { type AgentFileMentionSuggestionState } from "./agentRichText/agentFileM
 import { formatSlashStatusTokenCount } from "./AgentSlashStatusPanel";
 import { useOptionalAgentGUIRuntime } from "../../agentActivityRuntime";
 import { useComposerDraftAttachmentsWithConnectors } from "./composer/useComposerDraftAttachmentsWithConnectors";
-import { goalDraftObjectiveFromPrompt } from "./composer/composerDraftUtils";
 import {
   INITIAL_DOCK_COMPOSER_METRICS,
   useComposerLayout
@@ -37,7 +36,6 @@ import { useAgentMentionSearchController } from "./composer/useAgentMentionSearc
 import { useAgentQuickPromptLibrary } from "./composer/quickPrompts/useAgentQuickPromptLibrary";
 import { useScopedProjectMissingState } from "./composer/useScopedProjectMissingState";
 import type { AgentComposerProps } from "./composer/AgentComposer.types";
-import { withAgentComposerTuttiModeSnapshot } from "./composer/agentComposerSubmitOptions";
 import {
   agentComposerDraftFiles,
   agentComposerDraftImages,
@@ -77,7 +75,6 @@ export type {
   AgentComposerSlashStatus,
   AgentComposerSlashStatusLimit,
   AgentComposerSubmitOptions,
-  AgentComposerTuttiModeSubmitSnapshot,
   AgentComposerUsage
 } from "./composer/AgentComposer.types";
 import { useSessionWorktreeLaunch } from "./composer/useSessionWorktreeLaunch";
@@ -108,10 +105,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     presentationEditorDisabled,
     disabledReason,
     presentationSubmitDisabled,
-    tuttiModeActive = false,
-    tuttiModeUpdating = false,
-    tuttiModeEffect = 50,
-    tuttiModeSpeed = 50,
     placeholder,
     composerSettings,
     selectedAgentTarget = null,
@@ -133,7 +126,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     isActive = true,
     workspaceReferencePickerOpen = false,
     promptImagesSupported = true,
-    canGoalControl = true,
     canUploadAttachment = true,
     composerFocusRequestSequence = null,
     layoutMode = "dock",
@@ -143,9 +135,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     labels,
     onDraftContentChange,
     onSettingsChange,
-    onTuttiModeChange = () => {},
-    onTuttiModeEffectChange = () => {},
-    onTuttiModeSpeedChange = () => {},
     capabilityMenuState,
     capabilityControlsReadOnly = false,
     onSubmit,
@@ -185,10 +174,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   });
   const draftPrompt = agentComposerDraftPrompt(draftContent);
   const draftQuoteCount = agentComposerDraftQuotes(draftContent).length;
-  const goalDraftObjective = canGoalControl
-    ? goalDraftObjectiveFromPrompt(draftPrompt)
-    : null;
-  const isGoalModeActive = goalDraftObjective !== null;
   const {
     images: draftImages,
     files: draftFiles,
@@ -219,12 +204,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   > = (content, displayPrompt) => {
     onSubmitGuidance?.(
       content,
-      displayPrompt,
-      tuttiModeActive
-        ? {
-            capabilityRefs: [{ capability: "tutti", source: "slash_command" }]
-          }
-        : undefined
+      displayPrompt
     );
   };
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -237,9 +217,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     shouldResetMentionHighlightToFilter,
     setShouldResetMentionHighlightToFilter
   ] = useState(false);
-  const [paletteDraftPrompt, setPaletteDraftPrompt] = useState(
-    goalDraftObjective ?? draftPrompt
-  );
+  const [paletteDraftPrompt, setPaletteDraftPrompt] = useState(draftPrompt);
   const [fileMentionSuggestion, setFileMentionSuggestion] =
     useState<AgentFileMentionSuggestionState | null>(null);
   const selectedProjectPath =
@@ -272,15 +250,9 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     onSubmit(
       content,
       displayPrompt,
-      withAgentComposerTuttiModeSnapshot({
-        options:
-          sessionWorktreeLaunch.mode === "worktree"
-            ? { ...options, isolation: "worktree" }
-            : options,
-        active: tuttiModeActive,
-        effect: tuttiModeEffect,
-        speed: tuttiModeSpeed
-      })
+      sessionWorktreeLaunch.mode === "worktree"
+        ? { ...options, isolation: "worktree" }
+        : options
     );
   };
   const slashStatusAgentSessionId = slashStatus?.agentSessionId ?? null;
@@ -334,8 +306,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   );
   const paletteCatalog = useComposerPaletteCatalog({
     provider,
-    isGoalModeActive,
-    goalSupported: canGoalControl,
     paletteDraftPrompt,
     availableCommands,
     availableSkills,
@@ -450,7 +420,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     draftLargeTextsRef.current = agentComposerDraftLargeTexts(draftContent);
     const isExternalDraftReplacement = draftPromptRef.current !== draftPrompt;
     draftPromptRef.current = draftPrompt;
-    setPaletteDraftPrompt(goalDraftObjective ?? draftPrompt);
+    setPaletteDraftPrompt(draftPrompt);
     settlePendingInputHistory();
     if (isExternalDraftReplacement && draftPrompt) {
       window.requestAnimationFrame(() => {
@@ -464,7 +434,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   }, [
     draftContent,
     draftPrompt,
-    goalDraftObjective,
     settlePendingInputHistory
   ]);
 
@@ -492,10 +461,8 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     availableSkills,
     composerSettings,
     computerExecutable,
-    // Host-gated product capability: omit or enabled:false must hide /tutti.
     // Fail closed like other unsupported host capabilities — do not treat a
     // missing flag as enabled.
-    tuttiModeSupported: capabilityMenuState?.tuttiMode?.enabled === true,
     capabilityControlsReadOnly,
     onDraftContentChange: handleDraftContentChange,
     onSettingsChange,
@@ -506,7 +473,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     onSlashStatusOpen,
     onPromptImagesUnsupported,
     onRequestGitBranches,
-    onTuttiModeActivate: () => onTuttiModeChange(true),
     draftContent,
     selectedProjectPath,
     slashStatusAgentSessionId,
@@ -579,8 +545,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     draftContent,
     draftScopeKey,
     draftByScopeKeyRef,
-    goalDraftObjective,
-    isGoalModeActive,
     promptImagesSupported: canUploadAttachment && promptImagesSupported,
     promptFilesSupported,
     promptAssetLimit,
@@ -772,16 +736,8 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
       setIsSelectedProjectMissing={setIsSelectedProjectMissing}
       setIsPaletteOpen={setIsPaletteOpen}
       setHighlightedIndex={setHighlightedIndex}
-      isGoalModeActive={isGoalModeActive}
       isPlanModeActive={composerSettings.draftSettings.planMode}
-      isTuttiModeActive={tuttiModeActive}
-      isTuttiModeUpdating={tuttiModeUpdating}
-      tuttiModeEffect={tuttiModeEffect}
-      tuttiModeSpeed={tuttiModeSpeed}
       onClearPlanMode={() => onSettingsChange({ planMode: false })}
-      onClearTuttiMode={() => onTuttiModeChange(false)}
-      onTuttiModeEffectChange={onTuttiModeEffectChange}
-      onTuttiModeSpeedChange={onTuttiModeSpeedChange}
       isPromptTipOverflowing={isPromptTipOverflowing}
       onHistoryNavigation={onHistoryNavigation}
       sessionWorktreeLaunch={sessionWorktreeLaunch}

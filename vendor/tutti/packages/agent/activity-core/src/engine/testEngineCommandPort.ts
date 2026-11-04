@@ -4,7 +4,6 @@ import type {
   EngineExternalCommand,
   EngineTypedCommandPort
 } from "./types.ts";
-import type { PlanSubmitDecisionResult } from "./planDecision.types.ts";
 
 export type TestEngineCommandExecutor = (
   command: EngineExternalCommand,
@@ -34,25 +33,7 @@ export function createTestEngineCommandPort(
     activateSession(_input, options) {
       return executeObserved(options);
     },
-    cancelTurn(_input, options) {
-      return executeObserved(options);
-    },
-    controlGoal(_input, options) {
-      return executeObserved(options);
-    },
-    deleteSessions(_input, options) {
-      return executeObserved(options);
-    },
-    renameSession(_input, options) {
-      return executeObserved(options);
-    },
-    respondToInteraction(_input, options) {
-      return executeObserved(options);
-    },
     sendInput(_input, options) {
-      return executeObserved(options);
-    },
-    setSessionPinned(_input, options) {
       return executeObserved(options);
     },
     updateSessionSettings(_input, options) {
@@ -64,9 +45,6 @@ export function createTestEngineCommandPort(
     effects,
     execute(command, options) {
       return execute(command, options);
-    },
-    executePlanDecision(command, options) {
-      return execute(command, options) as Promise<PlanSubmitDecisionResult>;
     },
     kind: "typed",
     observe(command) {

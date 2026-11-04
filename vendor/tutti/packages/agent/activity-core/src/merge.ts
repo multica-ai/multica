@@ -7,19 +7,20 @@ export function mergeAgentActivityMessages<
     return [...currentMessages];
   }
 
+  // Messages are not changed in place, so an unchanged one keeps its object, and
+  // what is built from it can be kept too.
   const byMessageId = new Map<string, T>();
   for (const message of currentMessages) {
-    byMessageId.set(message.messageId, cloneAgentActivityMessage(message));
+    byMessageId.set(message.messageId, message);
   }
 
   for (const incoming of incomingMessages) {
     const existing = byMessageId.get(incoming.messageId);
+    if (existing === incoming) continue;
     if (!existing || shouldReplaceAgentActivityMessage(existing, incoming)) {
       byMessageId.set(
         incoming.messageId,
-        existing
-          ? mergeAgentActivityMessage(existing, incoming)
-          : cloneAgentActivityMessage(incoming)
+        existing ? mergeAgentActivityMessage(existing, incoming) : incoming
       );
     }
   }
@@ -71,6 +72,9 @@ export function areAgentActivityMessagesEqual(
   left: AgentActivityMessage,
   right: AgentActivityMessage
 ): boolean {
+  if (left === right) {
+    return true;
+  }
   return (
     left.workspaceId === right.workspaceId &&
     left.agentSessionId === right.agentSessionId &&

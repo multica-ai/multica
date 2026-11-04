@@ -40,26 +40,30 @@ function latestDisplayableMessage(messages: readonly AgentActivityMessage[]): {
   text: string;
   time?: number;
 } | null {
-  return (
-    messages
-      .map((message) => ({
-        message,
-        text: messageDisplayText(message),
-        time: messageTime(message)
-      }))
-      .filter(
-        (item) =>
-          item.text.length > 0 &&
-          normalizeToken(item.message.kind) !== "tool_call"
-      )
-      .sort((left, right) => {
-        const timeDiff = (right.time ?? 0) - (left.time ?? 0);
-        if (timeDiff !== 0) {
-          return timeDiff;
-        }
-        return right.message.messageId.localeCompare(left.message.messageId);
-      })[0] ?? null
-  );
+  // Reading a message's text is the expensive part, so ask for it only when the
+  // message would become the latest. Newest first: nearly all are ruled out by time.
+  let latest: { message: AgentActivityMessage; text: string; time?: number } | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (normalizeToken(message.kind) === "tool_call") continue;
+    const time = messageTime(message);
+    if (latest && !isLaterMessage(message, time, latest.message, latest.time)) continue;
+    const text = messageDisplayText(message);
+    if (text.length > 0) latest = { message, text, time };
+  }
+  return latest;
+}
+
+function isLaterMessage(
+  candidate: AgentActivityMessage,
+  candidateTime: number | undefined,
+  current: AgentActivityMessage,
+  currentTime: number | undefined
+): boolean {
+  const timeDiff = (candidateTime ?? 0) - (currentTime ?? 0);
+  return timeDiff !== 0
+    ? timeDiff > 0
+    : candidate.messageId.localeCompare(current.messageId) > 0;
 }
 
 function messageDisplayText(message: AgentActivityMessage): string {

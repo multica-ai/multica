@@ -27,10 +27,7 @@ export function settleQueueCommand(
   const [agentSessionId, current] = entry;
   const inFlight = current.inFlight!;
   if (intent.outcome === "succeeded" && validation?.kind === "valid") {
-    const deliveryBarrierTurnId =
-      validation.result.kind === "goalControl"
-        ? null
-        : validation.result.turnId;
+    const deliveryBarrierTurnId = validation.result.turnId;
     const record = compactQueueRecord({
       ...current,
       deliveryBarrierTurnId,

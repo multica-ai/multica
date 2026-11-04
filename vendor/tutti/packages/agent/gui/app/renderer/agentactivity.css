@@ -3482,26 +3482,6 @@ aside.workspace-agents-status-panel
   transform: translateY(12px);
 }
 
-/* Tutti workflow plan-review surfaces: --background-fronted base with an 8%
-   tutti-purple wash. Geometry (fused panel/banner overlap, radii, borders)
-   stays identical to the generic disclosure card. */
-.agent-gui-chrome__tutti-workflow-panel {
-  padding: 8px;
-  background: color-mix(
-    in srgb,
-    var(--tutti-purple) 8%,
-    var(--background-fronted)
-  );
-}
-
-.agent-gui-chrome__tutti-workflow-banner {
-  background: color-mix(
-    in srgb,
-    var(--tutti-purple) 8%,
-    var(--background-fronted)
-  );
-}
-
 .agent-gui-chrome__composer-disclosure[data-expanded="true"]
   .agent-gui-chrome__composer-disclosure-banner {
   border-top-left-radius: 0;
@@ -9841,64 +9821,6 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
   will-change: opacity, transform;
 }
 
-.agent-gui-node__composer-tutti-mode-icon {
-  position: relative;
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  align-items: center;
-  justify-content: center;
-  /* Inherit color from the chip label so the mark tracks every state:
-     text-secondary at rest, text-primary on hover, tutti-purple when armed. */
-  contain: layout paint;
-}
-
-.agent-gui-node__composer-tutti-mode-icon-static,
-.agent-gui-node__composer-tutti-mode-icon-animated {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-
-.agent-gui-node__composer-tutti-mode-icon-static {
-  background-color: currentColor;
-  opacity: 1;
-}
-
-.agent-gui-node__composer-tutti-mode-icon:has(
-    .agent-gui-node__composer-tutti-mode-icon-animated[data-active="true"]
-  )
-  .agent-gui-node__composer-tutti-mode-icon-static {
-  opacity: 0;
-}
-
-.agent-gui-node__composer-tutti-mode-icon-animated {
-  position: absolute;
-  inset: 0;
-  /* Match the 16px static mark exactly; the APNG canvas already pads the
-    snapping hand and bursting stars, so no enlargement is applied. */
-  opacity: 0;
-  pointer-events: none;
-}
-
-.agent-gui-node__composer-tutti-mode-icon-animated[data-active="true"] {
-  transform: translateZ(0);
-  opacity: 1;
-  backface-visibility: hidden;
-  will-change: opacity, transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-gui-node__composer-tutti-mode-icon-animated {
-    display: none;
-  }
-
-  .agent-gui-node__composer-tutti-mode-icon-static {
-    opacity: 1 !important;
-  }
-}
-
 .agent-gui-node__composer-handoff-icon[data-disabled="true"]
   .agent-gui-node__composer-handoff-icon-animated {
   opacity: 0;
@@ -10176,20 +10098,6 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
   color: var(--state-warning);
 }
 
-.agent-gui-node__composer-menu-trigger[data-agent-goal-badge="true"],
-.agent-gui-node__composer-menu-trigger[data-agent-goal-badge="true"]:hover:not(
-    :disabled
-  ) {
-  color: var(--tutti-purple);
-}
-
-/* Active Tutti Mode chip: icon (bg-current) and label both go tutti-purple. */
-.agent-gui-node__composer-menu-trigger[data-agent-tutti-mode-active="true"],
-.agent-gui-node__composer-menu-trigger[data-agent-tutti-mode-active="true"]:hover:not(
-    :disabled
-  ) {
-  color: var(--tutti-purple);
-}
 .agent-gui-node__composer-menu-trigger:hover:not(:disabled) {
   color: var(--agent-gui-text-primary);
 }

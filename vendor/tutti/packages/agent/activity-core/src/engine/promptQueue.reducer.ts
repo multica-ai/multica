@@ -11,7 +11,6 @@ import type {
   PromptQueueState
 } from "./promptQueue.types.ts";
 import type {
-  CancelResultValidation,
   SendInputResultValidation,
   ScopedSessionResultValidation
 } from "./commandResult.validation.ts";
@@ -32,7 +31,6 @@ import {
 } from "./promptQueue.sendNow.ts";
 import {
   activeTurnIdForSession,
-  isSettingsUpdateBlockingDrain,
   resolveQueueDrainDecision
 } from "./promptQueue.drainDecision.ts";
 import {
@@ -68,10 +66,7 @@ export { createInitialPromptQueueState } from "./promptQueue.initialState.ts";
 export interface PromptQueueReducerContext {
   lifecycle: CanonicalSessionLifecycleView;
   deletedSessionIds: Readonly<Record<string, true>>;
-  planFeedbackAccepted?: boolean;
   submitRequestAccepted?: boolean;
-  cancelResultValidation?: CancelResultValidation | null;
-  interactionResultValidation?: ScopedSessionResultValidation | null;
   sendResultValidation?: SendInputResultValidation | null;
   sendNowStrategy?: PromptQueueSendNowStrategy | null;
   settingsPreconditionPromptCommandId?: string | null;
@@ -136,14 +131,6 @@ function reduceQueueOwnedState(
         );
       }
       return enqueueSubmit(state, intent, context.lifecycle);
-    case "plan/feedbackRequested":
-      return context.planFeedbackAccepted === true
-        ? enqueueSubmit(
-            state,
-            { ...intent, type: "submit/requested" },
-            context.lifecycle
-          )
-        : unchanged(state);
     case "submit/canceled":
       return removePrompt(
         state,
@@ -598,8 +585,7 @@ function drainSession(
   const decision = resolveQueueDrainDecision(
     record,
     availability,
-    barrierPending,
-    isSettingsUpdateBlockingDrain(lifecycle, agentSessionId)
+    barrierPending
   );
   if (decision.kind === "blocked") {
     return state === originalState ? unchanged(state) : result(state);

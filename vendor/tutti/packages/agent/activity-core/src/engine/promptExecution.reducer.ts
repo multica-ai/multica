@@ -71,16 +71,16 @@ function requestPromptExecution(
     return unchanged(state);
   }
   return {
-    commands: NO_COMMANDS,
-    followUpIntents: [
+    commands: [
       {
         agentSessionId: command.agentSessionId,
         commandId: settingsCommandId,
+        correlationId: command.agentSessionId,
         settings: { ...settings },
         ...(command.timeoutMs !== undefined
           ? { timeoutMs: command.timeoutMs }
           : {}),
-        type: "session/settingsPreconditionRequested",
+        type: "session/updateSettings",
         workspaceId: command.workspaceId
       }
     ],
@@ -104,23 +104,16 @@ function settlePromptSettings(
   const record = selectPromptSettingsExecution(state, intent.commandId);
   if (!record) return unchanged(state);
   const next = deleteRecord(state, record.settingsCommandId);
-  const resumeIntent = {
-    agentSessionId: record.promptCommand.agentSessionId,
-    settingsCommandId: record.settingsCommandId,
-    type: "session/settingsQueueResumeRequested" as const
-  };
   if (intent.outcome === "succeeded" && validation?.kind === "valid") {
     return {
       commands: [sendCommand(record.promptCommand)],
-      followUpIntents: [resumeIntent],
       state: next
     };
   }
   return {
     commands: NO_COMMANDS,
     followUpIntents: [
-      promptFailureIntent(record.promptCommand, intent, validation),
-      resumeIntent
+      promptFailureIntent(record.promptCommand, intent, validation)
     ],
     state: next
   };

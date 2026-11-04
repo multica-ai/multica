@@ -9,7 +9,6 @@ import {
   validateScopedSessionResult,
   validateSendInputResult
 } from "./commandResult.validation.ts";
-import { selectPendingPlanFeedbackSubmit } from "./pendingIntents.selectors.ts";
 
 test("submit intent declares its confirmation deadline", () => {
   const result = reduce(createInitialPendingIntentsState(), submit());
@@ -24,56 +23,6 @@ test("submit intent declares its confirmation deadline", () => {
       type: "engine/scheduleExpiry"
     }
   ]);
-});
-
-test("plan feedback records exact source identity independently from its submit id", () => {
-  const result = pendingIntentsReducer(
-    createInitialPendingIntentsState(),
-    {
-      type: "plan/feedbackRequested",
-      agentSessionId: "session-1",
-      clientSubmitId: "550e8400-e29b-41d4-a716-446655440000",
-      content: [{ type: "text", text: "Revise the plan" }],
-      expiresAtUnixMs: 60_000,
-      requestedAtUnixMs: 1,
-      requestId: "request-plan-1",
-      turnId: "turn-plan-1",
-      workspaceId: "workspace-1"
-    },
-    {
-      deletedSessionIds: {},
-      turnsById: {},
-      planFeedbackAccepted: true
-    }
-  );
-  const record =
-    result.state.submitsByClientSubmitId[
-      "550e8400-e29b-41d4-a716-446655440000"
-    ];
-
-  assert.deepEqual(record?.source, {
-    kind: "plan-feedback",
-    requestId: "request-plan-1",
-    turnId: "turn-plan-1"
-  });
-  assert.equal(
-    selectPendingPlanFeedbackSubmit(
-      { pendingIntents: result.state },
-      "session-1",
-      "turn-plan-1",
-      "request-plan-1"
-    ),
-    record
-  );
-  assert.equal(
-    selectPendingPlanFeedbackSubmit(
-      { pendingIntents: result.state },
-      "session-1",
-      "turn-plan-1",
-      "request-other"
-    ),
-    null
-  );
 });
 
 test("command timeout is uncertain until the same client submit id is durable", () => {
@@ -329,7 +278,6 @@ test("control activation can carry content without expecting a Turn", () => {
   const intent = {
     ...activation(),
     content: [{ type: "text" as const, text: "/goal ship it" }],
-    initialGoalControl: { action: "set" as const, objective: "ship it" },
     initialTurnExpected: false,
     runtimeContent: [{ type: "text" as const, text: "/goal ship it" }]
   };
@@ -347,7 +295,6 @@ test("control activation can carry content without expecting a Turn", () => {
       cwd: "/workspace",
       initialContent: [{ type: "text", text: "/goal ship it" }],
       initialDisplayPrompt: "/browser",
-      initialGoalControl: { action: "set", objective: "ship it" },
       railPlacement: {
         version: 1,
         kind: "project",
@@ -363,56 +310,6 @@ test("control activation can carry content without expecting a Turn", () => {
       workspaceId: "workspace-1"
     }
   );
-});
-
-test("goal control send result confirms without manufacturing a Turn", () => {
-  const state = reduce(createInitialPendingIntentsState(), submit()).state;
-  const validation = validateSendInputResult(
-    {
-      kind: "goalControl",
-      session: session("session-1"),
-      goal: { objective: "ship it", status: "active" as const }
-    },
-    state.submitsByClientSubmitId["submit-1"]
-  );
-  const result = pendingIntentsReducer(
-    state,
-    {
-      type: "engine/commandResult",
-      commandId: "queue:send:session-1:1",
-      commandType: "queue/sendPrompt",
-      correlationId: "submit-1",
-      outcome: "succeeded"
-    },
-    {
-      deletedSessionIds: {},
-      turnsById: {},
-      sendResultValidation: validation
-    }
-  );
-  assert.equal(
-    result.state.submitsByClientSubmitId["submit-1"]?.status,
-    "confirmed"
-  );
-  assert.equal(result.state.submitsByClientSubmitId["submit-1"]?.turnId, null);
-});
-
-test("malformed turnless goal control result is rejected before session upsert", () => {
-  const state = reduce(createInitialPendingIntentsState(), submit()).state;
-  const validation = validateSendInputResult(
-    {
-      kind: "goalControl",
-      session: {
-        agentSessionId: "session-1",
-        workspaceId: "workspace-1"
-      }
-    },
-    state.submitsByClientSubmitId["submit-1"]
-  );
-  assert.deepEqual(validation, {
-    kind: "invalid",
-    reason: "send_result_entities_missing"
-  });
 });
 
 test("timed out activation remains uncertain until its exact session appears", () => {
@@ -757,53 +654,6 @@ test("typed activation rejects malformed nested Session entities", () => {
   ]);
 });
 
-test("typed activation rejects malformed Goal synchronization evidence", () => {
-  for (const goalSyncState of [
-    { pendingOperationId: 42, revision: 1, syncStatus: "applying" },
-    { pendingOperationId: null, revision: -1, syncStatus: "applying" },
-    { pendingOperationId: null, revision: 1, syncStatus: "future" },
-    { revision: 1, syncStatus: "applying" }
-  ]) {
-    const state = reduce(
-      createInitialPendingIntentsState(),
-      activation()
-    ).state;
-    const result = reduce(state, {
-      commandId: "activate:activation-1",
-      commandType: "session/activate",
-      correlationId: "activation-1",
-      outcome: "succeeded",
-      resultContract: "activation-v1",
-      type: "engine/commandResult",
-      value: {
-        activation: { mode: "new", status: "attached" },
-        session: {
-          ...session("session-new"),
-          goalSyncState
-        }
-      }
-    });
-
-    assert.equal(
-      result.state.activationsByRequestId["activation-1"]?.errorCode,
-      "invalid_command_result"
-    );
-    assert.equal(
-      result.state.activationsByRequestId["activation-1"]?.status,
-      "uncertain"
-    );
-    assert.deepEqual(result.followUpIntents, [
-      {
-        agentSessionId: "session-new",
-        needsMessages: false,
-        needsState: true,
-        type: "session/reconcileRequested",
-        workspaceId: "workspace-1"
-      }
-    ]);
-  }
-});
-
 test("confirmed activation may hydrate detail but cannot be failed by a late result", () => {
   let state = reduce(
     createInitialPendingIntentsState(),
@@ -1011,8 +861,6 @@ test("stopping after activation command success preserves the command outcome", 
   }).state;
   const stopped = reduce(state, {
     agentSessionId: "session-new",
-    awaitingTurnExpiresAtUnixMs: 31_000,
-    commandId: "stop:1",
     type: "session/stopRequested",
     workspaceId: "workspace-1"
   }).state.activationsByRequestId["activation-1"];
@@ -1073,13 +921,14 @@ test("confirmed activation emits its request-scoped pending settings command onc
     sessions: [{ ...session("session-new"), createdAtUnixMs: 1 }],
     type: "session/snapshotReceived"
   });
-  assert.deepEqual(attached.commands, []);
-  assert.deepEqual(attached.followUpIntents, [
+  assert.equal(attached.followUpIntents, undefined);
+  assert.deepEqual(attached.commands, [
     {
       agentSessionId: "session-new",
       commandId: "activation-settings:activation-1",
+      correlationId: "session-new",
       settings: { model: "model-2" },
-      type: "session/settingsActivationRequested",
+      type: "session/updateSettings",
       workspaceId: "workspace-1"
     }
   ]);
@@ -1087,8 +936,8 @@ test("confirmed activation emits its request-scoped pending settings command onc
     reduce(attached.state, {
       sessions: [{ ...session("session-new"), createdAtUnixMs: 1 }],
       type: "session/snapshotReceived"
-    }).followUpIntents,
-    undefined
+    }).commands,
+    []
   );
   const settingsSucceeded = reduce(attached.state, {
     commandId: "activation-settings:activation-1",
@@ -1130,10 +979,7 @@ test("settings update failure remains request-scoped and retryable without doubl
     sessions: [{ ...session("session-new"), createdAtUnixMs: 1 }],
     type: "session/snapshotReceived"
   });
-  assert.equal(
-    attached.followUpIntents?.[0]?.type,
-    "session/settingsActivationRequested"
-  );
+  assert.equal(attached.commands[0]?.type, "session/updateSettings");
   const failed = reduce(attached.state, {
     commandId: "activation-settings:activation-1",
     commandType: "session/updateSettings",
@@ -1155,10 +1001,7 @@ test("settings update failure remains request-scoped and retryable without doubl
     settings: { model: "model-3" },
     type: "activation/settingsPatched"
   });
-  assert.equal(
-    retried.followUpIntents?.[0]?.type,
-    "session/settingsActivationRequested"
-  );
+  assert.equal(retried.commands[0]?.type, "session/updateSettings");
   const timedOut = reduce(retried.state, {
     commandId: "activation-settings:activation-1",
     commandType: "session/updateSettings",

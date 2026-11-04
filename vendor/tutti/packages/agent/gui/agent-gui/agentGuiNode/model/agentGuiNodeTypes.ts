@@ -67,19 +67,7 @@ export interface AgentGUISessionChrome {
         canRetry?: never;
       }
     | null;
-  rawState:
-    | (Pick<CanonicalAgentSession, "agentSessionId" | "goal"> & {
-        goalControlStatus:
-          | "idle"
-          | "pending_create"
-          | "pending"
-          | "accepted"
-          | "succeeded"
-          | "failed"
-          | "unknown";
-        goalIsOptimistic: boolean;
-      })
-    | null;
+  rawState: Pick<CanonicalAgentSession, "agentSessionId"> | null;
 }
 
 export interface AgentGUIInlineNotice {
@@ -549,20 +537,7 @@ export interface AgentGUIComposerViewModel {
   hasPendingSubmitStopTarget?: boolean;
   promptImagesSupported: boolean;
   compactSupported: boolean | null;
-  /** Provider goal exposes a real paused state and pause/resume controls. */
-  goalPauseSupported: boolean;
   gate: AgentGUIComposerGate;
-  isTuttiModeActive: boolean;
-  isTuttiModeUpdating: boolean;
-  /** Effective Tutti outcome-quality and completion-speed preferences. */
-  tuttiModeEffect: number;
-  tuttiModeSpeed: number;
-  tuttiModeUpdateStatus:
-    | "idle"
-    | "pending_create"
-    | "updating"
-    | "failed"
-    | "uncertain";
   composerSettings: AgentGUIComposerSettingsVM;
   queuedPrompts: AgentGUIQueuedPromptVM[];
   queueStatus: AgentGUIQueueStatus;
@@ -590,9 +565,7 @@ export interface AgentGUIReadinessViewModel {
 
 export interface AgentGUIOperationsViewModel {
   forkThroughTurnPendingTurnIds: readonly string[];
-  goalClearNoticeSequence: number;
   isDeletingConversation: boolean;
-  isDeletingProjectConversations: boolean;
   isUserProjectMutationPending: boolean;
   pendingDeleteConversation: AgentGUIConversationSummary | null;
   pendingDeleteProjectConversations: AgentGUIProjectConversationDeleteTarget | null;

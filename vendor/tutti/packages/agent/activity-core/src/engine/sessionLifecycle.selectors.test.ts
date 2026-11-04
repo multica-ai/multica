@@ -379,7 +379,6 @@ test("completed Claude goal does not unlock a waiting root with a running child"
         activeTurnId: "root-turn",
         agentSessionId: "root",
         cwd: "/workspace",
-        goal: { objective: "ship it", status: "complete" },
         latestTurnInteractions: [],
         pendingInteractions: [],
         provider: "claude-code",

@@ -4,7 +4,6 @@ import {
   type AgentActivityMessage
 } from "@tutti-os/agent-activity-core";
 import {
-  createOptimisticGoalControlMessage,
   createOptimisticPromptMessage,
   normalizePromptContentBlocks
 } from "./agentGuiController.promptHelpers";
@@ -86,25 +85,6 @@ describe("createOptimisticPromptMessage", () => {
     expect(merged[0]).toMatchObject({ version: 3, turnId: "turn-2" });
   });
 
-  it("marks an initial goal as a control event instead of a prompt turn", () => {
-    const echo = createOptimisticGoalControlMessage({
-      ...echoInput,
-      displayPrompt: "/goal ship it",
-      goalControl: { action: "set", objective: "ship it" }
-    });
-
-    expect(echo).toMatchObject({
-      kind: "session_audit",
-      payload: {
-        __agentGuiOptimisticPrompt: true,
-        action: "set",
-        goalControl: true,
-        messageId: "client-submit:user:submit-1",
-        objective: "ship it",
-        text: "/goal ship it"
-      }
-    });
-  });
 });
 
 describe("normalizePromptContentBlocks", () => {

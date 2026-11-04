@@ -8,7 +8,8 @@ import {
   resolvePromptSendNowStrategy,
   type PromptQueueSendNowStrategy
 } from "./promptQueue.sendNow.ts";
-import { TURN_CANCEL_TIMEOUT_MS } from "./sessionLifecycle.cancel.ts";
+
+const TURN_CANCEL_TIMEOUT_MS = 30_000;
 import type { CanonicalSubmitAvailability } from "./sessionLifecycle.availability.ts";
 import type { EngineIntent } from "./types.ts";
 

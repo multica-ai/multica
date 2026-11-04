@@ -50,9 +50,6 @@
     "workbench/types.ts",
     "shared/workspaceAgentGeneratedFiles.ts",
     "agentConversationMessageController.ts",
-    "agentConversationRailController.ts",
-    "agentConversationRailRuntime.ts",
-    "conversationRailProjection.ts",
     "conversationProjection.ts",
     "composerProjection.ts"
   ]

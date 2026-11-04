@@ -1,5 +1,4 @@
 import {
-  type AgentActivityGoalControlAction,
   type AgentActivityInteraction,
   type AgentActivityTurn,
   type AgentSessionEngine
@@ -30,11 +29,6 @@ import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftSc
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type { AgentComposerSubmitOptions } from "../composer/AgentComposer.types";
 import {
-  PLAN_IMPLEMENTATION_ACTION_FEEDBACK,
-  PLAN_IMPLEMENTATION_ACTION_IMPLEMENT,
-  PLAN_IMPLEMENTATION_ACTION_SKIP
-} from "../../../shared/agentConversation/planImplementationPresentation";
-import {
   clearSubmittedDraftIfUnchanged,
   deleteUnacceptedSubmittedDraftSnapshot,
   toRuntimeSendContent
@@ -43,7 +37,6 @@ import { clearSubmittedAgentGUIHomeDraft } from "./agentGuiController.homeDraftH
 import {
   agentGUIInteractionDraftSettlementKey,
   AgentGUIEngineSettlementController,
-  type AgentGUIGoalControlPendingSettlement,
   type AgentGUIInteractionDraftPendingSettlement
 } from "./AgentGUIEngineSettlementController";
 import {
@@ -52,10 +45,8 @@ import {
   buildProviderSessionNotFoundActivationError,
   buildResumeSessionNotLocalActivationError,
   getAgentGUIErrorMessage,
-  goalControlSettlementError,
   isNonRetryableResumeErrorCode
 } from "./agentGuiController.errors";
-import { typedGoalControlFromComposer } from "./agentGuiController.composerHelpers";
 import {
   agentSubmitTraceDiagnostics,
   createAgentSubmitTraceState,
@@ -72,7 +63,6 @@ import {
 } from "./useAgentConversationSelection";
 import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 import type { AgentGUINewConversationActivationResult } from "./agentGuiNewConversationActivation.types";
-import { useAgentGUIGoalControlActions } from "./useAgentGUIGoalControlActions";
 import { resolvePendingQuestionComposerResponse } from "./pendingQuestionComposerResponse";
 
 interface UseAgentGUISubmitInteractionActionsInput {
@@ -102,18 +92,12 @@ interface UseAgentGUISubmitInteractionActionsInput {
       }
     ) => void
   >;
-  goalControlSupported: boolean;
   isComposerHomeRef: RefObject<boolean>;
   isCurrentConversation(agentSessionId: string): boolean;
   isRespondingToInteraction: boolean;
   interactionReadinessSource?: AgentGUIInteractionReadinessSource | null;
   isSessionMarkedNonResumable(agentSessionId: string): boolean;
   persistActiveConversation(agentSessionId: string | null): void;
-  planActionsRef: RefObject<{
-    implement(): boolean;
-    feedback(value: string): boolean;
-    skip(): boolean;
-  }>;
   promptImagesSupported: boolean;
   sessionEngine: AgentSessionEngine;
   setActiveConversationId: Dispatch<SetStateAction<string | null>>;
@@ -121,18 +105,13 @@ interface UseAgentGUISubmitInteractionActionsInput {
   setDraftByScopeKey: Dispatch<
     SetStateAction<Record<string, AgentComposerDraft>>
   >;
-  setGoalClearNoticeSequence: Dispatch<SetStateAction<number>>;
   setIntent: Dispatch<SetStateAction<ConversationIntent>>;
   submittedDraftSnapshotsRef: RefObject<Record<string, SubmittedDraftSnapshot>>;
   startConversation(
     content: AgentPromptContentBlock[],
     displayPrompt?: string,
     options?: AgentComposerSubmitOptions,
-    initialTurnExpected?: boolean,
-    initialGoalControl?: {
-      action: AgentActivityGoalControlAction;
-      objective?: string;
-    }
+    initialTurnExpected?: boolean
   ): AgentGUINewConversationActivationResult | null;
   submitPromptRef: RefObject<
     (
@@ -159,20 +138,17 @@ export function useAgentGUISubmitInteractionActions(
     dataRef,
     draftByScopeKeyRef,
     executePromptRef,
-    goalControlSupported,
     isComposerHomeRef,
     isCurrentConversation,
     isRespondingToInteraction,
     interactionReadinessSource,
     isSessionMarkedNonResumable,
     persistActiveConversation,
-    planActionsRef,
     promptImagesSupported,
     sessionEngine,
     setActiveConversationId,
     setDetailError,
     setDraftByScopeKey,
-    setGoalClearNoticeSequence,
     setIntent,
     submittedDraftSnapshotsRef,
     startConversation,
@@ -180,19 +156,9 @@ export function useAgentGUISubmitInteractionActions(
     transientConversation,
     workspaceId
   } = input;
-  const goalControlSettlementsRef = useRef<
-    Record<string, AgentGUIGoalControlPendingSettlement>
-  >({});
   const interactionDraftSettlementsRef = useRef<
     Record<string, AgentGUIInteractionDraftPendingSettlement>
   >({});
-  const { goalControl } = useAgentGUIGoalControlActions({
-    activeConversationIdRef,
-    draftByScopeKeyRef,
-    goalControlSettlementsRef,
-    sessionEngine,
-    setDetailError
-  });
   const retryActivation = useCallback(() => {
     const agentSessionId = activeConversationIdRef.current;
     if (!agentSessionId) {
@@ -368,18 +334,9 @@ export function useAgentGUISubmitInteractionActions(
         });
       },
       engine: sessionEngine,
-      goalControlSettlements: goalControlSettlementsRef.current,
+      prompts: agentActivityRuntime.prompts,
       interactionDraftSettlements: interactionDraftSettlementsRef.current,
       isCurrentConversation,
-      onGoalControlCleared: () =>
-        setGoalClearNoticeSequence((current) => current + 1),
-      onGoalControlFailed: (settlement) => {
-        setDetailError(
-          settlement.errorMessage
-            ? getAgentGUIErrorMessage(goalControlSettlementError(settlement))
-            : translate("agentHost.agentGui.goalControlFailed")
-        );
-      },
       onSubmitFailed: (submit) => {
         setDetailError(
           getAgentGUIErrorMessage(agentGUISubmitSettlementError(submit))
@@ -389,12 +346,12 @@ export function useAgentGUISubmitInteractionActions(
     });
     return controller.attach();
   }, [
+    agentActivityRuntime,
     draftByScopeKeyRef,
     isCurrentConversation,
     sessionEngine,
     setDetailError,
     setDraftByScopeKey,
-    setGoalClearNoticeSequence,
     submittedDraftSnapshotsRef
   ]);
 
@@ -449,19 +406,6 @@ export function useAgentGUISubmitInteractionActions(
 
   const submitInteractivePrompt = useCallback(
     (input: AgentInteractionResponseInput): boolean => {
-      // Plan-implementation actions are client-orchestrated; route them to the
-      // plan decision handlers instead of submitInteractive.
-      if (input.action === PLAN_IMPLEMENTATION_ACTION_IMPLEMENT) {
-        return planActionsRef.current.implement();
-      }
-      if (input.action === PLAN_IMPLEMENTATION_ACTION_FEEDBACK) {
-        return planActionsRef.current.feedback(
-          typeof input.payload?.text === "string" ? input.payload.text : ""
-        );
-      }
-      if (input.action === PLAN_IMPLEMENTATION_ACTION_SKIP) {
-        return planActionsRef.current.skip();
-      }
       const normalizedOptionId = input.optionId?.trim() ?? "";
       const target = resolveAgentGUIInteractionReadinessIdentity({
         agentSessionId: input.agentSessionId,
@@ -490,7 +434,7 @@ export function useAgentGUISubmitInteractionActions(
         return false;
       }
       setDetailError(null);
-      return sessionEngine.submitInteractionResponse({
+      return agentActivityRuntime.prompts.respondToInteraction({
         ...(input.action?.trim() ? { action: input.action.trim() } : {}),
         agentSessionId: target.agentSessionId,
         ...(normalizedOptionId ? { optionId: normalizedOptionId } : {}),
@@ -501,9 +445,9 @@ export function useAgentGUISubmitInteractionActions(
     },
     [
       activeEnginePendingInteractions,
+      agentActivityRuntime,
       interactionReadinessSource,
       isRespondingToInteraction,
-      sessionEngine,
       workspaceId
     ]
   );
@@ -521,11 +465,6 @@ export function useAgentGUISubmitInteractionActions(
       }
       const displayPromptText =
         displayPrompt && displayPrompt.trim() ? displayPrompt : undefined;
-      const typedGoal = typedGoalControlFromComposer(
-        normalizedContent,
-        displayPromptText,
-        goalControlSupported
-      );
       if (
         !promptImagesSupported &&
         agentPromptContentHasImage(normalizedContent)
@@ -566,14 +505,6 @@ export function useAgentGUISubmitInteractionActions(
             setActiveConversationId(recoveredAgentSessionId);
             setIntent({ tag: "active", id: recoveredAgentSessionId });
             persistActiveConversation(recoveredAgentSessionId);
-            if (typedGoal) {
-              goalControl(
-                typedGoal.action,
-                typedGoal.objective,
-                resolveAgentComposerDraftScopeKey({})
-              );
-              return;
-            }
             submitExistingPrompt(
               recoveredAgentSessionId,
               normalizedContent,
@@ -598,9 +529,7 @@ export function useAgentGUISubmitInteractionActions(
         const activationResult = startConversation(
           normalizedContent,
           displayPromptText,
-          options,
-          typedGoal ? false : undefined,
-          typedGoal ?? undefined
+          options
         );
         if (activationResult) {
           draftByScopeKeyRef.current = clearSubmittedAgentGUIHomeDraft({
@@ -616,14 +545,6 @@ export function useAgentGUISubmitInteractionActions(
             })
           );
         }
-        return;
-      }
-      if (typedGoal) {
-        goalControl(
-          typedGoal.action,
-          typedGoal.objective,
-          resolveAgentComposerDraftScopeKey({ agentSessionId })
-        );
         return;
       }
       const activeTurnId = activeEngineActiveTurn?.turnId.trim() ?? "";
@@ -689,8 +610,6 @@ export function useAgentGUISubmitInteractionActions(
       activeEnginePendingInteractions,
       agentActivityRuntime,
       conversationListQuery,
-      goalControl,
-      goalControlSupported,
       persistActiveConversation,
       promptImagesSupported,
       startConversation,
@@ -765,9 +684,9 @@ export function useAgentGUISubmitInteractionActions(
       if (!agentSessionId) return;
       void noRunningResponseMessage;
       setDetailError(null);
-      sessionEngine.stopSession({ agentSessionId });
+      agentActivityRuntime.prompts.stop(agentSessionId);
     },
-    [sessionEngine]
+    [agentActivityRuntime]
   );
 
   const updateDraftContent = useCallback(
@@ -791,7 +710,6 @@ export function useAgentGUISubmitInteractionActions(
   );
 
   return {
-    goalControl,
     interruptCurrentTurn,
     retryActivation,
     showPromptImagesUnsupported,

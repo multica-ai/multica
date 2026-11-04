@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
@@ -37,14 +37,8 @@ function resolveSessionActionConversation(
  * AgentGUI node: creating a conversation and session actions (rename, copy
  * variants) targeting the conversation the header menu was rendered for.
  *
- * The header chrome cannot see the rail interaction lock or whether the
- * target conversation is loaded, so unlike the rail menus (which disable or
- * suppress actions up front) failures here surface as an error toast rather
- * than a silent drop.
- *
- * The rail query controller owns the interaction lock and lives inside the
- * rail subtree; it registers a probe through the returned callback so session
- * actions honor the same lock as the rail's own menus.
+ * The header chrome cannot see whether the target conversation is loaded, so
+ * failures here surface as an error toast rather than a silent drop.
  */
 export function useAgentGUIExternalRequests(input: {
   createConversationDisabled: boolean;
@@ -68,9 +62,7 @@ export function useAgentGUIExternalRequests(input: {
   workbenchCommandBridge: NonNullable<
     AgentGUINodeViewProps["workbenchCommandBridge"]
   > | null;
-}): {
-  registerRailInteractionLockProbe: (probe: (() => boolean) | null) => void;
-} {
+}): void {
   const {
     createConversationDisabled,
     labels,
@@ -81,13 +73,6 @@ export function useAgentGUIExternalRequests(input: {
     workbenchCommandBridge
   } = input;
   const agentHostApi = useOptionalAgentHostApi();
-  const railInteractionLockProbeRef = useRef<(() => boolean) | null>(null);
-  const registerRailInteractionLockProbe = useCallback(
-    (probe: (() => boolean) | null) => {
-      railInteractionLockProbeRef.current = probe;
-    },
-    []
-  );
   const copyConversationValue = useAgentGUIConversationCopyAction(labels);
   const requestContextRef = useRef({
     agentHostApi,
@@ -140,9 +125,7 @@ export function useAgentGUIExternalRequests(input: {
         current.viewModel,
         command.agentSessionId
       );
-      const railInteractionLocked =
-        railInteractionLockProbeRef.current?.() ?? false;
-      if (!conversation || railInteractionLocked) {
+      if (!conversation) {
         current.agentHostApi?.toast?.error(
           current.labels.sessionActionUnavailable
         );
@@ -164,5 +147,4 @@ export function useAgentGUIExternalRequests(input: {
       );
     };
   }, [workbenchCommandBridge?.instanceId]);
-  return { registerRailInteractionLockProbe };
 }

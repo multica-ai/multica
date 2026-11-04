@@ -125,6 +125,8 @@ export type AgentGuiTaskMessagePayload = Omit<TaskMessagePayload, "type"> & {
 /** IDs belong to the selected transport; local IDs are never sent to cloud APIs. */
 export interface AgentGuiRpcMethods {
   "queue.enqueue": { params: { sessionId: string; item: import("@multica/core/local-conversation/protocol").LocalQueuedPrompt; paused?: boolean; queued: true }; result: import("@multica/core/local-conversation/protocol").LocalPromptQueue };
+  /** What became of each message; empty from a daemon that cannot say. */
+  "queue.statuses": { params: { sessionId: string; requestIds: string[] }; result: Record<string, import("@multica/conversation-client/services").PromptStatus> };
   "queue.update": { params: { sessionId: string; action: "pause" | "stop" | "resume" | "remove" | "sendNow"; requestId?: string }; result: import("@multica/core/local-conversation/protocol").LocalPromptQueue };
   "interaction.respond": { params: { sessionId: string; turnId: string; requestId: string; answers: Record<string, string | string[]> }; result: void };
   "workspace.load": { params: Record<string, never>; result: AgentGuiWorkspaceState };
@@ -141,7 +143,6 @@ export interface AgentGuiRpcMethods {
   "session.fork": { params: { sessionId: string; turnId: string; requestId: string }; result: AgentGuiSession };
   "session.pin": { params: { sessionId: string; pinned: boolean }; result: AgentGuiSession };
   "session.delete": { params: { sessionId: string }; result: void };
-  "session.markRead": { params: { sessionId: string }; result: void };
   "session.cancel": { params: { sessionId: string; taskId: string }; result: CancelTaskResponse };
   "models.list": { params: { agentId: string; force?: boolean }; result: RuntimeModelsResult };
   "usage.read": { params: { agentId: string; sessionId?: string; force?: boolean }; result: LocalProviderUsage };

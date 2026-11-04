@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { sideLayoutKey, sideSnapshot, readSideLayout as readLayout, prepareSideTab, applySideCommand, registerSideWorkspaceView, syncSideWorkspace, type SideTab as Tab, type SideLayout as Layout } from "./local-side-workspace-sync";
 import { sideWorkspaceControlSchema } from "../../../shared/side-workspace";
 import { SideActivityIcon, SideActivitySummary, useSideActivity } from "./local-side-feedback";
@@ -7,7 +8,7 @@ import { localV2Preview } from "../platform/local-v2-preview";
 import { sessionEntry, type LocalSessionEntry } from "../platform/local-conversation-projects";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
 import { ConversationModel } from "@multica/conversation-client/models";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type SetStateAction } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ComponentProps, type ReactNode, type SetStateAction } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowLeft, File, FolderOpen, Globe, Loader2, Maximize2, MessagesSquare, Minimize2, PanelRightOpen, Plus, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -38,7 +39,7 @@ function layoutKey(scope: LocalConversationScope, sessionId: string, deviceId: s
   return sideLayoutKey(scope, sessionId, deviceId);
 }
 
-export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(function LocalSideWorkspace(props, ref) {
+export const LocalSideWorkspace = observer(forwardRef<SideWorkspaceHandle, Props>(function LocalSideWorkspace(props, ref) {
   const device = useLocalDevice();
   const { transport } = device;
   const sessionId = props.sessionId === undefined ? props.source?.id : props.sessionId;
@@ -48,13 +49,13 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
   const layout = layouts[key] ?? (sessionId ? readLayout(key) : emptyLayout());
   // Sides the list has not loaded yet are read once; reading records their summary.
   const v2 = conversationService(transport, props.scope);
-  const known = useSyncExternalStore(useCallback((listener: () => void) => v2.onSummaries(listener), [v2]), () => v2.summaries());
+  const known = v2.list.summaries;
   const listed = new Set(props.sessions.map((entry) => entry.id));
   const extra = known.filter((summary) => !listed.has(summary.conversation_id) && layout.tabs.some((tab) => tab.kind === "side" && tab.sessionId === summary.conversation_id)).map(sessionEntry);
   useQueries({ queries: layout.tabs.filter((tab) => tab.kind === "side").map((tab) => ({
     queryKey: [...localConversationKey(props.scope, device.id), "side-summary", tab.sessionId],
     queryFn: async () => { await v2.snapshot(tab.sessionId); return true; },
-    enabled: !listed.has(tab.sessionId) && !v2.summary(tab.sessionId),
+    enabled: !listed.has(tab.sessionId) && !v2.list.summary(tab.sessionId),
   })) });
   const sessions = [...props.sessions, ...extra];
   const updateLayout = useCallback((owner: string, update: SetStateAction<Layout>) => {
@@ -277,7 +278,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
     </ResizablePanelGroup>
     <Dialog open={addressOpen} onOpenChange={setAddressOpen}><DialogContent><form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); try { const url = new URL(/^https?:\/\//i.test(address) ? address : `https://${address}`); if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error(props.chinese ? "请输入 HTTP 或 HTTPS 地址" : "Enter an HTTP or HTTPS address"); add({ id: `web:${crypto.randomUUID()}`, kind: "web", url: url.href }); setAddressOpen(false); } catch (error) { showError(error); } }}><DialogHeader><DialogTitle>{props.chinese ? "打开网页" : "Open webpage"}</DialogTitle></DialogHeader><label className="grid gap-2 text-label">{props.chinese ? "网页地址" : "Webpage address"}<Input autoFocus value={address} onChange={(event) => setAddress(event.target.value)} placeholder="https://" required /></label><DialogFooter><Button type="button" variant="outline" onClick={() => setAddressOpen(false)}>{props.chinese ? "取消" : "Cancel"}</Button><Button type="submit">{props.chinese ? "打开" : "Open"}</Button></DialogFooter></form></DialogContent></Dialog>
   </div>;
-});
+}));
 
 function SideConversation(props: Props & { sessionId: string; onSide(id: string): void; onResource(id: string, url: string): Promise<void>; visible: boolean }) {
   const { transport } = useLocalDevice();

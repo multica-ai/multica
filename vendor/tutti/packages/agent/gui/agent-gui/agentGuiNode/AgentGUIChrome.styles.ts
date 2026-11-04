@@ -29,8 +29,6 @@ const styles = {
     "agent-gui-chrome__composer-disclosure-chevron--expanded",
   composerDisclosurePanel: "agent-gui-chrome__composer-disclosure-panel",
   composerDisclosureTrigger: "agent-gui-chrome__composer-disclosure-trigger",
-  tuttiWorkflowBanner: "agent-gui-chrome__tutti-workflow-banner",
-  tuttiWorkflowPanel: "agent-gui-chrome__tutti-workflow-panel"
 } as const;
 
 export default styles;

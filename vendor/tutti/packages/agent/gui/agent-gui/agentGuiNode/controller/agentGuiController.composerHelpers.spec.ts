@@ -17,8 +17,7 @@ describe("slash command policy equality", () => {
   const policy = {
     fallbackCommands: ["compact", "goal"],
     commandEffects: [
-      { command: "compact", effect: "submitImmediate" as const },
-      { command: "goal", effect: "activateGoalMode" as const }
+      { command: "compact", effect: "submitImmediate" as const }
     ]
   };
 

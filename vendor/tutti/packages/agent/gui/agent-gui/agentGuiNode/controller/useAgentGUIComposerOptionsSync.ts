@@ -129,7 +129,7 @@ export function useAgentGUIComposerOptionsSync(input: {
         }
         const loadedOptions =
           composerOptionsForTarget({
-            snapshot: input.agentActivityRuntime.getSnapshot(input.workspaceId),
+            composer: input.agentActivityRuntime.composer,
             target: targetData
           }) ?? returnedOptions;
         input.onComposerDefaultsAuthorityReloadedRef.current.reconcileHomeDefaults(

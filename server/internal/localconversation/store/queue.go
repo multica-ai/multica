@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
 )
@@ -39,7 +40,13 @@ type QueueChange struct {
 	Append *QueueItem
 	Front  string
 	Remove string
+	// RemovedAt marks Remove as the user's doing, leaving a tombstone. A message
+	// leaving because it was sent has its receipt instead.
+	RemovedAt time.Time
 }
+
+// queueTombstoneRetention is how long a removed message stays unable to return.
+const queueTombstoneRetention = 7 * 24 * time.Hour
 
 // Queue reads a conversation's prompt queue.
 func (s *Store) Queue(ctx context.Context, conversationID string) (QueueState, error) {
@@ -73,6 +80,14 @@ func applyQueue(ctx context.Context, q *sqlitedb.Queries, conversationID string,
 		if err := q.DeletePromptQueueItem(ctx, sqlitedb.DeletePromptQueueItemParams{ConversationID: conversationID, RequestID: c.Remove}); err != nil {
 			return err
 		}
+		if !c.RemovedAt.IsZero() {
+			if err := q.InsertPromptQueueTombstone(ctx, sqlitedb.InsertPromptQueueTombstoneParams{ConversationID: conversationID, RequestID: c.Remove, RemovedAt: formatTime(c.RemovedAt)}); err != nil {
+				return err
+			}
+			if err := q.DeleteOldPromptQueueTombstones(ctx, sqlitedb.DeleteOldPromptQueueTombstonesParams{ConversationID: conversationID, RemovedAt: formatTime(c.RemovedAt.Add(-queueTombstoneRetention))}); err != nil {
+				return err
+			}
+		}
 	}
 	bounds, err := q.PromptQueueBounds(ctx, conversationID)
 	if err != nil {
@@ -92,6 +107,12 @@ func applyQueue(ctx context.Context, q *sqlitedb.Queries, conversationID string,
 		})
 	}
 	return nil
+}
+
+// QueueItemRemoved reports whether the user removed this message from the queue.
+func (s *Store) QueueItemRemoved(ctx context.Context, conversationID, requestID string) (bool, error) {
+	count, err := sqlitedb.New(s.read).CountPromptQueueTombstone(ctx, sqlitedb.CountPromptQueueTombstoneParams{ConversationID: conversationID, RequestID: requestID})
+	return count > 0, err
 }
 
 // QueuedConversations lists conversations with queued messages.

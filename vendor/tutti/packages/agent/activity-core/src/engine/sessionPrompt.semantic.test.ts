@@ -197,16 +197,7 @@ test("send-now retains the prompt until authoritative interrupt capability arriv
     type: "session/snapshotReceived"
   });
 
-  assert.deepEqual(harness.commands, [
-    {
-      agentSessionId: "session-1",
-      commandId: "submit:cancel:submit-interrupt",
-      timeoutMs: 30_000,
-      turnId: "turn-1",
-      type: "turn/cancel",
-      workspaceId: "workspace-1"
-    }
-  ]);
+  assert.deepEqual(harness.commands, []);
   assert.equal(
     harness.engine.getSnapshot().promptQueue.recordsBySessionId["session-1"]
       ?.sendNextPromptId,
@@ -463,7 +454,7 @@ test("consecutive deferred send-now prompts retain independent decisions", () =>
     },
     {
       capabilities: capabilities({ interrupt: true }),
-      commandType: "turn/cancel",
+      commandType: null,
       name: "interrupt"
     },
     {

@@ -7,6 +7,11 @@ import {
   type PropsWithChildren
 } from "react";
 import type {
+  AgentGUIComposerOptionsReader,
+  AgentGUIComposerSettingsLane
+} from "./agent-gui/agentGuiNode/controller/agentGuiController.providerHelpers";
+import type { AgentGUIPromptOperations } from "./agent-gui/agentGuiNode/controller/agentGuiController.promptOperations";
+import type {
   AgentActivityCollaborationRun,
   AgentActivityComposerOptions,
   AgentActivityMessage,
@@ -16,7 +21,6 @@ import type {
   AgentActivityMessageOrder,
   AgentActivityMessagePage,
   AgentActivityRailPlacement,
-  AgentActivityRenameSessionInput,
   AgentActivitySendInput,
   AgentActivitySession,
   AgentActivitySessionSettings,
@@ -27,28 +31,15 @@ import type {
 } from "@tutti-os/agent-activity-core";
 import type { AgentComposerDraft } from "./agent-gui/agentGuiNode/model/agentGuiNodeTypes";
 import type { AgentHostAgentSessionComposerSettings } from "./shared/contracts/dto";
-import type {
-  AgentConversationRailDeleteSessionsBatchInput,
-  AgentConversationRailDeleteSessionsBatchResult,
-  AgentConversationRailListPinnedSessionsPageInput,
-  AgentConversationRailListSessionSectionPageInput,
-  AgentConversationRailListSessionSectionsInput,
-  AgentConversationRailListSessionsPageInput,
-  AgentConversationRailSessionPage,
-  AgentConversationRailSessionSection,
-  AgentConversationRailSessionSectionDeletionCandidates,
-  AgentConversationRailSessionSectionScopeInput,
-  AgentConversationRailSessionSectionsResult,
-  AgentConversationRailSessionsPageResult,
-  AgentConversationRailUserProject
-} from "./agentConversationRailContracts";
-import { useEngineSelector } from "./shared/engine/useEngineSelector";
-
-const EMPTY_SESSION_MESSAGES: readonly AgentActivityMessage[] = [];
+import { useModelValue } from "./shared/engine/useEngineSelector";
 
 export type AgentActivitySessionMessages = Readonly<
   Record<string, readonly AgentActivityMessage[]>
 >;
+
+export interface AgentGUITranscriptReader {
+  messages(agentSessionId: string): readonly AgentActivityMessage[];
+}
 
 export interface AgentActivityRuntimeUpdateSessionSettingsResult {
   agentSessionId: string;
@@ -77,22 +68,16 @@ export interface AgentActivityRuntimeListGeneratedFilesInput {
   workspaceId: string;
 }
 
-export type AgentActivityRuntimeListSessionsPageInput =
-  AgentConversationRailListSessionsPageInput;
-export type AgentActivityRuntimeSessionPageResult =
-  AgentConversationRailSessionsPageResult;
-export type AgentActivityRuntimeListSessionSectionsInput =
-  AgentConversationRailListSessionSectionsInput;
-export type AgentActivityRuntimeListSessionSectionPageInput =
-  AgentConversationRailListSessionSectionPageInput;
-export type AgentActivityRuntimeListPinnedSessionsPageInput =
-  AgentConversationRailListPinnedSessionsPageInput;
-export type AgentActivityRuntimeUserProject = AgentConversationRailUserProject;
-export type AgentActivityRuntimeSessionSection =
-  AgentConversationRailSessionSection;
-export type AgentActivityRuntimeSessionPage = AgentConversationRailSessionPage;
-export type AgentActivityRuntimeSessionSectionsResult =
-  AgentConversationRailSessionSectionsResult;
+export interface AgentActivityRuntimeUserProject {
+  createdAtUnixMs: number;
+  id: string;
+  label: string;
+  lastUsedAtUnixMs?: number;
+  path: string;
+  pinnedAtUnixMs: number;
+  sectionKey: string;
+  updatedAtUnixMs: number;
+}
 
 export interface AgentActivityRuntimeGeneratedFile {
   label: string;
@@ -110,12 +95,6 @@ export interface AgentActivityRuntimeEnsureSessionSynchronizedInput {
   afterVersion?: number;
   agentSessionId: string;
   onError?: (error: unknown) => void;
-  workspaceId: string;
-}
-
-export interface AgentActivityRuntimeSetSessionPinnedInput {
-  agentSessionId: string;
-  pinned: boolean;
   workspaceId: string;
 }
 
@@ -184,8 +163,6 @@ export type AgentActivityRuntimeActivateSessionInput =
   | (AgentActivityRuntimeActivateSessionInputBase & {
       agentTargetId: string;
       clientSubmitId: string;
-      initialGoalControl?: AgentActivityCreateSessionInput["initialGoalControl"];
-      initialTuttiModeActivation?: AgentActivityCreateSessionInput["initialTuttiModeActivation"];
       mode: "new";
     })
   | (AgentActivityRuntimeActivateSessionInputBase & {
@@ -278,15 +255,6 @@ export type AgentActivityRuntimeStagePastedTextResult =
       uri?: string;
     };
 
-export type AgentActivityRuntimeSessionSectionScopeInput =
-  AgentConversationRailSessionSectionScopeInput;
-export type AgentActivityRuntimeSessionSectionDeletionCandidates =
-  AgentConversationRailSessionSectionDeletionCandidates;
-export type AgentActivityRuntimeDeleteSessionsBatchInput =
-  AgentConversationRailDeleteSessionsBatchInput;
-export type AgentActivityRuntimeDeleteSessionsBatchResult =
-  AgentConversationRailDeleteSessionsBatchResult;
-
 export interface AgentActivityRuntimeSessionAttachment {
   attachmentId: string;
   mimeType: string;
@@ -312,7 +280,34 @@ export interface AgentActivityRuntimePromptAsset {
  * only the reads, metadata actions, uploads, diagnostics, and subscriptions
  * that remain host-owned.
  */
+export interface AgentGUIConversationMutations {
+  rename(input: {
+    agentSessionId: string;
+    title: string;
+  }): Promise<AgentActivitySession>;
+  setPinned(input: {
+    agentSessionId: string;
+    pinned: boolean;
+  }): Promise<AgentActivitySession>;
+  forkThroughTurn(input: {
+    sourceAgentSessionId: string;
+    turnId: string;
+  }): Promise<{ targetAgentSessionId: string }>;
+  /** The turns of a conversation being forked right now. */
+  pendingForkTurnIds(
+    agentSessionId: string | null | undefined
+  ): readonly string[];
+}
+
 export interface AgentGUIRuntime {
+  /** Renames, pins and forks; each waits for the server. */
+  mutations: AgentGUIConversationMutations;
+  /** Each target's composer choices, for reading; getComposerOptions asks for them. Also writes a conversation's settings. */
+  composer: AgentGUIComposerOptionsReader & AgentGUIComposerSettingsLane;
+  /** Each conversation's committed messages, for reading. */
+  transcript: AgentGUITranscriptReader;
+  /** Stops, answers to interactions and edit retries. */
+  prompts: AgentGUIPromptOperations;
   /**
    * Reads the next older page into the session itself, which then updates through
    * its usual snapshot. A runtime with this owns paging; versions need not page.
@@ -336,13 +331,6 @@ export interface AgentGUIRuntime {
    * false fails closed so external hosts opt in explicitly.
    */
   conversationActivityViewEnabled?: boolean;
-  /**
-   * Host query limits for the Conversation Rail. Omit when the backend accepts
-   * AgentGUI's default limits.
-   */
-  conversationRailQueryLimits?: {
-    sectionRefreshLimitMax: number;
-  };
   /**
    * The session cwd is not resolvable on the local filesystem (e.g. a
    * shared/cloud sandbox not mounted locally), so AgentGUI must not run its
@@ -375,24 +363,6 @@ export interface AgentGUIRuntime {
   listAgentGeneratedFiles?(
     input: AgentActivityRuntimeListGeneratedFilesInput
   ): Promise<AgentActivityRuntimeGeneratedFileList>;
-  listSessionsPage?(
-    input: AgentActivityRuntimeListSessionsPageInput
-  ): Promise<AgentActivityRuntimeSessionPageResult>;
-  listSessionSections?(
-    input: AgentActivityRuntimeListSessionSectionsInput
-  ): Promise<AgentActivityRuntimeSessionSectionsResult>;
-  listSessionSectionPage?(
-    input: AgentActivityRuntimeListSessionSectionPageInput
-  ): Promise<AgentActivityRuntimeSessionSection>;
-  listSessionSectionDeletionCandidates?(
-    input: AgentActivityRuntimeSessionSectionScopeInput
-  ): Promise<AgentActivityRuntimeSessionSectionDeletionCandidates>;
-  deleteSessionsBatch?(
-    input: AgentActivityRuntimeDeleteSessionsBatchInput
-  ): Promise<AgentActivityRuntimeDeleteSessionsBatchResult>;
-  listPinnedSessionsPage?(
-    input: AgentActivityRuntimeListPinnedSessionsPageInput
-  ): Promise<AgentActivityRuntimeSessionPage>;
   load(
     workspaceId: string,
     signal?: AbortSignal
@@ -412,9 +382,6 @@ export interface AgentGUIRuntime {
   readPromptAsset?(
     input: AgentActivityRuntimeReadPromptAssetInput
   ): Promise<AgentActivityRuntimePromptAsset>;
-  renameSession(
-    input: AgentActivityRenameSessionInput
-  ): Promise<AgentActivitySession>;
   /**
    * Record whether a collaboration outcome was adopted.
    * Optional; hosts without support omit it and adoption controls stay hidden.
@@ -422,9 +389,6 @@ export interface AgentGUIRuntime {
   setCollaborationAdoption?(
     input: AgentActivitySetCollaborationAdoptionInput
   ): Promise<AgentActivityCollaborationRun>;
-  setSessionPinned(
-    input: AgentActivityRuntimeSetSessionPinnedInput
-  ): Promise<AgentActivitySession>;
   trackSettingsProjectChange?(
     input: AgentActivityRuntimeTrackSettingsProjectChangeInput
   ): Promise<void>;
@@ -512,11 +476,9 @@ export function useAgentActivitySnapshot(
 }
 
 export function useAgentActivitySessionMessages(
-  workspaceId: string,
   agentSessionIds: readonly (string | null | undefined)[]
 ): AgentActivitySessionMessages {
-  const runtime = useAgentGUIRuntime();
-  const normalizedWorkspaceId = workspaceId.trim();
+  const { transcript } = useAgentGUIRuntime();
   const sessionIdsKey = agentSessionIds
     .map((agentSessionId) => agentSessionId?.trim() ?? "")
     .filter(Boolean)
@@ -525,19 +487,11 @@ export function useAgentActivitySessionMessages(
     () => [...new Set(sessionIdsKey.split("\u0000").filter(Boolean))],
     [sessionIdsKey]
   );
-  const workspaceStore = useMemo(
-    () => ({
-      getSnapshot: () => runtime.getSnapshot(normalizedWorkspaceId),
-      subscribe: (listener: () => void) =>
-        runtime.subscribe(normalizedWorkspaceId, listener)
-    }),
-    [normalizedWorkspaceId, runtime]
+  const readMessages = useMemo(
+    () => createSessionMessagesReader(transcript, normalizedSessionIds),
+    [normalizedSessionIds, transcript]
   );
-  const selectMessages = useMemo(
-    () => createSessionMessagesSelector(normalizedSessionIds),
-    [normalizedSessionIds]
-  );
-  return useEngineSelector(workspaceStore, selectMessages);
+  return useModelValue(readMessages, [readMessages]);
 }
 
 export function resetAgentGUIRuntimeForTests(): void {
@@ -554,15 +508,16 @@ export function setAgentGUIRuntimeForTests(
   }
 }
 
-function createSessionMessagesSelector(
+function createSessionMessagesReader(
+  transcript: AgentGUITranscriptReader,
   agentSessionIds: readonly string[]
-): (snapshot: AgentActivitySnapshot) => AgentActivitySessionMessages {
+): () => AgentActivitySessionMessages {
   let previous: AgentActivitySessionMessages = {};
-  return (snapshot) => {
+  return () => {
     const next = Object.fromEntries(
       agentSessionIds.map((agentSessionId) => [
         agentSessionId,
-        snapshot.sessionMessagesById[agentSessionId] ?? EMPTY_SESSION_MESSAGES
+        transcript.messages(agentSessionId)
       ])
     );
     if (

@@ -1,7 +1,5 @@
 import type {
   AgentActivityCapabilityReference,
-  AgentActivityInitialGoalControl,
-  AgentActivityInitialTuttiModeActivation,
   AgentActivityMessage,
   AgentActivitySessionSettings,
   AgentActivitySubmitDiagnostics,
@@ -68,7 +66,6 @@ interface PendingActivationIntentRecordBase {
   initialPromptRetracted: boolean;
   initialTurnExpected: boolean;
   lastObservedStage: PendingActivationLastObservedStage;
-  initialGoalControl?: Readonly<AgentActivityInitialGoalControl>;
   isolation?: "worktree";
   modelExplicit?: boolean;
   railSectionKey?: string;
@@ -85,8 +82,6 @@ interface PendingActivationIntentRecordBase {
   snapshotOutcome: PendingActivationSnapshotOutcome;
   title: string | null;
   workspaceId: string;
-  initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation;
-  tuttiModeDraftKey?: string;
 }
 
 export type PendingActivationIntentRecord =
@@ -110,12 +105,6 @@ export type PendingSubmitStatus =
   | "uncertain"
   | "failed";
 
-export type PendingSubmitSource = Readonly<{
-  kind: "plan-feedback";
-  requestId: string;
-  turnId: string;
-}>;
-
 export interface PendingSubmitIntentRecord {
   acceptedSessionVersion: number | null;
   agentSessionId: string;
@@ -129,7 +118,6 @@ export interface PendingSubmitIntentRecord {
   expiresAtUnixMs: number;
   submitDiagnostics?: Readonly<AgentActivitySubmitDiagnostics>;
   requestedAtUnixMs: number;
-  source?: PendingSubmitSource;
   status: PendingSubmitStatus;
   turnId: string | null;
   workspaceId: string;
@@ -151,7 +139,6 @@ interface SessionActivationRequestedIntentBase {
   cwd?: string;
   expiresAtUnixMs: number;
   initialTurnExpected?: boolean;
-  initialGoalControl?: Readonly<AgentActivityInitialGoalControl>;
   isolation?: "worktree";
   modelExplicit?: boolean;
   railSectionKey?: string;
@@ -166,8 +153,6 @@ interface SessionActivationRequestedIntentBase {
   title?: string;
   visible?: boolean;
   workspaceId: string;
-  initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation;
-  tuttiModeDraftKey?: string;
 }
 
 export type SessionActivationRequestedIntent =
@@ -226,10 +211,8 @@ interface SessionActivateCommandBase {
   cwd?: string;
   initialContent?: readonly AgentPromptContentBlock[];
   initialDisplayPrompt?: string;
-  initialGoalControl?: Readonly<AgentActivityInitialGoalControl>;
   isolation?: "worktree";
   modelExplicit?: boolean;
-  initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation;
   railPlacement?: AgentActivityRailPlacement;
   reasoningEffortExplicit?: boolean;
   submitDiagnostics?: Readonly<AgentActivitySubmitDiagnostics>;

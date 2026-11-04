@@ -61,18 +61,6 @@ export interface AgentComposerSubmitOptions {
   capabilityRefs?: readonly AgentComposerCapabilityReference[];
   /** Exact canonical active Turn captured for native guidance. */
   targetTurnId?: string;
-  /**
-   * Immutable Tutti presentation captured by the composer that initiated the
-   * submit. An explicit inactive snapshot is authoritative over stale draft
-   * state while a new conversation is being created.
-   */
-  tuttiMode?: AgentComposerTuttiModeSubmitSnapshot;
-}
-
-export interface AgentComposerTuttiModeSubmitSnapshot {
-  active: boolean;
-  effect?: number;
-  speed?: number;
 }
 
 export interface AgentComposerCapabilityReference {
@@ -106,13 +94,6 @@ export interface AgentComposerProps {
   disabledReason?: string | null;
   /** Draft-independent view-local submission lock. */
   presentationSubmitDisabled: boolean;
-  /** Canonical engine projection of the independent TuttiModeActivation. */
-  tuttiModeActive?: boolean;
-  /** Blocks submission/removal while activation CAS or creation is unresolved. */
-  tuttiModeUpdating?: boolean;
-  /** Effective Tutti outcome-quality and completion-speed preferences. */
-  tuttiModeEffect?: number;
-  tuttiModeSpeed?: number;
   placeholder: string;
   composerSettings: AgentGUIComposerSettingsVM;
   queueStatus?: AgentGUIQueueStatus;
@@ -161,7 +142,6 @@ export interface AgentComposerProps {
   isActive?: boolean;
   workspaceReferencePickerOpen?: boolean;
   promptImagesSupported?: boolean;
-  canGoalControl?: boolean;
   canUploadAttachment?: boolean;
   composerFocusRequestSequence?: number | null;
   /**
@@ -236,27 +216,10 @@ export interface AgentComposerProps {
     codexSaverModeDescription: string;
     rtkSaverModeLabel: string;
     rtkSaverModeDescription: string;
-    tuttiModeLabel: string;
-    tuttiModeDescription: string;
-    tuttiModeRemove: string;
-    tuttiBudgetTitle: string;
-    tuttiBudgetEffectLabel: string;
-    tuttiBudgetSpeedLabel: string;
-    tuttiBudgetPreviewHint: string;
-    tuttiBudgetPreviewCost: string;
-    tuttiBudgetPreviewBalance: string;
-    tuttiBudgetPreviewPowerful: string;
-    tuttiBudgetModelPreferenceLabel: string;
-    tuttiBudgetModelPreferenceCost: string;
-    tuttiBudgetModelPreferenceBalance: string;
-    tuttiBudgetModelPreferencePowerful: string;
-    tuttiBudgetParallelismLabel: string;
-    tuttiBudgetParallelismValue: (count: number) => string;
     planModeDescription?: string;
     planModeOnLabel: string;
     planModeOffLabel: string;
     planUnavailable: string;
-    goalLabel: string;
     browserUseCapabilityLabel: string;
     browserUseCapabilityDescription: string;
     browserUseCapabilityDescriptionAutoConnect: string;
@@ -442,9 +405,6 @@ export interface AgentComposerProps {
     section?: "core" | "capabilities" | "connectors";
     waitForFreshModelCatalog?: boolean;
   }) => void;
-  onTuttiModeChange?: (active: boolean) => void;
-  onTuttiModeEffectChange?: (value: number) => void;
-  onTuttiModeSpeedChange?: (value: number) => void;
   capabilityMenuState?: AgentComposerCapabilityMenuState;
   capabilityControlsReadOnly?: boolean;
   onCapabilitySettingsRequest?: (
@@ -501,7 +461,7 @@ export interface AgentComposerProps {
 }
 
 export type AgentComposerCapabilitySettingsTarget =
-  | Exclude<AgentSlashCommandCapability["capability"], "tutti">
+  | AgentSlashCommandCapability["capability"]
   | {
       kind: "connector";
       connectorKey: string;
@@ -534,9 +494,6 @@ export interface AgentComposerCapabilityMenuState {
     readOnly?: boolean | null;
     /** Controls the host management footer independently from catalog visibility. */
     showViewMore?: boolean | null;
-  };
-  tuttiMode?: {
-    enabled?: boolean | null;
   };
 }
 

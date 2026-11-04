@@ -64,24 +64,6 @@ export function createAgentActivitySnapshotProjector(
         previousState.sessionMessages.windowsBySessionId
         ? previousSnapshot.sessionMessageWindowsById
         : { ...state.sessionMessages.windowsBySessionId };
-    const composerOptionsByTargetKey =
-      previousState &&
-      previousSnapshot &&
-      state.composerOptions.optionsByTargetKey ===
-        previousState.composerOptions.optionsByTargetKey
-        ? previousSnapshot.composerOptionsByTargetKey
-        : { ...state.composerOptions.optionsByTargetKey };
-    const composerOptionsLoadStatusByTargetKey =
-      previousState &&
-      previousSnapshot &&
-      state.composerOptions.entriesByTargetKey ===
-        previousState.composerOptions.entriesByTargetKey
-        ? previousSnapshot.composerOptionsLoadStatusByTargetKey
-        : Object.fromEntries(
-            Object.entries(state.composerOptions.entriesByTargetKey).map(
-              ([targetKey, entry]) => [targetKey, entry.status]
-            )
-          );
     const snapshot: AgentActivitySnapshot = {
       workspaceId,
       sessions,
@@ -89,9 +71,7 @@ export function createAgentActivitySnapshotProjector(
       // snapshot field empty until the runtime contract drops it.
       presences: EMPTY_PRESENCES,
       sessionMessagesById,
-      sessionMessageWindowsById,
-      composerOptionsByTargetKey,
-      composerOptionsLoadStatusByTargetKey
+      sessionMessageWindowsById
     };
     previousState = state;
     previousSnapshot = snapshot;
@@ -108,8 +88,6 @@ export function createEmptyAgentActivitySnapshot(
     presences: [],
     sessionMessagesById: {},
     sessionMessageWindowsById: {},
-    composerOptionsByTargetKey: {},
-    composerOptionsLoadStatusByTargetKey: {}
   };
 }
 

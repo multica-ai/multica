@@ -70,10 +70,7 @@ export type EngineCommandOutcome = "failed" | "succeeded" | "timedOut";
  * Manually dispatched results may omit this field and retain opaque
  * acknowledgement semantics.
  */
-export type EngineCommandResultContract =
-  | "activation-v1"
-  | "goal-control-v1"
-  | "opaque";
+export type EngineCommandResultContract = "activation-v1" | "opaque";
 
 /**
  * Every command execution settles back into the loop as this intent, so
@@ -109,7 +106,6 @@ export interface EngineIntentExpiredIntent {
  * continuations belong to the private root-reducer contract.
  */
 export type EngineIntent =
-  | AttentionReadIntent
   | EngineCommandResultIntent
   | EngineConnectionChangedIntent
   | EngineExpiryCancelRequestedIntent
@@ -118,16 +114,10 @@ export type EngineIntent =
   | EngineProbeRequestedIntent
   | WorkspaceReconcileRequestedIntent
   | PendingIntentsIntent
-  | PlanDecisionIntent
   | PromptQueueIntent
   | SessionReconcileIntent
-  | SessionMutationsIntent
   | SessionCommandsIntent
-  | SessionLifecycleIntent
-  | SessionGoalControlIntent
-  | ComposerOptionsIntent
-  | EditRetryIntent
-  | TuttiModeActivationIntent;
+  | SessionLifecycleIntent;
 
 // ---------------------------------------------------------------------------
 // Commands: descriptions returned by reducers. Internal commands are handled
@@ -188,38 +178,22 @@ export type EngineInternalCommand =
   | EngineExpiryCommand;
 
 export type EngineExternalCommand =
-  | AttentionReadCommand
   | EngineProbeCommand
   | EngineReconcileWorkspaceCommand
-  | InteractionRespondCommand
-  | PlanSubmitDecisionCommand
   | PromptQueueSendCommand
   | SessionActivateCommand
   | SessionUpdateSettingsCommand
   | SessionUnactivateCommand
-  | SessionReconcileCommand
-  | SessionMutationCommand
-  | SessionGoalControlCommand
-  | TurnCancelCommand
-  | ComposerOptionsCommand
-  | EditRetryCommand
-  | TuttiModeActivationCommand;
+  | SessionReconcileCommand;
 
 type AgentSessionEffectCommand =
-  | Extract<
-      SessionMutationCommand,
-      { type: "session/rename" | "session/setPinned" | "sessions/delete" }
-    >
-  | InteractionRespondCommand
   | PromptQueueSendCommand
   | SessionActivateCommand
-  | SessionGoalControlCommand
-  | SessionUpdateSettingsCommand
-  | TurnCancelCommand;
+  | SessionUpdateSettingsCommand;
 
 export type EngineExtensionCommand = Exclude<
   EngineExternalCommand,
-  AgentSessionEffectCommand | PlanSubmitDecisionCommand
+  AgentSessionEffectCommand
 >;
 
 export type EngineCommand = EngineExternalCommand | EngineInternalCommand;
@@ -259,34 +233,22 @@ export interface EngineRuntimeState {
   };
 }
 
-/**
- * State shared by public snapshots and the private reducer root. Selectors
- * that do not read Goal Control use this shape so the private Goal ledger does
- * not have to masquerade as public state.
- */
+/** State shared by public snapshots and the private reducer root. */
 export interface AgentSessionEngineStateBase {
-  attentionReadState: AttentionReadState;
-  editRetry: EditRetryState;
   engineRuntime: EngineRuntimeState;
   pendingIntents: PendingIntentsState;
-  planDecisions: PlanDecisionState;
   promptQueue: PromptQueueState;
   sessionReconcile: SessionReconcileState;
-  sessionMutations: SessionMutationsState;
   sessionCommands: SessionCommandsState;
   sessionLifecycle: SessionLifecycleState;
   sessionMessages: SessionMessagesState;
-  composerOptions: ComposerOptionsState;
-  tuttiModeActivation: TuttiModeActivationState;
 }
 
 /**
  * Host-observable Engine snapshot. Reducer execution ledgers are deliberately
  * omitted from this public state contract.
  */
-export interface AgentSessionEngineState extends AgentSessionEngineStateBase {
-  goalControl: SessionGoalControlPublicState;
-}
+export type AgentSessionEngineState = AgentSessionEngineStateBase;
 
 export interface EngineReducerResult<TState> {
   commands: readonly EngineCommand[];
@@ -352,8 +314,6 @@ export type AgentSessionActivateEffectInput =
   | (AgentSessionActivateEffectInputBase & {
       agentTargetId: string;
       clientSubmitId: string;
-      initialGoalControl?: Readonly<AgentActivityInitialGoalControl>;
-      initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation;
       mode: "new";
     })
   | (AgentSessionActivateEffectInputBase & {
@@ -383,34 +343,10 @@ export interface AgentSessionEffectPort {
     input: AgentSessionActivateEffectInput,
     options: EngineEffectOptions
   ): Promise<AgentSessionActivateEffectResult>;
-  cancelTurn(
-    input: AgentActivityCancelTurnInput,
-    options: EngineEffectOptions
-  ): Promise<unknown>;
-  controlGoal?(
-    input: AgentSessionGoalControlEffectInput,
-    options?: EngineEffectOptions
-  ): Promise<AgentActivityGoalControlResult>;
-  deleteSessions(
-    input: Omit<AgentActivityDeleteSessionsInput, "signal">,
-    options?: EngineEffectOptions
-  ): Promise<AgentActivityDeleteSessionsResult>;
-  respondToInteraction(
-    input: AgentActivitySubmitInteractiveInput,
-    options: EngineEffectOptions
-  ): Promise<unknown>;
-  renameSession(
-    input: Omit<AgentActivityRenameSessionInput, "signal">,
-    options?: EngineEffectOptions
-  ): Promise<{ session: AgentActivitySession }>;
   sendInput(
     input: AgentActivitySendInput,
     options: EngineEffectOptions
   ): Promise<unknown>;
-  setSessionPinned(
-    input: Omit<AgentActivitySetSessionPinnedInput, "signal">,
-    options?: EngineEffectOptions
-  ): Promise<{ session: AgentActivitySession }>;
   updateSessionSettings(
     input: {
       agentSessionId: string;
@@ -431,10 +367,6 @@ export interface EngineTypedCommandPort {
     options?: EngineEffectOptions
   ): Promise<unknown>;
   observe?(command: EngineExternalCommand): void;
-  executePlanDecision?(
-    command: PlanSubmitDecisionCommand,
-    options?: EngineEffectOptions
-  ): Promise<PlanSubmitDecisionResult>;
   kind: "typed";
 }
 
@@ -457,31 +389,6 @@ export type AgentSessionEngineListener = (
 
 export type AgentSessionEngineIntentObserver = (intent: EngineIntent) => void;
 
-export interface AgentSessionLoadComposerOptionsInput {
-  agentSessionId?: string | null;
-  cwd?: string | null;
-  force?: boolean;
-  waitForFreshModelCatalog?: boolean;
-  provider: string;
-  section?: import("./composerOptions.types.ts").ComposerOptionsSection;
-  settings?: AgentActivityComposerSettings | null;
-  signal?: AbortSignal;
-  targetKey: string;
-}
-
-export interface AgentSessionUpdateSettingsInput {
-  agentSessionId: string;
-  settings: AgentActivitySessionSettings;
-}
-
-export interface AgentSessionSubmitInteractionResponseInput {
-  action?: string;
-  agentSessionId: string;
-  optionId?: string;
-  payload?: Readonly<Record<string, unknown>>;
-  requestId: string;
-  turnId: string;
-}
 
 interface AgentSessionActivationInputBase {
   agentSessionId: string;
@@ -507,20 +414,14 @@ export type AgentSessionActivationInput =
   | (AgentSessionActivationInputBase & {
       agentTargetId: string;
       clientSubmitId: string;
-      initialGoalControl?: Readonly<AgentActivityInitialGoalControl>;
-      initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation;
       mode: "new";
       optimisticTitle?: string;
-      tuttiModeDraftKey?: string;
     })
   | (AgentSessionActivationInputBase & {
       agentTargetId?: string | null;
       clientSubmitId?: never;
-      initialGoalControl?: never;
-      initialTuttiModeActivation?: never;
       mode: "existing";
       optimisticTitle?: never;
-      tuttiModeDraftKey?: never;
     });
 
 export interface AgentSessionSubmitPromptInput {
@@ -542,51 +443,16 @@ export interface AgentSessionSubmitPromptResult {
   queued: boolean;
 }
 
-export interface AgentSessionStopInput {
-  agentSessionId: string;
-  /** Identity of the pending submit to stop while its Turn is being admitted. */
-  clientSubmitId?: string;
-}
-
 export interface AgentSessionEngine {
   readonly identity: AgentSessionEngineIdentity;
   activateSession(input: AgentSessionActivationInput): boolean;
-  controlGoal(
-    input: AgentSessionControlGoalInput
-  ): AgentSessionControlGoalAdmission;
-  deleteSessions(
-    input: Omit<AgentActivityDeleteSessionsInput, "signal" | "workspaceId"> & {
-      signal?: AbortSignal;
-    }
-  ): Promise<AgentActivityDeleteSessionsResult>;
   dispatch(intent: EngineIntent, options?: EngineDispatchOptions): void;
   dispose(): void;
   getSnapshot(): AgentSessionEngineState;
-  loadComposerOptions(
-    input: AgentSessionLoadComposerOptionsInput
-  ): Promise<AgentActivityComposerOptions>;
-  renameSession(
-    input: Omit<AgentActivityRenameSessionInput, "signal" | "workspaceId"> & {
-      signal?: AbortSignal;
-    }
-  ): Promise<AgentActivitySession>;
-  setSessionPinned(
-    input: Omit<
-      AgentActivitySetSessionPinnedInput,
-      "signal" | "workspaceId"
-    > & {
-      signal?: AbortSignal;
-    }
-  ): Promise<AgentActivitySession>;
-  submitInteractionResponse(
-    input: AgentSessionSubmitInteractionResponseInput
-  ): boolean;
   submitPrompt(
     input: AgentSessionSubmitPromptInput
   ): AgentSessionSubmitPromptResult;
-  stopSession(input: AgentSessionStopInput): void;
   subscribe(listener: AgentSessionEngineListener): () => void;
-  updateSessionSettings(input: AgentSessionUpdateSettingsInput): void;
 }
 import type {
   PromptQueueIntent,
@@ -601,10 +467,8 @@ import type {
   SessionUnactivateCommand
 } from "./pendingIntents.types.ts";
 import type {
-  InteractionRespondCommand,
   SessionLifecycleIntent,
-  SessionLifecycleState,
-  TurnCancelCommand
+  SessionLifecycleState
 } from "./sessionLifecycle.types.ts";
 import type {
   AgentActivitySessionDetailSnapshot,
@@ -613,47 +477,14 @@ import type {
   SessionReconcileState
 } from "./sessionReconcile.types.ts";
 import type {
-  AttentionReadCommand,
-  AttentionReadIntent,
-  AttentionReadState
-} from "./attentionReadState.types.ts";
-import type {
-  PlanDecisionIntent,
-  PlanDecisionState,
-  PlanSubmitDecisionCommand,
-  PlanSubmitDecisionResult
-} from "./planDecision.types.ts";
-import type {
   SessionCommandsIntent,
   SessionCommandsState
 } from "./sessionCommands.types.ts";
 import type { SessionMessagesState } from "./sessionMessages.types.ts";
 import type {
-  ComposerOptionsCommand,
-  ComposerOptionsIntent,
-  ComposerOptionsState
-} from "./composerOptions.types.ts";
-import type {
-  SessionMutationCommand,
-  SessionMutationsIntent,
-  SessionMutationsState
-} from "./sessionMutations.types.ts";
-import type {
-  TuttiModeActivationCommand,
-  TuttiModeActivationIntent,
-  TuttiModeActivationState
-} from "./tuttiModeActivation.types.ts";
-import type {
-  AgentActivityCancelTurnInput,
   AgentActivityComposerOptions,
   AgentActivityComposerSettings,
-  AgentActivityDeleteSessionsInput,
-  AgentActivityDeleteSessionsResult,
-  AgentActivityGoalControlResult,
-  AgentActivityInitialGoalControl,
-  AgentActivityRenameSessionInput,
   AgentActivitySendInput,
-  AgentActivitySetSessionPinnedInput,
   AgentActivitySession,
   AgentActivitySessionSettings,
   AgentActivitySubmitDiagnostics,
@@ -662,20 +493,4 @@ import type {
   AgentPromptContentBlock
 } from "../types.ts";
 import type { AgentActivityRailPlacement } from "../railPlacement.types.ts";
-import type {
-  AgentActivityCapabilityReference,
-  AgentActivityInitialTuttiModeActivation
-} from "../tuttiMode.types.ts";
-import type {
-  EditRetryCommand,
-  EditRetryIntent,
-  EditRetryState
-} from "./editRetry.types.ts";
-import type {
-  AgentSessionControlGoalAdmission,
-  AgentSessionControlGoalInput,
-  AgentSessionGoalControlEffectInput,
-  SessionGoalControlCommand,
-  SessionGoalControlIntent,
-  SessionGoalControlPublicState
-} from "./sessionGoalControl.types.ts";
+import type { AgentActivityCapabilityReference } from "../tuttiMode.types.ts";

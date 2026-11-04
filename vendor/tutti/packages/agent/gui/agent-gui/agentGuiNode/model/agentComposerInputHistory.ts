@@ -1,6 +1,5 @@
 import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import type { WorkspaceAgentSessionDetailGoalControl } from "../../../shared/workspaceAgentSessionDetailViewModel";
 import type { AgentComposerDraft } from "./agentGuiNodeTypes";
 import {
   agentComposerDraftHasContent,
@@ -74,9 +73,6 @@ export function projectAgentComposerInputHistory(
     for (const message of turn.userMessages) {
       append(projectHistoryEntry(message, turn.id), message.occurredAtUnixMs);
     }
-  }
-  for (const control of conversation.sourceDetail.goalControls ?? []) {
-    append(projectGoalControlHistoryEntry(control), control.occurredAtUnixMs);
   }
 
   projectedEntries.sort(compareProjectedHistoryEntries);
@@ -253,19 +249,6 @@ function projectHistoryEntry(
     })
   );
   return entry;
-}
-
-function projectGoalControlHistoryEntry(
-  control: WorkspaceAgentSessionDetailGoalControl
-): AgentComposerInputHistoryEntry | null {
-  const draft = buildAgentComposerDraft({ prompt: control.body });
-  if (!agentComposerDraftHasContent(draft)) {
-    return null;
-  }
-  return {
-    id: `goal-control:${control.id}`,
-    draft
-  };
 }
 
 function compareProjectedHistoryEntries(

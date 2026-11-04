@@ -31,6 +31,10 @@ const V2Version = 2
 // ConversationFocusCapability tells clients they may send conversation.focus.
 const ConversationFocusCapability = "conversation-focus-v1"
 
+// PromptStatusCapability says clients may ask what became of queued messages,
+// and that queue.updated events carry the queue's order and the change's reason.
+const PromptStatusCapability = "prompt-status-v1"
+
 // AttachmentReserveCapability says clients may choose attachment ids, link
 // stored content by SHA-256 and discard uploads a draft dropped.
 const AttachmentReserveCapability = "attachment-reserve-v1"
@@ -201,7 +205,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
 		}
-		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability)
+		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability)
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
@@ -353,6 +357,20 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 			return
 		}
 		writeJSON(w, http.StatusOK, queue)
+	case len(parts) == 4 && parts[0] == "sessions" && parts[2] == "queue" && parts[3] == "status" && r.Method == http.MethodPost:
+		var body struct {
+			RequestIDs []string `json:"request_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeV2Error(w, AppError("invalid_request", "invalid request body"))
+			return
+		}
+		statuses, err := v.svc.PromptStatuses(r.Context(), scopeID, parts[1], body.RequestIDs)
+		if err != nil {
+			writeV2Error(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"statuses": statuses})
 	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "side-workspace" && r.Method == http.MethodGet:
 		if _, err := v.svc.Snapshot(r.Context(), scopeID, parts[1], 1); err != nil {
 			writeV2Error(w, err)

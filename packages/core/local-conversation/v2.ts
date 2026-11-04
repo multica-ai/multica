@@ -133,6 +133,13 @@ export const localV2QueueSchema = z.object({
 });
 export type LocalV2Queue = z.infer<typeof localV2QueueSchema>;
 
+/** A daemon announcing this can say what became of queued messages. */
+export const LOCAL_V2_PROMPT_STATUS_CAPABILITY = "prompt-status-v1";
+
+export const localV2PromptStatusesSchema = z.object({
+  statuses: z.record(z.string(), z.enum(["queued", "dispatching", "delivered", "failed", "unknown", "removed", "none"]).catch("none")).default({}),
+});
+
 export const localV2HistorySchema = z.object({
   store_generation: z.string(),
   turns: z.array(snapshotTurnSchema),

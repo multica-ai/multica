@@ -1,11 +1,7 @@
 import {
   type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent,
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState
 } from "react";
 import { TooltipProvider } from "@tutti-os/ui-system";
@@ -24,13 +20,10 @@ import {
 import styles from "./AgentGUINode.styles";
 import {
   fallbackWorkspaceFileReferenceCopy,
-  useOptionalStableEventCallback,
   useStableEventCallback
 } from "./view/agentGUIViewUtils";
 import { AgentGUIConfigMenu } from "./view/AgentGUIAccountConfig";
 import { AgentGUIProviderRail } from "./view/AgentGUIProviderRail";
-import { type AgentGUIConversationRailState } from "./view/AgentGUIConversationRailPane";
-import { AgentGUIConversationRailController } from "./controller/AgentGUIConversationRailController";
 import { AgentGUIDetailPane } from "./view/AgentGUIDetailPane";
 import { EMPTY_WORKSPACE_APP_ICONS } from "./view/agentGUIDetailConstants";
 import { mergeWorkspaceAppIconsFromCommands } from "./view/agentGUIDetailModelHelpers";
@@ -48,10 +41,6 @@ import {
   resolveAgentGUIRailConfigProvider,
   resolveAgentGUIRailStatusTarget
 } from "./AgentGUINode.usage";
-import {
-  useAgentGUIConversationRailResizePointerMove,
-  type AgentGUIConversationRailResizeInteraction
-} from "./view/useAgentGUIConversationRailResizePointerMove";
 export type {
   AgentGUIComposerEmptySubmit,
   AgentGUIComposerFooterAccessoryContext,
@@ -127,9 +116,6 @@ export function AgentGUINodeView({
   onAgentEnvPanelOpen,
   actions,
   conversationRailCollapsed,
-  conversationRailWidthPx,
-  conversationRailMinWidthPx,
-  conversationRailMaxWidthPx,
   detailMinWidthPx,
   uiLanguage,
   onWorkspaceFileReferencesAdded,
@@ -137,14 +123,10 @@ export function AgentGUINodeView({
   prepareExternalPromptFiles = null,
   resolvePastedPath = null,
   promptAssetLimit = null,
-  onConversationRailWidthChanged,
-  onConversationRailLayoutChange,
   labels,
-  conversationRailLabels,
   workspaceUserProjectI18n,
   workspaceFileManagerCopy = null,
   workspaceFileReferenceAdapter = null,
-  onOpenConversationWindow,
   selectProjectDirectory,
   workspaceFileReferenceCopy = null,
   onRequestGitBranches = null,
@@ -170,12 +152,6 @@ export function AgentGUINodeView({
     viewModel
   });
   const [providerManagerOpen, setProviderManagerOpen] = useState(false);
-  const railResizeInteractionRef =
-    useRef<AgentGUIConversationRailResizeInteraction | null>(null);
-  const [isRailResizing, setIsRailResizing] = useState(false);
-  const [railResizeWidthPx, setRailResizeWidthPx] = useState<number | null>(
-    null
-  );
   const [
     localComposerFocusRequestSequence,
     setLocalComposerFocusRequestSequence
@@ -209,32 +185,6 @@ export function AgentGUINodeView({
   const createConversationAction = useStableEventCallback(
     actions.createConversation
   );
-  const selectConversation = useStableEventCallback(actions.selectConversation);
-  const toggleConversationPinned = useStableEventCallback(
-    actions.toggleConversationPinned
-  );
-  const removeProject = useStableEventCallback(actions.removeProject);
-  const moveProject = useStableEventCallback(actions.moveProject);
-  const toggleProjectPinned = useStableEventCallback(
-    actions.toggleProjectPinned
-  );
-  const projectDelete = actions.confirmDeleteProjectConversations;
-  const confirmProjectDelete = useStableEventCallback(projectDelete);
-  const conversationDelete = actions.confirmDeleteConversations;
-  const confirmConversationDelete = useStableEventCallback(conversationDelete);
-  const requestDeleteConversation = useStableEventCallback(
-    actions.requestDeleteConversation
-  );
-  const cancelDeleteConversation = useStableEventCallback(
-    actions.cancelDeleteConversation
-  );
-  const confirmDeleteConversation = useStableEventCallback(
-    actions.confirmDeleteConversation
-  );
-  const openConversationWindow = useOptionalStableEventCallback(
-    onOpenConversationWindow
-  );
-  const openProjectFiles = useOptionalStableEventCallback(onLinkAction);
   const detailComposerFocusRequestSequence =
     localComposerFocusRequestSequence === 0
       ? composerFocusRequestSequence
@@ -261,119 +211,13 @@ export function AgentGUINodeView({
       workspaceAppIcons
     ]
   );
-  const clampConversationRailWidth = useCallback(
-    (widthPx: number) =>
-      Math.min(
-        conversationRailMaxWidthPx,
-        Math.max(conversationRailMinWidthPx, widthPx)
-      ),
-    [conversationRailMaxWidthPx, conversationRailMinWidthPx]
-  );
   const providerRailWidthPx = conversationRailCollapsed ? 0 : 52;
-  const handleConversationRailResizePointerDown = useCallback(
-    (event: PointerEvent<HTMLDivElement>): void => {
-      if (conversationRailCollapsed || event.button !== 0) {
-        return;
-      }
-      event.preventDefault();
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      railResizeInteractionRef.current = {
-        lastWidthPx: conversationRailWidthPx,
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        startWidthPx: conversationRailWidthPx
-      };
-      setRailResizeWidthPx(conversationRailWidthPx);
-      setIsRailResizing(true);
-    },
-    [conversationRailCollapsed, conversationRailWidthPx]
-  );
-  const handleConversationRailResizePointerMove =
-    useAgentGUIConversationRailResizePointerMove({
-      clampConversationRailWidth,
-      layoutElementRef,
-      onConversationRailLayoutChange,
-      providerRailWidthPx,
-      railResizeInteractionRef
-    });
-  const endConversationRailResize = useCallback(
-    (event?: PointerEvent<HTMLDivElement>): void => {
-      const resizeState = railResizeInteractionRef.current;
-      if (
-        event &&
-        resizeState?.pointerId === event.pointerId &&
-        event.currentTarget.hasPointerCapture?.(event.pointerId)
-      ) {
-        event.currentTarget.releasePointerCapture?.(event.pointerId);
-      }
-      railResizeInteractionRef.current = null;
-      if (resizeState) {
-        const nextWidthPx = resizeState.lastWidthPx;
-        setRailResizeWidthPx(nextWidthPx);
-        onConversationRailWidthChanged(nextWidthPx);
-      } else {
-        setRailResizeWidthPx(null);
-      }
-      setIsRailResizing(false);
-    },
-    [onConversationRailWidthChanged]
-  );
-  useEffect(() => {
-    if (isRailResizing || railResizeWidthPx === null) {
-      return;
-    }
-    if (
-      conversationRailCollapsed ||
-      conversationRailWidthPx === railResizeWidthPx
-    ) {
-      setRailResizeWidthPx(null);
-    }
-  }, [
-    conversationRailCollapsed,
-    conversationRailWidthPx,
-    isRailResizing,
-    railResizeWidthPx
-  ]);
-  const handleConversationRailResizeKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>): void => {
-      if (conversationRailCollapsed) {
-        return;
-      }
-
-      const stepPx = event.shiftKey ? 48 : 16;
-      const direction =
-        event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
-      if (direction === 0) {
-        return;
-      }
-
-      event.preventDefault();
-      onConversationRailWidthChanged(
-        clampConversationRailWidth(conversationRailWidthPx + direction * stepPx)
-      );
-    },
-    [
-      clampConversationRailWidth,
-      conversationRailCollapsed,
-      conversationRailWidthPx,
-      onConversationRailWidthChanged
-    ]
-  );
-
-  const visualConversationRailWidthPx = isRailResizing
-    ? (railResizeInteractionRef.current?.lastWidthPx ?? conversationRailWidthPx)
-    : (railResizeWidthPx ?? conversationRailWidthPx);
-  const effectiveConversationRailWidthPx = conversationRailCollapsed
-    ? 0
-    : visualConversationRailWidthPx;
 
   const layoutStyle = {
-    "--agent-gui-conversation-rail-width": `${effectiveConversationRailWidthPx}px`,
-    "--agent-gui-conversation-rail-content-width": `${visualConversationRailWidthPx}px`,
     "--agent-gui-detail-min-width": `${detailMinWidthPx}px`,
     "--agent-gui-provider-rail-width": `${providerRailWidthPx}px`,
     gridTemplateColumns:
-      "var(--agent-gui-provider-rail-width) var(--agent-gui-conversation-rail-width) minmax(var(--agent-gui-detail-min-width), 1fr)"
+      "var(--agent-gui-provider-rail-width) minmax(var(--agent-gui-detail-min-width), 1fr)"
   } as CSSProperties;
   const effectiveRailConfigProvider = resolveAgentGUIRailConfigProvider(
     railConfigProvider,
@@ -422,7 +266,7 @@ export function AgentGUINodeView({
     },
     []
   );
-  const { registerRailInteractionLockProbe } = useAgentGUIExternalRequests({
+  useAgentGUIExternalRequests({
     createConversationDisabled,
     labels,
     requestCreateConversation,
@@ -431,82 +275,6 @@ export function AgentGUINodeView({
     viewModel,
     workbenchCommandBridge
   });
-  const conversationRailStoreState = useMemo<AgentGUIConversationRailState>(
-    () => ({
-      activeConversation: viewModel.rail.activeConversation,
-      activeConversationId: viewModel.rail.activeConversationId,
-      revealRequest: viewModel.rail.revealRequest,
-      pendingDeleteConversationId:
-        viewModel.operations.pendingDeleteConversation?.id ?? null,
-      isLoadingConversations: viewModel.rail.isLoadingConversations,
-      isDeletingConversation: viewModel.operations.isDeletingConversation,
-      isDeletingProjectConversations:
-        viewModel.operations.isDeletingProjectConversations,
-      isUserProjectMutationPending:
-        viewModel.operations.isUserProjectMutationPending,
-      labels: conversationRailLabels,
-      workspaceUserProjectI18n,
-      uiLanguage,
-      createConversationDisabled,
-      isCollapsed: conversationRailCollapsed,
-      agentTargets: viewModel.rail.agentTargets,
-      agentTargetsLoading: viewModel.rail.agentTargetsLoading,
-      conversationFilter: viewModel.rail.conversationFilter,
-      onCreateConversation: requestCreateConversation,
-      onUpdateConversationFilter: actions.updateConversationFilter,
-      onSelectConversationFilterTarget: actions.selectConversationFilterTarget,
-      onSelectConversation: selectConversation,
-      onToggleConversationPinned: toggleConversationPinned,
-      onMarkConversationUnread: actions.markConversationUnread,
-      onRemoveProject: removeProject,
-      onMoveProject: moveProject,
-      onToggleProjectPinned: toggleProjectPinned,
-      onConfirmDeleteProjectConversations: confirmProjectDelete,
-      onConfirmDeleteConversations: confirmConversationDelete,
-      onRequestDeleteConversation: requestDeleteConversation,
-      onRequestRenameConversation: requestRenameConversation,
-      onCancelDeleteConversation: cancelDeleteConversation,
-      onConfirmDeleteConversation: confirmDeleteConversation,
-      onOpenProjectFiles: openProjectFiles,
-      onOpenConversationWindow: openConversationWindow,
-      selectProjectDirectory: effectiveSelectProjectDirectory
-    }),
-    [
-      cancelDeleteConversation,
-      confirmDeleteConversation,
-      confirmConversationDelete,
-      confirmProjectDelete,
-      conversationRailCollapsed,
-      createConversationDisabled,
-      conversationRailLabels,
-      openConversationWindow,
-      openProjectFiles,
-      actions.markConversationUnread,
-      actions.updateConversationFilter,
-      removeProject,
-      moveProject,
-      toggleProjectPinned,
-      requestCreateConversation,
-      requestDeleteConversation,
-      requestRenameConversation,
-      selectConversation,
-      effectiveSelectProjectDirectory,
-      viewModel.rail.agentTargets,
-      viewModel.rail.agentTargetsLoading,
-      viewModel.rail.revealRequest,
-      toggleConversationPinned,
-      uiLanguage,
-      viewModel.rail.conversationFilter,
-      viewModel.rail.activeConversation,
-      viewModel.rail.activeConversationId,
-      viewModel.operations.isDeletingConversation,
-      viewModel.operations.isDeletingProjectConversations,
-      viewModel.operations.isUserProjectMutationPending,
-      viewModel.rail.isLoadingConversations,
-      viewModel.operations.pendingDeleteConversation?.id,
-      workspaceUserProjectI18n
-    ]
-  );
   const targetPresentationKey = mentionAgentTargetPresentationKey(
     viewModel.rail.agentTargets,
     viewModel.composer.handoffAgentTargets,
@@ -541,7 +309,6 @@ export function AgentGUINodeView({
           className={styles.layout}
           data-agent-gui-active={isActive ? "true" : "false"}
           data-agent-gui-visible={isVisible ? "true" : "false"}
-          data-rail-resizing={isRailResizing ? "true" : undefined}
           style={layoutStyle}
         >
           <aside
@@ -626,60 +393,6 @@ export function AgentGUINodeView({
               </div>
             ) : null}
           </aside>
-          <aside
-            id="agent-gui-conversation-rail"
-            className={`${styles.railPanel}${
-              conversationRailCollapsed ? ` ${styles.railPanelCollapsed}` : ""
-            }`}
-            aria-hidden={conversationRailCollapsed ? "true" : undefined}
-            inert={conversationRailCollapsed ? true : undefined}
-          >
-            <AgentConversationClockProvider isVisible={isVisible}>
-              {/* Selecting an Activity row must not rebuild its all-provider snapshot. */}
-              <AgentGUIConversationRailController
-                {...conversationRailStoreState}
-                activityContextKey={[
-                  viewModel.shell.currentUserId?.trim() ?? "",
-                  viewModel.shell.nodeId?.trim() ?? ""
-                ].join("\u0000")}
-                conversations={viewModel.rail.conversations}
-                currentUserId={viewModel.shell.currentUserId}
-                nodeId={viewModel.shell.nodeId}
-                registerInteractionLockProbe={registerRailInteractionLockProbe}
-                userProjects={viewModel.rail.userProjects}
-                workspaceId={viewModel.shell.workspaceId}
-              />
-            </AgentConversationClockProvider>
-          </aside>
-          <div
-            id="agent-gui-conversation-rail-resize"
-            className={
-              conversationRailCollapsed
-                ? `${styles.railResizeHandle} ${styles.railResizeHandleCollapsed} nodrag pointer-events-none opacity-0`
-                : `${styles.railResizeHandle} nodrag`
-            }
-            role="separator"
-            aria-label={labels.conversationRailResizeAria}
-            aria-hidden={conversationRailCollapsed ? "true" : undefined}
-            aria-orientation="vertical"
-            aria-valuemin={conversationRailMinWidthPx}
-            aria-valuemax={conversationRailMaxWidthPx}
-            aria-valuenow={
-              conversationRailCollapsed
-                ? undefined
-                : visualConversationRailWidthPx
-            }
-            data-resizing={isRailResizing ? "true" : undefined}
-            data-testid="agent-gui-conversation-rail-resize-handle"
-            tabIndex={conversationRailCollapsed ? -1 : 0}
-            onBlur={() => endConversationRailResize()}
-            onKeyDown={handleConversationRailResizeKeyDown}
-            onPointerCancel={endConversationRailResize}
-            onPointerDown={handleConversationRailResizePointerDown}
-            onLostPointerCapture={endConversationRailResize}
-            onPointerMove={handleConversationRailResizePointerMove}
-            onPointerUp={endConversationRailResize}
-          />
           <section id="agent-gui-detail" className={styles.detailPanel}>
             <AgentConversationClockProvider isVisible={isVisible}>
               <AgentGUIDetailPane

@@ -21,6 +21,8 @@ export class InteractionModel {
   status: "pending" | "answered" | "cancelled" = "pending";
   answer: Record<string, unknown> | null = null;
   updatedAt: string;
+  /** The row as last built; a resolve clears it, so an unchanged question keeps its object. */
+  private row?: ConversationMessage;
 
   constructor(init: InteractionInit) {
     this.id = init.id;
@@ -42,6 +44,7 @@ export class InteractionModel {
     this.status = status;
     this.answer = answer;
     this.updatedAt = at;
+    this.row = undefined;
   }
 
   get input() {
@@ -56,7 +59,9 @@ export class InteractionModel {
     } : undefined;
   }
 
-  toMessage(): ConversationMessage {
+  toMessage(): ConversationMessage { return this.row ??= this.buildMessage(); }
+
+  private buildMessage(): ConversationMessage {
     const output = this.output;
     return {
       turnId: this.turnId, messageId: this.id, role: "assistant", kind: "tool_call",

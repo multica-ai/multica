@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LocalFolderProject } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { groupLocalConversations, sessionEntry, type LocalConversationProjectGroup, type LocalSessionEntry } from "./local-conversation-projects";
@@ -16,13 +16,13 @@ export interface ConversationPageGroup extends LocalConversationProjectGroup {
 /**
  * The local conversation list, grouped by folder project. The complete list
  * comes from the scope's v2 summaries and stays current with them; groups
- * show eight conversations per page, pinned first, then most recent.
+ * show eight conversations per page, pinned first, then most recent. Call this
+ * from an observer component: it reads the list model.
  */
 export function useLocalConversationPages(transport: LocalV2Transport & Pick<DirectLocalV2Transport, "availability" | "onAvailability">, scope: LocalV2Scope, projects: LocalFolderProject[], hidden: string[], archived: boolean, search: string, enabled: boolean) {
   const client = conversationService(transport, scope);
   const [status, setStatus] = useState<{ pending: boolean; error: Error | null; fetching: boolean }>({ pending: true, error: null, fetching: false });
   const [pages, setPages] = useState(new Map<string | null, number>());
-  const version = useSyncExternalStore(useCallback((listener) => client.onSummaries(listener), [client]), () => client.summaries());
   const load = useCallback(() => {
     setStatus((current) => ({ ...current, fetching: true }));
     client.loadSummaries().then(() => setStatus({ pending: false, error: null, fetching: false }), (error: unknown) => setStatus({ pending: false, error: error instanceof Error ? error : new Error(String(error)), fetching: false }));
@@ -42,7 +42,7 @@ export function useLocalConversationPages(transport: LocalV2Transport & Pick<Dir
     return () => { stopAvailability(); stopConnection(); };
   }, [enabled, load, transport, scope.userId, scope.workspaceId]);
   // Sides open beside their source; a conversation joins the list with its first message.
-  const sessions: LocalSessionEntry[] = version.filter((summary) => !summary.side_source_id && summary.turn_count > 0).map(sessionEntry)
+  const sessions: LocalSessionEntry[] = client.list.summaries.filter((summary) => !summary.side_source_id && summary.turn_count > 0).map(sessionEntry)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
   const groups: ConversationPageGroup[] = groupLocalConversations(sessions, projects.filter((project) => !hidden.includes(project.id)), archived, search).map((group) => {
     const pageCount = pages.get(group.id) ?? 1;

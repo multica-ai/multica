@@ -16,7 +16,12 @@ const transportFor = vi.hoisted(() => ({ calls: [] as string[] }));
 vi.mock("../platform/local-v2-transport", () => ({ setRemoteFolderChooser: () => {}, localV2Transport: (deviceId = "local") => { transportFor.calls.push(deviceId); return window.desktopAPI.localV2; } }));
 vi.mock("../platform/linked-devices", () => ({ useLinkedDevices: () => [{ peer_id: "peer-1", device_name: "Mac Studio", connection: "direct" }], deviceName: (_devices: unknown, id: string) => id === "peer-1" ? "Mac Studio" : id }));
 
-const mock = vi.hoisted(() => ({ request: vi.fn(), replace: vi.fn(), pathname: "/test/conversations", selected: "source", error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), panel: vi.fn(), copyText: vi.fn(), compact: false, locale: "zh-Hans", projects: [] as Project[], folders: [] as LocalFolderProject[], folderError: null as Error | null, folderPending: null as Promise<unknown> | null }));
+const mock = await vi.hoisted(async () => {
+  const { createContext, useContext } = await import("react");
+  // Route and layout changes reach the page through context, as they do in the app.
+  const Route = createContext(0);
+  return { Route, useRoute: () => useContext(Route), request: vi.fn(), replace: vi.fn(), pathname: "/test/conversations", selected: "source", error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), panel: vi.fn(), copyText: vi.fn(), compact: false, locale: "zh-Hans", projects: [] as Project[], folders: [] as LocalFolderProject[], folderError: null as Error | null, folderPending: null as Promise<unknown> | null };
+});
 vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mock.copyText }));
 vi.mock("@multica/core/projects/queries", () => ({ projectListOptions: () => ({ queryKey: ["test-projects"], queryFn: async () => mock.projects }) }));
 vi.mock("sonner", () => ({ toast: { error: mock.error, success: mock.success, info: mock.info, warning: mock.warning } }));
@@ -24,11 +29,11 @@ vi.mock("@multica/core/auth", () => ({ useAuthStore: (selector: (state: unknown)
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "workspace" }), useRequiredWorkspaceSlug: () => "test", useWorkspacePaths: () => ({ conversationFlow: () => "/test/conversations", conversationFlowDevice: (id: string) => `/test/conversations/devices/${id}` }) }));
 vi.mock("@multica/core/platform", () => ({ getCurrentSlug: () => "test" }));
 vi.mock("@multica/views/navigation", () => ({
-  useNavigation: () => ({ pathname: mock.pathname, searchParams: new URLSearchParams({ session: mock.selected }), replace: mock.replace }),
+  useNavigation: () => { mock.useRoute(); return { pathname: mock.pathname, searchParams: new URLSearchParams({ session: mock.selected }), replace: mock.replace }; },
   AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => <a href={href} {...props}>{children}</a>,
 }));
 vi.mock("@multica/views/i18n", () => ({ useLocale: () => mock.locale, useT: (namespace?: string) => ({ t: (selector: (resource: typeof chat) => string, options?: { title?: string; device?: string }) => selector((namespace === "layout" ? layout : chat) as typeof chat).replace("{{title}}", options?.title ?? "").replace("{{device}}", options?.device ?? "") }) }));
-vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => mock.compact }));
+vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => { mock.useRoute(); return mock.compact; } }));
 vi.mock("@multica/views/runtimes/provider-logo", () => ({ ProviderLogo: () => null }));
 vi.mock("../components/tutti-agent-gui-panel", () => ({ TuttiAgentGuiPanel: (props: ComponentProps<typeof TuttiAgentGuiPanel>) => {
   mock.panel(props);
@@ -145,7 +150,8 @@ afterEach(() => { cleanup(); qc.clear(); useProjectVisibilityStore.setState({ hi
 function listedIds() {
   return screen.queryAllByRole("link").map((link) => new URL(link.getAttribute("href")!, "http://app").searchParams.get("session"));
 }
-const page = () => <QueryClientProvider client={qc}><LocalConversationFlowPage /></QueryClientProvider>;
+let route = 0;
+const page = () => <mock.Route.Provider value={++route}><QueryClientProvider client={qc}><LocalConversationFlowPage /></QueryClientProvider></mock.Route.Provider>;
 const folder = (id: string, title: string, path = "/owned/work"): LocalFolderProject => ({ id, title, path, createdAt: "2026-01-01T00:00:00Z" });
 function activateWithPointer(element: HTMLElement) {
   const pointerDown = new MouseEvent("pointerdown", { bubbles: true, button: 0 });

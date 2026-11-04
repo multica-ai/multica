@@ -35,7 +35,7 @@ export function queueOwnedReconcileCommand(
  * proof arrives. The follow-up owned reconcile may apply that proof via
  * message/snapshotReceived before this result lands. If uncertainty remains:
  * - succeeded reconcile → definitive non-delivery; drop the prompt so later
- *   queued work can drain (matching Goal Control releasing a failed identity)
+ *   queued work can drain
  * - failed/timedOut reconcile → retryable failed head (send-now / remove),
  *   matching Tutti Mode's inconclusive-owned-reconcile rule
  */

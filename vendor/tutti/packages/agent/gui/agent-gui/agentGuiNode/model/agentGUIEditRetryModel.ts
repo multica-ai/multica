@@ -1,8 +1,8 @@
 import type {
-  AgentActivityEditRetryAvailability,
-  AgentActivityEditRetryRecoveryAction,
-  EditRetryOperationStatus
-} from "@tutti-os/agent-activity-core";
+  AgentGUIEditRetryAvailability,
+  AgentGUIEditRetryRecoveryAction,
+  AgentGUIEditRetryStatus
+} from "../controller/agentGuiController.promptOperations";
 
 export type AgentGUIEditRetryPresentationState =
   | "ready"
@@ -13,13 +13,13 @@ export interface AgentGUIEditRetryPresentation {
   state: AgentGUIEditRetryPresentationState;
   editableTurnId: string | null;
   operationId: string | null;
-  availableActions: readonly AgentActivityEditRetryRecoveryAction[];
-  reasonCode: AgentActivityEditRetryAvailability["reasonCode"] | null;
+  availableActions: readonly AgentGUIEditRetryRecoveryAction[];
+  reasonCode: AgentGUIEditRetryAvailability["reasonCode"] | null;
 }
 
 export function projectAgentGUIEditRetryPresentation(input: {
-  availability: AgentActivityEditRetryAvailability | null;
-  commandStatus: EditRetryOperationStatus;
+  availability: AgentGUIEditRetryAvailability | null;
+  commandStatus: AgentGUIEditRetryStatus;
 }): AgentGUIEditRetryPresentation {
   const availability = input.availability;
   const processing =

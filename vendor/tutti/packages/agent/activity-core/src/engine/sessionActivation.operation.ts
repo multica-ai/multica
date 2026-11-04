@@ -92,22 +92,9 @@ export function requestSessionActivation(
           ...sharedIntent,
           agentTargetId,
           clientSubmitId,
-          ...(input.initialGoalControl
-            ? { initialGoalControl: { ...input.initialGoalControl } }
-            : {}),
-          ...(input.initialTuttiModeActivation
-            ? {
-                initialTuttiModeActivation: {
-                  ...input.initialTuttiModeActivation
-                }
-              }
-            : {}),
           mode: "new",
           ...(input.optimisticTitle?.trim()
             ? { optimisticTitle: input.optimisticTitle.trim() }
-            : {}),
-          ...(input.tuttiModeDraftKey?.trim()
-            ? { tuttiModeDraftKey: input.tuttiModeDraftKey.trim() }
             : {})
         }
       : {

@@ -2,7 +2,9 @@ import { action, makeObservable, observable } from "mobx";
 import type { LocalBackgroundTask } from "@multica/core/local-conversation/protocol";
 import { backgroundTaskPresentation } from "./background-task-presentation";
 import type { ConversationLocale, ConversationMessage } from "./conversation-message";
+import type { InteractionModel } from "./interaction-model";
 import type { ItemModel } from "./item-model";
+import type { UserMessageModel } from "./user-message-model";
 import { errorMessage, millis, number, record, text } from "./values";
 
 /** The daemon's context MCP server; its question tool is shown as an interaction instead. */
@@ -37,7 +39,14 @@ export class TurnModel {
   completedAt: string | null;
   error: TurnError | null;
 
-  constructor(private readonly conversation: { turnItems(turnId: string): ItemModel[] }, init: TurnInit) {
+  /** Each item's row and what it was built from, so an unchanged item keeps its object. */
+  private readonly rows = new Map<string, { key: string; row: ConversationMessage | null }>();
+
+  constructor(private readonly conversation: {
+    turnItems(turnId: string): readonly ItemModel[];
+    turnMessages(turnId: string): readonly UserMessageModel[];
+    turnInteractions(turnId: string): readonly InteractionModel[];
+  }, init: TurnInit) {
     this.id = init.id;
     this.index = init.index;
     this.requestId = init.requestId;
@@ -60,7 +69,18 @@ export class TurnModel {
   }
 
   /** Items of this turn in the order they started. */
-  items(): ItemModel[] { return this.conversation.turnItems(this.id); }
+  items(): readonly ItemModel[] { return this.conversation.turnItems(this.id); }
+
+  /**
+   * This turn's transcript: the prompt first, then output by its start time, so a
+   * late event cannot move ahead of the prompt that started the turn.
+   */
+  messages(locale: ConversationLocale): ConversationMessage[] {
+    const rows = this.conversation.turnMessages(this.id).map((message) => message.toMessage());
+    rows.push(...this.assistantMessages(locale));
+    for (const interaction of this.conversation.turnInteractions(this.id)) if (interaction.kind === "question") rows.push(interaction.toMessage());
+    return rows.sort((a, b) => Number(b.role === "user") - Number(a.role === "user") || a.occurredAtUnixMs - b.occurredAtUnixMs);
+  }
 
   /**
    * The rows this turn's items produce. Not one row per item: some produce none,
@@ -70,12 +90,20 @@ export class TurnModel {
     const allItems = this.items();
     const items = allItems.filter((item) => !text(item.state.parent_tool_use_id));
     const lastText = items.findLast((item) => item.kind === "assistant_text")?.id;
+    // A background task's row shows its children, so it follows every item of the turn.
+    const newest = allItems.reduce((seq, item) => Math.max(seq, item.lastSeq), 0);
     const messages: ConversationMessage[] = [];
     for (const item of items) {
-      const message = item.kind === "background_task"
-        ? backgroundTask(item, locale, allItems)
-        : this.itemMessage(item, item.id === lastText, locale);
-      if (message) messages.push({ turnId: this.id, role: "assistant", occurredAtUnixMs: millis(item.startedAt), ...message });
+      const background = item.kind === "background_task";
+      const final = item.id === lastText;
+      const key = [background ? newest : item.lastSeq, this.status, final, this.error?.message ?? "", locale].join("|");
+      let entry = this.rows.get(item.id);
+      if (entry?.key !== key) {
+        const message = background ? backgroundTask(item, locale, allItems) : this.itemMessage(item, final, locale);
+        entry = { key, row: message && { turnId: this.id, role: "assistant", occurredAtUnixMs: millis(item.startedAt), ...message } };
+        this.rows.set(item.id, entry);
+      }
+      if (entry.row) messages.push(entry.row);
     }
     return messages;
   }
@@ -140,7 +168,7 @@ function toolCall(id: string, status: string, toolName: string, input: unknown, 
   };
 }
 
-function backgroundTask(item: ItemModel, locale: ConversationLocale, items: ItemModel[]): ItemMessage {
+function backgroundTask(item: ItemModel, locale: ConversationLocale, items: readonly ItemModel[]): ItemMessage {
   const state = item.state;
   const usage = record(state.usage);
   const status: LocalBackgroundTask["status"] = item.status === "in_progress" ? "running" : item.status === "completed" ? "completed" : item.status === "failed" ? "failed" : "cancelled";

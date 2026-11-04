@@ -16,7 +16,6 @@ import { AgentEnvPanelActionProvider } from "../../agentEnv";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { AgentTranscriptItemView } from "./AgentTranscriptItemView";
-import type { AgentGoalControlRowVM } from "../contracts/agentGoalControlRowVM";
 import type { AgentMessageContentVM } from "../contracts/agentMessageRowVM";
 import type { AgentMessageRowVM } from "../contracts/agentMessageRowVM";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
@@ -95,47 +94,6 @@ beforeEach(() => {
 });
 
 describe("AgentTranscriptItemView render stability", () => {
-  it("renders and copies a goal control as a dedicated transcript row", async () => {
-    const row: AgentGoalControlRowVM = {
-      kind: "goal-control",
-      id: "goal-control:client-submit:user:submit-goal-1",
-      turnId: null,
-      action: "set",
-      body: "/goal ship it",
-      occurredAtUnixMs: 1
-    };
-    const writeText = vi.fn(async () => undefined);
-    installAgentHostClipboard(writeText);
-
-    const { container } = render(
-      <AgentTranscriptItemView
-        workspaceRoot="/workspace/demo"
-        basePath="/workspace/demo"
-        row={row}
-        labels={transcriptLabels()}
-      />
-    );
-
-    expect(screen.getByText("/goal ship it")).toBeInTheDocument();
-    expect(
-      container.querySelector('[data-agent-goal-control-action="set"]')
-    ).toBeInTheDocument();
-    expect(
-      container.querySelector(
-        '[data-agent-message-footer="true"] [aria-label="agentHost.agentGui.copyMessage"]'
-      )
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "agentHost.agentGui.copyMessage"
-      })
-    );
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("/goal ship it");
-    });
-  });
-
   it("keeps tool link handlers stable when an unchanged tool row is reprojected", () => {
     const onLinkAction = vi.fn();
     const labels = transcriptLabels();

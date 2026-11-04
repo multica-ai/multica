@@ -73,7 +73,6 @@ describe("Agent Side composer policy", () => {
     expect(
       projectAgentSideCapabilityMenuState({
         connectors: { enabled: false },
-        tuttiMode: { enabled: true },
         computerUse: { installed: true }
       })
     ).toEqual({ connectors: { enabled: false } });

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { reaction } from "mobx";
 import { describe, expect, it, vi } from "vitest";
 import { localV2SnapshotSchema, localV2SummarySchema, type LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_STABLE_MS } from "@multica/core/local-conversation/focus";
@@ -31,26 +32,28 @@ describe("ConversationService", () => {
     ]);
     const client = newStore(t);
     const changed = vi.fn();
-    client.onSummaries(changed);
+    const stop = reaction(() => client.list.summaries, changed);
     await client.loadSummaries();
-    expect(client.summaries().map((s) => s.conversation_id)).toEqual(["a", "b", "c"]);
+    expect(client.list.summaries.map((s) => s.conversation_id)).toEqual(["a", "b", "c"]);
     expect(sent).toEqual([{ version: 2, type: "subscribe_scope", after_scope_seq: 3 }]);
     client.receive({ version: 2, type: "scope.summaries", scope_seq: 4, summaries: [summary("a", 4, "renamed")] });
-    expect(client.summary("a")?.title).toBe("renamed");
+    expect(client.list.summary("a")?.title).toBe("renamed");
     // An older summary arriving late never replaces a newer one.
     client.receiveSummary(summary("a", 1, "stale"));
-    expect(client.summary("a")?.title).toBe("renamed");
-    expect(changed).toHaveBeenCalledTimes(2);
+    expect(client.list.summary("a")?.title).toBe("renamed");
+    stop();
+    // Each page, then the stream's change; the stale one changes nothing.
+    expect(changed).toHaveBeenCalledTimes(3);
   });
 
   it("hands out the list without waiting for the scope subscription, and retries a failed one", async () => {
     const { t, sent } = transport([{ scope_seq: 1, summaries: [summary("a", 1)], has_more: false }]);
     vi.mocked(t.send).mockReturnValueOnce(new Promise(() => {}));
     const client = newStore(t);
-    expect(client.hasSummaries()).toBe(false);
+    expect(client.list.read).toBe(false);
     await client.loadSummaries();
-    expect(client.summaries().map((s) => s.conversation_id)).toEqual(["a"]);
-    expect(client.hasSummaries()).toBe(true);
+    expect(client.list.summaries.map((s) => s.conversation_id)).toEqual(["a"]);
+    expect(client.list.read).toBe(true);
 
     const failing = transport([{ scope_seq: 1, summaries: [], has_more: false }]);
     vi.mocked(failing.t.send).mockRejectedValueOnce(new Error("socket down"));
@@ -95,16 +98,17 @@ describe("ConversationService", () => {
     const client = newStore(t);
     const listener = vi.fn(), changed = vi.fn();
     client.observe("c1", listener);
-    client.onPresence(changed);
+    const stop = reaction(() => client.list.presence("c1"), changed);
     const devices = [{ peer_id: "p1", device_name: "MacBook" }];
     client.receive({ version: 2, type: "scope.presence", conversation_id: "c1", devices });
-    expect(client.presence("c1")).toEqual(devices);
+    expect(client.list.presence("c1")).toEqual(devices);
     expect(listener).not.toHaveBeenCalled();
     client.receive({ version: 2, type: "scope.presence", conversation_id: "c1", devices: [] });
-    expect(client.presence("c1")).toEqual([]);
+    expect(client.list.presence("c1")).toEqual([]);
     client.receive({ version: 2, type: "scope.presence", conversation_id: "c1", devices });
     client.connection(false);
-    expect(client.presence("c1")).toEqual([]);
+    expect(client.list.presence("c1")).toEqual([]);
+    stop();
     expect(changed).toHaveBeenCalledTimes(4);
   });
 
@@ -372,7 +376,7 @@ describe("ConversationServiceManager", () => {
     expect(store.conversation("a")).toBeDefined();
     expect(store.conversation("b")).toBeUndefined();
     expect(store.conversation("c")).toBeDefined();
-    expect(store.summary("a")).toBeDefined();
+    expect(store.list.summary("a")).toBeDefined();
     held();
   });
 

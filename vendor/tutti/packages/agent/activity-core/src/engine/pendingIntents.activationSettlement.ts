@@ -179,7 +179,7 @@ export function confirmActivationsFromSessions(
   const sessionsById = new Map(
     sessions.map((session) => [session.agentSessionId, session])
   );
-  const followUpIntents: EngineIntent[] = [];
+  const commands: EngineCommand[] = [];
   const workspaceMismatchSessionIdSet = new Set(
     workspaceMismatchSessionIds?.map((id) => id.trim()).filter(Boolean) ?? []
   );
@@ -231,15 +231,11 @@ export function confirmActivationsFromSessions(
       snapshotOutcome: "matched",
       status: "confirmed"
     });
-    followUpIntents.push(...settingsUpdate.followUpIntents);
+    commands.push(...settingsUpdate.commands);
   }
-  return next === state && followUpIntents.length === 0
+  return next === state && commands.length === 0
     ? unchanged(state)
-    : {
-        commands: NO_COMMANDS,
-        ...(followUpIntents.length ? { followUpIntents } : {}),
-        state: next
-      };
+    : { commands, state: next };
 }
 
 function sessionConfirmsNewActivation(

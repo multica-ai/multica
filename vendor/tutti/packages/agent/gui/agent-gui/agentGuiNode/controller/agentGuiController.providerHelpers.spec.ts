@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   AgentActivityComposerOptions,
-  AgentActivitySnapshot
+  AgentActivityComposerOptionsLoadStatus
 } from "@tutti-os/agent-activity-core";
 import {
   composerOptionsForTarget,
@@ -19,38 +19,25 @@ const target = {
 } as AgentGUIComposerTargetData;
 
 describe("composer options target state", () => {
+  const composer = (
+    options: AgentActivityComposerOptions | null,
+    status: AgentActivityComposerOptionsLoadStatus
+  ) => ({ options: () => options, status: () => status });
+
   it("reports loading only before the target has cached options", () => {
-    const loadingSnapshot = snapshot({
-      composerOptionsLoadStatusByTargetKey: { "target-1": "loading" }
-    });
-    expect(
-      composerOptionsLoadingForTarget({ snapshot: loadingSnapshot, target })
-    ).toBe(true);
-    expect(
-      composerOptionsForTarget({ snapshot: loadingSnapshot, target })
-    ).toBe(null);
+    const loading = composer(null, "loading");
+    expect(composerOptionsLoadingForTarget({ composer: loading, target })).toBe(true);
+    expect(composerOptionsForTarget({ composer: loading, target })).toBe(null);
 
     const cachedOptions = {} as AgentActivityComposerOptions;
-    const refreshingSnapshot = snapshot({
-      composerOptionsByTargetKey: { "target-1": cachedOptions },
-      composerOptionsLoadStatusByTargetKey: { "target-1": "loading" }
-    });
-    expect(
-      composerOptionsLoadingForTarget({ snapshot: refreshingSnapshot, target })
-    ).toBe(false);
-    expect(
-      composerOptionsForTarget({ snapshot: refreshingSnapshot, target })
-    ).toBe(cachedOptions);
+    const refreshing = composer(cachedOptions, "loading");
+    expect(composerOptionsLoadingForTarget({ composer: refreshing, target })).toBe(false);
+    expect(composerOptionsForTarget({ composer: refreshing, target })).toBe(cachedOptions);
   });
 
   it("does not leave the target loading after a request error", () => {
     expect(
-      composerOptionsLoadingForTarget({
-        snapshot: snapshot({
-          composerOptionsLoadStatusByTargetKey: { "target-1": "error" }
-        }),
-        target
-      })
+      composerOptionsLoadingForTarget({ composer: composer(null, "error"), target })
     ).toBe(false);
   });
 });
@@ -194,17 +181,6 @@ describe("target connection selection", () => {
   });
 });
 
-function snapshot(
-  overrides: Partial<AgentActivitySnapshot>
-): AgentActivitySnapshot {
-  return {
-    workspaceId: "workspace-1",
-    sessions: [],
-    presences: [],
-    sessionMessagesById: {},
-    ...overrides
-  };
-}
 
 function conversation(
   id: string,

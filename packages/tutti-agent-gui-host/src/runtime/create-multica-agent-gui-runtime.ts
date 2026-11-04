@@ -2,17 +2,21 @@ import { createLocalCostProfile, createLocalPresentationTiming, createLocalSendT
 import {
   createAgentActivitySnapshotProjector,
   createAgentSessionEngine,
+  providerForkBindingAllowsAttempt,
+  selectEngineTurn,
   type AgentActivityComposerOptions,
   type AgentActivityDurableMessage,
   type AgentActivitySendInput,
   type AgentActivitySession,
   type AgentActivitySnapshot,
   type AgentSessionActivateEffectInput,
+  type AgentSessionEngine,
   type EngineExtensionCommand,
   type EngineTypedCommandPort,
 } from "@tutti-os/agent-activity-core";
 import type { AgentGUIRuntime } from "@tutti-os/agent-gui";
 import { extractRichTextMentionsFromContent } from "@tutti-os/ui-rich-text/core";
+import { runInAction } from "mobx";
 import { contentReferencesAttachment } from "@multica/core/types/attachment-url";
 import type { Attachment } from "@multica/core/types";
 import type {
@@ -27,12 +31,13 @@ import type {
   LocalConversationSource,
 } from "../protocol";
 import { executionTargets } from "../protocol";
-import { ReasoningPreferences } from "./reasoning-preferences";
-import { ModelPreferences } from "./model-preferences";
-import { PermissionPreferences } from "./permission-preferences";
 import type { LocalV2Event } from "@multica/core/local-conversation/v2";
-import { isLocalReasoningEffort, localReasoningLevels, isLocalPermissionMode, type LocalReasoningEffort, type LocalPermissionMode } from "@multica/core/local-conversation/protocol";
+import { localReasoningLevels, type LocalPermissionMode } from "@multica/core/local-conversation/protocol";
+import { reaction } from "mobx";
+import { TranscriptModel } from "@multica/conversation-client/models";
+import { CommitCadence, ComposerService, ConversationMutationService } from "@multica/conversation-client/services";
 import { RuntimeLedger } from "./ledger";
+import { LocalTranscript, mergeTranscriptChange, type LocalTranscriptChange } from "./local-transcript";
 import { composerOptions, projectLocalMetadata, projectPendingSession, projectSession, projectV2Detail } from "./projection";
 import { createDesktopQueueEngine } from "./desktop-queue-engine";
 import { promptSubmissionError } from "./prompt-submission-policy";
@@ -61,26 +66,14 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   const costProfile = createLocalCostProfile({ itemCount: (id) => source.conversation(id)?.items.size ?? 0 });
   const sendTiming = createLocalSendTiming();
   const ledger = new RuntimeLedger();
-  const modelPreferences = new ModelPreferences();
-  const modelListeners = new Set<() => void>();
-  let modelRevision = 0;
-  let modelWrites: Promise<void> = Promise.resolve();
-  const modelHydration = client.request("storage.read", { key: "model-preferences-v1" }).then((value) => { modelPreferences.hydrate(value); });
-  void modelHydration.catch(() => {});
-  const reasoningPreferences = new ReasoningPreferences();
-  const reasoningCatalogs = new Map<string, Awaited<ReturnType<typeof loadReasoningCatalog>>>();
-  const reasoningHydration = client.request("storage.read", { key: "reasoning-preferences-v1" }).then((value) => { reasoningPreferences.hydrate(value); });
-  void reasoningHydration.catch(() => {});
-  const permissionPreferences = new PermissionPreferences();
-  const permissionListeners = new Set<() => void>();
-  let permissionRevision = 0;
-  let permissionWrites: Promise<void> = Promise.resolve();
-  const permissionHydration = client.request("storage.read", { key: "permission-preferences-v1" }).then((value) => { permissionPreferences.hydrate(value); });
-  void permissionHydration.catch(() => {});
   const details = new Map<string, AgentGuiSessionDetail>();
   /** Local conversations in view: each one's release and its observer's. */
   const openLocal = new Map<string, () => void>();
-  const v2Applies = new Set<string>();
+  /** The turns events changed since the last apply; "all" when a change was not events. */
+  const v2Changes = new Map<string, LocalTranscriptChange>();
+  const transcripts = new Map<string, LocalTranscript>();
+  const transcriptModel = new TranscriptModel<AgentActivityDurableMessage>();
+  const commits = new CommitCadence<string>(commitLocal);
   let hostVisible = init.hostVisible !== false;
   const attachments = new Map<string, Attachment>();
   const sessionLoads = new Map<string, Promise<AgentActivitySession>>();
@@ -100,7 +93,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   let saveQueue = Promise.resolve();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let latestGeneration = init.generation ?? 0;
-  let attention = { completed: { readIds: [] as string[], unreadIds: [] as string[] }, failed: { readIds: [] as string[], unreadIds: [] as string[] } };
 
   const persist = () => {
     const value = ledger.serialize();
@@ -120,59 +112,89 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     effects: {
       activateSession: (input, options) => activate(input, options.signal),
       sendInput: (input, options) => send(input, options.signal),
-      cancelTurn: async (input, options) => {
-        scope(input.workspaceId);
-        const result = await client.request("session.cancel", {
-          sessionId: await backendSessionId(input.agentSessionId), taskId: input.turnId,
-        }, { signal: options.signal });
-        const detail = details.get(input.agentSessionId);
-        if (detail) {
-          detail.tasks = [...(detail.tasks ?? []).filter((task) => task.id !== result.id), result];
-        }
-        await loadFreshSession(input.agentSessionId);
-        const turn = Object.values(engine.getSnapshot().sessionLifecycle.turnsById)
-          .find((entry) => entry.agentSessionId === input.agentSessionId && entry.turnId === input.turnId);
-        if (!turn) throw new MulticaAgentGuiError("The cancellation was accepted, but its run is still synchronizing.", "cancel_pending_sync");
-        return turn.phase === "settled"
-          ? { cancel: { canceled: turn.outcome === "canceled", reason: turn.outcome === "canceled" ? "turn_canceled" : "already_settled" }, turn }
-          : { cancel: { canceled: false, reason: "cancel_requested" }, turn: { ...turn, phase: "settling", outcome: null } };
-      },
-      deleteSessions: async () => unsupported("Recoverable session deletion"),
-      respondToInteraction: async (input, options) => {
-        scope(input.workspaceId);
-        if (input.action !== "submit" || !input.payload?.answersByQuestionId) unsupported("This interaction response");
-        await client.request("interaction.respond", {
-          sessionId: await backendSessionId(input.agentSessionId), turnId: input.turnId, requestId: input.requestId,
-          answers: input.payload.answersByQuestionId as Record<string, string | string[]>,
-        }, { signal: options.signal });
-        return { session: await loadFreshSession(input.agentSessionId) };
-      },
-      renameSession: async (input, options) => {
-        scope(input.workspaceId);
-        const session = await client.request("session.rename", {
-          sessionId: await backendSessionId(input.agentSessionId), title: input.title,
-        }, { signal: options?.signal });
-        return { session: replaceMetadata(session) };
-      },
-      setSessionPinned: async (input, options) => {
-        scope(input.workspaceId);
-        const session = await client.request("session.pin", {
-          sessionId: await backendSessionId(input.agentSessionId), pinned: input.pinned,
-        }, { signal: options?.signal });
-        return { session: replaceMetadata(session) };
-      },
+      // Only a new conversation's patch reaches the engine's port; later choices go straight to the composer.
       updateSessionSettings: async (input) => {
         scope(input.workspaceId);
-        const session = engine.getSnapshot().sessionLifecycle.sessionsById[input.agentSessionId];
-        if (!session?.agentTargetId) throw new MulticaAgentGuiError("Conversation is not loaded.", "session_not_loaded");
-        if (Object.keys(input.settings).some((key) => key !== "model" && key !== "reasoningEffort")) unsupported("Non-model conversation settings");
-        if ("model" in input.settings) await setModelSelection(session.agentTargetId, input.agentSessionId, input.settings.model ?? null);
-        if ("reasoningEffort" in input.settings) await setReasoningSelection(session.agentTargetId, input.agentSessionId, input.settings.reasoningEffort ?? null);
+        await composer.applyActivationSettings(input.agentSessionId, input.settings);
         return { agentSessionId: input.agentSessionId, session: projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === input.agentSessionId) };
       },
     },
     execute: executeExtension,
   };
+  const composer: ComposerService<AgentActivityComposerOptions> = new ComposerService<AgentActivityComposerOptions>(async (request) => {
+    const agent = descriptor(request.targetKey);
+    const options = composerOptions(agent);
+    const model = composer.selectedModel(agent.id, request.agentSessionId) ?? agent.model ?? null;
+    const catalog = await composer.loadCatalog(agent.id);
+    const reasoningEffort = composer.selectedReasoning(agent.id, request.agentSessionId);
+    const levels = localReasoningLevels(catalog.models, model);
+    return { ...options, models: catalog.models.map((entry) => ({ value: entry.id, label: entry.label })), modelConfigurable: catalog.supported !== false,
+      reasoningEfforts: levels.map((entry) => ({ value: entry.value, label: entry.label })), reasoningConfigurable: levels.length > 0,
+      effectiveModel: model, effectiveSettings: { ...options.effectiveSettings, model, reasoningEffort } };
+  }, {
+    storage: {
+      read: (key) => client.request("storage.read", { key }),
+      write: (key, value) => client.request("storage.write", { key, value }),
+    },
+    listModels: (agentId, options) => client.request("models.list", { agentId, ...(options?.force ? { force: true } : {}) }, { signal: options?.signal }),
+    agent: (agentId) => executionTargets(workspace).find((entry) => entry.id === agentId),
+    requireAgent: descriptor,
+    assertInvokable: assertInvoke,
+    assertOpen: () => scope(workspaceId),
+    conversation(sessionId) {
+      const detail = details.get(sessionId);
+      const session = detail?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId));
+      if (!session) return undefined;
+      return { agentId: session.agent_id, detail: detail ? { model: detail.model, reasoningEffort: detail.reasoningEffort, permissionMode: detail.permissionMode,
+        untouched: detail.messages.length === 0 && (detail.tasks?.length ?? 0) === 0 && !detail.pending.task_id && !detail.forkedFrom } : null };
+    },
+    storedId: (sessionId) => ledger.serverId(sessionId),
+    busy: isModelSelectionBusy,
+    selectionChanged(sessionId) {
+      const current = projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === sessionId);
+      if (current) engine.dispatch({ type: "session/upserted", session: withModel(current) });
+    },
+    session(sessionId) {
+      const { sessionsById, operationBySessionId } = baseEngine.getSnapshot().sessionLifecycle;
+      const session = sessionsById[sessionId];
+      return session ? { agentId: session.agentTargetId ?? null, settings: session.settings, runtimeBlocked: operationBySessionId[sessionId]?.runtimeAvailability.state === "blocked" } : null;
+    },
+  });
+  const mutations = new ConversationMutationService<AgentActivitySession>({
+    // These decide against turn state, which must not be behind what has already arrived.
+    session(id) {
+      commits.flush();
+      const { sessionsById, deletedSessionIds } = engine.getSnapshot().sessionLifecycle;
+      const session = sessionsById[id];
+      if (!session || deletedSessionIds[id]) return null;
+      return { title: session.title, pinned: session.pinnedAtUnixMs != null, forkable: session.kind === "root" && session.lifecycleCapabilities.forkThroughTurn === true };
+    },
+    deleted: (id) => Boolean(engine.getSnapshot().sessionLifecycle.deletedSessionIds[id]),
+    turnForkable(sourceId, turnId) {
+      commits.flush();
+      const turn = selectEngineTurn(engine.getSnapshot(), sourceId, turnId);
+      return turn ? providerForkBindingAllowsAttempt(turn) : false;
+    },
+    current: (id) => projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === id) ?? null,
+    async rename(input, signal) {
+      scope(workspaceId);
+      return replaceMetadata(await client.request("session.rename", { sessionId: await backendSessionId(input.agentSessionId), title: input.title }, { signal }));
+    },
+    async setPinned(input, signal) {
+      scope(workspaceId);
+      return replaceMetadata(await client.request("session.pin", { sessionId: await backendSessionId(input.agentSessionId), pinned: input.pinned }, { signal }));
+    },
+    deleteSessions: async () => unsupported("Recoverable session deletion"),
+    async fork(input, signal) {
+      scope(workspaceId);
+      const session = await client.request("session.fork", { sessionId: await backendSessionId(input.sourceAgentSessionId), turnId: input.turnId, requestId: input.requestId }, { signal });
+      scope(workspaceId);
+      ledger.bind(input.targetAgentSessionId, session.id);
+      await persist(); replaceMetadata(session);
+      return loadFreshSession(input.targetAgentSessionId);
+    },
+    removed: (id) => { engine.dispatch({ type: "session/removed", agentSessionId: id }); },
+  });
   const baseEngine = createAgentSessionEngine({
     identity: { workspaceId, origin: "multica" },
     clock: { nowUnixMs: () => Date.now() },
@@ -183,12 +205,27 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     commandPort,
   });
   const desktopQueue = createDesktopQueueEngine(baseEngine, {
+    // A stop or an answer decides against turn state, which must not be behind what has arrived.
+    beforeTurnOperation: () => commits.flush(),
     pendingStore: init.composerDraftScope
       ? createDesktopPendingStore(window.sessionStorage, JSON.stringify([init.composerDraftScope, init.userId, workspaceId]))
       : undefined,
     locale: () => init.locale,
     enqueue: enqueueDesktop,
     update: async (id, action, requestId) => client.request("queue.update", { sessionId: await backendSessionId(id), action, requestId }),
+    statuses: async (id, requestIds) => client.request("queue.statuses", { sessionId: await backendSessionId(id), requestIds }),
+    respondToInteraction: async (input, options) => {
+      scope(input.workspaceId);
+      if (input.action !== "submit" || !input.payload?.answersByQuestionId) unsupported("This interaction response");
+      await client.request("interaction.respond", {
+        sessionId: await backendSessionId(input.agentSessionId), turnId: input.turnId, requestId: input.requestId,
+        answers: input.payload.answersByQuestionId as Record<string, string | string[]>,
+      }, { signal: options.signal });
+      return { session: await loadFreshSession(input.agentSessionId) };
+    },
+    editRetry: async () => unsupported("turn/editRetry"),
+    recoverEditRetry: async () => unsupported("turn/recoverEditRetry"),
+    reconcileWorkspace: () => { void loadWorkspace().catch(reportError); },
     error(error) {
       reportError(error);
       if (!disposed) void client.request("host.showMessage", {
@@ -196,7 +233,15 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       }).catch(reportError);
     },
   });
-  const engine = desktopQueue.engine;
+  const queueEngine = desktopQueue.engine;
+  // Anything entering the engine decides against its turn state, which must not
+  // be behind what has already arrived and is waiting for the next commit.
+  const engine: AgentSessionEngine = {
+    ...queueEngine,
+    submitPrompt(input) { commits.flush(); return queueEngine.submitPrompt(input); },
+    dispatch(intent, options) { commits.flush(); queueEngine.dispatch(intent, options); },
+  };
+  baseEngine.subscribe(() => composer.reconcileSettings());
   const projectSnapshot = createAgentActivitySnapshotProjector(workspaceId);
   const unrestoredQueueSessionIds = new Set<string>();
 
@@ -255,131 +300,15 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     }
     return agent;
   }
-  /** Claude's default used to be a catalog row. A saved one now means what no selection means, so it reaches the catalog's default model. */
-  function followingClaudeDefault(agentId: string, model: string | null) {
-    return model === "default" && executionTargets(workspace).find((entry) => entry.id === agentId)?.provider === "claude";
-  }
-  function selectedModel(agentId: string, sessionId?: string | null) {
-    const session = sessionId ? details.get(sessionId)?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId)) : undefined;
-    if (session && session.agent_id !== agentId) return null;
-    const serverId = sessionId ? ledger.serverId(sessionId) : null;
-    const model = modelPreferences.has(agentId, serverId) ? modelPreferences.get(agentId, serverId) : sessionId ? details.get(sessionId)?.model ?? null : null;
-    return followingClaudeDefault(agentId, model) ? null : model;
-  }
-  async function loadReasoningCatalog(agentId: string, options?: { force?: boolean; signal?: AbortSignal }) {
-    const catalog = await client.request("models.list", { agentId, ...(options?.force ? { force: true } : {}) }, { signal: options?.signal });
-    reasoningCatalogs.set(agentId, catalog);
-    return catalog;
-  }
-  function selectedReasoning(agentId: string, sessionId?: string | null): LocalReasoningEffort | null {
-    const detail = sessionId ? details.get(sessionId) : undefined;
-    if (detail && detail.session.agent_id !== agentId) return null;
-    const model = selectedModel(agentId, sessionId);
-    const selection = reasoningPreferences.get(agentId, sessionId ? ledger.serverId(sessionId) : null);
-    const effort = selection ? ((followingClaudeDefault(agentId, selection.model) ? null : selection.model) === model ? selection.effort : null)
-      : model === (detail?.model ?? null) ? detail?.reasoningEffort ?? null : null;
-    const catalog = reasoningCatalogs.get(agentId);
-    return effort && (!catalog || localReasoningLevels(catalog.models, model ?? descriptor(agentId).model).some((level) => level.value === effort)) ? effort : null;
-  }
-  async function reasoningForSend(agentId: string, sessionId?: string | null) {
-    await reasoningHydration;
-    await modelWrites.catch(() => {});
-    if (selectedReasoning(agentId, sessionId)) await loadReasoningCatalog(agentId);
-    return selectedReasoning(agentId, sessionId);
-  }
-  function setReasoningSelection(agentId: string, sessionId: string | null | undefined, effort: string | null) {
-    const operation = modelWrites.catch(() => {}).then(async () => {
-      await reasoningHydration;
-      await modelHydration;
-      scope(workspaceId);
-      const agent = assertInvoke(agentId, sessionId ?? undefined);
-      if (effort !== null && !isLocalReasoningEffort(effort)) throw new MulticaAgentGuiError("Invalid thinking effort.", "invalid_reasoning_effort");
-      if (sessionId) {
-        const session = details.get(sessionId)?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId));
-        if (!session || session.agent_id !== agentId) throw new MulticaAgentGuiError("The thinking scope does not belong to this provider.", "invalid_session", 409);
-      }
-      if (isModelSelectionBusy(sessionId)) throw new MulticaAgentGuiError("Wait for this run to finish before changing thinking effort.", "run_in_progress", 409);
-      const model = selectedModel(agentId, sessionId);
-      if (effort !== null && !localReasoningLevels((await loadReasoningCatalog(agentId)).models, model ?? agent.model).some((level) => level.value === effort)) throw new MulticaAgentGuiError("This model does not support that thinking effort.", "invalid_reasoning_effort");
-      // The catalog request can overlap a newly accepted turn.
-      if (isModelSelectionBusy(sessionId)) throw new MulticaAgentGuiError("Wait for this run to finish before changing thinking effort.", "run_in_progress", 409);
-      const next = new ReasoningPreferences(); next.hydrate(reasoningPreferences.serialize());
-      next.set(agentId, sessionId ? ledger.serverId(sessionId) : null, model, effort);
-      await client.request("storage.write", { key: "reasoning-preferences-v1", value: next.serialize() });
-      scope(workspaceId); reasoningPreferences.hydrate(next.serialize());
-      if (sessionId) {
-        const current = projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === sessionId);
-        if (current) engine.dispatch({ type: "session/upserted", session: withModel(current) });
-      }
-      modelRevision++; modelListeners.forEach((listener) => listener());
-    });
-    modelWrites = operation;
-    return operation;
-  }
   function withModel(session: AgentActivitySession): AgentActivitySession {
     const agent = executionTargets(workspace).find((entry) => entry.id === session.agentTargetId);
-    return { ...session, settings: { ...session.settings, reasoningEffort: selectedReasoning(session.agentTargetId ?? "", session.agentSessionId), model: selectedModel(session.agentTargetId ?? "", session.agentSessionId) ?? agent?.model ?? null } };
+    return { ...session, settings: { ...session.settings, reasoningEffort: composer.selectedReasoning(session.agentTargetId ?? "", session.agentSessionId), model: composer.selectedModel(session.agentTargetId ?? "", session.agentSessionId) ?? agent?.model ?? null } };
   }
   function isModelSelectionBusy(sessionId?: string | null) {
+    commits.flush();
     if (!sessionId) return false;
     const canonical = engine.getSnapshot().sessionLifecycle.sessionsById[sessionId];
     return Boolean(canonical?.activeTurnId || workspace.pendingTasks?.some((task) => task.chat_session_id === ledger.serverId(sessionId)));
-  }
-  function selectedPermission(agentId: string, sessionId?: string | null): LocalPermissionMode {
-    const detail = sessionId ? details.get(sessionId) : undefined;
-    const session = sessionId ? detail?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId)) : undefined;
-    if (session && session.agent_id !== agentId) return "default";
-    const saved = permissionPreferences.get(agentId, sessionId ? ledger.serverId(sessionId) : null) ?? detail?.permissionMode;
-    if (saved !== undefined) return saved;
-    // A remembered default only applies to drafts and confirmed empty conversations.
-    if (sessionId && (!detail || detail.messages.length > 0 || (detail.tasks?.length ?? 0) > 0 || detail.pending.task_id || detail.forkedFrom)) return "default";
-    return permissionPreferences.get(agentId) ?? "default";
-  }
-  function setPermissionSelection(agentId: string, sessionId: string | null | undefined, mode: LocalPermissionMode) {
-    const operation = permissionWrites.catch(() => {}).then(async () => {
-      await permissionHydration;
-      scope(workspaceId);
-      if (!isLocalPermissionMode(mode)) throw new MulticaAgentGuiError("Invalid local permission mode.", "invalid_permission_mode");
-      assertInvoke(agentId, sessionId ?? undefined);
-      const session = sessionId ? details.get(sessionId)?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId)) : undefined;
-      if (sessionId && (!session || session.agent_id !== agentId)) throw new MulticaAgentGuiError("The permission scope does not belong to this provider.", "invalid_session", 409);
-      if (isModelSelectionBusy(sessionId)) throw new MulticaAgentGuiError("Wait for this run to finish before changing permissions.", "run_in_progress", 409);
-      const next = new PermissionPreferences();
-      next.hydrate(permissionPreferences.serialize());
-      next.set(agentId, null, mode);
-      if (sessionId) next.set(agentId, ledger.serverId(sessionId), mode);
-      await client.request("storage.write", { key: "permission-preferences-v1", value: next.serialize() });
-      scope(workspaceId);
-      permissionPreferences.hydrate(next.serialize());
-      permissionRevision++;
-      permissionListeners.forEach((listener) => listener());
-    });
-    permissionWrites = operation;
-    return operation;
-  }
-  function setModelSelection(agentId: string, sessionId: string | null | undefined, model: string | null) {
-    const operation = modelWrites.catch(() => {}).then(async () => {
-      await modelHydration;
-      scope(workspaceId);
-      assertInvoke(agentId, sessionId ?? undefined);
-      const session = sessionId ? details.get(sessionId)?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(sessionId)) : undefined;
-      if (sessionId && (!session || session.agent_id !== agentId)) throw new MulticaAgentGuiError("The model scope does not belong to this agent.", "invalid_session", 409);
-      if (isModelSelectionBusy(sessionId)) throw new MulticaAgentGuiError("Wait for this run to finish before changing its model.", "run_in_progress", 409);
-      const next = new ModelPreferences();
-      next.hydrate(modelPreferences.serialize());
-      next.set(agentId, sessionId ? ledger.serverId(sessionId) : null, model);
-      await client.request("storage.write", { key: "model-preferences-v1", value: next.serialize() });
-      scope(workspaceId);
-      modelPreferences.hydrate(next.serialize());
-      if (sessionId) {
-        const current = projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === sessionId);
-        if (current) engine.dispatch({ type: "session/upserted", session: withModel(current) });
-      }
-      modelRevision++;
-      modelListeners.forEach((listener) => listener());
-    });
-    modelWrites = operation;
-    return operation;
   }
   function markAvailability(session: AgentActivitySession) {
     const agent = executionTargets(workspace).find((entry) => entry.id === session.agentTargetId);
@@ -419,6 +348,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     }
   }
   function receiveWorkspace(next: AgentGuiWorkspaceState) {
+    // Projecting below reads each conversation as it is now, ahead of the engine otherwise.
+    commits.flush();
     const previousPending = workspace.pendingTasks;
     workspace = next;
     workspaceRevision++;
@@ -432,7 +363,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       const detail = details.get(id);
       if (detail) {
         detail.session = session;
-        return project(id).session;
+        return project(id, "all").session;
       }
       return projectPendingSession(session, executionTargets(workspace).find((entry) => entry.id === session.agent_id), ledger, pendingBySession.get(session.id));
     });
@@ -474,13 +405,18 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   }
 
   /** The session's view; only metadata for a conversation the source no longer holds. */
-  function project(guiId: string) {
+  function project(guiId: string, changedTurns: LocalTranscriptChange) {
     const detail = details.get(guiId)!;
     const agent = executionTargets(workspace).find((entry) => entry.id === detail.session.agent_id);
     const conversation = localConversation(guiId);
-    return conversation
-      ? projectV2Detail(detail, conversation, agent, ledger, init.locale)
-      : projectLocalMetadata(detail, agent, ledger);
+    if (!conversation) {
+      transcripts.delete(guiId);
+      transcriptModel.commit(guiId, []);
+      return projectLocalMetadata(detail, agent, ledger);
+    }
+    let transcript = transcripts.get(guiId);
+    if (!transcript) transcripts.set(guiId, transcript = new LocalTranscript(ledger, transcriptModel, detail.session.workspace_id, ledger.guiId(detail.session.id), init.locale));
+    return projectV2Detail(detail, conversation, agent, ledger, transcript, changedTurns);
   }
 
   function localConversation(guiId: string) {
@@ -507,17 +443,20 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     for (const event of events) {
       if (event.turn_id && isLocalTimingModelOutput(event.type, event.payload.kind)) presentationTiming.received(conversation.summary.conversation_id, event.turn_id);
     }
-    // Coalesce a burst of event batches into one projection.
-    if (v2Applies.has(guiId)) return;
-    v2Applies.add(guiId);
-    queueMicrotask(() => {
-      v2Applies.delete(guiId);
-      if (disposed || !details.has(guiId)) return;
-      const id = resolvedServerId(guiId);
-      const detail = id ? source.detail(id) : null;
-      if (detail) details.set(guiId, detail);
-      applyDetail(guiId);
-    });
+    v2Changes.set(guiId, mergeTranscriptChange(v2Changes.get(guiId), events));
+    commits.schedule(guiId);
+    // A page of history or a queue change is not a stream: only this tick's changes can join it.
+    if (!events.length) queueMicrotask(() => commits.flush());
+  }
+
+  function commitLocal(guiId: string) {
+    if (disposed || !details.has(guiId)) return;
+    const id = resolvedServerId(guiId);
+    const detail = id ? source.detail(id) : null;
+    if (detail) details.set(guiId, detail);
+    const change = v2Changes.get(guiId);
+    v2Changes.delete(guiId);
+    applyDetail(guiId, change);
   }
 
   async function loadSession(guiId: string, fresh = false): Promise<AgentActivitySession> {
@@ -537,16 +476,24 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     return loadSession(guiId, true);
   }
 
-  function applyDetail(guiId: string): AgentActivitySession {
+  /**
+   * One commit: observers of the transcript run when it ends, by which time the
+   * engine holds the same turns, so no view sees messages and turn state disagree.
+   */
+  function applyDetail(guiId: string, changedTurns: LocalTranscriptChange = "all"): AgentActivitySession {
+    return runInAction(() => commitDetail(guiId, changedTurns));
+  }
+
+  function commitDetail(guiId: string, changedTurns: LocalTranscriptChange): AgentActivitySession {
     const detail = details.get(guiId)!;
     desktopQueue.receive(guiId, detail.promptQueue);
-    const result = costProfile.measure("projection", detail.session.id, () => project(guiId));
-    const unsettled = new Set(Object.values(engine.getSnapshot().sessionLifecycle.turnsById)
-      .filter((turn) => turn.agentSessionId === guiId && turn.phase !== "settled").map((turn) => turn.turnId));
-    costProfile.measure("dispatch", detail.session.id, () => engine.dispatch({
+    const result = costProfile.measure("projection", detail.session.id, () => project(guiId, changedTurns));
+    costProfile.measure("dispatch", detail.session.id, () => queueEngine.dispatch({
       type: "session/historyAuthoritativeSnapshotReceived", workspaceId,
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
-      session: withModel(result.session), turns: result.turns, messages: result.messages,
+      session: withModel(result.session), turns: result.turns,
+      // Confirming a submit needs only the user's messages; the transcript reads the model.
+      messages: result.messages.filter((message) => message.role === "user"),
       sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: localConversation(guiId)?.hasOlderTurns ?? false,
         oldestLoadedVersion: result.messages.reduce<number | null>((oldest, message) => oldest === null || message.version < oldest ? message.version : oldest, null) }],
     }));
@@ -554,17 +501,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     // pointer intact. Fence that specific transition once: replaying every
     // historical settlement would itself request another live reconciliation.
     for (const turn of result.turns) {
-      if (turn.phase === "settled" && engine.getSnapshot().sessionLifecycle.sessionsById[guiId]?.activeTurnId === turn.turnId) engine.dispatch({
+      if (turn.phase === "settled" && engine.getSnapshot().sessionLifecycle.sessionsById[guiId]?.activeTurnId === turn.turnId) queueEngine.dispatch({
         type: "turn/projectionReceived", workspaceId, turn, activeTurnId: null,
         hostFencedSameTurnSettlement: true,
-      });
-    }
-    // History snapshots never raise attention. A run this runtime saw unsettled
-    // that history now settles is a real completion: replay it as an accepted
-    // live completion so the conversation list shows its unread mark.
-    for (const turn of Object.values(engine.getSnapshot().sessionLifecycle.turnsById)) {
-      if (turn.agentSessionId === guiId && turn.phase === "settled" && unsettled.has(turn.turnId)) engine.dispatch({
-        type: "turn/upserted", live: true, replayAcceptedLiveCompletion: true, turn,
       });
     }
     const conversation = localConversation(guiId);
@@ -583,10 +522,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       return { activation: { mode: "existing" as const, status: "already_attached" as const }, session,
         detail: { projection: "authoritative" as const, lifecycleCapabilitiesProjected: true, session, childSessions: [], turns: Object.values(engine.getSnapshot().sessionLifecycle.turnsById).filter((turn) => turn.agentSessionId === input.agentSessionId) } };
     }
-    await modelHydration;
-    await modelWrites.catch(() => {});
+    await composer.modelsSettled();
     const agent = assertInvoke(input.agentTargetId);
-    if (input.initialGoalControl || input.initialTuttiModeActivation || input.isolation) unsupported("Goal, Tutti mode and local project activation");
+    if (input.isolation) unsupported("Local project activation");
     if (input.settings && Object.entries(input.settings).some(([key, value]) => key !== "model" && key !== "reasoningEffort" && value != null && value !== false)) unsupported("Non-model conversation settings");
     let serverId = ledger.serverId(input.agentSessionId);
     if (serverId === input.agentSessionId) {
@@ -602,17 +540,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         const session = await client.request("session.create", { agentId: input.agentTargetId, title: input.title, ...(input.cwd ? { cwd: input.cwd } : {}) }, { signal });
         ledger.bind(input.agentSessionId, session.id);
         serverId = session.id;
-        const model = selectedModel(agent.id) ?? (input.settings?.model && input.settings.model !== agent.model ? input.settings.model : null);
-        modelPreferences.set(agent.id, session.id, model);
-        await client.request("storage.write", { key: "model-preferences-v1", value: modelPreferences.serialize() });
-        await reasoningHydration;
-        const effort = reasoningPreferences.get(agent.id) ? selectedReasoning(agent.id) : (isLocalReasoningEffort(input.settings?.reasoningEffort) ? input.settings.reasoningEffort : null);
-        reasoningPreferences.set(agent.id, session.id, model, effort);
-        await client.request("storage.write", { key: "reasoning-preferences-v1", value: reasoningPreferences.serialize() });
-        await permissionHydration;
-        await permissionWrites.catch(() => {});
-        permissionPreferences.set(agent.id, session.id, selectedPermission(agent.id));
-        await client.request("storage.write", { key: "permission-preferences-v1", value: permissionPreferences.serialize() });
+        await composer.seedConversation(agent, session.id, input.settings);
         await persist();
         replaceMetadata(session);
         resolveIdentity(session.id);
@@ -664,10 +592,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     } }, [...attachments.values()])[0]!.prompts[0]!;
     // Restoring a saved queue is not the user sending anything.
     const timing = !paused ? sendTiming.begin(sessionId, input.clientSubmitId, startedAt) : undefined;
-    const reasoningEffort = await reasoningForSend(session.agent_id, input.agentSessionId);
+    const reasoningEffort = await composer.reasoningForSend(session.agent_id, input.agentSessionId);
     const params: AgentGuiRpcMethods["queue.enqueue"]["params"] = { sessionId, paused, queued: true, item: { ...encoded, requestId: input.clientSubmitId, display,
-      ...(selectedModel(session.agent_id, input.agentSessionId) ? { model: selectedModel(session.agent_id, input.agentSessionId)! } : {}),
-      reasoningEffort, permissionMode: selectedPermission(session.agent_id, input.agentSessionId),
+      ...(composer.selectedModel(session.agent_id, input.agentSessionId) ? { model: composer.selectedModel(session.agent_id, input.agentSessionId)! } : {}),
+      reasoningEffort, permissionMode: composer.selectedPermission(session.agent_id, input.agentSessionId),
     } };
     // Keep the admitted payload stable even if preferences change before an
     // explicit retry of a failed or lost acknowledgement.
@@ -682,10 +610,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   async function send(input: AgentActivitySendInput, signal?: AbortSignal): Promise<unknown> {
     const startedAt = Date.now();
     scope(input.workspaceId);
-    await modelHydration;
-    await modelWrites.catch(() => {});
-    await permissionHydration;
-    await permissionWrites.catch(() => {});
+    await composer.selectionsSettled();
     scope(input.workspaceId);
     const submissionError = promptSubmissionError(input, init.locale);
     if (submissionError) throw new MulticaAgentGuiError(submissionError, "unsupported");
@@ -711,12 +636,12 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         await persist();
         try {
           const timing = sendTiming.begin(session.id, input.clientSubmitId, startedAt);
-          const reasoningEffort = !recipients.length ? await reasoningForSend(session.agent_id, input.agentSessionId) : null;
+          const reasoningEffort = !recipients.length ? await composer.reasoningForSend(session.agent_id, input.agentSessionId) : null;
           const submit = () => client.request("session.send", {
             sessionId: session.id, ...encoded, requestId: input.clientSubmitId,
             ...(input.submitDiagnostics?.queued === true ? { queued: true as const } : {}),
-            ...(!recipients.length && selectedModel(session.agent_id, input.agentSessionId) ? { model: selectedModel(session.agent_id, input.agentSessionId)! } : {}),
-            ...(!recipients.length ? { reasoningEffort, permissionMode: selectedPermission(session.agent_id, input.agentSessionId) } : {}),
+            ...(!recipients.length && composer.selectedModel(session.agent_id, input.agentSessionId) ? { model: composer.selectedModel(session.agent_id, input.agentSessionId)! } : {}),
+            ...(!recipients.length ? { reasoningEffort, permissionMode: composer.selectedPermission(session.agent_id, input.agentSessionId) } : {}),
           }, { signal });
           const response = await timing.measure("client.request", submit);
           uploads.forget(encoded.attachmentIds ?? []);
@@ -793,48 +718,9 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
 
   async function executeExtension(command: EngineExtensionCommand, options?: { signal?: AbortSignal }): Promise<unknown> {
     switch (command.type) {
-      case "session/forkThroughTurn": {
-        scope(command.workspaceId);
-        const session = await client.request("session.fork", { sessionId: await backendSessionId(command.sourceAgentSessionId), turnId: command.turnId, requestId: command.requestId }, { signal: options?.signal });
-        scope(command.workspaceId);
-        ledger.bind(command.targetAgentSessionId, session.id);
-        await persist(); replaceMetadata(session);
-        const result = await loadFreshSession(command.targetAgentSessionId);
-        return { operationId: session.id, requestId: command.requestId, sourceAgentSessionId: command.sourceAgentSessionId, targetAgentSessionId: command.targetAgentSessionId, turnId: command.turnId, status: "committed", session: result, error: null };
-      }
-      case "session/ackForkObserved": return undefined;
       case "engine/reconcileWorkspace": return loadWorkspace();
       case "session/reconcile": await loadSession(command.agentSessionId); return { status: "applied" };
-      case "composerOptions/load": {
-        const agent = descriptor(command.targetKey);
-        const options = composerOptions(agent);
-        const model = selectedModel(agent.id, command.agentSessionId) ?? agent.model ?? null;
-        const catalog = await loadReasoningCatalog(agent.id);
-        const reasoningEffort = selectedReasoning(agent.id, command.agentSessionId);
-        const levels = localReasoningLevels(catalog.models, model);
-        return { ...options, models: catalog.models.map((entry) => ({ value: entry.id, label: entry.label })), modelConfigurable: catalog.supported !== false,
-          reasoningEfforts: levels.map((entry) => ({ value: entry.value, label: entry.label })), reasoningConfigurable: levels.length > 0,
-          effectiveModel: model, effectiveSettings: { ...options.effectiveSettings, model, reasoningEffort } };
-      }
       case "session/unactivate": return undefined;
-      case "attention/readState/read": return attention;
-      case "attention/readState/write": {
-        const previousUnread = [...attention.completed.unreadIds, ...attention.failed.unreadIds];
-        attention = {
-          completed: { readIds: [...command.completed.readIds], unreadIds: [...command.completed.unreadIds] },
-          failed: { readIds: [...command.failed.readIds], unreadIds: [...command.failed.unreadIds] },
-        };
-        await client.request("storage.write", { key: "attention-read-state-v1", value: JSON.stringify(attention) });
-        const nextUnread = new Set([...attention.completed.unreadIds, ...attention.failed.unreadIds]);
-        const read = new Set([...command.completed.readIds, ...command.failed.readIds, ...previousUnread.filter((id) => !nextUnread.has(id))]);
-        const sessionsToMark = new Set<string>();
-        for (const completionId of read) {
-          const guiId = /^turn:([^:]+):[^:]+:(completed|failed)$/.exec(completionId)?.[1];
-          if (guiId) sessionsToMark.add(ledger.serverId(guiId));
-        }
-        await Promise.all([...sessionsToMark].map((sessionId) => client.request("session.markRead", { sessionId })));
-        return undefined;
-      }
       default: return unsupported(command.type);
     }
   }
@@ -847,6 +733,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     origin: "multica", projectPathIsRemote: false, conversationActivityViewEnabled: true,
     promptContentUploadSupport: { file: true, image: true }, devDiagnosticConsoleSink: false,
     getSessionEngine: (id) => { scope(id); return engine; },
+    composer,
+    transcript: transcriptModel,
+    mutations,
+    prompts: desktopQueue.prompts,
     getSnapshot: (id) => { scope(id); return projectSnapshot(engine.getSnapshot()); },
     subscribe: (id, listener) => { scope(id); return engine.subscribe((state) => listener(projectSnapshot(state))); },
     subscribeSessionEvents: (id, listener) => { scope(id); eventListeners.add(listener); return () => { eventListeners.delete(listener); }; },
@@ -854,7 +744,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     getSession: (id, sessionId) => { scope(id); return loadSession(sessionId); },
     getComposerOptions: async (input): Promise<AgentActivityComposerOptions> => {
       scope(input.workspaceId);
-      return engine.loadComposerOptions({
+      return composer.load({
         targetKey: input.agentTargetId,
         provider: input.provider ?? descriptor(input.agentTargetId).provider,
         agentSessionId: input.agentSessionId,
@@ -872,7 +762,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     listSessionMessages: async (input) => {
       scope(input.workspaceId);
       await loadSession(input.agentSessionId);
-      let messages = (projectSnapshot(engine.getSnapshot()).sessionMessagesById[input.agentSessionId] ?? []) as AgentActivityDurableMessage[];
+      commits.flush();
+      let messages = transcriptModel.messages(input.agentSessionId);
       if (input.afterVersion !== undefined) messages = messages.filter((message) => message.version > input.afterVersion!);
       if (input.beforeVersion !== undefined) messages = messages.filter((message) => message.version < input.beforeVersion!);
       if (input.order === "desc") messages = [...messages].reverse();
@@ -890,9 +781,11 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         if (!disposed) syncLocalWatch();
       };
     },
-    renameSession: (input) => engine.renameSession(input),
-    setSessionPinned: (input) => engine.setSessionPinned(input),
-    deleteSession: async () => unsupported("Recoverable session deletion"),
+    deleteSession: async (input) => {
+      scope(input.workspaceId);
+      const result = await mutations.deleteSessions({ agentSessionIds: [input.agentSessionId] });
+      return { cleanupFailed: result.cleanupFailedSessionIds.length > 0, removed: result.removedSessions > 0 };
+    },
     uploadPromptContent: async (input) => {
       scope(input.workspaceId);
       const content = await Promise.all(input.content.map(async (block) => {
@@ -988,21 +881,14 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     async initialize() {
       if (initialized) return;
       ledger.hydrate(await client.request("storage.read", { key: STORAGE_KEY }));
-      await modelHydration;
-      await permissionHydration;
-      await reasoningHydration;
-      const readState = await client.request("storage.read", { key: "attention-read-state-v1" });
-      if (readState) {
-        const value = JSON.parse(readState);
-        if (value && typeof value === "object" && [value.completed, value.failed].every((entry) => entry && Array.isArray(entry.readIds) && Array.isArray(entry.unreadIds) && [...entry.readIds, ...entry.unreadIds].every((id) => typeof id === "string"))) attention = value;
-      }
+      await composer.hydrated();
       initialized = true;
       await loadWorkspace();
       const active = init.activeSessionId ? workspace.sessions.find((session) => session.id === init.activeSessionId) : undefined;
-      if (active && permissionPreferences.get(active.agent_id) === undefined) {
-        const saved = permissionPreferences.get(active.agent_id, active.id);
+      if (active) {
+        const saved = composer.permissionWithoutDefault(active.agent_id, active.id);
         // Retain an explicit choice made before provider defaults were remembered.
-        if (saved !== undefined) await setPermissionSelection(active.agent_id, null, saved).catch(reportError);
+        if (saved !== undefined) await composer.setPermissionSelection(active.agent_id, null, saved).catch(reportError);
       }
       await restorePromptQueues();
       engine.dispatch({ type: "engine/connectionChanged", status: "connected", workspaceId });
@@ -1022,22 +908,18 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       engine.submitPrompt({ agentSessionId, clientSubmitId: crypto.randomUUID(), content: [{ type: "text", text: init.locale === "zh-CN" ? "继续" : "Continue" }] });
     },
     subscribeTurns: (listener: () => void) => engine.subscribe(() => listener()),
-    loadModelCatalog: async (agentId: string, options?: { force?: boolean; signal?: AbortSignal }) => {
-      const result = await loadReasoningCatalog(agentId, options);
-      modelRevision++; modelListeners.forEach((listener) => listener());
-      return result;
-    },
-    getReasoningSelection: selectedReasoning,
-    setReasoningSelection,
-    getModelSelection: selectedModel,
-    setModelSelection,
-    getPermissionSelection: selectedPermission,
-    setPermissionSelection,
-    getPermissionRevision: () => permissionRevision,
-    subscribePermissions: (listener: () => void) => { permissionListeners.add(listener); return () => { permissionListeners.delete(listener); }; },
+    loadModelCatalog: (agentId: string, options?: { force?: boolean; signal?: AbortSignal }) => composer.refreshCatalog(agentId, options),
+    getReasoningSelection: (agentId: string, sessionId?: string | null) => composer.selectedReasoning(agentId, sessionId),
+    setReasoningSelection: (agentId: string, sessionId: string | null | undefined, effort: string | null) => composer.setReasoningSelection(agentId, sessionId, effort),
+    getModelSelection: (agentId: string, sessionId?: string | null) => composer.selectedModel(agentId, sessionId),
+    setModelSelection: (agentId: string, sessionId: string | null | undefined, model: string | null) => composer.setModelSelection(agentId, sessionId, model),
+    getPermissionSelection: (agentId: string, sessionId?: string | null) => composer.selectedPermission(agentId, sessionId),
+    setPermissionSelection: (agentId: string, sessionId: string | null | undefined, mode: LocalPermissionMode) => composer.setPermissionSelection(agentId, sessionId, mode),
+    getPermissionRevision: () => composer.permissionRevision,
+    subscribePermissions: (listener: () => void) => reaction(() => composer.permissionRevision, listener),
     isModelSelectionBusy,
-    getModelRevision: () => modelRevision,
-    subscribeModels: (listener: () => void) => { modelListeners.add(listener); return () => { modelListeners.delete(listener); }; },
+    getModelRevision: () => composer.modelRevision,
+    subscribeModels: (listener: () => void) => reaction(() => composer.modelRevision, listener),
     subscribeWorkspace: (listener: () => void) => { workspaceListeners.add(listener); return () => { workspaceListeners.delete(listener); }; },
     toServerSessionId: resolvedServerId,
     toGuiSessionId: (id: string) => ledger.guiId(id),
@@ -1051,6 +933,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     dispose() {
       if (disposed) return;
       disposed = true;
+      commits.dispose();
       costProfile.dispose();
       unsubscribe();
       for (const pending of pendingIdentities.values()) pending.reject(new MulticaAgentGuiError("This connection has closed.", "disposed"));
@@ -1058,9 +941,10 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void persist().catch(() => {}); }
       for (const release of openLocal.values()) release();
       openLocal.clear();
+      composer.dispose();
+      mutations.dispose();
       engine.dispose();
       workspaceListeners.clear();
-      modelListeners.clear();
       eventListeners.clear();
     },
   };

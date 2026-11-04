@@ -42,7 +42,6 @@ import {
   updateAgentComposerDraft
 } from "../model/agentComposerDraft";
 import { resolvePermissionModeControlsDisabled } from "../model/composerModeSelection";
-import { GOAL_MODE_SLASH_COMMAND } from "./AgentComposerChrome";
 import type { AgentComposerProps } from "./AgentComposer.types";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
 
@@ -77,8 +76,6 @@ type Props = Pick<
 
 interface UseComposerSlashActionsInput extends Props {
   computerExecutable: boolean;
-  onTuttiModeActivate?: () => void;
-  tuttiModeSupported: boolean;
   draftContent: AgentComposerDraft;
   selectedProjectPath: string;
   slashStatusAgentSessionId: string | null;
@@ -127,7 +124,6 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
     availableSkills = [],
     composerSettings,
     computerExecutable,
-    tuttiModeSupported,
     capabilityControlsReadOnly = false,
     onDraftContentChange,
     onSettingsChange,
@@ -135,7 +131,6 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
     onSubmitEmpty,
     onSubmitGuidance,
     onCapabilitySettingsRequest,
-    onTuttiModeActivate,
     onSlashStatusOpen,
     onSlashStatusClose,
     onPromptImagesUnsupported,
@@ -274,32 +269,11 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
         setIsReviewPickerOpen(true);
         return;
       }
-      if (effect.kind === "activateGoalMode") {
-        if (isSlashStatusPanelOpen) {
-          onSlashStatusClose?.();
-        }
-        draftPromptRef.current = GOAL_MODE_SLASH_COMMAND;
-        setPaletteDraftPrompt("");
-        setIsSlashStatusPanelOpen(false);
-        setIsReviewPickerOpen(false);
-        setIsPaletteOpen(false);
-        onDraftContentChange(
-          updateAgentComposerDraft(draftContent, {
-            prompt: GOAL_MODE_SLASH_COMMAND
-          })
-        );
-        return;
-      }
       if (effect.kind === "enablePlanMode") {
         clearSlashCommandDraft();
         if (!settingsControlsDisabled) {
           onSettingsChange({ planMode: true });
         }
-        return;
-      }
-      if (effect.kind === "activateTuttiMode") {
-        clearSlashCommandDraft();
-        onTuttiModeActivate?.();
         return;
       }
       if (effect.kind === "enableBrowserUse") {
@@ -359,7 +333,6 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
       isSlashStatusPanelOpen,
       onDraftContentChange,
       onSlashStatusClose,
-      onTuttiModeActivate,
       onSlashStatusOpen,
       onSettingsChange,
       onSubmit,
@@ -410,9 +383,7 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
       if (capabilityControlsReadOnly) {
         return;
       }
-      if (capability.capability !== "tutti") {
-        onCapabilitySettingsRequest?.(capability.capability);
-      }
+      onCapabilitySettingsRequest?.(capability.capability);
       setIsPaletteOpen(false);
     },
     [capabilityControlsReadOnly, onCapabilitySettingsRequest]
@@ -523,7 +494,6 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
         const slashCommandEffect = resolveSlashCommandSubmitEffect({
           browserSupported: Boolean(composerSettings.supportsBrowser),
           computerSupported: computerExecutable,
-          tuttiSupported: tuttiModeSupported,
           commands: resolvedSlashCommands,
           draft: nextPrompt,
           provider,

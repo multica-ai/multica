@@ -43,7 +43,7 @@ daemon 事件 → V2Conversation（增量）
 | Web | 删除 `/conversations` 页面和相关代码，旧链接重定向到 `/chat`。原生 `/chat` 不变 |
 | engine 外围模块 | 云端路径删除后用不到的直接删，不做等价迁移 |
 | 测试和验证 | 用户负责 e2e 和真实应用验证 |
-| 部署 | 每个阶段单独合入、单独部署 |
+| 交付 | 阶段 0、1 已单独合入。之后的阶段都在本地分支上逐阶段提交，全部完成后一起交付 |
 
 ## 3. 分层
 
@@ -234,7 +234,7 @@ class ItemModel {
 | `sessionMutations` | 3176 | `PromptService`、`ConversationService` |
 | `sessionReconcile` | 1767 | **要迁：** 水合、加载状态和打开未知会话进 `ConversationService` |
 | `engineRuntime` | 1641 | 删除，但 `workspaceReconcile` 和重连后重新加载工作区要先迁走 |
-| `attentionReadState` | 1507 | **必需：** 它是列表未读的唯一来源，进 `ConversationListModel` |
+| `attentionReadState` | 1507 | 删除：Desktop 的会话列表不显示未读，读它的只有已不挂载的 vendor rail，`session.markRead` 在本地也是空操作 |
 | `composerOptions` | 1503 | `ComposerService` |
 | `editRetry` | 894 | `PromptService` |
 | `sessionEntities` | 784 | `ConversationListModel` |
@@ -263,7 +263,7 @@ class ItemModel {
 
 ## 9. 实施阶段
 
-每个阶段单独合入、单独部署，结束时应用都可用。
+每个阶段结束时应用都可用，本地检查都通过。
 
 | 阶段 | 内容 | 消除第 1 节的哪段 |
 | --- | --- | --- |
@@ -271,9 +271,9 @@ class ItemModel {
 | 1. 打点 | 投影（①②）、engine 分发（③）、React 提交（④⑤，`Profiler` 无法再细分）按 5 秒窗口汇总，并记录 item 数和堆大小，用真实长会话记录基线 | 无 |
 | 2a. Model 和 Service | 新包；`ConversationStore`、`V2Conversation` 迁入，Model 实例稳定；派生逻辑从投影移进 Turn；测试假后端移到 `LocalV2Transport` 层 | 无 |
 | 2a+. 读取一致性 | 第 13 节：旧快照和换库前的读取不再覆盖 Model，`refresh` 合并 | 无，修复现有问题 |
-| 2b. 增量提交 | 第 10 节；merge 保留未变化消息的引用并改为有序插入 | ①、②，③ 的大部分 |
-| 3. 转录 | 按轮次的行 computed 和不依赖内容的结构索引；view 直接读 Model；engine 不再持有 assistant 内容，只留 reducer 需要的轮次和用户消息 | ③、④ |
-| 3b. 列表 | 列表和未读迁入 `ConversationListModel`；**删除** rail 的分页查询层，本地列表本来就全在内存里 | 列表的全量计算 |
+| 2b. 增量提交 | 第 10 节 | ①、②，③ 的一部分 |
+| 3. 转录 | 按轮次的行 computed 和不依赖内容的结构索引；view 直接读 Model；engine 不再持有 assistant 内容，只留 reducer 需要的轮次和用户消息 | ③ 的其余部分、④ |
+| 3b. 列表 | 列表和设备在线状态迁入 `ConversationListModel`；vendor rail 在 Desktop 上固定折叠，折叠时不再挂载，分页查询层不再运行，代码在阶段 7 删除 | 列表的全量计算 |
 | 4. 写路径 | 第 6 节和 daemon 能力；提交、新建会话、队列、取消、交互、发送可用性一起迁；结束时迁出 `sessionLifecycle` | 数据存两份的主体 |
 | 5. 其余领域 | composer → detail，同时删除对应的 runtime 方法、controller hook、RPC 方法和 `useAgentHostApi` | |
 | 6. 删除 engine 和翻译层 | 删除 engine、`useEngineSelector`、投影、ledger、`AgentGuiRpcClient`、`AgentGUIRuntime`、runtime | 只有 MobX |
@@ -283,25 +283,82 @@ class ItemModel {
 
 每到一个阶段结束，用打点结果重新评估下一阶段的节奏。
 
+### 阶段 3 的范围说明
+
+按用户选择分两步，每一步应用都能跑。第一步已完成：时间线项、明细轮次和行都按输入对象缓存，每批只重建变化的轮次。行模型和现有组件没有变。合成数据下（200 轮、4200 条消息，不含 React），一批事件从约 69ms 降到约 8ms。
+
+第二步让 engine 不再持有 assistant 内容：
+
+- **读取：** `TranscriptModel` 持有每个会话已提交的消息列表，由 `LocalTranscript` 写入，经 `AgentGUIRuntime.transcript` 读取。`useAgentActivitySessionMessages` 用 `useModelValue` 订阅它，行模型和组件没有改。没有消息变化的提交保留原数组，下游不会重跑。
+- **engine：** 只收到用户消息和轮次，`pendingIntents`、`promptQueue` 和取消只看 `clientSubmitId`。`sessionMessagesById`、`selectSessionMessages` 还在，但只含用户消息。还在读它们的：标题和 rail 标题（只读首条用户消息）、`desktop-queue-engine`（是否已有用户消息）、历史版本的回退。计划检测读 assistant 消息，但本地转录不产出计划消息，结果不变；message center 没有挂载。
+- **同一次提交：** `applyDetail` 在一个 MobX batch 里写 Model 和分发 engine。observer 在 batch 结束时才运行，engine 的订阅者读到的 Model 已是新值，所以两边不会看到不一致的轮次状态（第 11 节风险 2）。
+- **节奏：** `CommitCadence` 约 30 ms 提交一次，取代 `receiveLocal` 的微任务合并。没有用 rAF：它在隐藏或被遮挡的窗口里暂停，在 120Hz 屏幕上又太频繁；定时器在隐藏窗口里只是被浏览器降频。提交之前 `ConversationModel` 已是新值，只有 `TranscriptModel` 和 engine 等这一拍。
+- **立即提交：** 进入 engine 的 `submitPrompt`、`dispatch`、`stopSession`、`submitInteractionResponse`，以及 `listSessionMessages`、`receiveWorkspace`。不是事件的变化（翻页、队列）在当前微任务里提交。把这些操作从 engine 迁到 Service 时，要带上这次 flush，否则发送判断会比已到达的事件晚一拍。
+- **虚拟列表：** `AgentTranscriptView.observer.spec.tsx` 在 jsdom 里跑真实的 `useVirtualizer`，尺寸是打桩的。`useModelValue` 和 `observer` 两种读法都覆盖：窗口不变时更新可见行、不在窗口内的行回来时显示最新内容、追加、卸载后不再订阅，没有 `flushSync` 警告。`observer` 行放进虚拟列表时只重渲染变化的行，滚出窗口后不再订阅。真实布局下的高度增长、滚动锚定和跟随到底，要在真实应用里看。
+
+把组件逐个改成 `observer` 直接读 Model 和阶段 5、6 一起做。
+
+### 阶段 4 的范围说明
+
+- daemon 能力已补齐：`queue.updated` 带 `request_ids`、`reason`、`dispatching_request_id`；`POST /sessions/{id}/queue/status` 批量查状态（能力 `prompt-status-v1`）；删除留墓碑，保留 7 天；重提比较时排除 `display`；`send_now` 不改变暂停的队列。
+- `PromptService` 接管了 `desktop-queue-engine` 的全部状态和逻辑，后者只把它投影给 engine。原有 28 个队列测试没有修改。
+- 重载后恢复的消息会查询状态：已送达、已入队、派发中、已删除的不再显示；未送达和结果未知的留给用户判断，不自动重发。
+- 未确认发送的存储 key 对非本机设备带设备 id。本机 key 不变，升级后已有草稿还在。
+- 还没迁的：engine 的 `pendingIntents`、`sessionMutations`、`promptExecution`、`editRetry` 和 `sessionLifecycle`。它们和新建会话、取消、交互、发送可用性缠在一起，要等 controller 的读写换掉后才能删，和阶段 5、6 一起做。
+
+### 阶段 5 的迁移做法
+
+以 composer 选项为样板，每个领域都这样做：
+
+1. 在 `packages/conversation-client/services/` 写 Service，按原语义移植 reducer 的逻辑，并把对应的 reducer 测试移植成 Service 测试。Service 不依赖 `@tutti-os/*`，类型用泛型或结构类型。
+2. host 的 runtime 创建 Service，把原来 engine 命令处理里的逻辑作为依赖注入，并挂到 `AgentGUIRuntime` 上。
+3. controller 的 hook 还不是 `observer` 时，用 `useModelValue(read, deps)` 读 Model，它负责在 React 和 MobX 之间订阅。
+4. 从 engine 整个删除这个 slice：reducer、selector、intent、command、snapshot 字段。不留兼容层。
+5. 改 spec 的夹具，不改断言的语义。删除行为测试要说明理由。
+
+每个领域完成的标准：`pnpm typecheck`、`pnpm test` 通过；GUI spec 对照基线清单（`.tmp/gui-spec-baseline.fail`）没有新增失败。
+
+**会话设置（`sessionSettings`）：** 选择和保存在 `ComposerService`，preferences 类移到 `models/composer-preferences.ts`。每个会话一条写入通道，状态和乐观值由 `composer.settingsUpdate(id)` 读取。Engine 只留下裸的 `session/updateSettings` 命令，供 `pendingIntents` 的新建补丁和 `promptExecution` 的前置设置使用，前者经 `applyActivationSettings` 回到同一条通道。等 `pendingIntents` 和 `promptExecution` 迁走后，这个命令和 `AgentSessionEffectPort.updateSessionSettings` 一起删除。
+
+队列排空不再被未结算的设置挡住：Desktop 的提示不进 engine 队列，由 `PromptService` 经 daemon 派发，发送前会等 `ComposerService` 的写入完成，界面上的发送也由 composer gate 拦截。
+
+**会话变更（`sessionMutations`）：** rename、pin、delete、fork 在 `ConversationMutationService`。fork 的 observation ACK 和 `accepted` 状态没有迁：host 的 ACK 本来就是空操作，`session.fork` 是同步提交的。归档从未进过 engine，仍由 `local-conversation-flow` 发命令。
+### 轮次操作（取消、交互回应、编辑重试）
+
+已从 engine 迁到 `PromptService`，内部拆成 `TurnCancels`、`InteractionResponses`、`EditRetries`，经 `runtime.prompts` 读写。Service 不存轮次数据，通过注入的 `PromptTurnReader` 读 engine，由 `lifecycleChanged()` 触发对账。`beforeTurnOperation` 在用户发起的操作判断之前执行，供 runtime 先提交还在缓冲的事件。
+
+- **停止：** 一直走 `queue.update stop`，它在 daemon 里同时暂停队列并中断当前轮次。`turn/cancel` 和 `session.cancel` 不再使用。客户端只负责 daemon 还不知道的情况：发送中的消息到达时会解除暂停并开始新轮次，所以没有活动轮次时进入 `awaitingTurn`，等到对应轮次出现后再停一次，30 秒过期。
+- **取消结果：** daemon 的回执不带轮次，不再校验 `cancel` 响应，改为回执后读取当前轮次状态。
+- **显示：** 之前 `desktop-queue-engine` 绕过了 engine 的取消状态，Desktop 上 `isInterrupting`、`isCancelPending` 恒为假；迁移后它们生效。
+- **编辑重试：** 状态机已移植，但本地会话目前用不到：host 不提供 availability，命令也返回 `unsupported`。
+- **还留在 engine：** `session/stopRequested` 只剩 `pendingIntents`（中止激活）和 `promptQueue`（暂停）在处理，Desktop 上没有派发方；`promptQueue` 的 `cancel_then_send` 不再触发取消。`promptExecution`、`pendingSubmit` 依赖 `promptQueue`、设置前置条件和 `pendingIntents`，等它们迁走后再动。
+
 ### 阶段 2a 的范围说明
 
 - 迁入的是内容部分和 `ConversationService`。`ConversationListModel` 和 Service 的 observable 入口留到阶段 3、3b，那时才有 view 读它们。
 - 消息列表由 Model 派生：Turn 产出 assistant 行，用户消息和交互各自产出自己的行，`ConversationModel.transcript()` 按原有顺序拼起来。按轮次排序和 `(turnIndex, rank)` 位置留到阶段 2b。
 - 派生仍是普通方法，每次调用都重算，和现在的投影开销一样。`computed` 留到阶段 3，那时才有 reaction 观察它。
-- 第 4 节的事件缓冲还没做：现在没有 observer 读 Model，流式更新仍走 runtime 已有的合并。阶段 3 接入 view 时一起做。
-- `observer` 和 React 19 的配合只验证了 host 里的组件测试（批量事件只渲染一次，且只渲染变化的行）。虚拟列表要到阶段 3 才验证。
+- 第 4 节的事件缓冲在阶段 3 第二步完成，见“阶段 3 的范围说明”。
+- `observer` 和 React 19 的配合在这个阶段只验证了 host 里的组件测试（批量事件只渲染一次，且只渲染变化的行）。虚拟列表的验证见“阶段 3 的范围说明”。
 
 
-## 10. 增量提交通道（阶段 2b）
+## 10. 增量提交（阶段 2b）
 
-`message/snapshotReceived` 不适合作为主通道：它只能增改、不能删，按字段合并会留下旧值（reasoning 结束时不带 `status`，“思考中”就不会结束），也不更新轮次状态。
+和最初的设想不同：没有在 engine 新增 intent，流式更新继续走 `session/historyAuthoritativeSnapshotReceived`，只是传入的数组由增量维护。
 
-- **首次读取、快照、历史页、generation 变化：** 继续用 `session/historyAuthoritativeSnapshotReceived`。
-- **流式更新：** 在 engine 新增一个原子 intent，包含 session、upserted turns、upserted messages、removed ids 和 window，消息整体替换，一次分发只通知一次。
+这个 intent 本身就是原子的：能删除、整体替换消息、更新轮次状态，一次分发只通知一次。结算围栏和未读回放都在 `applyDetail` 里，不用移动。engine 反正要删，少改它也少一份要删的代码。
 
-结算围栏和未读回放（`applyDetail` 里的 `replayAcceptedLiveCompletion`）要在新 intent 中保留。
+host 新增 `LocalTranscript`，每个会话一个：
 
-这个通道只存在于阶段 2b 到 6，engine 删除时一起移除。
+- 事件带来的 `turn_id` 决定重新提交哪些轮次。不是事件的变化（快照、翻页）读全部。
+- `ConversationModel` 按轮次建索引，读一轮的开销只和这一轮有关。Turn、用户消息和交互缓存自己的行，内容没变就返回同一个对象。
+- `sequence` 编码为 `(turnIndex + 1) * 2^20 + 轮内序号`，前插旧轮次不影响已有消息。轮内顺序沿用原规则：用户消息在前，其余按开始时间。没有已加载轮次的行（轮次开始前的用户消息、未翻到的轮次的问题）按时间放到对应轮次之前。
+- 流式路径上，行对象变了就直接递增版本，不再序列化和 hash。全量路径仍按内容比较。
+- `areAgentActivityMessagesEqual` 先比引用。
+
+**消除的开销：** 第 1 节的 ①②。③ 里 reducer 的深比较也没了，但 selector 和 `workspaceAgentSessionMessages` 里的克隆排序还在，它们在阶段 3 移除。
+
+**还在的开销：** 每批仍要复制一遍消息数组的引用，并重建所有轮次的投影对象。轮次数远小于 item 数，先不处理。
 
 ## 11. 风险
 
@@ -361,6 +418,8 @@ if (sameStore && snapshot.snapshot_seq < this.seq) {
 
 序号相等时内容相同，正常替换。
 
+**例外：** daemon 判定客户端游标超前于 store 时会发 `snapshot_required`（`hub.go`），此时 generation 没变，但更小的序号才是真相。这种读取标记为权威读取，跳过比较；否则会一直用旧游标重新订阅，形成死循环。
+
 **换库作废旧读取：**
 
 1. `read()` 只要 `epoch` 不一致就丢弃结果，调用方改为等待当前那次读取。
@@ -382,6 +441,7 @@ if (sameStore && snapshot.snapshot_seq < this.seq) {
 都放在 `packages/conversation-client`，先写失败的回归测试：
 
 - 迟到的同库旧快照不改变 `seq` 和轮次状态，更新的队列仍被接收。
+- 收到 `snapshot_required` 后接受更小的序号，并用它重新订阅。
 - 换库前发出的读取无论先回还是后回，都不写入 Model，也不再次触发失效。
 - 读取进行中调用 `refresh`，返回的结果来自调用之后才发出的读取；多次调用只多读一次。
 - `runtime.test.ts` 里“等上一次读完”的等待可以去掉。

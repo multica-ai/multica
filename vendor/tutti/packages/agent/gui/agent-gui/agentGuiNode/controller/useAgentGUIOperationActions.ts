@@ -9,12 +9,10 @@ import {
 import { resolveConversationSummaryById } from "./useAgentConversationSelection";
 import { useAgentGUIComposerSettingsActions } from "./useAgentGUIComposerSettingsActions";
 import { useAgentGUIContinueConversation } from "./useAgentGUIContinueConversation";
-import { useAgentGUIConversationBatchDeletion } from "./useAgentGUIConversationBatchDeletion";
 import { useAgentGUIConversationDeletion } from "./useAgentGUIConversationDeletion";
 import { useAgentGUIConversationHome } from "./useAgentGUIConversationHome";
 import { useAgentGUIConversationMetadataActions } from "./useAgentGUIConversationMetadataActions";
 import { useAgentGUINewConversationActivation } from "./useAgentGUINewConversationActivation";
-import { useAgentGUIPlanActions } from "./useAgentGUIPlanActions";
 import { useAgentGUIQueueActions } from "./useAgentGUIQueueActions";
 import { useAgentGUISubmitInteractionActions } from "./useAgentGUISubmitInteractionActions";
 
@@ -26,7 +24,7 @@ type NewConversationInput = Parameters<
 
 type UseAgentGUIOperationActionsInput = Omit<
   SubmitInput,
-  "goalControlSupported" | "isSessionMarkedNonResumable" | "startConversation"
+  "isSessionMarkedNonResumable" | "startConversation"
 > &
   Omit<HomeInput, "submitPrefillPrompt"> &
   Omit<NewConversationInput, "getCachedComposerOptions"> &
@@ -35,11 +33,10 @@ type UseAgentGUIOperationActionsInput = Omit<
     "createConversation"
   > &
   Parameters<typeof useAgentGUIComposerSettingsActions>[0] &
-  Parameters<typeof useAgentGUIPlanActions>[0] &
   Parameters<typeof useAgentGUIConversationDeletion>[0] &
   Parameters<typeof useAgentGUIQueueActions>[0] &
   Parameters<typeof useAgentGUIConversationMetadataActions>[0] &
-  Parameters<typeof useAgentGUIConversationBatchDeletion>[0] & {
+  {
     providerComposerOptions: ReturnType<
       NewConversationInput["getCachedComposerOptions"]
     >;
@@ -125,21 +122,14 @@ export function useAgentGUIOperationActions(
 
   const submitActions = useAgentGUISubmitInteractionActions({
     ...input,
-    goalControlSupported:
-      input.providerComposerOptions?.slashCommandPolicy?.commandEffects.some(
-        ({ effect }) => effect === "activateGoalMode"
-      ) === true,
     isSessionMarkedNonResumable,
     startConversation
   });
   const settingsActions = useAgentGUIComposerSettingsActions(input);
 
-  useAgentGUIPlanActions(input);
-
   const deletionActions = useAgentGUIConversationDeletion(input);
   const queueActions = useAgentGUIQueueActions(input);
   const metadataActions = useAgentGUIConversationMetadataActions(input);
-  const batchDeletionActions = useAgentGUIConversationBatchDeletion(input);
 
   return {
     ...submitActions,
@@ -147,7 +137,6 @@ export function useAgentGUIOperationActions(
     ...deletionActions,
     ...queueActions,
     ...metadataActions,
-    ...batchDeletionActions,
     continueInNewConversation,
     createConversation
   };

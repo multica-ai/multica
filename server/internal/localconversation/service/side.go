@@ -192,7 +192,7 @@ func (s *Service) QueueToSide(ctx context.Context, scopeID int64, conversationID
 	if err != nil {
 		return conv, err
 	}
-	_, err = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error, Remove: requestID}, len(state.Items)-1)
+	_, err = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error, Remove: requestID}, len(state.Items)-1, "moved")
 	return conv, err
 }
 

@@ -228,7 +228,7 @@ export function AgentGuiApplication({
       sessionWorktreeEnabled: false,
       sideConversationEnabled: false,
       capabilityControlsReadOnly: true,
-      capabilityMenuState: { tuttiMode: { enabled: false }, connectors: { enabled: false }, computerUse: { presentationSupported: false } },
+      capabilityMenuState: { connectors: { enabled: false }, computerUse: { presentationSupported: false } },
     }}
     hostActions={{
       onClose: () => undefined,

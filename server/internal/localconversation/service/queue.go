@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -87,6 +88,28 @@ type queues struct {
 	mu          sync.Mutex
 	locks       map[string]*sync.Mutex
 	dispatching map[string]string
+	// once names a message to send although its queue is paused. In memory on
+	// purpose: after a restart the queue waits for the user, this message included.
+	once map[string]string
+}
+
+func (q *queues) setOnce(conversationID, requestID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.once == nil {
+		q.once = map[string]string{}
+	}
+	if requestID == "" {
+		delete(q.once, conversationID)
+	} else {
+		q.once[conversationID] = requestID
+	}
+}
+
+func (q *queues) onceFor(conversationID string) string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.once[conversationID]
 }
 
 func (q *queues) lock(conversationID string) func() {
@@ -134,7 +157,7 @@ func (s *Service) queueView(conversationID string, state store.QueueState) Queue
 	for _, item := range state.Items {
 		view.Items = append(view.Items, item.Item)
 	}
-	if id := s.queues.dispatchingFor(conversationID); id != "" && !state.Paused && state.Error == "" {
+	if id := s.queues.dispatchingFor(conversationID); id != "" && ((!state.Paused && state.Error == "") || id == s.queues.onceFor(conversationID)) {
 		view.Dispatching = id
 	}
 	return view
@@ -164,7 +187,7 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 	for _, existing := range state.Items {
 		if existing.RequestID == item.RequestID {
 			unlock()
-			if !jsonEqual(existing.Item, raw) {
+			if !sameQueuedMessage(existing.Item, raw) {
 				return QueueView{}, ErrRequestConflict
 			}
 			return s.queueView(conversationID, state), nil
@@ -173,6 +196,11 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 	if _, err := s.store.Receipt(ctx, scopeID, item.RequestID); err == nil {
 		unlock()
 		return s.queueView(conversationID, state), nil
+	}
+	removed, err := s.store.QueueItemRemoved(ctx, conversationID, item.RequestID)
+	if err != nil || removed {
+		unlock()
+		return s.queueView(conversationID, state), err
 	}
 	if len(state.Items) >= maxQueueItems {
 		unlock()
@@ -184,7 +212,7 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 	} else {
 		change.Error = state.Error
 	}
-	view, err := s.commitQueue(ctx, conversationID, change, len(state.Items)+1)
+	view, err := s.commitQueue(ctx, conversationID, change, len(state.Items)+1, "enqueued")
 	unlock()
 	if err == nil {
 		if paused || len(state.Items) > 0 || conv.Status == "running" {
@@ -234,6 +262,8 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 	}
 	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error}
 	count := len(state.Items)
+	wasHeld, heldError := state.Paused || state.Error != "", state.Error
+	reason := action
 	switch action {
 	case "pause", "stop":
 		change.Paused = true
@@ -248,6 +278,8 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 			return s.queueView(conversationID, state), nil
 		}
 		change.Remove = requestID
+		change.RemovedAt = s.opts.Now()
+		reason = "removed"
 		count--
 	case "send_now":
 		if !queued {
@@ -257,7 +289,7 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 		// Hold the queue until the running turn has stopped.
 		change.Paused = true
 	}
-	view, err := s.commitQueue(ctx, conversationID, change, count)
+	view, err := s.commitQueue(ctx, conversationID, change, count, reason)
 	unlock()
 	if err != nil {
 		return view, err
@@ -271,7 +303,15 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 		unlock := s.queues.lock(conversationID)
 		state, err := s.store.Queue(ctx, conversationID)
 		if err == nil {
-			view, err = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: state.Revision + 1, Front: requestID}, len(state.Items))
+			// A queue the user was holding stays held: only this message goes.
+			if wasHeld {
+				s.queues.setOnce(conversationID, requestID)
+			}
+			front := store.QueueChange{Revision: state.Revision + 1, Front: requestID}
+			if wasHeld {
+				front.Paused, front.Error = true, heldError
+			}
+			view, err = s.commitQueue(ctx, conversationID, front, len(state.Items), "send_now")
 		}
 		unlock()
 		if err != nil {
@@ -294,21 +334,30 @@ func (s *Service) pauseQueueAfterRestart(ctx context.Context, conversationID str
 	if err != nil || state.Paused || len(state.Items) == 0 {
 		return err
 	}
-	_, err = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: state.Revision + 1, Paused: true, Error: queuePausedByRestart}, len(state.Items))
+	_, err = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: state.Revision + 1, Paused: true, Error: queuePausedByRestart}, len(state.Items), "restart")
 	return err
 }
 
 // commitQueue records a queue change with its queue.updated event and the
 // summary's queue count. The caller holds the conversation's queue lock.
-func (s *Service) commitQueue(ctx context.Context, conversationID string, change store.QueueChange, count int) (QueueView, error) {
-	payload := map[string]any{"revision": change.Revision, "paused": change.Paused, "count": count}
+func (s *Service) commitQueue(ctx context.Context, conversationID string, change store.QueueChange, count int, reason string) (QueueView, error) {
+	current, err := s.store.Queue(ctx, conversationID)
+	if err != nil {
+		return QueueView{}, err
+	}
+	// The order and the reason tell a client a message that went out from one
+	// another device removed. No content: the items stay behind the queue route.
+	payload := map[string]any{"revision": change.Revision, "paused": change.Paused, "count": count, "request_ids": requestIDsAfter(current, change), "reason": reason}
 	if change.Error != "" {
 		payload["error"] = change.Error
+	}
+	if id := s.queues.dispatchingFor(conversationID); id != "" {
+		payload["dispatching_request_id"] = id
 	}
 	data, _ := json.Marshal(payload)
 	n := int64(count)
 	now := s.opts.Now()
-	_, err := s.batcher.AppendWait(ctx, store.Batch{
+	_, err = s.batcher.AppendWait(ctx, store.Batch{
 		ConversationID: conversationID, Queue: &change,
 		Events:  []store.NewEvent{{Type: "queue.updated", Payload: data, CreatedAt: now}},
 		Summary: &store.SummaryPatch{QueueCount: &n, UpdatedAt: now},
@@ -334,7 +383,11 @@ func (s *Service) dispatchQueue(conversationID string) {
 		return
 	}
 	state, err := s.store.Queue(ctx, conversationID)
-	if err != nil || state.Paused || state.Error != "" || len(state.Items) == 0 {
+	if err != nil || len(state.Items) == 0 {
+		return
+	}
+	once := s.queues.onceFor(conversationID) == state.Items[0].RequestID
+	if (state.Paused || state.Error != "") && !once {
 		return
 	}
 	conv, err := s.store.Conversation(ctx, conversationID)
@@ -352,11 +405,14 @@ func (s *Service) dispatchQueue(conversationID string) {
 		err = s.sendQueued(ctx, conv, item, TurnOrigin{PeerID: first.OriginPeerID, ClientKind: first.OriginClientKind})
 		s.queues.setDispatching(conversationID, "")
 	}
-	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused}
+	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error}
 	count := len(state.Items)
 	switch {
 	case errors.Is(err, ErrTurnRunning) || errors.Is(err, ErrClosing) || errors.Is(err, ErrDraining):
 		return
+	}
+	if once {
+		s.queues.setOnce(conversationID, "")
 	}
 	// Recorded after the send because a dispatch that finds a running turn
 	// stays queued and is not the one that counts.
@@ -368,7 +424,11 @@ func (s *Service) dispatchQueue(conversationID string) {
 		change.Remove = first.RequestID
 		count--
 	}
-	if _, err := s.commitQueue(ctx, conversationID, change, count); err != nil {
+	reason := "dispatched"
+	if change.Remove == "" {
+		reason = "failed"
+	}
+	if _, err := s.commitQueue(ctx, conversationID, change, count, reason); err != nil {
 		s.opts.Logger.Warn("local conversations: could not record queue progress", "conversation_id", conversationID, "error", err)
 	}
 }
@@ -433,6 +493,118 @@ func (s *Service) queuedAttemptID(ctx context.Context, conv sqlitedb.Conversatio
 			return id, nil
 		}
 		id = fmt.Sprintf("%s-retry-%d", requestID, attempt)
+	}
+}
+
+// requestIDsAfter is the queue's order once a change applies.
+func requestIDsAfter(state store.QueueState, change store.QueueChange) []string {
+	ids := []string{}
+	for _, item := range state.Items {
+		if item.RequestID != change.Remove && item.RequestID != change.Front {
+			ids = append(ids, item.RequestID)
+		}
+	}
+	if change.Front != "" {
+		ids = append([]string{change.Front}, ids...)
+	}
+	if change.Append != nil {
+		ids = append(ids, change.Append.RequestID)
+	}
+	return ids
+}
+
+// sameQueuedMessage compares two queued items apart from how they display: a
+// reloaded client rebuilds the display, with a new time, for the same message.
+func sameQueuedMessage(a, b json.RawMessage) bool {
+	withoutDisplay := func(raw json.RawMessage) any {
+		var value map[string]any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return string(raw)
+		}
+		delete(value, "display")
+		return value
+	}
+	return reflect.DeepEqual(withoutDisplay(a), withoutDisplay(b))
+}
+
+// Prompt statuses answer what became of a message a client lost track of.
+const (
+	PromptQueued      = "queued"
+	PromptDispatching = "dispatching"
+	PromptDelivered   = "delivered"
+	// PromptFailed means no provider received it, so sending again is safe.
+	PromptFailed = "failed"
+	// PromptUnknown means it may have been delivered; only the user can judge.
+	PromptUnknown = "unknown"
+	PromptRemoved = "removed"
+	PromptNone    = "none"
+)
+
+// PromptStatuses reports each message's fate, for a client reconciling after a
+// reload: a dispatched message may be in a turn it has not loaded.
+func (s *Service) PromptStatuses(ctx context.Context, scopeID int64, conversationID string, requestIDs []string) (map[string]string, error) {
+	conv, err := s.scopedConversation(ctx, scopeID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if len(requestIDs) > maxQueueItems {
+		return nil, fmt.Errorf("%w: ask about up to %d messages", ErrInvalidRequest, maxQueueItems)
+	}
+	state, err := s.store.Queue(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	statuses := make(map[string]string, len(requestIDs))
+	for _, item := range state.Items {
+		statuses[item.RequestID] = PromptQueued
+	}
+	dispatching := s.queues.dispatchingFor(conversationID)
+	result := make(map[string]string, len(requestIDs))
+	for _, id := range requestIDs {
+		switch {
+		case id != "" && id == dispatching:
+			result[id] = PromptDispatching
+		case statuses[id] != "":
+			result[id] = statuses[id]
+		default:
+			if result[id], err = s.settledPromptStatus(ctx, conv, id); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) settledPromptStatus(ctx context.Context, conv sqlitedb.Conversation, requestID string) (string, error) {
+	removed, err := s.store.QueueItemRemoved(ctx, conv.ID, requestID)
+	if err != nil {
+		return "", err
+	}
+	if removed {
+		return PromptRemoved, nil
+	}
+	status := PromptNone
+	// Each attempt the provider refused was followed by a retry under a new id; the last decides.
+	for attempt, id := 0, requestID; ; attempt, id = attempt+1, fmt.Sprintf("%s-retry-%d", requestID, attempt+1) {
+		receipt, err := s.store.Receipt(ctx, conv.ScopeID, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return status, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if receipt.Uncertain != 0 {
+			return PromptUnknown, nil
+		}
+		turn, err := s.store.Turn(ctx, conv.ID, "turn-"+id)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return "", err
+		}
+		if err == nil && turn.Status == "failed" && (turn.ErrorKind == "provider_unavailable" || turn.ErrorKind == "provider_error") {
+			status = PromptFailed
+			continue
+		}
+		return PromptDelivered, nil
 	}
 }
 

@@ -2,14 +2,22 @@ import { renderHook } from "@testing-library/react";
 import {
   AGENT_CAPABILITY_KEYS,
   normalizeAgentActivitySession,
-  selectComposerOptions,
   type AgentActivityComposerOptions,
   type AgentActivitySessionCapabilities,
   type CanonicalAgentSession
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it } from "vitest";
+import type { AgentGUIComposerOptionsReader } from "./agentGuiController.providerHelpers";
 import { useAgentGUIComposerCapabilities } from "./useAgentGUIComposerCapabilities";
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
+
+function composerWith(
+  options: Record<string, AgentActivityComposerOptions>
+): AgentGUIComposerOptionsReader {
+  return {
+    options: (targetKey) => options[targetKey?.trim() ?? ""] ?? null,
+    status: () => undefined
+  };
+}
 
 describe("useAgentGUIComposerCapabilities", () => {
   function engineSession(input: {
@@ -109,7 +117,7 @@ describe("useAgentGUIComposerCapabilities", () => {
           provider: "opencode",
           targetId: "local:opencode"
         },
-        sessionEngine: createTestAgentSessionEngine("workspace-1")
+        composer: composerWith({})
       })
     );
 
@@ -151,7 +159,7 @@ describe("useAgentGUIComposerCapabilities", () => {
           provider: "opencode",
           targetId: "local:opencode"
         },
-        sessionEngine: createTestAgentSessionEngine("workspace-1")
+        composer: composerWith({})
       })
     );
 
@@ -202,7 +210,7 @@ describe("useAgentGUIComposerCapabilities", () => {
           provider: "opencode",
           targetId: "local:opencode"
         },
-        sessionEngine: createTestAgentSessionEngine("workspace-1")
+        composer: composerWith({})
       })
     );
 
@@ -229,21 +237,8 @@ describe("useAgentGUIComposerCapabilities", () => {
       agentTargetId: "extension:hermes",
       lastActiveAgentSessionId: "session-1"
     };
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    sessionEngine.dispatch({
-      type: "composerOptions/loadRequested",
-      commandId: "composer-options-1",
-      targetKey: "extension:hermes",
-      provider: "acp:hermes",
-      workspaceId: "workspace-1"
-    });
-    sessionEngine.dispatch({
-      type: "engine/commandResult",
-      commandId: "composer-options-1",
-      commandType: "composerOptions/load",
-      correlationId: "extension:hermes",
-      outcome: "succeeded",
-      value: composerOptions({
+    const composer = composerWith({
+      "extension:hermes": composerOptions({
         provider: "acp:hermes",
         capabilities: ["interrupt", "browserUse", "skills"]
       })
@@ -262,7 +257,7 @@ describe("useAgentGUIComposerCapabilities", () => {
           provider: "acp:hermes",
           targetId: "extension:hermes"
         },
-        sessionEngine
+        composer
       })
     );
 
@@ -281,26 +276,10 @@ describe("useAgentGUIComposerCapabilities", () => {
       provider: "codex" as const,
       targetId: "local:codex"
     };
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    sessionEngine.dispatch({
-      type: "composerOptions/loadRequested",
-      commandId: "composer-options-creation",
-      targetKey: "local:codex",
-      provider: "codex",
-      workspaceId: "workspace-1"
+    const composer = composerWith({
+      "local:codex": composerOptions({ provider: "codex" })
     });
-    sessionEngine.dispatch({
-      type: "engine/commandResult",
-      commandId: "composer-options-creation",
-      commandType: "composerOptions/load",
-      correlationId: "local:codex",
-      outcome: "succeeded",
-      value: composerOptions({ provider: "codex" })
-    });
-    const cachedOptions = selectComposerOptions(
-      sessionEngine.getSnapshot(),
-      "local:codex"
-    );
+    const cachedOptions = composer.options("local:codex");
     expect(cachedOptions).not.toBeNull();
 
     type CreationProps = {
@@ -330,7 +309,7 @@ describe("useAgentGUIComposerCapabilities", () => {
           draftSettingsBySessionId: {},
           optimisticComposerTarget,
           selectedComposerTargetData,
-          sessionEngine
+          composer
         }),
       { initialProps }
     );

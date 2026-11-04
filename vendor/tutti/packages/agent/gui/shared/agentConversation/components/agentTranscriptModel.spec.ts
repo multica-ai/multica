@@ -11,8 +11,8 @@ import {
 } from "./agentTranscriptModel";
 
 describe("buildAgentTranscriptTurnGroups", () => {
-  it("keeps a turnless Goal control inside one surrounding Turn presentation group", () => {
-    const rows = [row("turn-1"), goalControlRow(), row("turn-1")];
+  it("keeps a turnless row inside one surrounding Turn presentation group", () => {
+    const rows = [row("turn-1"), turnlessRow(), row("turn-1")];
     const groups = buildAgentTranscriptTurnGroups(
       rows,
       rows.map(transcriptRowKey)
@@ -21,16 +21,12 @@ describe("buildAgentTranscriptTurnGroups", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.key).toBe("turn-1");
     expect(groups[0]?.turnId).toBe("turn-1");
-    expect(groups[0]?.rows.map(({ row: item }) => item.kind)).toEqual([
-      "message",
-      "goal-control",
-      "message"
-    ]);
+    expect(groups[0]?.rows).toHaveLength(3);
     expect(groups[0]?.rows[1]?.row.turnId).toBeNull();
   });
 
-  it("keeps a Goal control between different Turns independent", () => {
-    const rows = [row("turn-1"), goalControlRow(), row("turn-2")];
+  it("keeps a turnless row between different Turns independent", () => {
+    const rows = [row("turn-1"), turnlessRow(), row("turn-2")];
     const groups = buildAgentTranscriptTurnGroups(
       rows,
       rows.map(transcriptRowKey)
@@ -38,7 +34,7 @@ describe("buildAgentTranscriptTurnGroups", () => {
 
     expect(groups.map((group) => group.key)).toEqual([
       "turn-1",
-      "orphan:goal-control:clear",
+      `orphan:${transcriptRowKey(rows[1]!)}`,
       "turn-2"
     ]);
     expect(groups[1]?.turnId).toBeNull();
@@ -141,15 +137,8 @@ function row(
   };
 }
 
-function goalControlRow(): AgentTranscriptRowVM {
-  return {
-    kind: "goal-control",
-    id: "goal-control:clear",
-    turnId: null,
-    action: "clear",
-    body: "/goal clear",
-    occurredAtUnixMs: 2
-  };
+function turnlessRow(): AgentTranscriptRowVM {
+  return { ...row("turnless"), turnId: null } as AgentTranscriptRowVM;
 }
 
 function userRow(turnId: string): AgentTranscriptRowVM {

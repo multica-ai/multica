@@ -1,11 +1,8 @@
 import {
   type AgentActivityComposerOptions,
-  type AgentActivityInitialGoalControl,
   type AgentActivityRailPlacement,
   isPendingActivationViable,
   selectLatestActivationForSession,
-  selectTuttiModeDraftIsActive,
-  selectTuttiModeDraftPreferences
 } from "@tutti-os/agent-activity-core";
 import { useCallback } from "react";
 import { translate } from "../../../i18n/index";
@@ -47,45 +44,6 @@ import {
   type AgentGUINewConversationActivationResult,
   type UseAgentGUINewConversationActivationInput
 } from "./agentGuiNewConversationActivation.types";
-
-interface ResolvedInitialTuttiModeActivation {
-  activation: {
-    source: "slash_command";
-    status: "active";
-    effect?: number;
-    speed?: number;
-  };
-  source: "composer_submit" | "engine_draft";
-}
-
-export function resolveInitialTuttiModeActivation(input: {
-  submitOptions?: AgentComposerSubmitOptions;
-  draftActive: boolean;
-  draftEffect: number | null;
-  draftSpeed: number | null;
-}): ResolvedInitialTuttiModeActivation | null {
-  const submitSnapshot = input.submitOptions?.tuttiMode;
-  const active = submitSnapshot?.active ?? input.draftActive;
-  if (!active) return null;
-  const effect = normalizePreference(
-    submitSnapshot?.effect ?? input.draftEffect
-  );
-  const speed = normalizePreference(submitSnapshot?.speed ?? input.draftSpeed);
-  return {
-    activation: {
-      source: "slash_command",
-      status: "active",
-      ...(effect === null ? {} : { effect }),
-      ...(speed === null ? {} : { speed })
-    },
-    source: submitSnapshot ? "composer_submit" : "engine_draft"
-  };
-}
-
-function normalizePreference(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.min(100, Math.max(0, Math.round(value)));
-}
 
 function firstResolvedComposerText(
   ...values: Array<string | null | undefined>
@@ -266,7 +224,6 @@ export function useAgentGUINewConversationActivation(
     isComposerHomeRef,
     activeSessionState,
     sessionEngine,
-    tuttiModeDraftKey,
     activation,
     currentUserId,
     data,
@@ -285,8 +242,7 @@ export function useAgentGUINewConversationActivation(
       initialContentInput?: unknown,
       displayPrompt?: string,
       submitOptions?: AgentComposerSubmitOptions,
-      initialTurnExpected?: boolean,
-      initialGoalControl?: AgentActivityInitialGoalControl
+      initialTurnExpected?: boolean
     ): AgentGUINewConversationActivationResult | null => {
       const target = selectedAgentTargetRef.current;
       const targetData = selectedComposerTargetDataRef.current;
@@ -390,30 +346,12 @@ export function useAgentGUINewConversationActivation(
         sourceScopeKey,
         content: snapshotAgentComposerDraft(submittedDraft)
       };
-      const engineSnapshot = sessionEngine.getSnapshot();
-      const draftPreferences = selectTuttiModeDraftPreferences(
-        engineSnapshot,
-        tuttiModeDraftKey
-      );
-      const initialTuttiMode = resolveInitialTuttiModeActivation({
-        submitOptions,
-        draftActive: selectTuttiModeDraftIsActive(
-          engineSnapshot,
-          tuttiModeDraftKey
-        ),
-        draftEffect: draftPreferences.effect,
-        draftSpeed: draftPreferences.speed
-      });
       reportAgentSubmitTraceDiagnostic({
         event: "activation.requested",
         runtime: agentActivityRuntime,
         trace: submitTrace,
         workspaceId,
-        fields: {
-          mode: "new",
-          tutti_mode_active: initialTuttiMode !== null,
-          tutti_mode_source: initialTuttiMode?.source ?? "inactive"
-        }
+        fields: { mode: "new" }
       });
       const requestId = activation.activate({
         mode: "new",
@@ -432,14 +370,7 @@ export function useAgentGUINewConversationActivation(
         railSectionKey,
         initialContent: normalizedInitialContent,
         ...(initialTurnExpected !== undefined ? { initialTurnExpected } : {}),
-        ...(initialGoalControl ? { initialGoalControl } : {}),
         initialDisplayPrompt,
-        ...(initialTuttiMode
-          ? {
-              initialTuttiModeActivation: initialTuttiMode.activation,
-              tuttiModeDraftKey
-            }
-          : {}),
         runtimeContent: toRuntimeSendContent(normalizedInitialContent),
         submitDiagnostics: agentSubmitTraceDiagnostics(submitTrace),
         settings,
@@ -476,7 +407,6 @@ export function useAgentGUINewConversationActivation(
       agentActivityRuntime,
       isConversationStale,
       sessionEngine,
-      tuttiModeDraftKey,
       workspaceId
     ]
   );

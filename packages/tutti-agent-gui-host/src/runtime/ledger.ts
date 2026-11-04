@@ -1,4 +1,4 @@
-import type { AgentActivityDurableMessage, PromptQueueState } from "@tutti-os/agent-activity-core";
+import type { PromptQueueState } from "@tutti-os/agent-activity-core";
 import type { Attachment, SendChatMessageResponse } from "@multica/core/types";
 import { readSavedPromptQueues, snapshotPromptQueues, type SavedPromptQueue } from "./saved-prompt-queues";
 
@@ -105,35 +105,13 @@ export class RuntimeLedger {
     return version;
   }
   latestVersion(sessionId: string): number { return this.state.versions[sessionId]?.next ?? 0; }
-  project(sessionId: string, messages: Omit<AgentActivityDurableMessage, "version" | "sequence">[], turnStarts: ReadonlyMap<string, number> = new Map(), paged = false): AgentActivityDurableMessage[] {
-    const anchors = new Map([...turnStarts].filter(([, start]) => Number.isFinite(start) && start > 0));
-    const promptTurns = new Set<string>();
-    for (const message of messages) {
-      if (message.role !== "user" || !message.turnId || promptTurns.has(message.turnId)) continue;
-      anchors.set(message.turnId, message.occurredAtUnixMs);
-      promptTurns.add(message.turnId);
-    }
-    const fallbackAnchors = new Map<string, number>();
-    for (const message of messages) if (message.turnId && !anchors.has(message.turnId)) {
-      fallbackAnchors.set(message.turnId, Math.min(fallbackAnchors.get(message.turnId) ?? Infinity, message.occurredAtUnixMs));
-    }
-    for (const [turnId, at] of fallbackAnchors) anchors.set(turnId, at);
-    const anchor = (message: typeof messages[number]) => message.turnId ? anchors.get(message.turnId) ?? message.occurredAtUnixMs : message.occurredAtUnixMs;
-    // A late/backfilled event must not move its Turn ahead of the prompt that
-    // started it, or split a Turn into duplicate virtual-list groups.
-    const turnOrder = new Map<string, number>();
-    for (const message of messages) if (message.turnId && !turnOrder.has(message.turnId)) turnOrder.set(message.turnId, turnOrder.size);
-    return [...messages].sort((a, b) => {
-      if (a.turnId && a.turnId === b.turnId) {
-        return Number(b.role === "user") - Number(a.role === "user") || a.occurredAtUnixMs - b.occurredAtUnixMs;
-      }
-      return anchor(a) - anchor(b) || (a.turnId && b.turnId ? turnOrder.get(a.turnId)! - turnOrder.get(b.turnId)! : 0);
-    }).map((message, index) => {
-      const positioned = { ...message, sequence: index + 1 };
-      // Older turns paged in move every message without changing any, and a full
-      // snapshot replaces what readers hold, so position is not a new version there.
-      return { ...positioned, version: this.version(sessionId, message.messageId, paged ? message : positioned) };
-    });
+  /** A new version for content known to have changed, without reading it. */
+  bumpVersion(sessionId: string, messageId: string): number {
+    const state = this.state.versions[sessionId] ??= { next: 0, messages: {} };
+    const version = ++state.next;
+    // The next comparison by content finds a difference, and at worst bumps once more.
+    state.messages[messageId] = { fingerprint: "", version };
+    return version;
   }
 }
 

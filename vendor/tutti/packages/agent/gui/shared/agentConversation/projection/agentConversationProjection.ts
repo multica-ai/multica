@@ -5,7 +5,6 @@ import type {
 import { extractImageGenerationPreview } from "../../imageGenerationTool";
 import type { AgentConversationVM } from "../contracts/agentConversationVM";
 import type { AgentGeneratedImageRowVM } from "../contracts/agentGeneratedImageRowVM";
-import type { AgentGoalControlRowVM } from "../contracts/agentGoalControlRowVM";
 import type {
   AgentMessageContentVM,
   AgentMessageRowVM
@@ -66,10 +65,9 @@ export function projectAgentConversationVM(
       )
     )
   );
-  const timelineRows = insertGoalControlRows(normalizedRows, detail);
-  const processing = projectAgentProcessingRow(detail, timelineRows);
+  const processing = projectAgentProcessingRow(detail, normalizedRows);
   const projectedRows = projectAgentMessageFinalText(
-    processing ? [...timelineRows, processing] : timelineRows,
+    processing ? [...normalizedRows, processing] : normalizedRows,
     detail
   );
 
@@ -79,40 +77,6 @@ export function projectAgentConversationVM(
     sourceDetail: detail,
     rows: projectedRows
   };
-}
-
-function insertGoalControlRows(
-  rows: readonly AgentTranscriptRowVM[],
-  detail: WorkspaceAgentSessionDetailViewModel
-): AgentTranscriptRowVM[] {
-  const controls = detail.goalControls ?? [];
-  if (controls.length === 0) {
-    return [...rows];
-  }
-  const merged = [...rows];
-  for (const control of controls) {
-    const row: AgentGoalControlRowVM = {
-      kind: "goal-control",
-      id: `goal-control:${control.id}`,
-      turnId: null,
-      action: control.action,
-      body: control.body,
-      occurredAtUnixMs: control.occurredAtUnixMs ?? null,
-      sourceTimelineItems: control.sourceTimelineItems
-    };
-    const insertionIndex = merged.findIndex(
-      (candidate) =>
-        row.occurredAtUnixMs !== null &&
-        candidate.occurredAtUnixMs !== null &&
-        candidate.occurredAtUnixMs > row.occurredAtUnixMs
-    );
-    if (insertionIndex < 0) {
-      merged.push(row);
-    } else {
-      merged.splice(insertionIndex, 0, row);
-    }
-  }
-  return merged;
 }
 
 function dropRedundantCompactFailureEchoRows(
@@ -301,29 +265,37 @@ function mergeAdjacentAssistantMessageRows(
       isMergeableAssistantMessageRow(previous) &&
       canMergeAdjacentAssistantMessageRows(previous, row)
     ) {
-      const lastMessage = previous.messages.at(-1);
+      // Rows are kept between projections, so a merge makes a new one.
+      const messages = [...previous.messages];
+      const lastMessage = messages.at(-1);
       const nextMessage = row.messages[0];
       if (lastMessage && nextMessage) {
-        lastMessage.body = joinAdjacentAssistantMessageBodies(
-          lastMessage.body,
-          nextMessage.body,
-          nextMessage.statusKind
-        );
-        lastMessage.statusKind =
-          nextMessage.statusKind ??
-          (lastMessage.statusKind === "working" ||
-          lastMessage.statusKind === "waiting"
-            ? null
-            : lastMessage.statusKind) ??
-          null;
-        lastMessage.occurredAtUnixMs =
-          nextMessage.occurredAtUnixMs ?? lastMessage.occurredAtUnixMs;
+        messages[messages.length - 1] = {
+          ...lastMessage,
+          body: joinAdjacentAssistantMessageBodies(
+            lastMessage.body,
+            nextMessage.body,
+            nextMessage.statusKind
+          ),
+          statusKind:
+            nextMessage.statusKind ??
+            (lastMessage.statusKind === "working" ||
+            lastMessage.statusKind === "waiting"
+              ? null
+              : lastMessage.statusKind) ??
+            null,
+          occurredAtUnixMs:
+            nextMessage.occurredAtUnixMs ?? lastMessage.occurredAtUnixMs
+        };
       }
       if (row.messages.length > 1) {
-        previous.messages.push(...row.messages.slice(1));
+        messages.push(...row.messages.slice(1));
       }
-      previous.occurredAtUnixMs =
-        row.occurredAtUnixMs ?? previous.occurredAtUnixMs;
+      merged[merged.length - 1] = {
+        ...previous,
+        messages,
+        occurredAtUnixMs: row.occurredAtUnixMs ?? previous.occurredAtUnixMs
+      };
       continue;
     }
     merged.push(row);
@@ -473,18 +445,24 @@ function mergeAdjacentTransportRetryNoticeRows(
         previousMessage.sourceTimelineItems,
         nextMessage.sourceTimelineItems
       );
-      previous.messages[0] = {
-        ...previousMessage,
-        body: nextMessage.body || previousMessage.body,
-        systemNotice: nextMessage.systemNotice ?? previousMessage.systemNotice,
-        statusKind:
-          nextMessage.statusKind ?? previousMessage.statusKind ?? null,
-        occurredAtUnixMs:
-          nextMessage.occurredAtUnixMs ?? previousMessage.occurredAtUnixMs,
-        ...(sourceTimelineItems ? { sourceTimelineItems } : {})
+      merged[merged.length - 1] = {
+        ...previous,
+        messages: [
+          {
+            ...previousMessage,
+            body: nextMessage.body || previousMessage.body,
+            systemNotice:
+              nextMessage.systemNotice ?? previousMessage.systemNotice,
+            statusKind:
+              nextMessage.statusKind ?? previousMessage.statusKind ?? null,
+            occurredAtUnixMs:
+              nextMessage.occurredAtUnixMs ?? previousMessage.occurredAtUnixMs,
+            ...(sourceTimelineItems ? { sourceTimelineItems } : {})
+          },
+          ...previous.messages.slice(1)
+        ],
+        occurredAtUnixMs: row.occurredAtUnixMs ?? previous.occurredAtUnixMs
       };
-      previous.occurredAtUnixMs =
-        row.occurredAtUnixMs ?? previous.occurredAtUnixMs;
       continue;
     }
     merged.push(row);
@@ -559,7 +537,29 @@ function isSpecialAssistantMessage(message: {
   );
 }
 
+/** A turn's rows, kept while the detail keeps the turn's object. */
+const rowsByTurn = new WeakMap<
+  WorkspaceAgentSessionDetailTurn,
+  { key: string; rows: AgentTranscriptRowVM[] }
+>();
+
 function projectTurnConversationRows(
+  turn: WorkspaceAgentSessionDetailTurn,
+  workspaceId: string | null | undefined,
+  options: {
+    agentSessionId: string;
+    avoidGroupingEdits?: boolean;
+  }
+): AgentTranscriptRowVM[] {
+  const key = JSON.stringify([workspaceId, options.agentSessionId, options.avoidGroupingEdits]);
+  const cached = rowsByTurn.get(turn);
+  if (cached?.key === key) return cached.rows;
+  const rows = buildTurnConversationRows(turn, workspaceId, options);
+  rowsByTurn.set(turn, { key, rows });
+  return rows;
+}
+
+function buildTurnConversationRows(
   turn: WorkspaceAgentSessionDetailTurn,
   workspaceId: string | null | undefined,
   options: {

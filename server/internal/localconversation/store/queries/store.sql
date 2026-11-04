@@ -305,3 +305,12 @@ SELECT item_id, MIN(seq) AS first_seq, created_at
 FROM event
 WHERE conversation_id = sqlc.arg(conversation_id) AND turn_id = sqlc.arg(turn_id) AND item_id IS NOT NULL
 GROUP BY item_id;
+
+-- name: InsertPromptQueueTombstone :exec
+INSERT OR REPLACE INTO prompt_queue_tombstone (conversation_id, request_id, removed_at) VALUES (?, ?, ?);
+
+-- name: DeleteOldPromptQueueTombstones :exec
+DELETE FROM prompt_queue_tombstone WHERE conversation_id = ? AND removed_at < ?;
+
+-- name: CountPromptQueueTombstone :one
+SELECT COUNT(*) FROM prompt_queue_tombstone WHERE conversation_id = ? AND request_id = ?;

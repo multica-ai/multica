@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { conversationService } from "../platform/conversation-services";
 import { localV2Error, LocalV2RequestError } from "@multica/conversation-client/services";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
@@ -77,7 +78,7 @@ export function LocalConversationFlowPage() {
   return <LocalDeviceProvider device={device}><LocalConversationFlow key={deviceId} /></LocalDeviceProvider>;
 }
 
-function LocalConversationFlow() {
+const LocalConversationFlow = observer(function LocalConversationFlow() {
   const workspace = useCurrentWorkspace();
   const slug = useRequiredWorkspaceSlug();
   const userId = useAuthStore((state) => state.user?.id);
@@ -122,9 +123,6 @@ function LocalConversationFlow() {
   const [locateRequest, setLocateRequest] = useState<{ sessionId: string; turnId?: string; quote?: string; sequence: number } | null>(null);
   const scope = { userId: userId || "", workspaceId: workspace?.id || "" };
   const v2 = conversationService(transport, scope);
-  // Other devices with a conversation open; shown on this device's own page only.
-  const [, setPresenceVersion] = useState(0);
-  useEffect(() => remote ? undefined : v2.onPresence(() => setPresenceVersion((version) => version + 1)), [v2, remote]);
   const visibilityScope = projectVisibilityScopeKey(scope);
   const hiddenProjectPreferences = useProjectVisibilityStore((state) => state.hiddenByScope[visibilityScope] ?? EMPTY_PROJECT_IDS);
   const setProjectHidden = useProjectVisibilityStore((state) => state.setProjectHidden);
@@ -177,7 +175,7 @@ function LocalConversationFlow() {
   const selectedId = searchParams.get("session");
   const sessions = useLocalConversationPages(transport, scope, folderProjects, hiddenProjectIds, archived, search, !!workspace && !!userId);
   // The list already knows every conversation; only an ID it lacks needs its snapshot read here.
-  const selectedSummary = selectedId ? v2.summary(selectedId) : undefined;
+  const selectedSummary = selectedId ? v2.list.summary(selectedId) : undefined;
   const selectedQuery = useQuery({ queryKey: [...localConversationKey(scope, device.id), "selected", selectedId], queryFn: async () => sessionEntry((await v2.snapshot(selectedId!)).conversation), enabled: !!workspace && !!userId && !!selectedId && !selectedSummary && !sessions.isPending, retry: false, refetchOnMount: "always" });
   const selected = selectedSummary ? sessionEntry(selectedSummary) : selectedQuery.data;
   const selectedRef = useRef(selectedId); selectedRef.current = selectedId;
@@ -375,7 +373,7 @@ function LocalConversationFlow() {
         <CircleHelp aria-hidden="true" className="size-4 text-muted-foreground" />
       </IconButton> : entryRunning && <Spinner aria-label={chinese ? `会话运行中：${entry.title}` : `Conversation running: ${entry.title}`} className="shrink-0 text-muted-foreground motion-reduce:animate-none" />}
       {!remote && (() => {
-        const users = v2.presence(entry.id).map((user) => user.device_name || user.peer_id.slice(-6)).join(chinese ? "、" : ", ");
+        const users = v2.list.presence(entry.id).map((user) => user.device_name || user.peer_id.slice(-6)).join(chinese ? "、" : ", ");
         return users && <span role="status" aria-label={chinese ? `${users} 正在使用：${entry.title}` : `In use on ${users}: ${entry.title}`} title={chinese ? `${users} 正在使用` : `In use on ${users}`} className="flex shrink-0 items-center text-muted-foreground"><MonitorSmartphone aria-hidden="true" className="size-4" /></span>;
       })()}
       {!entryRunning && background > 0 && <span role="status" aria-label={chinese ? `后台运行中：${entry.title}（${background}）` : `Background tasks: ${entry.title} (${background})`} title={chinese ? "后台运行中" : "Running in background"} className="flex shrink-0 items-center text-muted-foreground"><Clock3 aria-hidden="true" className="size-4" /></span>}
@@ -506,4 +504,4 @@ function LocalConversationFlow() {
       </ResizablePanel>
     </ResizablePanelGroup>
   </div>;
-}
+});

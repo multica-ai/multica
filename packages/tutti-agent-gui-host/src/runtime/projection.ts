@@ -12,6 +12,7 @@ import { localProjectSectionKey } from "../local-projects";
 import { RuntimeLedger } from "./ledger";
 import type { ConversationModel } from "@multica/conversation-client/models";
 import { projectV2Conversation } from "./v2-projection";
+import type { LocalTranscript, LocalTranscriptChange } from "./local-transcript";
 
 export const MULTICA_GUI_CAPABILITIES: AgentActivitySessionCapabilities = {
   imageInput: true, modelImageInputRequired: false, modelPlanBinding: false,
@@ -124,16 +125,12 @@ export function projectV2Detail(
   conversation: ConversationModel,
   agent: AgentGuiExecutionTarget | undefined,
   ledger: RuntimeLedger,
-  locale: "en" | "zh-CN" = "en",
+  transcript: LocalTranscript,
+  changedTurns: LocalTranscriptChange = "all",
 ): { session: AgentActivitySession; turns: AgentActivityTurn[]; messages: AgentActivityDurableMessage[] } {
   const sessionId = ledger.guiId(detail.session.id);
-  const view = projectV2Conversation(conversation, { workspaceId: detail.session.workspace_id, agentSessionId: sessionId, locale });
-  // The composer's submit id lets the engine replace its optimistic message.
-  for (const message of view.messages) {
-    const clientSubmitId = message.role === "user" ? ledger.clientSubmitId(message.messageId) : undefined;
-    if (clientSubmitId) message.payload = { ...message.payload, clientSubmitId };
-  }
-  const messages = ledger.project(sessionId, view.messages, new Map(view.turns.map((turn) => [turn.turnId, turn.startedAtUnixMs])), true);
+  const view = projectV2Conversation(conversation, { agentSessionId: sessionId });
+  const messages = transcript.update(conversation, changedTurns);
   const turns = view.turns.map((turn) => ({ ...turn, providerForkBindingAvailable: agent?.canFork === true }));
   const session = projectSession(detail.session, agent, ledger, turns, view.activeTurnId);
   session.latestTurnInteractions = view.interactions.filter((item) => item.turnId === (session.activeTurnId ?? session.latestTurn?.turnId));

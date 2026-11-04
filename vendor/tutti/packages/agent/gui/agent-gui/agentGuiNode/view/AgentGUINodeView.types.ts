@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type { AgentActivityGoalControlAction } from "@tutti-os/agent-activity-core";
 import type { AgentGuiWorkbenchCommandBridge } from "../../../workbench/commands";
 import type { ReferenceSourceAggregator } from "@tutti-os/workspace-file-reference/core";
 import type { ReferenceSourcePickerProps } from "@tutti-os/workspace-file-reference/ui";
@@ -40,11 +39,6 @@ import type {
 import type { AgentGUIEngagementEventSink } from "../engagement/agentGUIEngagement.types";
 import type { AgentGUIProviderReadinessLabels } from "../model/agentGuiProviderReadiness";
 import type { OpenAgentEnvPanelInput } from "../../../shared/agentEnv";
-import type {
-  TuttiModePlanPanelLabels,
-  TuttiPlanIssuePanelLabels
-} from "../../../workspaceWorkflow";
-import type { TuttiWorkflowDockLabels } from "../TuttiWorkflowDock";
 import type {
   AgentGUIComposerEmptySubmit,
   AgentGUIComposerFooterAccessoryRenderer
@@ -130,44 +124,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   rtkSaverModeDescription: string;
   normalModeLabel?: string;
   normalModeDescription?: string;
-  tuttiModeLabel: string;
-  tuttiModeDescription: string;
-  tuttiModeRemove: string;
-  tuttiBudgetTitle: string;
-  tuttiBudgetEffectLabel: string;
-  tuttiBudgetSpeedLabel: string;
-  tuttiBudgetPreviewHint: string;
-  tuttiBudgetPreviewCost: string;
-  tuttiBudgetPreviewBalance: string;
-  tuttiBudgetPreviewPowerful: string;
-  tuttiBudgetModelPreferenceLabel: string;
-  tuttiBudgetModelPreferenceCost: string;
-  tuttiBudgetModelPreferenceBalance: string;
-  tuttiBudgetModelPreferencePowerful: string;
-  tuttiBudgetParallelismLabel: string;
-  tuttiBudgetParallelismValue: (count: number) => string;
-  tuttiModeUpdateFailed: string;
-  tuttiModeUpdateUncertain: string;
-  tuttiModePlanPanel: TuttiModePlanPanelLabels;
-  tuttiWorkflowDock: TuttiWorkflowDockLabels;
-  tuttiModePlanIssuePanel: TuttiPlanIssuePanelLabels;
-  tuttiModePlanIssueAcceptPrompt: (reference: string) => string;
-  tuttiModePlanIssueReworkPrompt: (reference: string) => string;
-  tuttiModePlanSendAccept: string;
-  tuttiModePlanSendRequestChanges: string;
-  /** Auto feedback for an empty send after either preference diverged. */
-  tuttiModePlanReplanFeedback: (
-    fromEffect: string,
-    fromSpeed: string,
-    toEffect: string,
-    toSpeed: string
-  ) => string;
-  /** Appended to typed feedback when either preference diverged. */
-  tuttiModePlanReplanFeedbackSuffix: (effect: string, speed: string) => string;
-  tuttiModePlanLoadFailed: string;
-  tuttiModePlanRetry: string;
-  /** Accepted plan whose Issue creation durably failed; message is the cause. */
-  tuttiModePlanIssueCreateFailed: (message: string) => string;
   planModeDescription?: string;
   planModeOnLabel: string;
   planModeOffLabel: string;
@@ -190,7 +146,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   /** Accessible label for the button that dismisses an expanded suggestion category. */
   homeSuggestionsClose?: string;
   conversations: string;
-  newConversation: string;
   agentConfig: string;
   agentSettingsMenu: string;
   agentEnvSetup: string;
@@ -206,8 +161,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   removeAgentFromSidebar: (agent: string) => string;
   addAgentToSidebar: (agent: string) => string;
   dragAgentToReorder: (agent: string) => string;
-  noConversations: string;
-  emptyProjectConversations: string;
   conversationFilterAll: string;
   conversationFilterCodex: string;
   conversationFilterClaudeCode: string;
@@ -216,57 +169,16 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   sharedAgentOwnerSeparator: string;
   startConversation: string;
   selectConversation: string;
-  loadingConversations: string;
-  conversationsLoadFailed: string;
   loadingConversation: string;
   continuedFromTask: string;
   scrollToBottom: string;
-  searchNoConversations: string;
-  searchFailed: string;
-  retryConversations: string;
-  retrySearch: string;
-  activityPriority: string;
-  activityNothingNeedsAttention: string;
-  activityToday: string;
-  activityYesterday: string;
-  activityConversationSource: string;
-  activityStatusFailed: string;
-  activityStatusRecentlyActive: string;
-  activityStatusUnread: string;
-  activityStatusWaiting: string;
-  activityStatusWorking: string;
-  viewActivity: string;
-  viewActivityNeedsAttention: string;
-  turnOffActivityView: string;
   conversationUnavailable: string;
   fallbackAgentTitle: string;
   untitledConversationTitle: string;
   searchPlaceholder: string;
-  sectionConversations: string;
   sectionToday: string;
-  sectionPinned: string;
   sectionYesterday: string;
   sectionEarlier: string;
-  projectSectionEdit: string;
-  projectSectionMoreActions: string;
-  projectSectionViewFiles: string;
-  pinProject: string;
-  unpinProject: string;
-  pinnedProjectAccessibleName: (projectLabel: string) => string;
-  projectRailCreateProject: string;
-  projectRailLinkExistingProject: string;
-  removeProject: string;
-  removeProjectConfirmDescription: (projectLabel: string) => string;
-  removeProjectConfirmTitle: string;
-  batchDeleteProjectSessions: string;
-  batchDeleteProjectSessionsTitle: string;
-  batchDeleteProjectSessionsBody: (count: number, project: string) => string;
-  batchDeleteProjectSessionsConfirm: string;
-  conversationsSectionMoreActions: string;
-  batchDeleteConversations: string;
-  batchDeleteConversationsTitle: string;
-  batchDeleteConversationsBody: (count: number) => string;
-  batchDeleteConversationsConfirm: string;
   approvalRequired: string;
   fileChangeApprovalRequired: string;
   approvalUnavailable: string;
@@ -276,20 +188,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   cancellingSession: string;
   retryActivation: string;
   continueInNewConversation: string;
-  goalLabel: string;
-  goalTitleActive: string;
-  goalTitlePaused: string;
-  goalTitleBlocked: string;
-  goalTitleUsageLimited: string;
-  goalTitleBudgetLimited: string;
-  goalTitleComplete: string;
-  goalBudgetUsage: (used: number, budget: number) => string;
-  goalClearHint: string;
-  goalEditAction: string;
-  goalPauseAction: string;
-  goalResumeAction: string;
-  goalClearAction: string;
-  goalRemoved: string;
   processing: string;
   turnSummary: string;
   userMessageLocator: string;
@@ -308,10 +206,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   thinkingLabel: string;
   toolCallsLabel: (count: number) => string;
   openConversationWindow: string;
-  showMoreConversations: string;
-  showLessConversations: string;
-  deleteSession: string;
-  pinSession: string;
   moreSessionActions: string;
   copyAsMarkdown: string;
   copyAsReference: string;
@@ -329,19 +223,10 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   renameSessionDescription: string;
   renameSessionPlaceholder: string;
   renameSessionSave: string;
-  unpinSession: string;
   markSessionUnread: string;
   deleteSessionTitle: string;
   deleteSessionBody: string;
-  deleteSessionConfirm: string;
   cancel: string;
-  conversationRailResizeAria: string;
-  relativeTimeJustNow: string;
-  relativeTimeMinutes: (count: number) => string;
-  relativeTimeHours: (count: number) => string;
-  relativeTimeDays: (count: number) => string;
-  relativeTimeMonths: (count: number) => string;
-  relativeTimeYears: (count: number) => string;
   slashCommandPalette: string;
   skillPickerPalette: string;
   slashPaletteCommandsGroup: string;
@@ -501,85 +386,6 @@ export type InteractivePromptLabels = {
   planImplementationSkip: string;
 };
 
-export type AgentGUIConversationRailLabels = Pick<
-  AgentGUIViewLabels,
-  | "batchDeleteConversations"
-  | "activityPriority"
-  | "activityNothingNeedsAttention"
-  | "activityToday"
-  | "activityYesterday"
-  | "activityConversationSource"
-  | "activityStatusFailed"
-  | "activityStatusRecentlyActive"
-  | "activityStatusUnread"
-  | "activityStatusWaiting"
-  | "activityStatusWorking"
-  | "batchDeleteConversationsBody"
-  | "batchDeleteConversationsConfirm"
-  | "batchDeleteConversationsTitle"
-  | "batchDeleteProjectSessions"
-  | "batchDeleteProjectSessionsBody"
-  | "batchDeleteProjectSessionsConfirm"
-  | "batchDeleteProjectSessionsTitle"
-  | "cancel"
-  | "conversationUnavailable"
-  | "conversationsSectionMoreActions"
-  | "copyAsMarkdown"
-  | "copyAsReference"
-  | "conversationCopyFile"
-  | "conversationCopyImage"
-  | "conversationCopyImagesOmitted"
-  | "conversationCopyInProgress"
-  | "conversationCopyMentionPrefix"
-  | "conversationCopyPreviousMessages"
-  | "copiedToClipboard"
-  | "copyFailed"
-  | "conversationsLoadFailed"
-  | "moreSessionActions"
-  | "deleteSession"
-  | "deleteSessionConfirm"
-  | "emptyProjectConversations"
-  | "loadingConversations"
-  | "markSessionUnread"
-  | "newConversation"
-  | "noConversations"
-  | "openConversationWindow"
-  | "pinProject"
-  | "pinSession"
-  | "pinnedProjectAccessibleName"
-  | "projectRailCreateProject"
-  | "projectRailLinkExistingProject"
-  | "projectSectionEdit"
-  | "projectSectionMoreActions"
-  | "projectSectionViewFiles"
-  | "relativeTimeDays"
-  | "relativeTimeHours"
-  | "relativeTimeJustNow"
-  | "relativeTimeMinutes"
-  | "relativeTimeMonths"
-  | "relativeTimeYears"
-  | "removeProject"
-  | "removeProjectConfirmDescription"
-  | "removeProjectConfirmTitle"
-  | "renameSession"
-  | "retryConversations"
-  | "retrySearch"
-  | "searchFailed"
-  | "searchNoConversations"
-  | "searchPlaceholder"
-  | "sectionConversations"
-  | "sectionPinned"
-  | "selectConversation"
-  | "showLessConversations"
-  | "showMoreConversations"
-  | "startConversation"
-  | "turnOffActivityView"
-  | "unpinProject"
-  | "unpinSession"
-  | "untitledConversationTitle"
-  | "viewActivity"
-  | "viewActivityNeedsAttention"
->;
 type AgentGUIComposerExternalPromptProps = Pick<
   AgentComposerProps,
   | "resolveExternalPromptEntries"
@@ -688,10 +494,6 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
       displayPrompt?: string,
       options?: Parameters<AgentComposerProps["onSubmit"]>[2]
     ) => void;
-    goalControl: (
-      action: AgentActivityGoalControlAction,
-      objective?: string
-    ) => void;
     submitGuidancePrompt: (
       content: AgentPromptContentBlock[],
       displayPrompt?: string,
@@ -717,10 +519,6 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
     retryComposerOptions: NonNullable<
       AgentComposerProps["onRetryComposerOptions"]
     >;
-    setTuttiModeActive: (active: boolean) => void;
-    setTuttiModeEffect: (value: number) => void;
-    setTuttiModeSpeed: (value: number) => void;
-    retryTuttiModeActivation: () => void;
     updatePlanIssueBudgetPreset: (preset: PlanIssueBudgetPreset) => void;
     selectHomeComposerAgentTarget: (input: {
       provider: AgentGUIProvider;
@@ -732,7 +530,6 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
     retryActivation: () => void;
     continueInNewConversation: () => void;
     toggleConversationPinned: (agentSessionId: string, pinned: boolean) => void;
-    markConversationUnread: (agentSessionId: string) => void;
     renameConversation: (
       agentSessionId: string,
       title: string
@@ -748,30 +545,17 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
       beforeProjectId: string | null
     ) => Promise<void>;
     toggleProjectPinned: (projectId: string, pinned: boolean) => Promise<void>;
-    confirmDeleteProjectConversations: (
-      sectionKey?: string,
-      agentTargetId?: string | null
-    ) => Promise<string[]>;
-    confirmDeleteConversations: (agentSessionIds: string[]) => Promise<boolean>;
     requestDeleteConversation: (agentSessionId: string) => void;
     cancelDeleteConversation: () => void;
     confirmDeleteConversation: () => void;
   };
   conversationRailCollapsed: boolean;
-  conversationRailWidthPx: number;
-  conversationRailMinWidthPx: number;
-  conversationRailMaxWidthPx: number;
   detailMinWidthPx: number;
   uiLanguage: UiLanguage;
   onWorkspaceFileReferencesAdded?: (
     references: readonly WorkspaceFileReference[]
   ) => void | Promise<void>;
-  onConversationRailWidthChanged: (widthPx: number) => void;
-  onConversationRailLayoutChange?: (
-    layout: AgentGUIConversationRailLayout
-  ) => void;
   labels: AgentGUIViewLabels;
-  conversationRailLabels: AgentGUIConversationRailLabels;
   workspaceUserProjectI18n: WorkspaceUserProjectI18nRuntime;
   workspaceFileManagerCopy?: WorkspaceFileManagerI18nRuntime | null;
   workspaceFileReferenceAdapter?: WorkspaceFileReferenceAdapter | null;

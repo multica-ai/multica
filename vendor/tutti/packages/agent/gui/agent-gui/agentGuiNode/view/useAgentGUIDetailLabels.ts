@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import type { AgentGoalBannerLabels } from "../AgentGoalBanner";
 import type { AgentGUIViewLabels } from "../AgentGUINodeView";
 import { resolveAgentGUIConversationReturn } from "./agentGUIDetailModelHelpers";
 
@@ -51,36 +50,6 @@ export function useAgentGUIDetailLabels(input: Input) {
       labels.continueInNewConversation,
       labels.retryActivation,
       isCancelPending
-    ]
-  );
-  const goalBannerLabels = useMemo<AgentGoalBannerLabels>(
-    () => ({
-      titleActive: labels.goalTitleActive,
-      titlePaused: labels.goalTitlePaused,
-      titleBlocked: labels.goalTitleBlocked,
-      titleUsageLimited: labels.goalTitleUsageLimited,
-      titleBudgetLimited: labels.goalTitleBudgetLimited,
-      titleComplete: labels.goalTitleComplete,
-      budgetUsage: labels.goalBudgetUsage,
-      clearHint: labels.goalClearHint,
-      editAction: labels.goalEditAction,
-      pauseAction: labels.goalPauseAction,
-      resumeAction: labels.goalResumeAction,
-      clearAction: labels.goalClearAction
-    }),
-    [
-      labels.goalTitleActive,
-      labels.goalTitlePaused,
-      labels.goalTitleBlocked,
-      labels.goalTitleUsageLimited,
-      labels.goalTitleBudgetLimited,
-      labels.goalTitleComplete,
-      labels.goalBudgetUsage,
-      labels.goalClearHint,
-      labels.goalEditAction,
-      labels.goalPauseAction,
-      labels.goalResumeAction,
-      labels.goalClearAction
     ]
   );
   const interactivePromptLabels = useMemo(
@@ -135,7 +104,6 @@ export function useAgentGUIDetailLabels(input: Input) {
   return {
     chromeLabels,
     conversationFlowLabels,
-    goalBannerLabels,
     interactivePromptLabels
   };
 }

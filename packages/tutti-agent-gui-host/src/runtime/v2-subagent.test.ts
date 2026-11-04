@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
-import { ConversationModel } from "@multica/conversation-client/models";
+import { ConversationModel, TranscriptModel } from "@multica/conversation-client/models";
 import { projectV2Conversation } from "./v2-projection";
+import { LocalTranscript } from "./local-transcript";
+import { RuntimeLedger } from "./ledger";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { projectAgentActivitySessionToConversationVM } from "../../../../vendor/tutti/packages/agent/gui/shared/agentConversation/projection/workspaceAgentMessageProjection";
 
@@ -13,7 +15,13 @@ if (fixture.type !== "conversation.events") throw new Error("Expected event fixt
 const events = fixture.events;
 const at = events[0]!.created_at;
 const summary = { conversation_id: "conv-1", summary_seq: 1, provider: "claude", title: "test", status: "idle", pinned: false, archived: false, updated_at: at };
-const project = (conversation: ConversationModel) => projectV2Conversation(conversation, { workspaceId: "ws", agentSessionId: "gui-1", locale: "en" });
+const project = (conversation: ConversationModel) => ({
+  ...projectV2Conversation(conversation, { agentSessionId: "gui-1" }),
+  messages: new LocalTranscript(new RuntimeLedger(), new TranscriptModel(), "ws", "gui-1", "en").update(conversation, "all"),
+});
+
+/** A replay holds fewer rows, so only the content compares. */
+const withoutPlace = <T extends { sequence?: number; version: number }>({ sequence: _sequence, version: _version, ...rest }: T) => rest;
 
 it("projects a live and replayed child transcript inside its task without settling the root", () => {
   const conversation = ConversationModel.fromSnapshot(localV2SnapshotSchema.parse({ version: 2, store_generation: "g", snapshot_seq: 0, conversation: summary, turns: [] }));
@@ -41,7 +49,7 @@ it("projects a live and replayed child transcript inside its task without settli
     version: 2, store_generation: "g", snapshot_seq: events.length, conversation: summary,
     turns: [{ id: "turn-1", turn_index: 0, status: "completed", started_at: at, completed_at: at, request_id: "r1", messages: [], events: events.filter((e) => e.final) }],
   }));
-  expect(project(replay).messages.find((m) => m.messageId === "task:a")).toEqual(completed.messages[1]);
+  expect(withoutPlace(project(replay).messages.find((m) => m.messageId === "task:a")!)).toEqual(withoutPlace(completed.messages[1]));
   expect(project(replay).activeTurnId).toBeNull();
   const vm = projectAgentActivitySessionToConversationVM({
     agentSessionId: "gui-1", sessionTurns: completed.turns,

@@ -1,16 +1,12 @@
 import {
   selectEngineInteraction,
-  selectEngineInteractionResponse,
   selectEngineHasVisibleQueuedSubmit,
   selectPendingActivations,
   selectPendingSubmitsForSession,
-  selectSessionGoalControlSettlement,
   type AgentSessionEngine,
   type AgentSessionEngineState,
-  type PendingSubmitIntentRecord,
-  type SessionGoalControlSettlement
+  type PendingSubmitIntentRecord
 } from "@tutti-os/agent-activity-core";
-import type { AgentActivityGoalControlAction } from "@tutti-os/agent-activity-core";
 import { agentComposerDraftPreservingConnectors } from "../model/agentComposerDraft";
 import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
 import type {
@@ -18,13 +14,8 @@ import type {
   SubmittedDraftSnapshot
 } from "../model/agentGuiNodeTypes";
 import { clearSubmittedDraftIfUnchanged } from "./agentGuiController.draftMessageHelpers";
+import type { AgentGUIPromptOperations } from "./agentGuiController.promptOperations";
 import { restoreFailedAgentGUIHomeDraft } from "./agentGuiController.homeDraftHelpers";
-
-export interface AgentGUIGoalControlPendingSettlement {
-  action: AgentActivityGoalControlAction;
-  clientSubmitId: string;
-  submittedDraftSnapshot: SubmittedDraftSnapshot | null;
-}
 
 export interface AgentGUIInteractionDraftPendingSettlement {
   agentSessionId: string;
@@ -52,14 +43,15 @@ interface AgentGUIEngineSettlementControllerInput {
     ) => Record<string, AgentComposerDraft>
   ): void;
   engine: AgentSessionEngine;
-  goalControlSettlements?: Record<string, AgentGUIGoalControlPendingSettlement>;
+  prompts: Pick<
+    AgentGUIPromptOperations,
+    "interactionResponse" | "subscribeInteractionResponses"
+  >;
   interactionDraftSettlements?: Record<
     string,
     AgentGUIInteractionDraftPendingSettlement
   >;
   isCurrentConversation?(agentSessionId: string): boolean;
-  onGoalControlCleared?(): void;
-  onGoalControlFailed?(settlement: SessionGoalControlSettlement): void;
   onSubmitFailed?(submit: PendingSubmitIntentRecord): void;
   snapshots: Record<string, SubmittedDraftSnapshot>;
 }
@@ -67,22 +59,13 @@ interface AgentGUIEngineSettlementControllerInput {
 export class AgentGUIEngineSettlementController {
   private readonly applyDraftUpdate: AgentGUIEngineSettlementControllerInput["applyDraftUpdate"];
   private readonly engine: AgentSessionEngine;
-  private readonly goalControlSettlements: Record<
-    string,
-    AgentGUIGoalControlPendingSettlement
-  >;
+  private readonly prompts: AgentGUIEngineSettlementControllerInput["prompts"];
   private readonly isCurrentConversation: NonNullable<
     AgentGUIEngineSettlementControllerInput["isCurrentConversation"]
   >;
   private readonly interactionDraftSettlements: Record<
     string,
     AgentGUIInteractionDraftPendingSettlement
-  >;
-  private readonly onGoalControlCleared: NonNullable<
-    AgentGUIEngineSettlementControllerInput["onGoalControlCleared"]
-  >;
-  private readonly onGoalControlFailed: NonNullable<
-    AgentGUIEngineSettlementControllerInput["onGoalControlFailed"]
   >;
   private readonly onSubmitFailed: NonNullable<
     AgentGUIEngineSettlementControllerInput["onSubmitFailed"]
@@ -93,11 +76,9 @@ export class AgentGUIEngineSettlementController {
   constructor(input: AgentGUIEngineSettlementControllerInput) {
     this.applyDraftUpdate = input.applyDraftUpdate;
     this.engine = input.engine;
-    this.goalControlSettlements = input.goalControlSettlements ?? {};
+    this.prompts = input.prompts;
     this.interactionDraftSettlements = input.interactionDraftSettlements ?? {};
     this.isCurrentConversation = input.isCurrentConversation ?? (() => false);
-    this.onGoalControlCleared = input.onGoalControlCleared ?? (() => undefined);
-    this.onGoalControlFailed = input.onGoalControlFailed ?? (() => undefined);
     this.onSubmitFailed = input.onSubmitFailed ?? (() => undefined);
     this.snapshots = input.snapshots;
   }
@@ -106,8 +87,13 @@ export class AgentGUIEngineSettlementController {
     if (this.unsubscribe) return this.unsubscribe;
     this.settle(this.engine.getSnapshot());
     const unsubscribe = this.engine.subscribe((state) => this.settle(state));
+    // A failed answer changes nothing in the engine.
+    const unsubscribeResponses = this.prompts.subscribeInteractionResponses(() =>
+      this.settle(this.engine.getSnapshot())
+    );
     this.unsubscribe = () => {
       unsubscribe();
+      unsubscribeResponses();
       this.unsubscribe = null;
     };
     return this.unsubscribe;
@@ -191,7 +177,6 @@ export class AgentGUIEngineSettlementController {
       delete this.snapshots[clientSubmitId];
     }
     this.settleInteractionDrafts(state);
-    this.settleGoalControls(state);
   }
 
   private settleInteractionDrafts(state: AgentSessionEngineState): void {
@@ -204,8 +189,7 @@ export class AgentGUIEngineSettlementController {
         pending.turnId,
         pending.requestId
       );
-      const response = selectEngineInteractionResponse(
-        state,
+      const response = this.prompts.interactionResponse(
         pending.agentSessionId,
         pending.turnId,
         pending.requestId
@@ -228,47 +212,6 @@ export class AgentGUIEngineSettlementController {
     }
   }
 
-  private settleGoalControls(state: AgentSessionEngineState): void {
-    for (const [agentSessionId, pending] of Object.entries(
-      this.goalControlSettlements
-    )) {
-      const settlement = selectSessionGoalControlSettlement(
-        state,
-        agentSessionId
-      );
-      if (
-        !settlement ||
-        settlement.clientSubmitId !== pending.clientSubmitId ||
-        (settlement.status !== "accepted" &&
-          settlement.status !== "succeeded" &&
-          settlement.status !== "failed")
-      ) {
-        continue;
-      }
-      delete this.goalControlSettlements[agentSessionId];
-      if (settlement.status === "failed") {
-        if (this.isCurrentConversation(agentSessionId)) {
-          this.onGoalControlFailed(settlement);
-        }
-        continue;
-      }
-      const submittedDraftSnapshot = pending.submittedDraftSnapshot;
-      if (submittedDraftSnapshot) {
-        this.applyDraftUpdate((drafts) =>
-          clearSubmittedDraftIfUnchanged({
-            drafts,
-            snapshot: submittedDraftSnapshot
-          })
-        );
-      }
-      if (
-        pending.action === "clear" &&
-        this.isCurrentConversation(agentSessionId)
-      ) {
-        this.onGoalControlCleared();
-      }
-    }
-  }
 }
 
 function seedActivatedSessionDraft(

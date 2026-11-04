@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "node scripts/prepare.mjs",
-    "test": "node scripts/prepare.mjs && node --test scripts/scope-css.test.mjs && vitest run --exclude 'scripts/**' && vitest run --root ../../vendor/tutti/packages/agent/gui agent-gui/agentGuiNode/composer/useComposerFocusAndDrop.spec.tsx",
+    "test": "node scripts/prepare.mjs && node --test scripts/scope-css.test.mjs && vitest run --exclude 'scripts/**' && vitest run --root ../../vendor/tutti/packages/agent/gui agent-gui/agentGuiNode/composer/useComposerFocusAndDrop.spec.tsx shared/workspaceAgentActivitySummary.spec.ts shared/workspaceAgentTimelineCanonical.reuse.spec.ts",
     "typecheck": "node scripts/prepare.mjs && tsc --noEmit",
     "build:e2e-harness": "node scripts/build-e2e-harness.mjs"
   },
@@ -60,8 +60,8 @@
     "@tutti-os/workbench-surface": "workspace:*",
     "chart.js": "4.6.1",
     "d3": "7.9.0",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "zustand": "catalog:"
   },
   "devDependencies": {

@@ -7,7 +7,6 @@ import type {
   EngineCommand,
   EngineIntent
 } from "./types.ts";
-import type { SessionGoalControlState } from "./sessionGoalControl.types.ts";
 
 /**
  * Root-reducer-only intents. Hosts dispatch `EngineIntent`; continuations in
@@ -20,7 +19,6 @@ export type RootEngineIntent = EngineIntent | PromptExecutionIntent;
  * and omit execution bookkeeping.
  */
 export type RootAgentSessionEngineState = AgentSessionEngineStateBase & {
-  goalControl: SessionGoalControlState;
   promptExecutions: PromptExecutionState;
 };
 

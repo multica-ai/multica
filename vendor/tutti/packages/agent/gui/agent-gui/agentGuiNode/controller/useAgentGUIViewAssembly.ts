@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { selectPendingSessionForkThroughTurnIds } from "@tutti-os/agent-activity-core";
 import { useAgentGUIViewModel } from "../model/useAgentGUIViewModel";
 import type { AgentGUIProviderRailMode } from "../../../types";
 import type { AgentGUIDetailViewModel } from "../model/agentGuiNodeTypes";
@@ -15,10 +14,10 @@ import type { useAgentGUILocalState } from "./useAgentGUILocalState";
 import type { useAgentGUIComposerCapabilities } from "./useAgentGUIComposerCapabilities";
 import type { useAgentGUISessionDetailTransport } from "./useAgentGUISessionDetailTransport";
 import { resolveAgentGUIProviderReadinessGateForView } from "../model/agentGuiProviderReadiness";
-import type { useAgentGUITuttiModeActivation } from "./useAgentGUITuttiModeActivation";
 import { targetConnectionForAgentGUIView } from "./agentGuiController.providerHelpers";
 import { isAgentGUIAgentTargetComingSoon } from "../../../agentTargets";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
+import { useModelValue } from "../../../shared/engine/useEngineSelector";
+import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 
 type ConversationPresentationInput = Parameters<
   typeof useAgentGUIConversationPresentation
@@ -68,6 +67,7 @@ type UseAgentGUIViewAssemblyInput = ConversationPresentationInput &
   ComposerCapabilities &
   SessionDetailTransport &
   OperationActions & {
+    agentActivityRuntime: AgentGUIRuntime;
     nodeId?: string | null;
     operationActions: OperationActions;
     detailAvailability: AgentGUIDetailViewModel["availability"];
@@ -78,20 +78,15 @@ type UseAgentGUIViewAssemblyInput = ConversationPresentationInput &
       typeof useAgentGUIControllerActions
     >[0]["selectConversation"];
     providerRailMode: AgentGUIProviderRailMode | undefined;
-    tuttiModeActivation: ReturnType<typeof useAgentGUITuttiModeActivation>;
   };
 
 export function useAgentGUIViewAssembly(input: UseAgentGUIViewAssemblyInput) {
   const { activeConversation, visibleConversations } =
     useAgentGUIConversationPresentation(input);
-  const forkThroughTurnPendingTurnIds = useEngineSelector(
-    input.sessionEngine,
-    (state) =>
-      selectPendingSessionForkThroughTurnIds(state, {
-        sourceAgentSessionId: input.activeConversationId,
-        workspaceId: input.workspaceId
-      }),
-    equalStringArrays
+  const { mutations } = input.agentActivityRuntime;
+  const forkThroughTurnPendingTurnIds = useModelValue(
+    () => mutations.pendingForkTurnIds(input.activeConversationId),
+    [mutations, input.activeConversationId]
   );
   const targetConnection = useMemo(
     () =>
@@ -235,10 +230,6 @@ export function useAgentGUIViewAssembly(input: UseAgentGUIViewAssemblyInput) {
     ...providerHome,
     loadOlderConversationMessages: input.loadOlderConversationMessages,
     selectConversation: input.selectConversation,
-    setTuttiModeActive: input.tuttiModeActivation.setActive,
-    setTuttiModeEffect: input.tuttiModeActivation.setEffect,
-    setTuttiModeSpeed: input.tuttiModeActivation.setSpeed,
-    retryTuttiModeActivation: input.tuttiModeActivation.retry,
     updateSelectedProjectPath: input.updateSelectedProjectPath
   });
   const viewData =
@@ -293,15 +284,7 @@ export function useAgentGUIViewAssembly(input: UseAgentGUIViewAssemblyInput) {
       hasPendingSubmitStopTarget: session.hasPendingSubmitStopTarget,
       promptImagesSupported: input.promptImagesSupported,
       compactSupported: input.compactSupported,
-      goalPauseSupported: input.goalPauseSupported,
       gate: session.composerGate,
-      isTuttiModeActive: input.tuttiModeActivation.active,
-      isTuttiModeUpdating: input.tuttiModeActivation.updatePending,
-      tuttiModeEffect:
-        input.tuttiModeActivation.effect ??
-        input.tuttiModeActivation.orchestrationIntensity,
-      tuttiModeSpeed: input.tuttiModeActivation.speed ?? 50,
-      tuttiModeUpdateStatus: input.tuttiModeActivation.updateStatus,
       composerSettings: stableComposerSettings,
       queueStatus: detail.queueStatus,
       queuedPrompts: detail.queuedPrompts,
@@ -332,9 +315,7 @@ export function useAgentGUIViewAssembly(input: UseAgentGUIViewAssemblyInput) {
     },
     operations: {
       forkThroughTurnPendingTurnIds,
-      goalClearNoticeSequence: input.goalClearNoticeSequence,
       isDeletingConversation: input.isDeletingConversation,
-      isDeletingProjectConversations: input.isDeletingProjectConversations,
       isUserProjectMutationPending: input.isUserProjectMutationPending,
       pendingDeleteConversation: input.pendingDeleteConversation,
       pendingDeleteProjectConversations: input.pendingDeleteProjectConversations
@@ -343,15 +324,5 @@ export function useAgentGUIViewAssembly(input: UseAgentGUIViewAssemblyInput) {
   return useMemo(
     () => ({ viewModel, actions: controllerActions }),
     [controllerActions, viewModel]
-  );
-}
-
-function equalStringArrays(
-  previous: readonly string[],
-  next: readonly string[]
-): boolean {
-  return (
-    previous.length === next.length &&
-    previous.every((value, index) => value === next[index])
   );
 }

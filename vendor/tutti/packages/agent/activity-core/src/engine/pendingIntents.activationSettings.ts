@@ -1,12 +1,11 @@
 import type { ScopedSessionResultValidation } from "./commandResult.validation.ts";
 import type { PendingActivationIntentRecord } from "./pendingIntents.types.ts";
-import type { SessionSettingsActivationRequestedIntent } from "./sessionLifecycle.types.ts";
-import type { EngineCommandResultIntent } from "./types.ts";
+import type { EngineCommand, EngineCommandResultIntent } from "./types.ts";
 
 export function attachPendingActivationSettings(
   record: PendingActivationIntentRecord
 ): {
-  followUpIntents: readonly SessionSettingsActivationRequestedIntent[];
+  commands: readonly EngineCommand[];
   record: PendingActivationIntentRecord;
 } {
   const settings = record.pendingSettingsPatch;
@@ -15,15 +14,16 @@ export function attachPendingActivationSettings(
     Object.keys(settings).length === 0 ||
     record.settingsUpdateStatus === "inFlight"
   ) {
-    return { followUpIntents: [], record };
+    return { commands: [], record };
   }
   return {
-    followUpIntents: [
+    commands: [
       {
         agentSessionId: record.agentSessionId,
         commandId: `activation-settings:${record.requestId}`,
+        correlationId: record.agentSessionId,
         settings: { ...settings },
-        type: "session/settingsActivationRequested",
+        type: "session/updateSettings",
         workspaceId: record.workspaceId
       }
     ],

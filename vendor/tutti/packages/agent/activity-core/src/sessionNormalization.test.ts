@@ -13,7 +13,6 @@ test("normalizes a transport session into the complete canonical contract", () =
     cwd: "/workspace",
     provider: "codex",
     title: "Session",
-    tuttiModeActivation: null,
     updatedAtUnixMs: 42,
     workspaceId: "workspace-1"
   });
@@ -28,7 +27,6 @@ test("normalizes a transport session into the complete canonical contract", () =
     cwd: "/workspace",
     endedAtUnixMs: null,
     forkedFrom: null,
-    goal: null,
     imported: false,
     isolation: null,
     kind: "root",
@@ -54,37 +52,10 @@ test("normalizes a transport session into the complete canonical contract", () =
     settings: {},
     startedAtUnixMs: 0,
     title: "Session",
-    tuttiModeActivation: null,
     updatedAtUnixMs: 42,
     usage: null,
     visible: true,
     workspaceId: "workspace-1"
-  });
-});
-
-test("clones an explicitly projected Goal synchronization state", () => {
-  const session = normalizeAgentActivitySession({
-    activeTurnId: null,
-    agentSessionId: "session-goal-sync",
-    cwd: "/workspace",
-    goalSyncState: {
-      executionPending: true,
-      pendingOperationId: " goal-operation-1 ",
-      revision: 3,
-      syncStatus: "applying"
-    },
-    latestTurnInteractions: [],
-    pendingInteractions: [],
-    provider: "codex",
-    title: "Goal session",
-    workspaceId: "workspace-1"
-  });
-
-  assert.deepEqual(session.goalSyncState, {
-    executionPending: true,
-    pendingOperationId: "goal-operation-1",
-    revision: 3,
-    syncStatus: "applying"
   });
 });
 

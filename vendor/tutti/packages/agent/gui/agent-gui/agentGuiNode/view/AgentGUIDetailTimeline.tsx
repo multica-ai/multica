@@ -19,7 +19,7 @@ import styles from "../AgentGUINode.styles";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import type { AgentConversationFollowEndMode } from "../../../shared/agentConversation/agentConversationFollowEndController";
 import type { AgentTranscriptEditRetryControl } from "../../../shared/agentConversation/components/useAgentTranscriptEditRetryProjection";
-import type { AgentActivityEditRetryRecoveryAction } from "@tutti-os/agent-activity-core";
+import type { AgentGUIEditRetryRecoveryAction } from "../controller/agentGuiController.promptOperations";
 import type { AgentGUIEditRetryPresentation } from "../model/agentGUIEditRetryModel";
 import { AgentGUIEditRetryStatus } from "./AgentGUIEditRetryStatus";
 import {
@@ -42,7 +42,7 @@ interface AgentGUIDetailTimelineProps {
   editRetry?: {
     control?: AgentTranscriptEditRetryControl;
     presentation: AgentGUIEditRetryPresentation;
-    recover: (action: AgentActivityEditRetryRecoveryAction) => Promise<void>;
+    recover: (action: AgentGUIEditRetryRecoveryAction) => Promise<void>;
   };
   conversationFlowEmpty: React.JSX.Element;
   conversationFlowLabels: {

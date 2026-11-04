@@ -92,14 +92,6 @@ export function replaceCanonicalSessionSnapshot(
         state.operationBySessionId[id] ?? createOperation();
     }
   }
-  for (const [id, operation] of Object.entries(state.operationBySessionId)) {
-    if (
-      !operationBySessionId[id] &&
-      operation.cancel.status === "awaitingTurn"
-    ) {
-      operationBySessionId[id] = operation;
-    }
-  }
   for (const turn of Object.values(state.turnsById)) {
     const key = canonicalTurnKey(turn.agentSessionId, turn.turnId);
     if (sessionsById[turn.agentSessionId] && !turnsById[key]) {
@@ -739,25 +731,11 @@ function preserveProjectedSessionState(
     current?.messageVersion ?? 0,
     incoming.messageVersion ?? 0
   );
-  const goalSyncState =
-    current?.goalSyncState !== undefined &&
-    !Object.prototype.hasOwnProperty.call(incoming, "goalSyncState")
-      ? current.goalSyncState
-      : undefined;
-  const tuttiModeActivation =
-    current?.tuttiModeActivation &&
-    (!incoming.tuttiModeActivation ||
-      incoming.tuttiModeActivation.currentRevision.revision <
-        current.tuttiModeActivation.currentRevision.revision)
-      ? current.tuttiModeActivation
-      : undefined;
   const preserved = {
     ...incoming,
     ...(messageVersion === (incoming.messageVersion ?? 0)
       ? {}
       : { messageVersion }),
-    ...(goalSyncState === undefined ? {} : { goalSyncState }),
-    ...(tuttiModeActivation === undefined ? {} : { tuttiModeActivation })
   };
   if (
     current?.lifecycleCapabilitiesProjected === true &&

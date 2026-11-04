@@ -19,10 +19,6 @@ import {
 } from "./agent-gui/agentGuiNode/AgentGUINode";
 import { AgentGUIActivityHostProvider } from "./agentActivityHost";
 import { AgentGuiI18nProvider, type AgentGuiI18nLocale } from "./i18n/index";
-import {
-  TuttiModePlanReviewRuntimeProvider,
-  type TuttiModePlanReviewRuntime
-} from "./workspaceWorkflow";
 import { AgentVisibleErrorPresentationProvider } from "./shared/visibleError/AgentVisibleErrorPresentationContext";
 import {
   AgentSideConversationRuntimeProvider,
@@ -70,7 +66,6 @@ export interface AgentGUIProps extends Omit<
   agentActivityRuntime: AgentGUIRuntime;
   agentSideConversationRuntime?: AgentSideConversationRuntime | null;
   agentHostApi?: AgentHostInputApi | null;
-  tuttiModePlanReviewRuntime?: TuttiModePlanReviewRuntime | null;
   /** Starter entries to hide below the empty new-session composer. */
   disabled?: readonly AgentGUIHomeSuggestionId[];
   i18n?: I18nRuntime<string> | null;
@@ -83,7 +78,6 @@ export const AgentGUI = memo(function AgentGUI({
   agentActivityRuntime,
   agentSideConversationRuntime,
   agentHostApi,
-  tuttiModePlanReviewRuntime,
   agentDirectory,
   mentionAgentDirectory,
   handoffAgentDirectory,
@@ -197,21 +191,17 @@ export const AgentGUI = memo(function AgentGUI({
       <AgentSideConversationRuntimeProvider
         runtime={agentSideConversationRuntime}
       >
-        <TuttiModePlanReviewRuntimeProvider
-          runtime={tuttiModePlanReviewRuntime}
+        <AgentGUIActivityHostProvider
+          agentActivityRuntime={agentActivityRuntime}
+          agentHostApi={agentHostApi}
         >
-          <AgentGUIActivityHostProvider
-            agentActivityRuntime={agentActivityRuntime}
-            agentHostApi={agentHostApi}
+          <AgentVisibleErrorPresentationProvider
+            scope={props.hostCapabilities?.visibleErrorPresentationScope}
+            value={props.hostCapabilities?.visibleErrorPresentationOverrides}
           >
-            <AgentVisibleErrorPresentationProvider
-              scope={props.hostCapabilities?.visibleErrorPresentationScope}
-              value={props.hostCapabilities?.visibleErrorPresentationOverrides}
-            >
-              <AgentGUINode {...nodeProps} />
-            </AgentVisibleErrorPresentationProvider>
-          </AgentGUIActivityHostProvider>
-        </TuttiModePlanReviewRuntimeProvider>
+            <AgentGUINode {...nodeProps} />
+          </AgentVisibleErrorPresentationProvider>
+        </AgentGUIActivityHostProvider>
       </AgentSideConversationRuntimeProvider>
     </AgentGuiI18nProvider>
   );

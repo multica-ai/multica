@@ -2,7 +2,6 @@ import type {
   AgentActivityComposerOptions,
   AgentActivityComposerOptionsLoadStatus
 } from "./composerOptions.types.ts";
-import type { AgentActivityInitialGoalControl } from "./goalControl.types.ts";
 import type {
   AgentActivityDurableMessage,
   AgentActivityMessage,
@@ -11,11 +10,7 @@ import type {
 import type { AgentActivitySessionMessageWindow } from "./messageWindow.types.ts";
 import type { AgentActivityRailPlacement } from "./railPlacement.types.ts";
 import type { AgentActivitySessionCapabilities } from "./sessionCapabilities.types.ts";
-import type {
-  AgentActivityCapabilityReference,
-  AgentActivityInitialTuttiModeActivation,
-  AgentActivityTuttiModeActivation
-} from "./tuttiMode.types.ts";
+import type { AgentActivityCapabilityReference } from "./tuttiMode.types.ts";
 
 export type {
   AgentActivityDurableMessage,
@@ -25,16 +20,7 @@ export type {
   AgentActivityTransientMessage
 } from "./message.types.ts";
 
-export type {
-  AgentActivityCapabilityReference,
-  AgentActivityInitialTuttiModeActivation,
-  AgentActivityTuttiModeActivation,
-  AgentActivityTuttiModeActivationRevision,
-  AgentActivityTuttiModeActivationSource,
-  AgentActivityTuttiModeActivationStatus,
-  AgentActivityUpdateTuttiModeActivationInput,
-  AgentActivityUpdateTuttiModeActivationResult
-} from "./tuttiMode.types.ts";
+export type { AgentActivityCapabilityReference } from "./tuttiMode.types.ts";
 
 export type {
   AgentActivityComposerBehavior,
@@ -114,19 +100,6 @@ export interface AgentActivitySession {
   lifecycleCapabilitiesProjected?: boolean;
   forkedFrom: AgentActivitySessionForkLineage | null;
   usage: AgentActivitySessionUsage | null;
-  goal: AgentActivitySessionGoal | null;
-  /**
-   * Optional host-owned projection of the durable Goal synchronization state.
-   * Absence means the host cannot prove operation progress; it is not an idle,
-   * failed, or synced assertion.
-   */
-  goalSyncState?: AgentActivitySessionGoalSyncState | null;
-  /**
-   * Read projection of the independent daemon-owned TuttiModeActivation.
-   * The session does not own this lifecycle; activity-core normalizes it into
-   * its dedicated activation slice.
-   */
-  tuttiModeActivation: AgentActivityTuttiModeActivation | null;
   imported: boolean;
   visible: boolean;
   resumable: boolean;
@@ -204,13 +177,6 @@ export interface AgentActivitySnapshot {
   presences: AgentActivityPresence[];
   sessionMessagesById: Record<string, AgentActivityMessage[]>;
   sessionMessageWindowsById?: Record<string, AgentActivitySessionMessageWindow>;
-  /** Composer options keyed by the opaque, verbatim loadComposerOptions targetKey. */
-  composerOptionsByTargetKey?: Record<string, AgentActivityComposerOptions>;
-  /** Request lifecycle for composer options, keyed by the same opaque target. */
-  composerOptionsLoadStatusByTargetKey?: Record<
-    string,
-    AgentActivityComposerOptionsLoadStatus
-  >;
 }
 
 export type AgentActivitySnapshotListener = (
@@ -392,8 +358,6 @@ export interface AgentActivityCreateSessionInput {
   isolation?: AgentActivitySessionIsolation["mode"] | null;
   noProject?: boolean | null;
   capabilityRefs?: readonly AgentActivityCapabilityReference[] | null;
-  initialGoalControl?: AgentActivityInitialGoalControl | null;
-  initialTuttiModeActivation?: AgentActivityInitialTuttiModeActivation | null;
   railPlacement?: AgentActivityRailPlacement;
   initialContent?: AgentPromptContentBlock[] | null;
   /** 仅展示用的首轮文本(bundle 折叠成一个 chip);initialContent 仍带展开后的文件。 */
@@ -444,19 +408,11 @@ export interface AgentActivitySubmitDiagnostics {
   uiMode?: "os" | "agent";
 }
 
-export type AgentActivitySendInputResult =
-  | {
-      /** Optional for compatibility with adapters predating the discriminator. */
-      kind?: "turn";
-      session: AgentActivitySession;
-      turnId: string;
-      turn: AgentActivityTurn;
-    }
-  | {
-      kind: "goalControl";
-      session: AgentActivitySession;
-      goal?: AgentActivitySessionGoal | null;
-    };
+export interface AgentActivitySendInputResult {
+  session: AgentActivitySession;
+  turnId: string;
+  turn: AgentActivityTurn;
+}
 
 export interface AgentPromptContentBlock {
   type: "text" | "image" | "file" | "skill" | "mention" | "connector";
@@ -474,19 +430,6 @@ export interface AgentPromptContentBlock {
   assetId?: string;
   kind?: string;
   sizeBytes?: number;
-}
-
-export type {
-  AgentActivityGoalControlAction,
-  AgentActivityGoalControlInput,
-  AgentActivityInitialGoalControl
-} from "./goalControl.types.ts";
-
-export interface AgentActivityGoalControlResult {
-  session: AgentActivitySession;
-  goal?: AgentActivitySessionGoal | null;
-  operationId?: string | null;
-  state?: AgentActivitySessionGoalState | null;
 }
 
 export interface AgentActivitySubmitInteractiveInput {
@@ -661,51 +604,6 @@ export interface AgentActivitySessionPermissionConfig {
   modes: AgentActivitySessionPermissionModeOption[];
 }
 
-export interface AgentActivitySessionGoal {
-  objective: string;
-  status:
-    | "active"
-    | "paused"
-    | "blocked"
-    | "usageLimited"
-    | "budgetLimited"
-    | "complete";
-  reason?: string;
-  startedAtUnixMs?: number;
-  iterations?: number;
-  durationMs?: number;
-  tokens?: number;
-}
-
-export type AgentActivitySessionGoalSyncStatus =
-  | "pending"
-  | "applying"
-  | "synced"
-  | "diverged"
-  | "unknown"
-  | "failed";
-
-export interface AgentActivitySessionGoalSyncState {
-  revision: number;
-  syncStatus: AgentActivitySessionGoalSyncStatus;
-  pendingOperationId: string | null;
-  /** Optional for mixed-version hosts; true is authoritative Host evidence. */
-  executionPending?: boolean;
-}
-
-export interface AgentActivitySessionGoalState {
-  desired?: AgentActivitySessionGoal | null;
-  observed?: AgentActivitySessionGoal | null;
-  revision: number;
-  tombstoned: boolean;
-  syncStatus: AgentActivitySessionGoalSyncStatus;
-  pendingOperationId?: string | null;
-  lastEvidence: Readonly<Record<string, unknown>>;
-  lastError?: string;
-  observedAtUnixMs?: number | null;
-  updatedAtUnixMs: number;
-}
-
 export interface AgentActivitySessionUsage {
   contextWindow: {
     usedTokens: number;
@@ -728,11 +626,4 @@ export interface AgentActivityTurnCancelResponse {
       | "not_found";
   };
   turn?: AgentActivityTurn;
-}
-
-export interface AgentActivityCancelTurnInput {
-  agentSessionId: string;
-  signal?: AbortSignal;
-  turnId: string;
-  workspaceId: string;
 }

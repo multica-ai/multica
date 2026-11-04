@@ -21,13 +21,9 @@ import { AgentProbeInfoPopover } from "../workspaceDesktop/view/AgentProbeInfoPo
 import styles from "./AgentGUINode.styles";
 import {
   AGENT_GUI_COLLAPSED_MIN_WIDTH_PX,
-  AGENT_GUI_CONVERSATION_RAIL_MIN_WIDTH_PX,
   AGENT_GUI_DETAIL_MIN_WIDTH_PX,
-  clampAgentGUIConversationRailWidthPx,
   resolveAgentGUIConversationRailPresentation,
   resolveAgentGUIExpandedWindowFrame,
-  resolveNextAgentGUIConversationRailWidthPx,
-  resolveAgentGUIConversationRailMaxWidthPx
 } from "./model/agentGuiRailLayout";
 import type {
   AgentGUIAgentConfigMenuContext,
@@ -37,7 +33,6 @@ import { areAgentGUINodePropsEqual } from "./AgentGUINode.types";
 import { AgentGUIMentionServiceBoundary } from "./AgentGUIMentionServiceBoundary";
 import {
   useAgentGUIViewLabels,
-  useAgentGUIConversationRailLabels,
   useAgentGUIWorkspaceFileReferenceCopy
 } from "./AgentGUINode.labels";
 import { useAgentMentionProvenanceFilters } from "./composer/useAgentMentionProvenanceFilters";
@@ -152,8 +147,7 @@ export const AgentGUINode = memo(function AgentGUINode({
     onMinimize,
     onToggleMaximize,
     onShowMessage,
-    onEngagementEvent,
-    onConversationRailLayoutChange
+    onEngagementEvent
   } = hostActions;
   const {
     agentConfigAccount: renderAgentConfigAccount,
@@ -207,26 +201,6 @@ export const AgentGUINode = memo(function AgentGUINode({
   const handleDataChange = useCallback(
     (updater: (current: AgentGUINodeData) => AgentGUINodeData) => {
       onUpdateNode(updater);
-    },
-    [onUpdateNode]
-  );
-  const handleConversationRailWidthChanged = useCallback(
-    (widthPx: number) => {
-      onUpdateNode((current) => {
-        const nextWidthPx = resolveNextAgentGUIConversationRailWidthPx({
-          currentWidthPx: current.conversationRailWidthPx,
-          requestedWidthPx: widthPx,
-          containerWidthPx: widthRef.current
-        });
-
-        if (current.conversationRailWidthPx === nextWidthPx) {
-          return current;
-        }
-        return {
-          ...current,
-          conversationRailWidthPx: nextWidthPx
-        };
-      });
     },
     [onUpdateNode]
   );
@@ -356,7 +330,6 @@ export const AgentGUINode = memo(function AgentGUINode({
       ? activeConversationAgentTarget?.label
       : viewModel.rail.selectedAgentTarget?.label
   );
-  const conversationRailLabels = useAgentGUIConversationRailLabels(t);
   const labels = useAgentGUIViewLabels({
     disabledHomeSuggestions,
     displayProviderLabel,
@@ -544,16 +517,6 @@ export const AgentGUINode = memo(function AgentGUINode({
               }
               onAgentEnvPanelOpen={onAgentEnvPanelOpen}
               conversationRailCollapsed={isRenderedConversationRailCollapsed}
-              conversationRailWidthPx={clampAgentGUIConversationRailWidthPx(
-                state.conversationRailWidthPx,
-                renderedWidth
-              )}
-              conversationRailMinWidthPx={
-                AGENT_GUI_CONVERSATION_RAIL_MIN_WIDTH_PX
-              }
-              conversationRailMaxWidthPx={resolveAgentGUIConversationRailMaxWidthPx(
-                renderedWidth
-              )}
               detailMinWidthPx={AGENT_GUI_DETAIL_MIN_WIDTH_PX}
               uiLanguage={locale}
               onWorkspaceFileReferencesAdded={
@@ -565,12 +528,7 @@ export const AgentGUINode = memo(function AgentGUINode({
               prepareExternalPromptFiles={prepareExternalPromptFiles}
               resolvePastedPath={resolvePastedPath}
               promptAssetLimit={promptAssetLimit}
-              onConversationRailWidthChanged={
-                handleConversationRailWidthChanged
-              }
-              onConversationRailLayoutChange={onConversationRailLayoutChange}
               labels={labels}
-              conversationRailLabels={conversationRailLabels}
               workspaceUserProjectI18n={workspaceUserProjectI18n}
               workspaceFileManagerCopy={workspaceFileManagerI18n}
               workspaceFileReferenceAdapter={workspaceFileReferenceAdapter}

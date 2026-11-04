@@ -2,7 +2,6 @@ import { act, renderHook } from "@testing-library/react";
 import {
   createAgentSessionEngine,
   normalizeAgentActivitySession,
-  selectEngineSessionSettingsUpdate,
   type AgentActivityComposerOptions
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
@@ -60,7 +59,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
@@ -158,9 +157,8 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({
-            composerOptionsByTargetKey: {
-              "local:codex": {
+          composer: {
+            options: () => ({
                 behavior: { refreshModelOptionsAfterSettings: false },
                 models: [],
                 permissionConfig: {
@@ -171,9 +169,9 @@ describe("useAgentGUIComposerSettingsActions", () => {
                 reasoningConfigurable: false,
                 reasoningEfforts: [],
                 speeds: []
-              }
-            }
-          }),
+              }),
+            status: () => undefined
+          },
           trackDraftComposerSettingsChange: vi.fn()
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
@@ -257,7 +255,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
     expect(onRememberComposerDefaults).toHaveBeenCalledTimes(1);
   });
 
-  it("retries an unknown active-session update and remembers the explicit selection", () => {
+  it("asks the composer to write an active-session selection and remembers it", () => {
     const execute = vi.fn(() => new Promise<unknown>(() => undefined));
     const sessionEngine = createAgentSessionEngine({
       clock: { nowUnixMs: () => 1 },
@@ -282,26 +280,6 @@ describe("useAgentGUIComposerSettingsActions", () => {
         })
       ]
     });
-    sessionEngine.dispatch({
-      agentSessionId: "session-1",
-      commandId: "settings-1",
-      settings: { permissionModeId: "acceptEdits" },
-      type: "session/settingsUpdateRequested",
-      workspaceId: "workspace-1"
-    });
-    sessionEngine.dispatch({
-      commandId: "settings-1",
-      commandType: "session/updateSettings",
-      correlationId: "session-1",
-      outcome: "timedOut",
-      type: "engine/commandResult"
-    });
-    expect(
-      selectEngineSessionSettingsUpdate(
-        sessionEngine.getSnapshot(),
-        "session-1"
-      )?.status
-    ).toBe("unknown");
 
     const data: AgentGUINodeData = {
       agentTargetId: "local:claude-code",
@@ -314,10 +292,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
     const draftSettingsBySessionIdRef: {
       current: Record<string, AgentSessionComposerSettings>;
     } = { current: {} };
-    const updateSessionSettings = vi.spyOn(
-      sessionEngine,
-      "updateSessionSettings"
-    );
+    const updateSettings = vi.fn();
     const activeSettings: AgentSessionComposerSettings = {
       browserUse: true,
       computerUse: true,
@@ -334,7 +309,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: "session-1" },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined, updateSettings }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
@@ -371,11 +346,10 @@ describe("useAgentGUIComposerSettingsActions", () => {
       });
     });
 
-    expect(updateSessionSettings).toHaveBeenCalledWith({
+    expect(updateSettings).toHaveBeenCalledWith({
       agentSessionId: "session-1",
       settings: { permissionModeId: "acceptEdits" }
     });
-    expect(execute).toHaveBeenCalledTimes(2);
     expect(onRememberComposerDefaults).toHaveBeenCalledWith({
       agentTargetId: "local:claude-code",
       provider: "claude-code",
@@ -445,7 +419,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
@@ -574,7 +548,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
@@ -757,7 +731,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
@@ -842,7 +816,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: null },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },

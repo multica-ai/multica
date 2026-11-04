@@ -529,8 +529,6 @@ export function createAgentActivityEphemeralConversationProjector(
       lifecycleCapabilities: { fork: false, forkThroughTurn: false },
       forkedFrom: null,
       usage: null,
-      goal: null,
-      tuttiModeActivation: null,
       imported: false,
       visible: true,
       resumable: false,

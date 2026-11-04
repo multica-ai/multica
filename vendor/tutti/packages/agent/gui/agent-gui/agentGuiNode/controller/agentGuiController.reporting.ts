@@ -29,7 +29,6 @@ import {
   getAgentGUIErrorCode,
   normalizeAgentGUIDiagnosticError
 } from "./agentGuiController.errors";
-import type { AgentConversationBatchDeletionCapability } from "./agentConversationBatchDeletionCapability";
 export {
   normalizePermissionModeSemantic,
   permissionConfigFromComposerOptions,
@@ -183,39 +182,6 @@ export function reportAgentGUIConversationFilterTargetUnresolved(input: {
       "[agent-gui] reportAgentGUIConversationFilterTargetUnresolved failed",
       reportError
     );
-  }
-}
-
-export function reportAgentGUIConversationBatchDeletionCapabilityIncomplete(input: {
-  missingMethods: AgentConversationBatchDeletionCapability["missingMethods"];
-  runtime: AgentGUIRuntime;
-  workspaceId: string;
-}): void {
-  const reportDiagnostic = input.runtime.reportDiagnostic;
-  if (!reportDiagnostic) {
-    return;
-  }
-  const reportFailure = (error: unknown) => {
-    console.error(
-      "[agent-gui-conversation-batch-delete-capability]",
-      JSON.stringify({
-        error: normalizeAgentGUIDiagnosticError(error),
-        workspaceId: input.workspaceId
-      })
-    );
-  };
-  try {
-    void Promise.resolve(
-      reportDiagnostic.call(input.runtime, {
-        details: { missingMethods: input.missingMethods },
-        event: "agent.gui.conversation_batch_delete.capability_incomplete",
-        level: "warn",
-        source: "agent-gui",
-        workspaceId: input.workspaceId
-      })
-    ).catch(reportFailure);
-  } catch (error) {
-    reportFailure(error);
   }
 }
 
@@ -377,60 +343,6 @@ export function reportAgentGUIActiveConversationCleared(input: {
     // Diagnostic logging must never affect active conversation routing.
     console.error(
       "[agent-gui] reportAgentGUIActiveConversationCleared failed",
-      reportError
-    );
-  }
-}
-
-export function reportAgentGUIAttentionReadDecision(input: {
-  agentSessionId: string;
-  completionKey: string;
-  decision: "preserve_unread" | "read";
-  isSurfaceActive: boolean;
-  isSurfaceDocumentExposed: boolean;
-  isSurfaceVisible: boolean;
-  markedUnreadByUser: boolean;
-  nodeId?: string;
-  previousActiveConversationId: string | null;
-  reason:
-    | "active_selection"
-    | "manual_unread_current_selection"
-    | "reselected"
-    | "surface_hidden"
-    | "surface_inactive"
-    | "document_not_exposed";
-  runtime: AgentGUIRuntime;
-  workspaceId: string;
-}): void {
-  const reportDiagnostic = input.runtime.reportDiagnostic;
-  if (!reportDiagnostic) {
-    return;
-  }
-  try {
-    void Promise.resolve(
-      reportDiagnostic.call(input.runtime, {
-        details: {
-          agentSessionId: input.agentSessionId,
-          completionKey: input.completionKey,
-          decision: input.decision,
-          isSurfaceActive: input.isSurfaceActive,
-          isSurfaceDocumentExposed: input.isSurfaceDocumentExposed,
-          isSurfaceVisible: input.isSurfaceVisible,
-          markedUnreadByUser: input.markedUnreadByUser,
-          nodeId: input.nodeId ?? null,
-          previousActiveConversationId: input.previousActiveConversationId,
-          reason: input.reason
-        },
-        event: "agent.gui.attention_read.decision",
-        level: "info",
-        source: "agent-gui",
-        workspaceId: input.workspaceId
-      })
-    ).catch(() => {});
-  } catch (reportError) {
-    // Diagnostic logging must never affect attention/read decisions.
-    console.error(
-      "[agent-gui] reportAgentGUIAttentionReadDecision failed",
       reportError
     );
   }

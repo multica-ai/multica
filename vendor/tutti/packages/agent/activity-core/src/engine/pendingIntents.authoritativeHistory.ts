@@ -70,7 +70,6 @@ export function reconcilePendingIntentsFromAuthoritativeHistory(
       record.status !== "confirmed" ||
       record.initialPromptRetracted ||
       !record.initialTurnExpected ||
-      record.initialGoalControl ||
       effectiveClientSubmitIds.has(record.clientSubmitId)
     ) {
       continue;

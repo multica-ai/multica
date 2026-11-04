@@ -34,8 +34,8 @@
     "@tiptap/react": "3.23.6",
     "@tutti-os/ui-i18n-runtime": "workspace:*",
     "@tutti-os/ui-system": "workspace:*",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "peerDependencies": {
     "@tiptap/core": "^3.23.6",

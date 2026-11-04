@@ -194,7 +194,6 @@ export function useAgentGUIDetailSideChrome({
       isActive: baseComposerProps.isActive && isVisible,
       workspaceReferencePickerOpen: false,
       promptImagesSupported: false,
-      canGoalControl: false,
       canUploadAttachment: false,
       labels: {
         ...baseComposerProps.labels,

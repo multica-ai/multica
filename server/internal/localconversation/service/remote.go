@@ -549,7 +549,7 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 			if message == "" {
 				message = "The agent execution ended as " + status
 			}
-			_, _ = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: q.Revision + 1, Paused: true, Error: message}, len(q.Items))
+			_, _ = s.commitQueue(ctx, conversationID, store.QueueChange{Revision: q.Revision + 1, Paused: true, Error: message}, len(q.Items), "failed")
 		}
 		unlock()
 	}

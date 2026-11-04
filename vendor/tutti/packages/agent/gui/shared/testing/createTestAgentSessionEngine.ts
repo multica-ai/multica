@@ -6,8 +6,6 @@ import {
   type EngineEffectOptions,
   type EngineExternalCommand,
   type EngineTypedCommandPort,
-  type PlanSubmitDecisionCommand,
-  type PlanSubmitDecisionResult
 } from "@tutti-os/agent-activity-core";
 
 export interface TestEngineCommandHandler {
@@ -15,10 +13,6 @@ export interface TestEngineCommandHandler {
     command: EngineExternalCommand,
     options?: EngineEffectOptions
   ): Promise<unknown>;
-  executePlanDecision?(
-    command: PlanSubmitDecisionCommand,
-    options?: EngineEffectOptions
-  ): Promise<PlanSubmitDecisionResult>;
 }
 
 export function createTestAgentSessionEngine(
@@ -77,27 +71,13 @@ export function createTestEngineCommandPort(
   }
   const effects: AgentSessionEffectPort = {
     activateSession: (_input, options) => executeObserved(options),
-    cancelTurn: (_input, options) => executeObserved(options),
-    controlGoal: (_input, options) => executeObserved(options),
-    deleteSessions: (_input, options) => executeObserved(options),
-    renameSession: (_input, options) => executeObserved(options),
-    respondToInteraction: (_input, options) => executeObserved(options),
     sendInput: (_input, options) => executeObserved(options),
-    setSessionPinned: (_input, options) => executeObserved(options),
     updateSessionSettings: (_input, options) => executeObserved(options)
   };
   return {
     effects,
     execute(command, options) {
       return commandHandler.execute(command, options);
-    },
-    executePlanDecision(command, options) {
-      return commandHandler.executePlanDecision
-        ? commandHandler.executePlanDecision(command, options)
-        : (commandHandler.execute(
-            command,
-            options
-          ) as Promise<PlanSubmitDecisionResult>);
     },
     kind: "typed",
     observe(command) {

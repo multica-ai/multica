@@ -3,7 +3,6 @@ import {
   buildAgentConversationHandoffPrompt,
   handoffProjectPathForConversation,
   isAgentGUIHomeStatusNoticeVisible,
-  resolveAgentGUITuttiStopTargets,
   resolveAgentGUIInteractionDisabledReason,
   resolveAgentGUIHomeNoticeChrome,
   resolveAgentGUIStopControl,
@@ -126,35 +125,6 @@ describe("resolveAgentGUIInteractionDisabledReason", () => {
         interactivePromptReason: "The shared Agent caller is offline"
       })
     ).toBeNull();
-  });
-});
-
-describe("resolveAgentGUITuttiStopTargets", () => {
-  it("stops only the Issue cascade when aggregate work outlives the source Turn", () => {
-    expect(
-      resolveAgentGUITuttiStopTargets({
-        executionActive: true,
-        sourceHasStoppableWork: false
-      })
-    ).toEqual({ stopExecution: true, stopSession: false });
-  });
-
-  it("stops both the Issue cascade and a live source Turn", () => {
-    expect(
-      resolveAgentGUITuttiStopTargets({
-        executionActive: true,
-        sourceHasStoppableWork: true
-      })
-    ).toEqual({ stopExecution: true, stopSession: true });
-  });
-
-  it("preserves ordinary Session stop outside Tutti execution", () => {
-    expect(
-      resolveAgentGUITuttiStopTargets({
-        executionActive: false,
-        sourceHasStoppableWork: false
-      })
-    ).toEqual({ stopExecution: false, stopSession: true });
   });
 });
 

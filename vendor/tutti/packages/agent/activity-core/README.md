@@ -81,9 +81,7 @@ Engine rules:
   runtimes against one workspace create one engine per origin.
 - Normalized observations and advanced lifecycle intents enter through
   `dispatch(intent)`. Frontend activation enters through
-  `engine.activateSession`; Session rename, pin, and batch delete enter through
-  `engine.renameSession`, `engine.setSessionPinned`, and
-  `engine.deleteSessions`. Existing-Session Goal Control enters through
+  `engine.activateSession`. Existing-Session Goal Control enters through
   `engine.controlGoal`. Composer-option reads enter through
   `engine.loadComposerOptions`. These semantic methods derive workspace
   identity or target scope and hide reducer protocol from hosts. Activation
@@ -356,8 +354,8 @@ and Session reference consistent.
 
 The Engine projects shared lifecycle command descriptions onto
 `AgentSessionEffectPort`: `activateSession`, `sendInput`,
-`controlGoal`, `updateSessionSettings`, `cancelTurn`, `respondToInteraction`,
-`renameSession`, `setSessionPinned`, and `deleteSessions`. Hosts implement
+`controlGoal`, `updateSessionSettings`, `cancelTurn`, and
+`respondToInteraction`. Hosts implement
 transport and result mapping without switching on those command types. When a
 queued prompt includes
 a required settings patch, the Engine records a prompt continuation and enters

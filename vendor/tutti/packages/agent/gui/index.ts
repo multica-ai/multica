@@ -47,19 +47,6 @@ export type {
 export type { AgentGUIAgentConfigMenuContext } from "./agent-gui/agentGuiNode/AgentGUINode.types";
 export type { AgentGUISessionLaunchMode } from "./agent-gui/agentGuiNode/model/agentSessionLaunchMode";
 export { AgentGUIConfigAccountFallbackSuppressed } from "./agent-gui/agentGuiNode/view/AgentGUIAccountConfig";
-export type {
-  TuttiModePlanAssignmentAgentDetail,
-  TuttiModePlanAssignmentAgentOption,
-  TuttiModePlanAssignmentOptionsSource,
-  TuttiModePlanReviewSnapshot,
-  TuttiModePlanReviewRuntime,
-  TuttiModePlanTaskAssignmentInput,
-  TuttiPlanIssueMaterializationFailure,
-  TuttiPlanIssueQueryResult,
-  TuttiPlanIssueSnapshot,
-  TuttiPlanIssueSource,
-  TuttiPlanIssueTaskSnapshot
-} from "./workspaceWorkflow";
 export type { AgentGUIComposerAppendRequest } from "./agent-gui/agentGuiNode/controller/useAgentGUIComposerAppendRequest";
 export {
   createAgentStatusController,
@@ -204,11 +191,6 @@ export type { AgentGUIActivityHostProviderProps } from "./agentActivityHost";
 export { useEngineSelector } from "./shared/engine/useEngineSelector";
 export type { EngineStateStore } from "./shared/engine/useEngineSelector";
 export {
-  dispatchAgentPlanPromptAction,
-  selectAgentPlanPromptTurn
-} from "./shared/agentConversation/agentPlanPromptDispatch";
-export type { AgentPlanPromptAction } from "./shared/agentConversation/agentPlanPromptDispatch";
-export {
   AgentGUIRuntimeProvider,
   resetAgentGUIRuntimeForTests,
   setAgentGUIRuntimeForTests,
@@ -224,11 +206,6 @@ export type {
   AgentActivityRuntimeActivateSessionInput,
   AgentActivityRuntimeListSessionMessagesInput,
   AgentActivityRuntimePromptContentBlock,
-  AgentActivityRuntimeDeleteSessionsBatchInput,
-  AgentActivityRuntimeDeleteSessionsBatchResult,
-  AgentActivityRuntimeSessionSectionDeletionCandidates,
-  AgentActivityRuntimeSessionSectionScopeInput,
-  AgentActivityRuntimeSetSessionPinnedInput,
   AgentActivityRuntimeUploadPromptContentInput,
   AgentActivityRuntimeUploadPromptContentResult,
   AgentActivityRuntimeUnactivateSessionInput,

@@ -1,5 +1,5 @@
 import { Button } from "@tutti-os/ui-system/components";
-import type { AgentActivityEditRetryRecoveryAction } from "@tutti-os/agent-activity-core";
+import type { AgentGUIEditRetryRecoveryAction } from "../controller/agentGuiController.promptOperations";
 import type { AgentGUIEditRetryPresentation } from "../model/agentGUIEditRetryModel";
 import { translate } from "../../../i18n";
 
@@ -8,7 +8,7 @@ export function AgentGUIEditRetryStatus({
   onRecover
 }: {
   presentation: AgentGUIEditRetryPresentation;
-  onRecover: (action: AgentActivityEditRetryRecoveryAction) => Promise<void>;
+  onRecover: (action: AgentGUIEditRetryRecoveryAction) => Promise<void>;
 }): React.JSX.Element | null {
   if (presentation.state === "ready") {
     return null;

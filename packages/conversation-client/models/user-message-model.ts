@@ -24,6 +24,7 @@ export class UserMessageModel {
   readonly steered: boolean;
   readonly failed: boolean;
   readonly createdAt: string;
+  private row?: ConversationMessage;
 
   constructor(init: UserMessageInit) {
     this.id = init.id;
@@ -36,7 +37,9 @@ export class UserMessageModel {
     this.createdAt = init.createdAt;
   }
 
-  toMessage(): ConversationMessage {
+  toMessage(): ConversationMessage { return this.row ??= this.buildMessage(); }
+
+  private buildMessage(): ConversationMessage {
     const content = localMessageDisplayContent({ role: "user", content: chatAuthoredPrompt(this.content), attachmentIds: this.attachmentIds });
     return {
       messageId: this.id, turnId: this.turnId, role: "user", kind: "text",

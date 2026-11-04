@@ -34,11 +34,6 @@ const styles = {
   composerInputShell: "agent-gui-node__composer-input-shell",
   composerInputShellHero: "agent-gui-node__composer-input-shell-hero",
   composerMenuTrigger: "agent-gui-node__composer-menu-trigger",
-  composerTuttiModeIcon: "agent-gui-node__composer-tutti-mode-icon",
-  composerTuttiModeIconStatic:
-    "agent-gui-node__composer-tutti-mode-icon-static",
-  composerTuttiModeIconAnimated:
-    "agent-gui-node__composer-tutti-mode-icon-animated",
   composerMenuContent: "agent-gui-node__composer-menu-content",
   composerMenuLabel: "agent-gui-node__composer-menu-label",
   composerMenuItem: "agent-gui-node__composer-menu-item",

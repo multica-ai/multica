@@ -45,7 +45,7 @@ export function withoutDeletedChildren(
     lifecycleCapabilitiesProjected: detail.lifecycleCapabilitiesProjected,
     session: detail.session,
     childSessions,
-    editRetry: detail.editRetry,
+    historyRevision: detail.historyRevision,
     turns: detail.turns.filter((turn) => retainedIds.has(turn.agentSessionId))
   };
 }

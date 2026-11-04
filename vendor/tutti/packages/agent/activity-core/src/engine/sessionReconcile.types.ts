@@ -5,7 +5,6 @@ import type {
 } from "../types.ts";
 import type { AgentActivitySessionMessageWindow } from "../messageWindow.types.ts";
 import type { AgentActivitySessionInput } from "../sessionNormalization.ts";
-import type { AgentActivityEditRetryAvailability } from "./editRetry.types.ts";
 
 export type SessionReconcileScope = "messages" | "state" | "state_and_messages";
 
@@ -20,7 +19,7 @@ export interface AgentActivitySessionDetailSnapshot {
   lifecycleCapabilitiesProjected: boolean;
   session: AgentActivitySession;
   childSessions: readonly AgentActivitySession[];
-  editRetry?: AgentActivityEditRetryAvailability;
+  historyRevision?: number;
   turns: readonly AgentActivityTurn[];
 }
 
@@ -80,7 +79,6 @@ export interface SessionActivityObservedIntent {
 export interface SessionDetailSnapshotReceivedIntent {
   type: "session/detailSnapshotReceived";
   childSessions: readonly AgentActivitySessionInput[];
-  editRetry?: AgentActivityEditRetryAvailability;
   live?: boolean;
   messages?: readonly AgentActivityDurableMessage[];
   session: AgentActivitySessionInput;

@@ -37,9 +37,6 @@
     "./agentGuiSessionProviderIconUrls": "./agentGuiSessionProviderIconUrls.ts",
     "./workspace-agent-generated-files": "./shared/workspaceAgentGeneratedFiles.ts",
     "./conversation-message-controller": "./agentConversationMessageController.ts",
-    "./conversation-rail-controller": "./agentConversationRailController.ts",
-    "./conversation-rail-runtime": "./agentConversationRailRuntime.ts",
-    "./conversation-rail-projection": "./conversationRailProjection.ts",
     "./conversation-projection": "./conversationProjection.ts",
     "./composer-projection": "./composerProjection.ts",
     "./i18n": "./i18n/index.ts",
@@ -94,9 +91,10 @@
     "lodash": "4.18.1",
     "lucide-react": "0.511.0",
     "mermaid": "11.16.0",
+    "mobx": "catalog:",
     "monaco-editor": "0.55.1",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "react-markdown": "10.1.0",
     "rehype-sanitize": "6.0.0",
     "remark-gfm": "4.0.1",
@@ -126,6 +124,7 @@
     "@types/react-dom": "19.2.3",
     "@types/three": "0.185.1",
     "@types/use-sync-external-store": "0.0.6",
+    "mobx-react-lite": "catalog:",
     "vitest": "catalog:"
   }
 }

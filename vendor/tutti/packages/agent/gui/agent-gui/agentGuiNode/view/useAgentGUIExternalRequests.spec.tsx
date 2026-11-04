@@ -346,45 +346,6 @@ describe("useAgentGUIExternalRequests session actions", () => {
     expect(requestRenameConversation).toHaveBeenCalledTimes(2);
   });
 
-  it("reports unavailable instead of executing while the rail interaction lock is held", () => {
-    const { toastError } = installHostApi();
-    const active = makeConversation();
-    const requestRenameConversation = vi.fn();
-    const props = baseProps({
-      requestRenameConversation,
-      viewModel: makeViewModel({
-        activeConversation: active,
-        conversations: [active]
-      })
-    });
-    const { result } = renderHook(useAgentGUIExternalRequests, {
-      initialProps: props
-    });
-    result.current.registerRailInteractionLockProbe(() => true);
-
-    dispatchSessionAction("rename");
-
-    expect(requestRenameConversation).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledTimes(1);
-    expect(toastError).toHaveBeenCalledWith(LABELS.sessionActionUnavailable);
-  });
-
-  it("reports unavailable when the target conversation is not loaded", () => {
-    const { toastError, writeText } = installHostApi();
-    installRuntime();
-    const props = baseProps({
-      viewModel: makeViewModel({ activeConversation: null, conversations: [] })
-    });
-    renderHook(useAgentGUIExternalRequests, {
-      initialProps: props
-    });
-
-    dispatchSessionAction("copy-markdown", "session-ghost");
-
-    expect(writeText).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledWith(LABELS.sessionActionUnavailable);
-  });
-
   it("opens one loading toast immediately instead of a separate info toast", async () => {
     const { toastInfo, toastLoading } = installHostApi();
     installRuntime();

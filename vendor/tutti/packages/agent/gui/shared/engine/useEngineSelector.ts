@@ -1,3 +1,5 @@
+import { reaction } from "mobx";
+import { useCallback, useSyncExternalStore } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-selector.js";
 
 // Single React binding for workspace session engine subscriptions
@@ -37,4 +39,17 @@ export function useEngineSelector<TState, TSelected>(
     selector,
     isEqual
   );
+}
+
+/**
+ * Reads MobX state from a hook outside an observer component, while controllers
+ * still pass values down. `deps` are what `read` closes over.
+ */
+export function useModelValue<T>(read: () => T, deps: readonly unknown[]): T {
+  const subscribe = useCallback(
+    (listener: () => void) => reaction(read, listener),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    deps
+  );
+  return useSyncExternalStore(subscribe, read, read);
 }

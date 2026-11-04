@@ -69,8 +69,6 @@ export function isAssistantParticipantContentRow(
     case "tool-group":
     case "turn-summary":
       return true;
-    case "goal-control":
-      return false;
   }
 }
 

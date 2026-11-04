@@ -32,7 +32,7 @@ async function mount({ waiting = true, mentioned = false, active = true, editor 
   });
   engines.push(sessionEngine);
   const submit = vi.spyOn(sessionEngine, "submitPrompt").mockReturnValue({ accepted: true, queued: true });
-  const respond = vi.spyOn(sessionEngine, "submitInteractionResponse").mockReturnValue(true);
+  const respond = vi.fn(() => true);
   const mention = mentioned ? createRichTextMentionMarkdown({ providerId: "agent-target", entityId: "bug-agent", label: "捉虫高手", scope: { workspaceId: "workspace" } }) : "";
   const content: [{ type: "text"; text: string }] = [{ type: "text", text: `${mention}帮我记个优化` }];
   const draft = { current: { "session:session": content } as Input["draftByScopeKeyRef"]["current"] };
@@ -44,8 +44,8 @@ async function mount({ waiting = true, mentioned = false, active = true, editor 
     activeEngineActiveTurn: active ? { turnId: "active" } : null,
     activeEnginePendingInteractions: waiting ? [{ agentSessionId: "session", turnId: "active", requestId: "question", kind: "question", status: "pending", createdAtUnixMs: 1, updatedAtUnixMs: 1,
       input: { questions: [{ id: "scope", header: "排查范围", question: "查哪里？", allowFreeText: true, options: [] }] } }] : [],
-    agentActivityRuntime: {}, conversationListQuery: {}, conversationsRef: { current: [] }, dataRef: { current: {} },
-    draftByScopeKeyRef: draft, executePromptRef: { current: vi.fn() }, goalControlSupported: false,
+    agentActivityRuntime: { prompts: { respondToInteraction: respond, interactionResponse: () => null, subscribeInteractionResponses: () => () => undefined } }, conversationListQuery: {}, conversationsRef: { current: [] }, dataRef: { current: {} },
+    draftByScopeKeyRef: draft, executePromptRef: { current: vi.fn() },
     isComposerHomeRef: { current: false }, isCurrentConversation: () => true, isRespondingToInteraction: false,
     isSessionMarkedNonResumable: () => false, persistActiveConversation: vi.fn(),
     planActionsRef: { current: { implement: vi.fn(), feedback: vi.fn(), skip: vi.fn() } },

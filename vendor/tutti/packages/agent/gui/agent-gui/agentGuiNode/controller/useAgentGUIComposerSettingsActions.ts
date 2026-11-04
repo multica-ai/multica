@@ -296,7 +296,7 @@ export function useAgentGUIComposerSettingsActions(
           }
         }
         const snapshotComposerOptions = composerOptionsForTarget({
-          snapshot: agentActivityRuntime.getSnapshot(workspaceId),
+          composer: agentActivityRuntime.composer,
           target: targetData
         });
         draftSettingsBySessionIdRef.current = {
@@ -483,7 +483,7 @@ export function useAgentGUIComposerSettingsActions(
             settings: { ...sessionSettingsPatch }
           });
         } else {
-          sessionEngine.updateSessionSettings({
+          agentActivityRuntime.composer.updateSettings({
             agentSessionId,
             settings: { ...sessionSettingsPatch }
           });

@@ -24,8 +24,8 @@
     "@tutti-os/ui-system": "workspace:*",
     "qrcode-generator": "2.0.4",
     "valtio": "2.3.2",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "peerDependencies": {
     "react": "^19.1.0",

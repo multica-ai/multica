@@ -331,16 +331,6 @@ export function resolveAgentGUIStopControl(input: {
   };
 }
 
-export function resolveAgentGUITuttiStopTargets(input: {
-  executionActive: boolean;
-  sourceHasStoppableWork: boolean;
-}): { stopExecution: boolean; stopSession: boolean } {
-  return {
-    stopExecution: input.executionActive,
-    stopSession: !input.executionActive || input.sourceHasStoppableWork
-  };
-}
-
 export function buildAgentConversationHandoffPrompt(input: {
   activeConversation: AgentGUINodeViewModel["rail"]["activeConversation"];
   currentUserId?: string | null;

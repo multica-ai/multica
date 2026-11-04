@@ -63,7 +63,6 @@ function backend(storage = new Map<string, string>()) {
         pending = {};
         messages.splice(0);
         return tasks[tasks.length - 1];
-      case "session.markRead": return;
       case "attachment.upload": return {
         id: "attachment-1", filename: params.file.name, content_type: params.file.type,
         markdown_url: "/api/attachments/attachment-1/download", url: "/api/attachments/attachment-1/download",
@@ -548,8 +547,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const data = backend(); data.sessions.push(session);
     const { handle } = await setup(data);
     await handle.runtime.getSession(init.workspaceId, session.id);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.updateSessionSettings({ agentSessionId: session.id, settings: { model: "runtime-catalog-model" } });
+    handle.runtime.composer.updateSettings({ agentSessionId: session.id, settings: { model: "runtime-catalog-model" } });
     await vi.waitFor(() => expect(handle.getModelSelection(agent.id, session.id)).toBe("runtime-catalog-model"));
     data.emit({ type: "invalidate", scope: "workspace" });
     await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.settings.model).toBe("runtime-catalog-model"));
@@ -690,37 +688,6 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(data.request.mock.calls.filter(([method]) => method === "session.load").length).toBeLessThanOrEqual(2);
   });
 
-  it("marks a run that settles out of view as an unread completion", async () => {
-    const data = backend();
-    data.sessions.push(session);
-    let pendingTasks: PendingChatTaskItem[] = [{ task_id: "real-pending-task", chat_session_id: session.id, status: "running" }];
-    const original = data.request.getMockImplementation()!;
-    data.request.mockImplementation(async (method, params) => method === "workspace.load"
-      ? { agents: init.agents, sessions: data.sessions, pendingTasks }
-      : original(method, params));
-    const { handle } = await setup(data);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    expect(engine.getSnapshot().attentionReadState.partitionsByUserId[init.userId]?.recordsBySessionId[session.id]).toBeUndefined();
-    data.complete("real-pending-task");
-    data.messages.push({ id: "reply", chat_session_id: session.id, role: "assistant", content: "Done", task_id: "real-pending-task", created_at: time } as ChatMessage);
-    pendingTasks = [];
-    data.emit({ type: "invalidate", scope: "workspace" });
-    await vi.waitFor(() => expect(engine.getSnapshot().attentionReadState.partitionsByUserId[init.userId]?.recordsBySessionId[session.id]).toMatchObject({
-      isUnread: true, kind: "completed", completionKey: `turn:${session.id}:real-pending-task:completed`,
-    }));
-  });
-
-  it("does not mark already settled history unread when it is opened", async () => {
-    const data = backend();
-    data.sessions.push(session);
-    data.complete("completed-task");
-    data.messages.push({ id: "completed-message", chat_session_id: session.id, role: "assistant", content: "Completed result", task_id: "completed-task", created_at: time } as ChatMessage);
-    const { handle } = await setup(data);
-    await handle.runtime.getSession(init.workspaceId, session.id);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    expect(engine.getSnapshot().attentionReadState.partitionsByUserId[init.userId]?.recordsBySessionId[session.id]).toBeUndefined();
-  });
-
   it("refreshes previously loaded history when the aggregate reports a newly started real run", async () => {
     const data = backend();
     data.sessions.push(session);
@@ -795,33 +762,59 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
   });
 
 
+  it("renames and pins through the server, then shows what it committed", async () => {
+    const data = backend(); data.sessions.push(session);
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "session.rename") return { ...session, title: params.title };
+      if (method === "session.pin") return { ...session, pinned: params.pinned };
+      return original(method, params);
+    });
+    const { handle } = await setup(data);
+    await handle.runtime.getSession(init.workspaceId, session.id);
+    await expect(handle.runtime.mutations.rename({ agentSessionId: session.id, title: " Renamed " })).resolves.toMatchObject({ title: "Renamed" });
+    expect(data.request).toHaveBeenCalledWith("session.rename", { sessionId: session.id, title: "Renamed" }, expect.anything());
+    expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.title).toBe("Renamed");
+    await handle.runtime.mutations.setPinned({ agentSessionId: session.id, pinned: true });
+    expect(data.request).toHaveBeenCalledWith("session.pin", { sessionId: session.id, pinned: true }, expect.anything());
+    expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]?.pinnedAtUnixMs).not.toBeNull();
+  });
+
+  it("forks through a turn and binds the child to the id it was asked to appear under", async () => {
+    const forkable = { ...init, agents: [{ ...init.agents[0]!, canFork: true }] };
+    const child = { ...session, id: "server-child" };
+    const data = backend(); data.sessions.push(session);
+    data.messages.push({ id: "message-1", chat_session_id: session.id, role: "user", content: "hi", task_id: "turn-1", created_at: time } as ChatMessage);
+    data.tasks.push({ id: "turn-1", chat_session_id: session.id, status: "completed", created_at: time, started_at: time, completed_at: time } as AgentTask);
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "workspace.load") return { ...await original(method, params), agents: forkable.agents };
+      if (method === "session.fork") return child;
+      if (method === "session.load" && params.sessionId === child.id) return { ...await original(method, params), session: child, messages: [], tasks: [],
+        forkedFrom: { sessionId: session.id, turnId: "turn-1", targetTurnId: "child-turn", operationId: child.id, createdAt: time } };
+      return original(method, params);
+    });
+    const handle = createMulticaAgentGuiRuntime(data.client, forkable);
+    handles.push(handle);
+    await handle.initialize();
+    await handle.runtime.getSession(init.workspaceId, session.id);
+    const fork = await handle.runtime.mutations.forkThroughTurn({ sourceAgentSessionId: session.id, turnId: "turn-1" });
+    expect(handle.toServerSessionId(fork.targetAgentSessionId)).toBe(child.id);
+    expect(data.request).toHaveBeenCalledWith("session.fork", expect.objectContaining({ sessionId: session.id, turnId: "turn-1" }), expect.anything());
+    expect(handle.runtime.mutations.pendingForkTurnIds(session.id)).toEqual([]);
+  });
+
   it("rejects recoverable deletion and unsupported capabilities without calling a destructive API", async () => {
     const { handle, request } = await setup();
     await expect(handle.runtime.deleteSession({ workspaceId: init.workspaceId, agentSessionId: "anything" })).rejects.toMatchObject({ code: "unsupported" });
     expect(request.mock.calls.some(([method]) => method === "session.delete")).toBe(false);
     const options = await handle.runtime.getComposerOptions({ workspaceId: init.workspaceId, agentTargetId: agent.id });
     expect(options.capabilities).toMatchObject({ goalPause: false, planMode: false, modelSwitch: true, activeTurnGuidance: false });
-    expect(handle.runtime.getSnapshot(init.workspaceId).composerOptionsByTargetKey?.[agent.id]).toEqual(options);
+    expect(handle.runtime.composer.options(agent.id)).toEqual(options);
     expect(() => handle.runtime.getSessionEngine("another-workspace")).toThrow("workspace changed");
   });
 
 
-
-  it("maps the source engine's unread-removal write to one real server mark-read", async () => {
-    const data = backend();
-    data.sessions.push(session);
-    const key = "turn:server-session:server-task-1:completed";
-    data.storage.set("attention-read-state-v1", JSON.stringify({ completed: { readIds: [], unreadIds: [key] }, failed: { readIds: [], unreadIds: [] } }));
-    const { handle } = await setup(data);
-    const engine = handle.runtime.getSessionEngine(init.workspaceId);
-    engine.dispatch({ type: "attention/hydrateRequested", commandId: "hydrate-1", userId: init.userId, workspaceId: init.workspaceId });
-    await vi.waitFor(() => expect(engine.getSnapshot().attentionReadState.partitionsByUserId[init.userId]?.hydrated).toBeTruthy());
-    engine.dispatch({ type: "attention/read", userId: init.userId, agentSessionId: "server-session" });
-    await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "session.markRead")).toHaveLength(1));
-    expect(data.request.mock.calls.find(([method]) => method === "session.markRead")?.[1]).toEqual({ sessionId: "server-session" });
-    engine.dispatch({ type: "attention/read", userId: init.userId, agentSessionId: "server-session" });
-    expect(data.request.mock.calls.filter(([method]) => method === "session.markRead")).toHaveLength(1);
-  });
 
   it("uploads real image bytes and reuses the resulting attachment identity on send", async () => {
     const { handle, request } = await setup();
@@ -1033,7 +1026,7 @@ describe("local conversations over protocol v2", () => {
     const release = handle.runtime.ensureSessionSynchronized!({ workspaceId: init.workspaceId, agentSessionId: session.id });
     await vi.waitFor(() => expect(data.request.mock.calls.some(([method]) => method === "session.load")).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const messages = () => (handle.runtime.getSnapshot(init.workspaceId).sessionMessagesById[session.id] ?? []) as { messageId: string; payload: Record<string, unknown> }[];
+    const messages = () => handle.runtime.transcript.messages(session.id);
     return { data, handle, messages, release };
   }
   const event = (seq: number, type: string, payload: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
@@ -1087,8 +1080,6 @@ describe("local conversations over protocol v2", () => {
     const { data } = await localRuntime();
     data.emit({ type: "local.events", sessionId: session.id, message: batch([event(5, "turn.started", { request_id: "r1" })]) });
     await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(2));
-    // The service shares a read under way, so let this one finish.
-    await new Promise((resolve) => setTimeout(resolve));
     data.emit({ type: "local.reload", sessionId: session.id });
     await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(3));
   });

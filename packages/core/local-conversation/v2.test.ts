@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
-import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema } from "./v2";
+import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema } from "./v2";
 
 const root = join(__dirname, "../../../server/internal/localconversation/protocol/testdata/local-v2");
 const schemas: Record<string, ZodType> = { server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema };
@@ -50,5 +50,15 @@ describe("local conversation v2 wire schemas", () => {
     });
     expect(snapshot.pending_interactions).toEqual([]);
     expect(snapshot.conversation.project_id).toBeNull();
+  });
+});
+
+describe("prompt statuses", () => {
+  it("reads unknown fates as none and tolerates a missing map", () => {
+    expect(localV2PromptStatusesSchema.parse({ statuses: { a: "delivered", b: "from-the-future" } }).statuses).toEqual({ a: "delivered", b: "none" });
+    expect(localV2PromptStatusesSchema.parse({}).statuses).toEqual({});
+  });
+  it("rejects a response of the wrong shape, for the caller's fallback", () => {
+    expect(localV2PromptStatusesSchema.safeParse({ statuses: "nope" }).success).toBe(false);
   });
 });

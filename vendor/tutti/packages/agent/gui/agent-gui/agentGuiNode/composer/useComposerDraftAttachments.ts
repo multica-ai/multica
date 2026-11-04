@@ -47,9 +47,7 @@ import { type WorkspaceLinkAction } from "../../../actions/workspaceLinkActions"
 import { dispatchComposerDraftMarkdownLinkClick } from "./resolveComposerFileMentionLinkAction";
 import {
   AGENT_COMPOSER_PASTED_TEXT_FILE_PREFIX,
-  agentComposerTextByteLength,
-  buildGoalModePrompt,
-  goalDraftObjectiveFromPrompt
+  agentComposerTextByteLength
 } from "./composerDraftUtils";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
 import type { AgentGUIComposerContentType } from "../engagement/agentGUIEngagement.types";
@@ -72,8 +70,6 @@ export interface UseComposerDraftAttachmentsInput {
   draftContent: AgentComposerDraft;
   draftScopeKey: string;
   draftByScopeKeyRef: RefObject<Record<string, AgentComposerDraft>>;
-  goalDraftObjective: string | null;
-  isGoalModeActive: boolean;
   promptImagesSupported: boolean;
   promptFilesSupported: boolean;
   promptAssetLimit?: number | null;
@@ -106,8 +102,6 @@ export function useComposerDraftAttachments({
   workspacePath,
   draftScopeKey,
   draftByScopeKeyRef,
-  goalDraftObjective,
-  isGoalModeActive,
   promptImagesSupported,
   promptFilesSupported,
   promptAssetLimit,
@@ -174,31 +168,6 @@ export function useComposerDraftAttachments({
   >(null);
   const handleDraftChange = useStableEventCallback(
     (nextDraft: string): void => {
-      if (isGoalModeActive) {
-        const nextGoalPrompt = buildGoalModePrompt(nextDraft);
-        draftPromptRef.current = nextGoalPrompt;
-        startTransition(() => {
-          setPaletteDraftPrompt(nextDraft);
-          setIsPaletteOpen(true);
-          updateScopedDraft(draftScopeKey, (currentDraft) =>
-            updateDraftPromptAndReconcileFiles(currentDraft, nextGoalPrompt)
-          );
-        });
-        return;
-      }
-      const nextGoalObjective = goalDraftObjectiveFromPrompt(nextDraft);
-      if (nextGoalObjective !== null) {
-        const nextGoalPrompt = buildGoalModePrompt(nextGoalObjective);
-        draftPromptRef.current = nextGoalPrompt;
-        startTransition(() => {
-          setPaletteDraftPrompt(nextGoalObjective);
-          setIsPaletteOpen(true);
-          updateScopedDraft(draftScopeKey, (currentDraft) =>
-            updateDraftPromptAndReconcileFiles(currentDraft, nextGoalPrompt)
-          );
-        });
-        return;
-      }
       draftPromptRef.current = nextDraft;
       startTransition(() => {
         setPaletteDraftPrompt(nextDraft);
@@ -209,18 +178,6 @@ export function useComposerDraftAttachments({
       });
     }
   );
-
-  const clearGoalModeBadge = useCallback((): void => {
-    if (!isGoalModeActive) {
-      return;
-    }
-    const nextPrompt = goalDraftObjective ?? "";
-    draftPromptRef.current = nextPrompt;
-    setPaletteDraftPrompt(nextPrompt);
-    updateScopedDraft(draftScopeKey, (currentDraft) =>
-      updateDraftPromptAndReconcileFiles(currentDraft, nextPrompt)
-    );
-  }, [draftScopeKey, goalDraftObjective, isGoalModeActive, updateScopedDraft]);
 
   const addDraftImages = useCallback(
     (images: AgentRichTextPastedImage[]): void => {
@@ -742,7 +699,6 @@ export function useComposerDraftAttachments({
   return {
     addDraftImages,
     addDraftFiles,
-    clearGoalModeBadge,
     expandDraftLargeTextToPrompt,
     handleDraftChange,
     handleLinkClick,

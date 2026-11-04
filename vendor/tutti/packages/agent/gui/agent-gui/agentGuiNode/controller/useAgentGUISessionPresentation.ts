@@ -1,14 +1,10 @@
 import {
   isPendingActivationViable,
-  selectPlanDecisionForTurn,
-  selectPlanTurnDismissed,
   type AgentActivityDisplayStatus,
   type AgentActivityMessage,
-  type AgentActivitySessionGoalSyncState,
   type AgentActivityTurn,
   type CanonicalAgentSession,
   type PendingActivationIntentRecord,
-  type SessionGoalControlPresentation,
   type SessionRuntimeAvailability,
   type AgentSessionEngine
 } from "@tutti-os/agent-activity-core";
@@ -17,10 +13,6 @@ import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import { translate } from "../../../i18n/index";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentApprovalItemVM } from "../../../shared/agentConversation/contracts/agentApprovalItemVM";
-import {
-  latestPlanTurnId,
-  planImplementationPromptFromPlanTurn
-} from "../../../shared/agentConversation/planImplementationPresentation";
 import type { AgentSessionState } from "../../../shared/agentSessionTypes";
 import type { AppErrorCode } from "../../../shared/contracts/dto";
 import type {
@@ -29,7 +21,6 @@ import type {
   AgentGUIInteractionReadinessSource,
   AgentGUITargetConnectionSource
 } from "../../../types";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
 import type {
   AgentGUIConversationSummary,
   AgentGUIInteractivePrompt
@@ -143,7 +134,6 @@ interface UseAgentGUISessionPresentationInput {
   activeEngineSettingsUpdate: {
     status: string;
   } | null;
-  activeGoalControlPresentation: SessionGoalControlPresentation;
   activeLatestPendingSubmitTurnId: string | null;
   activeLiveState: "inactive" | "activating" | "active" | "failed";
   activeMessages: readonly AgentActivityMessage[];
@@ -168,7 +158,6 @@ interface UseAgentGUISessionPresentationInput {
   isSubmitting: boolean;
   lastRenderStateDiagnosticKeyRef: CurrentValue<string | null>;
   pendingApproval: AgentApprovalItemVM | null;
-  planImplementationTurnIdRef: CurrentValue<string | null>;
   providerReadinessGate:
     | import("../../../types").AgentGUIProviderReadinessGate
     | null;
@@ -189,50 +178,9 @@ interface UseAgentGUISessionPresentationInput {
 export function useAgentGUISessionPresentation(
   input: UseAgentGUISessionPresentationInput
 ) {
-  const latestTimelinePlanTurnId = latestPlanTurnId(input.activeTimelineItems);
-  const planImplementationTurnId =
-    input.activeConversationId !== null &&
-    input.composerSupport.planImplementation &&
-    input.composerSupport.plan &&
-    input.activeEngineLatestTurn?.phase === "settled" &&
-    input.activeEngineLatestTurn.outcome === "completed" &&
-    input.activeEngineLatestTurn.turnId === latestTimelinePlanTurnId
-      ? latestTimelinePlanTurnId
-      : null;
-  const activePlanDecision = useEngineSelector(input.sessionEngine, (state) =>
-    selectPlanDecisionForTurn(
-      state,
-      input.activeConversationId,
-      planImplementationTurnId
-    )
-  );
-  const activePlanTurnDismissed = useEngineSelector(
-    input.sessionEngine,
-    (state) =>
-      selectPlanTurnDismissed(
-        state,
-        input.activeConversationId,
-        planImplementationTurnId
-      )
-  );
-  input.planImplementationTurnIdRef.current = planImplementationTurnId;
-  const planImplementationPrompt =
-    planImplementationTurnId !== null &&
-    input.activeConversationId !== null &&
-    !activePlanTurnDismissed
-      ? planImplementationPromptFromPlanTurn(
-          planImplementationTurnId,
-          input.activeConversation?.title ?? ""
-        )
-      : null;
-  const unresolvedInteractivePrompt =
-    input.serverInteractivePrompt ?? planImplementationPrompt;
-  const interactiveReadinessPrompt =
-    unresolvedInteractivePrompt?.kind === "plan-implementation"
-      ? null
-      : unresolvedInteractivePrompt;
+  const unresolvedInteractivePrompt = input.serverInteractivePrompt;
   const interactiveReadiness = useExactInteractionReadiness({
-    prompt: interactiveReadinessPrompt,
+    prompt: unresolvedInteractivePrompt,
     source: input.interactionReadinessSource,
     workspaceId: input.workspaceId
   });
@@ -262,9 +210,7 @@ export function useAgentGUISessionPresentation(
     activeInteractionReadiness.ownsInteraction;
   const interactivePromptResponsePending =
     input.isRespondingToInteraction ||
-    interactiveReadiness.block !== null ||
-    activePlanDecision?.status === "requested" ||
-    activePlanDecision?.status === "unknown";
+    interactiveReadiness.block !== null;
   const approvalResponsePending =
     input.isRespondingToInteraction || approvalReadiness.block !== null;
 
@@ -277,24 +223,9 @@ export function useAgentGUISessionPresentation(
     isPendingActivationViable(input.activePendingActivation) &&
     !input.activeEngineLatestTurn
   );
-  const activeInitialGoalSetHasPendingOperation = Boolean(
-    input.activeConversationId &&
-    input.activePendingActivation?.mode === "new" &&
-    input.activePendingActivation.agentSessionId ===
-      input.activeConversationId &&
-    input.activePendingActivation.initialGoalControl?.action === "set" &&
-    isPendingActivationViable(input.activePendingActivation) &&
-    input.activeGoalControlPresentation.goal?.status === "active" &&
-    initialGoalHasPendingOperationEvidence({
-      goalIsOptimistic: input.activeGoalControlPresentation.optimistic,
-      syncState: input.activeEngineSession?.goalSyncState ?? null
-    }) &&
-    !input.activeEngineLatestTurn
-  );
   const hasPendingTurnStartEvidence = Boolean(
     input.activeConversationId &&
     (activeActivationAwaitsInitialTurn ||
-      activeInitialGoalSetHasPendingOperation ||
       input.hasUnconfirmedSubmit ||
       input.isSubmitting ||
       (!input.activeEngineSession && input.activeLatestPendingSubmitTurnId))
@@ -343,22 +274,14 @@ export function useAgentGUISessionPresentation(
     AgentGUISessionChrome["rawState"]
   >(() => {
     const agentSessionId =
-      input.activeEngineSession?.agentSessionId ??
-      input.activeGoalControlPresentation.agentSessionId ??
-      input.activeConversationId;
+      input.activeEngineSession?.agentSessionId ?? input.activeConversationId;
     if (!agentSessionId) {
       return null;
     }
-    return {
-      agentSessionId,
-      goal: input.activeGoalControlPresentation.goal,
-      goalControlStatus: input.activeGoalControlPresentation.status,
-      goalIsOptimistic: input.activeGoalControlPresentation.optimistic
-    };
+    return { agentSessionId };
   }, [
     input.activeConversationId,
-    input.activeEngineSession?.agentSessionId,
-    input.activeGoalControlPresentation
+    input.activeEngineSession?.agentSessionId
   ]);
   const sessionChrome = useMemo<AgentGUISessionChrome>(() => {
     if (interactionReadinessBlock?.reason === "binding_revoked") {
@@ -733,23 +656,6 @@ export function useAgentGUISessionPresentation(
     pendingInteractivePrompt,
     sessionChrome
   };
-}
-
-function initialGoalHasPendingOperationEvidence(input: {
-  goalIsOptimistic: boolean;
-  syncState: AgentActivitySessionGoalSyncState | null;
-}): boolean {
-  if (input.goalIsOptimistic) return true;
-  switch (input.syncState?.syncStatus) {
-    case "pending":
-    case "applying":
-    case "unknown":
-      return Boolean(input.syncState.pendingOperationId?.trim());
-    case "synced":
-      return input.syncState.executionPending === true;
-    default:
-      return false;
-  }
 }
 
 function interactionReadinessReasonMessage(

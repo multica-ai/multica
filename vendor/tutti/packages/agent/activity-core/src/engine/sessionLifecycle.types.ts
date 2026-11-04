@@ -2,40 +2,16 @@ import type {
   AgentActivityDurableMessage,
   AgentActivityInteraction,
   AgentActivitySession,
-  AgentActivityTurn,
-  AgentActivityTurnCancelResponse
+  AgentActivityTurn
 } from "../types.ts";
 import type { AgentActivitySessionInput } from "../sessionNormalization.ts";
 import type { AgentActivitySessionMessageWindow } from "../messageWindow.types.ts";
-import type { AgentActivityEditRetryAvailability } from "./editRetry.types.ts";
-
-export type SessionCancelStatus =
-  | "idle"
-  | "awaitingTurn"
-  | "requested"
-  | "accepted"
-  | "unknown"
-  | "failed";
-
-export interface SessionCancelState {
-  commandId: string | null;
-  errorCode: string | null;
-  errorMessage: string | null;
-  expiryId: string | null;
-  requestedSessionVersion: number | null;
-  requestedWorkspaceId: string | null;
-  targetClientSubmitId: string | null;
-  turnId: string | null;
-  status: SessionCancelStatus;
-}
 
 export interface SessionOperationState {
   runtimeAvailability: SessionRuntimeAvailability;
   runtimeActivity: SessionRuntimeActivity;
   runtimeActivityOccurredAtUnixMs: number;
-  cancel: SessionCancelState;
   operationError: string | null;
-  settingsUpdate: SessionSettingsUpdateState;
 }
 
 export type SessionRuntimeActivity = "idle" | "running";
@@ -62,49 +38,6 @@ export type SessionRuntimeAvailability =
       ownerLabel: string;
     };
 
-export type SessionSettingsUpdateStatus =
-  | "idle"
-  | "inFlight"
-  | "waitingForPromptSend"
-  | "waitingForRuntime"
-  | "failed"
-  | "unknown";
-
-export interface SessionSettingsUpdateState {
-  commandId: string | null;
-  errorCode: string | null;
-  errorMessage: string | null;
-  queuedCommandId: string | null;
-  queuedRequests: readonly {
-    commandId: string;
-    kind: "activation" | "promptPrecondition" | "user";
-    settings: Readonly<Record<string, unknown>>;
-    timeoutMs?: number;
-  }[];
-  queuedSettings: Readonly<Record<string, unknown>> | null;
-  requestKind: "activation" | "promptPrecondition" | "user" | null;
-  settings: Readonly<Record<string, unknown>> | null;
-  status: SessionSettingsUpdateStatus;
-  timeoutMs: number | null;
-}
-
-export type InteractionResponseStatus = "responding" | "failed" | "unknown";
-
-export interface InteractionResponseState {
-  action: string | null;
-  agentSessionId: string;
-  commandId: string;
-  errorCode: string | null;
-  errorMessage: string | null;
-  optionId: string | null;
-  payload: Readonly<Record<string, unknown>> | null;
-  requestId: string;
-  retry?: boolean;
-  status: InteractionResponseStatus;
-  turnId: string;
-  workspaceId: string;
-}
-
 export type CanonicalAgentSession = Omit<
   AgentActivitySession,
   "activeTurn" | "latestTurn" | "latestTurnInteractions" | "pendingInteractions"
@@ -115,7 +48,6 @@ export type CanonicalAgentSession = Omit<
 export interface SessionLifecycleState {
   deletedSessionIds: Readonly<Record<string, true>>;
   interactionsById: Readonly<Record<string, AgentActivityInteraction>>;
-  interactionResponsesById: Readonly<Record<string, InteractionResponseState>>;
   operationBySessionId: Readonly<Record<string, SessionOperationState>>;
   sessionsById: Readonly<Record<string, CanonicalAgentSession>>;
   turnsById: Readonly<Record<string, AgentActivityTurn>>;
@@ -139,7 +71,6 @@ export type CanonicalSessionMetadataPatch = Partial<
   Pick<
     CanonicalAgentSession,
     | "cwd"
-    | "goal"
     | "pinnedAtUnixMs"
     | "resumable"
     | "title"
@@ -162,12 +93,6 @@ export interface TurnUpsertedIntent {
    * and is treated as a live observation.
    */
   live?: boolean;
-  /**
-   * Internal replay of an already accepted live completion after reconcile
-   * supplied Session identity. It may create attention even though canonical
-   * state already contains the settled Turn.
-   */
-  replayAcceptedLiveCompletion?: true;
   turn: AgentActivityTurn;
 }
 
@@ -192,7 +117,6 @@ export interface SessionHistoryAuthoritativeSnapshotReceivedIntent {
   type: "session/historyAuthoritativeSnapshotReceived";
   agentSessionId: string;
   childSessions: readonly AgentActivitySessionInput[];
-  editRetry?: AgentActivityEditRetryAvailability;
   historyRevision: number;
   messages: readonly AgentActivityDurableMessage[];
   session: AgentActivitySessionInput;
@@ -207,20 +131,6 @@ export interface SessionHistoryAuthoritativeSnapshotReceivedIntent {
 export interface InteractionUpsertedIntent {
   type: "interaction/upserted";
   interaction: AgentActivityInteraction;
-}
-
-export interface InteractionResponseRequestedIntent {
-  type: "interaction/responseRequested";
-  action?: string;
-  agentSessionId: string;
-  commandId: string;
-  optionId?: string;
-  payload?: Readonly<Record<string, unknown>>;
-  requestId: string;
-  turnId: string;
-  retry?: boolean;
-  timeoutMs?: number;
-  workspaceId: string;
 }
 
 export interface SessionRemovedIntent {
@@ -244,63 +154,11 @@ export interface SessionErrorClearedIntent {
   agentSessionId: string;
 }
 
-export interface SessionCancelRequestedIntent {
-  type: "session/cancelRequested";
-  agentSessionId: string;
-  commandId: string;
-  awaitingTurnExpiresAtUnixMs: number;
-  clientSubmitId?: string;
-  timeoutMs?: number;
-  workspaceId: string;
-}
-
+/** Holds what the engine's queue and activations would still start. */
 export interface SessionStopRequestedIntent {
   type: "session/stopRequested";
   agentSessionId: string;
-  commandId: string;
-  awaitingTurnExpiresAtUnixMs: number;
-  clientSubmitId?: string;
-  timeoutMs?: number;
   workspaceId: string;
-}
-
-export interface SessionCancelAbandonedIntent {
-  type: "session/cancelAbandoned";
-  agentSessionId: string;
-}
-
-export interface SessionSettingsUpdateRequestedIntent {
-  type: "session/settingsUpdateRequested";
-  agentSessionId: string;
-  commandId: string;
-  settings: Readonly<Record<string, unknown>>;
-  retry?: boolean;
-  timeoutMs?: number;
-  workspaceId: string;
-}
-
-export interface SessionSettingsPreconditionRequestedIntent {
-  type: "session/settingsPreconditionRequested";
-  agentSessionId: string;
-  commandId: string;
-  settings: Readonly<Record<string, unknown>>;
-  timeoutMs?: number;
-  workspaceId: string;
-}
-
-export interface SessionSettingsActivationRequestedIntent {
-  type: "session/settingsActivationRequested";
-  agentSessionId: string;
-  commandId: string;
-  settings: Readonly<Record<string, unknown>>;
-  timeoutMs?: number;
-  workspaceId: string;
-}
-
-export interface SessionSettingsQueueResumeRequestedIntent {
-  type: "session/settingsQueueResumeRequested";
-  agentSessionId: string;
-  settingsCommandId: string;
 }
 
 export interface SessionRuntimeAvailabilityChangedIntent {
@@ -319,9 +177,6 @@ export interface SessionRuntimeActivityChangedIntent {
 
 export type SessionLifecycleIntent =
   | InteractionUpsertedIntent
-  | InteractionResponseRequestedIntent
-  | SessionCancelAbandonedIntent
-  | SessionCancelRequestedIntent
   | SessionErrorClearedIntent
   | SessionErrorRecordedIntent
   | SessionHistoryAuthoritativeSnapshotReceivedIntent
@@ -330,49 +185,8 @@ export type SessionLifecycleIntent =
   | SessionRestoredIntent
   | SessionRuntimeActivityChangedIntent
   | SessionRuntimeAvailabilityChangedIntent
-  | SessionSettingsActivationRequestedIntent
-  | SessionSettingsPreconditionRequestedIntent
-  | SessionSettingsQueueResumeRequestedIntent
-  | SessionSettingsUpdateRequestedIntent
   | SessionSnapshotReceivedIntent
   | SessionStopRequestedIntent
   | SessionUpsertedIntent
   | TurnProjectionReceivedIntent
   | TurnUpsertedIntent;
-
-export interface TurnCancelCommand {
-  type: "turn/cancel";
-  commandId: string;
-  workspaceId: string;
-  agentSessionId: string;
-  turnId: string;
-  timeoutMs?: number;
-}
-
-export interface InteractionRespondCommand {
-  type: "interaction/respond";
-  action?: string;
-  agentSessionId: string;
-  commandId: string;
-  correlationId: string;
-  optionId?: string;
-  payload?: Readonly<Record<string, unknown>>;
-  requestId: string;
-  turnId: string;
-  timeoutMs?: number;
-  workspaceId: string;
-}
-
-export function isAgentActivityTurnCancelResponse(
-  value: unknown
-): value is AgentActivityTurnCancelResponse {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const response = value as Partial<AgentActivityTurnCancelResponse>;
-  return Boolean(
-    response.cancel &&
-    typeof response.cancel.canceled === "boolean" &&
-    typeof response.cancel.reason === "string"
-  );
-}

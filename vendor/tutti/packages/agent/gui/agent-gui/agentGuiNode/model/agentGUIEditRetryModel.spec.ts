@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentActivityEditRetryAvailability } from "@tutti-os/agent-activity-core";
+import type { AgentGUIEditRetryAvailability } from "../controller/agentGuiController.promptOperations";
 import { projectAgentGUIEditRetryPresentation } from "./agentGUIEditRetryModel";
 
 describe("projectAgentGUIEditRetryPresentation", () => {
@@ -96,8 +96,8 @@ describe("projectAgentGUIEditRetryPresentation", () => {
 });
 
 function availability(
-  overrides: Partial<AgentActivityEditRetryAvailability> = {}
-): AgentActivityEditRetryAvailability {
+  overrides: Partial<AgentGUIEditRetryAvailability> = {}
+): AgentGUIEditRetryAvailability {
   return {
     supported: true,
     eligible: false,

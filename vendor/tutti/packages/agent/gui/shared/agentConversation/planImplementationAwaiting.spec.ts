@@ -15,7 +15,6 @@ describe("planImplementationAwaiting", () => {
     expect(
       consumerAwaitingPlanImplementation({
         capabilities: planCapabilities(),
-        dismissed: false,
         latestTurn: settledPlanTurn("turn-plan"),
         messages: [
           {
@@ -38,16 +37,7 @@ describe("planImplementationAwaiting", () => {
     ];
     expect(
       consumerAwaitingPlanImplementation({
-        capabilities: planCapabilities(),
-        dismissed: true,
-        latestTurn: settledPlanTurn("turn-plan"),
-        messages
-      })
-    ).toBe(false);
-    expect(
-      consumerAwaitingPlanImplementation({
         capabilities: planCapabilities({ planImplementation: false }),
-        dismissed: false,
         latestTurn: settledPlanTurn("turn-plan"),
         messages
       })
@@ -55,7 +45,6 @@ describe("planImplementationAwaiting", () => {
     expect(
       consumerAwaitingPlanImplementation({
         capabilities: planCapabilities({ planMode: false }),
-        dismissed: false,
         latestTurn: settledPlanTurn("turn-plan"),
         messages
       })
@@ -63,7 +52,6 @@ describe("planImplementationAwaiting", () => {
     expect(
       consumerAwaitingPlanImplementation({
         capabilities: planCapabilities(),
-        dismissed: false,
         latestTurn: settledPlanTurn("turn-plan"),
         messages: [
           {
@@ -80,7 +68,6 @@ describe("planImplementationAwaiting", () => {
     expect(
       consumerAwaitingPlanImplementation({
         capabilities: null,
-        dismissed: false,
         latestTurn: settledPlanTurn("turn-plan"),
         messages: [
           {

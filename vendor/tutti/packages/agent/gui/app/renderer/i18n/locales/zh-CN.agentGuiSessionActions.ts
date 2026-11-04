@@ -5,7 +5,6 @@ export const zhCNAgentGuiSessionActions = {
   copyAsMarkdown: "复制为 Markdown",
   copyAsReference: "复制为引用",
   markSessionUnread: "标记为未读",
-  retryConversations: "重试",
   conversationCopyImage: "图片",
   conversationCopyMentionPrefix: "@",
   conversationCopyFile: "文件",

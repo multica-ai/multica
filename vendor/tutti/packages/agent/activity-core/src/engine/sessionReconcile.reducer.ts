@@ -144,22 +144,9 @@ function receiveDetailSnapshot(
       type: "session/upserted"
     }
   ];
-  if (intent.editRetry) {
-    followUpIntents.push({
-      agentSessionId: intent.session.agentSessionId,
-      availability: intent.editRetry,
-      type: "editRetry/availabilityReceived",
-      workspaceId: intent.workspaceId
-    });
-  }
   if (intent.live && intent.session.latestTurn) {
-    const replayAcceptedLiveCompletion =
-      !liveTurnId || intent.session.latestTurn.turnId === liveTurnId;
     followUpIntents.push({
       live: true,
-      ...(replayAcceptedLiveCompletion
-        ? { replayAcceptedLiveCompletion: true as const }
-        : {}),
       turn: intent.session.latestTurn,
       type: "turn/upserted"
     });
@@ -196,7 +183,6 @@ function receiveAuthoritativeHistorySnapshot(
     state,
     {
       childSessions: intent.childSessions,
-      editRetry: intent.editRetry,
       messages: intent.messages,
       session: intent.session,
       sessionMessageWindows: intent.sessionMessageWindows,

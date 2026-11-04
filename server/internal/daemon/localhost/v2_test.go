@@ -704,3 +704,26 @@ func TestV2RemoteFocusPreheatsOnThisDevice(t *testing.T) {
 		t.Fatalf("adapter starts = %d", starts.Load())
 	}
 }
+
+func TestV2PromptStatuses(t *testing.T) {
+	t.Parallel()
+
+	srv, _ := newV2Server(t)
+	h := v2Headers("user-1")
+	v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "conv-1", "provider": "claude"}, h)
+	item := map[string]any{"requestId": "q1", "content": "later", "display": map[string]any{"id": "q1", "createdAtUnixMs": 1}}
+	v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-1/commands", map[string]any{"type": "queue_enqueue", "item": item, "paused": true}, h)
+
+	status, body := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-1/queue/status", map[string]any{"request_ids": []string{"q1", "never"}}, h)
+	statuses, _ := body["statuses"].(map[string]any)
+	if status != http.StatusOK || statuses["q1"] != "queued" || statuses["never"] != "none" {
+		t.Fatalf("statuses = %d %v", status, body)
+	}
+	if status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/other/queue/status", map[string]any{"request_ids": []string{"q1"}}, h); status != http.StatusNotFound {
+		t.Fatalf("another conversation = %d", status)
+	}
+	_, hello := v2Do(t, srv, http.MethodGet, "/local/v2/hello", nil, h)
+	if capabilities, _ := hello["capabilities"].([]any); !slices.Contains(capabilities, any(PromptStatusCapability)) {
+		t.Fatalf("capabilities = %v", capabilities)
+	}
+}

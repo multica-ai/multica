@@ -1,25 +1,21 @@
 import { useCallback, useMemo } from "react";
-import {
-  editRetryPresentationRecordsEqual,
-  dispatchEditRetry,
-  dispatchEditRetryRecovery,
-  selectEditRetryPresentation,
-  type AgentActivityEditRetryRecoveryAction
-} from "@tutti-os/agent-activity-core";
 import { useAgentGUIRuntime } from "../../../agentActivityRuntime";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
+import { useModelValue } from "../../../shared/engine/useEngineSelector";
+import type { AgentGUIEditRetryRecoveryAction } from "./agentGuiController.promptOperations";
 import { projectAgentGUIEditRetryPresentation } from "../model/agentGUIEditRetryModel";
 
 export function useAgentGUIEditRetryController(input: {
   agentSessionId: string | null;
   workspaceId: string;
 }) {
-  const runtime = useAgentGUIRuntime();
-  const sessionEngine = runtime.getSessionEngine(input.workspaceId);
-  const record = useEngineSelector(
-    sessionEngine,
-    (state) => selectEditRetryPresentation(state, input.agentSessionId),
-    editRetryPresentationRecordsEqual
+  const { prompts } = useAgentGUIRuntime();
+  const availability = useModelValue(
+    () => prompts.editRetryAvailability(input.agentSessionId),
+    [prompts, input.agentSessionId]
+  );
+  const commandStatus = useModelValue(
+    () => prompts.editRetryOperation(input.agentSessionId).status,
+    [prompts, input.agentSessionId]
   );
 
   const submit = useCallback(
@@ -27,64 +23,46 @@ export function useAgentGUIEditRetryController(input: {
       const agentSessionId = input.agentSessionId?.trim() ?? "";
       if (
         !agentSessionId ||
-        record.availability?.eligible !== true ||
-        record.availability.turnId !== request.turnId
+        availability?.eligible !== true ||
+        availability.turnId !== request.turnId
       ) {
         return false;
       }
       try {
-        await dispatchEditRetry(sessionEngine, {
+        await prompts.requestEditRetry({
           agentSessionId,
           editedText: request.editedText,
-          turnId: request.turnId,
-          workspaceId: input.workspaceId
+          turnId: request.turnId
         });
         return true;
       } catch {
-        // The engine retains the typed failure/recovery state. Returning false
+        // The service retains the typed failure/recovery state. Returning false
         // keeps the editor draft available without leaking a rejected UI event.
         return false;
       }
     },
-    [
-      input.agentSessionId,
-      input.workspaceId,
-      record.availability,
-      sessionEngine
-    ]
+    [input.agentSessionId, availability, prompts]
   );
 
   const recover = useCallback(
-    async (action: AgentActivityEditRetryRecoveryAction) => {
+    async (action: AgentGUIEditRetryRecoveryAction) => {
       const agentSessionId = input.agentSessionId?.trim() ?? "";
       if (
         !agentSessionId ||
-        !record.availability?.operationId ||
-        !record.availability.availableActions.includes(action)
+        !availability?.operationId ||
+        !availability.availableActions.includes(action)
       ) {
         throw new Error("agent_edit_retry_recovery_unavailable");
       }
-      await dispatchEditRetryRecovery(sessionEngine, {
-        action,
-        agentSessionId,
-        workspaceId: input.workspaceId
-      });
+      await prompts.recoverEditRetry({ action, agentSessionId });
     },
-    [
-      input.agentSessionId,
-      input.workspaceId,
-      record.availability,
-      sessionEngine
-    ]
+    [input.agentSessionId, availability, prompts]
   );
 
   const presentation = useMemo(
     () =>
-      projectAgentGUIEditRetryPresentation({
-        availability: record.availability,
-        commandStatus: record.operation.status
-      }),
-    [record.availability, record.operation.status]
+      projectAgentGUIEditRetryPresentation({ availability, commandStatus }),
+    [availability, commandStatus]
   );
 
   return { presentation, recover, submit };

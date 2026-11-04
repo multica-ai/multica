@@ -1,5 +1,4 @@
 import type {
-  CancelResultValidation,
   ScopedSessionResultValidation,
   SendInputResultValidation
 } from "./commandResult.validation.ts";
@@ -8,8 +7,6 @@ import type { PromptQueueState } from "./promptQueue.types.ts";
 import type { EngineIntent } from "./types.ts";
 
 export interface PromptQueueAffectedSessionsContext {
-  cancelResultValidation?: CancelResultValidation | null;
-  interactionResultValidation?: ScopedSessionResultValidation | null;
   sendResultValidation?: SendInputResultValidation | null;
   settingsResultValidation?: ScopedSessionResultValidation | null;
 }
@@ -70,14 +67,8 @@ export function affectedPromptQueueSessionIds(
       context.sendResultValidation?.kind === "valid"
         ? context.sendResultValidation.result.session.agentSessionId
         : undefined,
-      context.interactionResultValidation?.kind === "valid"
-        ? context.interactionResultValidation.session.agentSessionId
-        : undefined,
       context.settingsResultValidation?.kind === "valid"
         ? context.settingsResultValidation.session.agentSessionId
-        : undefined,
-      context.cancelResultValidation?.kind === "valid"
-        ? context.cancelResultValidation.response.turn?.agentSessionId
         : undefined
     ];
     ids.push(

@@ -52,7 +52,6 @@ test("semantic new-Session activation owns scope, confirmation window, and comma
     modelExplicit: false,
     initialContent: [{ text: "display instructions", type: "text" }],
     initialDisplayPrompt: " /browser ",
-    initialGoalControl: { action: "set", objective: "ship it" },
     initialTurnExpected: false,
     mode: "new",
     optimisticTitle: " Review browser flow ",
@@ -69,13 +68,6 @@ test("semantic new-Session activation owns scope, confirmation window, and comma
     settings: { model: "model-1" },
     submitDiagnostics: { source: "test", submittedAtUnixMs: 100 },
     title: " New session ",
-    tuttiModeDraftKey: " draft-1 ",
-    initialTuttiModeActivation: {
-      effect: 80,
-      source: "slash_command",
-      speed: 60,
-      status: "active"
-    },
     visible: true
   });
 
@@ -91,14 +83,7 @@ test("semantic new-Session activation owns scope, confirmation window, and comma
     modelExplicit: false,
     expiresAtUnixMs: 120_100,
     initialDisplayPrompt: "/browser",
-    initialGoalControl: { action: "set", objective: "ship it" },
     initialTurnExpected: false,
-    initialTuttiModeActivation: {
-      effect: 80,
-      source: "slash_command",
-      speed: 60,
-      status: "active"
-    },
     mode: "new",
     optimisticTitle: "Review browser flow",
     railPlacement: {
@@ -115,7 +100,6 @@ test("semantic new-Session activation owns scope, confirmation window, and comma
     settings: { model: "model-1" },
     submitDiagnostics: { source: "test", submittedAtUnixMs: 100 },
     title: "New session",
-    tuttiModeDraftKey: "draft-1",
     type: "activation/requested",
     visible: true,
     workspaceId: "workspace-1"
@@ -133,13 +117,6 @@ test("semantic new-Session activation owns scope, confirmation window, and comma
       modelExplicit: false,
       initialContent: [{ text: "runtime instructions", type: "text" }],
       initialDisplayPrompt: "/browser",
-      initialGoalControl: { action: "set", objective: "ship it" },
-      initialTuttiModeActivation: {
-        effect: 80,
-        source: "slash_command",
-        speed: 60,
-        status: "active"
-      },
       mode: "new",
       railPlacement: {
         kind: "project",

@@ -82,8 +82,6 @@ export function useAgentGUILocalState({
   >({});
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isDeletingConversation, setIsDeletingConversation] = useState(false);
-  const [isDeletingProjectConversations, setIsDeletingProjectConversations] =
-    useState(false);
   const [pendingDeleteConversation, setPendingDeleteConversation] =
     useState<AgentGUIConversationSummary | null>(null);
   const [
@@ -92,7 +90,6 @@ export function useAgentGUILocalState({
   ] = useState<AgentGUIProjectConversationDeleteTarget | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [goalClearNoticeSequence, setGoalClearNoticeSequence] = useState(0);
   const railRevealRevisionRef = useRef(0);
   const [railRevealRequest, setRailRevealRequest] =
     useState<AgentGUIConversationRailRevealRequest | null>(null);
@@ -118,11 +115,9 @@ export function useAgentGUILocalState({
     detailError,
     draftByScopeKey,
     draftSettingsBySessionId,
-    goalClearNoticeSequence,
     intent,
     isComposerHome,
     isDeletingConversation,
-    isDeletingProjectConversations,
     isLoadingMessages,
     isUserProjectMutationPending,
     listError,
@@ -137,11 +132,9 @@ export function useAgentGUILocalState({
     setDetailError,
     setDraftByScopeKey,
     setDraftSettingsBySessionId,
-    setGoalClearNoticeSequence,
     setIntent,
     setIsComposerHome,
     setIsDeletingConversation,
-    setIsDeletingProjectConversations,
     setIsLoadingMessages,
     setIsUserProjectMutationPending,
     setListError,

@@ -75,52 +75,6 @@ describe("agent composer input history", () => {
     ]);
   });
 
-  it("includes Goal controls in chronological input history", () => {
-    const conversation = conversationWithUserMessages([
-      {
-        id: "message-1",
-        body: "first prompt",
-        occurredAtUnixMs: 100
-      },
-      {
-        id: "message-2",
-        body: "second prompt",
-        occurredAtUnixMs: 300
-      }
-    ]);
-    conversation.sourceDetail.goalControls = [
-      {
-        id: "goal-control-1",
-        action: "set",
-        body: "/goal ship it",
-        occurredAtUnixMs: 200
-      }
-    ];
-
-    const history = projectAgentComposerInputHistory(conversation);
-
-    expect(
-      history.map((entry) => agentComposerDraftPrompt(entry.draft))
-    ).toEqual(["first prompt", "/goal ship it", "second prompt"]);
-
-    const latest = navigateAgentComposerInputHistory({
-      currentDraft: emptyAgentComposerDraft(),
-      direction: "older",
-      entries: history,
-      hasOlderPage: false,
-      state: EMPTY_AGENT_COMPOSER_INPUT_HISTORY_STATE
-    });
-    const goal = navigateAgentComposerInputHistory({
-      currentDraft: latest.draft!,
-      direction: "older",
-      entries: history,
-      hasOlderPage: false,
-      state: latest.state
-    });
-
-    expect(agentComposerDraftPrompt(goal.draft!)).toBe("/goal ship it");
-  });
-
   it("does not restore a synthetic image-only display prompt as text", () => {
     const history = projectAgentComposerInputHistory(
       conversationWithUserMessages([

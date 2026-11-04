@@ -75,30 +75,6 @@ describe("Agent GUI declaration build", () => {
     });
   });
 
-  it("builds and publishes the conversation rail runtime contract", () => {
-    expect(agentGUIBuildEntries["conversation-rail-runtime"]).toBe(
-      "agentConversationRailRuntime.ts"
-    );
-    expect(
-      packageManifest.publishConfig.exports["./conversation-rail-runtime"]
-    ).toEqual({
-      types: "./dist/conversation-rail-runtime.d.ts",
-      import: "./dist/conversation-rail-runtime.js"
-    });
-  });
-
-  it("builds and publishes the headless conversation rail controller", () => {
-    expect(agentGUIBuildEntries["conversation-rail-controller"]).toBe(
-      "agentConversationRailController.ts"
-    );
-    expect(
-      packageManifest.publishConfig.exports["./conversation-rail-controller"]
-    ).toEqual({
-      types: "./dist/conversation-rail-controller.d.ts",
-      import: "./dist/conversation-rail-controller.js"
-    });
-  });
-
   it("builds and publishes the headless conversation message controller", () => {
     expect(agentGUIBuildEntries["conversation-message-controller"]).toBe(
       "agentConversationMessageController.ts"
@@ -111,35 +87,11 @@ describe("Agent GUI declaration build", () => {
     });
   });
 
-  it("keeps conversation rail seams off the package root", () => {
-    expect(packageRootSource).not.toContain(
-      'from "./agentConversationRailController"'
-    );
-    expect(packageRootSource).not.toContain(
-      'from "./agentConversationRailRuntime"'
-    );
-    expect(packageRootSource).not.toContain(
-      'from "./agentConversationMessageController"'
-    );
-  });
-
   it("keeps the workspace query cache package-internal", () => {
     expect(agentGUIBuildEntries).not.toHaveProperty("workspace-query-cache");
     expect(
       packageManifest.publishConfig.exports["./workspace-query-cache"]
     ).toBeUndefined();
-  });
-
-  it("builds and publishes the DOM-free conversation rail projection", () => {
-    expect(agentGUIBuildEntries["conversation-rail-projection"]).toBe(
-      "conversationRailProjection.ts"
-    );
-    expect(
-      packageManifest.publishConfig.exports["./conversation-rail-projection"]
-    ).toEqual({
-      types: "./dist/conversation-rail-projection.d.ts",
-      import: "./dist/conversation-rail-projection.js"
-    });
   });
 
   it("builds and publishes the DOM-free conversation projection", () => {

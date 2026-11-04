@@ -49,18 +49,16 @@ export function useAgentGUISessionDetailTransport(input: {
     }),
     [agentActivityRuntimeOrigin, workspaceId]
   );
+  // Only the fallback for history coverage without a window: the user's messages suffice.
   const activeCanonicalMessages = useEngineSelector(
     sessionEngine,
     (engineState) => selectSessionMessages(engineState, activeConversationId)
   );
-  const projectedSessionMessagesById = useAgentActivitySessionMessages(
-    workspaceId,
-    [
-      activeConversationId,
-      sessionFamily.rootSession?.agentSessionId,
-      ...sessionFamily.childSessions.map((session) => session.agentSessionId)
-    ]
-  );
+  const projectedSessionMessagesById = useAgentActivitySessionMessages([
+    activeConversationId,
+    sessionFamily.rootSession?.agentSessionId,
+    ...sessionFamily.childSessions.map((session) => session.agentSessionId)
+  ]);
   const activeCanonicalWindow = useEngineSelector(
     sessionEngine,
     (engineState) =>
@@ -77,10 +75,10 @@ export function useAgentGUISessionDetailTransport(input: {
       if (!normalized) return [];
       return (
         projectedSessionMessagesById[normalized] ??
-        selectSessionMessages(sessionEngine.getSnapshot(), normalized)
+        agentActivityRuntime.transcript.messages(normalized)
       );
     },
-    [projectedSessionMessagesById, sessionEngine]
+    [agentActivityRuntime, projectedSessionMessagesById]
   );
   const loadSessionState = useCallback(
     (agentSessionId: string) => {

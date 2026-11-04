@@ -21,8 +21,7 @@ type BlockerKind =
   | "in_flight"
   | "uncertain_delivery"
   | "suspended"
-  | "failed_head"
-  | "settings_update_pending";
+  | "failed_head";
 
 const HEAD_KINDS: readonly HeadKind[] = ["none", "plain", "guidance"];
 const AVAILABILITY_KINDS: readonly AvailabilityKind[] = [
@@ -37,8 +36,7 @@ const BLOCKER_KINDS: readonly BlockerKind[] = [
   "in_flight",
   "uncertain_delivery",
   "suspended",
-  "failed_head",
-  "settings_update_pending"
+  "failed_head"
 ];
 
 test("contract table: every head/availability/barrier/blocker combination resolves per priority order", () => {
@@ -51,8 +49,7 @@ test("contract table: every head/availability/barrier/blocker combination resolv
           const actual = resolveQueueDrainDecision(
             buildRecord(head, blocker),
             availabilityFor(availabilityKind),
-            barrierPending,
-            blocker === "settings_update_pending"
+            barrierPending
           );
           const expected = expectedDecision(
             head,
@@ -91,9 +88,6 @@ function expectedDecision(
   if (blocker === "suspended") return { kind: "blocked", reason: "suspended" };
   if (blocker === "failed_head") {
     return { kind: "blocked", reason: "failed_head" };
-  }
-  if (blocker === "settings_update_pending") {
-    return { kind: "blocked", reason: "settings_update_pending" };
   }
   if (head === "guidance" && availabilityKind === "blocked_active_turn") {
     return { kind: "send", guidance: true };
@@ -145,8 +139,6 @@ function buildRecord(head: HeadKind, blocker: BlockerKind): PromptQueueRecord {
       // Not meaningful without a head to fail; falls back to no overlay so
       // the "no_head" reason still wins, exactly as the oracle expects.
       return headPrompt ? { ...base, failedPromptId: "head-1" } : base;
-    case "settings_update_pending":
-      return base;
   }
 }
 

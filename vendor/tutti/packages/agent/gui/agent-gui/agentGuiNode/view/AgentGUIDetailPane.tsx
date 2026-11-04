@@ -14,7 +14,6 @@ import {
   buildAgentConversationHandoffPrompt,
   handoffProjectPathForConversation,
   resolveAgentGUIComposerInteractionDisabledReason,
-  resolveAgentGUITuttiStopTargets
 } from "./agentGUIDetailModelHelpers";
 import { EMPTY_WORKSPACE_APP_ICONS } from "./agentGUIDetailConstants";
 import { AgentGUIBottomDockPane } from "./AgentGUIBottomDockPane";
@@ -22,7 +21,6 @@ import {
   AgentGUIEmptyHomePane,
   EMPTY_HOME_SUGGESTIONS
 } from "./AgentGUIEmptyState";
-import { AgentGUIContentToast } from "./AgentGUIContentToast";
 import { AgentGUIDetailTimeline } from "./AgentGUIDetailTimeline";
 import {
   useOptionalStableEventCallback,
@@ -33,8 +31,6 @@ import { useIsSidePane } from "@multica/tutti-agent-gui-host/side-entry";
 import { useAgentGUIDetailScroll } from "./useAgentGUIDetailScroll";
 import { useAgentGUIDetailModel } from "./useAgentGUIDetailModel";
 import { useAgentGUIComposerInputHistoryProps } from "./useAgentGUIComposerInputHistoryProps";
-import { useAgentGUITuttiWorkflow } from "./useAgentGUITuttiWorkflow";
-import { AgentGUITuttiPlanReviewActionSlot } from "./AgentGUITuttiPlanReviewAction";
 import type { AgentGUIDetailPaneProps } from "./AgentGUIDetailPane.types";
 import { useAgentGUIDetailEditRetry } from "./useAgentGUIDetailEditRetry";
 import { useAgentGUIDetailSideConversation } from "./useAgentGUIDetailSideConversation";
@@ -129,7 +125,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
     conversationFlowLabels,
     dismissBottomDockPrompt,
     emptyProviderReadinessGate,
-    goalBannerLabels,
     hasActiveConversation,
     homeNoticeChrome,
     inlineNoticeChrome,
@@ -167,13 +162,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
   });
   const submitApproval = useStableEventCallback(actions.submitApprovalOption);
   const retryActivation = useStableEventCallback(actions.retryActivation);
-  const retryTuttiModeActivation = useStableEventCallback(
-    actions.retryTuttiModeActivation
-  );
-  const retryInlineNotice =
-    viewModel.composer.tuttiModeUpdateStatus === "failed"
-      ? retryTuttiModeActivation
-      : retryActivation;
   const continueInNewConversation = useStableEventCallback(
     actions.continueInNewConversation
   );
@@ -190,8 +178,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
   const retryComposerOptions = useStableEventCallback(
     actions.retryComposerOptions
   );
-  const setTuttiModeEffect = useStableEventCallback(actions.setTuttiModeEffect);
-  const setTuttiModeSpeed = useStableEventCallback(actions.setTuttiModeSpeed);
   const updatePlanIssueBudgetPreset = useStableEventCallback(
     actions.updatePlanIssueBudgetPreset
   );
@@ -224,7 +210,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
     []
   );
   const submitPrompt = useStableEventCallback(actions.submitPrompt);
-  const goalControl = useStableEventCallback(actions.goalControl);
   const submitGuidancePrompt = useStableEventCallback(
     actions.submitGuidancePrompt
   );
@@ -260,38 +245,10 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
     actions.submitInteractivePrompt
   );
   const stableLinkAction = useOptionalStableEventCallback(onLinkAction);
-  const tuttiWorkflow = useAgentGUITuttiWorkflow({
-    viewModel,
-    labels,
-    stableLinkAction,
-    setTuttiModeActive: actions.setTuttiModeActive,
-    setTuttiModeEffect: actions.setTuttiModeEffect,
-    setTuttiModeSpeed: actions.setTuttiModeSpeed,
-    updateDraftContent: actions.updateDraftContent,
-    submitPromptPassthrough: submitPromptAndScrollToBottom
-  });
-  const tuttiWorkflowComposer = tuttiWorkflow.composer;
-  const tuttiWorkflowDock = tuttiWorkflow.workflowDock;
   const sourceActiveTurn =
     viewModel.detail.conversationDetail?.session.activeTurn ?? null;
-  const sourceHasStoppableWork =
-    Boolean(sourceActiveTurn && sourceActiveTurn.phase !== "settled") ||
-    viewModel.composer.isCreatingConversation;
   const handleInterruptCurrentTurn = useStableEventCallback(() => {
-    const targets = resolveAgentGUITuttiStopTargets({
-      executionActive: tuttiWorkflowComposer.tuttiExecutionActive,
-      sourceHasStoppableWork
-    });
-    if (targets.stopExecution) {
-      void tuttiWorkflowComposer
-        .stopTuttiExecution()
-        .catch((error: unknown) => {
-          console.error("tutti plan execution stop failed", error);
-        });
-    }
-    if (targets.stopSession) {
-      actions.interruptCurrentTurn(labels.noRunningResponse);
-    }
+    actions.interruptCurrentTurn(labels.noRunningResponse);
   });
   const stableRequestWorkspaceReferences = useOptionalStableEventCallback(
     onRequestWorkspaceReferences
@@ -376,7 +333,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
     availableCommands: viewModel.composer.availableCommands,
     slashCommandPolicy: viewModel.composer.composerSettings.slashCommandPolicy,
     clearMainDraft,
-    submitPrompt: tuttiWorkflowComposer.submitPromptOrDecidePlan
+    submitPrompt: submitPromptAndScrollToBottom
   });
   const sideComposerFocused = sideConversation.focused;
   const baseComposerProps = useMemo<AgentComposerProps>(
@@ -431,13 +388,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       gate: composerGate,
       presentationEditorDisabled: timelineInteractionLocked,
       disabledReason: composerDisabledReason,
-      presentationSubmitDisabled:
-        timelineInteractionLocked ||
-        tuttiWorkflowDock.phase?.kind === "materializing",
-      tuttiModeActive: viewModel.composer.isTuttiModeActive,
-      tuttiModeUpdating: viewModel.composer.isTuttiModeUpdating,
-      tuttiModeEffect: viewModel.composer.tuttiModeEffect,
-      tuttiModeSpeed: viewModel.composer.tuttiModeSpeed,
+      presentationSubmitDisabled: timelineInteractionLocked,
       composerSettings: {
         ...viewModel.composer.composerSettings,
         slashCommandPolicy: sideConversation.slashCommandPolicy
@@ -449,14 +400,9 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       placeholder: viewModel.detail.hasSentUserMessage
         ? labels.followupPlaceholder
         : labels.initialPlaceholder,
-      showStopButton:
-        showStopButton || tuttiWorkflowComposer.tuttiExecutionActive,
+      showStopButton,
       activeTurnId: sourceActiveTurn?.turnId ?? null,
-      draftOverridesStopButton: tuttiWorkflowComposer.tuttiExecutionActive,
-      stopDisabled:
-        stopDisabled ||
-        timelineInteractionLocked ||
-        tuttiWorkflowComposer.tuttiExecutionStopping,
+      stopDisabled: stopDisabled || timelineInteractionLocked,
       workspaceReferencePickerOpen,
       ...{ referenceProvenanceFilters, activePrompt: composerActivePrompt },
       activePromptKeyboardShortcutsEnabled: isActive && !sideComposerFocused,
@@ -469,9 +415,7 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       handoffLabel: labels.handoffConversation,
       handoffMenuLabel: labels.handoffConversationMenu,
       isInterrupting:
-        viewModel.composer.isInterrupting ||
-        viewModel.composer.isCancelPending ||
-        tuttiWorkflowComposer.tuttiExecutionStopping,
+        viewModel.composer.isInterrupting || viewModel.composer.isCancelPending,
       modelConsult:
         viewModel.rail.activeConversationId !== null
           ? {
@@ -490,32 +434,10 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       onProjectPathChange: updateSelectedProjectPath,
       onSettingsChange: updateComposerSettings,
       onRetryComposerOptions: retryComposerOptions,
-      onTuttiModeChange:
-        capabilityMenuState?.tuttiMode?.enabled === true
-          ? tuttiWorkflowComposer.setTuttiModeActiveAndSettleReview
-          : undefined,
-      onTuttiModeEffectChange:
-        capabilityMenuState?.tuttiMode?.enabled === true
-          ? setTuttiModeEffect
-          : undefined,
-      onTuttiModeSpeedChange:
-        capabilityMenuState?.tuttiMode?.enabled === true
-          ? setTuttiModeSpeed
-          : undefined,
       onPlanIssueBudgetPresetChange: updatePlanIssueBudgetPreset,
       onSubmit: sideConversation.submitMain,
-      composerActionAccessory: (
-        <AgentGUITuttiPlanReviewActionSlot
-          controller={tuttiWorkflowComposer}
-          label={labels.tuttiModePlanSendRequestChanges}
-        />
-      ),
-      onSubmitEmpty: tuttiWorkflowComposer.planReviewSendActive
-        ? tuttiWorkflowComposer.acceptPendingPlan
-        : composerEmptySubmit?.onSubmit,
-      emptySubmitLabel: tuttiWorkflowComposer.planReviewSendActive
-        ? undefined
-        : composerEmptySubmit?.label,
+      onSubmitEmpty: composerEmptySubmit?.onSubmit,
+      emptySubmitLabel: composerEmptySubmit?.label,
       onSubmitGuidance: submitGuidancePromptAndScrollToBottom,
       onPromptImagesUnsupported: showPromptImagesUnsupported,
       onSendQueuedPromptNext: sendQueuedPromptNext,
@@ -579,19 +501,9 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       onSessionLaunchModePreferenceChange,
       stopDisabled,
       slashStatus,
-      setTuttiModeEffect,
-      setTuttiModeSpeed,
       submitInteractivePrompt,
       sideConversation.submitMain,
       sideConversation.slashCommandPolicy,
-      tuttiWorkflowComposer.planReviewSendActive,
-      tuttiWorkflowComposer.tuttiExecutionActive,
-      tuttiWorkflowComposer.tuttiExecutionStopping,
-      tuttiWorkflowComposer.planReviewDraftHasContent,
-      tuttiWorkflowComposer.planReviewPreferencesDiverged,
-      tuttiWorkflowDock.phase?.kind,
-      tuttiWorkflowComposer.acceptPendingPlan,
-      tuttiWorkflowComposer.requestPendingPlanChanges,
       submitGuidancePromptAndScrollToBottom,
       uiLanguage,
       stableLinkAction,
@@ -616,10 +528,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       viewModel.composer.drainingQueuedPromptId,
       viewModel.detail.hasSentUserMessage,
       viewModel.composer.isInterrupting,
-      viewModel.composer.isTuttiModeActive,
-      viewModel.composer.isTuttiModeUpdating,
-      viewModel.composer.tuttiModeEffect,
-      viewModel.composer.tuttiModeSpeed,
       activePromptResponsePending,
       viewModel.composer.promptImagesSupported,
       viewModel.composer.queueStatus,
@@ -724,13 +632,6 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
       aria-busy={timelineInteractionLocked || undefined}
       data-agent-session-id={viewModel.rail.activeConversationId ?? undefined}
     >
-      {viewModel.operations.goalClearNoticeSequence > 0 ? (
-        <AgentGUIContentToast
-          key={viewModel.operations.goalClearNoticeSequence}
-          insetTopPx={16}
-          message={labels.goalRemoved}
-        />
-      ) : null}
       <div className={styles.detailWorkbench}>
         <section
           className={styles.detailPrimary}
@@ -785,22 +686,15 @@ export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
               sessionChrome={sessionChrome}
               keyboardShortcutsEnabled={isActive && !sideComposerFocused}
               chromeLabels={chromeLabels}
-              goalBannerLabels={goalBannerLabels}
               promptLabels={interactivePromptLabels}
               onSubmitApprovalOption={submitApproval}
               onRetryActivation={retryActivation}
-              onRetryInlineNotice={retryInlineNotice}
+              onRetryInlineNotice={retryActivation}
               onAuthLogin={authLogin}
               onContinueInNewConversation={continueInNewConversation}
               onSubmitBottomDockInteractivePrompt={
                 submitBottomDockInteractivePrompt
               }
-              onGoalControl={goalControl}
-              goalPauseSupported={viewModel.composer.goalPauseSupported}
-              tuttiWorkflowDock={tuttiWorkflowDock}
-              tuttiWorkflowDockLabels={labels.tuttiWorkflowDock}
-              tuttiPlanPanelLabels={labels.tuttiModePlanPanel}
-              tuttiPlanIssuePanelLabels={labels.tuttiModePlanIssuePanel}
             />
           ) : null}
         </section>

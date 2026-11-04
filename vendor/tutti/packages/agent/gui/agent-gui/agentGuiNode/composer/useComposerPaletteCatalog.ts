@@ -38,8 +38,6 @@ import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
 
 interface UseComposerPaletteCatalogInput {
   provider: string;
-  isGoalModeActive: boolean;
-  goalSupported: boolean;
   paletteDraftPrompt: string;
   availableCommands: readonly AgentSessionCommand[];
   availableSkills: readonly AgentGUIProviderSkillOption[];
@@ -61,7 +59,6 @@ function isSlashCommandCapability(
 
 export function useComposerPaletteCatalog({
   provider,
-  goalSupported,
   paletteDraftPrompt,
   availableCommands,
   availableSkills,
@@ -112,20 +109,14 @@ export function useComposerPaletteCatalog({
         planSupported: composerSettings.supportsPlanMode,
         browserSupported: Boolean(composerSettings.supportsBrowser),
         computerSupported: computerPresentationSupported,
-        tuttiSupported: capabilityMenuState?.tuttiMode?.enabled === true
-      }).filter(
-        (command) =>
-          goalSupported || command.name.trim().toLowerCase() !== "goal"
-      ),
+      }),
     [
       availableCommands,
       compactSupported,
       composerSettings.supportsPlanMode,
       composerSettings.supportsBrowser,
       computerPresentationSupported,
-      capabilityMenuState?.tuttiMode?.enabled,
       hasCompactableContext,
-      goalSupported,
       provider,
       slashCommandPolicy
     ]
@@ -188,46 +179,34 @@ export function useComposerPaletteCatalog({
           const computerUseAuthorization =
             capabilityMenuState?.computerUse?.authorization ?? null;
           const capLabel =
-            command.capability === "tutti"
-              ? labels.tuttiModeLabel
-              : command.capability === "computerUse"
-                ? labels.computerUseCapabilityLabel
-                : labels.browserUseCapabilityLabel;
+            command.capability === "computerUse"
+              ? labels.computerUseCapabilityLabel
+              : labels.browserUseCapabilityLabel;
           const capDescription =
-            command.capability === "tutti"
-              ? labels.tuttiModeDescription
-              : command.capability === "computerUse"
-                ? computerUseInstalled === false
-                  ? labels.computerUseCapabilitySetupRequiredDescription
-                  : computerUseAuthorization === "needs-authorization"
-                    ? labels.computerUseCapabilityAuthorizationRequiredDescription
-                    : computerUseAuthorization === "unknown"
-                      ? labels.computerUseCapabilityAuthorizationUnknownDescription
-                      : labels.computerUseCapabilityDescription
-                : browserConnectionMode === "autoConnect"
-                  ? labels.browserUseCapabilityDescriptionAutoConnect
-                  : browserConnectionMode === "isolated"
-                    ? labels.browserUseCapabilityDescriptionIsolated
-                    : labels.browserUseCapabilityDescription;
+            command.capability === "computerUse"
+              ? computerUseInstalled === false
+                ? labels.computerUseCapabilitySetupRequiredDescription
+                : computerUseAuthorization === "needs-authorization"
+                  ? labels.computerUseCapabilityAuthorizationRequiredDescription
+                  : computerUseAuthorization === "unknown"
+                    ? labels.computerUseCapabilityAuthorizationUnknownDescription
+                    : labels.computerUseCapabilityDescription
+              : browserConnectionMode === "autoConnect"
+                ? labels.browserUseCapabilityDescriptionAutoConnect
+                : browserConnectionMode === "isolated"
+                  ? labels.browserUseCapabilityDescriptionIsolated
+                  : labels.browserUseCapabilityDescription;
           const capSettingsLabel =
-            command.capability === "tutti"
-              ? labels.tuttiModeLabel
-              : command.capability === "computerUse"
-                ? labels.computerUseCapabilitySettingsLabel
-                : labels.browserUseCapabilitySettingsLabel;
+            command.capability === "computerUse"
+              ? labels.computerUseCapabilitySettingsLabel
+              : labels.browserUseCapabilitySettingsLabel;
           const capabilityEntry: AgentSlashPaletteEntry = {
             type: "capability",
             key: `capability:${command.capability}`,
             label: capLabel,
             description: capDescription,
             settingsAriaLabel: capSettingsLabel,
-            // Tutti Mode has no inline settings surface (its "settings" button
-            // was a no-op), so omit the label to drop the button entirely; the
-            // row body still toggles the capability.
-            settingsLabel:
-              command.capability === "tutti"
-                ? undefined
-                : labels.capabilityInlineSettingsLabel,
+            settingsLabel: labels.capabilityInlineSettingsLabel,
             disabled: capabilityControlsReadOnly,
             selectAction:
               command.capability === "computerUse" &&
@@ -304,8 +283,6 @@ export function useComposerPaletteCatalog({
     labels.computerUseCapabilitySetupRequiredDescription,
     labels.computerUseCapabilityLabel,
     labels.computerUseCapabilitySettingsLabel,
-    labels.tuttiModeDescription,
-    labels.tuttiModeLabel,
     labels.slashCommandPresentation,
     labels.slashCommandCompactLabel,
     labels.slashCommandContextLabel,

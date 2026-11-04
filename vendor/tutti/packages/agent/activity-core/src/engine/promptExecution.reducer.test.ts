@@ -18,14 +18,15 @@ test("turns a prompt settings patch into a settings-lane precondition", () => {
     }
   );
 
-  assert.deepEqual(requested.commands, []);
-  assert.deepEqual(requested.followUpIntents, [
+  assert.equal(requested.followUpIntents, undefined);
+  assert.deepEqual(requested.commands, [
     {
       agentSessionId: "session-1",
       commandId: "prompt:settings:send-1",
+      correlationId: "session-1",
       settings: { browserUse: true },
       timeoutMs: 30_000,
-      type: "session/settingsPreconditionRequested",
+      type: "session/updateSettings",
       workspaceId: "workspace-1"
     }
   ]);
@@ -36,7 +37,7 @@ test("turns a prompt settings patch into a settings-lane precondition", () => {
   );
 });
 
-test("valid settings settlement starts the send and then releases the lane", () => {
+test("valid settings settlement starts the send", () => {
   const requested = requestPrompt();
   const settled = promptExecutionReducer(
     requested.state,
@@ -63,13 +64,7 @@ test("valid settings settlement starts the send and then releases the lane", () 
       : null,
     undefined
   );
-  assert.deepEqual(settled.followUpIntents, [
-    {
-      agentSessionId: "session-1",
-      settingsCommandId: "prompt:settings:send-1",
-      type: "session/settingsQueueResumeRequested"
-    }
-  ]);
+  assert.equal(settled.followUpIntents, undefined);
   assert.deepEqual(settled.state.recordsBySettingsCommandId, {});
 });
 
@@ -95,11 +90,6 @@ test("failed settings settlement fails the logical prompt without sending", () =
       errorMessage: "settings rejected",
       outcome: "failed",
       type: "engine/commandResult"
-    },
-    {
-      agentSessionId: "session-1",
-      settingsCommandId: "prompt:settings:send-1",
-      type: "session/settingsQueueResumeRequested"
     }
   ]);
 });

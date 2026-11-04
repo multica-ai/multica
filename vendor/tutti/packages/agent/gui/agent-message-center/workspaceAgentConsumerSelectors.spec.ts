@@ -372,71 +372,6 @@ describe("workspaceAgentConsumerSelectors", () => {
     });
   });
 
-  it("removes a skipped plan from the production message center model", () => {
-    const engine = createCompletedPlanEngine({
-      latestTurnId: "turn-plan",
-      planTurnId: "turn-plan",
-      capabilities: planImplementationCapabilities()
-    });
-    engine.dispatch({
-      type: "plan/skipped",
-      workspaceId: "workspace-1",
-      agentSessionId: "session-1",
-      turnId: "turn-plan",
-      requestId: "turn-plan"
-    });
-
-    const model = buildWorkspaceAgentMessageCenterModelFromEngine(
-      selectWorkspaceAgentMessageCenterPresentation(engine.getSnapshot()),
-      { workspaceId: "workspace-1", sessionMessagesById: {} }
-    );
-
-    expect(model.waitingCount).toBe(0);
-    expect(model.items[0]).toMatchObject({
-      status: "completed",
-      pendingPrompt: null
-    });
-  });
-
-  it("tracks Plan feedback through explicit source identity instead of submit-id parsing", () => {
-    const engine = createEngine();
-    engine.dispatch({
-      type: "session/snapshotReceived",
-      sessions: [
-        session({
-          latestTurn: {
-            turnId: "turn-plan",
-            agentSessionId: "session-1",
-            origin: "user_prompt",
-            phase: "settled",
-            outcome: "completed",
-            startedAtUnixMs: 10,
-            settledAtUnixMs: 20,
-            updatedAtUnixMs: 20
-          }
-        })
-      ]
-    });
-    engine.dispatch({
-      type: "plan/feedbackRequested",
-      agentSessionId: "session-1",
-      clientSubmitId: "opaque-feedback-id",
-      content: [{ type: "text", text: "Revise it" }],
-      expiresAtUnixMs: 120_000,
-      requestedAtUnixMs: 21,
-      requestId: "turn-plan",
-      turnId: "turn-plan",
-      workspaceId: "workspace-1"
-    });
-
-    const presentation = selectWorkspaceAgentMessageCenterPresentation(
-      engine.getSnapshot()
-    );
-    expect(
-      presentation.promptStatusByKey["session-1\0turn-plan\0turn-plan"]
-    ).toBe("responding");
-  });
-
   it("keeps message-center presentation equal across unrelated engine changes", () => {
     const engine = createEngine();
     engine.dispatch({
@@ -622,17 +557,16 @@ describe("workspaceAgentConsumerSelectors", () => {
     expect(model.waitingCount).toBe(1);
     expect(selectMessageCenterAttentionDeckItems(model.items)).toHaveLength(1);
 
-    engine.dispatch({
-      type: "interaction/responseRequested",
-      agentSessionId: "child-1",
-      commandId: "respond-child-approval-1",
-      requestId: "child-approval-1",
-      turnId: "child-turn-1",
-      workspaceId: "workspace-1",
-      optionId: "allow"
-    });
     const respondingPresentation =
-      selectWorkspaceAgentMessageCenterPresentation(engine.getSnapshot());
+      selectWorkspaceAgentMessageCenterPresentation(
+        engine.getSnapshot(),
+        (agentSessionId, turnId, requestId) =>
+          agentSessionId === "child-1" &&
+          turnId === "child-turn-1" &&
+          requestId === "child-approval-1"
+            ? { status: "responding" }
+            : null
+      );
     expect(
       workspaceAgentMessageCenterPromptStatus(
         respondingPresentation,

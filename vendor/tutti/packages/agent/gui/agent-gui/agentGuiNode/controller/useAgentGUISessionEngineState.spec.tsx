@@ -1,12 +1,44 @@
+import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook } from "@testing-library/react";
 import {
   createAgentSessionEngine,
-  normalizeAgentActivitySession,
-  selectEngineSessionSettingsUpdate
+  normalizeAgentActivitySession
 } from "@tutti-os/agent-activity-core";
+import { observable, runInAction } from "mobx";
 import { describe, expect, it, vi } from "vitest";
 import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
+import type { AgentGUISessionSettingsUpdate } from "./agentGuiController.providerHelpers";
 import { useAgentGUISessionEngineState } from "./useAgentGUISessionEngineState";
+
+function composerFixture() {
+  const update = observable.box<AgentGUISessionSettingsUpdate | null>(null, {
+    deep: false
+  });
+  return {
+    composer: {
+      settingsUpdate: () => update.get(),
+      updateSettings: vi.fn()
+    },
+    show(
+      status: AgentGUISessionSettingsUpdate["status"] | null,
+      settings: AgentGUISessionSettingsUpdate["settings"] = null,
+      queuedSettings: AgentGUISessionSettingsUpdate["queuedSettings"] = null
+    ) {
+      runInAction(() =>
+        update.set(
+          status && {
+            errorCode: null,
+            errorMessage: null,
+            queuedSettings,
+            settings,
+            status
+          }
+        )
+      );
+    }
+  };
+}
+const prompts = createTestPromptOperations();
 
 describe("useAgentGUISessionEngineState", () => {
   it("shows an optimistic session selection then silently restores canonical settings on failure", () => {
@@ -35,37 +67,22 @@ describe("useAgentGUISessionEngineState", () => {
         })
       ]
     });
+    const { composer, show } = composerFixture();
     const rendered = renderHook(() =>
       useAgentGUISessionEngineState({
         activeConversationId: "session-1",
+        composer,
+        prompts,
         sessionEngine
       })
     );
 
-    act(() => {
-      sessionEngine.dispatch({
-        agentSessionId: "session-1",
-        commandId: "settings-1",
-        settings: { permissionModeId: "full-access" },
-        type: "session/settingsUpdateRequested",
-        workspaceId: "workspace-1"
-      });
-    });
+    act(() => show("inFlight", { permissionModeId: "full-access" }));
     expect(
       rendered.result.current.activeCanonicalComposerSettings.permissionModeId
     ).toBe("full-access");
 
-    act(() => {
-      sessionEngine.dispatch({
-        commandId: "settings-1",
-        commandType: "session/updateSettings",
-        correlationId: "session-1",
-        errorCode: "settings_require_new_session",
-        errorMessage: "requires a new session",
-        outcome: "failed",
-        type: "engine/commandResult"
-      });
-    });
+    act(() => show("failed", { permissionModeId: "full-access" }));
     expect(
       rendered.result.current.activeCanonicalComposerSettings.permissionModeId
     ).toBe("ask");
@@ -97,95 +114,39 @@ describe("useAgentGUISessionEngineState", () => {
       type: "session/snapshotReceived",
       sessions: [session({ model: "model-canonical", planMode: false })]
     });
+    const { composer, show } = composerFixture();
     const rendered = renderHook(() =>
       useAgentGUISessionEngineState({
         activeConversationId: "session-1",
+        composer,
+        prompts,
         sessionEngine
       })
     );
 
-    act(() => {
-      sessionEngine.dispatch({
-        agentSessionId: "session-1",
-        commandId: "settings-1",
-        settings: { model: "model-first" },
-        type: "session/settingsUpdateRequested",
-        workspaceId: "workspace-1"
-      });
-      sessionEngine.dispatch({
-        agentSessionId: "session-1",
-        commandId: "settings-2",
-        settings: { model: "model-latest", planMode: true },
-        type: "session/settingsUpdateRequested",
-        workspaceId: "workspace-1"
-      });
-      sessionEngine.dispatch({
-        type: "session/runtimeAvailabilityChanged",
-        agentSessionId: "session-1",
-        availability: {
-          state: "blocked",
-          reason: "transport_reconnecting"
-        }
-      });
-      sessionEngine.dispatch({
-        commandId: "settings-1",
-        commandType: "session/updateSettings",
-        correlationId: "session-1",
-        outcome: "succeeded",
-        type: "engine/commandResult",
-        value: {
-          agentSessionId: "session-1",
-          session: session({ model: "model-first", planMode: false })
-        }
-      });
-    });
-
+    act(() =>
+      show(
+        "waitingForRuntime",
+        { model: "model-first" },
+        { model: "model-latest", planMode: true }
+      )
+    );
     expect(
-      selectEngineSessionSettingsUpdate(
-        sessionEngine.getSnapshot(),
-        "session-1"
-      )?.status
-    ).toBe("waitingForRuntime");
+      rendered.result.current.activeCanonicalComposerSettings
+    ).toMatchObject({ model: "model-latest", planMode: true });
+
+    act(() => show("inFlight", { model: "model-latest", planMode: true }));
     expect(
       rendered.result.current.activeCanonicalComposerSettings
     ).toMatchObject({ model: "model-latest", planMode: true });
 
     act(() => {
       sessionEngine.dispatch({
-        type: "session/runtimeAvailabilityChanged",
-        agentSessionId: "session-1",
-        availability: { state: "available" }
+        type: "session/snapshotReceived",
+        sessions: [session({ model: "model-latest", planMode: true })]
       });
+      show(null);
     });
-    expect(
-      selectEngineSessionSettingsUpdate(
-        sessionEngine.getSnapshot(),
-        "session-1"
-      )?.status
-    ).toBe("inFlight");
-    expect(
-      rendered.result.current.activeCanonicalComposerSettings
-    ).toMatchObject({ model: "model-latest", planMode: true });
-
-    act(() => {
-      sessionEngine.dispatch({
-        commandId: "settings-2",
-        commandType: "session/updateSettings",
-        correlationId: "session-1",
-        outcome: "succeeded",
-        type: "engine/commandResult",
-        value: {
-          agentSessionId: "session-1",
-          session: session({ model: "model-latest", planMode: true })
-        }
-      });
-    });
-    expect(
-      selectEngineSessionSettingsUpdate(
-        sessionEngine.getSnapshot(),
-        "session-1"
-      )?.status
-    ).toBe("idle");
     expect(
       rendered.result.current.activeCanonicalComposerSettings
     ).toMatchObject({ model: "model-latest", planMode: true });
@@ -219,6 +180,8 @@ describe("useAgentGUISessionEngineState", () => {
       ({ activeConversationId }) =>
         useAgentGUISessionEngineState({
           activeConversationId,
+          composer: composerFixture().composer,
+          prompts,
           sessionEngine
         }),
       { initialProps: { activeConversationId: "session-1" } }

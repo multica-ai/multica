@@ -129,6 +129,12 @@ type PromptQueueItem struct {
 	OriginClientKind string
 }
 
+type PromptQueueTombstone struct {
+	ConversationID string
+	RequestID      string
+	RemovedAt      string
+}
+
 type Scope struct {
 	ID          int64
 	ApiOrigin   string

@@ -429,11 +429,6 @@ test("applies a settled Turn and its cleared Session reference atomically", () =
     lifecycle.turnsById[canonicalTurnKey("session-1", "turn-1")]?.phase,
     "settled"
   );
-  assert.equal(
-    harness.engine.getSnapshot().attentionReadState.partitionsByUserId["user-1"]
-      ?.recordsBySessionId["session-1"]?.isUnread,
-    true
-  );
   assert.ok(
     observations.every(
       (observation) =>
@@ -455,7 +450,7 @@ test("applies a settled Turn and its cleared Session reference atomically", () =
   harness.engine.dispose();
 });
 
-test("rejects a late Turn fact without leaking completion into attention", () => {
+test("rejects a late Turn fact", () => {
   const harness = createHarness();
   const runningTurn = turn("running", 4);
   harness.engine.dispatch({
@@ -477,10 +472,6 @@ test("rejects a late Turn fact without leaking completion into attention", () =>
   assert.equal(
     snapshot.sessionLifecycle.sessionsById["session-1"]?.activeTurnId,
     "turn-1"
-  );
-  assert.equal(
-    snapshot.attentionReadState.partitionsByUserId["user-1"],
-    undefined
   );
 
   harness.coordinator.dispose();
@@ -510,107 +501,6 @@ test("accepts host-fenced settlement across source version domains", () => {
   assert.equal(
     snapshot.sessionLifecycle.sessionsById["session-1"]?.activeTurnId,
     null
-  );
-
-  harness.coordinator.dispose();
-  harness.engine.dispose();
-});
-
-test("replays an accepted completion after live reconcile supplies identity", () => {
-  const harness = createHarness();
-  const settledTurn = turn("settled", 2);
-  harness.coordinator.ingestEvent(turnUpdateEvent("settled", 2));
-  assert.equal(
-    harness.engine.getSnapshot().attentionReadState.partitionsByUserId[
-      "user-1"
-    ],
-    undefined
-  );
-  const reconciled = session(null, 2);
-  reconciled.latestTurn = settledTurn;
-
-  harness.engine.dispatch({
-    childSessions: [],
-    live: true,
-    session: reconciled,
-    turns: [],
-    type: "session/detailSnapshotReceived",
-    workspaceId: "workspace-1"
-  });
-
-  assert.equal(
-    harness.engine.getSnapshot().attentionReadState.partitionsByUserId["user-1"]
-      ?.recordsBySessionId["session-1"]?.isUnread,
-    true
-  );
-
-  harness.coordinator.dispose();
-  harness.engine.dispose();
-});
-
-test("stale historical snapshot cannot leak completion into attention", () => {
-  const harness = createHarness();
-  const runningTurn = turn("running", 4);
-  harness.engine.dispatch({
-    session: session(runningTurn, 4),
-    type: "session/upserted"
-  });
-  const stale = session(null, 2);
-  stale.latestTurn = turn("settled", 2);
-
-  harness.engine.dispatch({
-    sessions: [stale],
-    type: "session/snapshotReceived"
-  });
-
-  assert.equal(
-    harness.engine.getSnapshot().attentionReadState.partitionsByUserId[
-      "user-1"
-    ],
-    undefined
-  );
-
-  harness.coordinator.dispose();
-  harness.engine.dispose();
-});
-
-test("rejected historical snapshot cannot replace newer attention", () => {
-  const harness = createHarness();
-  const oldTurn = turn("settled", 2, "turn-a");
-  harness.engine.dispatch({
-    live: true,
-    turn: oldTurn,
-    type: "turn/upserted"
-  });
-  harness.engine.dispatch({
-    session: session(null, 10),
-    type: "session/upserted"
-  });
-  harness.engine.dispatch({
-    activeTurnId: null,
-    turn: turn("settled", 10, "turn-b"),
-    type: "turn/projectionReceived",
-    workspaceId: "workspace-1"
-  });
-  const stale = session(null, 2);
-  stale.latestTurn = oldTurn;
-
-  harness.engine.dispatch({
-    sessions: [stale],
-    type: "session/snapshotReceived"
-  });
-
-  assert.deepEqual(
-    harness.engine.getSnapshot().attentionReadState.partitionsByUserId["user-1"]
-      ?.recordsBySessionId["session-1"],
-    {
-      completionKey: "turn:session-1:turn-b:completed",
-      isUnread: true,
-      kind: "completed",
-      markedUnreadByUser: false,
-      observationProvenance: "live",
-      readStateProvenance: "live"
-    }
   );
 
   harness.coordinator.dispose();

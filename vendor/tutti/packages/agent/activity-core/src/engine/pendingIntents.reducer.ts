@@ -9,7 +9,6 @@ import {
 } from "./pendingIntents.types.ts";
 import { reconcilePendingIntentsFromAuthoritativeHistory } from "./pendingIntents.authoritativeHistory.ts";
 import {
-  pendingActivationGoalControlFields,
   pendingActivationRailSectionKeyFields
 } from "./pendingIntents.activationExtras.ts";
 import {
@@ -76,7 +75,6 @@ export function pendingIntentsReducer(
     submitCancellationAccepted?: boolean;
     sendResultValidation?: SendInputResultValidation | null;
     settingsResultValidation?: ScopedSessionResultValidation | null;
-    planFeedbackAccepted?: boolean;
     submitRequestAccepted?: boolean;
     submitDeliveryIsQueuePending?: boolean;
   } = {
@@ -108,21 +106,6 @@ export function pendingIntentsReducer(
         return unchanged(state);
       }
       return requestSubmit(state, intent);
-    case "plan/feedbackRequested":
-      return context.planFeedbackAccepted === true
-        ? requestSubmit(
-            state,
-            {
-              ...intent,
-              type: "submit/requested"
-            },
-            {
-              kind: "plan-feedback",
-              requestId: intent.requestId,
-              turnId: intent.turnId
-            }
-          )
-        : unchanged(state);
     case "submit/dismissed":
       return removeSubmit(state, intent.clientSubmitId);
     case "submit/canceled":
@@ -227,10 +210,7 @@ function patchActivationSettings(
   if (record.status === "confirmed") {
     const attached = attachPendingActivationSettings(patchedRecord);
     return {
-      commands: NO_COMMANDS,
-      ...(attached.followUpIntents.length
-        ? { followUpIntents: attached.followUpIntents }
-        : {}),
+      commands: attached.commands,
       state: replaceActivation(state, attached.record)
     };
   }
@@ -297,7 +277,6 @@ function requestActivation(
     ...(intent.modelExplicit !== undefined
       ? { modelExplicit: intent.modelExplicit }
       : {}),
-    ...pendingActivationGoalControlFields(intent),
     ...pendingActivationRailSectionKeyFields(intent),
     ...(intent.railPlacement
       ? { railPlacement: { ...intent.railPlacement } }
@@ -324,16 +303,6 @@ function requestActivation(
           agentTargetId: agentTargetId!,
           clientSubmitId: clientSubmitId!,
           mode: "new",
-          ...(intent.initialTuttiModeActivation
-            ? {
-                initialTuttiModeActivation: {
-                  ...intent.initialTuttiModeActivation
-                }
-              }
-            : {}),
-          ...(intent.tuttiModeDraftKey?.trim()
-            ? { tuttiModeDraftKey: intent.tuttiModeDraftKey.trim() }
-            : {}),
           ...(optimisticTitle ? { optimisticTitle } : {})
         }
       : {
@@ -366,7 +335,6 @@ function requestActivation(
               ? { initialContent: runtimeContent }
               : {}),
             ...(displayPrompt ? { initialDisplayPrompt: displayPrompt } : {}),
-            ...pendingActivationGoalControlFields(intent),
             ...(intent.isolation ? { isolation: intent.isolation } : {}),
             ...(intent.modelExplicit !== undefined
               ? { modelExplicit: intent.modelExplicit }
@@ -381,13 +349,6 @@ function requestActivation(
               ? { submitDiagnostics: { ...intent.submitDiagnostics } }
               : {}),
             mode: "new" as const,
-            ...(intent.initialTuttiModeActivation
-              ? {
-                  initialTuttiModeActivation: {
-                    ...intent.initialTuttiModeActivation
-                  }
-                }
-              : {}),
             ...(intent.settings ? { settings: { ...intent.settings } } : {}),
             timeoutMs: NEW_SESSION_ACTIVATION_COMMAND_TIMEOUT_MS,
             ...(intent.title?.trim() ? { title: intent.title.trim() } : {}),

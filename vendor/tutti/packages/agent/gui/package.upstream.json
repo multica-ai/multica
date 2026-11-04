@@ -37,9 +37,6 @@
     "./agentGuiSessionProviderIconUrls": "./agentGuiSessionProviderIconUrls.ts",
     "./workspace-agent-generated-files": "./shared/workspaceAgentGeneratedFiles.ts",
     "./conversation-message-controller": "./agentConversationMessageController.ts",
-    "./conversation-rail-controller": "./agentConversationRailController.ts",
-    "./conversation-rail-runtime": "./agentConversationRailRuntime.ts",
-    "./conversation-rail-projection": "./conversationRailProjection.ts",
     "./conversation-projection": "./conversationProjection.ts",
     "./composer-projection": "./composerProjection.ts",
     "./i18n": "./i18n/index.ts",
@@ -261,18 +258,6 @@
         "types": "./dist/conversation-message-controller.d.ts",
         "import": "./dist/conversation-message-controller.js"
       },
-      "./conversation-rail-controller": {
-        "types": "./dist/conversation-rail-controller.d.ts",
-        "import": "./dist/conversation-rail-controller.js"
-      },
-      "./conversation-rail-runtime": {
-        "types": "./dist/conversation-rail-runtime.d.ts",
-        "import": "./dist/conversation-rail-runtime.js"
-      },
-      "./conversation-rail-projection": {
-        "types": "./dist/conversation-rail-projection.d.ts",
-        "import": "./dist/conversation-rail-projection.js"
-      },
       "./conversation-projection": {
         "types": "./dist/conversation-projection.d.ts",
         "import": "./dist/conversation-projection.js"
@@ -409,15 +394,6 @@
         ],
         "conversation-message-controller": [
           "./dist/conversation-message-controller.d.ts"
-        ],
-        "conversation-rail-controller": [
-          "./dist/conversation-rail-controller.d.ts"
-        ],
-        "conversation-rail-runtime": [
-          "./dist/conversation-rail-runtime.d.ts"
-        ],
-        "conversation-rail-projection": [
-          "./dist/conversation-rail-projection.d.ts"
         ],
         "conversation-projection": [
           "./dist/conversation-projection.d.ts"

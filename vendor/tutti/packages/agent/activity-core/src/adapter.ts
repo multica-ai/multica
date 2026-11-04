@@ -1,6 +1,4 @@
 import type {
-  AgentActivityGoalControlInput,
-  AgentActivityGoalControlResult,
   AgentActivityCreateSessionInput,
   AgentActivityDeleteSessionInput,
   AgentActivityDeleteSessionResult,
@@ -18,8 +16,6 @@ import type {
   AgentActivitySessionList,
   AgentActivitySubmitInteractiveInput,
   AgentActivitySubmitInteractiveResult,
-  AgentActivityUpdateTuttiModeActivationInput,
-  AgentActivityUpdateTuttiModeActivationResult
 } from "./types.ts";
 import type {
   AgentActivityForkSessionResult,
@@ -52,12 +48,6 @@ export interface AgentActivityAdapter {
   sendInput(
     input: AgentActivitySendInput
   ): Promise<AgentActivitySendInputResult>;
-  updateTuttiModeActivation(
-    input: AgentActivityUpdateTuttiModeActivationInput
-  ): Promise<AgentActivityUpdateTuttiModeActivationResult>;
-  goalControl(
-    input: AgentActivityGoalControlInput
-  ): Promise<AgentActivityGoalControlResult>;
   submitInteractive(
     input: AgentActivitySubmitInteractiveInput
   ): Promise<AgentActivitySubmitInteractiveResult>;

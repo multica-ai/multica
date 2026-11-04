@@ -84,7 +84,6 @@ export interface AgentActivityComposerSettings {
 export type AgentActivitySlashCommandEffect =
   | "submitImmediate"
   | "showReviewPicker"
-  | "activateGoalMode"
   | "togglePlanMode"
   | "showStatus"
   | "toggleSpeed";

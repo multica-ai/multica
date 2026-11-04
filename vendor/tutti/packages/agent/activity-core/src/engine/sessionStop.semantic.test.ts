@@ -8,7 +8,6 @@ import {
   selectSessionHasPendingSubmitStopTarget
 } from "./pendingIntents.selectors.ts";
 import { canonicalTurnKey } from "./sessionEntityKeys.ts";
-import { selectEngineCancelState } from "./sessionLifecycle.selectors.ts";
 import { createTestEngineCommandPort } from "./testEngineCommandPort.ts";
 import type { EngineExternalCommand, EngineScheduler } from "./types.ts";
 
@@ -54,94 +53,7 @@ function createHarness(active: boolean) {
   };
 }
 
-test("semantic session stop owns command identity, scope, and timeout", () => {
-  const harness = createHarness(true);
-
-  harness.engine.stopSession({ agentSessionId: " session-1 " });
-
-  assert.deepEqual(harness.commands, [
-    {
-      agentSessionId: "session-1",
-      commandId: "stop:100:1",
-      timeoutMs: 30_000,
-      turnId: "turn-1",
-      type: "turn/cancel",
-      workspaceId: "workspace-1"
-    }
-  ]);
-  assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")?.status,
-    "requested"
-  );
-});
-
-test("semantic session stop waits 30 seconds for a first Turn and deduplicates repeated requests", () => {
-  const harness = createHarness(false);
-
-  harness.engine.stopSession({ agentSessionId: "session-1" });
-  harness.engine.stopSession({ agentSessionId: "session-1" });
-
-  assert.deepEqual(harness.commands, []);
-  assert.deepEqual(harness.scheduled, [
-    {
-      canceled: false,
-      delayMs: 30_000
-    }
-  ]);
-  assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")?.status,
-    "awaitingTurn"
-  );
-
-  harness.setNow(200);
-  harness.engine.dispatch({
-    session: session(activeTurn()),
-    type: "session/upserted"
-  });
-
-  assert.deepEqual(harness.commands, [
-    {
-      agentSessionId: "session-1",
-      commandId: "stop:100:1",
-      timeoutMs: 30_000,
-      turnId: "turn-1",
-      type: "turn/cancel",
-      workspaceId: "workspace-1"
-    }
-  ]);
-  assert.equal(harness.scheduled[0]?.canceled, true);
-});
-
-test("semantic session stop targets the latest pending prompt admission", () => {
-  const harness = createHarness(false);
-
-  assert.deepEqual(
-    harness.engine.submitPrompt({
-      agentSessionId: "session-1",
-      clientSubmitId: "submit-1",
-      content: [{ text: "hello", type: "text" }]
-    }),
-    { accepted: true, queued: false }
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(
-      harness.engine.getSnapshot(),
-      "session-1"
-    ),
-    true
-  );
-
-  harness.engine.stopSession({ agentSessionId: "session-1" });
-
-  assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")
-      ?.targetClientSubmitId,
-    "submit-1"
-  );
-  assert.equal(harness.commands.at(-1)?.type, "queue/sendPrompt");
-});
-
-test("semantic session stop does not target a visible queued prompt that was never dispatched", () => {
+test("stop target selection does not target a visible queued prompt that was never dispatched", () => {
   const harness = createHarness(true);
 
   assert.deepEqual(
@@ -153,7 +65,11 @@ test("semantic session stop does not target a visible queued prompt that was nev
     { accepted: true, queued: true }
   );
 
-  harness.engine.stopSession({ agentSessionId: "session-1" });
+  harness.engine.dispatch({
+    agentSessionId: "session-1",
+    type: "session/stopRequested",
+    workspaceId: "workspace-1"
+  });
 
   const turn = settledTurn();
   harness.engine.dispatch({
@@ -357,7 +273,7 @@ test("stop target selection keeps immediate submits with missing or running cano
   );
 });
 
-test("semantic session stop does not target a failed submit admission", () => {
+test("stop target selection does not target a failed submit admission", () => {
   const harness = createHarness(false);
 
   harness.engine.submitPrompt({
@@ -375,20 +291,16 @@ test("semantic session stop does not target a failed submit admission", () => {
     type: "engine/commandResult"
   });
 
-  harness.engine.stopSession({ agentSessionId: "session-1" });
-
   assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")
-      ?.targetClientSubmitId,
+    selectLatestStopTargetSubmitForSession(
+      harness.engine.getSnapshot(),
+      "session-1"
+    ),
     null
-  );
-  assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")?.status,
-    "awaitingTurn"
   );
 });
 
-test("semantic session stop keeps a delivery-unknown submit as its target", () => {
+test("stop target selection keeps a delivery-unknown submit as its target", () => {
   const harness = createHarness(false);
 
   harness.engine.submitPrompt({
@@ -405,11 +317,11 @@ test("semantic session stop keeps a delivery-unknown submit as its target", () =
     type: "engine/commandResult"
   });
 
-  harness.engine.stopSession({ agentSessionId: "session-1" });
-
   assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")
-      ?.targetClientSubmitId,
+    selectLatestStopTargetSubmitForSession(
+      harness.engine.getSnapshot(),
+      "session-1"
+    )?.clientSubmitId,
     "submit-1"
   );
 });
@@ -445,22 +357,6 @@ test("stop target selection ignores a submit whose canonical Turn is settled", (
       "session-1"
     ),
     false
-  );
-});
-
-test("semantic session stop preserves an explicit submit target with an active turn", () => {
-  const harness = createHarness(true);
-
-  harness.engine.stopSession({
-    agentSessionId: "session-1",
-    clientSubmitId: "submit-explicit"
-  });
-
-  assert.deepEqual(harness.commands, []);
-  assert.equal(
-    selectEngineCancelState(harness.engine.getSnapshot(), "session-1")
-      ?.targetClientSubmitId,
-    "submit-explicit"
   );
 });
 

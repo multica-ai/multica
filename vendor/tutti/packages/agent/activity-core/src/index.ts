@@ -1,6 +1,5 @@
 export type { AgentActivityAdapter } from "./adapter.ts";
 export { AGENT_ACTIVITY_LIVE_PROTOCOL_REVISION } from "./liveProtocolRevision.gen.ts";
-export { parseAgentActivityGoalControlText } from "./goalControl.ts";
 export type { AgentActivityLiveEvent } from "./liveEvent.types.ts";
 export type { AgentActivityComposerModelConfiguration } from "./composerModelConfiguration.types.ts";
 export type { AgentActivityDisplayStatus } from "./displayStatus.types.ts";
@@ -112,94 +111,7 @@ export type {
   EngineTypedCommandPort
 } from "./engine/types.ts";
 export { AGENT_SESSION_ENGINE_LOCAL_ORIGIN } from "./engine/types.ts";
-export {
-  selectSessionGoalControlPresentation,
-  selectSessionGoalControlSettlement,
-  sessionGoalControlPresentationsEqual
-} from "./engine/sessionGoalControl.selectors.ts";
-export type {
-  AgentSessionControlGoalAdmission,
-  AgentSessionControlGoalInput,
-  AgentSessionGoalControlEffectInput,
-  SessionGoalControlPresentation,
-  SessionGoalControlPresentationStatus,
-  SessionGoalControlSettlement
-} from "./engine/sessionGoalControl.types.ts";
 export { selectWorkspaceReconcileState } from "./engine/engineRuntime.selectors.ts";
-export {
-  editRetryPresentationRecordsEqual,
-  selectEditRetryAvailabilityIsNewer,
-  selectEditRetryPresentation,
-  type EditRetryPresentationRecord
-} from "./engine/editRetry.selectors.ts";
-export {
-  dispatchEditRetry,
-  dispatchEditRetryRecovery
-} from "./engine/editRetry.command.ts";
-export type {
-  AgentActivityEditRetryAvailability,
-  AgentActivityEditRetryInput,
-  AgentActivityEditRetryReasonCode,
-  AgentActivityEditRetryRecoveryAction,
-  AgentActivityEditRetryRecoveryState,
-  AgentActivityEditRetryResult,
-  AgentActivityRecoverEditRetryInput,
-  EditRetryCommand,
-  EditRetryIntent,
-  EditRetryOperationRecord,
-  EditRetryOperationStatus,
-  EditRetryState,
-  TurnEditRetryCommand,
-  TurnRecoverEditRetryCommand
-} from "./engine/editRetry.types.ts";
-export {
-  dispatchSessionForkThroughTurn,
-  type DispatchSessionForkThroughTurnInput
-} from "./engine/sessionMutationDispatch.ts";
-export {
-  selectPendingSessionForkThroughTurnIds,
-  selectSessionForkThroughTurnMutation,
-  selectSessionMutation,
-  selectSessionMutations,
-  type SessionForkThroughTurnPendingSelectorInput,
-  type SessionForkThroughTurnMutationSelectorInput
-} from "./engine/sessionMutations.selectors.ts";
-export type {
-  SessionDeleteMutationResult,
-  SessionAcknowledgeForkObservedCommand,
-  SessionForkObservationAckStatus,
-  SessionForkThroughTurnCommand,
-  SessionForkThroughTurnMutationRecord,
-  SessionForkThroughTurnRequestedIntent,
-  SessionMutationCommand,
-  SessionMutationRecord,
-  SessionMutationStatus,
-  SessionMutationsIntent,
-  SessionMutationsState,
-  SessionPinRequestedIntent,
-  SessionSetPinnedCommand,
-  SessionsDeleteCommand,
-  SessionsDeleteRequestedIntent
-} from "./engine/sessionMutations.types.ts";
-export {
-  selectTuttiModeActivationPresentation,
-  selectTuttiModeDraftIsActive,
-  selectTuttiModeDraftOrchestrationIntensity,
-  selectTuttiModeDraftPreferences,
-  tuttiModeActivationPresentationsEqual,
-  type ResolvedTuttiModeActivationPresentation,
-  type TuttiModeActivationPresentation
-} from "./engine/tuttiModeActivation.selectors.ts";
-export type {
-  TuttiModeActivationCommand,
-  TuttiModeActivationIntent,
-  TuttiModeActivationState,
-  TuttiModeActivationUpdateCommand
-} from "./engine/tuttiModeActivation.types.ts";
-export {
-  selectAttentionReadState,
-  selectSessionAttention
-} from "./engine/attentionReadState.selectors.ts";
 export {
   selectSessionMessageWindow,
   selectSessionMessages,
@@ -211,45 +123,18 @@ export {
 } from "./engine/sessionFamily.selectors.ts";
 export type { SessionMessagesState } from "./engine/sessionMessages.types.ts";
 export {
-  selectComposerOptions,
-  selectComposerOptionsLoadStatus,
-  selectComposerOptionsSectionLoadStatus
-} from "./engine/composerOptions.selectors.ts";
-export type {
-  ComposerOptionsIntent,
-  ComposerOptionsCommand,
-  ComposerOptionsSection,
-  ComposerOptionsState
-} from "./engine/composerOptions.types.ts";
-export type {
-  AttentionCompletionKind,
-  AttentionReadCommand,
-  AttentionReadIntent,
-  AttentionReadRecord,
-  AttentionObservationProvenance,
-  AttentionReadStateProvenance,
-  AttentionReadState
-} from "./engine/attentionReadState.types.ts";
-export {
   selectEngineActiveTurn,
-  selectEngineCancelState,
-  selectEngineCancelPending,
-  selectEngineGoalControl,
   selectEngineHasPendingInteractions,
   selectEngineInteractionsForSession,
   selectEngineInteraction,
-  selectEngineInteractionResponse,
-  selectEngineInteractionResponseError,
   selectEngineLatestTurn,
   selectEnginePendingInteractions,
   selectEngineSession,
   selectEngineSessionCanReload,
   selectFailedNewActivationResolution,
   selectEngineSessionDeleted,
-  selectEngineSessionIsRespondingToInteraction,
   selectEngineSessionRuntimeAvailability,
   selectEngineSessionRuntimeActivity,
-  selectEngineSessionSettingsUpdate,
   selectEngineSessionOperationError,
   selectEngineSessionOperation,
   selectEngineSubmitAvailability,
@@ -280,32 +165,11 @@ export type {
 } from "./engine/sessionLifecycle.selectors.ts";
 export type {
   CanonicalAgentSession,
-  InteractionRespondCommand,
-  InteractionResponseState,
-  InteractionResponseStatus,
-  SessionCancelState,
-  SessionCancelStatus,
   SessionOperationState,
   SessionRuntimeAvailability,
   SessionRuntimeActivity,
-  SessionSettingsUpdateState,
-  SessionSettingsUpdateStatus,
-  SessionLifecycleState,
-  TurnCancelCommand
+  SessionLifecycleState
 } from "./engine/sessionLifecycle.types.ts";
-export type {
-  PlanDecisionOperation,
-  PlanDecisionIntent,
-  PlanDecisionRecord,
-  PlanDecisionState,
-  PlanDecisionStatus,
-  PlanSubmitDecisionCommand,
-  PlanSubmitDecisionResult
-} from "./engine/planDecision.types.ts";
-export {
-  selectPlanDecisionForTurn,
-  selectPlanTurnDismissed
-} from "./engine/planDecision.selectors.ts";
 export { selectEngineAvailableCommands } from "./engine/sessionCommands.selectors.ts";
 export type {
   AgentSessionAvailableCommand,
@@ -339,7 +203,6 @@ export type {
   PendingIntentsIntent,
   PendingIntentsState,
   PendingSubmitIntentRecord,
-  PendingSubmitSource,
   PendingSubmitStatus,
   SessionActivateCommand,
   SessionActivationDismissedIntent,
@@ -358,10 +221,10 @@ export {
   pendingSubmitRecordListsEqual,
   selectPendingActivationByRequestId,
   selectPendingActivations,
-  selectPendingPlanFeedbackSubmit,
   sessionActivationPresentationMapsEqual,
   selectLatestActivationForSession,
   selectLatestPendingSubmitForSession,
+  selectLatestStopTargetSubmitForSession,
   selectPendingSubmits,
   selectPendingSubmitsForSession,
   selectSessionActivationPresentations,
@@ -385,11 +248,6 @@ export type {
   AgentActivityActivateSessionResult,
   AgentActivityActivationMode,
   AgentActivityActivationStatus,
-  AgentActivityCancelTurnInput,
-  AgentActivityGoalControlAction,
-  AgentActivityInitialGoalControl,
-  AgentActivityGoalControlInput,
-  AgentActivityGoalControlResult,
   AgentActivityComposerCapabilityOption,
   AgentActivityComposerBehavior,
   AgentActivityComposerOptions,
@@ -436,23 +294,12 @@ export type {
   AgentActivitySession,
   AgentActivitySessionForkLineage,
   AgentActivitySessionCapabilities,
-  AgentActivitySessionGoal,
-  AgentActivitySessionGoalState,
-  AgentActivitySessionGoalSyncState,
-  AgentActivitySessionGoalSyncStatus,
   AgentActivitySessionPermissionConfig,
   AgentActivitySessionUsage,
   AgentActivitySessionSettings,
   AgentActivitySessionKind,
   AgentActivitySessionEventEnvelope,
   AgentActivitySessionList,
-  AgentActivityInitialTuttiModeActivation,
-  AgentActivityTuttiModeActivation,
-  AgentActivityTuttiModeActivationRevision,
-  AgentActivityTuttiModeActivationSource,
-  AgentActivityTuttiModeActivationStatus,
-  AgentActivityUpdateTuttiModeActivationInput,
-  AgentActivityUpdateTuttiModeActivationResult,
   AgentActivitySubmitInteractiveInput,
   AgentActivitySubmitInteractiveResult,
   AgentActivitySnapshot,
@@ -460,8 +307,8 @@ export type {
   AgentActivitySubmitDiagnostics,
   AgentActivitySubmitSettingsPatch,
   AgentActivityTurn,
-  AgentActivityTurnOrigin,
   AgentActivityTurnCancelResponse,
+  AgentActivityTurnOrigin,
   AgentActivityTransientMessage,
   AgentActivityInteraction,
   AgentActivityUpdatedApplyResult,

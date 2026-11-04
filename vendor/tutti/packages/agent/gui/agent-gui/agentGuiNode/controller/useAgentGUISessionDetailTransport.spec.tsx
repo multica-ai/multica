@@ -1,8 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import type {
-  AgentActivityMessage,
-  AgentActivitySnapshot
-} from "@tutti-os/agent-activity-core";
+import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
 import type { PropsWithChildren, RefObject } from "react";
 import { describe, expect, it } from "vitest";
 import {
@@ -16,9 +13,7 @@ import { useAgentGUISessionDetailTransport } from "./useAgentGUISessionDetailTra
 describe("useAgentGUISessionDetailTransport", () => {
   it("renders optimistic text without treating its version as history coverage", () => {
     const optimisticMessage = message();
-    const runtime = createRuntime({
-      sessionMessagesById: { "session-1": [optimisticMessage] }
-    } as unknown as AgentActivitySnapshot);
+    const runtime = createRuntime([optimisticMessage]);
     const wrapper = ({ children }: PropsWithChildren) => (
       <AgentGUIRuntimeProvider runtime={runtime}>
         {children}
@@ -52,11 +47,12 @@ describe("useAgentGUISessionDetailTransport", () => {
   });
 });
 
-function createRuntime(snapshot: AgentActivitySnapshot): AgentGUIRuntime {
+function createRuntime(
+  messages: readonly AgentActivityMessage[]
+): AgentGUIRuntime {
   return {
-    getSnapshot: () => snapshot,
     origin: "test",
-    subscribe: () => () => {}
+    transcript: { messages: () => messages }
   } as unknown as AgentGUIRuntime;
 }
 

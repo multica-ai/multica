@@ -26,8 +26,8 @@
     "@tutti-os/workspace-file-manager": "workspace:*",
     "@tutti-os/workspace-file-preview": "workspace:*",
     "valtio": "2.3.2",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "peerDependencies": {
     "react": "^19.1.0",

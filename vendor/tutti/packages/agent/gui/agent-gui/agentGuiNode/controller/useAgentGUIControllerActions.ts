@@ -28,7 +28,6 @@ export function useAgentGUIControllerActions(
     actions.selectConversation
   );
   const submitPrompt = useStableControllerEventCallback(actions.submitPrompt);
-  const goalControl = useStableControllerEventCallback(actions.goalControl);
   const submitGuidancePrompt = useStableControllerEventCallback(
     actions.submitGuidancePrompt
   );
@@ -59,18 +58,6 @@ export function useAgentGUIControllerActions(
   const retryComposerOptions = useStableControllerEventCallback(
     actions.retryComposerOptions
   );
-  const setTuttiModeActive = useStableControllerEventCallback(
-    actions.setTuttiModeActive
-  );
-  const setTuttiModeEffect = useStableControllerEventCallback(
-    actions.setTuttiModeEffect
-  );
-  const setTuttiModeSpeed = useStableControllerEventCallback(
-    actions.setTuttiModeSpeed
-  );
-  const retryTuttiModeActivation = useStableControllerEventCallback(
-    actions.retryTuttiModeActivation
-  );
   const updatePlanIssueBudgetPreset = useStableControllerEventCallback(
     actions.updatePlanIssueBudgetPreset
   );
@@ -88,17 +75,8 @@ export function useAgentGUIControllerActions(
   const toggleProjectPinned = useStableControllerEventCallback(
     actions.toggleProjectPinned
   );
-  const confirmDeleteProjectConversations = useStableControllerEventCallback(
-    actions.confirmDeleteProjectConversations
-  );
-  const confirmDeleteConversations = useStableControllerEventCallback(
-    actions.confirmDeleteConversations
-  );
   const toggleConversationPinned = useStableControllerEventCallback(
     actions.toggleConversationPinned
-  );
-  const markConversationUnread = useStableControllerEventCallback(
-    actions.markConversationUnread
   );
   const renameConversation = useStableControllerEventCallback(
     actions.renameConversation
@@ -133,7 +111,6 @@ export function useAgentGUIControllerActions(
       createConversation,
       selectConversation,
       submitPrompt,
-      goalControl,
       submitGuidancePrompt,
       loadOlderConversationMessages,
       showPromptImagesUnsupported,
@@ -144,10 +121,6 @@ export function useAgentGUIControllerActions(
       updateSelectedProjectPath,
       updateComposerSettings,
       retryComposerOptions,
-      setTuttiModeActive,
-      setTuttiModeEffect,
-      setTuttiModeSpeed,
-      retryTuttiModeActivation,
       updatePlanIssueBudgetPreset,
       sendQueuedPromptNext,
       removeQueuedPrompt,
@@ -155,10 +128,7 @@ export function useAgentGUIControllerActions(
       removeProject,
       moveProject,
       toggleProjectPinned,
-      confirmDeleteProjectConversations,
-      confirmDeleteConversations,
       toggleConversationPinned,
-      markConversationUnread,
       renameConversation,
       forkConversationThroughTurn,
       openForkSourceConversation,
@@ -171,15 +141,11 @@ export function useAgentGUIControllerActions(
     [
       cancelDeleteConversation,
       confirmDeleteConversation,
-      confirmDeleteConversations,
-      confirmDeleteProjectConversations,
       continueInNewConversation,
       createConversation,
       editQueuedPrompt,
-      goalControl,
       interruptCurrentTurn,
       loadOlderConversationMessages,
-      markConversationUnread,
       removeProject,
       moveProject,
       toggleProjectPinned,
@@ -201,10 +167,6 @@ export function useAgentGUIControllerActions(
       toggleConversationPinned,
       updateComposerSettings,
       retryComposerOptions,
-      setTuttiModeActive,
-      setTuttiModeEffect,
-      setTuttiModeSpeed,
-      retryTuttiModeActivation,
       updatePlanIssueBudgetPreset,
       updateConversationFilter,
       updateDraftContent,

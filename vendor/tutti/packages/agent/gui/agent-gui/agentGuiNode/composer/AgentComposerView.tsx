@@ -128,7 +128,6 @@ export function AgentComposerView(
     selectFileMention
   } = input.mentionActions;
   const {
-    clearGoalModeBadge,
     expandDraftLargeTextToPrompt,
     handleDraftChange,
     handleLinkClick,
@@ -652,13 +651,7 @@ export function AgentComposerView(
             permissionModeControlsDisabled={permissionModeControlsDisabled}
             isSendingTurn={input.props.isSendingTurn}
             showComposerAction={showComposerActionInFooter}
-            isGoalModeActive={input.isGoalModeActive}
             isPlanModeActive={input.isPlanModeActive}
-            isTuttiModeActive={input.isTuttiModeActive}
-            isTuttiModeUpdating={input.isTuttiModeUpdating}
-            tuttiModeSupported={
-              input.props.capabilityMenuState?.tuttiMode?.enabled === true
-            }
             connectorsVisible={
               input.props.capabilityMenuState?.connectors?.enabled !== false
             }
@@ -670,7 +663,6 @@ export function AgentComposerView(
               input.props.capabilityMenuState?.connectors?.showViewMore !==
               false
             }
-            onTuttiModeChange={input.props.onTuttiModeChange}
             onClearPlanMode={input.onClearPlanMode}
             composerAction={composerActionNode}
             projectControl={
@@ -725,7 +717,6 @@ export function AgentComposerView(
             onMentionPaletteButton={handleMentionPaletteButton}
             onSettingsChange={onSettingsChange}
             onSubmit={onSubmit}
-            onClearGoalMode={clearGoalModeBadge}
             draftPrompt={draftPrompt}
           />
         </div>

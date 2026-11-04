@@ -457,8 +457,8 @@ export function createAgentActivitySessionReconcileExecutor(
             return skippedResult();
           }
           const after = await getDetail(agentSessionId, "state", signal);
-          const beforeHistoryRevision = before.editRetry?.historyRevision ?? 0;
-          const afterHistoryRevision = after.editRetry?.historyRevision ?? 0;
+          const beforeHistoryRevision = before.historyRevision ?? 0;
+          const afterHistoryRevision = after.historyRevision ?? 0;
           if (
             beforeHistoryRevision !== afterHistoryRevision ||
             before.session.messageVersion !== after.session.messageVersion ||
@@ -490,7 +490,6 @@ export function createAgentActivitySessionReconcileExecutor(
           input.engine.dispatch({
             agentSessionId,
             childSessions: filtered.childSessions,
-            editRetry: filtered.editRetry,
             historyRevision: afterHistoryRevision,
             ...(command.live && liveTurn
               ? { liveTurnId: liveTurn.turnId }

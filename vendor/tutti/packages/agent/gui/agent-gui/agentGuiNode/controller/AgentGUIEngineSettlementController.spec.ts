@@ -1,3 +1,4 @@
+import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import {
   normalizeAgentActivitySession,
   selectEngineHasVisibleQueuedSubmit,
@@ -38,6 +39,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: submittedDraft
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -83,6 +85,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: submittedDraft
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -142,6 +145,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: emptyAgentComposerDraft()
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -210,6 +214,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: emptyAgentComposerDraft()
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -306,6 +311,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: emptyAgentComposerDraft()
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -372,16 +378,17 @@ describe("AgentGUIEngineSettlementController", () => {
   });
 
   it("restores a composer answer when the interaction response fails", async () => {
-    let rejectResponse: (error: Error) => void = vi.fn();
-    const engine = createTestAgentSessionEngine("test-workspace", {
-      execute(command) {
-        if (command.type !== "interaction/respond") {
-          return Promise.resolve({ ok: true });
-        }
-        return new Promise((_, reject) => {
-          rejectResponse = reject;
-        });
+    let responseStatus: "responding" | "failed" = "responding";
+    let responseChanged: () => void = vi.fn();
+    const prompts = createTestPromptOperations({
+      interactionResponse: () => ({ status: responseStatus }),
+      subscribeInteractionResponses: (listener) => {
+        responseChanged = listener;
+        return () => undefined;
       }
+    });
+    const engine = createTestAgentSessionEngine("test-workspace", {
+      execute: () => Promise.resolve({ ok: true })
     });
     const { interaction, session } = waitingQuestionSession();
     engine.dispatch({ sessions: [session], type: "session/snapshotReceived" });
@@ -406,6 +413,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: emptyAgentComposerDraft()
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts,
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -415,25 +423,13 @@ describe("AgentGUIEngineSettlementController", () => {
     });
     const detach = controller.attach();
 
-    expect(
-      engine.submitInteractionResponse({
-        action: "submit",
-        agentSessionId: interaction.agentSessionId,
-        payload: {
-          answers: ["You decide"],
-          answersByQuestionId: { "execution-mode": "You decide" }
-        },
-        requestId: interaction.requestId,
-        turnId: interaction.turnId
-      })
-    ).toBe(true);
-    rejectResponse(new Error("response failed"));
+    expect(agentComposerDraftPrompt(drafts[sourceScopeKey]!)).toBe("");
+    responseStatus = "failed";
+    responseChanged();
 
-    await vi.waitFor(() => {
-      expect(agentComposerDraftPrompt(drafts[sourceScopeKey]!)).toBe(
-        "You decide"
-      );
-    });
+    expect(agentComposerDraftPrompt(drafts[sourceScopeKey]!)).toBe(
+      "You decide"
+    );
     expect(interactionDraftSettlements).toEqual({});
     detach();
     engine.dispose();
@@ -464,6 +460,7 @@ describe("AgentGUIEngineSettlementController", () => {
       [sourceScopeKey]: emptyAgentComposerDraft()
     };
     const controller = new AgentGUIEngineSettlementController({
+      prompts: createTestPromptOperations(),
       applyDraftUpdate: (update) => {
         drafts = update(drafts);
       },
@@ -483,141 +480,7 @@ describe("AgentGUIEngineSettlementController", () => {
     detach();
     engine.dispose();
   });
-
-  it("settles a Goal draft when Host durably accepts an applying operation", async () => {
-    const engine = createTestAgentSessionEngineWithEffects("test-workspace", {
-      controlGoal: () =>
-        Promise.resolve({
-          goal: { objective: "ship it", status: "active" },
-          operationId: "goal-operation-1",
-          session: sessionWithGoal("old goal"),
-          state: {
-            desired: { objective: "ship it", status: "active" },
-            lastEvidence: { source: "test" },
-            observed: { objective: "old goal", status: "active" },
-            pendingOperationId: "goal-operation-1",
-            revision: 2,
-            syncStatus: "applying",
-            tombstoned: false,
-            updatedAtUnixMs: 2
-          }
-        })
-    });
-    engine.dispatch({
-      session: sessionWithGoal("old goal"),
-      type: "session/upserted"
-    });
-    const sourceScopeKey = "session:session-1";
-    const submittedDraft = buildAgentComposerDraft({
-      prompt: "/goal ship it",
-      connectors: [{ connectorKey: "lark-cli" }]
-    });
-    let drafts: Record<string, AgentComposerDraft> = {
-      [sourceScopeKey]: submittedDraft
-    };
-    const goalControlSettlements = {
-      "session-1": {
-        action: "set" as const,
-        clientSubmitId: "goal-submit-1",
-        submittedDraftSnapshot: {
-          content: submittedDraft,
-          sourceScopeKey,
-          targetAgentSessionId: "session-1"
-        }
-      }
-    };
-    const controller = new AgentGUIEngineSettlementController({
-      applyDraftUpdate: (update) => {
-        drafts = update(drafts);
-      },
-      engine,
-      goalControlSettlements,
-      snapshots: {}
-    });
-    const detach = controller.attach();
-
-    expect(
-      engine.controlGoal({
-        action: "set",
-        agentSessionId: "session-1",
-        clientSubmitId: "goal-submit-1",
-        objective: "ship it"
-      }).accepted
-    ).toBe(true);
-
-    await vi.waitFor(() => {
-      expect(drafts[sourceScopeKey]).toEqual(
-        buildAgentComposerDraft({
-          prompt: "",
-          connectors: [{ connectorKey: "lark-cli" }]
-        })
-      );
-    });
-    expect(goalControlSettlements).toEqual({});
-    detach();
-    engine.dispose();
-  });
-
-  it("reports a definitive Goal rejection without clearing its draft", async () => {
-    const rejection = Object.assign(new Error("invalid goal"), {
-      code: "invalid_request"
-    });
-    const engine = createTestAgentSessionEngineWithEffects("test-workspace", {
-      controlGoal: () => Promise.reject(rejection)
-    });
-    engine.dispatch({
-      session: sessionWithGoal("old goal"),
-      type: "session/upserted"
-    });
-    const failed = vi.fn();
-    const goalControlSettlements = {
-      "session-1": {
-        action: "clear" as const,
-        clientSubmitId: "goal-submit-1",
-        submittedDraftSnapshot: null
-      }
-    };
-    const controller = new AgentGUIEngineSettlementController({
-      applyDraftUpdate: vi.fn(),
-      engine,
-      goalControlSettlements,
-      isCurrentConversation: () => true,
-      onGoalControlFailed: failed,
-      snapshots: {}
-    });
-    const detach = controller.attach();
-
-    engine.controlGoal({
-      action: "clear",
-      agentSessionId: "session-1",
-      clientSubmitId: "goal-submit-1"
-    });
-
-    await vi.waitFor(() => expect(failed).toHaveBeenCalledTimes(1));
-    expect(failed.mock.calls[0]?.[0]).toMatchObject({
-      clientSubmitId: "goal-submit-1",
-      errorCode: "invalid_request",
-      status: "failed"
-    });
-    expect(goalControlSettlements).toEqual({});
-    detach();
-    engine.dispose();
-  });
 });
-
-function sessionWithGoal(objective: string) {
-  return normalizeAgentActivitySession({
-    activeTurnId: null,
-    agentSessionId: "session-1",
-    cwd: "/workspace/app",
-    goal: { objective, status: "active" },
-    latestTurnInteractions: [],
-    pendingInteractions: [],
-    provider: "codex",
-    title: "session",
-    workspaceId: "test-workspace"
-  });
-}
 
 function waitingQuestionSession(): {
   interaction: AgentActivityInteraction;

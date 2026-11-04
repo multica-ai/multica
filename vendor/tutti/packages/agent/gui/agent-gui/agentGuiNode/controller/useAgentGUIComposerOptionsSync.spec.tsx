@@ -20,7 +20,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: target,
         conversationFilter: null,
@@ -87,7 +87,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationIdRef,
           agentActivityRuntime: {
             getComposerOptions,
-            getSnapshot: () => ({ composerOptionsByTargetKey })
+            composer: { options: (key: string) => composerOptionsByTargetKey[key as keyof typeof composerOptionsByTargetKey] ?? null, status: () => undefined }
           } as unknown as AgentGUIRuntime,
           composerTargetData: target,
           conversationFilter: null,
@@ -186,7 +186,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationIdRef,
           agentActivityRuntime: {
             getComposerOptions,
-            getSnapshot: () => ({})
+            composer: { options: () => null, status: () => undefined }
           } as unknown as AgentGUIRuntime,
           composerTargetData: target,
           conversationFilter: null,
@@ -248,7 +248,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationIdRef,
           agentActivityRuntime: {
             getComposerOptions,
-            getSnapshot: () => ({})
+            composer: { options: () => null, status: () => undefined }
           } as unknown as AgentGUIRuntime,
           composerTargetData: target,
           conversationFilter: null,
@@ -313,7 +313,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: selectedTarget,
         conversationFilter: null,
@@ -372,7 +372,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: target,
         conversationFilter: null,
@@ -456,7 +456,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: target,
         conversationFilter: null,
@@ -578,11 +578,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({
-            composerOptionsByTargetKey: {
-              "local:opencode": cachedOptions
-            }
-          })
+          composer: { options: () => cachedOptions, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: target,
         conversationFilter: null,
@@ -653,7 +649,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
           getComposerOptions,
-          getSnapshot: () => ({})
+          composer: { options: () => null, status: () => undefined }
         } as unknown as AgentGUIRuntime,
         composerTargetData: target,
         conversationFilter: null,

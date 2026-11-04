@@ -25,7 +25,7 @@
     "tailwindSourceRoot": "src"
   },
   "dependencies": {
-    "react": "19.2.6"
+    "react": "catalog:"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

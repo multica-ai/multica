@@ -3,14 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { translate } from "../../../i18n/index";
 import { useAgentGUIConversationMetadataActions } from "./useAgentGUIConversationMetadataActions";
 
-const dispatchSessionForkThroughTurn = vi.hoisted(() => vi.fn());
-
-vi.mock("@tutti-os/agent-activity-core", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@tutti-os/agent-activity-core")>();
-  return { ...actual, dispatchSessionForkThroughTurn };
-});
-
 describe("useAgentGUIConversationMetadataActions project pin", () => {
   it("delegates to the shared user-project store and diagnoses failures silently", async () => {
     const pin = vi.fn(() => Promise.reject(new Error("pin failed")));
@@ -117,10 +109,9 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
       sessionLifecycle: { sessionsById: {} }
     };
     const listeners = new Set<() => void>();
-    const renameSession = vi.fn().mockResolvedValue({});
+    const rename = vi.fn().mockResolvedValue({});
     const sessionEngine = {
       getSnapshot: () => snapshot,
-      renameSession,
       subscribe: (listener: () => void) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -128,7 +119,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
     };
     const { result } = renderHook(() =>
       useAgentGUIConversationMetadataActions({
-        agentActivityRuntime: {} as never,
+        agentActivityRuntime: { mutations: { rename } } as never,
         agentHostApi: { toast: { error: vi.fn() } } as never,
         currentUserId: "user-1",
         dataRef: { current: { provider: "codex" } } as never,
@@ -148,7 +139,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
         "Renamed session"
       );
     });
-    expect(renameSession).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
 
     snapshot = {
       ...snapshot,
@@ -161,14 +152,14 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
     });
     await renamePromise;
 
-    expect(renameSession).toHaveBeenCalledWith({
+    expect(rename).toHaveBeenCalledWith({
       agentSessionId: "new-session",
       title: "Renamed session"
     });
   });
 
-  it("delegates an existing Session rename to the Engine", async () => {
-    const renameSession = vi.fn().mockResolvedValue({});
+  it("delegates an existing Session rename to the runtime's mutations", async () => {
+    const rename = vi.fn().mockResolvedValue({});
     const sessionEngine = {
       getSnapshot: () => ({
         pendingIntents: { activationsByRequestId: {} },
@@ -178,12 +169,11 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
           }
         }
       }),
-      renameSession,
       subscribe: vi.fn(() => vi.fn())
     };
     const { result } = renderHook(() =>
       useAgentGUIConversationMetadataActions({
-        agentActivityRuntime: {} as never,
+        agentActivityRuntime: { mutations: { rename } } as never,
         agentHostApi: { toast: { error: vi.fn() } } as never,
         currentUserId: "user-1",
         dataRef: { current: { provider: "codex" } } as never,
@@ -203,7 +193,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
       );
     });
 
-    expect(renameSession).toHaveBeenCalledWith({
+    expect(rename).toHaveBeenCalledWith({
       agentSessionId: "existing-session",
       title: "Renamed session"
     });
@@ -223,11 +213,10 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
       sessionLifecycle: { sessionsById: {} }
     };
     const listeners = new Set<() => void>();
-    const renameSession = vi.fn().mockResolvedValue({});
+    const rename = vi.fn().mockResolvedValue({});
     const toastError = vi.fn();
     const sessionEngine = {
       getSnapshot: () => snapshot,
-      renameSession,
       subscribe: (listener: () => void) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -235,7 +224,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
     };
     const { result } = renderHook(() =>
       useAgentGUIConversationMetadataActions({
-        agentActivityRuntime: {} as never,
+        agentActivityRuntime: { mutations: { rename } } as never,
         agentHostApi: { toast: { error: toastError } } as never,
         currentUserId: "user-1",
         dataRef: { current: { provider: "codex" } } as never,
@@ -275,7 +264,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
     await expect(renamePromise).rejects.toThrow(
       translate("agentHost.agentGui.sessionActionUnavailable")
     );
-    expect(renameSession).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith(
       translate("agentHost.agentGui.sessionActionUnavailable")
     );
@@ -287,7 +276,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
       .spyOn(AbortSignal, "timeout")
       .mockReturnValue(timeoutController.signal);
     try {
-      const renameSession = vi.fn().mockResolvedValue({});
+      const rename = vi.fn().mockResolvedValue({});
       const sessionEngine = {
         getSnapshot: () => ({
           pendingIntents: {
@@ -301,13 +290,12 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
           },
           sessionLifecycle: { sessionsById: {} }
         }),
-        renameSession,
         subscribe: vi.fn(() => vi.fn())
       };
       const toastError = vi.fn();
       const { result } = renderHook(() =>
         useAgentGUIConversationMetadataActions({
-          agentActivityRuntime: {} as never,
+          agentActivityRuntime: { mutations: { rename } } as never,
           agentHostApi: { toast: { error: toastError } } as never,
           currentUserId: "user-1",
           dataRef: { current: { provider: "codex" } } as never,
@@ -335,7 +323,7 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
       });
 
       await renameRejection;
-      expect(renameSession).not.toHaveBeenCalled();
+      expect(rename).not.toHaveBeenCalled();
       expect(toastError).toHaveBeenCalledWith(
         translate("agentHost.agentGui.sessionActionUnavailable")
       );
@@ -346,12 +334,13 @@ describe("useAgentGUIConversationMetadataActions rename", () => {
 });
 
 describe("useAgentGUIConversationMetadataActions fork identity", () => {
-  it("leaves identity reuse to the Engine facade and selects its authoritative target", async () => {
+  it("leaves identity reuse to the mutation service and selects its authoritative target", async () => {
     const unsupported = Object.assign(new Error("unsupported"), {
       code: "agent_session_fork_unsupported"
     });
     const selectConversation = vi.fn();
-    dispatchSessionForkThroughTurn
+    const forkThroughTurn = vi
+      .fn()
       .mockRejectedValueOnce(unsupported)
       .mockResolvedValueOnce({
         status: "succeeded",
@@ -359,13 +348,18 @@ describe("useAgentGUIConversationMetadataActions fork identity", () => {
       });
     const { result } = renderHook(() =>
       useAgentGUIConversationMetadataActions({
-        agentActivityRuntime: {} as never,
+        agentActivityRuntime: { mutations: { forkThroughTurn } } as never,
         agentHostApi: {
           debug: { logRuntimeDiagnostics: vi.fn() },
           toast: { error: vi.fn() }
         } as never,
         currentUserId: "user-1",
-        dataRef: { current: { provider: "codex" } } as never,
+        dataRef: {
+          current: {
+            lastActiveAgentSessionId: "session-source",
+            provider: "codex"
+          }
+        } as never,
         sessionEngine: {} as never,
         setDetailError: vi.fn(),
         setListError: vi.fn(),
@@ -387,24 +381,14 @@ describe("useAgentGUIConversationMetadataActions fork identity", () => {
       );
     });
 
-    expect(dispatchSessionForkThroughTurn).toHaveBeenNthCalledWith(
-      1,
-      expect.anything(),
-      {
-        sourceAgentSessionId: "session-source",
-        turnId: "turn-1",
-        workspaceId: "workspace-1"
-      }
-    );
-    expect(dispatchSessionForkThroughTurn).toHaveBeenNthCalledWith(
-      2,
-      expect.anything(),
-      {
-        sourceAgentSessionId: "session-source",
-        turnId: "turn-1",
-        workspaceId: "workspace-1"
-      }
-    );
+    expect(forkThroughTurn).toHaveBeenNthCalledWith(1, {
+      sourceAgentSessionId: "session-source",
+      turnId: "turn-1"
+    });
+    expect(forkThroughTurn).toHaveBeenNthCalledWith(2, {
+      sourceAgentSessionId: "session-source",
+      turnId: "turn-1"
+    });
     expect(selectConversation).toHaveBeenCalledWith(
       "session-authoritative-child"
     );

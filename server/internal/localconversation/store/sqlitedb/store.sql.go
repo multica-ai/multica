@@ -207,6 +207,22 @@ func (q *Queries) CountPendingInteractions(ctx context.Context, conversationID s
 	return count, err
 }
 
+const countPromptQueueTombstone = `-- name: CountPromptQueueTombstone :one
+SELECT COUNT(*) FROM prompt_queue_tombstone WHERE conversation_id = ? AND request_id = ?
+`
+
+type CountPromptQueueTombstoneParams struct {
+	ConversationID string
+	RequestID      string
+}
+
+func (q *Queries) CountPromptQueueTombstone(ctx context.Context, arg CountPromptQueueTombstoneParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPromptQueueTombstone, arg.ConversationID, arg.RequestID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSessionBrowseGroups = `-- name: CountSessionBrowseGroups :many
 SELECT CAST(COALESCE(f.id, '') AS TEXT) AS group_id, COUNT(*) AS total
 FROM conversation AS c
@@ -262,6 +278,20 @@ DELETE FROM attachment WHERE id = ?
 
 func (q *Queries) DeleteAttachment(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteAttachment, id)
+	return err
+}
+
+const deleteOldPromptQueueTombstones = `-- name: DeleteOldPromptQueueTombstones :exec
+DELETE FROM prompt_queue_tombstone WHERE conversation_id = ? AND removed_at < ?
+`
+
+type DeleteOldPromptQueueTombstonesParams struct {
+	ConversationID string
+	RemovedAt      string
+}
+
+func (q *Queries) DeleteOldPromptQueueTombstones(ctx context.Context, arg DeleteOldPromptQueueTombstonesParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOldPromptQueueTombstones, arg.ConversationID, arg.RemovedAt)
 	return err
 }
 
@@ -920,6 +950,21 @@ func (q *Queries) InsertPromptQueueItem(ctx context.Context, arg InsertPromptQue
 		arg.OriginPeerID,
 		arg.OriginClientKind,
 	)
+	return err
+}
+
+const insertPromptQueueTombstone = `-- name: InsertPromptQueueTombstone :exec
+INSERT OR REPLACE INTO prompt_queue_tombstone (conversation_id, request_id, removed_at) VALUES (?, ?, ?)
+`
+
+type InsertPromptQueueTombstoneParams struct {
+	ConversationID string
+	RequestID      string
+	RemovedAt      string
+}
+
+func (q *Queries) InsertPromptQueueTombstone(ctx context.Context, arg InsertPromptQueueTombstoneParams) error {
+	_, err := q.db.ExecContext(ctx, insertPromptQueueTombstone, arg.ConversationID, arg.RequestID, arg.RemovedAt)
 	return err
 }
 

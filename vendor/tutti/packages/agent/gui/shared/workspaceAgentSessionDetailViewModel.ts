@@ -1,5 +1,4 @@
 import type {
-  AgentActivityGoalControlAction,
   AgentActivityMessageSemantics,
   AgentActivitySession,
   AgentActivityTurn
@@ -44,14 +43,6 @@ export interface WorkspaceAgentSessionDetailThinking {
   body: string;
   statusKind?: ToolCallStatusKind | null;
   turnId?: string;
-  occurredAtUnixMs?: number | null;
-  sourceTimelineItems?: WorkspaceAgentActivityTimelineItem[];
-}
-
-export interface WorkspaceAgentSessionDetailGoalControl {
-  id: string;
-  action: AgentActivityGoalControlAction;
-  body: string;
   occurredAtUnixMs?: number | null;
   sourceTimelineItems?: WorkspaceAgentActivityTimelineItem[];
 }
@@ -117,7 +108,6 @@ export interface WorkspaceAgentSessionDetailViewModel {
   session: AgentActivitySession;
   cwd: string;
   workspaceRoot: string | null;
-  goalControls?: WorkspaceAgentSessionDetailGoalControl[];
   turns: WorkspaceAgentSessionDetailTurn[];
   sessionTurns?: readonly AgentActivityTurn[];
   showProcessingIndicator?: boolean;

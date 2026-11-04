@@ -7,7 +7,6 @@ import type {
 } from "../types.ts";
 import { normalizeAgentActivitySession } from "../sessionNormalization.ts";
 import type {
-  CancelResultValidation,
   SendInputResultValidation
 } from "./commandResult.validation.ts";
 import {
@@ -56,115 +55,6 @@ test("available canonical lifecycle sends an enqueued prompt immediately", () =>
     send(result.commands[0]).submitDiagnostics,
     submitDiagnostics
   );
-});
-
-test("user settings inFlight blocks drain until settings settle to idle", () => {
-  let lifecycle = canonicalLifecycle("settled", 1);
-  lifecycle = sessionLifecycleReducer(lifecycle, {
-    agentSessionId: "session-1",
-    commandId: "settings-1",
-    settings: { reasoningEffort: "high" },
-    type: "session/settingsUpdateRequested",
-    workspaceId: "workspace-1"
-  }).state;
-  assert.equal(
-    lifecycle.operationBySessionId["session-1"]?.settingsUpdate.status,
-    "inFlight"
-  );
-
-  const queued = reduce(
-    createInitialPromptQueueState(),
-    enqueue("prompt-1"),
-    lifecycle
-  );
-  assert.deepEqual(queued.commands, []);
-  assert.equal(
-    queued.state.recordsBySessionId["session-1"]?.prompts[0]?.id,
-    "prompt-1"
-  );
-
-  const acceptedSession = {
-    ...activitySession("settled", 2, "turn-1"),
-    settings: { reasoningEffort: "high" }
-  };
-  const settledLifecycle = sessionLifecycleReducer(
-    lifecycle,
-    {
-      commandId: "settings-1",
-      commandType: "session/updateSettings",
-      correlationId: "session-1",
-      outcome: "succeeded",
-      type: "engine/commandResult",
-      value: { agentSessionId: "session-1", session: acceptedSession }
-    },
-    {
-      queueSendNowRequiresCancel: false,
-      settingsResultValidation: {
-        kind: "valid",
-        session: acceptedSession
-      }
-    }
-  ).state;
-  assert.equal(
-    settledLifecycle.operationBySessionId["session-1"]?.settingsUpdate.status,
-    "idle"
-  );
-
-  const drained = reduce(
-    queued.state,
-    {
-      commandId: "settings-1",
-      commandType: "session/updateSettings",
-      correlationId: "session-1",
-      outcome: "succeeded",
-      type: "engine/commandResult",
-      value: { agentSessionId: "session-1", session: acceptedSession }
-    },
-    settledLifecycle
-  );
-  assert.equal(drained.commands[0]?.type, "queue/sendPrompt");
-});
-
-test("settings timeout leaves drain blocked until an explicit settings retry settles", () => {
-  let lifecycle = canonicalLifecycle("settled", 1);
-  lifecycle = sessionLifecycleReducer(lifecycle, {
-    agentSessionId: "session-1",
-    commandId: "settings-1",
-    settings: { reasoningEffort: "high" },
-    type: "session/settingsUpdateRequested",
-    workspaceId: "workspace-1"
-  }).state;
-  lifecycle = sessionLifecycleReducer(lifecycle, {
-    commandId: "settings-1",
-    commandType: "session/updateSettings",
-    correlationId: "session-1",
-    outcome: "timedOut",
-    type: "engine/commandResult"
-  }).state;
-  assert.equal(
-    lifecycle.operationBySessionId["session-1"]?.settingsUpdate.status,
-    "unknown"
-  );
-
-  const queued = reduce(
-    createInitialPromptQueueState(),
-    enqueue("prompt-1"),
-    lifecycle
-  );
-  assert.deepEqual(queued.commands, []);
-
-  const stillBlocked = reduce(
-    queued.state,
-    {
-      commandId: "settings-1",
-      commandType: "session/updateSettings",
-      correlationId: "session-1",
-      outcome: "timedOut",
-      type: "engine/commandResult"
-    },
-    lifecycle
-  );
-  assert.deepEqual(stillBlocked.commands, []);
 });
 
 test("queued capability settings and diagnostics survive delivery", () => {
@@ -317,7 +207,7 @@ test("guidance failure without the no-active-turn reason still blocks the queue"
   assert.deepEqual(failed.commands, []);
 });
 
-test("cancel-then-send waits until validated cancellation updates canonical lifecycle", () => {
+test("cancel-then-send waits until the canonical lifecycle settles", () => {
   const running = canonicalLifecycle("running", 1);
   let state = reduce(
     createInitialPromptQueueState(),
@@ -333,19 +223,10 @@ test("cancel-then-send waits until validated cancellation updates canonical life
     "prompt-1"
   );
 
-  const turn = settledTurn("turn-1", 2, "canceled");
-  const validation: CancelResultValidation = {
-    kind: "valid",
-    response: {
-      cancel: { canceled: true, reason: "turn_canceled" },
-      turn: { ...turn, completedCommand: null, error: null, fileChanges: null }
-    }
-  };
   const canceled = reduce(
     promoted.state,
-    commandResult("cancel-1", "turn/cancel", "succeeded"),
-    canonicalLifecycle("settled", 2),
-    { cancelValidation: validation }
+    turnUpserted(settledTurn("turn-1", 2, "canceled")),
+    canonicalLifecycle("settled", 2)
   );
   assert.equal(canceled.commands[0]?.type, "queue/sendPrompt");
   assert.equal(send(canceled.commands[0]).guidance, undefined);
@@ -382,39 +263,6 @@ test("successful send establishes an exact-turn barrier before the next prompt",
     canonicalLifecycle("settled", 3, "turn-1")
   );
   assert.equal(send(settled.commands[0]).promptId, "prompt-2");
-});
-
-test("turnless goal control result completes delivery without a turn barrier", () => {
-  const available = canonicalLifecycle("settled", 1, "turn-0");
-  const first = reduce(
-    createInitialPromptQueueState(),
-    enqueue("prompt-1"),
-    available
-  );
-  const withSecond = reduce(first.state, enqueue("prompt-2"), available).state;
-  const completed = reduce(
-    withSecond,
-    commandResult(
-      commandId(first.commands[0]),
-      "queue/sendPrompt",
-      "succeeded"
-    ),
-    available,
-    {
-      sendValidation: {
-        kind: "valid",
-        result: {
-          kind: "goalControl",
-          session: activitySession("settled", 2, "turn-0")
-        }
-      }
-    }
-  );
-  assert.equal(send(completed.commands[0]).promptId, "prompt-2");
-  assert.equal(
-    completed.state.recordsBySessionId["session-1"]?.deliveryBarrierTurnId,
-    null
-  );
 });
 
 test("late send result drains once when its exact canonical turn already settled", () => {
@@ -463,8 +311,6 @@ test("user stop suspension blocks drain until explicit resume", () => {
     state,
     {
       agentSessionId: "session-1",
-      awaitingTurnExpiresAtUnixMs: 30_000,
-      commandId: "stop-1",
       type: "session/stopRequested",
       workspaceId: "workspace-1"
     },
@@ -1112,7 +958,6 @@ function reduce(
   intent: Parameters<typeof promptQueueReducer>[1],
   lifecycle: SessionLifecycleState,
   options: {
-    cancelValidation?: CancelResultValidation;
     deletedSessionIds?: Readonly<Record<string, true>>;
     sendValidation?: SendInputResultValidation;
     strategy?: PromptQueueSendNowStrategy;
@@ -1139,7 +984,6 @@ function reduce(
           )
         : null);
   return promptQueueReducer(state, intent, {
-    cancelResultValidation: options.cancelValidation,
     deletedSessionIds: options.deletedSessionIds ?? {},
     lifecycle,
     sendNowStrategy: strategy,

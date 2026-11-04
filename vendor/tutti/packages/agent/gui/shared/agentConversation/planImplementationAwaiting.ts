@@ -1,5 +1,4 @@
 import {
-  selectPlanTurnDismissed,
   selectSessionMessages,
   selectWorkspaceAgentConsumerSessions,
   type AgentActivitySession,
@@ -23,7 +22,6 @@ type AgentSessionEngineSnapshot = Parameters<
  */
 export function consumerAwaitingPlanImplementation(input: {
   capabilities: AgentActivitySession["capabilities"] | null | undefined;
-  dismissed: boolean;
   latestTurn: AgentActivityTurn | null | undefined;
   messages: readonly {
     turnId?: string | null;
@@ -38,7 +36,6 @@ export function consumerAwaitingPlanImplementation(input: {
     !latestTurn ||
     latestTurn.phase !== "settled" ||
     latestTurn.outcome !== "completed" ||
-    input.dismissed ||
     !sessionAllowsPlanImplementation(input.capabilities)
   ) {
     return false;
@@ -66,11 +63,6 @@ export function selectRootAgentSessionIdsAwaitingPlanImplementation(
     if (
       !consumerAwaitingPlanImplementation({
         capabilities: consumer.session.capabilities,
-        dismissed: selectPlanTurnDismissed(
-          state,
-          sessionId,
-          consumer.latestTurn?.turnId
-        ),
         latestTurn: consumer.latestTurn,
         messages: sessionMessagesForPlanDetection(state, consumer.session)
       })

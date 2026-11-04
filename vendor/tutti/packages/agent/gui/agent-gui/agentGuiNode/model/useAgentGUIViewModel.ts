@@ -56,7 +56,6 @@ export function useAgentGUIViewModel(
       candidate.composer.draftContent,
       candidate.composer.draftPrompt,
       candidate.composer.drainingQueuedPromptId,
-      candidate.composer.goalPauseSupported,
       candidate.composer.gate,
       candidate.composer.hasPendingSubmitStopTarget,
       candidate.composer.handoffAgentTargets,
@@ -64,14 +63,9 @@ export function useAgentGUIViewModel(
       candidate.composer.isCreatingConversation,
       candidate.composer.isInterrupting,
       candidate.composer.isSubmitting,
-      candidate.composer.isTuttiModeActive,
-      candidate.composer.isTuttiModeUpdating,
       candidate.composer.promptImagesSupported,
       candidate.composer.queueStatus,
-      candidate.composer.queuedPrompts,
-      candidate.composer.tuttiModeEffect,
-      candidate.composer.tuttiModeSpeed,
-      candidate.composer.tuttiModeUpdateStatus
+      candidate.composer.queuedPrompts
     ]
   );
   const interaction = useMemo(
@@ -100,9 +94,7 @@ export function useAgentGUIViewModel(
     () => candidate.operations,
     [
       candidate.operations.forkThroughTurnPendingTurnIds,
-      candidate.operations.goalClearNoticeSequence,
       candidate.operations.isDeletingConversation,
-      candidate.operations.isDeletingProjectConversations,
       candidate.operations.isUserProjectMutationPending,
       candidate.operations.pendingDeleteConversation,
       candidate.operations.pendingDeleteProjectConversations

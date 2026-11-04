@@ -1,6 +1,5 @@
 import type { AgentActivitySessionInput } from "../sessionNormalization.ts";
 import type { AgentActivityTurn } from "../types.ts";
-import type { AgentActivityEditRetryAvailability } from "./editRetry.types.ts";
 import type {
   PendingActivationIntentRecord,
   PendingActivationStatus
@@ -115,7 +114,6 @@ function existingSessionProjection(
   if (!result.detail || typeof result.detail !== "object") return false;
   const detail = result.detail as {
     childSessions?: unknown;
-    editRetry?: unknown;
     lifecycleCapabilitiesProjected?: unknown;
     projection?: unknown;
     session?: unknown;
@@ -129,15 +127,12 @@ function existingSessionProjection(
     detail.projection !== "authoritative" ||
     detail.lifecycleCapabilitiesProjected !== true ||
     session === null ||
-    entities === null ||
-    (detail.editRetry !== undefined &&
-      !isEditRetryAvailability(detail.editRetry))
+    entities === null
   ) {
     return false;
   }
   return {
     childSessions: entities.childSessions,
-    ...(detail.editRetry === undefined ? {} : { editRetry: detail.editRetry }),
     session,
     turns: entities.turns,
     type: "session/detailSnapshotReceived",
@@ -182,24 +177,6 @@ function scopedDetailEntities(
     childSessions: decodedChildSessions,
     turns: decodedTurns
   };
-}
-
-function isEditRetryAvailability(
-  value: unknown
-): value is AgentActivityEditRetryAvailability {
-  if (!value || typeof value !== "object") return false;
-  const availability = value as Partial<AgentActivityEditRetryAvailability>;
-  return Boolean(
-    typeof availability.supported === "boolean" &&
-    typeof availability.eligible === "boolean" &&
-    typeof availability.historyRevision === "number" &&
-    Number.isFinite(availability.historyRevision) &&
-    typeof availability.recoveryState === "string" &&
-    Array.isArray(availability.availableActions) &&
-    availability.availableActions.every(
-      (action) => action === "reconcile" || action === "retry_replacement"
-    )
-  );
 }
 
 function normalizedString(value: unknown): string | null {

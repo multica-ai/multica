@@ -33,60 +33,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
         session
       };
     },
-    async cancelTurn(input, options) {
-      calls.push({
-        commandId: options.commandId,
-        input,
-        kind: "cancel",
-        origin: options.origin,
-        signal: options.signal
-      });
-    },
-    async controlGoal(input, options) {
-      assert.ok(options);
-      calls.push({
-        commandId: options.commandId,
-        input,
-        kind: "goal",
-        origin: options.origin,
-        signal: options.signal
-      });
-      return { goal: null, session };
-    },
-    async deleteSessions(input, options) {
-      calls.push({
-        commandId: options?.commandId ?? "",
-        input,
-        kind: "delete",
-        origin: options?.origin ?? "engine",
-        signal: options?.signal
-      });
-      return {
-        cleanupFailedSessionIds: [],
-        removedMessages: 0,
-        removedSessionIds: [],
-        removedSessions: 0
-      };
-    },
-    async respondToInteraction(input, options) {
-      calls.push({
-        commandId: options.commandId,
-        input,
-        kind: "respond",
-        origin: options.origin,
-        signal: options.signal
-      });
-    },
-    async renameSession(input, options) {
-      calls.push({
-        commandId: options?.commandId ?? "",
-        input,
-        kind: "rename",
-        origin: options?.origin,
-        signal: options?.signal
-      });
-      return { session };
-    },
     async sendInput(input, options) {
       calls.push({
         commandId: options.commandId,
@@ -95,16 +41,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
         origin: options.origin,
         signal: options.signal
       });
-    },
-    async setSessionPinned(input, options) {
-      calls.push({
-        commandId: options?.commandId ?? "",
-        input,
-        kind: "pin",
-        origin: options?.origin ?? "engine",
-        signal: options?.signal
-      });
-      return { session };
     },
     async updateSessionSettings(input, options) {
       calls.push({
@@ -137,13 +73,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     modelExplicit: false,
     initialContent: [{ text: "build it", type: "text" }],
     initialDisplayPrompt: "Build it",
-    initialGoalControl: { action: "set", objective: "ship it" },
-    initialTuttiModeActivation: {
-      effect: 80,
-      source: "slash_command",
-      speed: 60,
-      status: "active"
-    },
     mode: "new",
     railPlacement: {
       kind: "project",
@@ -181,58 +110,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     type: "session/updateSettings",
     workspaceId: "workspace-1"
   });
-  await executeAndWait(port, {
-    agentSessionId: "session-1",
-    commandId: "cancel-1",
-    turnId: "turn-1",
-    type: "turn/cancel",
-    workspaceId: "workspace-1"
-  });
-  await executeAndWait(port, {
-    agentSessionId: "session-1",
-    commandId: "pin-1",
-    correlationId: "pin-1",
-    pinned: true,
-    type: "session/setPinned",
-    workspaceId: "workspace-1"
-  });
-  await executeAndWait(port, {
-    agentSessionId: "session-1",
-    commandId: "rename-1",
-    correlationId: "rename-1",
-    title: "Renamed session",
-    type: "session/rename",
-    workspaceId: "workspace-1"
-  });
-  await executeAndWait(port, {
-    agentSessionIds: ["session-1", "session-2"],
-    commandId: "delete-1",
-    correlationId: "delete-1",
-    type: "sessions/delete",
-    workspaceId: "workspace-1"
-  });
-  await executeAndWait(port, {
-    action: "accept",
-    agentSessionId: "session-1",
-    commandId: "respond-1",
-    correlationId: "request-1",
-    optionId: "yes",
-    payload: { approved: true },
-    requestId: "request-1",
-    turnId: "turn-1",
-    type: "interaction/respond",
-    workspaceId: "workspace-1"
-  });
-  await executeAndWait(port, {
-    action: "set",
-    agentSessionId: "session-1",
-    clientSubmitId: "goal-submit-1",
-    commandId: "goal-1",
-    correlationId: "goal-submit-1",
-    objective: "ship it",
-    type: "goal/control",
-    workspaceId: "workspace-1"
-  });
 
   assert.equal(extensionCalls, 0);
   assert.deepEqual(
@@ -241,12 +118,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
       "activate",
       "send",
       "settings",
-      "cancel",
-      "pin",
-      "rename",
-      "delete",
-      "respond",
-      "goal"
     ]
   );
   assert.deepEqual(
@@ -255,12 +126,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
       "activate-1",
       "send-1",
       "settings-1",
-      "cancel-1",
-      "pin-1",
-      "rename-1",
-      "delete-1",
-      "respond-1",
-      "goal-1"
     ]
   );
   assert.deepEqual(calls[0]?.input, {
@@ -274,13 +139,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     modelExplicit: false,
     initialContent: [{ text: "build it", type: "text" }],
     initialDisplayPrompt: "Build it",
-    initialGoalControl: { action: "set", objective: "ship it" },
-    initialTuttiModeActivation: {
-      effect: 80,
-      source: "slash_command",
-      speed: 60,
-      status: "active"
-    },
     mode: "new",
     railPlacement: {
       kind: "project",
@@ -310,83 +168,11 @@ test("projects shared commands onto typed lifecycle effects without host switche
     settings: { speed: "fast" },
     workspaceId: "workspace-1"
   });
-  assert.deepEqual(calls[4]?.input, {
-    agentSessionId: "session-1",
-    pinned: true,
-    workspaceId: "workspace-1"
-  });
-  assert.deepEqual(calls[5]?.input, {
-    agentSessionId: "session-1",
-    title: "Renamed session",
-    workspaceId: "workspace-1"
-  });
-  assert.deepEqual(calls[6]?.input, {
-    agentSessionIds: ["session-1", "session-2"],
-    workspaceId: "workspace-1"
-  });
   assert.ok(calls.every((call) => call.signal instanceof AbortSignal));
   assert.deepEqual(
     calls.map((call) => call.origin),
-    [
-      "engine",
-      "engine",
-      "engine",
-      "engine",
-      "engine",
-      "engine",
-      "engine",
-      "engine",
-      "engine"
-    ]
+    ["engine", "engine", "engine"]
   );
-});
-
-test("projects plan decisions with exact Engine provenance", async () => {
-  let receivedOptions: unknown;
-  let receivedSignal: AbortSignal | undefined;
-  const result = await executeAndWait(
-    {
-      ...createTestEngineCommandPort(async () => {
-        throw new Error("unexpected generic execute");
-      }),
-      async executePlanDecision(_command, options) {
-        assert.ok(options);
-        receivedOptions = options;
-        receivedSignal = options.signal;
-        return {
-          operation: {
-            agentSessionId: "session-1",
-            idempotencyKey: "decision-1",
-            operationId: "operation-1",
-            requestId: "request-1",
-            status: "completed",
-            turnId: "turn-1",
-            workspaceId: "workspace-1"
-          }
-        };
-      }
-    },
-    {
-      action: "implement",
-      agentSessionId: "session-1",
-      commandId: "plan-1",
-      correlationId: "plan-1",
-      idempotencyKey: "decision-1",
-      promptKind: "plan-implementation",
-      requestId: "request-1",
-      turnId: "turn-1",
-      type: "plan/submitDecision",
-      workspaceId: "workspace-1"
-    }
-  );
-
-  assert.equal(result.outcome, "succeeded");
-  assert.deepEqual(receivedOptions, {
-    commandId: "plan-1",
-    origin: "engine",
-    signal: receivedSignal
-  });
-  assert.ok(receivedSignal instanceof AbortSignal);
 });
 
 test("rejects prompt settings preconditions that bypass the Engine state machine", async () => {

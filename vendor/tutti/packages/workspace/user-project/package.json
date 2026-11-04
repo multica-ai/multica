@@ -24,8 +24,8 @@
     "@tutti-os/ui-i18n-runtime": "workspace:*",
     "@tutti-os/ui-system": "workspace:*",
     "valtio": "2.3.2",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "peerDependencies": {
     "react": "^19.1.0",

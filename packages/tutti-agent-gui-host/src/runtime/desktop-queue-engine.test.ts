@@ -10,11 +10,12 @@ function setup(running = false, pendingStore?: DesktopPendingStore) {
   const sendInput = vi.fn();
   const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" },
     clock: { nowUnixMs: () => Date.now() }, scheduler: { schedule: (delay, callback) => { const timer = setTimeout(callback, delay); return { cancel: () => clearTimeout(timer) }; } },
-    commandPort: { kind: "typed", effects: { sendInput, activateSession: vi.fn(), cancelTurn: vi.fn(), deleteSessions: vi.fn(), respondToInteraction: vi.fn(), renameSession: vi.fn(), setSessionPinned: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
+    commandPort: { kind: "typed", effects: { sendInput, activateSession: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
   base.dispatch({ type: "session/snapshotReceived", sessions: [{ agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurnId: running ? "active" : null,
     ...(running ? { activeTurn: { agentSessionId: "session", turnId: "active", origin: "user_prompt", phase: "running", startedAtUnixMs: 1, updatedAtUnixMs: 1 } } : {}), pendingInteractions: [], latestTurnInteractions: [] }] });
   const options = { pendingStore, enabled: () => true, enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),
-    update: vi.fn(async (): Promise<LocalPromptQueue> => ({ revision: 2, paused: true, items: [] })), error: vi.fn() };
+    update: vi.fn(async (): Promise<LocalPromptQueue> => ({ revision: 2, paused: true, items: [] })), error: vi.fn(),
+    respondToInteraction: vi.fn(async () => ({ session: { agentSessionId: "session", workspaceId: "ws" } })), editRetry: vi.fn(), recoverEditRetry: vi.fn(), reconcileWorkspace: vi.fn() };
   const adapter = createDesktopQueueEngine(base, options);
   return { ...adapter, options, sendInput };
 }
@@ -321,11 +322,45 @@ describe("desktop queue presentation", () => {
     expect(queue.prompts).toEqual([item.display]); expect(queue.suspendReason).toBeNull();
     expect(engine.getSnapshot()).toBe(engine.getSnapshot()); engine.dispose();
   });
+  it("stops the turn a message on its way starts after the stop", async () => {
+    const { engine, options, prompts } = setup();
+    let admit!: (queue: LocalPromptQueue) => void;
+    options.enqueue.mockImplementation(() => new Promise((resolve) => { admit = resolve; }));
+    try {
+      submit(engine, "first");
+      prompts.stop("session");
+      expect(prompts.cancelRecord("session")).toMatchObject({ status: "awaitingTurn", targetClientSubmitId: "first" });
+      admit({ revision: 3, paused: false, items: [] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(options.update).toHaveBeenCalledOnce();
+      const turn = { agentSessionId: "session", turnId: "started", origin: "user_prompt" as const, phase: "running" as const, startedAtUnixMs: 2, updatedAtUnixMs: 2 };
+      engine.dispatch({ type: "session/historyAuthoritativeSnapshotReceived", workspaceId: "ws", agentSessionId: "session", childSessions: [], historyRevision: 1, turns: [turn],
+        session: { agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurn: turn, activeTurnId: "started", latestTurn: turn, pendingInteractions: [], latestTurnInteractions: [] },
+        messages: [{ agentSessionId: "session", kind: "user_prompt", messageId: "m", occurredAtUnixMs: 2, payload: { clientSubmitId: "first" }, role: "user", sequence: 1, turnId: "started", version: 1 }] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(options.update.mock.calls).toEqual([["session", "stop", undefined], ["session", "stop", undefined]]);
+      expect(prompts.cancelRecord("session")).toMatchObject({ status: "accepted", turnId: "started" });
+    } finally { engine.dispose(); }
+  });
+  it("answers an interaction until the conversation shows it answered", async () => {
+    const { engine, options, prompts } = setup(true);
+    const interaction = { agentSessionId: "session", turnId: "active", requestId: "question", kind: "question" as const, status: "pending" as const, createdAtUnixMs: 2, updatedAtUnixMs: 2 };
+    try {
+      engine.dispatch({ type: "interaction/upserted", interaction });
+      expect(prompts.respondToInteraction({ action: "submit", agentSessionId: "session", requestId: "question", turnId: "active", payload: { answersByQuestionId: { scope: "all" } } })).toBe(true);
+      expect(options.respondToInteraction).toHaveBeenCalledOnce();
+      expect(prompts.isRespondingToInteraction("session")).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(prompts.isRespondingToInteraction("session")).toBe(true);
+      engine.dispatch({ type: "interaction/upserted", interaction: { ...interaction, status: "answered", updatedAtUnixMs: 3 } });
+      expect(prompts.isRespondingToInteraction("session")).toBe(false);
+    } finally { engine.dispose(); }
+  });
   it("routes queue removal, send-now and stop to Electron", async () => {
-    const { engine, options } = setup();
+    const { engine, options, prompts } = setup();
     engine.dispatch({ type: "queue/removed", agentSessionId: "session", promptId: "removed" });
     engine.dispatch({ type: "queue/sendNowRequested", agentSessionId: "session", promptId: "next", awaitingTurnExpiresAtUnixMs: 1000, cancelCommandId: "cancel", timeoutMs: 1000 });
-    engine.stopSession({ agentSessionId: "session" });
+    prompts.stop("session");
     expect(options.update.mock.calls).toEqual([["session", "remove", "removed"], ["session", "sendNow", "next"], ["session", "stop", undefined]]);
     await Promise.resolve(); engine.dispose();
   });

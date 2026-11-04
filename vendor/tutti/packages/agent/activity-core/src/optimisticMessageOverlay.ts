@@ -4,8 +4,8 @@ import type {
   AgentActivityMessageDeltaEvent
 } from "./liveEvent.types.ts";
 import {
-  compareAgentActivityMessages,
-  mergeAgentActivityMessages
+  cloneAgentActivityMessage,
+  compareAgentActivityMessages
 } from "./merge.ts";
 import type {
   AgentActivityMessage,
@@ -477,5 +477,5 @@ function deleteScopeEntries<T>(entries: Map<string, T>, prefix: string): void {
 }
 
 function cloneMessage(message: AgentActivityMessage): AgentActivityMessage {
-  return mergeAgentActivityMessages([], [message])[0]!;
+  return cloneAgentActivityMessage(message);
 }

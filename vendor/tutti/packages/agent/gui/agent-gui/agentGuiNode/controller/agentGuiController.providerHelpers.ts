@@ -1,5 +1,6 @@
 import type {
   AgentActivityComposerOptions,
+  AgentActivityComposerOptionsLoadStatus,
   AgentActivityInteraction,
   AgentActivityMessage,
   AgentActivitySnapshot
@@ -286,26 +287,48 @@ export function agentGUINodeDataHasComposerTarget(
   return normalizeOptionalText(data.agentTargetId) !== null;
 }
 
+/** What choosing composer settings reads of a target's options. */
+export interface AgentGUIComposerOptionsReader {
+  options(targetKey: string | null | undefined): AgentActivityComposerOptions | null;
+  status(targetKey: string | null | undefined, section?: "core" | "capabilities" | "connectors"): AgentActivityComposerOptionsLoadStatus | undefined;
+}
+
+/** A conversation's unsettled write of its settings; none once it settles. */
+export interface AgentGUISessionSettingsUpdate {
+  errorCode: string | null;
+  errorMessage: string | null;
+  queuedSettings: Readonly<Record<string, unknown>> | null;
+  settings: Readonly<Record<string, unknown>> | null;
+  status: "failed" | "inFlight" | "unknown" | "waitingForRuntime";
+}
+
+/** Writing a conversation's settings: reads what is unsettled, asks for a change. */
+export interface AgentGUIComposerSettingsLane {
+  settingsUpdate(
+    agentSessionId: string | null | undefined
+  ): AgentGUISessionSettingsUpdate | null;
+  updateSettings(input: {
+    agentSessionId: string;
+    settings: Readonly<Record<string, unknown>>;
+  }): void;
+}
+
 export function composerOptionsForTarget(input: {
-  snapshot: AgentActivitySnapshot;
+  composer: AgentGUIComposerOptionsReader;
   target: AgentGUIComposerTargetData;
 }): AgentActivityComposerOptions | null {
-  const targetKey = input.target.agentTargetId?.trim() ?? "";
-  return targetKey
-    ? (input.snapshot.composerOptionsByTargetKey?.[targetKey] ?? null)
-    : null;
+  return input.composer.options(input.target.agentTargetId);
 }
 
 export function composerOptionsLoadingForTarget(input: {
-  snapshot: AgentActivitySnapshot;
+  composer: AgentGUIComposerOptionsReader;
   target: AgentGUIComposerTargetData;
 }): boolean {
   const targetKey = input.target.agentTargetId?.trim() ?? "";
   return Boolean(
     targetKey &&
-    !input.snapshot.composerOptionsByTargetKey?.[targetKey] &&
-    input.snapshot.composerOptionsLoadStatusByTargetKey?.[targetKey] ===
-      "loading"
+    !input.composer.options(targetKey) &&
+    input.composer.status(targetKey) === "loading"
   );
 }
 

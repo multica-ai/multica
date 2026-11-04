@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AgentActivityInteraction } from "@tutti-os/agent-activity-core";
 import type { AgentHostUserProjectsApi } from "../../../host/agentHostApi";
 import { normalizeAgentApprovalOptions } from "../../../shared/agentConversation/projection/agentApprovalProjection";
-import { projectConversationRailSectionsByExactKey } from "../model/agentGuiConversationRail";
 import {
   areAgentGUIUserProjectsEqual,
   interactiveApprovalFromInteraction,
@@ -101,7 +100,7 @@ describe("interactivePromptFromInteraction", () => {
 });
 
 describe("AgentGUI user-project snapshot projection", () => {
-  it("preserves the ordered section templates from an already-loaded shared service", () => {
+  it("preserves the project order from an already-loaded shared service", () => {
     const api = {
       service: {
         getSnapshot: () => ({
@@ -130,23 +129,10 @@ describe("AgentGUI user-project snapshot projection", () => {
     } as AgentHostUserProjectsApi;
 
     const projects = readAgentGUIUserProjectSnapshot(api);
-    const sections = projectConversationRailSectionsByExactKey({
-      conversations: [],
-      labels: {
-        sectionConversations: "Conversations",
-        sectionPinned: "Pinned"
-      },
-      userProjects: projects
-    });
 
     expect(projects.map((project) => project.sectionKey)).toEqual([
       "project:/workspace/beta",
       "project:/workspace/alpha"
-    ]);
-    expect(sections.map((section) => section.id)).toEqual([
-      "project:/workspace/beta",
-      "project:/workspace/alpha",
-      "conversations"
     ]);
   });
 

@@ -44,9 +44,6 @@ export const agentGUIBuildEntries = {
   "workbench/types": "workbench/types.ts",
   "workspace-agent-generated-files": "shared/workspaceAgentGeneratedFiles.ts",
   "conversation-message-controller": "agentConversationMessageController.ts",
-  "conversation-rail-controller": "agentConversationRailController.ts",
-  "conversation-rail-runtime": "agentConversationRailRuntime.ts",
-  "conversation-rail-projection": "conversationRailProjection.ts",
   "conversation-projection": "conversationProjection.ts",
   "composer-projection": "composerProjection.ts"
 } as const;
@@ -92,9 +89,6 @@ export const agentGUIDtsEntryGroups = [
     "conversation-activity-projection",
     "workspace-agent-generated-files",
     "conversation-message-controller",
-    "conversation-rail-controller",
-    "conversation-rail-runtime",
-    "conversation-rail-projection",
     "conversation-projection",
     "composer-projection",
     "composer-settings-core/index"

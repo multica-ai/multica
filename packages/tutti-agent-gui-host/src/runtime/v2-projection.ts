@@ -1,23 +1,18 @@
-import type { AgentActivityDurableMessage, AgentActivityInteraction, AgentActivityTurn } from "@tutti-os/agent-activity-core";
+import type { AgentActivityInteraction, AgentActivityTurn } from "@tutti-os/agent-activity-core";
 import type { ConversationModel, TurnModel } from "@multica/conversation-client/models";
-
-type RawMessage = Omit<AgentActivityDurableMessage, "version" | "sequence">;
 
 export interface V2Projection {
   turns: AgentActivityTurn[];
-  messages: RawMessage[];
   interactions: AgentActivityInteraction[];
   activeTurnId: string | null;
 }
 
-/** Puts a conversation's own derived state into the GUI's turns, messages and interactions. */
+/** Puts a conversation's own derived state into the GUI's turns and interactions. */
 export function projectV2Conversation(
   conversation: ConversationModel,
-  context: { workspaceId: string; agentSessionId: string; locale: "en" | "zh-CN" },
+  context: { agentSessionId: string },
 ): V2Projection {
-  const { workspaceId, agentSessionId, locale } = context;
-  const messages = conversation.transcript(locale).map((message) => ({ workspaceId, agentSessionId, ...message }) as RawMessage);
-
+  const { agentSessionId } = context;
   const interactions: AgentActivityInteraction[] = [];
   for (const interaction of conversation.interactions.values()) {
     if (interaction.kind !== "question") continue;
@@ -31,7 +26,7 @@ export function projectV2Conversation(
   const waiting = new Set(interactions.filter((item) => item.status === "pending").map((item) => item.turnId));
   const turns = [...conversation.turns.values()].map((turn) => projectTurn(turn, agentSessionId, waiting.has(turn.id)));
   const active = [...conversation.turns.values()].filter((turn) => turn.status === "running").sort((a, b) => millis(b.startedAt) - millis(a.startedAt))[0];
-  return { turns, messages, interactions, activeTurnId: active?.id ?? null };
+  return { turns, interactions, activeTurnId: active?.id ?? null };
 }
 
 function projectTurn(turn: TurnModel, agentSessionId: string, waiting: boolean): AgentActivityTurn {

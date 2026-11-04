@@ -45,8 +45,8 @@ export function localSourceFromClient(client: { request: Request; subscribe(list
   return {
     opened,
     open: (id) => { opened.push(id); return service.open(id); },
-    // Test hosts change their answers between reads, so this always reads.
-    ensure: (id) => service.refresh(id),
+    // Test hosts change their answers between reads, so this reads unless one is under way.
+    ensure: (id) => service.status(id).loading ? service.ensure(id) : service.refresh(id),
     refresh: (id) => service.refresh(id),
     loadOlder: async () => {},
     observe: (id, listener) => service.observe(id, listener),
