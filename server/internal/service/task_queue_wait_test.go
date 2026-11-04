@@ -59,6 +59,21 @@ func TestQueueWaitUpdatesForAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("runtime_no_capacity attributes every candidate row of the agent", func(t *testing.T) {
+		// The runtime-wide cap (#9795) rejects the agent's claim before any
+		// candidate is attempted, so the wait reason is as agent-wide as
+		// agent_capacity: every queued row of that agent stays behind the cap.
+		got := queueWaitUpdatesForAgent(candidates, claimAttempt{Outcome: claimOutcomeRuntimeNoCapacity})
+		if len(got) != 2 {
+			t.Fatalf("updates = %v, want 2", got)
+		}
+		for i, want := range []pgtype.UUID{head, tail} {
+			if got[i].taskID != want || got[i].reason != queueWaitRuntimeCapacity {
+				t.Fatalf("update[%d] = %+v, want {%v %s}", i, got[i], want, queueWaitRuntimeCapacity)
+			}
+		}
+	})
+
 	t.Run("claimed, errors, and empty attempts write nothing", func(t *testing.T) {
 		for _, outcome := range []string{claimOutcomeClaimed, claimOutcomeErrorClaim, "unknown", ""} {
 			if got := queueWaitUpdatesForAgent(candidates, claimAttempt{Outcome: outcome}); got != nil {

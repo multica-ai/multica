@@ -18,6 +18,8 @@ export function queueConstraintPhrase(constraint: string | undefined, t: IssuesT
   switch (constraint) {
     case "agent_capacity":
       return t(($) => $.inline_run.queue_constraint_agent_capacity);
+    case "runtime_capacity":
+      return t(($) => $.inline_run.queue_constraint_runtime_capacity);
     case "attempted_unclaimed":
       return t(($) => $.inline_run.queue_constraint_attempted_unclaimed);
     case "agent_rebound":

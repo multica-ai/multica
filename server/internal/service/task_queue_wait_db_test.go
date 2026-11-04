@@ -117,6 +117,76 @@ func TestQueueWaitDBAgentCapacityClearsOnClaim(t *testing.T) {
 	wantReason(t, f.pool, tail, "")
 }
 
+// TestQueueWaitDBRuntimeCapacity pins the runtime-wide-cap shape (#9795 +
+// route B): with the runtime's max_concurrent_tasks=1 held by a dispatched
+// task and the agent itself far from its own limit, the poll is rejected by
+// the runtime cap before any candidate is attempted, and every queued
+// candidate of that agent records runtime_capacity. Raising the cap lets the
+// next poll claim the head and clear its attribution on the way out.
+func TestQueueWaitDBRuntimeCapacity(t *testing.T) {
+	f := newClaimDecisionFixture(t, 5)
+	headIssue := f.fx.Issue(t, "queue wait runtime cap head")
+	tailIssue := f.fx.Issue(t, "queue wait runtime cap tail")
+	head := f.fx.Task(t, util.UUIDToString(f.agentID), testutil.Cols{
+		"runtime_id": util.UUIDToString(f.runtimeID),
+		"issue_id":   headIssue,
+		"status":     "queued",
+	})
+	tail := f.fx.Task(t, util.UUIDToString(f.agentID), testutil.Cols{
+		"runtime_id": util.UUIDToString(f.runtimeID),
+		"issue_id":   tailIssue,
+		"status":     "queued",
+	})
+	// One dispatched task on the fixture issue occupies the runtime's only
+	// slot. The agent-level cap (5) stays far away so the rejection can only
+	// come from the runtime cap — the attribution must say runtime, not agent.
+	// A distinct issue also keeps the holder clear of the per-(issue, agent)
+	// serialization fence when the cap rises again. The fixture's dispatched
+	// rows carry an expired prepare lease (the stale-reclaim shape), so renew
+	// it: a reclaimable holder would free its slot mid-poll instead of
+	// holding the capacity this test pins.
+	holder := f.insertTask(t, "dispatched")
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE agent_task_queue SET prepare_lease_expires_at = now() + interval '10 minutes' WHERE id = $1`, holder,
+	); err != nil {
+		t.Fatalf("renew holder lease: %v", err)
+	}
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE agent_runtime SET max_concurrent_tasks = 1 WHERE id = $1`, util.UUIDToString(f.runtimeID),
+	); err != nil {
+		t.Fatalf("set runtime cap: %v", err)
+	}
+
+	ctx := context.Background()
+	claimed, err := f.svc.ClaimTaskForRuntime(ctx, f.runtimeID)
+	if err != nil {
+		t.Fatalf("capped poll: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("capped poll claimed %s, want nil", util.UUIDToString(claimed.ID))
+	}
+	wantReason(t, f.pool, head, queueWaitRuntimeCapacity)
+	wantReason(t, f.pool, tail, queueWaitRuntimeCapacity)
+
+	// Raising the cap admits the head; the claim clears its recorded wait so a
+	// later read cannot mistake the old constraint for a live one.
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE agent_runtime SET max_concurrent_tasks = 2 WHERE id = $1`, util.UUIDToString(f.runtimeID),
+	); err != nil {
+		t.Fatalf("raise runtime cap: %v", err)
+	}
+	second, err := f.svc.ClaimTaskForRuntime(ctx, f.runtimeID)
+	if err != nil {
+		t.Fatalf("post-raise poll: %v", err)
+	}
+	if second == nil || util.UUIDToString(second.ID) != head {
+		t.Fatalf("post-raise poll claimed %v, want head %s", second, head)
+	}
+	wantReason(t, f.pool, head, "")
+	// The tail was not attempted by the claim loop and keeps its attribution.
+	wantReason(t, f.pool, tail, queueWaitRuntimeCapacity)
+}
+
 // TestQueueWaitDBAttemptedUnclaimedHeadOnly pins the runtime-offline shape of
 // attempted_unclaimed: the candidate stays visible (the candidate query has no
 // liveness fence) while the claim is rejected, and only the head row the poll

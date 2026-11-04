@@ -24,6 +24,7 @@ const t = ((selector: (bundle: unknown) => Leaf) => {
 describe("queue wait copy", () => {
   it("maps every recorded constraint to its own phrase", () => {
     expect(queueConstraintPhrase("agent_capacity", t)).toBe(en.inline_run.queue_constraint_agent_capacity);
+    expect(queueConstraintPhrase("runtime_capacity", t)).toBe(en.inline_run.queue_constraint_runtime_capacity);
     expect(queueConstraintPhrase("attempted_unclaimed", t)).toBe(en.inline_run.queue_constraint_attempted_unclaimed);
     expect(queueConstraintPhrase("agent_rebound", t)).toBe(en.inline_run.queue_constraint_agent_rebound);
     expect(queueConstraintPhrase("agent_unbound", t)).toBe(en.inline_run.queue_constraint_agent_unbound);

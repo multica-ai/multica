@@ -20,6 +20,10 @@ import (
 //   - agent_capacity is an agent-level fact (running >= max_concurrent_tasks
 //     observed under the agent row lock), so it is written to every candidate
 //     row of that agent.
+//   - runtime_capacity is a runtime-level fact (active tasks >= the runtime's
+//     max_concurrent_tasks, observed under the runtime claim capacity lock,
+//     #9795), so like agent_capacity it applies to every candidate row of the
+//     agent whose claim the cap rejected.
 //   - attempted_unclaimed states only that this poll attempted the head
 //     candidate and claimed nothing: the exact cause (a ClaimAgentTask fence
 //     versus another poller winning the row) is unknowable from the Go side,
@@ -42,6 +46,9 @@ import (
 const (
 	// queueWaitAgentCapacity: the agent is already running max_concurrent_tasks.
 	queueWaitAgentCapacity = "agent_capacity"
+	// queueWaitRuntimeCapacity: the agent's runtime is already running its
+	// runtime-wide max_concurrent_tasks across all bound agents (#9795).
+	queueWaitRuntimeCapacity = "runtime_capacity"
 	// queueWaitAttemptedUnclaimed: this poll attempted the row's head candidate
 	// and nothing was claimed; concurrent competition or a claim fence, not
 	// distinguishable here.
@@ -70,6 +77,8 @@ func queueWaitReasonForOutcome(outcome string) string {
 	switch outcome {
 	case claimOutcomeNoCapacity:
 		return queueWaitAgentCapacity
+	case claimOutcomeRuntimeNoCapacity:
+		return queueWaitRuntimeCapacity
 	case claimOutcomeNoTasks:
 		return queueWaitAttemptedUnclaimed
 	case claimOutcomeRuntimeMismatch:

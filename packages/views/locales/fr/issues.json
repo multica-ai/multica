@@ -5,6 +5,7 @@
     "stopping": "Arrêt...",
     "queued": "En attente d'un agent disponible.",
     "queue_constraint_agent_capacity": "l'agent a atteint sa limite d'exécutions simultanées",
+    "queue_constraint_runtime_capacity": "le runtime a atteint sa limite d'exécutions simultanées",
     "queue_constraint_attempted_unclaimed": "file d'attente occupée",
     "queue_constraint_agent_rebound": "l'agent a été déplacé vers un autre runtime",
     "queue_constraint_agent_unbound": "l'agent n'a pas de runtime",
