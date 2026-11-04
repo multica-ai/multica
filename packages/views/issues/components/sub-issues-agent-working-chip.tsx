@@ -17,11 +17,14 @@ import { useT } from "../../i18n";
 interface SubIssuesAgentWorkingChipProps {
   /** Parent issue whose direct children this chip aggregates over. */
   parentIssueId: string;
+  /** HoverCardContent horizontal alignment. Defaults to "start". */
+  align?: "start" | "center" | "end";
 }
 
 /**
  * Aggregate "N agents working" chip for the sub-issues header in issue
- * detail (multica#5825). The per-row IssueAgentActivityIndicator answers
+ * detail (multica#5825) and parent task cards on the board when subtasks
+ * are hidden (multica#8788). The per-row IssueAgentActivityIndicator answers
  * "which sub-issue is being worked on"; this chip answers "how many agents
  * are on this parent's children right now" without scanning the rows — and
  * keeps that signal visible while the list is collapsed.
@@ -40,6 +43,7 @@ interface SubIssuesAgentWorkingChipProps {
 export const SubIssuesAgentWorkingChip = memo(
   function SubIssuesAgentWorkingChip({
     parentIssueId,
+    align = "start",
   }: SubIssuesAgentWorkingChipProps) {
     const { t } = useT("issues");
     const wsId = useWorkspaceId();
@@ -65,7 +69,7 @@ export const SubIssuesAgentWorkingChip = memo(
             })}
           </ShimmerText>
         </HoverCardTrigger>
-        <HoverCardContent align="start" className="w-72">
+        <HoverCardContent align={align} className="w-72">
           <WorkingAgentsHoverContent agents={agents} />
         </HoverCardContent>
       </HoverCard>
