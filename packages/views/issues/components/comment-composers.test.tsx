@@ -13,8 +13,7 @@ import { ReplyInput } from "./reply-input";
 /** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
 type QuickActionMenuProp = {
   getQuickActions?: () => { id: string; name: string; description?: string }[];
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  onRenderError?: (error: unknown) => void;
+  getQuickActionContent?: (quickActionId: string) => string;
 };
 
 // Uploads now flow through the module-level coordinator, which calls
@@ -327,7 +326,7 @@ describe("quick action `/` menu", () => {
     apiListWorkspaces.mockResolvedValue([workspace]);
     apiListQuickActions.mockResolvedValue({
       quick_actions: [
-        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
+        { id: "qa-1", name: "review", description: "Ask for a review", status: "active", assignee_type: "", prompt: "Review this issue" },
         { id: "qa-2", name: "retired", description: "", status: "archived" },
       ],
     });
@@ -378,17 +377,14 @@ describe("quick action `/` menu", () => {
       });
     });
 
-    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
-      apiRenderQuickAction.mockResolvedValue("rendered body");
+    it(`builds quick action text from the catalog in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
       activateComposer(composer.shell);
 
       await waitFor(() => {
-        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
+        expect(editorQuickActionMenu.last?.getQuickActionContent?.("qa-1")).toBe("Review this issue");
       });
-      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
-
-      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
+      expect(apiRenderQuickAction).not.toHaveBeenCalled();
     });
   }
 });
