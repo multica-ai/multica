@@ -1440,12 +1440,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
-			if strings.HasPrefix(description, "item/") {
-				turnEffectsObserved.Store(true)
-			}
 			semanticObserved.Store(true)
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
 			trySendString(semanticActivityCh, description)
+		},
+		onItemProgress: func(itemType string) {
+			// An input echo acknowledges the prompt; it is not agent output.
+			// Unknown item types remain unsafe to replay.
+			if itemType != "userMessage" {
+				turnEffectsObserved.Store(true)
+			}
 		},
 		onTurnDone: func(aborted bool) {
 			select {
@@ -2557,6 +2561,7 @@ type codexClient struct {
 	// Result.Output fallbacks must use this callback rather than the last chunk.
 	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
+	onItemProgress           func(itemType string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
@@ -3898,6 +3903,9 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	}
 	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+	if isCodexItemProgressActivity(method) && c.onItemProgress != nil {
+		c.onItemProgress(itemType)
 	}
 	if item == nil && method != "item/agentMessage/delta" {
 		return

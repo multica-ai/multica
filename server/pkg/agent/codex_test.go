@@ -4502,6 +4502,7 @@ func TestCodexExecuteRetriesTransientCapacityInSameSession(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
 		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"userMessage","id":"input-1","content":[{"type":"text","text":"prompt"}]}}}'`+"\n"+
 		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"failed","error":{"message":"Selected model is at capacity. Please try a different model.","codexErrorInfo":"serverOverloaded"}}}}'`+"\n"+
 		`else`+"\n"+
 		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered"}}}'`+"\n"+
@@ -4535,7 +4536,15 @@ func TestCodexExecuteRetriesTransientCapacityInSameSession(t *testing.T) {
 	}
 	for i := 1; i <= 2; i++ {
 		got, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("cwd-%d", i)))
-		if err != nil || strings.TrimSpace(string(got)) != cwd {
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotInfo, err := os.Stat(strings.TrimSpace(string(got)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantInfo, err := os.Stat(cwd)
+		if err != nil || !os.SameFile(gotInfo, wantInfo) {
 			t.Fatalf("attempt %d cwd = %q, err = %v; want %q", i, got, err, cwd)
 		}
 	}
@@ -4609,6 +4618,7 @@ func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
 		{"permanent model rejection", "The selected model is no longer supported", "", false, false, false, false, "1"},
 		{"tool already started", "selected model unavailable", "serverOverloaded", true, false, false, false, "1"},
 		{"text already emitted", "selected model unavailable", "serverOverloaded", false, true, false, false, "1"},
+		{"unknown item", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
 		{"process cleanup unconfirmed", "selected model unavailable", "serverOverloaded", false, false, true, false, "1"},
 		{"selected model not pinned", "selected model unavailable", "serverOverloaded", false, false, false, true, "1"},
 	}
@@ -4635,6 +4645,9 @@ func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
 			}
 			if tc.textStarted {
 				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-1","text":"partial"}}}'` + "\n"
+			}
+			if tc.name == "unknown item" {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"futureAgentAction","id":"item-1"}}}'` + "\n"
 			}
 			fakePath := writeFakeCodexAppServer(t, ""+
 				`DIR="$(dirname "$0")"`+"\n"+
@@ -4724,7 +4737,7 @@ func TestCodexCapacityRetryRespectsRunTimeout(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 	previousBackoffs := codexCapacityRetryBackoffs
-	codexCapacityRetryBackoffs = [5]time.Duration{200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond}
+	codexCapacityRetryBackoffs = [5]time.Duration{20 * time.Second, 20 * time.Second, 20 * time.Second, 20 * time.Second, 20 * time.Second}
 	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`DIR="$(dirname "$0")"`+"\n"+
@@ -4735,7 +4748,7 @@ func TestCodexCapacityRetryRespectsRunTimeout(t *testing.T) {
 		`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"}}}}'`+"\n")
-	result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 100 * time.Millisecond})
+	result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 5 * time.Second})
 	if result.Status != "failed" || !strings.Contains(result.Error, "insufficient time") {
 		t.Fatalf("short timeout result = %+v", result)
 	}
