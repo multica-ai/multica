@@ -77,7 +77,8 @@
     "assign_issue": "Assign an issue to {{name}}...",
     "new_issue": "New issue for {{name}}",
     "pin_in_chat": "Pin in chat",
-    "unpin_in_chat": "Unpin from chat"
+    "unpin_in_chat": "Unpin from chat",
+    "settings": "Open agent settings"
   },
   "autopilot": {
     "run_now": "Run once now",

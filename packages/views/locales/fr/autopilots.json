@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "Nouvelle automatisation",
-    "start_blank": "Partir de zéro",
     "table": {
       "name": "Nom",
       "agent": "Agent",
@@ -15,10 +14,6 @@
       "created": "Création"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "Aucune automatisation pour l'instant",
-      "hint": "Planifiez du travail récurrent pour vos agents IA. Choisissez un modèle ou partez de zéro."
-    },
     "no_matches": "Aucune automatisation correspondante",
     "retry": "Réessayer"
   },
@@ -66,6 +61,8 @@
   },
   "detail": {
     "not_found": "Automatisation introuvable",
+    "not_found_description": "Elle a peut-être été supprimée, ou vous n'y avez pas accès.",
+    "back_to_list": "Toutes les automatisations",
     "pause_aria": "Mettre l'automatisation en pause",
     "activate_aria": "Activer l'automatisation",
     "paused_runtime_required": "En pause car l'assigné a perdu son runtime. Associez un runtime, puis réactivez cette automatisation.",
@@ -485,7 +482,6 @@
     "select_page": "Sélectionner tous les réveils activés",
     "load_error": "Impossible de charger les réveils",
     "loading": "Chargement des réveils…",
-    "empty": "Aucune règle de réveil",
     "disable_selected": "Désactiver la sélection",
     "confirm_title": "Désactiver {{count}} réveils ?",
     "confirm_body": "Les réveils futurs seront arrêtés. Les exécutions en file non confiées à un agent seront retirées. Les exécutions déjà confiées continueront ; arrêtez-les depuis le journal d’exécution.",
@@ -502,7 +498,6 @@
     },
     "target_agent": "Agent à réveiller",
     "empty_filtered": "Aucun réveil correspondant",
-    "clear_filters": "Effacer les filtres",
     "batch_success": "{{count}} règles désactivées",
     "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer.",
     "source": "Source",
@@ -523,6 +518,37 @@
     "banner_view": "Voir",
     "create": "Nouveau réveil",
     "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
-    "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
+    "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle.",
+    "intro": {
+      "title": "Rappelez vos agents au bon moment",
+      "description": "Les réveils sont attachés aux tâches : quand une PR est fusionnée, que quelqu'un répond ou que l'heure arrive, l'agent revient reprendre le travail. Quand la tâche se termine, ses réveils s'arrêtent.",
+      "slides": {
+        "event": {
+          "title": "Attendre qu'il se passe quelque chose",
+          "description": "Inutile de faire tourner un agent à vide en attendant. Dès que la condition est remplie, Multica le réveille."
+        },
+        "time": {
+          "title": "Ou choisir une heure",
+          "description": "Un réveil ponctuel convient à « revoir ça demain après-midi », un réveil récurrent à un contrôle quotidien."
+        },
+        "ends": {
+          "title": "S'arrête avec la tâche",
+          "description": "Les réveils appartiennent à leur tâche. Une fois celle-ci terminée ou annulée, ils se désactivent : aucune règle orpheline."
+        }
+      },
+      "art": {
+        "issue_inbox": "État vide des groupes de la boîte de réception",
+        "issue_board": "Colonnes du tableau redimensionnables",
+        "issue_paste": "Coller des images dans les commentaires",
+        "reply": "« La PR est fusionnée. Je mets à jour la doc et je ferme la tâche. »",
+        "event_examples": "PR fusionnée, nouveau commentaire"
+      }
+    }
+  },
+  "intro": {
+    "label": "Automatisation",
+    "title": "Laissez vos agents se mettre au travail tout seuls",
+    "description": "Définissez une planification ou un webhook. À chaque déclenchement, Multica crée une tâche pour un agent, ou lance directement l'agent. Choisissez un modèle et adaptez-le.",
+    "templates": "Partir d'un modèle"
   }
 }

@@ -14,7 +14,6 @@ const state = vi.hoisted(() => ({
   chatSessions: [] as { id: string; unread_count?: number }[],
   chat: { activeSessionId: null as string | null, isOpen: false },
   stuck: [] as unknown[],
-  failingAutopilots: [] as unknown[],
 }));
 
 vi.mock("../navigation", () => ({
@@ -61,11 +60,9 @@ vi.mock("../common/use-app-foreground", () => ({
 vi.mock("./panels/team-status", () => ({
   useTeamAgentStatus: () => ({ stuck: state.stuck }),
 }));
-vi.mock("./panels/autopilots-panel", () => ({
-  useFailingAutopilots: () => state.failingAutopilots,
-}));
 vi.mock("./rail-workspaces", () => ({ RailWorkspaces: () => null }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
+vi.mock("../whats-new/whats-new-launcher", () => ({ WhatsNewLauncher: () => null }));
 vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -108,7 +105,6 @@ beforeEach(() => {
   state.chatSessions = [];
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
-  state.failingAutopilots = [];
 });
 
 describe("AppRail global actions", () => {
@@ -160,18 +156,15 @@ describe("AppRail badges", () => {
     expect(badge?.animated).toBe(false);
   });
 
-  it("shows no attention dots when nothing needs a look", () => {
+  it("shows no attention dot when nothing needs a look", () => {
     renderRail();
     expect(link("/acme/agents")?.querySelector(".bg-warning")).toBeNull();
-    expect(link("/acme/autopilots")?.querySelector(".bg-destructive")).toBeNull();
   });
 
-  it("flags Team when an agent is stuck and Autopilot when a run failed", () => {
+  it("flags Team when an agent is stuck", () => {
     state.stuck = [{ id: "agent-1" }];
-    state.failingAutopilots = [{ id: "ap-1" }];
     renderRail();
     expect(link("/acme/agents")?.querySelector(".bg-warning")).not.toBeNull();
-    expect(link("/acme/autopilots")?.querySelector(".bg-destructive")).not.toBeNull();
   });
 });
 

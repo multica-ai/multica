@@ -11,9 +11,11 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
+  Bot,
   ChevronRight,
   File,
   FileText,
+  History,
   Link2,
   Loader2,
   Lock,
@@ -44,6 +46,7 @@ import {
   memberListOptions,
   selectSkillAssignments,
   skillDetailOptions,
+  skillVersionsOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -81,6 +84,7 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { RichContent } from "../../rich-content";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
@@ -95,6 +99,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
+import { SkillVersionsTab } from "./skill-versions-tab";
 import { useT } from "../../i18n";
 
 type DraftFile = { id?: string; path: string; content: string };
@@ -166,15 +171,16 @@ function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean 
 }
 
 /**
- * The page body: the skill's sections, or its files beside an editor. The
- * files need more width than the reading column, so they take the body over
- * instead of being a section of it. `?view=files` is also what the retired
- * Files tab wrote, so its links still land on the files.
+ * The page body: the skill's sections, its files beside an editor, or its
+ * version history. Files and versions need more width than the reading
+ * column, so they take the body over instead of being a section of it.
+ * `?view=files` is also what the retired Files tab wrote, so its links still
+ * land on the files.
  */
-type DetailView = "overview" | "files";
+type DetailView = "overview" | "files" | "versions";
 
 function readView(value: string | null): DetailView {
-  return value === "files" ? "files" : "overview";
+  return value === "files" || value === "versions" ? value : "overview";
 }
 
 const SKILL_DETAIL_LAYOUT_ID = "multica_skill_detail_layout";
@@ -279,9 +285,7 @@ function SupportingFileList({
   const { t } = useT("skills");
   if (paths.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed px-3 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.files.supporting_empty)}
-      </div>
+      <ObjectSectionEmpty icon={File} description={t(($) => $.detail.files.supporting_empty)} />
     );
   }
   return (
@@ -314,9 +318,7 @@ function UsedByList({ agents }: { agents: Agent[] }) {
   const { t } = useT("skills");
   if (agents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed px-3 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.overview.used_by_empty)}
-      </div>
+      <ObjectSectionEmpty icon={Bot} description={t(($) => $.detail.overview.used_by_empty)} />
     );
   }
   return (
@@ -369,6 +371,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { data: runtimes = [], error: runtimesError } = useQuery(
     runtimeListOptions(wsId),
   );
+  // Same cache entry as the versions view. Drives the version shown in the
+  // properties panel and the Content header, and the save toast.
+  const { data: versions } = useQuery(skillVersionsOptions(wsId, skillId));
+  // `null`: no history yet (a skill that predates versioning and has not
+  // changed since). `undefined`: still loading, or the load failed.
+  const latestVersion: number | null | undefined = versions
+    ? (versions[0]?.version ?? null)
+    : undefined;
 
   const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
 
@@ -589,6 +599,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     navigation.push(viewHref("files"));
   };
 
+  const openVersions = () => {
+    setActiveView("versions");
+    navigation.push(viewHref("versions"));
+  };
+
   const handleSave = async () => {
     if (!skill || !canEdit) return;
     const trimmedName = name.trim();
@@ -609,7 +624,34 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         exact: true,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t(($) => $.detail.toast_saved));
+      // Read the history back so the toast can name the version this save
+      // became. The save already succeeded, so a failed read only costs the
+      // version number in the toast.
+      let savedVersion: number | null = null;
+      try {
+        const list = await qc.fetchQuery({
+          ...skillVersionsOptions(wsId, skill.id),
+          staleTime: 0,
+        });
+        savedVersion = list[0]?.version ?? null;
+      } catch {
+        savedVersion = null;
+      }
+      const viewHistory = {
+        label: t(($) => $.detail.toast_view_history),
+        onClick: openVersions,
+      };
+      if (savedVersion === null) {
+        toast.success(t(($) => $.detail.toast_saved));
+      } else if (savedVersion !== latestVersion) {
+        toast.success(
+          t(($) => $.detail.toast_saved_version, { version: savedVersion }),
+          { action: viewHistory },
+        );
+      } else {
+        // Content-identical saves record no version; don't claim one.
+        toast.success(t(($) => $.detail.toast_saved), { action: viewHistory });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.detail.toast_save_failed));
     } finally {
@@ -817,6 +859,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <Link2 />
             {t(($) => $.detail.menu.copy_link)}
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={openVersions}>
+            <History />
+            {t(($) => $.detail.menu.version_history)}
+          </DropdownMenuItem>
           {canRefresh && (
             <DropdownMenuItem onClick={() => setConfirmRefresh(true)}>
               <RotateCw />
@@ -849,8 +895,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       origin={origin}
       originRuntime={originRuntime}
       creator={creator}
+      latestVersion={latestVersion}
       onNameChange={setName}
       onDescriptionChange={setDescription}
+      onOpenVersions={openVersions}
     />
   );
 
@@ -882,23 +930,40 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
       <ObjectSection
         title={t(($) => $.detail.sections.content)}
-        count={<span className="font-mono">{SKILL_MD}</span>}
+        count={
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono">{SKILL_MD}</span>
+            {typeof latestVersion === "number" && (
+              <span
+                data-testid="skill-version-chip"
+                className="rounded-full border px-1.5 font-mono text-micro leading-4 text-muted-foreground"
+              >
+                {t(($) => $.detail.versions.version_label, { version: latestVersion })}
+              </span>
+            )}
+          </span>
+        }
         action={
-          canEdit ? (
-            <ObjectSectionAction
-              icon={Pencil}
-              onClick={() => openFiles(SKILL_MD, { edit: true })}
-            >
-              {t(($) => $.detail.sections.edit)}
+          <>
+            <ObjectSectionAction icon={History} onClick={openVersions}>
+              {t(($) => $.detail.sections.history)}
             </ObjectSectionAction>
-          ) : (
-            <ObjectSectionAction
-              icon={FileText}
-              onClick={() => openFiles(SKILL_MD)}
-            >
-              {t(($) => $.detail.sections.open)}
-            </ObjectSectionAction>
-          )
+            {canEdit ? (
+              <ObjectSectionAction
+                icon={Pencil}
+                onClick={() => openFiles(SKILL_MD, { edit: true })}
+              >
+                {t(($) => $.detail.sections.edit)}
+              </ObjectSectionAction>
+            ) : (
+              <ObjectSectionAction
+                icon={FileText}
+                onClick={() => openFiles(SKILL_MD)}
+              >
+                {t(($) => $.detail.sections.open)}
+              </ObjectSectionAction>
+            )}
+          </>
         }
       >
         <SkillContentPreview content={content} />
@@ -966,6 +1031,32 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     </div>
   );
 
+  const versionsView = (
+    <div className="flex min-h-full flex-col md:h-full">
+      {notices.length > 0 && (
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "space-y-2 pt-3")}>
+          {notices}
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <SkillVersionsTab
+          skill={skill}
+          wsId={wsId}
+          canEdit={canEdit}
+          hasUnsavedChanges={isDirty}
+          members={members}
+          // Adopt explicitly: the user confirmed the restore, so a dirty
+          // draft is replaced instead of tripping the conflict banner.
+          onRestored={(updated) => adoptServerVersion(updated)}
+        />
+      </div>
+    </div>
+  );
+
+  // Files and versions take the body over, so the breadcrumb gains the skill
+  // as a link back to its overview.
+  const subView = activeView !== "overview";
+
   return (
     // relative: positioning anchor for the floating save pill (page-centered,
     // same rule as the skills list batch toolbar).
@@ -973,7 +1064,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       <ObjectPage
         layoutId={SKILL_DETAIL_LAYOUT_ID}
         segments={
-          activeView === "files"
+          subView
             ? [
                 listSegment,
                 {
@@ -989,6 +1080,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <span className="truncate font-mono text-caption text-foreground">
               {selectedPath}
             </span>
+          ) : activeView === "versions" ? (
+            <span className="truncate text-foreground">
+              {t(($) => $.detail.menu.version_history)}
+            </span>
           ) : (
             skillLeaf
           )
@@ -996,7 +1091,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         actions={headerActions}
         panel={panel}
       >
-        {activeView === "files" ? filesView : overview}
+        {activeView === "files"
+          ? filesView
+          : activeView === "versions"
+            ? versionsView
+            : overview}
       </ObjectPage>
 
       {/* Dirty-only and floating, matching the skills list batch toolbar;
@@ -1114,7 +1213,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         onOpenChange={setConfirmRefresh}
         // Adopt explicitly: the user just confirmed the overwrite, so a dirty
         // draft must be replaced instead of tripping the conflict banner.
-        onRefreshed={(updated) => adoptServerVersion(updated)}
+        onRefreshed={(updated) => {
+          adoptServerVersion(updated);
+          qc.invalidateQueries({
+            queryKey: skillVersionsOptions(wsId, updated.id).queryKey,
+            exact: true,
+          });
+        }}
       />
     </div>
   );

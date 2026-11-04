@@ -38,6 +38,29 @@
     "feedback": "Faire un retour",
     "server_version": "Version du serveur {{version}}"
   },
+  "whats_new": {
+    "trigger": "Nouveautés",
+    "card": {
+      "eyebrow": "Multica mis à jour · {{range}}",
+      "title_one": "{{count}} nouveauté depuis votre dernière visite",
+      "title_other": "{{count}} nouveautés depuis votre dernière visite",
+      "dismiss": "Fermer",
+      "view_details": "Voir le détail",
+      "got_it": "Compris"
+    },
+    "panel": {
+      "title": "Nouveautés",
+      "close": "Fermer",
+      "new": "Nouveau",
+      "release_notes": "Journal des modifications v{{version}}",
+      "full_changelog": "Journal des modifications complet"
+    },
+    "action": {
+      "try": "Essayer",
+      "open": "Ouvrir",
+      "learn_more": "En savoir plus"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "Chargement de l'espace de travail…",
     "loading_named_prefix": "Chargement"
@@ -87,6 +110,7 @@
     "work": {
       "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
+      "unread": "Non lues",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",
@@ -95,6 +119,7 @@
       "project_issues": "Tâches de {{name}}",
       "project_issues_empty": "Aucune tâche",
       "project_issues_error": "Impossible de charger les tâches",
+      "project_issues_retry": "Réessayer",
       "project_issues_settings": "Tâches des projets",
       "settings_status": "Statut",
       "settings_assignee": "Responsable",
@@ -137,8 +162,8 @@
       "members_one": "{{count}} membre",
       "members_other": "{{count}} membres",
       "resources": "Ressources",
-      "runtimes_offline_one": "{{count}} hors ligne",
-      "runtimes_offline_other": "{{count}} hors ligne",
+      "runtimes_online_one": "{{count}} en ligne",
+      "runtimes_online_other": "{{count}} en ligne",
       "invite_member": "Inviter un membre"
     },
     "autopilots": {
@@ -164,6 +189,9 @@
     "filter_count_one": "{{count}} filtre",
     "filter_count_other": "{{count}} filtres",
     "reset": "Réinitialiser",
+    "clear_search": "Effacer la recherche",
+    "clear_filters": "Effacer les filtres",
+    "clear_filters_and_search": "Effacer les filtres et la recherche",
     "display": "Affichage",
     "selected_one": "{{count}} sélectionné",
     "selected_other": "{{count}} sélectionnés",
@@ -181,5 +209,14 @@
   "object_page": {
     "toggle_panel": "Afficher ou masquer le panneau de droite",
     "properties": "Propriétés"
+  },
+  "feature_intro": {
+    "read_docs": "Lire la documentation",
+    "carousel": "carrousel",
+    "slide": "diapositive",
+    "slide_position": "{{current}} sur {{total}}",
+    "go_to_slide": "Aller à la diapositive {{index}}",
+    "previous": "Précédent",
+    "next": "Suivant"
   }
 }

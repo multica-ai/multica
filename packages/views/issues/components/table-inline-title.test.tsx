@@ -138,6 +138,37 @@ describe("InlineTitle", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it.each([
+    ["standard Enter", { key: "Enter", isComposing: true, keyCode: 13 }],
+    ["Safari Enter", { key: "Enter", isComposing: false, keyCode: 229 }],
+    ["standard Escape", { key: "Escape", isComposing: true, keyCode: 27 }],
+    ["Safari Escape", { key: "Escape", isComposing: false, keyCode: 229 }],
+  ])("preserves the title draft during %s IME composition", (_label, event) => {
+    const onUpdate = vi.fn();
+    const onEditingChange = vi.fn();
+    render(<Harness title="Original" onUpdate={onUpdate} onEditingChange={onEditingChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename issue" }));
+    onEditingChange.mockClear();
+    const input = screen.getByRole("textbox");
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "zhong" } });
+
+    expect(fireEvent.keyDown(input, event)).toBe(true);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onEditingChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("zhong");
+
+    fireEvent.compositionEnd(input, { data: "中" });
+    fireEvent.change(input, { target: { value: "中" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ title: "中" });
+    expect(onEditingChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
   it("opens sub-issue creation without also navigating into the issue", () => {
     const onCreateSubIssue = vi.fn();
     const rowClick = vi.fn();

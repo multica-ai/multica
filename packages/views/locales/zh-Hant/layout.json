@@ -6,7 +6,7 @@
     "issues": "任務",
     "projects": "專案",
     "autopilots": "自動化",
-    "agents": "智慧體",
+    "agents": "AI 代理",
     "squads": "小隊",
     "usage": "統計",
     "runtimes": "執行時",
@@ -18,15 +18,15 @@
     "issue": "任務",
     "project": "專案",
     "autopilot": "自動化",
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "member": "成員",
     "squad": "小隊",
     "skill": "Skill",
     "machine": "機器",
     "runtime": "執行時",
     "attachment": "附件",
-    "create_agent": "建立智慧體",
-    "my_agents": "我的智慧體在做",
+    "create_agent": "建立 AI 代理",
+    "my_agents": "我的 AI 代理在做",
     "unknown": "未知頁面"
   },
   "help": {
@@ -37,6 +37,28 @@
     "discord": "Discord",
     "feedback": "反饋",
     "server_version": "伺服器版本 {{version}}"
+  },
+  "whats_new": {
+    "trigger": "新功能",
+    "card": {
+      "eyebrow": "Multica 已更新 · {{range}}",
+      "title_other": "自你上次造訪以來，新增了 {{count}} 項功能",
+      "dismiss": "關閉",
+      "view_details": "查看詳情",
+      "got_it": "知道了"
+    },
+    "panel": {
+      "title": "新功能",
+      "close": "關閉",
+      "new": "未讀",
+      "release_notes": "v{{version}} 更新日誌",
+      "full_changelog": "完整更新日誌"
+    },
+    "action": {
+      "try": "試一下",
+      "open": "前往",
+      "learn_more": "了解更多"
+    }
   },
   "workspace_loader": {
     "loading_workspace": "正在載入工作區...",
@@ -85,8 +107,9 @@
   },
   "panels": {
     "work": {
-      "my_agents": "我的智慧體在做",
+      "my_agents": "我的 AI 代理在做",
       "all_issues": "全部任務",
+      "unread": "未讀",
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",
@@ -94,13 +117,14 @@
       "project_issues": "{{name}} 的任務",
       "project_issues_empty": "沒有任務",
       "project_issues_error": "無法載入任務",
+      "project_issues_retry": "重試",
       "project_issues_settings": "專案中的任務",
       "settings_status": "狀態",
       "settings_assignee": "負責人",
       "assignee_anyone": "所有人",
       "assignee_me": "我",
-      "assignee_my_agents": "我的智慧體",
-      "assignee_me_and_my_agents": "我和我的智慧體",
+      "assignee_my_agents": "我的 AI 代理",
+      "assignee_me_and_my_agents": "我和我的 AI 代理",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",
@@ -123,17 +147,17 @@
       "view_delete": "刪除檢視"
     },
     "team": {
-      "new_agent": "新建智慧體",
+      "new_agent": "新建 AI 代理",
       "needs_attention": "需要處理",
       "stuck_other": "{{count}} 個任務在等待離線的執行時",
       "working_now": "正在工作",
       "running_tasks_other": "{{count}} 個任務執行中",
-      "all_agents": "全部智慧體",
-      "my_agents": "我的智慧體",
+      "all_agents": "全部 AI 代理",
+      "my_agents": "我的 AI 代理",
       "squads_and_members": "小隊與成員",
       "members_other": "{{count}} 位成員",
       "resources": "資源",
-      "runtimes_offline_other": "{{count}} 個離線",
+      "runtimes_online_other": "{{count}} 台線上",
       "invite_member": "邀請成員"
     },
     "autopilots": {
@@ -158,6 +182,9 @@
     "filter": "篩選",
     "filter_count_other": "{{count}} 個篩選",
     "reset": "重設",
+    "clear_search": "清除搜尋",
+    "clear_filters": "清除篩選",
+    "clear_filters_and_search": "清除篩選和搜尋",
     "display": "顯示設定",
     "selected_other": "已選 {{count}} 項",
     "clear_selection": "清除選擇",
@@ -174,5 +201,14 @@
   "object_page": {
     "toggle_panel": "切換右側邊欄",
     "properties": "屬性"
+  },
+  "feature_intro": {
+    "read_docs": "閱讀文件",
+    "carousel": "輪播",
+    "slide": "卡片",
+    "slide_position": "第 {{current}} 張，共 {{total}} 張",
+    "go_to_slide": "前往第 {{index}} 張",
+    "previous": "上一張",
+    "next": "下一張"
   }
 }
