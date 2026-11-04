@@ -1581,7 +1581,10 @@
       "toast_rejected": "已拒絕，AI 代理會調整做法。",
       "toast_failed": "無法記錄你的決定。",
       "not_connected": "請先連線帳號。",
-      "connected_resumed": "{{app}} 已連線，代理會從中斷處繼續。"
+      "connected_resumed": "{{app}} 已連線，代理會從中斷處繼續。",
+      "rate_limited": "這個帳號已達到每分鐘呼叫上限，請一分鐘後再核准。",
+      "rate_limited_some_other": "有 {{count}} 個請求觸發了每分鐘上限，請一分鐘後再核准。",
+      "withdrawn": "你已無法使用這個代理，請求已撤回。"
     },
     "tools": {
       "tab": "工具",

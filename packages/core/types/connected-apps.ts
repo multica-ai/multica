@@ -159,6 +159,12 @@ export interface AppRequest {
   created_at: string;
 }
 
+/** One page of requests. `next_before` pages back through decided history. */
+export interface AppRequestList {
+  requests: AppRequest[];
+  next_before: string | null;
+}
+
 export interface UpdateAgentAppsRequest {
   apps: { toolkit_slug: string; account_scope: AppAccountScope; level: AppAccessLevel }[];
 }

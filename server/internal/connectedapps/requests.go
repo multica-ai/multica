@@ -97,10 +97,18 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 	if err != nil {
 		return db.AppActionRequest{}, err
 	}
+	if !s.mayAct(ctx, req) {
+		s.withdraw(ctx, req)
+		return db.AppActionRequest{}, ErrNoLongerAllowed
+	}
 	if req.Kind == KindConnect {
 		if _, err := s.resolveAccount(ctx, workspaceID, actorID, req.ToolkitSlug, req.AccountScope); err != nil {
 			return db.AppActionRequest{}, ErrAccountMissing
 		}
+	} else if acct, err := s.resolveAccount(ctx, workspaceID, actorID, req.ToolkitSlug, req.AccountScope); err == nil &&
+		s.overLimit(ctx, workspaceID, req.ToolkitSlug, acct) {
+		// Checked before deciding, so the request stays pending and retryable.
+		return db.AppActionRequest{}, ErrRateLimited
 	}
 	approvedArgs := req.Arguments
 	if args != nil && req.Kind == KindAction {
@@ -144,7 +152,8 @@ func (s *Service) ResolveConnectRequests(ctx context.Context, userID pgtype.UUID
 		return
 	}
 	for _, r := range rows {
-		if _, err := s.Approve(ctx, r.WorkspaceID, userID, r.ID, nil); err != nil && !errors.Is(err, ErrNotPending) {
+		if _, err := s.Approve(ctx, r.WorkspaceID, userID, r.ID, nil); err != nil &&
+			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) {
 			slog.Warn("connectedapps: resolve connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
 		}
 	}
@@ -249,17 +258,17 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	if err != nil {
 		return fail("the tool could not be loaded")
 	}
-	class := s.classify(ctx, req.WorkspaceID, req.ToolkitSlug, tool)
+	var args map[string]any
+	if err := json.Unmarshal(req.ApprovedArguments, &args); err != nil {
+		return fail("the approved arguments are invalid")
+	}
+	class := ClassifyCall(s.classify(ctx, req.WorkspaceID, req.ToolkitSlug, tool), tool.Slug, args)
 	rule, err := s.accountRule(ctx, req.WorkspaceID, req.ToolkitSlug, acct, class)
 	if err != nil {
 		return fail("the rules could not be read")
 	}
 	if Decide(req.ToolkitSlug, app.Level, class, rule) == PolicyBlock {
 		return fail("a rule now blocks this call")
-	}
-	var args map[string]any
-	if err := json.Unmarshal(req.ApprovedArguments, &args); err != nil {
-		return fail("the approved arguments are invalid")
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, *tool, args)
 	s.touch(ctx, req.WorkspaceID, acct)
@@ -301,8 +310,31 @@ func (s *Service) agentApp(ctx context.Context, agentID pgtype.UUID, slug string
 	return db.AgentApp{}, false
 }
 
+// mayAct reports whether the approver is still a member who may run the
+// agent. Membership and agent access can change while a request waits.
+func (s *Service) mayAct(ctx context.Context, req db.AppActionRequest) bool {
+	if _, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID: req.ApproverUserID, WorkspaceID: req.WorkspaceID,
+	}); err != nil {
+		return false
+	}
+	return s.resumer == nil || s.resumer.CanActFor(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
+}
+
+func (s *Service) withdraw(ctx context.Context, req db.AppActionRequest) {
+	row, err := s.q.CancelAppActionRequest(ctx, db.CancelAppActionRequestParams{ID: req.ID, WorkspaceID: req.WorkspaceID})
+	if err != nil {
+		return
+	}
+	s.publishChange(row)
+}
+
 func (s *Service) resume(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) {
 	if s.resumer == nil {
+		return
+	}
+	if !s.mayAct(ctx, req) {
+		slog.Info("connectedapps: approver can no longer run the agent; not resuming", "request_id", util.UUIDToString(req.ID))
 		return
 	}
 	if err := s.resumer.ResumeAfterDecision(ctx, req, actorID, note); err != nil {

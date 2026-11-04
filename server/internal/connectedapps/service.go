@@ -55,12 +55,21 @@ var (
 	ErrNotApprover     = errors.New("connectedapps: only the approver can decide")
 	ErrNotPending      = errors.New("connectedapps: request is no longer pending")
 	ErrAccountMissing  = errors.New("connectedapps: account not connected")
+	// ErrNoLongerAllowed: the approver left the workspace or lost access to
+	// the agent while the request waited. The request is withdrawn.
+	ErrNoLongerAllowed = errors.New("connectedapps: the approver can no longer use this agent")
+	// ErrRateLimited: the account used its per-minute budget. The request
+	// stays pending, so approving again a minute later runs it.
+	ErrRateLimited = errors.New("connectedapps: the account is over its per-minute call budget")
 )
 
 // Resumer continues the agent's work after a person decides on a request: a
 // new run on the issue, or a message in the chat.
 type Resumer interface {
 	ResumeAfterDecision(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) error
+	// CanActFor reports whether userID may still run agentID in the
+	// workspace, by the same rule that admits a new run.
+	CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
 }
 
 // Config wires a Service.

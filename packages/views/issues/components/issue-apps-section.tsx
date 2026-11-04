@@ -65,7 +65,7 @@ export function IssueAppsSection({ issueId }: { issueId: string }) {
               .join(", ");
             return (
               <div key={group.key} className="flex items-start gap-2 rounded-md px-2 py-2 text-caption" title={tools}>
-                <ComposioToolkitLogo slug={group.toolkit} name={name} className="mt-px size-4 rounded-[3px] text-[9px]" />
+                <ComposioToolkitLogo slug={group.toolkit} name={name} className="mt-px size-4 rounded-xs text-[9px]" />
                 <div className="min-w-0 flex-1">
                   <p className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate font-medium">{name}</span>

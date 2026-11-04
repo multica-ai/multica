@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -151,8 +152,15 @@ func (h *Handler) appsReady(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // appsMember returns the caller's membership and whether they administer the
-// workspace.
+// workspace. Every Connected Apps endpoint behind it is for people: a run's
+// credential acts as its owner, and must not approve its own calls, change
+// the owner's rules, or read the owner's requests and accounts. Runs reach
+// apps only through the gateway.
 func (h *Handler) appsMember(w http.ResponseWriter, r *http.Request) (db.Member, pgtype.UUID, bool, bool) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return db.Member{}, pgtype.UUID{}, false, false
+	}
 	workspaceID := ctxWorkspaceID(r.Context())
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -974,7 +982,19 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	q := r.URL.Query()
-	var rows []db.AppActionRequest
+	var before pgtype.Timestamptz
+	if raw := q.Get("before"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid before")
+			return
+		}
+		before = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+	// The first page carries every pending request plus the newest decided
+	// ones; `before` pages back through decided history only, so a long
+	// history never pushes a pending request out of the list.
+	var pending, decided []db.AppActionRequest
 	var err error
 	switch {
 	case q.Get("issue_id") != "":
@@ -982,7 +1002,14 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		rows, err = h.Queries.ListAppActionRequestsForIssue(ctx, db.ListAppActionRequestsForIssueParams{WorkspaceID: workspaceID, IssueID: issue.ID})
+		if !before.Valid {
+			pending, err = h.Queries.ListPendingAppActionRequestsForIssue(ctx, db.ListPendingAppActionRequestsForIssueParams{WorkspaceID: workspaceID, IssueID: issue.ID})
+		}
+		if err == nil {
+			decided, err = h.Queries.ListDecidedAppActionRequestsForIssue(ctx, db.ListDecidedAppActionRequestsForIssueParams{
+				WorkspaceID: workspaceID, IssueID: issue.ID, Before: before, PageSize: appRequestPageSize,
+			})
+		}
 	case q.Get("chat_session_id") != "":
 		sessionID, ok := parseUUIDOrBadRequest(w, q.Get("chat_session_id"), "chat_session_id")
 		if !ok {
@@ -993,20 +1020,39 @@ func (h *Handler) ListAppRequests(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "chat session not found")
 			return
 		}
-		rows, err = h.Queries.ListAppActionRequestsForChatSession(ctx, db.ListAppActionRequestsForChatSessionParams{WorkspaceID: workspaceID, ChatSessionID: sessionID})
+		if !before.Valid {
+			pending, err = h.Queries.ListPendingAppActionRequestsForChatSession(ctx, db.ListPendingAppActionRequestsForChatSessionParams{WorkspaceID: workspaceID, ChatSessionID: sessionID})
+		}
+		if err == nil {
+			decided, err = h.Queries.ListDecidedAppActionRequestsForChatSession(ctx, db.ListDecidedAppActionRequestsForChatSessionParams{
+				WorkspaceID: workspaceID, ChatSessionID: sessionID, Before: before, PageSize: appRequestPageSize,
+			})
+		}
 	default:
-		rows, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID})
+		pending, err = h.Queries.ListPendingAppActionRequestsForApprover(ctx, db.ListPendingAppActionRequestsForApproverParams{WorkspaceID: workspaceID, ApproverUserID: member.UserID})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list requests")
 		return
 	}
-	out := make([]AppRequestResponse, 0, len(rows))
-	for _, row := range rows {
+	var nextBefore *string
+	if len(decided) == appRequestPageSize {
+		cursor := decided[len(decided)-1].CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		nextBefore = &cursor
+	}
+	out := make([]AppRequestResponse, 0, len(pending)+len(decided))
+	// Decided rows arrive newest first; the list reads oldest first.
+	for i := len(decided) - 1; i >= 0; i-- {
+		out = append(out, h.requestResponse(decided[i], member.UserID))
+	}
+	for _, row := range pending {
 		out = append(out, h.requestResponse(row, member.UserID))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+	writeJSON(w, http.StatusOK, map[string]any{"requests": out, "next_before": nextBefore})
 }
+
+// appRequestPageSize is how many decided requests one list page carries.
+const appRequestPageSize = 50
 
 func writeDecisionError(w http.ResponseWriter, err error) {
 	switch {
@@ -1018,6 +1064,10 @@ func writeDecisionError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "request is no longer pending")
 	case errors.Is(err, connectedapps.ErrAccountMissing):
 		writeError(w, http.StatusConflict, "connect the account first")
+	case errors.Is(err, connectedapps.ErrNoLongerAllowed):
+		writeError(w, http.StatusForbidden, "you can no longer use this agent; the request was withdrawn")
+	case errors.Is(err, connectedapps.ErrRateLimited):
+		writeError(w, http.StatusTooManyRequests, "this account reached its per-minute call limit; approve again in a minute")
 	default:
 		writeError(w, http.StatusInternalServerError, "failed to decide")
 	}
@@ -1096,6 +1146,18 @@ func (h *Handler) AppsGateway(w http.ResponseWriter, r *http.Request) {
 
 // ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,
 // or a message in the chat from the person who decided.
+// CanActFor applies the rule that admits a new run of the agent to the
+// person a request waits on, so a decision never runs or resumes an agent
+// they could not start themselves.
+func (h *Handler) CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
+	agent, err := h.Queries.GetAgent(ctx, agentID)
+	if err != nil || agent.WorkspaceID != workspaceID || agent.ArchivedAt.Valid {
+		return false
+	}
+	uid := uuidToString(userID)
+	return h.canInvokeAgent(ctx, agent, "member", uid, uid, uuidToString(workspaceID))
+}
+
 func (h *Handler) ResumeAfterDecision(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) error {
 	if req.IssueID.Valid {
 		return h.TaskService.EnqueueAppDecisionRun(ctx, req.IssueID, req.AgentID, actorID, req.ID, note)

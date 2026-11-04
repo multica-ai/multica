@@ -9,7 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -130,14 +130,17 @@ function AppRequestList({
   );
   const approveAll = async () => {
     let failed = 0;
+    let limited = 0;
     for (const r of batch) {
       try {
         await decide.mutateAsync({ id: r.id, decision: "approve" });
-      } catch {
-        failed++;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 429) limited++;
+        else failed++;
       }
     }
-    if (failed) toast.error(t(($) => $.connected_apps.request.toast_failed));
+    if (limited) toast.error(t(($) => $.connected_apps.request.rate_limited_some, { count: limited }));
+    else if (failed) toast.error(t(($) => $.connected_apps.request.toast_failed));
     else toast.success(t(($) => $.connected_apps.request.toast_approved));
   };
 
@@ -161,6 +164,20 @@ function AppRequestList({
       ))}
     </section>
   );
+}
+
+type SettingsT = ReturnType<typeof useT<"settings">>["t"];
+
+function approveErrorMessage(e: unknown, t: SettingsT): string {
+  if (e instanceof ApiError) {
+    // 429 leaves the request pending; approving again later runs it.
+    if (e.status === 429) return t(($) => $.connected_apps.request.rate_limited);
+    if (e.status === 403) return t(($) => $.connected_apps.request.withdrawn);
+  }
+  if (e instanceof Error && /connect the account/i.test(e.message)) {
+    return t(($) => $.connected_apps.request.not_connected);
+  }
+  return t(($) => $.connected_apps.request.toast_failed);
 }
 
 function prettyArgs(args: Record<string, unknown> | undefined) {
@@ -219,12 +236,7 @@ function AppRequestCard({
       { id: request.id, decision: "approve", arguments: args },
       {
         onSuccess: () => toast.success(t(($) => $.connected_apps.request.toast_approved)),
-        onError: (e) =>
-          toast.error(
-            e instanceof Error && /connect the account/i.test(e.message)
-              ? t(($) => $.connected_apps.request.not_connected)
-              : t(($) => $.connected_apps.request.toast_failed),
-          ),
+        onError: (e) => toast.error(approveErrorMessage(e, t)),
       },
     );
   };

@@ -27,7 +27,10 @@ export function useUpdateAppRules(slug: string, scope: AppAccountScope) {
   return useMutation({
     mutationFn: (rules: { action_class: AppActionClass; policy: AppActionPolicy }[]) =>
       api.updateAppRules(slug, scope, rules),
-    onSuccess: (data) => qc.setQueryData(connectedAppsKeys.rules(wsId, slug, scope), data.rules),
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(connectedAppsKeys.rules(wsId, slug, scope), data.rules);
+      else void qc.invalidateQueries({ queryKey: connectedAppsKeys.rules(wsId, slug, scope) });
+    },
   });
 }
 
@@ -57,7 +60,10 @@ export function useUpdateAgentApps(agentId: string) {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (body: UpdateAgentAppsRequest) => api.updateAgentApps(agentId, body),
-    onSuccess: (data) => qc.setQueryData(connectedAppsKeys.agentApps(wsId, agentId), data.apps),
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(connectedAppsKeys.agentApps(wsId, agentId), data.apps);
+      else void qc.invalidateQueries({ queryKey: connectedAppsKeys.agentApps(wsId, agentId) });
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: connectedAppsKeys.overview(wsId) });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });

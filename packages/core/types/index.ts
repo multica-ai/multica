@@ -266,6 +266,7 @@ export type {
   TeamAppImpact,
   AppRequestStatus,
   AppRequest,
+  AppRequestList,
   UpdateAgentAppsRequest,
   AppRequestChangedPayload,
 } from "./connected-apps";

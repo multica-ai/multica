@@ -1581,7 +1581,10 @@
       "toast_rejected": "거절했습니다. 에이전트가 방식을 조정합니다.",
       "toast_failed": "결정을 기록하지 못했습니다.",
       "not_connected": "먼저 계정을 연결하세요.",
-      "connected_resumed": "{{app}} 연결됨. 에이전트가 멈춘 곳부터 이어서 진행합니다."
+      "connected_resumed": "{{app}} 연결됨. 에이전트가 멈춘 곳부터 이어서 진행합니다.",
+      "rate_limited": "이 계정이 분당 호출 한도에 도달했습니다. 1분 후에 다시 승인하세요.",
+      "rate_limited_some_other": "요청 {{count}}개가 분당 한도에 걸렸습니다. 1분 후에 다시 승인하세요.",
+      "withdrawn": "이 에이전트를 더 이상 사용할 수 없어 요청이 철회되었습니다."
     },
     "tools": {
       "tab": "도구",

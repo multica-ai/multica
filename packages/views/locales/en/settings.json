@@ -1594,7 +1594,11 @@
       "toast_rejected": "Declined. The agent will adapt.",
       "toast_failed": "Couldn't record your decision.",
       "not_connected": "Connect the account first.",
-      "connected_resumed": "{{app}} connected. The agent picks up where it stopped."
+      "connected_resumed": "{{app}} connected. The agent picks up where it stopped.",
+      "rate_limited": "This account reached its limit of calls per minute. Approve again in a minute.",
+      "rate_limited_some_one": "{{count}} request hit the per-minute limit. Approve it again in a minute.",
+      "rate_limited_some_other": "{{count}} requests hit the per-minute limit. Approve them again in a minute.",
+      "withdrawn": "You can no longer use this agent, so the request was withdrawn."
     },
     "tools": {
       "tab": "Tools",

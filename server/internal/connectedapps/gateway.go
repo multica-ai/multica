@@ -450,7 +450,7 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	if err != nil {
 		return textResult("tool not found", true)
 	}
-	class := s.classify(ctx, rn.workspaceID, slug, tool)
+	class := ClassifyCall(s.classify(ctx, rn.workspaceID, slug, tool), tool.Slug, args)
 	call := toolCall{
 		workspaceID: rn.workspaceID, taskID: rn.task.ID, agentID: rn.agent.ID,
 		issueID: rn.task.IssueID, chatSessionID: rn.task.ChatSessionID, triggeredBy: rn.triggeredBy,

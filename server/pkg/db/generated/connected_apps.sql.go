@@ -35,6 +35,111 @@ func (q *Queries) AppendQueuedTaskHandoffNote(ctx context.Context, arg AppendQue
 	return result.RowsAffected(), nil
 }
 
+const cancelAppActionRequest = `-- name: CancelAppActionRequest :one
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
+RETURNING id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at
+`
+
+type CancelAppActionRequestParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Withdraws one pending request whose approver may no longer act on it.
+func (q *Queries) CancelAppActionRequest(ctx context.Context, arg CancelAppActionRequestParams) (AppActionRequest, error) {
+	row := q.db.QueryRow(ctx, cancelAppActionRequest, arg.ID, arg.WorkspaceID)
+	var i AppActionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.TaskID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.ChatSessionID,
+		&i.ApproverUserID,
+		&i.AccountScope,
+		&i.ToolkitSlug,
+		&i.ToolSlug,
+		&i.ActionClass,
+		&i.Arguments,
+		&i.Summary,
+		&i.ApprovedArguments,
+		&i.Result,
+		&i.Error,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.RemindedAt,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const cancelPendingAppActionRequestsForApprover = `-- name: CancelPendingAppActionRequestsForApprover :many
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
+RETURNING id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at
+`
+
+type CancelPendingAppActionRequestsForApproverParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ApproverUserID pgtype.UUID `json:"approver_user_id"`
+}
+
+// A member leaving the workspace withdraws everything waiting on them.
+func (q *Queries) CancelPendingAppActionRequestsForApprover(ctx context.Context, arg CancelPendingAppActionRequestsForApproverParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingAppActionRequestsForApprover, arg.WorkspaceID, arg.ApproverUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelPendingTeamAppActionRequests = `-- name: CancelPendingTeamAppActionRequests :many
 UPDATE app_action_request
 SET status = 'cancelled', updated_at = now()
@@ -780,122 +885,6 @@ func (q *Queries) ListAgentAppsInWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
-const listAppActionRequestsForChatSession = `-- name: ListAppActionRequestsForChatSession :many
-SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
-WHERE workspace_id = $1 AND chat_session_id = $2
-ORDER BY created_at
-LIMIT 200
-`
-
-type ListAppActionRequestsForChatSessionParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-}
-
-func (q *Queries) ListAppActionRequestsForChatSession(ctx context.Context, arg ListAppActionRequestsForChatSessionParams) ([]AppActionRequest, error) {
-	rows, err := q.db.Query(ctx, listAppActionRequestsForChatSession, arg.WorkspaceID, arg.ChatSessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AppActionRequest{}
-	for rows.Next() {
-		var i AppActionRequest
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Kind,
-			&i.Status,
-			&i.TaskID,
-			&i.AgentID,
-			&i.IssueID,
-			&i.ChatSessionID,
-			&i.ApproverUserID,
-			&i.AccountScope,
-			&i.ToolkitSlug,
-			&i.ToolSlug,
-			&i.ActionClass,
-			&i.Arguments,
-			&i.Summary,
-			&i.ApprovedArguments,
-			&i.Result,
-			&i.Error,
-			&i.Reason,
-			&i.ExpiresAt,
-			&i.RemindedAt,
-			&i.DecidedBy,
-			&i.DecidedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAppActionRequestsForIssue = `-- name: ListAppActionRequestsForIssue :many
-SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
-WHERE workspace_id = $1 AND issue_id = $2
-ORDER BY created_at
-LIMIT 200
-`
-
-type ListAppActionRequestsForIssueParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
-}
-
-func (q *Queries) ListAppActionRequestsForIssue(ctx context.Context, arg ListAppActionRequestsForIssueParams) ([]AppActionRequest, error) {
-	rows, err := q.db.Query(ctx, listAppActionRequestsForIssue, arg.WorkspaceID, arg.IssueID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AppActionRequest{}
-	for rows.Next() {
-		var i AppActionRequest
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Kind,
-			&i.Status,
-			&i.TaskID,
-			&i.AgentID,
-			&i.IssueID,
-			&i.ChatSessionID,
-			&i.ApproverUserID,
-			&i.AccountScope,
-			&i.ToolkitSlug,
-			&i.ToolSlug,
-			&i.ActionClass,
-			&i.Arguments,
-			&i.Summary,
-			&i.ApprovedArguments,
-			&i.Result,
-			&i.Error,
-			&i.Reason,
-			&i.ExpiresAt,
-			&i.RemindedAt,
-			&i.DecidedBy,
-			&i.DecidedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAppActionRules = `-- name: ListAppActionRules :many
 SELECT id, workspace_id, owner_user_id, toolkit_slug, action_class, policy, updated_by, updated_at FROM app_action_rule
 WHERE workspace_id = $1
@@ -1020,6 +1009,139 @@ func (q *Queries) ListAppToolClassOverrides(ctx context.Context, arg ListAppTool
 	return items, nil
 }
 
+const listDecidedAppActionRequestsForChatSession = `-- name: ListDecidedAppActionRequestsForChatSession :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status <> 'pending'
+  AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)
+ORDER BY created_at DESC
+LIMIT $4
+`
+
+type ListDecidedAppActionRequestsForChatSessionParams struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Before        pgtype.Timestamptz `json:"before"`
+	PageSize      int32              `json:"page_size"`
+}
+
+func (q *Queries) ListDecidedAppActionRequestsForChatSession(ctx context.Context, arg ListDecidedAppActionRequestsForChatSessionParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listDecidedAppActionRequestsForChatSession,
+		arg.WorkspaceID,
+		arg.ChatSessionID,
+		arg.Before,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDecidedAppActionRequestsForIssue = `-- name: ListDecidedAppActionRequestsForIssue :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND issue_id = $2 AND status <> 'pending'
+  AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)
+ORDER BY created_at DESC
+LIMIT $4
+`
+
+type ListDecidedAppActionRequestsForIssueParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Before      pgtype.Timestamptz `json:"before"`
+	PageSize    int32              `json:"page_size"`
+}
+
+// One page of an issue's decided requests, newest first, before a cursor.
+func (q *Queries) ListDecidedAppActionRequestsForIssue(ctx context.Context, arg ListDecidedAppActionRequestsForIssueParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listDecidedAppActionRequestsForIssue,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.Before,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueAppToolCalls = `-- name: ListIssueAppToolCalls :many
 SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
 WHERE workspace_id = $1 AND issue_id = $2
@@ -1085,6 +1207,124 @@ type ListPendingAppActionRequestsForApproverParams struct {
 
 func (q *Queries) ListPendingAppActionRequestsForApprover(ctx context.Context, arg ListPendingAppActionRequestsForApproverParams) ([]AppActionRequest, error) {
 	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForApprover, arg.WorkspaceID, arg.ApproverUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAppActionRequestsForChatSession = `-- name: ListPendingAppActionRequestsForChatSession :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status = 'pending'
+ORDER BY created_at
+LIMIT 500
+`
+
+type ListPendingAppActionRequestsForChatSessionParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+}
+
+func (q *Queries) ListPendingAppActionRequestsForChatSession(ctx context.Context, arg ListPendingAppActionRequestsForChatSessionParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForChatSession, arg.WorkspaceID, arg.ChatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAppActionRequestsForIssue = `-- name: ListPendingAppActionRequestsForIssue :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND issue_id = $2 AND status = 'pending'
+ORDER BY created_at
+LIMIT 500
+`
+
+type ListPendingAppActionRequestsForIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Every request of an issue still waiting for a decision. Expiry and the
+// per-minute call budget keep this short; the cap only bounds a runaway.
+func (q *Queries) ListPendingAppActionRequestsForIssue(ctx context.Context, arg ListPendingAppActionRequestsForIssueParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForIssue, arg.WorkspaceID, arg.IssueID)
 	if err != nil {
 		return nil, err
 	}

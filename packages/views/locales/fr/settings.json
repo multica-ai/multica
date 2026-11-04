@@ -1594,7 +1594,11 @@
       "toast_rejected": "Refusé. L'agent va s'adapter.",
       "toast_failed": "Impossible d'enregistrer votre décision.",
       "not_connected": "Connectez d'abord le compte.",
-      "connected_resumed": "{{app}} connecté. L'agent reprend là où il s'était arrêté."
+      "connected_resumed": "{{app}} connecté. L'agent reprend là où il s'était arrêté.",
+      "rate_limited": "Ce compte a atteint sa limite d'appels par minute. Approuvez à nouveau dans une minute.",
+      "rate_limited_some_one": "{{count}} demande a atteint la limite par minute. Approuvez-la à nouveau dans une minute.",
+      "rate_limited_some_other": "{{count}} demandes ont atteint la limite par minute. Approuvez-les à nouveau dans une minute.",
+      "withdrawn": "Vous ne pouvez plus utiliser cet agent ; la demande a été retirée."
     },
     "tools": {
       "tab": "Outils",

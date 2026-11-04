@@ -135,17 +135,48 @@ LIMIT 1;
 SELECT * FROM app_action_request
 WHERE id = $1 AND workspace_id = $2;
 
--- name: ListAppActionRequestsForIssue :many
+-- name: ListPendingAppActionRequestsForIssue :many
+-- Every request of an issue still waiting for a decision. Expiry and the
+-- per-minute call budget keep this short; the cap only bounds a runaway.
 SELECT * FROM app_action_request
-WHERE workspace_id = $1 AND issue_id = $2
+WHERE workspace_id = $1 AND issue_id = $2 AND status = 'pending'
 ORDER BY created_at
-LIMIT 200;
+LIMIT 500;
 
--- name: ListAppActionRequestsForChatSession :many
+-- name: ListDecidedAppActionRequestsForIssue :many
+-- One page of an issue's decided requests, newest first, before a cursor.
 SELECT * FROM app_action_request
-WHERE workspace_id = $1 AND chat_session_id = $2
+WHERE workspace_id = $1 AND issue_id = $2 AND status <> 'pending'
+  AND (sqlc.narg('before')::timestamptz IS NULL OR created_at < sqlc.narg('before')::timestamptz)
+ORDER BY created_at DESC
+LIMIT sqlc.arg('page_size');
+
+-- name: ListPendingAppActionRequestsForChatSession :many
+SELECT * FROM app_action_request
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status = 'pending'
 ORDER BY created_at
-LIMIT 200;
+LIMIT 500;
+
+-- name: ListDecidedAppActionRequestsForChatSession :many
+SELECT * FROM app_action_request
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status <> 'pending'
+  AND (sqlc.narg('before')::timestamptz IS NULL OR created_at < sqlc.narg('before')::timestamptz)
+ORDER BY created_at DESC
+LIMIT sqlc.arg('page_size');
+
+-- name: CancelAppActionRequest :one
+-- Withdraws one pending request whose approver may no longer act on it.
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
+RETURNING *;
+
+-- name: CancelPendingAppActionRequestsForApprover :many
+-- A member leaving the workspace withdraws everything waiting on them.
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
+RETURNING *;
 
 -- name: ListPendingAppActionRequestsForApprover :many
 SELECT * FROM app_action_request

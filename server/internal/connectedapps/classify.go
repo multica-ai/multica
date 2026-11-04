@@ -60,11 +60,37 @@ var verbClasses = func() map[string]string {
 var shareNouns = map[string]bool{
 	"SHARING": true, "PERMISSION": true, "PERMISSIONS": true, "ACL": true, "COLLABORATOR": true,
 	"COLLABORATORS": true, "MEMBER": true, "MEMBERS": true, "ACCESS": true, "OWNER": true,
-	"OWNERSHIP": true, "PUBLIC": true,
+	"OWNERSHIP": true, "PUBLIC": true, "ADMIN": true, "ADMINS": true, "ROLE": true,
+	"ROLES": true, "PRIVILEGE": true, "PRIVILEGES": true, "VISIBILITY": true,
 }
 
 // Nouns that turn a write into a delete ("move to trash").
 var deleteNouns = map[string]bool{"TRASH": true, "BIN": true}
+
+// Objects that reach other people once written: scheduling a message, or
+// creating an event that invites attendees, is a send.
+var sendObjects = map[string]bool{
+	"MESSAGE": true, "MESSAGES": true, "EMAIL": true, "EMAILS": true, "MAIL": true,
+	"EVENT": true, "EVENTS": true, "INVITATION": true, "INVITATIONS": true, "INVITE": true,
+	"INVITES": true, "MEETING": true, "MEETINGS": true, "REPLY": true, "DM": true,
+}
+
+// Words between a verb and its object ("create a new event").
+var fillerWords = map[string]bool{"A": true, "AN": true, "THE": true, "NEW": true}
+
+// Argument names that address other people. A write carrying one of them
+// reaches those people, so it is confirmed like a send.
+var recipientArgs = map[string]bool{
+	"to": true, "cc": true, "bcc": true, "recipient": true, "recipients": true,
+	"recipient_email": true, "recipient_emails": true, "attendees": true, "invitees": true,
+	"guests": true, "participants": true, "required_attendees": true, "optional_attendees": true,
+}
+
+// Boolean or enum arguments that make the provider notify people.
+var notifyArgs = map[string]bool{
+	"send_updates": true, "send_notifications": true, "send_invitations": true,
+	"notify": true, "notify_users": true, "send_notification_email": true,
+}
 
 // Classify returns the action class of a tool. Curated overrides win; then the
 // first verb in the tool slug decides, with nouns upgrading a write to share or
@@ -81,10 +107,10 @@ func Classify(toolkitSlug, toolSlug string, tags []string) string {
 	prefix := strings.ToUpper(NormalizeSlug(toolkitSlug)) + "_"
 	tokens := strings.Split(strings.TrimPrefix(upper, prefix), "_")
 
-	class := ""
-	for _, tok := range tokens {
+	class, verbAt := "", -1
+	for i, tok := range tokens {
 		if c, ok := verbClasses[tok]; ok {
-			class = c
+			class, verbAt = c, i
 			break
 		}
 	}
@@ -95,6 +121,11 @@ func Classify(toolkitSlug, toolSlug string, tags []string) string {
 			}
 			if deleteNouns[tok] {
 				return ClassDelete
+			}
+		}
+		if !isDraft(tokens) {
+			if obj := objectAfter(tokens, verbAt); sendObjects[obj] {
+				return ClassSend
 			}
 		}
 	}
@@ -110,4 +141,75 @@ func Classify(toolkitSlug, toolSlug string, tags []string) string {
 		}
 	}
 	return ClassSend
+}
+
+func isDraft(tokens []string) bool {
+	for _, tok := range tokens {
+		if tok == "DRAFT" || tok == "DRAFTS" {
+			return true
+		}
+	}
+	return false
+}
+
+// objectAfter returns the first content word after the verb.
+func objectAfter(tokens []string, verbAt int) string {
+	for _, tok := range tokens[verbAt+1:] {
+		if !fillerWords[tok] {
+			return tok
+		}
+	}
+	return ""
+}
+
+// ClassifyCall refines a tool's class with the arguments of one call: a write
+// addressed to other people, or asking the app to notify them, is a send.
+// Drafts stay writes; they reach nobody until sent.
+func ClassifyCall(class, toolSlug string, args map[string]any) string {
+	if class != ClassWrite || len(args) == 0 {
+		return class
+	}
+	if isDraft(strings.Split(strings.ToUpper(toolSlug), "_")) {
+		return class
+	}
+	for key, value := range args {
+		k := strings.ToLower(strings.TrimSpace(key))
+		if recipientArgs[k] && hasValue(value) {
+			return ClassSend
+		}
+		if notifyArgs[k] && notifies(value) {
+			return ClassSend
+		}
+	}
+	return class
+}
+
+func hasValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(t) != ""
+	case []any:
+		return len(t) > 0
+	case map[string]any:
+		return len(t) > 0
+	default:
+		return true
+	}
+}
+
+func notifies(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "", "none", "false", "no":
+			return false
+		}
+		return true
+	default:
+		return false
+	}
 }

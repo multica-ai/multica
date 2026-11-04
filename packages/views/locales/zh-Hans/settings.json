@@ -1581,7 +1581,10 @@
       "toast_rejected": "已拒绝，智能体会调整做法。",
       "toast_failed": "无法记录你的决定。",
       "not_connected": "请先连接账号。",
-      "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。"
+      "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。",
+      "rate_limited": "这个账号已达到每分钟调用上限，请一分钟后再批准。",
+      "rate_limited_some_other": "有 {{count}} 个请求触发了每分钟上限，请一分钟后再批准。",
+      "withdrawn": "你已无法使用这个智能体，请求已撤回。"
     },
     "tools": {
       "tab": "工具",

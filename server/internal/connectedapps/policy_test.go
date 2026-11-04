@@ -106,3 +106,46 @@ func TestDefaultLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyOutwardWrites(t *testing.T) {
+	for _, tc := range []struct{ app, tool, want string }{
+		{"slack", "SLACK_SCHEDULE_MESSAGE", ClassSend},
+		{"slack", "SLACK_UPDATE_MESSAGE", ClassSend},
+		{"slack", "SLACK_SET_ADMIN_USER", ClassShare},
+		{"slack", "SLACK_SET_USER_ROLE", ClassShare},
+		{"outlook", "OUTLOOK_CALENDAR_CREATE_EVENT", ClassSend},
+		{"outlook", "OUTLOOK_CREATE_A_NEW_EVENT", ClassSend},
+		{"gmail", "GMAIL_CREATE_EMAIL_DRAFT", ClassWrite},
+		{"gmail", "GMAIL_ADD_LABEL_TO_EMAIL", ClassWrite},
+		{"notion", "NOTION_CREATE_PAGE", ClassWrite},
+	} {
+		if got := Classify(tc.app, tc.tool, nil); got != tc.want {
+			t.Errorf("Classify(%s) = %s, want %s", tc.tool, got, tc.want)
+		}
+	}
+	if got := Decide("slack", LevelWrite, Classify("slack", "SLACK_SET_ADMIN_USER", nil), ""); got != PolicyBlock {
+		t.Errorf("SLACK_SET_ADMIN_USER at write level = %s, want block", got)
+	}
+}
+
+func TestClassifyCallArguments(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		class string
+		tool  string
+		args  map[string]any
+		want  string
+	}{
+		{"attendees make an event a send", ClassWrite, "ZOOM_UPDATE_SCHEDULE", map[string]any{"attendees": []any{"a@example.com"}}, ClassSend},
+		{"empty recipients stay a write", ClassWrite, "TODOIST_UPDATE_TASK", map[string]any{"to": "", "attendees": []any{}}, ClassWrite},
+		{"notify flag", ClassWrite, "ASANA_UPDATE_TASK", map[string]any{"send_notifications": true}, ClassSend},
+		{"notify none", ClassWrite, "GOOGLECALENDAR_UPDATE_EVENT", map[string]any{"send_updates": "none"}, ClassWrite},
+		{"drafts reach nobody", ClassWrite, "GMAIL_CREATE_EMAIL_DRAFT", map[string]any{"to": "a@example.com"}, ClassWrite},
+		{"reads stay reads", ClassRead, "GMAIL_FETCH_EMAILS", map[string]any{"to": "a@example.com"}, ClassRead},
+		{"a delete is not softened", ClassDelete, "GMAIL_DELETE_MESSAGE", map[string]any{"to": "a@example.com"}, ClassDelete},
+	} {
+		if got := ClassifyCall(tc.class, tc.tool, tc.args); got != tc.want {
+			t.Errorf("%s: ClassifyCall = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}

@@ -2373,7 +2373,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
 					r.Get("/apps", h.ListAgentApps)
-					r.Put("/apps", h.UpdateAgentApps)
+					r.With(handler.RequireHumanActor).Put("/apps", h.UpdateAgentApps)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
@@ -2572,7 +2572,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Connected Apps (MUL-8516)
+			// Connected Apps management and decisions are for people; runs
+			// reach apps only through /api/apps/mcp.
 			r.Route("/api/apps", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
 				r.Get("/", h.GetAppsOverview)
 				r.Get("/catalog", h.ListAppCatalog)
 				r.Put("/settings", h.UpdateAppSettings)
@@ -2586,8 +2589,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/tools", h.ListAppTools)
 				r.Put("/tools/class", h.UpdateAppToolClass)
 			})
-			r.Get("/api/app-calls", h.ListIssueAppCalls)
+			r.With(handler.RequireHumanActor).Get("/api/app-calls", h.ListIssueAppCalls)
 			r.Route("/api/app-requests", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
 				r.Get("/", h.ListAppRequests)
 				r.Post("/{id}/approve", h.ApproveAppRequest)
 				r.Post("/{id}/reject", h.RejectAppRequest)

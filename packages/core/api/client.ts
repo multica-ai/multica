@@ -202,6 +202,7 @@ import type {
   AppTool,
   AppToolCall,
   IssueAppCall,
+  AppRequestList,
   TeamAppImpact,
   AppRequest,
   AgentApp,
@@ -430,6 +431,21 @@ import {
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
   IssueUnreadPageSchema,
+  AgentAppsResponseSchema,
+  AppActivityResponseSchema,
+  AppCatalogResponseSchema,
+  AppConnectInitSchema,
+  AppRequestListSchema,
+  AppRequestSchema,
+  AppRulesResponseSchema,
+  AppSettingsResponseSchema,
+  AppToolsResponseSchema,
+  AppsOverviewSchema,
+  EMPTY_APP_CATALOG,
+  EMPTY_APPS_OVERVIEW,
+  EMPTY_TEAM_APP_IMPACT,
+  IssueAppCallsResponseSchema,
+  TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
@@ -5244,22 +5260,28 @@ export class ApiClient {
   // workspace, personal accounts to the caller.
 
   async getAppsOverview(): Promise<AppsOverview> {
-    return this.fetch(`/api/apps`);
+    const raw = await this.fetch<unknown>(`/api/apps`);
+    return parseWithFallback(raw, AppsOverviewSchema, EMPTY_APPS_OVERVIEW, { endpoint: "GET /api/apps" });
   }
 
   /** The workspace's catalog; `view: "all"` (admins) lists every app with
    * whether the catalog allows it. */
   async listAppCatalog(view?: "all"): Promise<AppCatalogResponse> {
-    return this.fetch(`/api/apps/catalog${view ? `?view=${view}` : ""}`);
+    const raw = await this.fetch<unknown>(`/api/apps/catalog${view ? `?view=${view}` : ""}`);
+    return parseWithFallback(raw, AppCatalogResponseSchema, EMPTY_APP_CATALOG, { endpoint: "GET /api/apps/catalog" });
   }
 
   /** Starts connecting an account; the browser is sent to the returned URL
    * and comes back to `returnTo` (an app path) when given. */
   async connectApp(scope: AppAccountScope, toolkitSlug: string, returnTo?: string): Promise<ComposioConnectInitResponse> {
-    return this.fetch(`/api/apps/${scope}/connect`, {
+    const raw = await this.fetch<unknown>(`/api/apps/${scope}/connect`, {
       method: "POST",
       body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(returnTo ? { return_to: returnTo } : {}) }),
     });
+    const endpoint = `POST /api/apps/${scope}/connect`;
+    const parsed = parseWithFallback<ComposioConnectInitResponse | null>(raw, AppConnectInitSchema, null, { endpoint });
+    if (!parsed) throw new Error(`Malformed response from ${endpoint}`);
+    return parsed;
   }
 
   async disconnectTeamApp(connectionId: string): Promise<void> {
@@ -5267,21 +5289,27 @@ export class ApiClient {
   }
 
   async getTeamAppImpact(toolkitSlug: string): Promise<TeamAppImpact> {
-    return this.fetch(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    const raw = await this.fetch<unknown>(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    return parseWithFallback(raw, TeamAppImpactSchema, EMPTY_TEAM_APP_IMPACT, { endpoint: "GET /api/apps/team/impact" });
   }
+
+  // Write responses parse to null when malformed; callers refetch instead of
+  // caching a guess.
 
   async updateAppSettings(body: {
     catalog_mode: AppCatalogMode;
     allowed_toolkits?: string[];
-  }): Promise<{ catalog_mode: AppCatalogMode; allowed_toolkits: string[] }> {
-    return this.fetch(`/api/apps/settings`, {
+  }): Promise<{ catalog_mode: AppCatalogMode; allowed_toolkits: string[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/apps/settings`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
+    return parseWithFallback(raw, AppSettingsResponseSchema, null, { endpoint: "PUT /api/apps/settings" });
   }
 
   async listAppTools(toolkitSlug: string): Promise<{ tools: AppTool[] }> {
-    return this.fetch(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    const raw = await this.fetch<unknown>(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    return parseWithFallback(raw, AppToolsResponseSchema, { tools: [] }, { endpoint: "GET /api/apps/tools" });
   }
 
   /** Corrects one tool's class; `null` restores the automatic class. */
@@ -5293,60 +5321,76 @@ export class ApiClient {
   }
 
   async listIssueAppCalls(issueId: string): Promise<{ calls: IssueAppCall[] }> {
-    return this.fetch(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
+    const raw = await this.fetch<unknown>(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
+    return parseWithFallback(raw, IssueAppCallsResponseSchema, { calls: [] }, { endpoint: "GET /api/app-calls" });
   }
 
   async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {
-    return this.fetch(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    return parseWithFallback(raw, AppRulesResponseSchema, { rules: [] }, { endpoint: "GET /api/apps/rules" });
   }
 
   async updateAppRules(
     toolkitSlug: string,
     scope: AppAccountScope,
     rules: { action_class: AppActionClass; policy: AppActionPolicy }[],
-  ): Promise<{ rules: AppRule[] }> {
-    return this.fetch(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`, {
+  ): Promise<{ rules: AppRule[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`, {
       method: "PUT",
       body: JSON.stringify({ rules }),
     });
+    return parseWithFallback(raw, AppRulesResponseSchema, null, { endpoint: "PUT /api/apps/rules" });
   }
 
   async listAppActivity(toolkitSlug: string, scope: AppAccountScope): Promise<{ calls: AppToolCall[] }> {
-    return this.fetch(`/api/apps/activity?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    const raw = await this.fetch<unknown>(`/api/apps/activity?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    return parseWithFallback(raw, AppActivityResponseSchema, { calls: [] }, { endpoint: "GET /api/apps/activity" });
   }
 
   async listAgentApps(agentId: string): Promise<{ apps: AgentApp[] }> {
-    return this.fetch(`/api/agents/${agentId}/apps`);
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/apps`);
+    return parseWithFallback(raw, AgentAppsResponseSchema, { apps: [] }, { endpoint: "GET /api/agents/:id/apps" });
   }
 
-  async updateAgentApps(agentId: string, body: UpdateAgentAppsRequest): Promise<{ apps: AgentApp[] }> {
-    return this.fetch(`/api/agents/${agentId}/apps`, {
+  async updateAgentApps(agentId: string, body: UpdateAgentAppsRequest): Promise<{ apps: AgentApp[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/apps`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
+    return parseWithFallback(raw, AgentAppsResponseSchema, null, { endpoint: "PUT /api/agents/:id/apps" });
   }
 
-  /** Requests of an issue, of a chat, or (neither given) the caller's pending ones. */
-  async listAppRequests(params: { issueId?: string; chatSessionId?: string } = {}): Promise<{ requests: AppRequest[] }> {
+  /** Requests of an issue, of a chat, or (neither given) the caller's
+   * pending ones. The first page holds every pending request and the newest
+   * decided ones; `before` (a `next_before`) pages back through history. */
+  async listAppRequests(
+    params: { issueId?: string; chatSessionId?: string; before?: string } = {},
+  ): Promise<AppRequestList> {
     const qs = new URLSearchParams();
     if (params.issueId) qs.set("issue_id", params.issueId);
     if (params.chatSessionId) qs.set("chat_session_id", params.chatSessionId);
+    if (params.before) qs.set("before", params.before);
     const query = qs.toString();
-    return this.fetch(`/api/app-requests${query ? `?${query}` : ""}`);
+    const raw = await this.fetch<unknown>(`/api/app-requests${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, AppRequestListSchema, { requests: [], next_before: null }, {
+      endpoint: "GET /api/app-requests",
+    });
   }
 
-  async approveAppRequest(requestId: string, args?: Record<string, unknown>): Promise<AppRequest> {
-    return this.fetch(`/api/app-requests/${requestId}/approve`, {
+  async approveAppRequest(requestId: string, args?: Record<string, unknown>): Promise<AppRequest | null> {
+    const raw = await this.fetch<unknown>(`/api/app-requests/${requestId}/approve`, {
       method: "POST",
       body: JSON.stringify(args ? { arguments: args } : {}),
     });
+    return parseWithFallback(raw, AppRequestSchema, null, { endpoint: "POST /api/app-requests/:id/approve" });
   }
 
-  async rejectAppRequest(requestId: string, reason?: string): Promise<AppRequest> {
-    return this.fetch(`/api/app-requests/${requestId}/reject`, {
+  async rejectAppRequest(requestId: string, reason?: string): Promise<AppRequest | null> {
+    const raw = await this.fetch<unknown>(`/api/app-requests/${requestId}/reject`, {
       method: "POST",
       body: JSON.stringify(reason ? { reason } : {}),
     });
+    return parseWithFallback(raw, AppRequestSchema, null, { endpoint: "POST /api/app-requests/:id/reject" });
   }
 
   // Slack integration (MUL-3666)

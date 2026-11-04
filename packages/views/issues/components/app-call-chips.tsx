@@ -105,7 +105,7 @@ export function AppCallChips({ issueId, taskId, className }: { issueId: string; 
             <TooltipTrigger
               render={
                 <span className="inline-flex h-6 max-w-56 items-center gap-1.5 rounded-md border bg-card px-1.5 text-micro font-medium text-muted-foreground">
-                  <ComposioToolkitLogo slug={group.toolkit} name={app} className="size-3.5 rounded-[3px] text-[8px]" />
+                  <ComposioToolkitLogo slug={group.toolkit} name={app} className="size-3.5 rounded-xs text-[8px]" />
                   <span className="truncate text-foreground">{toolLabel(group.toolkit, group.tool)}</span>
                   {group.calls.length > 1 && <span className="tabular-nums">×{group.calls.length}</span>}
                   <OutcomeIcon outcome={latest.outcome} />
