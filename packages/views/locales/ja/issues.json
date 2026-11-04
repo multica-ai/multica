@@ -898,6 +898,7 @@
     "confirm": "実行を停止"
   },
   "batch": {
+    "delete_restricted": "自分または所有するエージェントが作成したタスクを削除できます。ワークスペースの owner と admin はすべてのタスクを削除できます。",
     "selected": "{{count}} 件選択中",
     "status": "ステータス",
     "priority": "優先度",
@@ -910,7 +911,6 @@
     "delete_failed": "タスクを削除できませんでした",
     "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
     "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
-    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル"
   },
   "card": {

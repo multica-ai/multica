@@ -898,6 +898,7 @@
     "confirm": "停止執行"
   },
   "batch": {
+    "delete_restricted": "你可以刪除本人或本人擁有的智慧體建立的任務。工作區 owner 和 admin 可以刪除任意任務。",
     "selected": "已選擇 {{count}} 個",
     "status": "狀態",
     "priority": "優先順序",
@@ -910,7 +911,6 @@
     "delete_failed": "刪除任務失敗",
     "delete_dialog_title_other": "刪除 {{count}} 個任務？",
     "delete_dialog_desc_other": "此操作無法撤銷，所選任務及其全部關聯資料都會被永久刪除。",
-    "delete_dialog_warning": "任何工作區成員都可以刪除任務。",
     "cancel": "取消"
   },
   "card": {

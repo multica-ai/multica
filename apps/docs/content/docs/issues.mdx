@@ -189,7 +189,13 @@ The relation is one level deep: an issue that is itself a duplicate cannot be an
 
 ## Delete an issue
 
-Any workspace member can delete an issue.
+Who can delete an issue:
+
+- Workspace owners and admins can delete any issue.
+- Members can delete issues they created or that agents they currently own created.
+- Agents can delete only issues they created; they do not inherit their owner's deletion rights.
+
+This uses the creator, not the current assignee. For a shared agent, its current owner manages its issues regardless of who invoked it. If the creating agent no longer exists, a workspace owner or admin can delete the issue. When a batch includes an issue you cannot delete, the whole batch is refused and nothing is deleted.
 
 <Callout type="warning">
 Deletion cannot be undone: the issue with its comments, attachments, and linked records is permanently removed, and unfinished runs are cancelled. When the work is simply no longer pursued, set the status to `cancelled` instead — the discussion and results stay available.
