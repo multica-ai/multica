@@ -224,6 +224,7 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 // the credential it requires rather than inheriting that guarantee silently
 // from a middleware two layers away.
 type chatHistoryScope struct {
+	task            db.AgentTaskQueue
 	sessionID       pgtype.UUID
 	contextRevision pgtype.Int8
 	historyStart    string
@@ -278,7 +279,7 @@ func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (ch
 		writeError(w, http.StatusForbidden, "chat session does not belong to this workspace")
 		return chatHistoryScope{}, false
 	}
-	scope := chatHistoryScope{sessionID: task.ChatSessionID, contextRevision: task.ChannelContextRevision}
+	scope := chatHistoryScope{task: task, sessionID: task.ChatSessionID, contextRevision: task.ChannelContextRevision}
 	if task.ChannelContextRevision.Valid {
 		generation, err := h.Queries.GetChannelChatContextGeneration(r.Context(), db.GetChannelChatContextGenerationParams{
 			ChatSessionID: task.ChatSessionID, Revision: task.ChannelContextRevision.Int64,

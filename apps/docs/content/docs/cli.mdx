@@ -246,6 +246,30 @@ Invalid limits or cursors return HTTP 400; limits above 200 are capped.
 Clients that do not follow the cursor receive only the newest 200 runs.
 
 
+## Task-bound chat input
+
+Inside a running chat task, use its injected task token to read the input sealed
+for that task:
+
+```bash
+multica chat trigger --output json
+```
+
+This calls `GET /api/chat/trigger`; it does not accept a task selector or a
+personal access token. The JSON contains `task_id`, `input`, `channel_type`,
+`channel_id`, `trigger_message_id`, and `thread_id`. Later messages cannot replace
+the sealed input. Retries read the original input with their own delivery snapshot.
+
+For Slack, `channel_id` is the resolved destination. An empty `thread_id` means
+there is no thread in the snapshot; a caller may explicitly use
+`trigger_message_id` to reply in a thread rooted at that message. Other channels
+retain their opaque channel identifiers. Native input without a channel delivery
+has all four channel fields empty and must not be sent to an external channel.
+
+Missing input ownership or inconsistent delivery metadata returns HTTP 409 and
+a nonzero CLI exit. Do not fall back to the latest chat-history message. Both the
+server and installed CLI must support this command before a skill requires it.
+
 ## Daemon and runtimes
 
 ```bash
