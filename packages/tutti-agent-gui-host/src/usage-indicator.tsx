@@ -13,6 +13,9 @@ export function contextPercent(usage: LocalProviderUsage | null): number | null 
   return context?.usedTokens != null && context.limitTokens != null && context.limitTokens > 0
     ? Math.min(100, Math.max(0, context.usedTokens / context.limitTokens * 100)) : null;
 }
+function formatContextTokens(value: number): string {
+  return value < 1000 ? String(value) : `${Math.round(value / 100) / 10}k`;
+}
 function Meter({ value, label }: { value: number; label: string }) {
   return <div className="multica-usage-meter" role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
     <span style={{ width: `${value}%` }} />
@@ -147,7 +150,7 @@ export function UsageIndicator({ client, localConversations, agentId, sessionId,
   const format = (value: number) => value.toLocaleString(chinese ? "zh-CN" : "en-US");
   const formatTime = (value: string) => new Intl.DateTimeFormat(chinese ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
   const chip = percent !== null ? `${labels.contextChip} ${Math.round(percent)}%`
-    : data?.context.usedTokens != null ? `${labels.contextChip} ${format(data.context.usedTokens)}` : labels.usage;
+    : data?.context.usedTokens != null ? `${labels.contextChip} ${formatContextTokens(data.context.usedTokens)}` : labels.usage;
   return <Popover open={open} onOpenChange={(value) => { hostDismissed.current = false; setOpen(value); if (value) void load(); }}>
     <PopoverTrigger asChild>
       <Button variant="ghost" size="sm" className="multica-usage-trigger" aria-label={labels.usage} data-testid="multica-usage-trigger" aria-busy={loading || undefined}>

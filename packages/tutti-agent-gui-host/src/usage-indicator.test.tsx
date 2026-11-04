@@ -43,6 +43,41 @@ async function complete(status = "completed", sessionId = "conversation") {
   });
 }
 
+it.each([
+  [0, "0"], [999, "999"], [1000, "1k"], [1049, "1k"], [1050, "1.1k"],
+  [10049, "10k"], [10050, "10.1k"], [65918, "65.9k"], [785685, "785.7k"],
+  [999999, "1000k"], [1000000, "1000k"], [1234567, "1234.6k"],
+])("shortens %s context tokens to %s without a reported limit", async (usedTokens, expected) => {
+  request.mockResolvedValue({ ...usage, context: { ...usage.context, usedTokens, limitTokens: null } });
+  await renderUsage();
+  expect(button("Usage").textContent).toBe(`Context ${expected}`);
+});
+
+it.each([false, true])("keeps exact tokens in details and account remaining alongside the compact summary (Chinese: %s)", async (chinese) => {
+  request.mockResolvedValue({
+    ...usage, provider: "claude", context: { ...usage.context, usedTokens: 65918, limitTokens: null },
+    account: { ...usage.account, windows: [{ id: "five_hour", label: "5h", usedPercent: 44 }] },
+  });
+  await renderUsage({ chinese, agentId: "local:claude" });
+  const trigger = button(chinese ? "用量" : "Usage");
+  expect(trigger.textContent).toBe(chinese ? "上下文 65.9k剩余 56%" : "Context 65.9kleft 56%");
+  await act(async () => trigger.click());
+  expect(document.querySelector(".multica-usage-detail")?.textContent).toBe(`65,918 · ${chinese ? "上限未提供" : "Limit not reported"} tokens`);
+});
+
+it("retains percentage summaries and exact used/limit details when the context limit is known", async () => {
+  await renderUsage();
+  expect(button("Usage").textContent).toBe("Context 10%");
+  await open();
+  expect(document.querySelector(".multica-usage-detail")?.textContent).toBe("100 / 1,000 tokens");
+});
+
+it("retains the empty-data label when no context count is available", async () => {
+  request.mockResolvedValue({ ...usage, context: { ...usage.context, usedTokens: null, limitTokens: null } });
+  await renderUsage();
+  expect(button("Usage").textContent).toBe("Usage");
+});
+
 it("waits for native completion, prevents duplicate clicks and refreshes usage after compaction", async () => {
   await renderUsage(); await open();
   await act(async () => { button("Compact").click(); button("Compact").click(); });
