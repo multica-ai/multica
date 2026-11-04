@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mattn/go-shellwords"
 )
 
 // kiroReaderDrainGrace bounds how long the turn waits for trailing ACP
@@ -719,22 +721,43 @@ func isKiroIssueCommentAddTool(msg Message) bool {
 }
 
 func isKiroIssueCommentAddCommand(command string) bool {
-	parts := trimLeadingEnvAssignments(strings.Fields(command))
+	parts := kiroCommandWords(command)
 	// Some runtimes route terminal calls through a shell wrapper such as
 	// `sh -c "multica issue comment add ..."`; unwrap a single such layer so
 	// the real invocation is still recognized.
 	if len(parts) >= 3 && isPOSIXShellName(parts[0]) && parts[1] == "-c" {
-		inner := strings.Trim(strings.Join(parts[2:], " "), "\"'")
-		parts = trimLeadingEnvAssignments(strings.Fields(inner))
+		parts = kiroCommandWords(parts[2])
 	}
 	if len(parts) < 4 {
 		return false
 	}
-	executable := strings.TrimPrefix(parts[0], "./")
-	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
-		return false
+	executable := strings.ReplaceAll(strings.TrimPrefix(parts[0], "./"), `\`, "/")
+	switch executable {
+	case "$MULTICA_CLI_PATH", "${MULTICA_CLI_PATH}", "$env:MULTICA_CLI_PATH", "${env:MULTICA_CLI_PATH}":
+	case "multica", "multica.exe":
+	default:
+		if !strings.HasSuffix(executable, "/multica") && !strings.HasSuffix(executable, "/multica.exe") {
+			return false
+		}
 	}
 	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
+}
+
+func kiroCommandWords(command string) []string {
+	command = strings.TrimSpace(command)
+	if after, ok := strings.CutPrefix(command, "&"); ok {
+		// PowerShell uses & to invoke a quoted executable and treats
+		// backslashes as literal path separators, not POSIX escapes.
+		command = strings.ReplaceAll(strings.TrimSpace(after), `\`, `\\`)
+	}
+	// Parse syntax only; never expand environment variables or execute
+	// command substitutions from the tool payload.
+	parser := shellwords.Parser{}
+	parts, err := parser.Parse(command)
+	if err != nil {
+		return nil
+	}
+	return trimLeadingEnvAssignments(parts)
 }
 
 // trimLeadingEnvAssignments drops leading `KEY=VALUE` tokens so an invocation
