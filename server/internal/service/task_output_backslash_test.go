@@ -35,9 +35,19 @@ var taskOutputBackslashCases = []struct {
 		want:   "Use `\\n` for a newline\nand `\\t` for a tab",
 	},
 	{
+		name:   "single line latex",
+		output: `$a \times b \neq 0$ and $n \neq -1$`,
+		want:   `$a \times b \neq 0$ and $n \neq -1$`,
+	},
+	{
+		name:   "single line path",
+		output: `Error: cannot read C:\tools\node_modules\repo`,
+		want:   `Error: cannot read C:\tools\node_modules\repo`,
+	},
+	{
 		name:   "escaped blob",
-		output: `First paragraph.\n\nSecond paragraph.`,
-		want:   "First paragraph.\n\nSecond paragraph.",
+		output: `First paragraph with $a \times b$.\n\nSecond paragraph.`,
+		want:   "First paragraph with $a \\times b$.\n\nSecond paragraph.",
 	},
 }
 

@@ -57,7 +57,14 @@ func TestDecodeEscapedAgentOutput(t *testing.T) {
 		{"empty", "", ""},
 		{"plain single line", "done", "done"},
 		{"escaped blob is decoded", `para1\n\npara2\n- item`, "para1\n\npara2\n- item"},
-		{"escaped blob decodes escaped backslash", `a \\times b\nnext`, "a \\times b\nnext"},
+		{"escaped blob keeps tab and carriage-return commands", `$a \times b$, $\rho$\n\nnext`, "$a \\times b$, $\\rho$\n\nnext"},
+		{"escaped blob keeps escaped backslash pairs", `a \\neq b\n\nnext`, "a \\\\neq b\n\nnext"},
+		{"escaped backslash does not start a paragraph break", `C:\\n\n`, `C:\\n\n`},
+		{"single escaped newline is not a blob", `line one\nline two`, `line one\nline two`},
+		// GH #9014: single-line LaTeX and paths that begin with `\n`.
+		{"single line neq", `$n \neq -1$`, `$n \neq -1$`},
+		{"single line times and neq", `$a \times b \neq 0$`, `$a \times b \neq 0$`},
+		{"single line node_modules path", `Error: cannot read C:\tools\node_modules\repo`, `Error: cannot read C:\tools\node_modules\repo`},
 		// GH #8845 / #9014: formatted output carries content backslashes.
 		{"latex in formatted reply", "Result:\n$a \\times b$, \\theta, \\text{x}, \\top, \\neq, \\rho", "Result:\n$a \\times b$, \\theta, \\text{x}, \\top, \\neq, \\rho"},
 		{"windows path in formatted reply", "Path:\n`D:\\Data\\secrets\\read-link.env` and `C:\\tools\\node_modules`", "Path:\n`D:\\Data\\secrets\\read-link.env` and `C:\\tools\\node_modules`"},
