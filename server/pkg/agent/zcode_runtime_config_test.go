@@ -137,3 +137,62 @@ func TestRequireNodeForZcodeScript(t *testing.T) {
 		t.Fatalf("error = %q, want clear Node.js message", err)
 	}
 }
+
+func TestZcodeStartPlanConnectionOptInViaOperatorToken(t *testing.T) {
+	base := t.TempDir()
+	executable := filepath.Join(base, "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs")
+	builtin := filepath.Join(filepath.Dir(executable), "..", "config", "provider", "zcode-builtin.json")
+	if err := os.MkdirAll(filepath.Dir(builtin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(builtin, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configRoot := filepath.Join(base, ".zcode", "v2")
+	if err := os.MkdirAll(configRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configRoot, "provider_config.json"), []byte(`{"schemaVersion":1,"config":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`{"provider":{
+		"builtin:zai-start-plan":{"enabled":true,"kind":"anthropic","options":{"apiKey":"stale-identity-token","baseURL":"https://plan.example.invalid"},"models":{"m":{"limit":{"context":12000}}}}
+	}}`)
+	if err := os.WriteFile(filepath.Join(configRoot, "config.json"), source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readSnapshot := func(env []string) string {
+		snapshotEnv, cleanup, err := prepareZcodeRuntimeEnv(executable, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cleanup)
+		snapshot := zcodeEnvValue(snapshotEnv, zcodePersonalConfigEnv)
+		if snapshot == "" {
+			t.Fatal("expected a process-owned snapshot")
+		}
+		data, err := os.ReadFile(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	// Default: the Start Plan connection stays excluded — its stored token is a
+	// login-time identity token that is normally already dead.
+	if data := readSnapshot([]string{"ZCODE_DATA_BASE_DIR=" + base}); strings.Contains(data, "stale-identity-token") {
+		t.Fatalf("Start Plan connection must stay excluded without an operator token, got: %s", data)
+	}
+
+	// Opt-in: the operator's current token replaces the stored identity token.
+	data := readSnapshot([]string{
+		"ZCODE_DATA_BASE_DIR=" + base,
+		zcodeStartPlanTokenEnv + "= fresh-identity-token ",
+	})
+	if !strings.Contains(data, `"apiKey":"fresh-identity-token"`) || strings.Contains(data, "stale-identity-token") {
+		t.Fatalf("Start Plan connection must use the trimmed operator token, got: %s", data)
+	}
+	if !strings.Contains(data, "https://plan.example.invalid") {
+		t.Fatalf("Start Plan connection must keep the Desktop baseURL, got: %s", data)
+	}
+}

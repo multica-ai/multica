@@ -14,6 +14,7 @@ import (
 const (
 	zcodePersonalConfigEnv   = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
 	zcodeProvidersTempPrefix = "multica-zcode-providers-"
+	zcodeStartPlanTokenEnv   = "MULTICA_ZCODE_START_PLAN_TOKEN"
 )
 
 type zcodeDesktopProvider struct {
@@ -62,7 +63,11 @@ func readZcodeConfig(path string, into any) error {
 // private, process-owned native provider repository snapshot under the process
 // temp dir (multica-zcode-providers-*). It reads Desktop's enabled connections
 // to build that snapshot, but never edits Desktop's repositories or converts
-// Start Plan identity tokens into API keys. Explicit native repositories remain
+// Start Plan identity tokens into API keys: Start Plan connections stay
+// excluded because their stored token is a login-time identity token the
+// Desktop refreshes only in memory. Operators can opt in by setting
+// MULTICA_ZCODE_START_PLAN_TOKEN to a currently valid identity token, which is
+// substituted for the stored one. Explicit native repositories remain
 // authoritative. Call CleanupStaleZcodeProviderSnapshots on daemon startup so
 // crash leftovers do not linger.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
@@ -128,13 +133,21 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 		sourceIDs = append(sourceIDs, id)
 	}
 	sort.Strings(sourceIDs)
+	startPlanToken := strings.TrimSpace(zcodeEnvValue(env, zcodeStartPlanTokenEnv))
 	for _, sourceID := range sourceIDs {
 		provider := desktop.Providers[sourceID]
 		if provider.Enabled == nil || !*provider.Enabled || strings.TrimSpace(provider.Options.APIKey) == "" || len(provider.Models) == 0 {
 			continue
 		}
 		if strings.HasPrefix(sourceID, "builtin:") && strings.Contains(sourceID, "start-plan") {
-			continue
+			// The stored token is a login-time identity token that is normally
+			// already dead (the Desktop resolves live credentials in memory);
+			// only include the connection when the operator supplies a current
+			// token to substitute for it.
+			if startPlanToken == "" {
+				continue
+			}
+			provider.Options.APIKey = startPlanToken
 		}
 		providerID := "multica-desktop:" + sourceID
 		ids := make([]string, 0, len(provider.Models))
