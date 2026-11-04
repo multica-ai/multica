@@ -31,6 +31,7 @@ import {
 } from "@multica/core/issues/sidebar-list";
 import { todayDateOnly } from "@multica/core/issues/date";
 import { useIssueUnreadIds } from "@multica/core/issues/unread";
+import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -339,9 +340,10 @@ function BuiltinViewRow({
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const statusCatalog = useIssueStatuses(wsId);
   const { issueSettings } = useSidebarProjectPrefs(wsId);
-  const request = statusCatalog.isLoaded
-    ? builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses)
-    : undefined;
+  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
+  const request = catalogDependency.unresolved
+    ? undefined
+    : builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses);
   const prefetch = usePrefetch(wsId, source, request);
 
   return (
@@ -387,6 +389,8 @@ function BuiltinViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={catalogDependency.error}
+          onRetry={catalogDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
@@ -427,8 +431,11 @@ function UnreadViewRow({
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const unread = useIssueUnreadIds(wsId);
-  const count = unread.ids?.length ?? 0;
-  const request = unread.ids ? viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.ids) : undefined;
+  const unreadDependency = filterDependencyState(true, [unread]);
+  const count = unread.data?.length ?? 0;
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.data);
   const prefetch = usePrefetch(wsId, source, request);
 
   if (count === 0 && !open) return null;
@@ -455,8 +462,8 @@ function UnreadViewRow({
           wsId={wsId}
           source={source}
           params={request}
-          paramsError={unread.isError}
-          onRetry={() => void unread.refetch()}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
@@ -508,8 +515,10 @@ function SavedViewRow({
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const needsUnread = viewSidebarNeedsUnread(view);
   const unread = useIssueUnreadIds(wsId, needsUnread);
-  const request =
-    needsUnread && !unread.ids ? undefined : viewSidebarRequest(view, todayDateOnly(), unread.ids);
+  const unreadDependency = filterDependencyState(needsUnread, [unread]);
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(view, todayDateOnly(), unread.data);
   const prefetch = usePrefetch(wsId, source, request);
   const canManage = actions.canManage(view);
 
@@ -589,8 +598,8 @@ function SavedViewRow({
           wsId={wsId}
           source={source}
           params={request}
-          paramsError={needsUnread && unread.isError}
-          onRetry={() => void unread.refetch()}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
