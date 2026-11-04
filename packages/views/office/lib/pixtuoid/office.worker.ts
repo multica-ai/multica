@@ -75,17 +75,36 @@ function reconcile(view: Office): void {
   }
 }
 
-/** Paints the engine's frame. The view wraps wasm memory directly, so nothing is copied per frame. */
+/**
+ * Paints the engine's frame. The view wraps wasm memory directly, so nothing is copied per frame.
+ * Only the rects the engine reports as changed are sent to the canvas: a settled office sends none.
+ */
 function paint(view: Office, wasm: WebAssembly.Memory, size: OfficeUnits): void {
   if (!canvas || !context) return;
   const scale = view.scale();
   const width = size.w * scale;
   const height = size.h * scale;
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-  // Read the view after every step: a grown memory detaches the older one.
+  let resized = false;
+  if (canvas.width !== width) {
+    canvas.width = width;
+    resized = true;
+  }
+  if (canvas.height !== height) {
+    canvas.height = height;
+    resized = true;
+  }
+  // Read the views after every step: a grown memory detaches the older ones.
   const pixels = new Uint8ClampedArray(wasm.buffer, view.frame_ptr(), view.frame_len());
-  context.putImageData(new ImageData(pixels, width, height), 0, 0);
+  const image = new ImageData(pixels, width, height);
+  if (resized || view.dirty_full()) {
+    context.putImageData(image, 0, 0);
+    return;
+  }
+  const rects = new Uint32Array(wasm.buffer, view.dirty_ptr(), view.dirty_len());
+  for (let i = 0; i < rects.length; i += 4) {
+    const [x = 0, y = 0, w = 0, h = 0] = rects.subarray(i, i + 4);
+    context.putImageData(image, 0, 0, x, y, w, h);
+  }
 }
 
 function frame(): void {

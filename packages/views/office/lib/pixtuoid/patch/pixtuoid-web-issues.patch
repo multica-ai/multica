@@ -1,5 +1,5 @@
 diff --git a/crates/pixtuoid-core/src/sprite/format.rs b/crates/pixtuoid-core/src/sprite/format.rs
-index 3bf1c86..0fb89ee 100644
+index 3bf1c863..0fb89ee8 100644
 --- a/crates/pixtuoid-core/src/sprite/format.rs
 +++ b/crates/pixtuoid-core/src/sprite/format.rs
 @@ -1661,6 +1661,9 @@ pub enum Piece {
@@ -14,7 +14,7 @@ index 3bf1c86..0fb89ee 100644
      DeskChair,
 diff --git a/crates/pixtuoid-scene/sprites/default/boss_desk.sprite b/crates/pixtuoid-scene/sprites/default/boss_desk.sprite
 new file mode 100644
-index 0000000..d0c42be
+index 00000000..d0c42beb
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/boss_desk.sprite
 @@ -0,0 +1,16 @@
@@ -36,7 +36,7 @@ index 0000000..d0c42be
 +ψ ψ . . . . . . . . . . . . . . . . . ψ ψ
 diff --git a/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite b/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite
 new file mode 100644
-index 0000000..861363c
+index 00000000..861363c2
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite
 @@ -0,0 +1,58 @@
@@ -99,7 +99,7 @@ index 0000000..861363c
 +ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
 +ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
 diff --git a/crates/pixtuoid-scene/sprites/default/pack.toml b/crates/pixtuoid-scene/sprites/default/pack.toml
-index 4a04da8..1856562 100644
+index 4a04da86..18565625 100644
 --- a/crates/pixtuoid-scene/sprites/default/pack.toml
 +++ b/crates/pixtuoid-scene/sprites/default/pack.toml
 @@ -848,3 +848,27 @@ planes = ["mid"]
@@ -132,7 +132,7 @@ index 4a04da8..1856562 100644
 +frame_ms = 600
 diff --git a/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite b/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite
 new file mode 100644
-index 0000000..10db35e
+index 00000000..10db35e2
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite
 @@ -0,0 +1,9 @@
@@ -147,7 +147,7 @@ index 0000000..10db35e
 +. n n n n n n n n n n n n n .
 diff --git a/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite b/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite
 new file mode 100644
-index 0000000..626c8d2
+index 00000000..626c8d25
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite
 @@ -0,0 +1,30 @@
@@ -183,7 +183,7 @@ index 0000000..626c8d2
 +. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
 diff --git a/crates/pixtuoid-scene/sprites/default/staff_desk.sprite b/crates/pixtuoid-scene/sprites/default/staff_desk.sprite
 new file mode 100644
-index 0000000..bd2661b
+index 00000000..bd2661ba
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/staff_desk.sprite
 @@ -0,0 +1,14 @@
@@ -203,7 +203,7 @@ index 0000000..bd2661b
 +ψ . . . . . . . . . . . . . . ψ
 diff --git a/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite b/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite
 new file mode 100644
-index 0000000..e598e60
+index 00000000..e598e602
 --- /dev/null
 +++ b/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite
 @@ -0,0 +1,50 @@
@@ -257,8 +257,21 @@ index 0000000..e598e60
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
 +ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
+diff --git a/crates/pixtuoid-scene/src/cutaway/canvas.rs b/crates/pixtuoid-scene/src/cutaway/canvas.rs
+index c668e632..fc60cbf4 100644
+--- a/crates/pixtuoid-scene/src/cutaway/canvas.rs
++++ b/crates/pixtuoid-scene/src/cutaway/canvas.rs
+@@ -110,7 +110,7 @@ impl Rects {
+ /// The most passes one frame's rects are painted in: a pass has a fixed cost,
+ /// so many small ones outrun the whole repaint, and one bounding box over
+ /// rects far apart paints most of the frame.
+-const MAX_PASSES: usize = 8;
++const MAX_PASSES: usize = 70;
+ 
+ /// `rects` merged into at most `max` disjoint boxes that cover them all, each
+ /// merge the pair whose box adds the least area: Mozilla's
 diff --git a/crates/pixtuoid-scene/src/floor/mod.rs b/crates/pixtuoid-scene/src/floor/mod.rs
-index 1d91f6a..eedcb61 100644
+index 1d91f6ac..eedcb614 100644
 --- a/crates/pixtuoid-scene/src/floor/mod.rs
 +++ b/crates/pixtuoid-scene/src/floor/mod.rs
 @@ -39,10 +39,47 @@ pub fn floor_seed(floor_idx: usize) -> u64 {
@@ -320,7 +333,7 @@ index 1d91f6a..eedcb61 100644
                  self.layout_memo = Some((key, Arc::clone(&l)));
                  l
 diff --git a/crates/pixtuoid-scene/src/layout/compute.rs b/crates/pixtuoid-scene/src/layout/compute.rs
-index f697a3a..eec47eb 100644
+index f697a3ab..eec47ebf 100644
 --- a/crates/pixtuoid-scene/src/layout/compute.rs
 +++ b/crates/pixtuoid-scene/src/layout/compute.rs
 @@ -195,15 +195,23 @@ struct FloorPlan {
@@ -665,7 +678,7 @@ index f697a3a..eec47eb 100644
  }
 +
 diff --git a/crates/pixtuoid-scene/src/layout/decor.rs b/crates/pixtuoid-scene/src/layout/decor.rs
-index 40f983a..6fa5816 100644
+index 40f983a8..6fa58161 100644
 --- a/crates/pixtuoid-scene/src/layout/decor.rs
 +++ b/crates/pixtuoid-scene/src/layout/decor.rs
 @@ -381,6 +381,12 @@ pub enum Furniture {
@@ -782,7 +795,7 @@ index 40f983a..6fa5816 100644
          );
          for &f in Furniture::ALL {
 diff --git a/crates/pixtuoid-scene/src/layout/mod.rs b/crates/pixtuoid-scene/src/layout/mod.rs
-index 9780a0f..2a68c9f 100644
+index 9780a0fc..2a68c9f7 100644
 --- a/crates/pixtuoid-scene/src/layout/mod.rs
 +++ b/crates/pixtuoid-scene/src/layout/mod.rs
 @@ -311,6 +311,8 @@ pub struct SceneLayout {
@@ -821,7 +834,7 @@ index 9780a0f..2a68c9f 100644
      /// fixed lounge area — the caller paints a "terminal too small" message.
      /// Panics where [`Self::compute_with_seed`] does.
 diff --git a/crates/pixtuoid-scene/src/layout/rooms/walls.rs b/crates/pixtuoid-scene/src/layout/rooms/walls.rs
-index 01114e0..94f99e9 100644
+index 01114e0d..94f99e91 100644
 --- a/crates/pixtuoid-scene/src/layout/rooms/walls.rs
 +++ b/crates/pixtuoid-scene/src/layout/rooms/walls.rs
 @@ -401,12 +401,58 @@ struct WallRequest {
@@ -884,7 +897,7 @@ index 01114e0..94f99e9 100644
          let b = room.bounds;
          requests.push(WallRequest {
 diff --git a/crates/pixtuoid-scene/src/layout/roster.rs b/crates/pixtuoid-scene/src/layout/roster.rs
-index a00f9cf..501bf76 100644
+index a00f9cf2..501bf765 100644
 --- a/crates/pixtuoid-scene/src/layout/roster.rs
 +++ b/crates/pixtuoid-scene/src/layout/roster.rs
 @@ -276,6 +276,9 @@ impl FixtureKind {
@@ -907,7 +920,7 @@ index a00f9cf..501bf76 100644
              // Architecture, which the painters draw from `wall_pieces`; the
              // pantry mat reads `doorways` through `pantry_entry_mat`.
 diff --git a/crates/pixtuoid-scene/src/layout/roster/tests.rs b/crates/pixtuoid-scene/src/layout/roster/tests.rs
-index 0a652c0..80d6177 100644
+index 0a652c07..80d6177d 100644
 --- a/crates/pixtuoid-scene/src/layout/roster/tests.rs
 +++ b/crates/pixtuoid-scene/src/layout/roster/tests.rs
 @@ -542,6 +542,9 @@ fn overlap_key(kind: FixtureKind) -> &'static str {
@@ -921,7 +934,7 @@ index 0a652c0..80d6177 100644
          _ => kind_key(kind),
      }
 diff --git a/crates/pixtuoid-scene/src/layout/tests.rs b/crates/pixtuoid-scene/src/layout/tests.rs
-index ee19bf2..1466bfe 100644
+index ee19bf2c..1466bfe3 100644
 --- a/crates/pixtuoid-scene/src/layout/tests.rs
 +++ b/crates/pixtuoid-scene/src/layout/tests.rs
 @@ -665,6 +665,61 @@ fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
@@ -986,8 +999,35 @@ index ee19bf2..1466bfe 100644
  #[test]
  fn sofas_seat_three_people() {
      // 120 wide so the meeting room clears MEETING_FURNITURE_MIN_W: a 96-wide room
+diff --git a/crates/pixtuoid-scene/src/look.rs b/crates/pixtuoid-scene/src/look.rs
+index 216df558..98f0af53 100644
+--- a/crates/pixtuoid-scene/src/look.rs
++++ b/crates/pixtuoid-scene/src/look.rs
+@@ -298,6 +298,22 @@ pub struct FloorPicture<'a> {
+     pub hits: &'a Hits,
+ }
+ 
++impl FloorPicture<'_> {
++    /// Whether the frame may differ everywhere from the last frame its session rendered.
++    pub fn changed_everywhere(&self) -> bool {
++        matches!(self.dirty, Dirty::All)
++    }
++
++    /// The rects the frame may differ inside, in buffer pixels; empty when it is
++    /// unchanged, and when it may differ everywhere (see [`Self::changed_everywhere`]).
++    pub fn changed_rects(&self) -> &[crate::layout::Bounds] {
++        match self.dirty {
++            Dirty::Rects(rects) => rects.as_slice(),
++            Dirty::All | Dirty::Unchanged => &[],
++        }
++    }
++}
++
+ /// A floor slide's frame: its two floors composed.
+ #[derive(Debug, Clone, Copy)]
+ pub struct SlidePicture<'a> {
 diff --git a/crates/pixtuoid-scene/src/sim/mod.rs b/crates/pixtuoid-scene/src/sim/mod.rs
-index 461e477..c1ca6b0 100644
+index 461e4772..c1ca6b0b 100644
 --- a/crates/pixtuoid-scene/src/sim/mod.rs
 +++ b/crates/pixtuoid-scene/src/sim/mod.rs
 @@ -377,7 +377,8 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
@@ -1001,7 +1041,7 @@ index 461e477..c1ca6b0 100644
              );
              (a.agent_id, p)
 diff --git a/crates/pixtuoid-web/src/lib.rs b/crates/pixtuoid-web/src/lib.rs
-index 14fd1b1..8c2e189 100644
+index 14fd1b18..4004e139 100644
 --- a/crates/pixtuoid-web/src/lib.rs
 +++ b/crates/pixtuoid-web/src/lib.rs
 @@ -20,7 +20,7 @@ use wasm_bindgen::prelude::*;
@@ -1035,7 +1075,20 @@ index 14fd1b1..8c2e189 100644
  #[wasm_bindgen]
  #[derive(Debug)]
  pub struct Office {
-@@ -168,6 +183,14 @@ pub struct Office {
+@@ -140,6 +155,12 @@ pub struct Office {
+     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
+     /// view into wasm memory, so blitting is zero-copy on the JS side.
+     rgba: Vec<u8>,
++    /// Whether `rgba` no longer mirrors the raster: the screen took no frame since, so the next one repaints whole.
++    mirror_stale: bool,
++    /// Whether the last written frame changed everywhere (a whole repaint), not just in `dirty_out`.
++    dirty_full: bool,
++    /// The rects the last written frame changed, as `x, y, w, h` in frame pixels (4 `u32` each).
++    dirty_out: Vec<u32>,
+     theme: &'static Theme,
+     /// The cutaway at the pack's densest art, which the browser upscales.
+     fit: PixelFit,
+@@ -168,6 +189,14 @@ pub struct Office {
      shown_badges: Vec<pixtuoid_scene::display::Badge>,
      /// The WebAudio engine — `None` until the site warms the ♩'s buffers.
      audio: Option<audio::WebAudioDriver>,
@@ -1050,7 +1103,7 @@ index 14fd1b1..8c2e189 100644
  }
  
  #[wasm_bindgen]
-@@ -179,6 +202,8 @@ impl Office {
+@@ -179,6 +208,8 @@ impl Office {
      /// If the bundled sprite pack fails to parse.
      #[wasm_bindgen(constructor)]
      pub fn new(seed: u32) -> Result<Office, JsError> {
@@ -1059,7 +1112,17 @@ index 14fd1b1..8c2e189 100644
          let pack =
              std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
          let density = pack.max_density_variant();
-@@ -208,6 +233,10 @@ impl Office {
+@@ -192,6 +223,9 @@ impl Office {
+             scene: SceneState::default(),
+             session: FloorSession::new(pack),
+             rgba: Vec::new(),
++            mirror_stale: true,
++            dirty_full: true,
++            dirty_out: Vec::new(),
+             theme: &NORMAL,
+             fit,
+             seed: u64::from(seed),
+@@ -208,6 +242,10 @@ impl Office {
              screen: Screen::on(page_clock()),
              shown_badges: Vec::new(),
              audio: None,
@@ -1070,10 +1133,68 @@ index 14fd1b1..8c2e189 100644
          })
      }
  
-@@ -266,6 +295,110 @@ impl Office {
+@@ -240,6 +278,8 @@ impl Office {
+         // member with stale walk legs teleports in.
+         self.render(now, units_w, units_h);
+         let Some(picture) = self.session.picture() else {
++            self.mirror_stale = true;
++            self.dirty_full = true;
+             // Too small to lay out: the canvas still takes a frame its size,
+             // in the background the engine fills a too-small classic with.
+             self.screen.blank(px);
+@@ -256,16 +296,158 @@ impl Office {
+         let badges = picture
+             .text
+             .map_or_else(Vec::new, |text| text.badges.to_vec());
++        let full = self.mirror_stale
++            || picture.changed_everywhere()
++            || self.rgba.len() != picture.pixels.as_slice().len() * 4;
++        let changed: Vec<pixtuoid_scene::layout::Bounds> = if full {
++            Vec::new()
++        } else {
++            picture.changed_rects().to_vec()
++        };
+         let picture = pixtuoid_scene::look::Picture::Floor(picture);
+         if !self.screen.admit(&picture, px, (), None).written() {
++            // The screen keeps its last frame, so the next written frame repaints whole.
++            self.mirror_stale = true;
++            self.dirty_full = true;
+             return;
+         }
+-        expand_rgba(&mut self.rgba, picture.pixels());
++        if full {
++            expand_rgba(&mut self.rgba, picture.pixels());
++            self.dirty_full = true;
++            self.dirty_out.clear();
++        } else {
++            expand_rects(&mut self.rgba, picture.pixels(), &changed);
++            self.dirty_full = false;
++            self.dirty_out.clear();
++            for b in &changed {
++                self.dirty_out.extend_from_slice(&[u32::from(b.x), u32::from(b.y), u32::from(b.width), u32::from(b.height)]);
++            }
++        }
++        self.mirror_stale = false;
+         self.shown_badges = badges;
+         // The page draws what `step` leaves in the same task, straight after.
          self.screen.landed();
      }
  
++    /// Whether the last written frame repainted everywhere; when false, only the rects at `dirty_ptr` changed.
++    pub fn dirty_full(&self) -> bool {
++        self.dirty_full
++    }
++
++    /// Pointer to the changed rects of the last written frame: `dirty_len` `u32`s, four per rect (`x, y, w, h`).
++    pub fn dirty_ptr(&self) -> *const u32 {
++        self.dirty_out.as_ptr()
++    }
++
++    /// The number of `u32`s at `dirty_ptr`.
++    pub fn dirty_len(&self) -> usize {
++        self.dirty_out.len()
++    }
++
 +    /// Drop the hero's scripted cast, so only the issues this office is given show.
 +    pub fn clear_script(&mut self) {
 +        self.beats.clear();
@@ -1181,7 +1302,7 @@ index 14fd1b1..8c2e189 100644
      /// Pointer to the RGBA frame in wasm linear memory ([`Office::frame_len`]
      /// bytes).
      ///
-@@ -362,6 +495,10 @@ impl Office {
+@@ -362,6 +544,10 @@ impl Office {
                  hex(*marker),
                  hex(name.ink)
              ));
@@ -1192,7 +1313,7 @@ index 14fd1b1..8c2e189 100644
              out.push('}');
          }
          out.push_str(&format!(
-@@ -374,7 +511,32 @@ impl Office {
+@@ -374,7 +560,32 @@ impl Office {
          push_board_segments(&mut out, &board.mood, theme);
          out.push_str(",\"context\":");
          push_board_segments(&mut out, &board.context, theme);
@@ -1226,7 +1347,7 @@ index 14fd1b1..8c2e189 100644
          out
      }
  
-@@ -535,6 +697,30 @@ impl Office {
+@@ -535,6 +746,30 @@ impl Office {
          let cap = floor_capacity(units_w, units_h, self.seed);
          self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
          self.caps_units = Some((units_w, units_h));
@@ -1257,7 +1378,51 @@ index 14fd1b1..8c2e189 100644
      }
  
      /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
-@@ -1046,6 +1232,22 @@ mod tests {
+@@ -624,14 +859,40 @@ impl Office {
+     }
+ }
+ 
++/// Copies only the `rects` of `buf` into `rgba`, which already mirrors `buf` everywhere else. Alpha is
++/// left alone: a whole expansion set it.
++fn expand_rects(rgba: &mut [u8], buf: &pixtuoid_core::sprite::RgbBuffer, rects: &[pixtuoid_scene::layout::Bounds]) {
++    let stride = usize::from(buf.width());
++    let rows = usize::from(buf.height());
++    let px = buf.as_slice();
++    for b in rects {
++        let x0 = usize::from(b.x).min(stride);
++        let x1 = (x0 + usize::from(b.width)).min(stride);
++        let y0 = usize::from(b.y).min(rows);
++        let y1 = (y0 + usize::from(b.height)).min(rows);
++        for y in y0..y1 {
++            for x in x0..x1 {
++                let c = px[y * stride + x];
++                let i = (y * stride + x) * 4;
++                rgba[i] = c.r;
++                rgba[i + 1] = c.g;
++                rgba[i + 2] = c.b;
++            }
++        }
++    }
++}
++
+ /// `buf` into the RGBA staging vec `rgba`: `Rgb` is not `repr(C)`, so
+ /// per-pixel (opaque alpha) — don't cast.
+ fn expand_rgba(rgba: &mut Vec<u8>, buf: &pixtuoid_core::sprite::RgbBuffer) {
+     let px = buf.as_slice();
++    // One pass over a pre-sized buffer: alpha is filled once, and each pixel writes only its colour.
+     rgba.clear();
+-    rgba.reserve(px.len() * 4);
+-    for c in px {
+-        rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
++    rgba.resize(px.len() * 4, 255);
++    for (dst, c) in rgba.chunks_exact_mut(4).zip(px) {
++        dst[0] = c.r;
++        dst[1] = c.g;
++        dst[2] = c.b;
+     }
+ }
+ 
+@@ -1046,6 +1307,22 @@ mod tests {
          );
      }
  
@@ -1280,7 +1445,7 @@ index 14fd1b1..8c2e189 100644
      #[test]
      fn overlay_json_exports_a_board_and_a_label_per_visible_agent() {
          let mut o = office();
-@@ -1299,7 +1501,7 @@ mod tests {
+@@ -1299,7 +1576,7 @@ mod tests {
              "the click past exhaustion is refused outright: {admitted:?}"
          );
          o.step(T0_MS + 32_000.0, w, h);

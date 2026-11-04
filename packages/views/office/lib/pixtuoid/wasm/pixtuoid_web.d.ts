@@ -79,6 +79,18 @@ export class Office {
      */
     clear_script(): void;
     /**
+     * Whether the last written frame repainted everywhere; when false, only the rects at `dirty_ptr` changed.
+     */
+    dirty_full(): boolean;
+    /**
+     * The number of `u32`s at `dirty_ptr`.
+     */
+    dirty_len(): number;
+    /**
+     * Pointer to the changed rects of the last written frame: `dirty_len` `u32`s, four per rect (`x, y, w, h`).
+     */
+    dirty_ptr(): number;
+    /**
      * Byte length of the RGBA frame: `w`×`h` units × [`Office::scale`]² × 4.
      */
     frame_len(): number;
@@ -194,6 +206,9 @@ export interface InitOutput {
     readonly office_audio_tick: (a: number, b: number) => [number, number];
     readonly office_audio_warmup_step: (a: number) => number;
     readonly office_clear_script: (a: number) => void;
+    readonly office_dirty_full: (a: number) => number;
+    readonly office_dirty_len: (a: number) => number;
+    readonly office_dirty_ptr: (a: number) => number;
     readonly office_frame_len: (a: number) => number;
     readonly office_frame_ptr: (a: number) => number;
     readonly office_hire: (a: number) => number;

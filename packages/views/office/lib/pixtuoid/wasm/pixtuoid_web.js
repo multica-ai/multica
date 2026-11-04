@@ -167,6 +167,30 @@ export class Office {
         wasm.office_clear_script(this.__wbg_ptr);
     }
     /**
+     * Whether the last written frame repainted everywhere; when false, only the rects at `dirty_ptr` changed.
+     * @returns {boolean}
+     */
+    dirty_full() {
+        const ret = wasm.office_dirty_full(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * The number of `u32`s at `dirty_ptr`.
+     * @returns {number}
+     */
+    dirty_len() {
+        const ret = wasm.office_dirty_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Pointer to the changed rects of the last written frame: `dirty_len` `u32`s, four per rect (`x, y, w, h`).
+     * @returns {number}
+     */
+    dirty_ptr() {
+        const ret = wasm.office_dirty_ptr(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Byte length of the RGBA frame: `w`×`h` units × [`Office::scale`]² × 4.
      * @returns {number}
      */
