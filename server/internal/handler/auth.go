@@ -60,6 +60,7 @@ var supportedLanguages = map[string]struct{}{
 	"ko":      {},
 	"ja":      {},
 	"fr":      {},
+	"ru":      {},
 }
 
 type UserResponse struct {

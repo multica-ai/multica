@@ -1,0 +1,181 @@
+{
+  "title": "Панель команд",
+  "description": "Ищите, выполняйте команды или передавайте работу агенту",
+  "placeholder": "Найдите нужное или опишите, что нужно сделать...",
+  "page_placeholder": "Фильтр...",
+  "breadcrumb_aria": "Текущее меню",
+  "groups": {
+    "pages": "Страницы",
+    "commands": "Команды",
+    "members": "Участники",
+    "agents": "Агенты",
+    "squads": "Отряды",
+    "projects": "Проекты",
+    "issues": "Задачи",
+    "autopilots": "Автопилоты",
+    "chats": "Чаты",
+    "skills": "skill",
+    "cancelled": "Отменено",
+    "recent": "Недавние",
+    "workspaces": "Рабочие пространства",
+    "new": "Создать",
+    "best_match": "Лучшее совпадение",
+    "actions": "Действия"
+  },
+  "context": {
+    "current_issue": "Текущая задача",
+    "selected_issues_one": "{{count}} выбранная задача",
+    "selected_issues_other": "{{count}} выбранной задачи",
+    "current_project": "Текущий проект",
+    "current_agent": "Текущий агент",
+    "current_autopilot": "Текущий автопилот",
+    "inbox": "Входящие",
+    "current_chat": "Текущий чат",
+    "selected_issues_few": "{{count}} выбранные задачи",
+    "selected_issues_many": "{{count}} выбранных задач"
+  },
+  "commands": {
+    "current_theme_aria": "Текущая тема",
+    "new_issue": "Новая задача",
+    "new_project": "Новый проект",
+    "new_autopilot": "Новый автопилот",
+    "chat_with_agent": "Чат с агентом",
+    "change_theme": "Сменить тему...",
+    "send_feedback": "Отправить отзыв",
+    "copy_issue_link": "Скопировать ссылку на задачу",
+    "copy_identifier": "Скопировать идентификатор ({{identifier}})",
+    "fold_all_comments": "Свернуть все комментарии",
+    "unfold_all_comments": "Развернуть все комментарии"
+  },
+  "issue": {
+    "change_status": "Изменить статус...",
+    "assign_to": "Назначить исполнителя...",
+    "set_priority": "Задать приоритет...",
+    "run_quick_action": "Выполнить быстрое действие...",
+    "quick_actions_available_one": "Доступно: {{count}}",
+    "quick_actions_available_other": "Доступно: {{count}}",
+    "add_label": "Добавить метку...",
+    "set_due_date": "Установить срок...",
+    "move_to_project": "Перенести в проект...",
+    "set_parent": "Выбрать родительскую задачу...",
+    "cancel_run": "Отменить текущий запуск",
+    "retry_run": "Повторить последний запуск",
+    "create_sub_issue": "Новая подзадача",
+    "subscribe": "Подписаться",
+    "unsubscribe": "Отписаться",
+    "delete": "Удалить задачу",
+    "delete_selected_one": "Удалить {{count}} задачу",
+    "delete_selected_other": "Удалить {{count}} задачи",
+    "quick_actions_available_few": "Доступно: {{count}}",
+    "quick_actions_available_many": "Доступно: {{count}}",
+    "delete_selected_few": "Удалить {{count}} задачи",
+    "delete_selected_many": "Удалить {{count}} задач"
+  },
+  "project": {
+    "change_status": "Изменить статус проекта...",
+    "new_issue": "Новая задача в этом проекте",
+    "pin": "Закрепить на боковой панели",
+    "unpin": "Открепить с боковой панели",
+    "copy_link": "Копировать ссылку на проект"
+  },
+  "agent": {
+    "chat": "Чат с {{name}}",
+    "assign_issue": "Назначить задачу агенту {{name}}...",
+    "new_issue": "Новая задача для {{name}}",
+    "pin_in_chat": "Закрепить в чате",
+    "unpin_in_chat": "Открепить в чате",
+    "settings": "Открыть настройки агента"
+  },
+  "autopilot": {
+    "run_now": "Запустить один раз сейчас",
+    "pause": "Приостановить",
+    "resume": "Возобновить"
+  },
+  "inbox": {
+    "archive": "В архив",
+    "mark_unread": "Отметить как непрочитанное",
+    "mark_all_read": "Отметить все входящие как прочитанные",
+    "archive_all_read": "Переместить все прочитанные входящие в архив"
+  },
+  "chat": {
+    "link_project": "Связать с проектом...",
+    "pin": "Закрепить чат",
+    "unpin": "Открепить чат",
+    "archive": "Переместить чат в архив"
+  },
+  "pages": {
+    "status": "Статус",
+    "priority": "Приоритет",
+    "assignee": "Исполнитель",
+    "labels": "Метки",
+    "due_date": "Срок",
+    "project": "Проект",
+    "parent": "Родительская задача",
+    "quick_actions": "Быстрые действия",
+    "theme": "Тема",
+    "project_status": "Статус проекта",
+    "no_project": "Без проекта",
+    "current": "Текущий"
+  },
+  "theme": {
+    "light": "Светлая",
+    "dark": "Тёмная",
+    "system": "Системная"
+  },
+  "toast": {
+    "link_copied": "Ссылка скопирована",
+    "copied_identifier": "Скопировано {{identifier}}",
+    "run_retried": "Запуск повторён",
+    "run_cancelled": "Запуск отменён",
+    "subscribed": "Подписка оформлена",
+    "unsubscribed": "Подписка отменена",
+    "label_added": "Добавлена метка «{{name}}»",
+    "label_removed": "Удалена метка «{{name}}»",
+    "label_failed": "Не удалось добавить метку «{{name}}» ко всем задачам",
+    "update_failed": "Не удалось обновить",
+    "assigned": "Задача {{identifier}} назначена: {{name}}"
+  },
+  "empty": {
+    "no_results": "Ничего не найдено.",
+    "no_labels": "Нет меток",
+    "type_to_find_issue": "Введите текст для поиска задачи",
+    "type_to_find_people": "Введите текст для поиска участников и агентов"
+  },
+  "delegate": {
+    "heading": "Передать агенту",
+    "create_and_assign": "Создать задачу и назначить агенту {{name}}",
+    "squad": "Отряд",
+    "context_aria": "Создано с",
+    "parent": "Подзадача {{identifier}}",
+    "pick_crumb": "Выбрать",
+    "pick_another": "Передать другому агенту или отряду...",
+    "detected": "Инструкция"
+  },
+  "best": {
+    "assign": "Назначить «{{subject}}»: {{name}}",
+    "chat": "Чат с {{name}}",
+    "new_issue_in": "Новая задача в «{{name}}»"
+  },
+  "types": {
+    "issue": "Задача",
+    "project": "Проект",
+    "agent": "Агент",
+    "autopilot": "Автопилот",
+    "squad": "Отряд",
+    "member": "Участник"
+  },
+  "footer": {
+    "navigate": "Навигация",
+    "select": "Выбрать",
+    "open_in_new_tab": "Открыть в новой вкладке",
+    "delegate": "Создать и передать: {{name}}",
+    "search_instead": "Искать по ключевым словам",
+    "back": "Назад",
+    "prefix_commands": "Команды",
+    "prefix_issues": "Задачи",
+    "prefix_people": "Участники и агенты"
+  },
+  "trigger": {
+    "label": "Поиск..."
+  }
+}
