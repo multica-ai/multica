@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -24,6 +25,92 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// Engineering context is optional: any failed read leaves the original project
+// description intact, without blocking task claims or writing derived text back.
+func (h *Handler) appendEngineeringProjectDescription(ctx context.Context, workspaceID, projectID pgtype.UUID, baseDescription string) string {
+	config, err := h.Queries.LabrastroGetEngineering(ctx, db.LabrastroGetEngineeringParams{WorkspaceID: workspaceID, ProjectID: projectID})
+	if err != nil || !config.Enabled {
+		return baseDescription
+	}
+	docs, err := h.Queries.LabrastroListBaselineDocs(ctx, db.LabrastroListBaselineDocsParams{WorkspaceID: workspaceID, ProjectID: projectID})
+	if err != nil {
+		return baseDescription
+	}
+	var stages []engineeringStage
+	if err := json.Unmarshal(config.Stages, &stages); err != nil {
+		return baseDescription
+	}
+	stageLine := fmt.Sprintf("当前主攻：Stage %d", config.CurrentStage)
+	for _, stage := range stages {
+		if stage.Stage == int64(config.CurrentStage) {
+			stageLine += " · " + engineeringContextText(stage.Title, 60)
+			if goal := engineeringContextText(stage.Goal, 280); goal != "" {
+				stageLine += "；目标：" + goal
+			}
+			break
+		}
+	}
+	lines := []string{"### 工程管理", stageLine}
+	if mode := engineeringContextText(config.ModeSummary, 280); mode != "" {
+		lines = append(lines, "推进方针："+mode)
+	}
+	var adopted, candidates []string
+	for _, chapter := range engineering.Chapters {
+		doc := baselineDoc(docs, chapter)
+		if doc.CandidateRevisionID.Valid {
+			candidates = append(candidates, chapter)
+		}
+		if !doc.AdoptedRevisionID.Valid {
+			continue
+		}
+		revision, err := h.Queries.LabrastroGetBaselineRevision(ctx, db.LabrastroGetBaselineRevisionParams{WorkspaceID: workspaceID, ProjectID: projectID, ID: doc.AdoptedRevisionID})
+		if err != nil {
+			return baseDescription
+		}
+		sections, err := engineering.Parse(chapter, revision.ContentMarkdown)
+		if err != nil {
+			return baseDescription
+		}
+		var titles []string
+		for _, section := range sections {
+			if section.Title != "" {
+				titles = append(titles, section.Title)
+			}
+		}
+		outline := engineeringContextText(strings.Join(titles, "；"), 240)
+		if outline == "" {
+			outline = "无小节标题"
+		}
+		adopted = append(adopted, fmt.Sprintf("- %s v%d：%s", chapter, revision.RevisionNumber, outline))
+	}
+	if len(adopted) == 0 {
+		lines = append(lines, "当前尚未建立生效基线")
+	} else {
+		lines = append(lines, "已生效基线（adopted）：")
+		lines = append(lines, adopted...)
+	}
+	if len(candidates) > 0 {
+		lines = append(lines, "待审候选（candidate，尚未生效）："+strings.Join(candidates, "、"))
+	}
+	lines = append(lines,
+		fmt.Sprintf("本项目已启用工程管理（Project ID: %s）。在规划、拆单、编码或审阅前，请运行 `multica project baseline get %s` 查阅完整项目基线与契约。", uuidToString(projectID), uuidToString(projectID)),
+		"如已绑定 strixnova-* 系列工程 skill，请按对应 skill 规程调用相关能力。")
+	summary := strings.Join(lines, "\n")
+	if baseDescription == "" {
+		return summary
+	}
+	return baseDescription + "\n\n" + summary
+}
+
+// Keep free-form configuration and headings on one bounded line per summary item.
+func engineeringContextText(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if utf8.RuneCountInString(value) > limit {
+		return string([]rune(value)[:limit-3]) + "..."
+	}
+	return value
+}
 
 func (h *Handler) RegisterLabrastroEngineeringRoutes(r chi.Router) {
 	r.Get("/api/projects/{id}/engineering", h.LabrastroGetEngineering)

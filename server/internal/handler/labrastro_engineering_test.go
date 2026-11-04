@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -124,6 +126,115 @@ func TestLabrastroEngineeringEnableLeavesBaselineEmpty(t *testing.T) {
 		if n := dbfx.Count(t, "SELECT count(*) FROM "+table+" WHERE project_id=$1", f.project); n != 0 {
 			t.Fatalf("enable created %s: %d", table, n)
 		}
+	}
+}
+
+func TestLabrastroEngineeringClaimProjectDescription(t *testing.T) {
+	f := newEngineeringFixture(t)
+	const original = "  项目原文\n\nKeep this whitespace.\n"
+	dbfx.Exec(t, `UPDATE project SET description=$2 WHERE id=$1`, f.project, original)
+	resolve := func() string {
+		t.Helper()
+		got, err := testHandler.resolveClaimProjectContext(context.Background(), parseUUID(f.project), parseUUID(testWorkspaceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Description
+	}
+	if got := resolve(); got != original {
+		t.Fatalf("unconfigured description=%q, want original", got)
+	}
+	f.enable()
+	if got := resolve(); !strings.Contains(got, "当前尚未建立生效基线") || !strings.Contains(got, "Stage 1") || strings.Contains(got, "待审候选") {
+		t.Fatalf("empty baseline context=%q", got)
+	}
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{
+		"current_stage": 9, "mode_summary": "逐步交付\n每阶段复盘",
+		"stages": []engineeringStage{{Stage: 2, Title: "历史阶段"}, {Stage: 9, Title: "核心接口", Goal: "打通任务主链"}},
+	}, "session")).Want(200)
+	for _, chapter := range engineering.Chapters {
+		adopted := f.propose(chapter, "## "+chapter+" 标题\nBASELINE_BODY_MUST_NOT_APPEAR\n### 验收约束\n正文\n```md\n## FENCED_HEADING_MUST_NOT_APPEAR\n```", nil, nil)
+		testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", adopted), "session")).Want(200)
+		if chapter == "domain_rules" {
+			adopted = f.propose(chapter, "## 新规则\n规则正文\n### 验收边界\n验收正文", uuidToPtr(adopted.ID), nil)
+			testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", adopted), "session")).Want(200)
+			f.propose(chapter, "## CANDIDATE_HEADING_MUST_NOT_APPEAR\n候选正文", uuidToPtr(adopted.ID), nil)
+		}
+	}
+	got := resolve()
+	if !strings.HasPrefix(got, original) {
+		t.Fatalf("original description was changed: %q", got)
+	}
+	for _, want := range []string{
+		"Stage 9 · 核心接口", "打通任务主链", "逐步交付 每阶段复盘",
+		"overview v1：overview 标题", "domain_rules v2：新规则", "验收边界",
+		"architecture v1：architecture 标题", "exclusions_and_risks v1：exclusions_and_risks 标题",
+		"待审候选（candidate，尚未生效）：domain_rules",
+		"Project ID: " + f.project, "`multica project baseline get " + f.project + "`", "strixnova-*",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("context missing %q: %s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"BASELINE_BODY_MUST_NOT_APPEAR", "FENCED_HEADING_MUST_NOT_APPEAR", "CANDIDATE_HEADING_MUST_NOT_APPEAR", "历史阶段", "当前尚未建立生效基线"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("context contains %q: %s", unwanted, got)
+		}
+	}
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{"enabled": false}, "session")).Want(200)
+	if got := resolve(); got != original {
+		t.Fatalf("disabled description=%q, want original", got)
+	}
+	var stored string
+	dbfx.QueryRow(t, `SELECT description FROM project WHERE id=$1`, f.project).Scan(&stored)
+	if stored != original {
+		t.Fatalf("stored description changed: %q", stored)
+	}
+}
+
+func TestLabrastroEngineeringClaimDescriptionBounded(t *testing.T) {
+	f := newEngineeringFixture(t)
+	f.enable()
+	testutil.Call(t, testHandler.LabrastroPatchEngineering, f.request("PATCH", "/engineering", map[string]any{
+		"mode_summary": strings.Repeat("方针\n", 90),
+		"stages":       []engineeringStage{{Stage: 1, Title: strings.Repeat("阶", 60), Goal: strings.Repeat("标", 280)}},
+	}, "session")).Want(200)
+	for _, chapter := range engineering.Chapters {
+		adopted := f.propose(chapter, strings.Repeat("## "+strings.Repeat("节", 100)+"\n正文\n", 30), nil, nil)
+		testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", adopted), "session")).Want(200)
+		f.propose(chapter, "候选", uuidToPtr(adopted.ID), nil)
+	}
+	got, err := testHandler.resolveClaimProjectContext(context.Background(), parseUUID(f.project), parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(got.Description) || utf8.RuneCountInString(got.Description) > 2000 || len(strings.Split(got.Description, "\n")) > 14 {
+		t.Fatalf("summary exceeded its context budget: %s", got.Description)
+	}
+	if !strings.Contains(got.Description, strings.Repeat("阶", 60)) || !strings.Contains(got.Description, strings.Repeat("标", 280)) {
+		t.Fatalf("stage text at its length limit was truncated: %s", got.Description)
+	}
+	if !strings.Contains(got.Description, "...") || !strings.Contains(got.Description, "`multica project baseline get "+f.project+"`") {
+		t.Fatalf("truncated summary lost its full-baseline guidance: %s", got.Description)
+	}
+}
+
+func TestLabrastroEngineeringClaimDescriptionQueryFailure(t *testing.T) {
+	f := newEngineeringFixture(t)
+	f.enable()
+	adopted := f.propose("overview", "## 已生效标题\n正文", nil, nil)
+	testutil.Call(t, testHandler.LabrastroDecideBaseline, f.request("POST", "/baseline/decisions", decision("adopt", adopted), "session")).Want(200)
+	const original = "Original project context\n"
+	dbfx.Exec(t, `UPDATE project SET description=$2 WHERE id=$1`, f.project, original)
+	for _, query := range []string{"LabrastroGetEngineering", "LabrastroListBaselineDocs", "LabrastroGetBaselineRevision"} {
+		t.Run(query, func(t *testing.T) {
+			h := *testHandler
+			h.Queries = db.New(failQueryDBTX{DBTX: testPool, failOn: query, err: errors.New("database read failed")})
+			got, err := h.resolveClaimProjectContext(context.Background(), parseUUID(f.project), parseUUID(testWorkspaceID))
+			if err != nil || got.Description != original {
+				t.Fatalf("engineering read failure blocked or changed claim context: %+v, %v", got, err)
+			}
+		})
 	}
 }
 
