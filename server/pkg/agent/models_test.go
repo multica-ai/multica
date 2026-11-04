@@ -1023,6 +1023,28 @@ bareword
 	}
 }
 
+func TestParsePiModelsQualifiedIDs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		input    string
+		want     string
+		provider string
+	}{
+		{"openrouter:anthropic/claude-sonnet-4", "openrouter/anthropic/claude-sonnet-4", "openrouter"},
+		{"custom:org/model:version", "custom/org/model:version", "custom"},
+		{"openrouter/anthropic/claude-sonnet-4", "openrouter/anthropic/claude-sonnet-4", "openrouter"},
+		{"custom/org/model:version", "custom/org/model:version", "custom"},
+		{"custom/model:version", "custom/model:version", "custom"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			models := parsePiModels(tc.input + "\n")
+			if len(models) != 1 || models[0].ID != tc.want || models[0].Provider != tc.provider {
+				t.Fatalf("parsePiModels(%q) = %+v, want ID %q and provider %q", tc.input, models, tc.want, tc.provider)
+			}
+		})
+	}
+}
+
 func TestParsePiModelsRejectsProseAlongsideCatalog(t *testing.T) {
 	input := `Some random log lines printed at the starting of the sandbox
 Disallowing sandbox creation from $HOME

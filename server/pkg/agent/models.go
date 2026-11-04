@@ -1378,11 +1378,12 @@ func parsePiModels(output string) []Model {
 		}
 		var id string
 		if len(fields) == 1 && strings.ContainsAny(first, ":/") {
-			// Legacy `provider:model` format — normalize colon to slash.
-			// Restricted to this branch so a model name with a `:` in
-			// the table format's column 1 is not silently rewritten.
+			// The first delimiter separates the provider. Legacy model IDs
+			// can contain slashes (provider:org/model), while later colons in
+			// provider/model:version belong to the model and stay unchanged.
 			id = first
-			if !strings.Contains(first, "/") {
+			colon, slash := strings.IndexByte(first, ':'), strings.IndexByte(first, '/')
+			if colon >= 0 && (slash < 0 || colon < slash) {
 				id = strings.Replace(first, ":", "/", 1)
 			}
 		} else if tableColumns >= 3 && len(fields) == tableColumns && piModelContextPattern.MatchString(fields[2]) {
