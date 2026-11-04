@@ -399,9 +399,23 @@ function BuiltinViewRow({
 }
 
 /**
+ * Whether the open issue was unread when it opened. Opening it marks it
+ * read, so the unread list alone cannot tell.
+ */
+function useOpenedUnread(activeIssueId: string | null, unreadIds: readonly string[] | undefined): boolean {
+  const isUnread = !!activeIssueId && !!unreadIds?.includes(activeIssueId);
+  const [opened, setOpened] = useState<{ id: string | null; unread: boolean }>({ id: null, unread: false });
+  if (opened.id !== activeIssueId || (isUnread && !opened.unread)) {
+    setOpened({ id: activeIssueId, unread: isUnread });
+  }
+  return opened.id === activeIssueId && (opened.unread || isUnread);
+}
+
+/**
  * The built-in Unread view. It shows only while the viewer has unread
- * issues, and stays while its page is open so reading the last one does not
- * pull the row out from under the reader.
+ * issues, and stays while its page is open, or while an issue that was
+ * unread when it opened is open, so reading the last one does not pull the
+ * row (and that issue's place under it) out from under the reader.
  */
 function UnreadViewRow({
   wsId,
@@ -430,8 +444,9 @@ function UnreadViewRow({
   const count = unread.ids?.length ?? 0;
   const request = unread.ids ? viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.ids) : undefined;
   const prefetch = usePrefetch(wsId, source, request);
+  const readingUnread = useOpenedUnread(activeIssueId, unread.ids);
 
-  if (count === 0 && !open) return null;
+  if (count === 0 && !open && !readingUnread) return null;
   const label = t(($) => $.panels.work.unread);
   return (
     <li>
