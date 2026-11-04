@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -719,29 +720,19 @@ func builtinSlug(skills []SkillContextForEnv, name string) (string, bool) {
 	return "", false
 }
 
-// writeSkills emits the Skills section: an index of invocable skill names.
-//
-// Names only, deliberately. Every runtime CLI discovers the SKILL.md files the
-// daemon writes and builds its own listing from their frontmatter, so repeating
-// the descriptions here bought a second, more expensive copy of what the model
-// already had — measured at ~3,100 tokens per brief on a real task, 40% of the
-// whole brief — and no extra routing signal (MUL-5529).
-//
-// The index itself stays because it is the one skill listing Multica controls.
-// Each CLI's own listing is theirs: its format, and whether it exists at all,
-// can change with any release.
-//
-// There is no per-provider branch. The old fallback told providers outside a
-// hardcoded list to read `.agent_context/skills/`, which was the wrong path for
-// every provider that actually reached it — grok and traecli write to
-// `.grok/skills` and `.traecli/skills` — while both discover natively and never
-// needed the pointer.
-func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
+// writeSkills keeps native discovery's names-only index, except for TRAE:
+// its task-local skills need descriptions and file-loading instructions when
+// the runtime does not discover them.
+func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	skills := modelVisibleSkills(ctx.AgentSkills)
 	if len(skills) == 0 {
 		return
 	}
 	b.WriteString("## Skills\n\n")
+	if provider == "traecli" {
+		writeTraecliSkills(b, skills)
+		return
+	}
 	b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 	for _, skill := range skills {
 		fmt.Fprintf(b, "- **%s**\n", skill.Name)
@@ -757,6 +748,37 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	// name the skill that actually holds those contracts.
 	if platformSlug != "" {
 		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
+	}
+}
+
+func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
+	skillPath := func(slug string) string {
+		return filepath.ToSlash(filepath.Join(skillsDirPath("", "traecli"), slug, "SKILL.md"))
+	}
+	platformSlug, _ := builtinSlug(skills, platformSkillName)
+	b.WriteString("The following skills are available as files (paths are relative to the task working directory):\n\n")
+	b.WriteString("When a task matches a skill's description, use your file tools to read its `SKILL.md` before following its instructions. Resolve relative references to supporting files, including `references/` and `scripts/`, from that skill's directory.\n\n")
+	for _, skill := range skills {
+		// Keep the routing hint bounded; the full instructions stay in SKILL.md.
+		const maxDescriptionRunes = 240
+		description := []rune(strings.Join(strings.Fields(skill.Description), " "))
+		if len(description) > maxDescriptionRunes {
+			description = append(description[:maxDescriptionRunes-1], '…')
+		}
+		fmt.Fprintf(b, "- **%s**", skill.Name)
+		if desc := sanitizeNameForBriefMarkdown(string(description)); desc != "" {
+			fmt.Fprintf(b, " — %s", desc)
+		}
+		fmt.Fprintf(b, " (file: `%s`)\n", skillPath(skill.Name))
+		// Prepared names may have a collision suffix; Content retains the
+		// original frontmatter identifying the built-in platform skill.
+		if platformSlug == "" && frontmatterNameIs(skill.Content, platformSkillName) {
+			platformSlug = skill.Name
+		}
+	}
+	b.WriteString("\n")
+	if platformSlug != "" {
+		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -975,7 +997,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// Every kind, quick-create included. Quick-create used to be skipped here
 	// and carried its own names-only index in the workdir sidecar instead;
 	// that sidecar is gone (MUL-6984) and the brief is the single index.
-	writeSkills(&b, ctx)
+	writeSkills(&b, provider, ctx)
 
 	if kind == kindIssue {
 		writeMentions(&b)
