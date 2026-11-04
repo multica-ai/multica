@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Code2, Copy, ExternalLink, File, Folder, Globe, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Code2, Copy, Eye, ExternalLink, File, Folder, Globe, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Markdown } from "@multica/ui/markdown/Markdown";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { LocalConversationScope, LocalPreviewLocation } from "@multica/core/local-conversation/protocol";
 import type { WebPreviewState, WebPreviewCommand } from "../../../shared/resource-preview";
@@ -40,16 +41,22 @@ export function PreviewFolder({ location, selected, scope, sessionId, onSelect, 
 
 export function LocalFilePreview({ location, scope, sessionId, line, chinese }: { location: LocalPreviewLocation; scope: LocalConversationScope; sessionId?: string; line?: number; chinese: boolean }) {
   const device = useLocalDevice();
-  const [source, setSource] = useState(false);
+  const previewKey = JSON.stringify([device.id, scope.userId, scope.workspaceId, location.root, location.path, line]);
+  const [mode, setMode] = useState({ key: previewKey, source: !!line });
+  if (mode.key !== previewKey) setMode({ key: previewKey, source: !!line });
+  const source = mode.key === previewKey ? mode.source : !!line;
   const query = useQuery({ queryKey: ["resource-file", device.id, scope.userId, scope.workspaceId, location.root, location.path], queryFn: () => localV2Preview(device.transport, scope).read(location, sessionId) });
   const highlight = useRef<HTMLSpanElement>(null);
-  useEffect(() => { highlight.current?.scrollIntoView({ block: "center" }); }, [line, query.data]);
+  useEffect(() => { highlight.current?.scrollIntoView({ block: "center" }); }, [line, query.data, source]);
   const file = query.data;
+  const markdown = /\.(md|markdown)$/i.test(location.name);
+  const lines = useMemo(() => (file?.text ?? "").split("\n"), [file?.text]);
+  const previewLines = useMemo(() => lines.slice(0, 5000), [lines]);
   return <div className="flex h-full min-h-0 min-w-0 flex-col">
-    <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-caption text-muted-foreground"><span className="min-w-0 flex-1 truncate" title={location.path}>{location.path.replace(location.root, location.root.split(/[\\/]/).at(-1) ?? "")}</span>{file?.mimeType === "text/html" && <Button variant="ghost" size="xs" onClick={() => setSource(!source)}><Code2 className="size-3.5" />{source ? (chinese ? "预览" : "Preview") : (chinese ? "源码" : "Source")}</Button>}{file?.text && <IconButton label={chinese ? "复制文件内容" : "Copy file contents"} onClick={() => { void copyText(file.text!); }}><Copy /></IconButton>}</div>
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-caption text-muted-foreground"><span className="min-w-0 flex-1 truncate" title={location.path}>{location.path.replace(location.root, location.root.split(/[\\/]/).at(-1) ?? "")}</span>{file && (markdown || file.mimeType === "text/html") && <Button variant="ghost" size="xs" className="shrink-0" onClick={() => setMode({ key: previewKey, source: !source })}>{source ? <Eye className="size-3.5" /> : <Code2 className="size-3.5" />}{source ? (chinese ? "预览" : "Preview") : (chinese ? "源码" : "Source")}</Button>}{file?.text && <IconButton label={chinese ? "复制文件内容" : "Copy file contents"} onClick={() => { void copyText(file.text!); }}><Copy /></IconButton>}</div>
     {query.isPending ? <div role="status" className="flex flex-1 items-center justify-center"><Loader2 className="size-5 animate-spin" /></div> : query.isError ? <div role="alert" className="p-4 text-body"><p>{query.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => { void query.refetch(); }}>{chinese ? "重试" : "Retry"}</Button></div> : file && <>
-      {file.url && file.mimeType.startsWith("image/") ? <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"><img alt={file.name} className="max-h-full max-w-full object-contain" src={file.url} /></div> : file.url && file.mimeType === "application/pdf" ? <iframe className="min-h-0 w-full flex-1 border-0" title={file.name} src={file.url} /> : file.mimeType === "text/html" && !source ? <iframe className="min-h-0 w-full flex-1 border-0 bg-white" title={file.name} sandbox="allow-scripts" srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; connect-src 'none'">${file.text ?? ""}`} /> : <pre className="min-h-0 flex-1 overflow-auto py-3 text-label leading-6"><code>{(file.text ?? "").split("\n").slice(0, 5000).map((text, index) => <span key={index} ref={line === index + 1 ? highlight : undefined} className={`flex min-w-max ${line === index + 1 ? "bg-accent" : ""}`}><span aria-hidden="true" className="sticky left-0 w-12 shrink-0 select-none bg-background pr-3 text-right text-faint-foreground">{index + 1}</span><span className="pr-4">{text || " "}</span></span>)}</code></pre>}
-      <div className="flex shrink-0 justify-between border-t px-3 py-2 text-caption text-muted-foreground"><span>{chinese ? "只读预览" : "Read-only preview"}{(file.text?.split("\n").length ?? 0) > 5000 ? (chinese ? " · 仅显示前 5000 行" : " · First 5,000 lines shown") : ""}{file.truncated ? (chinese ? " · 仅显示前 1 MB" : " · First 1 MB shown") : ""}</span><span>{line ? (chinese ? `第 ${line} 行` : `Line ${line}`) : `${Math.ceil(file.size / 1024)} KB`}</span></div>
+      {file.url && file.mimeType.startsWith("image/") ? <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"><img alt={file.name} className="max-h-full max-w-full object-contain" src={file.url} /></div> : file.url && file.mimeType === "application/pdf" ? <iframe className="min-h-0 w-full flex-1 border-0" title={file.name} src={file.url} /> : file.mimeType === "text/html" && !source ? <iframe className="min-h-0 w-full flex-1 border-0 bg-white" title={file.name} sandbox="allow-scripts" srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; connect-src 'none'">${file.text ?? ""}`} /> : markdown && !source ? <div className="min-h-0 min-w-0 flex-1 overflow-auto p-4 text-body"><Markdown mode="full" onUrlClick={(url) => { if (/^(https?:|mailto:)/i.test(url)) void window.desktopAPI.openExternal(url); }}>{previewLines.join("\n")}</Markdown></div> : <pre className="min-h-0 flex-1 overflow-auto py-3 text-label leading-6"><code>{previewLines.map((text, index) => <span key={index} ref={line === index + 1 ? highlight : undefined} className={`flex min-w-max ${line === index + 1 ? "bg-accent" : ""}`}><span aria-hidden="true" className="sticky left-0 w-12 shrink-0 select-none bg-background pr-3 text-right text-muted-foreground">{index + 1}</span><span className="pr-4">{text || " "}</span></span>)}</code></pre>}
+      <div className="flex shrink-0 justify-between border-t px-3 py-2 text-caption text-muted-foreground"><span>{chinese ? "只读预览" : "Read-only preview"}{lines.length > 5000 ? (chinese ? " · 仅显示前 5000 行" : " · First 5,000 lines shown") : ""}{file.truncated ? (chinese ? " · 仅显示前 1 MB" : " · First 1 MB shown") : ""}</span><span>{line ? (chinese ? `第 ${line} 行` : `Line ${line}`) : `${Math.ceil(file.size / 1024)} KB`}</span></div>
     </>}
   </div>;
 }
