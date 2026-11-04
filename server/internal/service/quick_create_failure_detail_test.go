@@ -59,6 +59,17 @@ func TestQuickCreateFailureDetail(t *testing.T) {
 		}
 	})
 
+	t.Run("backslashes in multi-line output pass through", func(t *testing.T) {
+		t.Parallel()
+		// GH #8845: once the output has real line breaks, `\t` and `\r` are
+		// content (here a Windows path), not escapes to decode.
+		result := []byte(`{"output":"Error: cannot read\nC:\\tools\\repo\\task.md"}`)
+		want := "Error: cannot read\nC:\\tools\\repo\\task.md"
+		if got := quickCreateFailureDetail(result); got != want {
+			t.Fatalf("expected verbatim output\n got: %q\nwant: %q", got, want)
+		}
+	})
+
 	t.Run("oversized output is dropped to a safe generic notice", func(t *testing.T) {
 		t.Parallel()
 		// A runaway raw-stream dump must not have its tool-trace head surfaced

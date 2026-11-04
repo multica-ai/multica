@@ -47,3 +47,31 @@ func TestUnescapeBackslashEscapes(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeEscapedAgentOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"plain single line", "done", "done"},
+		{"escaped blob is decoded", `para1\n\npara2\n- item`, "para1\n\npara2\n- item"},
+		{"escaped blob decodes escaped backslash", `a \\times b\nnext`, "a \\times b\nnext"},
+		// GH #8845 / #9014: formatted output carries content backslashes.
+		{"latex in formatted reply", "Result:\n$a \\times b$, \\theta, \\text{x}, \\top, \\neq, \\rho", "Result:\n$a \\times b$, \\theta, \\text{x}, \\top, \\neq, \\rho"},
+		{"windows path in formatted reply", "Path:\n`D:\\Data\\secrets\\read-link.env` and `C:\\tools\\node_modules`", "Path:\n`D:\\Data\\secrets\\read-link.env` and `C:\\tools\\node_modules`"},
+		{"quoted escape in formatted reply", "Use `\\n` for a newline\nand `\\t` for a tab", "Use `\\n` for a newline\nand `\\t` for a tab"},
+		{"crlf output untouched", "line1\r\n\\temp", "line1\r\n\\temp"},
+		{"single line latex without escaped newline", `$a \times b$ and \theta`, `$a \times b$ and \theta`},
+		{"single line windows path without escaped newline", `C:\tools\repo`, `C:\tools\repo`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DecodeEscapedAgentOutput(tt.in)
+			if got != tt.want {
+				t.Errorf("DecodeEscapedAgentOutput(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

@@ -11,8 +11,8 @@ import (
 // (\n, \r, \t, \\) that LLM agents routinely emit as 4-character literals
 // because Python/JSON-style string conventions are their default. The same
 // helper is used by the CLI to fix bash-double-quote bodies (where the shell
-// doesn't expand \n) and by the daemon-task completion path to fix raw agent
-// stdout that arrives with literal `\n\n` between paragraphs.
+// doesn't expand \n) and, through DecodeEscapedAgentOutput, by the daemon-task
+// completion path to fix agent output that arrives as one escaped blob.
 //
 // Only \n / \r / \t / \\ are decoded. Other escape sequences (\d, \w, \s,
 // \u, \0, \", etc.) pass through verbatim so regex literals and printf
@@ -50,6 +50,20 @@ func UnescapeBackslashEscapes(s string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// DecodeEscapedAgentOutput repairs agent output that arrived as one escaped
+// blob — no real line break anywhere, paragraphs joined by literal `\n` — by
+// running it through UnescapeBackslashEscapes. Output that already contains a
+// real line break is formatted text and is returned unchanged: any backslash
+// in it is content (LaTeX `\times`, Windows `C:\tools`, a quoted `\n`), and
+// decoding it would turn `\t` into a TAB and `\r` into a carriage return
+// (GH #8845, #9014).
+func DecodeEscapedAgentOutput(s string) string {
+	if strings.ContainsAny(s, "\n\r") || !strings.Contains(s, `\n`) {
+		return s
+	}
+	return UnescapeBackslashEscapes(s)
 }
 
 // sanitizeJSONMaxDepth bounds SanitizeJSONForPostgres's recursion. Task tool
