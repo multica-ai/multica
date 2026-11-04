@@ -232,6 +232,8 @@ The profile is shared across the workspace. Each connected computer looks up the
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 
+Version checks and Pi model discovery run in an empty temporary directory so sandbox wrappers can refuse launches from your home directory. Your home environment and user-level configuration remain available. Use absolute paths for scripts or configuration files in fixed arguments; probes do not discover configuration relative to the daemon's launch directory. Task execution still uses the task's working directory.
+
 ### How your arguments are ordered
 
 Everything you type in the command field stays directly after the executable, ahead of the arguments Multica adds:
@@ -294,7 +296,7 @@ On the Qoder Cloud Agents page, administrators can edit the connection and repos
 
 Runs beyond the concurrency limit wait in the queue. A follow-up on the same issue continues the agent's previous Qoder session when it is idle. An agent can set a default repository, used when the issue's project has none. The agent is asked to push a branch named after the issue identifier and to prefix the pull request title with it, so the pull request is linked to the issue.
 
-This first version supports issue runs, progress reporting, cancellation, and recovery from a persisted run journal. Configure models, tools, and skills in Qoder. Interactive chat, local directories, attachments, and creating agents in Qoder Cloud Agents from Multica are not supported. The Runtimes page separates remote runtimes from connected computers.
+This first version supports issue runs, chat, squad leaders, creating issues with an agent, progress reporting, cancellation, and recovery from a persisted run journal. Configure models, tools, and skills in Qoder. Files and images attached to issues and chat messages reach the session, PDFs and Office documents included, up to 5 MB per file; larger files are not passed on, and the agent is told they exist. Local directories and creating agents in Qoder Cloud Agents from Multica are not supported. The Runtimes page separates remote runtimes from connected computers. In chat, files the agent delivers with DeliverArtifacts, up to 10 MB each, are attached to its reply.
 
 For standalone bridge setup and operational limitations, see the [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 

@@ -303,6 +303,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | `project` | Manage projects, their resources, and the workflow they use |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `label`, `property` | Manage workspace labels and custom properties |
+| `view` | Read saved issue views and list the issues a view shows |
 | `agent`, `skill`, `squad` | Manage agents, skills, and squads |
 | `autopilot` | Manage automations, triggers, and run history |
 | `workspace` | Create, view, and switch workspaces, and invite members |
@@ -366,6 +367,12 @@ CLI configuration files contain tokens that can access Multica as you. Don't com
 
 The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
 
+### Issue attachments
+
+For `issue create`, `issue update`, and `issue comment add`, each `--attachment` takes one literal file path, including any commas or double quotes in the filename. Repeat the flag for multiple files: `--attachment 'report,final.csv' --attachment notes.txt`. Omitting the flag attaches no files; an explicitly empty path is an error. All local paths are checked before any file is uploaded.
+
+Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --attachment b` to attach two files. The former now selects a single file named `a,b`. Remove extra CSV quotes from the old workaround `--attachment '"report,final.csv"'`; use `--attachment 'report,final.csv'` unless the filename itself contains those double quotes.
+
 ### Core
 
 | Command | Subcommand | Purpose | Key flags |
@@ -400,6 +407,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `handoff set <workflow> <status-key>` | Set one step's handler, instructions, and next/back status; unchanged fields are kept | `--handler` (`none`, `project_lead`, `creator`, or a member/agent/squad name or UUID), `--instructions` / `--instructions-file`, `--next`, `--back`, `--copy-for-project` |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
+| `view` | `list/get/issues` | Read the saved views you can open (your own and workspace-shared ones); `issues` lists what a view shows, in its saved order, with every saved filter applied by the server. Inside an agent run, the views and any "my" conditions are the runtime owner's | `<view>` accepts an ID, ID prefix, or exact name; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (at most 100), `--cursor` (the previous page's `next_cursor`), `--today` (the day relative due-date filters resolve against; default today), `--fields` (JSON only), `--full-id` |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` only), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (older form), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's runs | |

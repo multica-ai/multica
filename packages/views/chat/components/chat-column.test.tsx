@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { NavigationProvider } from "../../navigation";
 import enChat from "../../locales/en/chat.json";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useContentWidthStore } from "@multica/core/issues/stores/content-width-store";
@@ -8,6 +10,8 @@ import { ChatMessageSkeleton } from "./chat-message-list";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { OfflineBanner } from "./offline-banner";
+import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
+import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import { ChatQueue } from "./chat-queue";
 
 // Every layer of the chat body has to land on the same left/right edges: the
@@ -22,7 +26,11 @@ const TEST_RESOURCES = { en: { chat: enChat } };
 function renderChat(ui: React.ReactElement) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      {ui}
+      <WorkspaceSlugProvider slug="acme">
+        <NavigationProvider value={{ pathname: "/acme/chat", searchParams: new URLSearchParams(), hash: "", push: () => {}, replace: () => {}, back: () => {}, getShareableUrl: (path) => path }}>
+          {ui}
+        </NavigationProvider>
+      </WorkspaceSlugProvider>
     </I18nProvider>,
   );
 }
@@ -43,6 +51,8 @@ describe("chat column geometry", () => {
     ["archived-agent banner", <ArchivedAgentBanner key="a" agentName="Lambda" />],
     ["offline banner", <OfflineBanner key="o" agentName="Lambda" availability="offline" />],
     ["unstable banner", <OfflineBanner key="u" agentName="Lambda" availability="unstable" />],
+    ["access-revoked banner", <AgentAccessRevokedBanner key="r" agentName="Lambda" />],
+    ["runtime-required banner", <RuntimeRequiredBanner key="b" agentId="agent-1" />],
     ["message skeleton", <ChatMessageSkeleton key="s" />],
     [
       "follow-up queue",
@@ -72,6 +82,12 @@ describe("chat column geometry", () => {
     for (const cls of COLUMN_CLASSES) expect(inner).toHaveClass(cls);
     // The cap belongs to the inner box only — see the test above.
     expect(outer.className).not.toContain("max-w-");
+
+    act(() => useContentWidthStore.getState().setContentWidth("full"));
+    expect(inner).not.toHaveClass("max-w-4xl");
+    for (const cls of GUTTER_CLASSES) expect(outer).toHaveClass(cls);
+    act(() => useContentWidthStore.getState().setContentWidth("standard"));
+    expect(inner).toHaveClass("max-w-4xl");
   });
 
   it("does not double the gutter when the skeleton nests inside the list", () => {
@@ -80,21 +96,5 @@ describe("chat column geometry", () => {
     const { container } = renderChat(<ChatMessageSkeleton />);
     const gutters = container.querySelectorAll(`.${CSS.escape(GUTTER_CLASSES[0]!)}`);
     expect(gutters).toHaveLength(1);
-  });
-
-  it("lifts the shared reading cap immediately without changing gutters", () => {
-    const { container, rerender } = renderChat(<NoAgentBanner />);
-    const outer = root(container);
-    const inner = outer.firstElementChild as HTMLElement;
-    expect(inner).toHaveClass("max-w-4xl");
-    useContentWidthStore.getState().setContentWidth("full");
-    rerender(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <NoAgentBanner />
-      </I18nProvider>,
-    );
-    expect(inner).not.toHaveClass("max-w-4xl");
-    for (const cls of GUTTER_CLASSES) expect(outer).toHaveClass(cls);
-    useContentWidthStore.getState().setContentWidth("standard");
   });
 });

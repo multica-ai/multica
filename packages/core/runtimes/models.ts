@@ -67,12 +67,13 @@ export const MODELS_GC_TIME_MS = 30 * 60_000;
 // window past what the server itself promises.
 export async function resolveRuntimeModels(
   runtimeId: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; workspaceSlug?: string } = {},
 ): Promise<RuntimeModelsResult> {
-  const initial =
-    options.force === true
-      ? await api.initiateListModels(runtimeId, { force: true })
-      : await api.initiateListModels(runtimeId);
+  const initial = await api.initiateListModels(
+    runtimeId,
+    options.force === true ? { force: true } : undefined,
+    options.workspaceSlug,
+  );
   const start = Date.now();
   let current = initial;
   while (current.status === "pending" || current.status === "running") {
@@ -80,7 +81,11 @@ export async function resolveRuntimeModels(
       throw new Error("model discovery timed out");
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    current = await api.getListModelsResult(runtimeId, initial.id);
+    current = await api.getListModelsResult(
+      runtimeId,
+      initial.id,
+      options.workspaceSlug,
+    );
   }
   // Only an explicit `completed` is a catalog. Anything else — failed, timeout,
   // or a status this client does not know (newer server, or a response that fell
@@ -119,12 +124,15 @@ export function staleTimeFor(data: RuntimeModelsResult | undefined): number {
   return data.cached ? 0 : LIVE_MODELS_STALE_TIME_MS;
 }
 
-export function runtimeModelsOptions(runtimeId: string | null | undefined) {
+export function runtimeModelsOptions(
+  runtimeId: string | null | undefined,
+  workspaceSlug?: string,
+) {
   return queryOptions({
     queryKey: runtimeId
       ? runtimeModelsKeys.forRuntime(runtimeId)
       : runtimeModelsKeys.all(),
-    queryFn: () => resolveRuntimeModels(runtimeId as string),
+    queryFn: () => resolveRuntimeModels(runtimeId as string, { workspaceSlug }),
     enabled: Boolean(runtimeId),
     staleTime: (query) => staleTimeFor(query.state.data),
     gcTime: MODELS_GC_TIME_MS,
@@ -139,10 +147,11 @@ export function runtimeModelsOptions(runtimeId: string | null | undefined) {
 export function refreshRuntimeModels(
   queryClient: QueryClient,
   runtimeId: string,
+  workspaceSlug?: string,
 ): Promise<RuntimeModelsResult> {
   return queryClient.fetchQuery({
-    ...runtimeModelsOptions(runtimeId),
-    queryFn: () => resolveRuntimeModels(runtimeId, { force: true }),
+    ...runtimeModelsOptions(runtimeId, workspaceSlug),
+    queryFn: () => resolveRuntimeModels(runtimeId, { force: true, workspaceSlug }),
     staleTime: 0,
   });
 }

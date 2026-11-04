@@ -289,13 +289,13 @@ describe("InboxFilterMenu", () => {
     );
   });
 
-  it("toggles no agents working and counts the idle rows behind it", async () => {
+  it("toggles no agents working without a count beside it", async () => {
     renderMenu({ activeIssueIds: new Set(["issue-todo-high"]) });
 
     fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", {
-        name: /No agents working.*1 notification/,
+        name: /^No agents working$/,
       }),
     );
 
