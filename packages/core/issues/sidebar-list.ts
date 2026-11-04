@@ -207,7 +207,7 @@ export function viewSidebarRequest(
  * leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: BuiltinViewKey,
+  builtin: Exclude<BuiltinViewKey, "unread">,
   myRelation: MyIssuesRelation,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],

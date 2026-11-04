@@ -898,6 +898,7 @@
     "confirm": "停止运行"
   },
   "batch": {
+    "delete_restricted": "你可以删除本人或本人拥有的智能体创建的任务。工作区 owner 和 admin 可以删除任意任务。",
     "selected": "已选择 {{count}} 个",
     "status": "状态",
     "priority": "优先级",
@@ -910,7 +911,6 @@
     "delete_failed": "删除任务失败",
     "delete_dialog_title_other": "删除 {{count}} 个任务？",
     "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
-    "delete_dialog_warning": "任何工作区成员都可以删除任务。",
     "cancel": "取消"
   },
   "card": {

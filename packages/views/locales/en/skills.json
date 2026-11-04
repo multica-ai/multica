@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "Skills",
+    "search": "Search skills",
     "new_skill": "New skill",
     "scopes": {
       "all": {
@@ -134,6 +135,8 @@
     },
     "toast_saved": "Skill saved",
     "toast_save_failed": "Failed to save skill",
+    "toast_saved_version": "Saved as v{{version}}",
+    "toast_view_history": "View history",
     "toast_deleted": "Skill deleted",
     "toast_delete_failed": "Failed to delete skill",
     "refresh": {
@@ -203,20 +206,51 @@
       "mode_edit": "Edit",
       "mode_raw": "Plain text"
     },
+    "versions": {
+      "list_aria": "Skill versions",
+      "version_label": "v{{version}}",
+      "current": "Current",
+      "unknown_author": "Unknown",
+      "empty": "No versions yet. The next change to this skill records its current content as the first version.",
+      "load_failed": "Failed to load versions.",
+      "restore": "Restore",
+      "toast_restored": "Restored v{{version}}",
+      "toast_restore_failed": "Failed to restore version",
+      "source": {
+        "baseline": "Earlier content",
+        "create": "Created",
+        "update": "Edited",
+        "import": "Imported",
+        "refresh": "Updated from source",
+        "restore": "Restored from v{{version}}"
+      },
+      "dialog": {
+        "title": "Restore v{{version}}?",
+        "description": "The content of v{{version}} becomes a new version. Agents use it from their next run. Newer versions stay in the history.",
+        "unsaved_warning": "Your unsaved changes will be discarded.",
+        "cancel": "Cancel",
+        "confirm": "Restore",
+        "restoring": "Restoring..."
+      }
+    },
     "sections": {
       "content": "Content",
       "files": "Files",
       "edit": "Edit",
       "open": "Open",
-      "add": "Add"
+      "add": "Add",
+      "history": "History"
     },
     "menu": {
       "copy_link": "Copy link",
       "link_copied": "Link copied",
-      "delete": "Delete skill"
+      "delete": "Delete skill",
+      "version_history": "Version history"
     },
     "panel": {
-      "add_description": "Add description"
+      "add_description": "Add description",
+      "version": "Version",
+      "no_versions": "No versions yet"
     }
   },
   "create": {

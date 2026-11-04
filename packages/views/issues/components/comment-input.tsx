@@ -49,9 +49,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const uploadGate = useUploadGate(editorRef);
   // Subscribe to the persisted draft so text written into it from outside
   // this composer shows up even while it is mounted.
-  // Quick actions in the `/` menu: picking one inserts the server-rendered
+  // Quick actions in the `/` menu: picking one inserts the cached
   // body so the user can edit before sending, instead of firing immediately.
-  const quickActionMenu = useQuickActionMenu(issueId);
+  const quickActionMenu = useQuickActionMenu();
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),

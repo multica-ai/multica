@@ -1,9 +1,7 @@
 import { useCallback } from "react";
 import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { inboxItemsReadOnIssueOpen, inboxKeys } from "../inbox/queries";
-import { onInboxInvalidate, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
-import type { InboxItem, IssueUnread } from "../types";
+import type { IssueUnread } from "../types";
 
 /**
  * The viewer's issues with an agent result they have not seen yet. Kept outside
@@ -53,42 +51,24 @@ export function useIssueUnread(wsId: string, issueId: string): IssueUnread | nul
 
 const selectUnreadIssueIds = (items: IssueUnread[]) => items.map((item) => item.issue_id);
 
-/** The ids of the viewer's unread issues. `ids` stays `undefined` until the
- *  list loads (or while `enabled` is false); `isError` means it failed with
- *  nothing cached and no retry in flight. */
+/** The ids of the viewer's unread issues, shaped as a `FilterDependencySource`.
+ *  `data` stays `undefined` until the list loads (or while `enabled` is
+ *  false); `isError` means it failed with nothing cached and no retry in
+ *  flight. */
 export function useIssueUnreadIds(wsId: string, enabled = true) {
   const { data, isError, isFetching, refetch } = useQuery({
     ...issueUnreadOptions(wsId),
     select: selectUnreadIssueIds,
     enabled: enabled && !!wsId,
   });
-  return { ids: data, isError: isError && !isFetching && data === undefined, refetch };
-}
-
-/**
- * Reads the issue's notifications in the cached Inbox list the way the server's
- * mark-read does. Reports whether it changed anything.
- */
-async function readIssueInboxInCache(qc: QueryClient, wsId: string, issueId: string): Promise<boolean> {
-  const listKey = inboxKeys.list(wsId);
-  if (inboxItemsReadOnIssueOpen(qc.getQueryData<InboxItem[]>(listKey) ?? [], issueId).length === 0) return false;
-  await qc.cancelQueries({ queryKey: listKey });
-  const items = qc.getQueryData<InboxItem[]>(listKey) ?? [];
-  const ids = new Set(inboxItemsReadOnIssueOpen(items, issueId));
-  if (ids.size === 0) return false;
-  qc.setQueryData<InboxItem[]>(listKey, items.map((item) => (ids.has(item.id) ? { ...item, read: true } : item)));
-  return true;
+  return { data, isError: isError && !isFetching && data === undefined, refetch };
 }
 
 function useSetIssueUnread(wsId: string, unread: boolean) {
   const qc = useQueryClient();
   const key = issueUnreadKeys.all(wsId);
   return useMutation({
-    mutationFn: async (issueId: string) => {
-      if (!unread) return api.markIssueRead(issueId);
-      await api.markIssueUnread(issueId);
-      return { inboxRead: 0 };
-    },
+    mutationFn: (issueId: string) => (unread ? api.markIssueUnread(issueId) : api.markIssueRead(issueId)),
     // Both writes are idempotent. A 4xx will not change on retry.
     retry: (failures, err) => {
       const status = (err as { status?: number }).status;
@@ -98,7 +78,6 @@ function useSetIssueUnread(wsId: string, unread: boolean) {
     onMutate: async (issueId) => {
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<IssueUnread[]>(key);
-      const hadMark = prev?.some((item) => item.issue_id === issueId) ?? false;
       qc.setQueryData<IssueUnread[]>(key, (old) => {
         if (!old) return old;
         const has = old.some((item) => item.issue_id === issueId);
@@ -109,24 +88,13 @@ function useSetIssueUnread(wsId: string, unread: boolean) {
           created_at: new Date().toISOString(),
         }, ...old];
       });
-      const inboxPatched = !unread && await readIssueInboxInCache(qc, wsId, issueId);
-      return { prev, hadMark, inboxPatched };
+      return { prev };
     },
-    // The Inbox list is not rolled back: the Inbox marks the same rows read
-    // when it opens the issue, and a snapshot would undo that too. The refresh
-    // on settle corrects it.
     onError: (_err, _issueId, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
     },
-    onSettled: (data, err, _issueId, ctx) => {
-      // Reading an issue that had no mark changes nothing here; a mark the
-      // cache missed arrives as issue_unread:changed.
-      if (unread || err || !ctx?.prev || ctx.hadMark) void qc.invalidateQueries({ queryKey: key });
-      // The badge follows the server, never the optimistic rows.
-      if (ctx?.inboxPatched || (data?.inboxRead ?? 0) > 0) {
-        void onInboxInvalidate(qc, wsId);
-        void onInboxSummaryInvalidate(qc);
-      }
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key });
     },
   });
 }

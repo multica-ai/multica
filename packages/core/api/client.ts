@@ -69,6 +69,8 @@ import type {
   User,
   Skill,
   SkillSummary,
+  SkillVersion,
+  SkillVersionSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -418,6 +420,7 @@ import {
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
+  IssueInboxReadSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -470,6 +473,10 @@ import {
   EMPTY_SKILL,
   SkillSummaryListSchema,
   EMPTY_SKILL_SUMMARY_LIST,
+  SkillVersionSchema,
+  EMPTY_SKILL_VERSION,
+  SkillVersionSummaryListSchema,
+  EMPTY_SKILL_VERSION_SUMMARY_LIST,
   SkillImportResultSchema,
   EMPTY_SKILL_IMPORT_RESULT,
   IssueViewSchema,
@@ -2964,11 +2971,8 @@ export class ApiClient {
     return parsed.issue_ids;
   }
 
-  /** `inboxRead` is how many of the issue's Inbox notifications the write read;
-   *  0 from a server that does not report it. */
-  async markIssueRead(issueId: string): Promise<{ inboxRead: number }> {
-    const res = await this.fetch<{ inbox_read?: unknown } | null>(`/api/issues/${issueId}/read`, { method: "POST" });
-    return { inboxRead: typeof res?.inbox_read === "number" ? res.inbox_read : 0 };
+  async markIssueRead(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/read`, { method: "POST" });
   }
 
   async markIssueUnread(issueId: string): Promise<void> {
@@ -3065,6 +3069,19 @@ export class ApiClient {
 
   async markAllInboxRead(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
+  }
+
+  /**
+   * Reads every unread notification the caller has on one issue. `count` is
+   * how many rows the server read, or `null` when the response did not say:
+   * the write itself succeeded, so callers must not read `null` as "nothing
+   * changed".
+   */
+  async markIssueInboxRead(issueId: string): Promise<{ count: number | null }> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+    return parseWithFallback<{ count: number | null }>(raw, IssueInboxReadSchema, { count: null }, {
+      endpoint: "POST /api/inbox/issues/{id}/read",
+    });
   }
 
   async archiveAllInbox(): Promise<{ count: number }> {
@@ -3670,6 +3687,39 @@ export class ApiClient {
     });
     return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
       endpoint: "POST /api/skills/:id/refresh",
+    });
+  }
+
+  // Content history, newest first. Metadata only; fetch one version for its
+  // snapshot.
+  async listSkillVersions(skillId: string): Promise<SkillVersionSummary[]> {
+    const raw = await this.fetch<unknown>(`/api/skills/${skillId}/versions`);
+    return parseWithFallback(
+      raw,
+      SkillVersionSummaryListSchema,
+      EMPTY_SKILL_VERSION_SUMMARY_LIST,
+      { endpoint: "GET /api/skills/:id/versions" },
+    );
+  }
+
+  async getSkillVersion(skillId: string, version: number): Promise<SkillVersion> {
+    const raw = await this.fetch<unknown>(
+      `/api/skills/${skillId}/versions/${version}`,
+    );
+    return parseWithFallback(raw, SkillVersionSchema, EMPTY_SKILL_VERSION, {
+      endpoint: "GET /api/skills/:id/versions/:version",
+    });
+  }
+
+  // Writes the version's snapshot back to the skill. The server records the
+  // result as a new latest version.
+  async restoreSkillVersion(skillId: string, version: number): Promise<Skill> {
+    const raw = await this.fetch<unknown>(
+      `/api/skills/${skillId}/versions/${version}/restore`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "POST /api/skills/:id/versions/:version/restore",
     });
   }
 
@@ -4528,8 +4578,9 @@ export class ApiClient {
   }
 
   /**
-   * What a quick action WOULD post, without posting it. Backs the composer
-   * hand-off (⌥-click and the `/` menu) so the user can edit before sending.
+   * What a quick action WOULD post, with server-side validation but no send.
+   * Retained for callers that resolve drafts over HTTP; the comment composer
+   * builds its draft synchronously from the quick-action catalog.
    * Returns "" when the response cannot be read — callers must treat an empty
    * string as "insert nothing" rather than clearing the composer.
    */

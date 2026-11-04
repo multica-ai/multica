@@ -128,8 +128,8 @@ describe("AllViewsPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "All views" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All views" }));
-    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("5");
-    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("3");
+    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("6");
+    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("4");
     expect(screen.getByRole("menuitemradio", { name: /^Created by me/ })).toHaveTextContent("1");
     await user.click(screen.getByRole("menuitemradio", { name: /^Shared/ }));
 
@@ -170,6 +170,19 @@ describe("AllViewsPage", () => {
     await user.click(screen.getByText("Team backlog"));
     expect(push).toHaveBeenCalledWith("/acme/issues?view=v2");
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
+  });
+
+  it("lists Unread as a built-in that is starred on demand and opens its view", async () => {
+    const user = userEvent.setup();
+    const { push } = renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Add Unread to sidebar" }));
+    expect(mocks.star).toHaveBeenCalledWith("builtin:unread");
+    expect(push).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("Unread"));
+    expect(push).toHaveBeenCalledWith("/acme/issues?view=unread");
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("unread");
   });
 
   it("opens a view in place for a shift-click, which rows never hand to the browser", async () => {

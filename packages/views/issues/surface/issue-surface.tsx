@@ -53,6 +53,7 @@ import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
+  type FilterDependencyKind,
   type IssueSurfaceController,
 } from "./use-issue-surface-controller";
 
@@ -286,18 +287,15 @@ function IssueSurfaceContent({
             loading and empty states too, so a view switch that briefly shows
             a skeleton keeps the peek open. */}
         <IssuePeekHost>
-        {/* A failed status catalog precedes loading/empty/content on purpose.
-            Row fetching is suspended while it is down (a custom status filter
-            cannot be routed without it), so every branch below would render an
-            unexplained empty surface with no way out. (MUL-6243) */}
-        {controller.isStatusCatalogError ? (
-          <FilterDependencyErrorState kind="status" onRetry={controller.retryStatusCatalog} />
-        ) : controller.isWorkingFilterError ? (
-          <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
-        ) : controller.isUnreadFilterError ? (
-          <FilterDependencyErrorState kind="unread" onRetry={controller.retryUnreadFilter} />
-        ) : controller.isRelationFilterError ? (
-          <FilterDependencyErrorState kind="relation" onRetry={controller.retryRelationFilter} />
+        {/* A failed filter dependency precedes loading/empty/content on
+            purpose. Row fetching is suspended while it is down, so every
+            branch below would render an unexplained empty surface with no way
+            out. */}
+        {controller.filterDependencyError ? (
+          <FilterDependencyErrorState
+            kind={controller.filterDependencyError.kind}
+            onRetry={controller.filterDependencyError.retry}
+          />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -424,7 +422,7 @@ function FilterDependencyErrorState({
   kind,
   onRetry,
 }: {
-  kind: "status" | "working" | "unread" | "relation";
+  kind: FilterDependencyKind;
   onRetry: () => void;
 }) {
   const { t } = useT("issues");

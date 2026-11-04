@@ -77,7 +77,7 @@ function ReplyInput({
   // Quick actions in the `/` menu — same catalog and same insert-don't-run
   // behavior as the top-level composer. A reply posts to the same issue, so
   // `/` has to offer the same thing here (MUL-5588).
-  const quickActionMenu = useQuickActionMenu(issueId);
+  const quickActionMenu = useQuickActionMenu();
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>

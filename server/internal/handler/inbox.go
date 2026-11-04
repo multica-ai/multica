@@ -437,6 +437,50 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
+// MarkIssueInboxRead marks the caller's unread informational notifications on
+// one issue read; items that need handling stay unread (see
+// MarkInboxReadByIssue). The client calls it while the issue is on screen outside the inbox, so
+// reading an issue anywhere also reads it in the inbox (MUL-8588). The update
+// is scoped to the caller's own rows, so an issue id from another workspace
+// matches nothing.
+func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	issueUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "issueId"), "issue id")
+	if !ok {
+		return
+	}
+
+	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+		WorkspaceID: wsUUID,
+		RecipientID: parseUUID(userID),
+		IssueID:     issueUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark issue inbox read")
+		return
+	}
+
+	// Opening an issue with nothing unread is the common case. It changes no
+	// row, so it must not make every open client refetch its inbox.
+	if count > 0 {
+		h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+			"recipient_id": userID,
+			"count":        count,
+			"issue_id":     uuidToString(issueUUID),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

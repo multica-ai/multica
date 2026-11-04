@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { createQueryClient } from "../query-client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
 import {
@@ -8,9 +7,7 @@ import {
   deduplicateArchivedInboxItems,
   deduplicateInboxItems,
   hasOtherWorkspaceUnread,
-  inboxItemsReadOnIssueOpen,
   inboxKeys,
-  issueOpenMayReadInbox,
   unreadCountForWorkspace,
   unreadWorkspaceIds,
 } from "./queries";
@@ -261,58 +258,5 @@ describe("unreadCountForWorkspace", () => {
 
   it("returns zero for an empty summary", () => {
     expect(unreadCountForWorkspace([], "ws-1")).toBe(0);
-  });
-});
-
-describe("inboxItemsReadOnIssueOpen", () => {
-  it("reads the issue's unread informational items only", () => {
-    const ids = inboxItemsReadOnIssueOpen([
-      item({ id: "comment" }),
-      item({ id: "status", type: "status_changed" }),
-      item({ id: "already-read", read: true }),
-      item({ id: "archived", archived: true }),
-      item({ id: "other-issue", issue_id: "issue-2" }),
-    ], "issue-1");
-
-    expect(ids).toEqual(["comment", "status"]);
-  });
-
-  it.each([
-    ["issue_assigned", "action_required"],
-    ["task_failed", "action_required"],
-    ["autopilot_paused", "attention"],
-    ["mentioned", "info"],
-  ] as const)("reads nothing while %s is unread", (type, severity) => {
-    const items = [item({ id: "kept", type, severity }), item({ id: "comment" })];
-
-    expect(inboxItemsReadOnIssueOpen(items, "issue-1")).toEqual([]);
-    expect(inboxItemsReadOnIssueOpen([{ ...items[0]!, read: true }, items[1]!], "issue-1")).toEqual(["comment"]);
-  });
-});
-
-describe("issueOpenMayReadInbox", () => {
-  it("answers from a current Inbox list", () => {
-    const qc = createQueryClient();
-    qc.setQueryData(inboxKeys.unreadSummary(), [{ workspace_id: "ws-1", count: 3 }]);
-    qc.setQueryData(inboxKeys.list("ws-1"), [item({ read: true })]);
-    expect(issueOpenMayReadInbox(qc, "ws-1", "issue-1")).toBe(false);
-
-    qc.setQueryData(inboxKeys.list("ws-1"), [item({})]);
-    expect(issueOpenMayReadInbox(qc, "ws-1", "issue-1")).toBe(true);
-  });
-
-  it("falls back to the unread summary when the list is missing or stale", async () => {
-    const qc = createQueryClient();
-    qc.setQueryData(inboxKeys.list("ws-1"), [item({ read: true })]);
-    await qc.invalidateQueries({ queryKey: inboxKeys.list("ws-1"), refetchType: "none" });
-    qc.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), [{ workspace_id: "ws-1", count: 1 }]);
-    expect(issueOpenMayReadInbox(qc, "ws-1", "issue-1")).toBe(true);
-
-    qc.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), [{ workspace_id: "ws-2", count: 1 }]);
-    expect(issueOpenMayReadInbox(qc, "ws-1", "issue-1")).toBe(false);
-  });
-
-  it("asks the server when nothing is known", () => {
-    expect(issueOpenMayReadInbox(createQueryClient(), "ws-1", "issue-1")).toBe(true);
   });
 });
