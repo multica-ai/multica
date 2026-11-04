@@ -22,7 +22,7 @@ function formatReleaseDate(date: string, language: string) {
   return new Intl.DateTimeFormat(language, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
 }
 
-/** Every announced release, opened from the rail button. */
+/** Every announced release, opened from the Help menu. */
 export function WhatsNewPanel({
   releases,
   unreadVersions,
@@ -82,7 +82,7 @@ export function WhatsNewPanel({
                         <p className="text-label text-muted-foreground">{copy.body}</p>
                         {highlight.action && (
                           <div className="mt-0.5">
-                            <HighlightActionButton action={highlight.action} variant="link" onDone={onClose} />
+                            <HighlightActionButton action={highlight.action} onDone={onClose} />
                           </div>
                         )}
                       </div>

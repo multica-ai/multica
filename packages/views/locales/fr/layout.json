@@ -40,14 +40,6 @@
   },
   "whats_new": {
     "trigger": "Nouveautés",
-    "card": {
-      "eyebrow": "Multica mis à jour · {{range}}",
-      "title_one": "{{count}} nouveauté depuis votre dernière visite",
-      "title_other": "{{count}} nouveautés depuis votre dernière visite",
-      "dismiss": "Fermer",
-      "view_details": "Voir le détail",
-      "got_it": "Compris"
-    },
     "panel": {
       "title": "Nouveautés",
       "close": "Fermer",

@@ -21,8 +21,6 @@ export interface WhatsNewHighlight {
   /** English is required; a missing locale falls back to it. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
-  /** Image shown above the expanded highlight in the update card. */
-  media?: { src: string };
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
@@ -32,8 +30,8 @@ export interface WhatsNewRelease extends ReleaseStamp {
 /**
  * In-app highlights per release, newest first. Not the changelog: only
  * user-visible changes worth discovering, 0–3 per release, with copy that
- * says how to use the feature. Fix-only releases get no entry, so they
- * neither open the card nor light the rail dot. Versions and dates must
+ * says how to use the feature. Fix-only releases get no entry, so they are
+ * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [

@@ -65,14 +65,6 @@
   },
   "whats_new": {
     "trigger": "Novedades",
-    "card": {
-      "eyebrow": "Multica se ha actualizado · {{range}}",
-      "title_one": "{{count}} función nueva desde tu última visita",
-      "title_other": "{{count}} funciones nuevas desde tu última visita",
-      "dismiss": "Descartar",
-      "view_details": "Ver detalles",
-      "got_it": "Entendido"
-    },
     "panel": {
       "title": "Novedades",
       "close": "Cerrar",

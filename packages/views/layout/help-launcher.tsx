@@ -28,7 +28,7 @@ import { useT } from "../i18n";
 import { docsLocalePrefix } from "../common/docs-locale";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
-import { useWhatsNewMenuPanel, WhatsNewMenuPanel } from "../whats-new/whats-new-launcher";
+import { useWhatsNewMenuPanel, WhatsNewMenuPanel } from "../whats-new/whats-new-menu-panel";
 
 
 export function HelpLauncher() {
