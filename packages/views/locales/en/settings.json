@@ -741,6 +741,8 @@
   },
   "workspace": {
     "section_general": "Workspace details",
+    "mention_all_label": "Allow @all mentions",
+    "mention_all_description": "When off, @all in comments and descriptions no longer sends an Inbox notification to every member, and it disappears from the mention picker.",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
     "click_logo_hint": "Click the logo to upload a new image",

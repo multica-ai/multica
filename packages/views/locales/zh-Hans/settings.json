@@ -736,6 +736,8 @@
   },
   "workspace": {
     "section_general": "工作区信息",
+    "mention_all_label": "允许 @所有成员",
+    "mention_all_description": "关闭后，评论和描述里的 @所有成员 不再给每位成员发收件箱通知，@ 选人列表也不再显示它。",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",
     "click_logo_hint": "点击图标上传新图片",

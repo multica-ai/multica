@@ -7,6 +7,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockSetQueryData = vi.hoisted(() => vi.fn());
 const mockInvalidateQueries = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const workspaceRef = vi.hoisted(() => ({
     description: "",
     context: "",
     issue_prefix: "TES",
+    settings: {} as Record<string, unknown>,
     repos: [] as { url: string }[],
   },
 }));
@@ -29,7 +31,7 @@ const membersRef = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: membersRef.current, isFetched: true }),
   useQueryClient: () => ({
-    setQueryData: vi.fn(),
+    setQueryData: mockSetQueryData,
     getQueryData: vi.fn(() => []),
     invalidateQueries: mockInvalidateQueries,
   }),
@@ -113,6 +115,7 @@ describe("WorkspaceTab — automatic updates", () => {
       description: "",
       context: "",
       issue_prefix: "TES",
+      settings: {},
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
@@ -220,6 +223,19 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(within(dialog).getByRole("button", { name: /^Change to/ })).toBeDisabled();
   });
 
+  it("lets an owner disable @all without dropping other workspace settings", async () => {
+    workspaceRef.current.settings = { github_enabled: false };
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    await user.click(screen.getByRole("switch", { name: "Allow @all mentions" }));
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        settings: { github_enabled: false, mention_all_enabled: false },
+      });
+    });
+    expect(mockSetQueryData).toHaveBeenCalledWith(["workspaces"], expect.any(Function));
+  });
+
   it("shows regular members the values read-only, with who to ask", () => {
     membersRef.current = [
       { user_id: "user-1", role: "member" },
@@ -231,5 +247,6 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.queryByDisplayValue("Test Workspace")).toBeNull();
     expect(screen.getByText("Test Workspace")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change prefix..." })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Allow @all mentions" })).toHaveAttribute("aria-disabled", "true");
   });
 });
