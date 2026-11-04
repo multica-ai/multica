@@ -1,10 +1,7 @@
 import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import {
-  createAgentSessionEngine,
-  type EngineEffectOptions
-} from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { agentComposerDraftPrompt } from "../model/agentComposerDraft";
 import {
@@ -46,16 +43,7 @@ function createSubmitInput() {
     updatedAtUnixMs: 1,
     workspaceId: "workspace-1"
   };
-  const sessionEngine = createAgentSessionEngine({
-    clock: { nowUnixMs: () => 1 },
-    commandPort: {
-      kind: "typed",
-      effects: {},
-      execute: async () => undefined
-    } as never,
-    identity: { origin: "test", workspaceId: "workspace-1" },
-    scheduler: { schedule: () => ({ cancel() {} }) }
-  });
+  const sessionEngine = createTestAgentSessionEngine("workspace-1");
   sessionEngine.dispatch({ session: baseSession, type: "session/upserted" });
   const setDetailError = vi.fn();
   const draftByScopeKeyRef = {

@@ -83,11 +83,6 @@ test("reuses expensive projections when unrelated engine slices change", () => {
 
   assert.notEqual(reconciled, populated);
   assert.equal(reconciled.sessions, populated.sessions);
-  assert.equal(reconciled.sessionMessagesById, populated.sessionMessagesById);
-  assert.equal(
-    reconciled.sessionMessageWindowsById,
-    populated.sessionMessageWindowsById
-  );
   assert.equal(
     reconciled.composerOptionsByTargetKey,
     populated.composerOptionsByTargetKey

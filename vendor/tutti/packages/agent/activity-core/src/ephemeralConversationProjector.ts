@@ -98,6 +98,7 @@ export interface AgentActivityEphemeralConversationProjection {
   expired: boolean;
   expiryReason: AgentActivityEphemeralConversationExpiryReason | null;
   activitySnapshot: AgentActivitySnapshot;
+  messages: AgentActivityMessage[];
   sessionTurns: readonly AgentActivityTurn[];
   interactions: readonly AgentActivityInteraction[];
 }
@@ -548,13 +549,11 @@ export function createAgentActivityEphemeralConversationProjector(
       activitySnapshot: {
         workspaceId: identity.workspaceId,
         sessions: [session],
-        presences: [],
-        sessionMessagesById: {
-          [identity.agentSessionId]: [...messages.values()]
-            .map((message) => cloneAgentActivityMessage(message))
-            .sort(compareAgentActivityMessages)
-        }
+        presences: []
       },
+      messages: [...messages.values()]
+        .map((message) => cloneAgentActivityMessage(message))
+        .sort(compareAgentActivityMessages),
       sessionTurns,
       interactions: projectedInteractions
     };

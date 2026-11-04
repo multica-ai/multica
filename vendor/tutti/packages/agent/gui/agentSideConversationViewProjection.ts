@@ -15,6 +15,7 @@ export function projectAgentSideConversationVM(
     ? projectAgentActivitySessionToConversationVM({
         activitySnapshot: projection.activitySnapshot,
         agentSessionId: session.agentSessionId,
+        messages: projection.messages,
         sessionTurns: projection.sessionTurns,
         workspaceRoot: session.cwd || null
       })

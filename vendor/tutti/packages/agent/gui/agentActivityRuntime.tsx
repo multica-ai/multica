@@ -37,8 +37,15 @@ export type AgentActivitySessionMessages = Readonly<
   Record<string, readonly AgentActivityMessage[]>
 >;
 
+export interface AgentGUIWorkspaceLoadReader {
+  readonly status: "idle" | "loading" | "ready" | "failed";
+  readonly errorMessage: string | null;
+}
+
 export interface AgentGUITranscriptReader {
   messages(agentSessionId: string): readonly AgentActivityMessage[];
+  hasOlderMessages(agentSessionId: string): boolean;
+  conversationIds(): readonly string[];
 }
 
 export interface AgentActivityRuntimeUpdateSessionSettingsResult {
@@ -304,6 +311,8 @@ export interface AgentGUIRuntime {
   mutations: AgentGUIConversationMutations;
   /** Each target's composer choices, for reading; getComposerOptions asks for them. Also writes a conversation's settings. */
   composer: AgentGUIComposerOptionsReader & AgentGUIComposerSettingsLane;
+  /** Whether the conversation list has been read. */
+  workspaceLoad: AgentGUIWorkspaceLoadReader;
   /** Each conversation's committed messages, for reading. */
   transcript: AgentGUITranscriptReader;
   /** Stops, answers to interactions and edit retries. */
@@ -312,7 +321,7 @@ export interface AgentGUIRuntime {
    * Reads the next older page into the session itself, which then updates through
    * its usual snapshot. A runtime with this owns paging; versions need not page.
    */
-  loadOlderSessionMessages?: (input: { workspaceId: string; agentSessionId: string }) => Promise<void>;
+  loadOlderSessionMessages: (input: { workspaceId: string; agentSessionId: string }) => Promise<void>;
   /** Reads an attachment as a URL; preferred over readSessionAttachment when present. */
   readSessionAttachmentSource?: (input: { workspaceId: string; attachmentId: string }) => Promise<{ attachmentId: string; url: string }>;
   /** The composer dropped attachments between these two drafts. */

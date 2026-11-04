@@ -1,3 +1,4 @@
+import { oldestVersion } from "../../../contexts/workspace/presentation/renderer/agentSessions/useAgentSessionControllerState";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
@@ -220,26 +221,14 @@ export function useAgentConversationMessagePaging(
           inputRef.current.isMounted() &&
           (!agentSessionId ||
             inputRef.current.getActiveSessionId()?.trim() === agentSessionId),
-        ...(inputRef.current.runtime.loadOlderSessionMessages
-          ? { loadOlderSessionMessages: (older: { workspaceId: string; agentSessionId: string }) => inputRef.current.runtime.loadOlderSessionMessages!(older) }
-          : {}),
-        listSessionMessages: ({
-          agentSessionId,
-          beforeVersion,
-          limit,
-          order,
-          signal,
-          workspaceId
-        }) =>
-          inputRef.current.runtime.listSessionMessages({
-            agentSessionId,
-            beforeVersion,
-            cache: false,
-            limit,
-            order,
-            signal,
-            workspaceId
-          }),
+        loadOlderSessionMessages: (older) => inputRef.current.runtime.loadOlderSessionMessages(older),
+        olderMessages: (agentSessionId) => {
+          const { transcript } = inputRef.current.runtime;
+          return {
+            hasOlderMessages: transcript.hasOlderMessages(agentSessionId),
+            oldestLoadedVersion: oldestVersion(transcript.messages(agentSessionId))
+          };
+        },
         onSnapshotChanged: (snapshot) =>
           inputRef.current.onOlderPageLoadingChanged(
             snapshot.olderPagePhase === "loading"

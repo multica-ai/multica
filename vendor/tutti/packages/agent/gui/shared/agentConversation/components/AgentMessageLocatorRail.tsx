@@ -187,31 +187,32 @@ export function AgentMessageLocatorRail({
       }
     };
   }, [isVisible, items.length]);
+  const selectedIndex = selectedKey
+    ? items.findIndex((item) => item.key === selectedKey)
+    : -1;
+  const itemCount = items.length;
+  const visibleHeight = visibleFrame?.heightPx ?? null;
+  // Reading scrollTop forces layout, so this runs only when the answer can change:
+  // a new list of the same items arrives with every committed update.
   useLayoutEffect(() => {
     if (!isVisible) {
       return;
     }
-    const selectedIndex = selectedKey
-      ? items.findIndex((item) => item.key === selectedKey)
-      : -1;
     const viewport = locatorViewportRef.current;
     if (selectedIndex < 0 || !viewport) {
       return;
     }
 
     const railHeight =
-      (items.length - 1) * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX +
+      (itemCount - 1) * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX +
       AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX;
-    const viewportHeight = Math.min(
-      railHeight,
-      visibleFrame?.heightPx ?? railHeight
-    );
+    const viewportHeight = Math.min(railHeight, visibleHeight ?? railHeight);
     scrollMessageLocatorViewportToIndex(
       viewport,
       selectedIndex,
       viewportHeight
     );
-  }, [isVisible, items, selectedKey, visibleFrame]);
+  }, [isVisible, itemCount, selectedIndex, visibleHeight]);
 
   if (items.length < 2) {
     return null;

@@ -26,6 +26,7 @@ export interface ProjectWorkspaceAgentMessagesInput extends Omit<
 export interface ProjectAgentActivitySessionConversationInput {
   activitySnapshot: AgentActivitySnapshot;
   agentSessionId: string;
+  messages: AgentActivityMessage[];
   sessionTurns?: readonly AgentActivityTurn[];
   workspaceRoot?: string | null;
 }
@@ -33,6 +34,7 @@ export interface ProjectAgentActivitySessionConversationInput {
 export function projectAgentActivitySessionToConversationVM({
   activitySnapshot,
   agentSessionId,
+  messages,
   sessionTurns,
   workspaceRoot
 }: ProjectAgentActivitySessionConversationInput): AgentConversationVM | null {
@@ -41,10 +43,9 @@ export function projectAgentActivitySessionToConversationVM({
       (candidate) => candidate.agentSessionId === agentSessionId
     ) ?? null;
   if (!session) return null;
-  const messages = activitySnapshot.sessionMessagesById[agentSessionId] ?? [];
   const activity =
     buildWorkspaceAgentActivityListViewModel(activitySnapshot, {
-      sessionMessagesById: activitySnapshot.sessionMessagesById
+      sessionMessagesById: { [agentSessionId]: [...messages] }
     }).activities.find(
       (candidate) => candidate.sessionId === session.agentSessionId
     ) ?? null;

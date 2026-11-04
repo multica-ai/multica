@@ -10,9 +10,8 @@ import {
   type AgentActivitySession,
   type AgentActivitySnapshot,
   type AgentSessionActivateEffectInput,
+  type AgentSessionActivationInput,
   type AgentSessionEngine,
-  type EngineExtensionCommand,
-  type EngineTypedCommandPort,
 } from "@tutti-os/agent-activity-core";
 import type { AgentGUIRuntime } from "@tutti-os/agent-gui";
 import { extractRichTextMentionsFromContent } from "@tutti-os/ui-rich-text/core";
@@ -34,7 +33,7 @@ import { executionTargets } from "../protocol";
 import type { LocalV2Event } from "@multica/core/local-conversation/v2";
 import { localReasoningLevels, type LocalPermissionMode } from "@multica/core/local-conversation/protocol";
 import { reaction } from "mobx";
-import { TranscriptModel } from "@multica/conversation-client/models";
+import { TranscriptModel, WorkspaceLoadModel } from "@multica/conversation-client/models";
 import { CommitCadence, ComposerService, ConversationMutationService } from "@multica/conversation-client/services";
 import { RuntimeLedger } from "./ledger";
 import { LocalTranscript, mergeTranscriptChange, type LocalTranscriptChange } from "./local-transcript";
@@ -73,6 +72,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
   const v2Changes = new Map<string, LocalTranscriptChange>();
   const transcripts = new Map<string, LocalTranscript>();
   const transcriptModel = new TranscriptModel<AgentActivityDurableMessage>();
+  const workspaceLoadState = new WorkspaceLoadModel();
+  let isConnected = false;
   const commits = new CommitCadence<string>(commitLocal);
   let hostVisible = init.hostVisible !== false;
   const attachments = new Map<string, Attachment>();
@@ -106,19 +107,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       saveTimer = null;
       void persist().catch(reportError);
     }, 200);
-  };
-  const commandPort: EngineTypedCommandPort = {
-    kind: "typed",
-    effects: {
-      activateSession: (input, options) => activate(input, options.signal),
-      // Only a new conversation's patch reaches the engine's port; later choices go straight to the composer.
-      updateSessionSettings: async (input) => {
-        scope(input.workspaceId);
-        await composer.applyActivationSettings(input.agentSessionId, input.settings);
-        return { agentSessionId: input.agentSessionId, session: projectSnapshot(engine.getSnapshot()).sessions.find((entry) => entry.agentSessionId === input.agentSessionId) };
-      },
-    },
-    execute: executeExtension,
   };
   const composer: ComposerService<AgentActivityComposerOptions> = new ComposerService<AgentActivityComposerOptions>(async (request) => {
     const agent = descriptor(request.targetKey);
@@ -194,16 +182,20 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     },
     removed: (id) => { engine.dispatch({ type: "session/removed", agentSessionId: id }); },
   });
-  const baseEngine = createAgentSessionEngine({
-    identity: { workspaceId, origin: "multica" },
-    clock: { nowUnixMs: () => Date.now() },
-    scheduler: { schedule: (delay, callback) => {
-      const timer = setTimeout(callback, delay);
-      return { cancel: () => clearTimeout(timer) };
-    } },
-    commandPort,
-  });
+  const baseEngine = createAgentSessionEngine({ identity: { workspaceId, origin: "multica" } });
   const desktopQueue = createDesktopQueueEngine(baseEngine, {
+    activate: (request, signal) => activate(activationEffectInput(request), signal),
+    applyActivationResult(target, request, result) {
+      if (result.activation.mode === "new") target.dispatch({ type: "session/upserted", session: result.session });
+      else if (result.detail) target.dispatch({ type: "session/detailSnapshotReceived", childSessions: result.detail.childSessions, session: result.detail.session, turns: result.detail.turns, workspaceId });
+    },
+    loadSession: (id) => loadSession(id),
+    updateActivationSettings: async (id, settings) => { await composer.applyActivationSettings(id, settings); },
+    describeActivationError: (error) => ({
+      code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.trim() || null : null,
+      message: error instanceof Error ? error.message : String(error),
+    }),
+    messages: (id) => transcriptModel.messages(id),
     // A stop or an answer decides against turn state, which must not be behind what has arrived.
     beforeTurnOperation: () => commits.flush(),
     pendingStore: init.composerDraftScope
@@ -403,6 +395,30 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     return workspaceLoad;
   }
 
+  /** A connection that comes back may have missed anything, so everything is read again. */
+  function receiveConnection(connected: boolean) {
+    const reconnected = connected && !isConnected;
+    isConnected = connected;
+    if (reconnected) reconcileWorkspace();
+  }
+
+  function reconcileWorkspace() {
+    if (workspaceLoadState.status === "loading") return;
+    workspaceLoadState.begin();
+    void loadWorkspace().then(() => {
+      if (disposed) return;
+      workspaceLoadState.succeed();
+      // A running conversation's turn state cannot wait until it is opened.
+      for (const session of Object.values(engine.getSnapshot().sessionLifecycle.sessionsById)) {
+        if (session.kind !== "root" || !session.activeTurnId?.trim()) continue;
+        engine.dispatch({ type: "session/reconcileRequested", agentSessionId: session.agentSessionId, needsMessages: false, needsState: true, workspaceId: session.workspaceId });
+      }
+    }, (error: unknown) => {
+      if (disposed) return;
+      workspaceLoadState.fail(error instanceof Error ? error.message.trim() || null : null);
+    });
+  }
+
   /** The session's view; only metadata for a conversation the source no longer holds. */
   function project(guiId: string, changedTurns: LocalTranscriptChange) {
     const detail = details.get(guiId)!;
@@ -491,20 +507,8 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       type: "session/historyAuthoritativeSnapshotReceived", workspaceId,
       agentSessionId: guiId, childSessions: [], historyRevision: ++historyRevision,
       session: withModel(result.session), turns: result.turns,
-      // Confirming a submit needs only the user's messages; the transcript reads the model.
-      messages: result.messages.filter((message) => message.role === "user"),
-      sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: localConversation(guiId)?.hasOlderTurns ?? false,
-        oldestLoadedVersion: result.messages.reduce<number | null>((oldest, message) => oldest === null || message.version < oldest ? message.version : oldest, null) }],
     }));
-    // A same-timestamp terminal result can leave the engine's previous active
-    // pointer intact. Fence that specific transition once: replaying every
-    // historical settlement would itself request another live reconciliation.
-    for (const turn of result.turns) {
-      if (turn.phase === "settled" && engine.getSnapshot().sessionLifecycle.sessionsById[guiId]?.activeTurnId === turn.turnId) queueEngine.dispatch({
-        type: "turn/projectionReceived", workspaceId, turn, activeTurnId: null,
-        hostFencedSameTurnSettlement: true,
-      });
-    }
+    desktopQueue.transcriptCommitted();
     const conversation = localConversation(guiId);
     for (const turn of result.turns) {
       presentationTiming.applied(detail.session.id, turn.turnId, (conversation?.turnItems(turn.turnId).length ?? 0) > 0, turn.phase === "settled");
@@ -512,6 +516,22 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     markAvailability(result.session);
     schedulePersist();
     return withModel(result.session);
+  }
+
+  function activationEffectInput(request: AgentSessionActivationInput): AgentSessionActivateEffectInput {
+    const initialContent = request.runtimeContent ?? request.initialContent;
+    const shared = {
+      activationId: request.requestId, workspaceId, agentSessionId: request.agentSessionId,
+      ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+      ...(initialContent?.length ? { initialContent: [...initialContent] } : {}),
+      ...(request.initialDisplayPrompt ? { initialDisplayPrompt: request.initialDisplayPrompt } : {}),
+      ...(request.isolation ? { isolation: request.isolation } : {}),
+      ...(request.settings ? { settings: request.settings } : {}),
+      ...(request.title ? { title: request.title } : {}),
+    };
+    return request.mode === "new"
+      ? { ...shared, mode: "new", agentTargetId: request.agentTargetId, clientSubmitId: request.clientSubmitId }
+      : { ...shared, mode: "existing", ...(request.agentTargetId ? { agentTargetId: request.agentTargetId } : {}) };
   }
 
   async function activate(input: AgentSessionActivateEffectInput, signal?: AbortSignal) {
@@ -659,15 +679,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       ...(references.size ? { references: [...references.values()] } : {}) };
   }
 
-  async function executeExtension(command: EngineExtensionCommand, options?: { signal?: AbortSignal }): Promise<unknown> {
-    switch (command.type) {
-      case "engine/reconcileWorkspace": return loadWorkspace();
-      case "session/reconcile": await loadSession(command.agentSessionId); return { status: "applied" };
-      case "session/unactivate": return undefined;
-      default: return unsupported(command.type);
-    }
-  }
-
   function registerAttachments(values: Attachment[]) {
     for (const attachment of values) attachments.set(attachment.id, attachment);
   }
@@ -677,7 +688,12 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     promptContentUploadSupport: { file: true, image: true }, devDiagnosticConsoleSink: false,
     getSessionEngine: (id) => { scope(id); return engine; },
     composer,
-    transcript: transcriptModel,
+    workspaceLoad: workspaceLoadState,
+    transcript: {
+      messages: (id) => transcriptModel.messages(id),
+      hasOlderMessages: (id) => localConversation(id)?.hasOlderTurns ?? false,
+      conversationIds: () => transcriptModel.conversationIds(),
+    },
     mutations,
     prompts: desktopQueue.prompts,
     getSnapshot: (id) => { scope(id); return projectSnapshot(engine.getSnapshot()); },
@@ -791,7 +807,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     }
     if (!initialized) return;
     if (event.type === "connection") {
-      engine.dispatch({ type: "engine/connectionChanged", status: event.connected ? "connected" : "disconnected", workspaceId });
+      receiveConnection(event.connected);
       return;
     }
     if (event.type !== "invalidate") return;
@@ -834,7 +850,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
         if (saved !== undefined) await composer.setPermissionSelection(active.agent_id, null, saved).catch(reportError);
       }
       await restorePromptQueues();
-      engine.dispatch({ type: "engine/connectionChanged", status: "connected", workspaceId });
+      receiveConnection(true);
     },
     getWorkspaceState: () => workspace,
     /**

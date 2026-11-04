@@ -706,6 +706,24 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]).toMatchObject({ activeTurnId: "another-surface-run", activeTurn: { phase: "running", startedAtUnixMs: Date.parse(time) } }));
   });
 
+  it("reads the workspace again when the connection comes back, and shows a read that failed", async () => {
+    const data = backend();
+    const { handle } = await setup(data);
+    await vi.waitFor(() => expect(handle.runtime.workspaceLoad.status).toBe("ready"));
+    const loads = () => data.request.mock.calls.filter(([method]) => method === "workspace.load").length;
+    const before = loads();
+    data.emit({ type: "connection", connected: false });
+    expect(loads()).toBe(before);
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "workspace.load") throw new Error("daemon unavailable");
+      return original(method, params);
+    });
+    data.emit({ type: "connection", connected: true });
+    await vi.waitFor(() => expect(handle.runtime.workspaceLoad).toMatchObject({ status: "failed", errorMessage: "daemon unavailable" }));
+    expect(loads()).toBe(before + 1);
+  });
+
   it("settles completed conversation history without generating a new reconcile demand", async () => {
     const data = backend();
     data.sessions.push(session);
@@ -723,6 +741,29 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     expect(engine.getSnapshot().sessionReconcile.recordsBySessionId[session.id]).toMatchObject({ inFlightCommandId: null, pendingState: false, pendingMessages: false });
     expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(1);
   });
+  it("does not read a conversation while its creation is unanswered", async () => {
+    const { handle, request } = await setup();
+    const original = request.getMockImplementation()!;
+    let answer!: () => void;
+    const created = new Promise<void>((resolve) => { answer = resolve; });
+    request.mockImplementation(async (method, params) => {
+      if (method === "session.create") await created;
+      return original(method, params);
+    });
+    const engine = handle.runtime.getSessionEngine(init.workspaceId);
+    expect(engine.activateSession({ mode: "new", agentSessionId: "gui-new", agentTargetId: agent.id, requestId: "creating", clientSubmitId: "submit-new" })).toBe(true);
+    await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === "session.create")).toBe(true));
+    const reads = () => request.mock.calls.filter(([method]) => method === "session.load").length;
+    const before = reads();
+    engine.dispatch({ type: "session/reconcileRequested", workspaceId: init.workspaceId, agentSessionId: "gui-new", needsState: true, needsMessages: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(reads()).toBe(before);
+    expect(engine.getSnapshot().pendingIntents.activationsByRequestId.creating).toMatchObject({ status: "requested", mode: "new" });
+    answer();
+    await vi.waitFor(() => expect(engine.getSnapshot().pendingIntents.activationsByRequestId.creating?.status).toBe("confirmed"));
+    expect(handle.toServerSessionId("gui-new")).toBe("server-session");
+  });
+
   it("creates a real server session while retaining the source GUI identity and confirms the real turn", async () => {
     const { handle, request, storage } = await setup();
     const engine = handle.runtime.getSessionEngine(init.workspaceId);
@@ -737,7 +778,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const snapshot = handle.runtime.getSnapshot(init.workspaceId);
     expect(snapshot.sessions[0]?.agentSessionId).toBe("gui-session");
     expect(snapshot.sessions[0]?.railSectionKey).toBe("conversations");
-    expect(snapshot.sessionMessagesById["gui-session"]?.[0]).toMatchObject({
+    expect(handle.runtime.transcript.messages("gui-session")[0]).toMatchObject({
       messageId: "server-message-1", turnId: "server-task-1",
     });
     expect(handle.toServerSessionId("gui-session")).toBe("server-session");

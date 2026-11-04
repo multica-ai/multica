@@ -26,15 +26,13 @@ describe("projectWorkspaceAgentMessagesToConversationVM", () => {
     const activitySnapshot: AgentActivitySnapshot = {
       workspaceId: "workspace-1",
       sessions: [selectedSession],
-      presences: [],
-      sessionMessagesById: {
-        [selectedSession.agentSessionId]: [selectedMessage]
-      }
+      presences: []
     };
 
     const conversation = projectAgentActivitySessionToConversationVM({
       activitySnapshot,
-      agentSessionId: selectedSession.agentSessionId
+      agentSessionId: selectedSession.agentSessionId,
+      messages: [selectedMessage]
     });
     const userRow = conversation?.rows.find(
       (row) => row.kind === "message" && row.speaker === "user"
@@ -63,15 +61,13 @@ describe("projectWorkspaceAgentMessagesToConversationVM", () => {
     const activitySnapshot: AgentActivitySnapshot = {
       workspaceId: "workspace-1",
       sessions: [selectedSession],
-      presences: [],
-      sessionMessagesById: {
-        [selectedSession.agentSessionId]: [selectedMessage]
-      }
+      presences: []
     };
 
     const conversation = projectAgentActivitySessionToConversationVM({
       activitySnapshot,
-      agentSessionId: selectedSession.agentSessionId
+      agentSessionId: selectedSession.agentSessionId,
+      messages: [selectedMessage]
     });
     const assistantRow = conversation?.rows.find(
       (row) => row.kind === "message" && row.speaker === "assistant"
@@ -92,15 +88,13 @@ describe("projectWorkspaceAgentMessagesToConversationVM", () => {
     const activitySnapshot: AgentActivitySnapshot = {
       workspaceId: "workspace-1",
       sessions: [selectedSession],
-      presences: [],
-      sessionMessagesById: {
-        [selectedSession.agentSessionId]: [selectedMessage]
-      }
+      presences: []
     };
 
     const conversation = projectAgentActivitySessionToConversationVM({
       activitySnapshot,
       agentSessionId: selectedSession.agentSessionId,
+      messages: [selectedMessage],
       sessionTurns: [
         {
           agentSessionId: "session-2",

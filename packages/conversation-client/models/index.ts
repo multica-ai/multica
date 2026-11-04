@@ -1,5 +1,7 @@
 export { ModelPreferences, PermissionPreferences, ReasoningPreferences } from "./composer-preferences";
+export { ActivationModel, type ActivationRequest, type ActivationSettingsStatus, type ActivationStatus } from "./activation-model";
 export { ConversationListModel } from "./conversation-list-model";
+export { WorkspaceLoadModel, type WorkspaceLoadStatus } from "./workspace-load-model";
 export { ConversationModel, type ConversationApplyResult } from "./conversation-model";
 export type { ConversationLocale, ConversationMessage } from "./conversation-message";
 export { InteractionModel } from "./interaction-model";

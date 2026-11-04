@@ -8,16 +8,15 @@ type SubmitInput = Parameters<ReturnType<typeof createAgentSessionEngine>["submi
 
 function setup(running = false, pendingStore?: DesktopPendingStore) {
   const sendInput = vi.fn();
-  const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" },
-    clock: { nowUnixMs: () => Date.now() }, scheduler: { schedule: (delay, callback) => { const timer = setTimeout(callback, delay); return { cancel: () => clearTimeout(timer) }; } },
-    commandPort: { kind: "typed", effects: { activateSession: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
+  const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" } });
   base.dispatch({ type: "session/snapshotReceived", sessions: [{ agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurnId: running ? "active" : null,
     ...(running ? { activeTurn: { agentSessionId: "session", turnId: "active", origin: "user_prompt", phase: "running", startedAtUnixMs: 1, updatedAtUnixMs: 1 } } : {}), pendingInteractions: [], latestTurnInteractions: [] }] });
-  const options = { pendingStore, enabled: () => true, enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),
+  const messages: { role: string; turnId: string; payload: Record<string, unknown> }[] = [];
+  const options = { pendingStore, enabled: () => true, messages: () => messages, activate: vi.fn(async () => undefined), loadSession: vi.fn(async () => undefined), applyActivationResult: vi.fn(), updateActivationSettings: vi.fn(async () => {}), describeActivationError: () => ({ code: null, message: null }), enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),
     update: vi.fn(async (): Promise<LocalPromptQueue> => ({ revision: 2, paused: true, items: [] })), error: vi.fn(),
     respondToInteraction: vi.fn(async () => ({ session: { agentSessionId: "session", workspaceId: "ws" } })), editRetry: vi.fn(), recoverEditRetry: vi.fn(), reconcileWorkspace: vi.fn() };
   const adapter = createDesktopQueueEngine(base, options);
-  return { ...adapter, options, sendInput };
+  return { ...adapter, messages, options, sendInput };
 }
 function queued(requestId: string): LocalQueuedPrompt {
   return { requestId, content: requestId, display: { id: requestId, clientSubmitId: requestId, createdAtUnixMs: 1, content: [{ type: "text", text: requestId }] } };
@@ -323,7 +322,7 @@ describe("desktop queue presentation", () => {
     expect(engine.getSnapshot()).toBe(engine.getSnapshot()); engine.dispose();
   });
   it("stops the turn a message on its way starts after the stop", async () => {
-    const { engine, options, prompts } = setup();
+    const { engine, messages, options, prompts } = setup();
     let admit!: (queue: LocalPromptQueue) => void;
     options.enqueue.mockImplementation(() => new Promise((resolve) => { admit = resolve; }));
     try {
@@ -333,10 +332,10 @@ describe("desktop queue presentation", () => {
       admit({ revision: 3, paused: false, items: [] });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(options.update).toHaveBeenCalledOnce();
+      messages.push({ role: "user", turnId: "started", payload: { clientSubmitId: "first" } });
       const turn = { agentSessionId: "session", turnId: "started", origin: "user_prompt" as const, phase: "running" as const, startedAtUnixMs: 2, updatedAtUnixMs: 2 };
       engine.dispatch({ type: "session/historyAuthoritativeSnapshotReceived", workspaceId: "ws", agentSessionId: "session", childSessions: [], historyRevision: 1, turns: [turn],
-        session: { agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurn: turn, activeTurnId: "started", latestTurn: turn, pendingInteractions: [], latestTurnInteractions: [] },
-        messages: [{ agentSessionId: "session", kind: "user_prompt", messageId: "m", occurredAtUnixMs: 2, payload: { clientSubmitId: "first" }, role: "user", sequence: 1, turnId: "started", version: 1 }] });
+        session: { agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurn: turn, activeTurnId: "started", latestTurn: turn, pendingInteractions: [], latestTurnInteractions: [] } });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(options.update.mock.calls).toEqual([["session", "stop", undefined], ["session", "stop", undefined]]);
       expect(prompts.cancelRecord("session")).toMatchObject({ status: "accepted", turnId: "started" });
@@ -346,13 +345,15 @@ describe("desktop queue presentation", () => {
     const { engine, options, prompts } = setup(true);
     const interaction = { agentSessionId: "session", turnId: "active", requestId: "question", kind: "question" as const, status: "pending" as const, createdAtUnixMs: 2, updatedAtUnixMs: 2 };
     try {
-      engine.dispatch({ type: "interaction/upserted", interaction });
+      const session = engine.getSnapshot().sessionLifecycle.sessionsById.session!;
+      const report = (reported: typeof interaction | (Omit<typeof interaction, "status"> & { status: "answered" })) => engine.dispatch({ type: "session/upserted", session: { ...session, pendingInteractions: [], latestTurnInteractions: [reported] } });
+      report(interaction);
       expect(prompts.respondToInteraction({ action: "submit", agentSessionId: "session", requestId: "question", turnId: "active", payload: { answersByQuestionId: { scope: "all" } } })).toBe(true);
       expect(options.respondToInteraction).toHaveBeenCalledOnce();
       expect(prompts.isRespondingToInteraction("session")).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(prompts.isRespondingToInteraction("session")).toBe(true);
-      engine.dispatch({ type: "interaction/upserted", interaction: { ...interaction, status: "answered", updatedAtUnixMs: 3 } });
+      report({ ...interaction, status: "answered", updatedAtUnixMs: 3 });
       expect(prompts.isRespondingToInteraction("session")).toBe(false);
     } finally { engine.dispose(); }
   });

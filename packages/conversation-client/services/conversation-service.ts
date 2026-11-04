@@ -149,8 +149,10 @@ export class ConversationService {
         const raw = await this.request("GET", `/sessions?after_scope_seq=${after}`);
         const list = parseWithFallback<z.infer<typeof localV2SessionListSchema>>(raw, localV2SessionListSchema, { scope_seq: after, summaries: [], has_more: false }, { endpoint: "local-v2.sessions" });
         this.store(list.summaries);
-        after = Math.max(after, list.scope_seq, ...list.summaries.map((summary) => summary.summary_seq));
-        if (!list.has_more) break;
+        const newest = Math.max(after, ...list.summaries.map((summary) => summary.summary_seq));
+        // scope_seq is the latest in the whole scope, so it only ends the list: mid-list it would skip the rest.
+        after = list.has_more ? newest : Math.max(newest, list.scope_seq);
+        if (!list.has_more || !list.summaries.length) break;
       }
       this.scopeSeq = after;
       this.list.markRead();

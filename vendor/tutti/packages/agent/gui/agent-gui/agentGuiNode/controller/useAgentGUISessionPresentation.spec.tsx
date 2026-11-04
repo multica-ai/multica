@@ -1,11 +1,10 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   type AgentActivityTurn,
   type PendingActivationIntentRecord
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type {
   AgentGUIInteractionReadiness,
   AgentGUIInteractionReadinessSource,
@@ -92,14 +91,7 @@ describe("useAgentGUISessionPresentation", () => {
   });
 
   it("separates Turn-start feedback from canonical execution busy", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",
@@ -255,14 +247,7 @@ describe("useAgentGUISessionPresentation", () => {
   });
 
   it("does not expose manual retry for failed activation", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-rejected",
@@ -349,14 +334,7 @@ describe("useAgentGUISessionPresentation", () => {
 
   it("makes a shared Agent composer editable in the same snapshot that its target connects", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: null,
@@ -441,14 +419,7 @@ describe("useAgentGUISessionPresentation", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
     targetConnectionSource.set({ status: "connected", retryAttempt: 0 });
     const observationGapSource = new FakeObservationGapSource();
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",
@@ -682,14 +653,7 @@ describe("useAgentGUISessionPresentation", () => {
   it("keeps shared history visible while revoked sharing blocks commands with owner copy", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
     targetConnectionSource.set({ status: "unavailable", retryAttempt: 4 });
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",

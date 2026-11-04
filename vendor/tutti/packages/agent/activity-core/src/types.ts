@@ -175,8 +175,6 @@ export interface AgentActivitySnapshot {
   workspaceId: string;
   sessions: AgentActivitySession[];
   presences: AgentActivityPresence[];
-  sessionMessagesById: Record<string, AgentActivityMessage[]>;
-  sessionMessageWindowsById?: Record<string, AgentActivitySessionMessageWindow>;
 }
 
 export type AgentActivitySnapshotListener = (

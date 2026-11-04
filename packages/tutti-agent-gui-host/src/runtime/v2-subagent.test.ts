@@ -56,8 +56,8 @@ it("projects a live and replayed child transcript inside its task without settli
     activitySnapshot: {
       workspaceId: "ws", presences: [],
       sessions: [normalizeAgentActivitySession({ workspaceId: "ws", agentSessionId: "gui-1", provider: "claude", title: "test", cwd: "", activeTurnId: null, latestTurnInteractions: [], pendingInteractions: [] })],
-      sessionMessagesById: { "gui-1": completed.messages.map((m, i) => ({ ...m, sequence: i + 1, version: i + 1 })) },
     },
+    messages: completed.messages.map((m, i) => ({ ...m, sequence: i + 1, version: i + 1 })),
   });
   const card = vm?.rows.filter((row) => row.kind === "message").flatMap((row) => row.messages).find((m) => m.systemNotice?.noticeKind === "background_task");
   expect(card?.sourceTimelineItems?.[0]?.payload?.subagentTranscript).toMatchObject({ items: [{ text: "Reading the source" }, { output: "diff contents" }] });

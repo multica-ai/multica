@@ -1,6 +1,5 @@
 import {
-  selectSessionMessages,
-  selectSessionMessageWindow,
+  type AgentActivityMessage,
   type AgentSessionFamilySnapshot,
   type AgentSessionEngine
 } from "@tutti-os/agent-activity-core";
@@ -17,7 +16,9 @@ import {
   reportAgentGUIRuntimeError
 } from "./agentGuiController.reporting";
 import { useAgentConversationMessagePaging } from "./useAgentConversationMessagePaging";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
+import { useModelValue } from "../../../shared/engine/useEngineSelector";
+
+const NO_MESSAGES: readonly AgentActivityMessage[] = [];
 
 export function useAgentGUISessionDetailTransport(input: {
   activeConversationId: string | null;
@@ -49,25 +50,24 @@ export function useAgentGUISessionDetailTransport(input: {
     }),
     [agentActivityRuntimeOrigin, workspaceId]
   );
-  // Only the fallback for history coverage without a window: the user's messages suffice.
-  const activeCanonicalMessages = useEngineSelector(
-    sessionEngine,
-    (engineState) => selectSessionMessages(engineState, activeConversationId)
+  const { transcript } = agentActivityRuntime;
+  const activeMessages = useModelValue(
+    () => (activeConversationId ? transcript.messages(activeConversationId) : NO_MESSAGES),
+    [activeConversationId, transcript]
   );
   const projectedSessionMessagesById = useAgentActivitySessionMessages([
     activeConversationId,
     sessionFamily.rootSession?.agentSessionId,
     ...sessionFamily.childSessions.map((session) => session.agentSessionId)
   ]);
-  const activeCanonicalWindow = useEngineSelector(
-    sessionEngine,
-    (engineState) =>
-      selectSessionMessageWindow(engineState, activeConversationId)
+  const activeHasOlderMessages = useModelValue(
+    () => (activeConversationId ? transcript.hasOlderMessages(activeConversationId) : false),
+    [activeConversationId, transcript]
   );
   const state = useAgentSessionControllerState(
     sessionViewRef(activeConversationId),
-    activeCanonicalMessages,
-    activeCanonicalWindow
+    activeMessages,
+    activeHasOlderMessages
   );
   const resolveSessionMessages = useCallback(
     (agentSessionId: string | null | undefined) => {
@@ -75,10 +75,10 @@ export function useAgentGUISessionDetailTransport(input: {
       if (!normalized) return [];
       return (
         projectedSessionMessagesById[normalized] ??
-        agentActivityRuntime.transcript.messages(normalized)
+        transcript.messages(normalized)
       );
     },
-    [agentActivityRuntime, projectedSessionMessagesById]
+    [projectedSessionMessagesById, transcript]
   );
   const loadSessionState = useCallback(
     (agentSessionId: string) => {

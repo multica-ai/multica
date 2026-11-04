@@ -4,11 +4,11 @@ import {
   selectPendingActivations,
   selectRootAgentSessionIdsWithPendingInteractions,
   selectWorkspaceAgentConsumerSessions,
-  selectWorkspaceReconcileState,
   type AgentSessionEngine,
   type PendingActivationIntentRecord
 } from "@tutti-os/agent-activity-core";
-import { useEngineSelector } from "../../../../../shared/engine/useEngineSelector";
+import { useEngineSelector, useModelValue } from "../../../../../shared/engine/useEngineSelector";
+import type { AgentGUITranscriptReader, AgentGUIWorkspaceLoadReader } from "../../../../../agentActivityRuntime";
 import {
   matchesAgentGUIConversationSummaryFilter,
   normalizeAgentGUIConversationFilter,
@@ -27,7 +27,6 @@ import {
 } from "../../../../../shared/agentConversationTitleProjection.ts";
 import { createAgentGUIConversationRailTitlePromptSelector } from "../../../../../shared/agentConversationRailTitlePromptSelector.ts";
 import { projectCanonicalAgentGUIConversationSummaries } from "../../../../../shared/agentGUIConversationSummaryProjection.ts";
-import { selectRootAgentSessionIdsAwaitingPlanImplementation } from "../../../../../shared/agentConversation/planImplementationAwaiting";
 
 export interface AgentGUIConversationListQuery {
   conversationFilter?: AgentGUIConversationFilter | null;
@@ -41,13 +40,13 @@ const EMPTY_AGENT_GUI_AGENT_TARGETS: readonly AgentGUIAgentTarget[] = [];
 
 export function useAgentGuiConversationList(
   engine: AgentSessionEngine,
+  transcript: AgentGUITranscriptReader,
+  workspaceLoad: AgentGUIWorkspaceLoadReader,
   query: AgentGUIConversationListQuery | null,
   agentTargets: readonly AgentGUIAgentTarget[] = EMPTY_AGENT_GUI_AGENT_TARGETS
 ) {
-  const workspaceReconcile = useEngineSelector(
-    engine,
-    selectWorkspaceReconcileState
-  );
+  const loadStatus = useModelValue(() => workspaceLoad.status, [workspaceLoad]);
+  const loadError = useModelValue(() => workspaceLoad.errorMessage, [workspaceLoad]);
   const sessions = useEngineSelector(
     engine,
     selectWorkspaceAgentConsumerSessions,
@@ -58,11 +57,6 @@ export function useAgentGuiConversationList(
     selectRootAgentSessionIdsWithPendingInteractions,
     stringArraysEqual
   );
-  const rootAgentSessionIdsAwaitingPlanImplementation = useEngineSelector(
-    engine,
-    selectRootAgentSessionIdsAwaitingPlanImplementation,
-    stringArraysEqual
-  );
   const pendingActivations = useEngineSelector(
     engine,
     selectPendingActivations,
@@ -70,19 +64,17 @@ export function useAgentGuiConversationList(
   );
   const selectRailTitlePrompts = useMemo(
     () => createAgentGUIConversationRailTitlePromptSelector(),
-    [engine]
+    [transcript]
   );
-  const firstUserDisplayPromptsBySessionId = useEngineSelector(
-    engine,
-    selectRailTitlePrompts,
-    Object.is
+  const firstUserDisplayPromptsBySessionId = useModelValue(
+    () => selectRailTitlePrompts(transcript),
+    [selectRailTitlePrompts, transcript]
   );
   return useMemo(() => {
     if (!query) return null;
-    const rootSessionIdsAwaitingUserAction = new Set([
-      ...rootAgentSessionIdsWithPendingInteractions,
-      ...rootAgentSessionIdsAwaitingPlanImplementation
-    ]);
+    const rootSessionIdsAwaitingUserAction = new Set(
+      rootAgentSessionIdsWithPendingInteractions
+    );
     const canonicalIds = new Set(
       sessions.map((item) => item.session.agentSessionId)
     );
@@ -219,14 +211,9 @@ export function useAgentGuiConversationList(
       );
     return {
       conversations,
-      error: workspaceReconcile.errorMessage,
-      initialized:
-        workspaceReconcile.status === "ready" ||
-        workspaceReconcile.status === "failed" ||
-        workspaceReconcile.status === "unknown",
-      isLoading:
-        workspaceReconcile.status === "idle" ||
-        workspaceReconcile.status === "loading",
+      error: loadError,
+      initialized: loadStatus === "ready" || loadStatus === "failed",
+      isLoading: loadStatus === "idle" || loadStatus === "loading",
       query,
       queryKey: [
         query.workspaceId,
@@ -240,10 +227,10 @@ export function useAgentGuiConversationList(
     firstUserDisplayPromptsBySessionId,
     pendingActivations,
     query,
-    rootAgentSessionIdsAwaitingPlanImplementation,
     rootAgentSessionIdsWithPendingInteractions,
-    sessions,
-    workspaceReconcile
+    loadError,
+    loadStatus,
+    sessions
   ]);
 }
 

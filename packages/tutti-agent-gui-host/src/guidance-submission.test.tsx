@@ -27,8 +27,6 @@ afterEach(async () => {
 async function mount({ waiting = true, mentioned = false, active = true, editor = false, locale = "zh-CN" as "en" | "zh-CN" } = {}) {
   const sessionEngine = createAgentSessionEngine({
     identity: { workspaceId: "workspace", origin: "multica" },
-    clock: { nowUnixMs: () => Date.now() }, scheduler: { schedule: () => ({ cancel() {} }) },
-    commandPort: { kind: "typed", effects: {}, execute: async () => undefined } as never,
   });
   engines.push(sessionEngine);
   const submit = vi.spyOn(sessionEngine, "submitPrompt").mockReturnValue({ accepted: true, queued: true });

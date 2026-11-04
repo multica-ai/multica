@@ -1,141 +1,41 @@
-import {
-  selectSessionMessages,
-  selectSessionMessageWindow,
-  type AgentActivityMessagePage
-} from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createTestAgentSessionEngine,
-  type TestEngineCommandHandler
-} from "./shared/testing/createTestAgentSessionEngine";
-import {
-  createAgentConversationMessageController,
-  type AgentConversationMessagePageInput
-} from "./agentConversationMessageController";
+import { createTestAgentSessionEngine } from "./shared/testing/createTestAgentSessionEngine";
+import { createAgentConversationMessageController } from "./agentConversationMessageController";
 
 describe("createAgentConversationMessageController", () => {
-  it("routes initial and latest hydration through Engine reconcile commands", async () => {
-    const execute = vi.fn<TestEngineCommandHandler["execute"]>(async () => ({
-      affectedSessionIds: [],
-      appliedMessages: [],
-      session: null,
-      status: "applied"
-    }));
-    const engine = createTestAgentSessionEngine("workspace-1", { execute });
+  it("asks for the state and messages on first open, and only messages for the latest", () => {
+    const engine = createTestAgentSessionEngine("workspace-1");
+    const dispatch = vi.spyOn(engine, "dispatch");
     const controller = createController({ engine });
 
     controller.setActiveSession("session-1");
     controller.requestInitial("session-1");
     controller.requestLatest("session-1");
 
-    await vi.waitFor(() => {
-      expect(
-        execute.mock.calls.filter(
-          ([command]) => command.type === "session/reconcile"
-        )
-      ).toHaveLength(2);
-    });
-    const reconcileCommands = execute.mock.calls
-      .map(([command]) => command)
-      .filter((command) => command.type === "session/reconcile");
-    expect(reconcileCommands).toEqual([
-      expect.objectContaining({
-        agentSessionId: "session-1",
-        scope: "state_and_messages"
-      }),
-      expect.objectContaining({
-        agentSessionId: "session-1",
-        scope: "messages"
-      })
+    expect(dispatch.mock.calls.map(([intent]) => intent)).toEqual([
+      expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "session-1", needsMessages: true, needsState: true }),
+      expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "session-1", needsMessages: true, needsState: false })
     ]);
 
     controller.dispose();
     engine.dispose();
   });
 
-  it("treats repeated initial hydration as idempotent while reconcile is pending", async () => {
-    type CommandResult = Awaited<
-      ReturnType<TestEngineCommandHandler["execute"]>
-    >;
-    let resolveExecute: (result: CommandResult) => void = () => {};
-    const execute = vi.fn<TestEngineCommandHandler["execute"]>(
-      () =>
-        new Promise((resolve) => {
-          resolveExecute = resolve;
-        })
-    );
-    const engine = createTestAgentSessionEngine("workspace-1", { execute });
-    const controller = createController({ engine });
-
-    controller.requestInitial("session-1");
-    controller.requestInitial("session-1");
-
-    await vi.waitFor(() => {
-      expect(
-        execute.mock.calls.filter(
-          ([command]) => command.type === "session/reconcile"
-        )
-      ).toHaveLength(1);
-    });
-    resolveExecute({
-      affectedSessionIds: [],
-      appliedMessages: [],
-      session: null,
-      status: "applied"
-    });
-
-    controller.dispose();
-    engine.dispose();
-  });
-
-  it("loads older history only from the authoritative Engine window", async () => {
+  it("loads older history only when the history has more", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
-    const listSessionMessages = vi.fn(async () =>
-      messagePage([message(1)], false)
-    );
-    const controller = createController({ engine, listSessionMessages });
+    const loadOlderSessionMessages = vi.fn(async () => {});
+    let window = { hasOlderMessages: false, oldestLoadedVersion: 446 as number | null };
+    const controller = createController({ engine, loadOlderSessionMessages, olderMessages: () => window });
     controller.setActiveSession("session-1");
 
-    engine.dispatch({
-      messages: [message(446)],
-      type: "message/snapshotReceived",
-      workspaceId: "workspace-1"
-    });
     await controller.loadOlder();
-    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(loadOlderSessionMessages).not.toHaveBeenCalled();
 
-    engine.dispatch({
-      messages: [],
-      sessionMessageWindows: [
-        {
-          agentSessionId: "session-1",
-          hasOlderMessages: true,
-          oldestLoadedVersion: 446
-        }
-      ],
-      type: "message/snapshotReceived",
-      workspaceId: "workspace-1"
-    });
+    window = { hasOlderMessages: true, oldestLoadedVersion: 446 };
     await controller.loadOlder();
-
-    expect(listSessionMessages).toHaveBeenCalledWith({
+    expect(loadOlderSessionMessages).toHaveBeenCalledWith({
       agentSessionId: "session-1",
-      beforeVersion: 446,
-      limit: 100,
-      order: "desc",
-      signal: expect.any(AbortSignal),
       workspaceId: "workspace-1"
-    });
-    expect(
-      selectSessionMessages(engine.getSnapshot(), "session-1").map(
-        (item) => item.version
-      )
-    ).toEqual([1, 446]);
-    expect(
-      selectSessionMessageWindow(engine.getSnapshot(), "session-1")
-    ).toEqual({
-      hasOlderMessages: false,
-      oldestLoadedVersion: 1
     });
 
     controller.dispose();
@@ -145,29 +45,28 @@ describe("createAgentConversationMessageController", () => {
   it("deduplicates an in-flight cursor and permits retry after failure", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
     let rejectFirst: ((error: unknown) => void) | null = null;
-    const listSessionMessages = vi
-      .fn()
+    const loadOlderSessionMessages = vi
+      .fn<() => Promise<void>>()
       .mockImplementationOnce(
         () =>
-          new Promise<AgentActivityMessagePage>((_resolve, reject) => {
+          new Promise<void>((_resolve, reject) => {
             rejectFirst = reject;
           })
       )
-      .mockResolvedValueOnce(messagePage([message(1)], false));
-    const controller = createController({ engine, listSessionMessages });
+      .mockResolvedValueOnce(undefined);
+    const controller = createController({ engine, loadOlderSessionMessages });
     controller.setActiveSession("session-1");
-    setOlderWindow(engine, 5);
 
     const first = controller.loadOlder();
     const duplicate = controller.loadOlder();
-    expect(listSessionMessages).toHaveBeenCalledTimes(1);
+    expect(loadOlderSessionMessages).toHaveBeenCalledTimes(1);
     rejectFirst!(new Error("temporary failure"));
     await first;
     await duplicate;
     expect(controller.getSnapshot().olderPagePhase).toBe("error");
 
     await controller.loadOlder();
-    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    expect(loadOlderSessionMessages).toHaveBeenCalledTimes(2);
     expect(controller.getSnapshot().olderPagePhase).toBe("idle");
 
     controller.dispose();
@@ -176,28 +75,24 @@ describe("createAgentConversationMessageController", () => {
 
   it("fences an older page after the active Session changes", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
-    let resolvePage: ((page: AgentActivityMessagePage) => void) | null = null;
-    let requestSignal!: AbortSignal;
-    const listSessionMessages = vi.fn(
-      (input: AgentConversationMessagePageInput) =>
-        new Promise<AgentActivityMessagePage>((resolve) => {
-          requestSignal = input.signal;
+    let resolvePage: (() => void) | null = null;
+    const onOlderPageApplied = vi.fn();
+    const controller = createController({
+      engine,
+      onOlderPageApplied,
+      loadOlderSessionMessages: () =>
+        new Promise<void>((resolve) => {
           resolvePage = resolve;
         })
-    );
-    const controller = createController({ engine, listSessionMessages });
+    });
     controller.setActiveSession("session-1");
-    setOlderWindow(engine, 5);
 
     const request = controller.loadOlder();
     controller.setActiveSession("session-2");
-    expect(requestSignal.aborted).toBe(true);
-    resolvePage!(messagePage([message(1)], false));
+    resolvePage!();
     await request;
 
-    expect(selectSessionMessages(engine.getSnapshot(), "session-1")).toEqual(
-      []
-    );
+    expect(onOlderPageApplied).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toEqual({
       agentSessionId: "session-2",
       error: null,
@@ -257,27 +152,26 @@ describe("createAgentConversationMessageController", () => {
   it("rejects a stale page when the host focus changes before synchronization", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
     let focusedSessionId = "session-1";
-    let resolvePage: ((page: AgentActivityMessagePage) => void) | null = null;
+    let resolvePage: (() => void) | null = null;
+    const onOlderPageApplied = vi.fn();
     const controller = createController({
       engine,
+      onOlderPageApplied,
       isAvailable: (agentSessionId) =>
         !agentSessionId || agentSessionId === focusedSessionId,
-      listSessionMessages: () =>
-        new Promise<AgentActivityMessagePage>((resolve) => {
+      loadOlderSessionMessages: () =>
+        new Promise<void>((resolve) => {
           resolvePage = resolve;
         })
     });
     controller.setActiveSession("session-1");
-    setOlderWindow(engine, 5);
 
     const request = controller.loadOlder();
     focusedSessionId = "session-2";
-    resolvePage!(messagePage([message(1)], false));
+    resolvePage!();
     await request;
 
-    expect(selectSessionMessages(engine.getSnapshot(), "session-1")).toEqual(
-      []
-    );
+    expect(onOlderPageApplied).not.toHaveBeenCalled();
 
     controller.dispose();
     engine.dispose();
@@ -290,60 +184,17 @@ function createController(input: {
     typeof createAgentConversationMessageController
   >[0]["ensureSessionSynchronized"];
   isAvailable?: (agentSessionId?: string | null) => boolean;
-  listSessionMessages?: (
-    input: AgentConversationMessagePageInput
-  ) => Promise<AgentActivityMessagePage>;
+  loadOlderSessionMessages?: () => Promise<void>;
+  olderMessages?: () => { hasOlderMessages: boolean; oldestLoadedVersion: number | null };
+  onOlderPageApplied?: (agentSessionId: string) => void;
 }) {
   return createAgentConversationMessageController({
     engine: input.engine,
     ensureSessionSynchronized: input.ensureSessionSynchronized,
     isAvailable: input.isAvailable ?? (() => true),
-    listSessionMessages:
-      input.listSessionMessages ??
-      (async () => ({ hasMore: false, latestVersion: 0, messages: [] })),
+    loadOlderSessionMessages: input.loadOlderSessionMessages ?? (async () => {}),
+    olderMessages: input.olderMessages ?? (() => ({ hasOlderMessages: true, oldestLoadedVersion: 5 })),
+    onOlderPageApplied: input.onOlderPageApplied,
     workspaceId: "workspace-1"
   });
-}
-
-function setOlderWindow(
-  engine: ReturnType<typeof createTestAgentSessionEngine>,
-  oldestLoadedVersion: number
-): void {
-  engine.dispatch({
-    messages: [],
-    sessionMessageWindows: [
-      {
-        agentSessionId: "session-1",
-        hasOlderMessages: true,
-        oldestLoadedVersion
-      }
-    ],
-    type: "message/snapshotReceived",
-    workspaceId: "workspace-1"
-  });
-}
-
-function message(version: number) {
-  return {
-    agentSessionId: "session-1",
-    kind: "text",
-    messageId: `message-${version}`,
-    occurredAtUnixMs: version,
-    payload: {},
-    role: "assistant",
-    sequence: version,
-    turnId: "turn-1",
-    version
-  };
-}
-
-function messagePage(
-  messages: ReturnType<typeof message>[],
-  hasMore: boolean
-): AgentActivityMessagePage {
-  return {
-    hasMore,
-    latestVersion: messages.at(-1)?.version ?? 0,
-    messages
-  };
 }

@@ -1,43 +1,25 @@
 import { act, renderHook } from "@testing-library/react";
-import type { AgentActivityMessagePage } from "@tutti-os/agent-activity-core";
 import { StrictMode, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { useAgentConversationMessagePaging } from "./useAgentConversationMessagePaging";
 
+function runtime(loadOlderSessionMessages: () => Promise<void>) {
+  return {
+    loadOlderSessionMessages,
+    transcript: {
+      messages: () => [{ version: 5 }],
+      hasOlderMessages: () => true,
+      conversationIds: () => ["session-1"]
+    }
+  } as unknown as AgentGUIRuntime;
+}
+
 describe("useAgentConversationMessagePaging", () => {
   it("binds the AgentGUI runtime to the shared message controller", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
-    engine.dispatch({
-      messages: [],
-      sessionMessageWindows: [
-        {
-          agentSessionId: "session-1",
-          hasOlderMessages: true,
-          oldestLoadedVersion: 5
-        }
-      ],
-      type: "message/snapshotReceived",
-      workspaceId: "workspace-1"
-    });
-    const listSessionMessages = vi.fn().mockResolvedValue({
-      hasMore: false,
-      latestVersion: 1,
-      messages: [
-        {
-          agentSessionId: "session-1",
-          kind: "text",
-          messageId: "message-1",
-          occurredAtUnixMs: 1,
-          payload: {},
-          role: "assistant",
-          sequence: 1,
-          turnId: "turn-1",
-          version: 1
-        }
-      ]
-    });
+    const loadOlderSessionMessages = vi.fn(async () => {});
     const onOlderPageLoadingChanged = vi.fn();
     const { result, unmount } = renderHook(() =>
       useAgentConversationMessagePaging({
@@ -45,9 +27,7 @@ describe("useAgentConversationMessagePaging", () => {
         getActiveSessionId: () => "session-1",
         isMounted: () => true,
         onOlderPageLoadingChanged,
-        runtime: {
-          listSessionMessages
-        } as unknown as AgentGUIRuntime,
+        runtime: runtime(loadOlderSessionMessages),
         sessionEngine: engine,
         workspaceId: "workspace-1"
       })
@@ -57,13 +37,8 @@ describe("useAgentConversationMessagePaging", () => {
       await result.current.loadOlderMessages();
     });
 
-    expect(listSessionMessages).toHaveBeenCalledWith({
+    expect(loadOlderSessionMessages).toHaveBeenCalledWith({
       agentSessionId: "session-1",
-      beforeVersion: 5,
-      cache: false,
-      limit: 100,
-      order: "desc",
-      signal: expect.any(AbortSignal),
       workspaceId: "workspace-1"
     });
     expect(onOlderPageLoadingChanged.mock.calls).toEqual([
@@ -78,34 +53,20 @@ describe("useAgentConversationMessagePaging", () => {
 
   it("disposes its request-owning controller on unmount", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
-    engine.dispatch({
-      messages: [],
-      sessionMessageWindows: [
-        {
-          agentSessionId: "session-1",
-          hasOlderMessages: true,
-          oldestLoadedVersion: 5
-        }
-      ],
-      type: "message/snapshotReceived",
-      workspaceId: "workspace-1"
-    });
-    let requestSignal!: AbortSignal;
-    let resolvePage!: (page: AgentActivityMessagePage) => void;
+    let resolvePage!: () => void;
+    const onOlderPageLoadingChanged = vi.fn();
     const { result, unmount } = renderHook(() =>
       useAgentConversationMessagePaging({
         diagnostics: { error: vi.fn(), page: vi.fn() },
         getActiveSessionId: () => "session-1",
         isMounted: () => true,
-        onOlderPageLoadingChanged: vi.fn(),
-        runtime: {
-          listSessionMessages: ({ signal }: { signal: AbortSignal }) => {
-            requestSignal = signal;
-            return new Promise<AgentActivityMessagePage>((resolve) => {
+        onOlderPageLoadingChanged,
+        runtime: runtime(
+          () =>
+            new Promise<void>((resolve) => {
               resolvePage = resolve;
-            });
-          }
-        } as unknown as AgentGUIRuntime,
+            })
+        ),
         sessionEngine: engine,
         workspaceId: "workspace-1"
       })
@@ -115,36 +76,21 @@ describe("useAgentConversationMessagePaging", () => {
     act(() => {
       request = result.current.loadOlderMessages();
     });
-    expect(requestSignal.aborted).toBe(false);
+    expect(onOlderPageLoadingChanged).toHaveBeenLastCalledWith(true);
 
     unmount();
     await Promise.resolve();
-    expect(requestSignal.aborted).toBe(true);
-    resolvePage({ hasMore: false, latestVersion: 0, messages: [] });
+    onOlderPageLoadingChanged.mockClear();
+    resolvePage();
     await request;
+    expect(onOlderPageLoadingChanged).not.toHaveBeenCalled();
 
     engine.dispose();
   });
 
   it("remains usable after the Strict Mode lifecycle probe", async () => {
     const engine = createTestAgentSessionEngine("workspace-1");
-    engine.dispatch({
-      messages: [],
-      sessionMessageWindows: [
-        {
-          agentSessionId: "session-1",
-          hasOlderMessages: true,
-          oldestLoadedVersion: 5
-        }
-      ],
-      type: "message/snapshotReceived",
-      workspaceId: "workspace-1"
-    });
-    const listSessionMessages = vi.fn().mockResolvedValue({
-      hasMore: false,
-      latestVersion: 1,
-      messages: []
-    });
+    const loadOlderSessionMessages = vi.fn(async () => {});
     const { result, unmount } = renderHook(
       () =>
         useAgentConversationMessagePaging({
@@ -152,9 +98,7 @@ describe("useAgentConversationMessagePaging", () => {
           getActiveSessionId: () => "session-1",
           isMounted: () => true,
           onOlderPageLoadingChanged: vi.fn(),
-          runtime: {
-            listSessionMessages
-          } as unknown as AgentGUIRuntime,
+          runtime: runtime(loadOlderSessionMessages),
           sessionEngine: engine,
           workspaceId: "workspace-1"
         }),
@@ -169,7 +113,7 @@ describe("useAgentConversationMessagePaging", () => {
       await result.current.loadOlderMessages();
     });
 
-    expect(listSessionMessages).toHaveBeenCalledOnce();
+    expect(loadOlderSessionMessages).toHaveBeenCalledOnce();
     unmount();
     engine.dispose();
   });

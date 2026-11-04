@@ -11,6 +11,32 @@ import type { AgentGUINodeData } from "../../../types";
 import { useAgentGUISessionDetailTransport } from "./useAgentGUISessionDetailTransport";
 
 describe("useAgentGUISessionDetailTransport", () => {
+  it("renders with no active conversation", () => {
+    const runtime = createRuntime([]);
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <AgentGUIRuntimeProvider runtime={runtime}>
+        {children}
+      </AgentGUIRuntimeProvider>
+    );
+    const rendered = renderHook(
+      () =>
+        useAgentGUISessionDetailTransport({
+          activeConversationId: null,
+          activeConversationIdRef: ref(null),
+          agentActivityRuntime: runtime,
+          agentActivityRuntimeOrigin: "test",
+          dataRef: ref({ provider: "codex" } as AgentGUINodeData),
+          isMountedRef: ref(true),
+          sessionEngine: createTestAgentSessionEngine("workspace-1"),
+          sessionFamily: { childSessions: [], pendingInteractions: [], rootSession: null },
+          workspaceId: "workspace-1"
+        }),
+      { wrapper }
+    );
+
+    expect(rendered.result.current.activeSessionView).toBeNull();
+  });
+
   it("renders optimistic text without treating its version as history coverage", () => {
     const optimisticMessage = message();
     const runtime = createRuntime([optimisticMessage]);
@@ -31,7 +57,6 @@ describe("useAgentGUISessionDetailTransport", () => {
           sessionEngine: createTestAgentSessionEngine("workspace-1"),
           sessionFamily: {
             childSessions: [],
-            messagesBySessionId: {},
             pendingInteractions: [],
             rootSession: null
           },
@@ -40,7 +65,7 @@ describe("useAgentGUISessionDetailTransport", () => {
       { wrapper }
     );
 
-    expect(rendered.result.current.activeSessionView).toBeNull();
+    expect(rendered.result.current.activeSessionView?.hasOlderMessages).toBe(false);
     expect(rendered.result.current.resolveSessionMessages("session-1")).toEqual(
       [optimisticMessage]
     );
@@ -52,7 +77,7 @@ function createRuntime(
 ): AgentGUIRuntime {
   return {
     origin: "test",
-    transcript: { messages: () => messages }
+    transcript: { messages: () => messages, hasOlderMessages: () => false, conversationIds: () => ["session-1"] }
   } as unknown as AgentGUIRuntime;
 }
 

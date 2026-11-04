@@ -1,3 +1,4 @@
+import { useAgentGUIRuntime } from "../../../agentActivityRuntime";
 import {
   type AgentSessionEngine
 } from "@tutti-os/agent-activity-core";
@@ -29,6 +30,7 @@ export function useAgentGUIConversationListState({
   sessionEngine,
   workspaceId
 }: UseAgentGUIConversationListStateInput) {
+  const { transcript, workspaceLoad } = useAgentGUIRuntime();
   const [conversationFilter, setConversationFilter] =
     useState<AgentGUIConversationFilter>(
       () => createAgentGUIConversationFilterState().filter
@@ -58,6 +60,8 @@ export function useAgentGUIConversationListState({
     ]);
   const conversationListState = useAgentGuiConversationList(
     sessionEngine,
+    transcript,
+    workspaceLoad,
     conversationListQuery,
     normalizedProviderTargets
   );

@@ -1,16 +1,14 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   type AgentActivityRailPlacement,
-  type EngineExternalCommand
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
 import { createLocalAgentGUIAgentTarget } from "../../../agentTargets";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { AgentHostUserProject } from "../../../host/agentHostApi";
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
@@ -263,18 +261,7 @@ function renderNewConversationScenario(input: {
   rememberedSettings?: AgentSessionComposerSettings;
   userProjects: AgentHostUserProject[];
 }) {
-  const commands: EngineExternalCommand[] = [];
-  const sessionEngine = createAgentSessionEngine({
-    clock: { nowUnixMs: () => 1 },
-    commandPort: createTestEngineCommandPort({
-      execute: (command) => {
-        commands.push(command);
-        return new Promise<never>(() => {});
-      }
-    }),
-    identity: { origin: "test", workspaceId: "workspace-1" },
-    scheduler: { schedule: () => ({ cancel() {} }) }
-  });
+  const sessionEngine = createTestAgentSessionEngine("workspace-1");
   const activateSession = vi.spyOn(sessionEngine, "activateSession");
   const target = createLocalAgentGUIAgentTarget("codex");
   const dataRef: { current: AgentGUINodeData } = {
@@ -478,9 +465,7 @@ function renderNewConversationScenario(input: {
     async waitForActivation() {
       let activation: EngineExternalCommand | undefined;
       await waitFor(() => {
-        const matches = commands.filter(
-          (command) => command.type === "session/activate"
-        );
+        const matches = activateSession.mock.calls.map(([input]) => input);
         expect(matches).toHaveLength(1);
         activation = matches[0];
       });

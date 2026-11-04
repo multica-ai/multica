@@ -210,34 +210,12 @@ export function isEngineInternalCommand(
 // State tree and reducer contract.
 // ---------------------------------------------------------------------------
 
-export interface EngineRuntimeCommandResultRecord {
-  commandId: string;
-  errorMessage?: string;
-  outcome: EngineCommandOutcome;
-}
-
-/** Engine self state: the minimal skeleton domain driving interleaving tests. */
-export interface EngineRuntimeState {
-  connection: EngineConnectionStatus;
-  lastCommandResult: EngineRuntimeCommandResultRecord | null;
-  lastExpiredIntentId: string | null;
-  processedIntentCount: number;
-  workspaceReconcile: {
-    commandId: string | null;
-    errorCode: string | null;
-    errorMessage: string | null;
-    status: "idle" | "loading" | "ready" | "failed" | "unknown";
-  };
-}
-
 /** State shared by public snapshots and the private reducer root. */
 export interface AgentSessionEngineStateBase {
-  engineRuntime: EngineRuntimeState;
   pendingIntents: PendingIntentsState;
   promptQueue: PromptQueueState;
   sessionReconcile: SessionReconcileState;
   sessionLifecycle: SessionLifecycleState;
-  sessionMessages: SessionMessagesState;
 }
 
 /**
@@ -467,7 +445,6 @@ import type {
   SessionReconcileIntent,
   SessionReconcileState
 } from "./sessionReconcile.types.ts";
-import type { SessionMessagesState } from "./sessionMessages.types.ts";
 import type {
   AgentActivityComposerOptions,
   AgentActivityComposerSettings,

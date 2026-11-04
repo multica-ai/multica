@@ -1,7 +1,4 @@
-import {
-  selectSessionMessagesById,
-  type AgentSessionEngineState
-} from "@tutti-os/agent-activity-core";
+import type { AgentGUITranscriptReader } from "../agentActivityRuntime";
 import { resolveAgentGUIFirstUserMessageDisplayPrompt } from "./agentConversationTitleProjection.ts";
 
 export type AgentGUIConversationRailTitlePromptsBySessionId = Readonly<
@@ -9,17 +6,16 @@ export type AgentGUIConversationRailTitlePromptsBySessionId = Readonly<
 >;
 
 export function createAgentGUIConversationRailTitlePromptSelector(): (
-  state: AgentSessionEngineState
+  transcript: AgentGUITranscriptReader
 ) => AgentGUIConversationRailTitlePromptsBySessionId {
   let previous: AgentGUIConversationRailTitlePromptsBySessionId = {};
 
-  return (state) => {
+  return (transcript) => {
     const next: Record<string, string> = {};
-    for (const [agentSessionId, messages] of Object.entries(
-      selectSessionMessagesById(state)
-    )) {
-      const displayPrompt =
-        resolveAgentGUIFirstUserMessageDisplayPrompt(messages);
+    for (const agentSessionId of transcript.conversationIds()) {
+      const displayPrompt = resolveAgentGUIFirstUserMessageDisplayPrompt(
+        transcript.messages(agentSessionId)
+      );
       if (displayPrompt) {
         next[agentSessionId] = displayPrompt;
       }

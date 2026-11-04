@@ -1,12 +1,11 @@
+import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook } from "@testing-library/react";
 import {
-  createAgentSessionEngine,
   normalizeAgentActivitySession
 } from "@tutti-os/agent-activity-core";
 import { observable, runInAction } from "mobx";
 import { describe, expect, it, vi } from "vitest";
-import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentGUISessionSettingsUpdate } from "./agentGuiController.providerHelpers";
 import { useAgentGUISessionEngineState } from "./useAgentGUISessionEngineState";
 
@@ -42,14 +41,7 @@ const prompts = createTestPromptOperations();
 
 describe("useAgentGUISessionEngineState", () => {
   it("shows an optimistic session selection then silently restores canonical settings on failure", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     sessionEngine.dispatch({
       type: "session/snapshotReceived",
       sessions: [
@@ -90,14 +82,7 @@ describe("useAgentGUISessionEngineState", () => {
   });
 
   it("keeps the latest queued settings visible while the session runtime reconnects", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     const session = (settings: { model: string; planMode: boolean }) =>
       normalizeAgentActivitySession({
         activeTurnId: null,
@@ -153,14 +138,7 @@ describe("useAgentGUISessionEngineState", () => {
   });
 
   it("observes runtime availability for the selected session only", () => {
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: vi.fn(() => new Promise(() => undefined))
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
+    const sessionEngine = createTestAgentSessionEngine("workspace-1");
     sessionEngine.dispatch({
       type: "session/snapshotReceived",
       sessions: ["session-1", "session-2"].map((agentSessionId) =>

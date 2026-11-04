@@ -43,18 +43,14 @@ describe("useAgentSessionControllerState", () => {
     });
   });
 
-  it("reads terminal older-page coverage from the canonical Engine window", () => {
+  it("reads terminal older-page coverage from the history", () => {
     const { result, rerender } = renderHook(
-      ({ hasOlderMessages, messages, oldestLoadedVersion }) =>
-        useAgentSessionControllerState(ACTIVE_REF, messages, {
-          hasOlderMessages,
-          oldestLoadedVersion
-        }),
+      ({ hasOlderMessages, messages }) =>
+        useAgentSessionControllerState(ACTIVE_REF, messages, hasOlderMessages),
       {
         initialProps: {
           hasOlderMessages: true,
-          messages: [message(446)],
-          oldestLoadedVersion: 446
+          messages: [message(446)]
         }
       }
     );
@@ -63,8 +59,7 @@ describe("useAgentSessionControllerState", () => {
 
     rerender({
       hasOlderMessages: false,
-      messages: [message(1), message(446)],
-      oldestLoadedVersion: 1
+      messages: [message(1), message(446)]
     });
 
     expect(result.current.activeSessionView).toMatchObject({
