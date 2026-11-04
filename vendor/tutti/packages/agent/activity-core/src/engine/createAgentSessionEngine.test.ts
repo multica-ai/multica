@@ -808,28 +808,7 @@ test("an authoritative Session detail snapshot notifies subscribers once", () =>
   engine.dispatch({
     childSessions: [childSession],
     live: true,
-    messages: [
-      {
-        agentSessionId: "session-root",
-        kind: "text",
-        messageId: "message-1",
-        occurredAtUnixMs: 3,
-        payload: { text: "hello" },
-        role: "assistant",
-        sequence: 1,
-        turnId: "turn-1",
-        version: 1,
-        workspaceId: "workspace-1"
-      }
-    ],
     session: { ...rootSession, latestTurn: turn },
-    sessionMessageWindows: [
-      {
-        agentSessionId: "session-root",
-        hasOlderMessages: false,
-        oldestLoadedVersion: 1
-      }
-    ],
     turns: [turn],
     type: "session/detailSnapshotReceived",
     workspaceId: "workspace-1"
@@ -842,18 +821,6 @@ test("an authoritative Session detail snapshot notifies subscribers once", () =>
   assert.equal(
     Object.values(snapshot.sessionLifecycle.turnsById)[0]?.turnId,
     "turn-1"
-  );
-  assert.equal(
-    snapshot.sessionMessages.messagesBySessionId["session-root"]?.[0]
-      ?.messageId,
-    "message-1"
-  );
-  assert.deepEqual(
-    snapshot.sessionMessages.windowsBySessionId["session-root"],
-    {
-      hasOlderMessages: false,
-      oldestLoadedVersion: 1
-    }
   );
 });
 

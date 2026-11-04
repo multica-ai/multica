@@ -24,10 +24,6 @@ import {
   validateScopedSessionResult,
   validateSendInputResult
 } from "./commandResult.validation.ts";
-import {
-  createInitialSessionMessagesState,
-  sessionMessagesReducer
-} from "./sessionMessages.reducer.ts";
 import { canonicalTurnKey } from "./sessionEntityKeys.ts";
 import { deriveCanonicalSubmitAvailability } from "./sessionLifecycle.availability.ts";
 
@@ -42,7 +38,6 @@ export function createInitialAgentSessionEngineState(): RootAgentSessionEngineSt
     promptQueue: createInitialPromptQueueState(),
     sessionReconcile: createInitialSessionReconcileState(),
     sessionLifecycle: createInitialSessionLifecycleState(),
-    sessionMessages: createInitialSessionMessagesState()
   };
 }
 
@@ -104,20 +99,11 @@ export function rootEngineReducer(
         state.engineRuntime.workspaceReconcile.commandId
     }
   );
-  const sessionMessages = sessionMessagesReducer(
-    state.sessionMessages,
-    intent,
-    {
-      previousSessionsById: state.sessionLifecycle.sessionsById,
-      sessionsById: sessionLifecycle.state.sessionsById
-    }
-  );
   const unchanged =
     engineRuntime.state === state.engineRuntime &&
     pendingIntents.state === state.pendingIntents &&
     sessionReconcile.state === state.sessionReconcile &&
-    sessionLifecycle.state === state.sessionLifecycle &&
-    sessionMessages.state === state.sessionMessages;
+    sessionLifecycle.state === state.sessionLifecycle;
   const nextState = unchanged
     ? state
     : {
@@ -125,8 +111,7 @@ export function rootEngineReducer(
         pendingIntents: pendingIntents.state,
         promptQueue: state.promptQueue,
         sessionReconcile: sessionReconcile.state,
-        sessionLifecycle: sessionLifecycle.state,
-        sessionMessages: sessionMessages.state
+        sessionLifecycle: sessionLifecycle.state
       };
   const followUpIntents = [
     ...(sessionReconcile.followUpIntents ?? []),

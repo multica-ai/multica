@@ -204,6 +204,7 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     commandPort,
   });
   const desktopQueue = createDesktopQueueEngine(baseEngine, {
+    messages: (id) => transcriptModel.messages(id),
     // A stop or an answer decides against turn state, which must not be behind what has arrived.
     beforeTurnOperation: () => commits.flush(),
     pendingStore: init.composerDraftScope
@@ -493,8 +494,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
       session: withModel(result.session), turns: result.turns,
       // Confirming a submit needs only the user's messages; the transcript reads the model.
       messages: result.messages.filter((message) => message.role === "user"),
-      sessionMessageWindows: [{ agentSessionId: guiId, hasOlderMessages: localConversation(guiId)?.hasOlderTurns ?? false,
-        oldestLoadedVersion: result.messages.reduce<number | null>((oldest, message) => oldest === null || message.version < oldest ? message.version : oldest, null) }],
     }));
     // A same-timestamp terminal result can leave the engine's previous active
     // pointer intact. Fence that specific transition once: replaying every
@@ -677,7 +676,11 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     promptContentUploadSupport: { file: true, image: true }, devDiagnosticConsoleSink: false,
     getSessionEngine: (id) => { scope(id); return engine; },
     composer,
-    transcript: transcriptModel,
+    transcript: {
+      messages: (id) => transcriptModel.messages(id),
+      hasOlderMessages: (id) => localConversation(id)?.hasOlderTurns ?? false,
+      conversationIds: () => transcriptModel.conversationIds(),
+    },
     mutations,
     prompts: desktopQueue.prompts,
     getSnapshot: (id) => { scope(id); return projectSnapshot(engine.getSnapshot()); },

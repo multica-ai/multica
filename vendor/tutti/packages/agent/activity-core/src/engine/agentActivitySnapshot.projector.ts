@@ -46,32 +46,12 @@ export function createAgentActivitySnapshotProjector(
               item.pendingInteractions
             )
           );
-    const sessionMessagesById =
-      previousState &&
-      previousSnapshot &&
-      state.sessionMessages.messagesBySessionId ===
-        previousState.sessionMessages.messagesBySessionId
-        ? previousSnapshot.sessionMessagesById
-        : Object.fromEntries(
-            Object.entries(state.sessionMessages.messagesBySessionId).map(
-              ([agentSessionId, messages]) => [agentSessionId, [...messages]]
-            )
-          );
-    const sessionMessageWindowsById =
-      previousState &&
-      previousSnapshot &&
-      state.sessionMessages.windowsBySessionId ===
-        previousState.sessionMessages.windowsBySessionId
-        ? previousSnapshot.sessionMessageWindowsById
-        : { ...state.sessionMessages.windowsBySessionId };
     const snapshot: AgentActivitySnapshot = {
       workspaceId,
       sessions,
       // Presence is no longer canonical activity state. Keep the legacy
       // snapshot field empty until the runtime contract drops it.
-      presences: EMPTY_PRESENCES,
-      sessionMessagesById,
-      sessionMessageWindowsById
+      presences: EMPTY_PRESENCES
     };
     previousState = state;
     previousSnapshot = snapshot;
@@ -86,8 +66,6 @@ export function createEmptyAgentActivitySnapshot(
     workspaceId,
     sessions: [],
     presences: [],
-    sessionMessagesById: {},
-    sessionMessageWindowsById: {},
   };
 }
 

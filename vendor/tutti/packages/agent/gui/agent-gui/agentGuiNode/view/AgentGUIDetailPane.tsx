@@ -1,7 +1,6 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import { latestAssistantMessageText } from "../../../shared/agentConversation/projection/agentConversationProjection";
-import { AGENT_GUI_WORKBENCH_OPEN_EXTERNAL_IMPORT_EVENT } from "../../../workbench/contribution";
 import type { AgentComposerProps } from "../AgentComposer";
 import type { AgentHomeSuggestionAction } from "../model/agentGuiNodeTypes";
 import {
@@ -38,6 +37,8 @@ import { useAgentGUIDetailSideChrome as useSideChrome } from "./useAgentGUIDetai
 import type { TimelineScrollAnchor } from "./agentGUIScrollMemory";
 import { useBottomDockInteractionSubmission } from "./useBottomDockInteractionSubmission";
 import type { AgentGUIPendingPrependScrollAnchor } from "./agentGUIDetailScrollTypes";
+
+const AGENT_GUI_WORKBENCH_OPEN_EXTERNAL_IMPORT_EVENT = "tutti:agent-gui-workbench-open-external-import";
 export const AgentGUIDetailPane = memo(function AgentGUIDetailPane({
   shell,
   rail,

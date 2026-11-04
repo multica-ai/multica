@@ -31,7 +31,6 @@ describe("useAgentGUISessionDetailTransport", () => {
           sessionEngine: createTestAgentSessionEngine("workspace-1"),
           sessionFamily: {
             childSessions: [],
-            messagesBySessionId: {},
             pendingInteractions: [],
             rootSession: null
           },
@@ -40,7 +39,7 @@ describe("useAgentGUISessionDetailTransport", () => {
       { wrapper }
     );
 
-    expect(rendered.result.current.activeSessionView).toBeNull();
+    expect(rendered.result.current.activeSessionView?.hasOlderMessages).toBe(false);
     expect(rendered.result.current.resolveSessionMessages("session-1")).toEqual(
       [optimisticMessage]
     );
@@ -52,7 +51,7 @@ function createRuntime(
 ): AgentGUIRuntime {
   return {
     origin: "test",
-    transcript: { messages: () => messages }
+    transcript: { messages: () => messages, hasOlderMessages: () => false, conversationIds: () => ["session-1"] }
   } as unknown as AgentGUIRuntime;
 }
 

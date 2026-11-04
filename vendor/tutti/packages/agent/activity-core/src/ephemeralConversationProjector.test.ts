@@ -89,7 +89,7 @@ test("projects optimistic and provider messages into one ephemeral snapshot", ()
   assert.equal(snapshot.sequence, 3);
   assert.equal(snapshot.activitySnapshot.sessions[0]?.activeTurnId, "turn-1");
   assert.deepEqual(
-    snapshot.activitySnapshot.sessionMessagesById["side-1"]?.map((message) => ({
+    snapshot.messages.map((message) => ({
       id: message.messageId,
       role: message.role,
       text: message.payload.text
@@ -173,7 +173,7 @@ test("projects tool, reasoning, turn, and interaction state without durable reco
   assert.equal(snapshot.sessionTurns[0]?.phase, "running");
   assert.equal(snapshot.interactions[0]?.status, "pending");
   assert.deepEqual(
-    snapshot.activitySnapshot.sessionMessagesById["side-1"]?.map(
+    snapshot.messages.map(
       (message) => message.kind
     ),
     ["reasoning", "tool_call"]

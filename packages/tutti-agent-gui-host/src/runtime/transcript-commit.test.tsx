@@ -82,14 +82,11 @@ async function open() {
 const interval = () => new Promise((resolve) => setTimeout(resolve, COMMIT_INTERVAL_MS + 20));
 
 describe("committing a conversation's transcript", () => {
-  it("leaves the engine with turns and the user's messages, and the transcript with everything", async () => {
+  it("commits the turn and every message together", async () => {
     const { emit, engine, messages, phase } = await open();
     emit(started);
     await interval();
     expect(messages().map((message) => message.messageId)).toEqual(["m1", "it-1"]);
-    const stored = engine.getSnapshot().sessionMessages.messagesBySessionId[session.id]!;
-    expect(stored.map((message) => message.messageId)).toEqual(["m1"]);
-    expect(stored[0]).toBe(messages()[0]);
     expect(phase()).toBe("running");
   });
 

@@ -39,6 +39,8 @@ export type AgentActivitySessionMessages = Readonly<
 
 export interface AgentGUITranscriptReader {
   messages(agentSessionId: string): readonly AgentActivityMessage[];
+  hasOlderMessages(agentSessionId: string): boolean;
+  conversationIds(): readonly string[];
 }
 
 export interface AgentActivityRuntimeUpdateSessionSettingsResult {
@@ -312,7 +314,7 @@ export interface AgentGUIRuntime {
    * Reads the next older page into the session itself, which then updates through
    * its usual snapshot. A runtime with this owns paging; versions need not page.
    */
-  loadOlderSessionMessages?: (input: { workspaceId: string; agentSessionId: string }) => Promise<void>;
+  loadOlderSessionMessages: (input: { workspaceId: string; agentSessionId: string }) => Promise<void>;
   /** Reads an attachment as a URL; preferred over readSessionAttachment when present. */
   readSessionAttachmentSource?: (input: { workspaceId: string; attachmentId: string }) => Promise<{ attachmentId: string; url: string }>;
   /** The composer dropped attachments between these two drafts. */

@@ -106,3 +106,29 @@ test("state hydration requires an authoritative lifecycle capability projection"
   }).state;
   assert.equal(selectEngineSessionStateHydrated(state, " session-1 "), true);
 });
+
+test("a history snapshot hydrates the detail, with no reconcile requested first", () => {
+  const session = {
+    activeTurnId: null,
+    agentSessionId: "session-1",
+    cwd: "/workspace",
+    latestTurnInteractions: [],
+    pendingInteractions: [],
+    provider: "codex",
+    title: "session",
+    workspaceId: "workspace-1"
+  };
+  const initial = createInitialAgentSessionEngineState();
+  assert.equal(selectEngineSessionDetailHydrated(initial, "session-1"), false);
+  const { state } = rootEngineReducer(initial, {
+    agentSessionId: "session-1",
+    childSessions: [],
+    historyRevision: 1,
+    messages: [],
+    session,
+    turns: [],
+    type: "session/historyAuthoritativeSnapshotReceived",
+    workspaceId: "workspace-1"
+  });
+  assert.equal(selectEngineSessionDetailHydrated(state, "session-1"), true);
+});

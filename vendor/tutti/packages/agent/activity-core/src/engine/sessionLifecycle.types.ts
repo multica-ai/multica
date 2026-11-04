@@ -5,7 +5,6 @@ import type {
   AgentActivityTurn
 } from "../types.ts";
 import type { AgentActivitySessionInput } from "../sessionNormalization.ts";
-import type { AgentActivitySessionMessageWindow } from "../messageWindow.types.ts";
 
 export interface SessionOperationState {
   runtimeAvailability: SessionRuntimeAvailability;
@@ -121,9 +120,6 @@ export interface SessionHistoryAuthoritativeSnapshotReceivedIntent {
   messages: readonly AgentActivityDurableMessage[];
   session: AgentActivitySessionInput;
   liveTurnId?: string;
-  sessionMessageWindows?: readonly (AgentActivitySessionMessageWindow & {
-    agentSessionId: string;
-  })[];
   turns: readonly AgentActivityTurn[];
   workspaceId: string;
 }

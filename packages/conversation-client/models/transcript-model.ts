@@ -19,6 +19,10 @@ export class TranscriptModel<Message> {
     return this.committed.get(conversationId) ?? NO_MESSAGES;
   }
 
+  conversationIds(): readonly string[] {
+    return [...this.committed.keys()];
+  }
+
   /** A commit that changed nothing keeps the list, so nothing downstream runs again. */
   commit(conversationId: string, messages: readonly Message[]): void {
     const current = this.committed.get(conversationId);

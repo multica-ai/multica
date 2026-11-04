@@ -1,15 +1,12 @@
 import { useCallback } from "react";
-import type {
-  AgentActivityMessage,
-  AgentActivitySessionMessageWindow
-} from "@tutti-os/agent-activity-core";
+import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
 import { type AgentSessionViewRef } from "./useAgentSessionPagingState";
 import { useAgentSessionPagingState } from "./useAgentSessionPagingState";
 
 export function useAgentSessionControllerState(
   activeRef: AgentSessionViewRef,
-  canonicalMessages: readonly AgentActivityMessage[] = [],
-  canonicalWindow: AgentActivitySessionMessageWindow | null = null
+  messages: readonly AgentActivityMessage[] = [],
+  hasOlderMessages = false
 ) {
   const paging = useAgentSessionPagingState();
   const getAgentSessionView = useCallback(
@@ -41,10 +38,9 @@ export function useAgentSessionControllerState(
   );
   void paging.entries;
   const storedActiveView = getAgentSessionView(activeRef);
-  const canonicalOldestVersion =
-    canonicalWindow?.oldestLoadedVersion ?? oldestVersion(canonicalMessages);
+  const oldestLoadedVersion = oldestVersion(messages);
   const activeSessionView =
-    storedActiveView === null && canonicalOldestVersion === null
+    storedActiveView === null && oldestLoadedVersion === null
       ? null
       : {
           ...(storedActiveView ?? {
@@ -52,8 +48,8 @@ export function useAgentSessionControllerState(
             isLoadingMessages: false,
             isLoadingOlderMessages: false
           }),
-          hasOlderMessages: canonicalWindow?.hasOlderMessages ?? false,
-          oldestLoadedVersion: canonicalOldestVersion
+          hasOlderMessages,
+          oldestLoadedVersion
         };
   return {
     activeSessionView,
@@ -65,7 +61,10 @@ export function useAgentSessionControllerState(
   };
 }
 
-function oldestVersion(messages: readonly AgentActivityMessage[]) {
-  const versions = messages.map((item) => item.version).filter(Number.isFinite);
-  return versions.length > 0 ? Math.min(...versions) : null;
+export function oldestVersion(messages: readonly AgentActivityMessage[]) {
+  let oldest: number | null = null;
+  for (const { version } of messages) {
+    if (Number.isFinite(version) && (oldest === null || version < oldest)) oldest = version;
+  }
+  return oldest;
 }

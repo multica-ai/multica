@@ -17,9 +17,6 @@ const EMPTY_MESSAGES: readonly AgentActivityMessage[] = [];
 
 export interface AgentSessionFamilySnapshot {
   childSessions: readonly AgentActivitySession[];
-  messagesBySessionId: Readonly<
-    Record<string, readonly AgentActivityMessage[]>
-  >;
   pendingInteractions: readonly AgentActivityInteraction[];
   rootSession: AgentActivitySession | null;
 }
@@ -47,7 +44,6 @@ export function createAgentSessionFamilySnapshotSelector(
   let previousRecordsById = new Map<string, ProjectedSessionRecord>();
   let previousSnapshot: AgentSessionFamilySnapshot = {
     childSessions: [],
-    messagesBySessionId: {},
     pendingInteractions: [],
     rootSession: null
   };
@@ -119,19 +115,6 @@ export function createAgentSessionFamilySnapshotSelector(
     )
       ? previousSnapshot.childSessions
       : nextChildSessions;
-    const nextMessagesBySessionId = Object.fromEntries(
-      familySessions.map((session) => [
-        session.agentSessionId,
-        state.sessionMessages.messagesBySessionId[session.agentSessionId] ??
-          EMPTY_MESSAGES
-      ])
-    );
-    const messagesBySessionId = messageRecordsEqual(
-      previousSnapshot.messagesBySessionId,
-      nextMessagesBySessionId
-    )
-      ? previousSnapshot.messagesBySessionId
-      : nextMessagesBySessionId;
     const nextPendingInteractions = projectedSessions
       .flatMap((session) => session.pendingInteractions)
       .sort(compareInteractions);
@@ -145,7 +128,6 @@ export function createAgentSessionFamilySnapshotSelector(
     previousRecordsById = nextRecordsById;
     if (
       childSessions === previousSnapshot.childSessions &&
-      messagesBySessionId === previousSnapshot.messagesBySessionId &&
       pendingInteractions === previousSnapshot.pendingInteractions &&
       rootSession === previousSnapshot.rootSession
     ) {
@@ -153,7 +135,6 @@ export function createAgentSessionFamilySnapshotSelector(
     }
     previousSnapshot = {
       childSessions,
-      messagesBySessionId,
       pendingInteractions,
       rootSession
     };
@@ -169,18 +150,6 @@ function referenceArrayEqual<T>(
     left === right ||
     (left.length === right.length &&
       left.every((item, index) => item === right[index]))
-  );
-}
-
-function messageRecordsEqual(
-  left: AgentSessionFamilySnapshot["messagesBySessionId"],
-  right: AgentSessionFamilySnapshot["messagesBySessionId"]
-): boolean {
-  const leftIds = Object.keys(left);
-  const rightIds = Object.keys(right);
-  return (
-    leftIds.length === rightIds.length &&
-    rightIds.every((id) => left[id] === right[id])
   );
 }
 

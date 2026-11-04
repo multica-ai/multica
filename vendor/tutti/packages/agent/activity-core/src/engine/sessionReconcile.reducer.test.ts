@@ -25,39 +25,6 @@ test("an uncached initial read establishes a baseline without forcing full histo
   });
 });
 
-test("cached messages without an applied revision require authoritative history", () => {
-  const initial = createInitialAgentSessionEngineState();
-  const requirement = selectEngineAuthoritativeHistoryRequirement(
-    {
-      ...initial,
-      sessionMessages: {
-        ...initial.sessionMessages,
-        messagesBySessionId: {
-          "session-1": [
-            {
-              agentSessionId: "session-1",
-              kind: "text",
-              messageId: "message-1",
-              occurredAtUnixMs: 1,
-              payload: {},
-              role: "user",
-              status: null,
-              turnId: "turn-1",
-              version: 1,
-              workspaceId: "workspace-1"
-            }
-          ]
-        }
-      }
-    },
-    {
-      agentSessionId: "session-1",
-      observedHistoryRevision: 0
-    }
-  );
-  assert.equal(requirement.needsAuthoritativeMessages, true);
-});
-
 test("historical detail turns preserve history provenance", () => {
   const turn = {
     agentSessionId: "session-1",

@@ -1,14 +1,9 @@
 import {
-  agentActivitySessionMessageWindowFromDescendingPage,
   selectEngineSessionDetailHydrated,
   selectEngineSessionDetailLoading,
-  selectSessionMessageWindow,
   type AgentActivityDurableMessage,
-  type AgentActivityMessagePage,
   type AgentSessionEngine
 } from "@tutti-os/agent-activity-core";
-
-const DEFAULT_PAGE_SIZE = 100;
 
 export type AgentConversationMessagePagePhase = "error" | "idle" | "loading";
 
@@ -16,15 +11,6 @@ export interface AgentConversationMessageControllerSnapshot {
   agentSessionId: string | null;
   error: unknown | null;
   olderPagePhase: AgentConversationMessagePagePhase;
-}
-
-export interface AgentConversationMessagePageInput {
-  agentSessionId: string;
-  beforeVersion: number;
-  limit: number;
-  order: "desc";
-  signal: AbortSignal;
-  workspaceId: string;
 }
 
 export interface AgentConversationMessageControllerDiagnostics {
@@ -48,7 +34,9 @@ export interface AgentConversationMessageControllerDiagnostics {
 
 export interface CreateAgentConversationMessageControllerInput {
   /** See AgentGUIRuntime.loadOlderSessionMessages. */
-  loadOlderSessionMessages?(input: { workspaceId: string; agentSessionId: string }): Promise<void>;
+  loadOlderSessionMessages(input: { workspaceId: string; agentSessionId: string }): Promise<void>;
+  /** The active conversation's position in its history. */
+  olderMessages(agentSessionId: string): { hasOlderMessages: boolean; oldestLoadedVersion: number | null };
   diagnostics?: AgentConversationMessageControllerDiagnostics;
   engine: Pick<AgentSessionEngine, "dispatch" | "getSnapshot">;
   ensureSessionSynchronized?(input: {
@@ -57,16 +45,12 @@ export interface CreateAgentConversationMessageControllerInput {
     workspaceId: string;
   }): () => void;
   isAvailable(agentSessionId?: string | null): boolean;
-  listSessionMessages(
-    input: AgentConversationMessagePageInput
-  ): Promise<AgentActivityMessagePage>;
   onOlderPageApplied?(agentSessionId: string): void;
   onOlderPageFailed?(error: unknown): void;
   onOlderPageSettled?(): void;
   onSnapshotChanged?(
     snapshot: AgentConversationMessageControllerSnapshot
   ): void;
-  pageSize?: number;
   workspaceId: string;
 }
 
@@ -90,9 +74,7 @@ const EMPTY_SNAPSHOT: AgentConversationMessageControllerSnapshot = {
  * Owns the renderer-neutral message-query state for one focused conversation.
  *
  * Canonical detail/latest hydration remains an Engine reconcile command.
- * Explicit older-page reads are fenced to the active Session and applied to
- * the same Engine, so Desktop and Mobile cannot drift into separate paging
- * stores or retry/concurrency rules.
+ * Explicit older-page reads are fenced to the active Session; the runtime applies them.
  */
 export function createAgentConversationMessageController(
   input: CreateAgentConversationMessageControllerInput
@@ -109,7 +91,6 @@ export function createAgentConversationMessageController(
     generation: number;
     promise: Promise<void>;
   } | null = null;
-  const pageSize = input.pageSize ?? DEFAULT_PAGE_SIZE;
 
   const publish = (next: AgentConversationMessageControllerSnapshot): void => {
     if (
@@ -234,12 +215,9 @@ export function createAgentConversationMessageController(
         });
         return;
       }
-      const window = selectSessionMessageWindow(
-        input.engine.getSnapshot(),
-        normalized
-      );
-      const beforeVersion = window?.oldestLoadedVersion ?? null;
-      if (!window?.hasOlderMessages || beforeVersion === null) {
+      const window = input.olderMessages(normalized);
+      const beforeVersion = window.oldestLoadedVersion;
+      if (!window.hasOlderMessages || beforeVersion === null) {
         input.diagnostics?.page?.({
           agentSessionId: normalized,
           details: {
@@ -272,11 +250,7 @@ export function createAgentConversationMessageController(
       });
       input.diagnostics?.page?.({
         agentSessionId: normalized,
-        details: {
-          beforeVersion,
-          limit: pageSize,
-          order: "desc"
-        },
+        details: { beforeVersion },
         event: "agent.gui.messages.older.requested"
       });
 
@@ -287,86 +261,20 @@ export function createAgentConversationMessageController(
         generation: requestGeneration,
         promise: Promise.resolve()
       };
-      const ownedPaging = input.loadOlderSessionMessages?.({ agentSessionId: normalized, workspaceId: input.workspaceId });
-      const promise = ownedPaging ? ownedPaging.then(() => {
+      const promise = input.loadOlderSessionMessages({ agentSessionId: normalized, workspaceId: input.workspaceId }).then(() => {
         if (!isCurrentRequest(request)) return;
         input.onOlderPageApplied?.(normalized);
         publish({ agentSessionId: normalized, error: null, olderPagePhase: "idle" });
       }).catch((error: unknown) => {
         if (!isCurrentRequest(request)) return;
+        input.diagnostics?.error?.({ agentSessionId: normalized, beforeVersion, error });
         input.onOlderPageFailed?.(error);
         publish({ agentSessionId: normalized, error, olderPagePhase: "error" });
       }).finally(() => {
         if (olderRequest?.promise !== promise) return;
         olderRequest = null;
         if (!disposed && generation === requestGeneration) input.onOlderPageSettled?.();
-      }) : input
-        .listSessionMessages({
-          agentSessionId: normalized,
-          beforeVersion,
-          limit: pageSize,
-          order: "desc",
-          signal: abortController.signal,
-          workspaceId: input.workspaceId
-        })
-        .then((page) => {
-          if (!isCurrentRequest(request)) return;
-          assertPageIdentity(normalized, page);
-          const authoritativePage =
-            page.messages.length === 0 && page.hasMore
-              ? { ...page, hasMore: false }
-              : page;
-          input.diagnostics?.page?.({
-            agentSessionId: normalized,
-            details: {
-              beforeVersion,
-              hasMore: authoritativePage.hasMore,
-              latestVersion: authoritativePage.latestVersion
-            },
-            event: "agent.gui.messages.older.resolved",
-            messages: authoritativePage.messages
-          });
-          input.engine.dispatch({
-            messages: authoritativePage.messages,
-            sessionMessageWindows: [
-              {
-                agentSessionId: normalized,
-                ...agentActivitySessionMessageWindowFromDescendingPage(
-                  authoritativePage
-                )
-              }
-            ],
-            type: "message/snapshotReceived",
-            workspaceId: input.workspaceId
-          });
-          input.onOlderPageApplied?.(normalized);
-          publish({
-            agentSessionId: normalized,
-            error: null,
-            olderPagePhase: "idle"
-          });
-        })
-        .catch((error: unknown) => {
-          if (!isCurrentRequest(request)) return;
-          input.diagnostics?.error?.({
-            agentSessionId: normalized,
-            beforeVersion,
-            error
-          });
-          input.onOlderPageFailed?.(error);
-          publish({
-            agentSessionId: normalized,
-            error,
-            olderPagePhase: "error"
-          });
-        })
-        .finally(() => {
-          if (olderRequest?.promise !== promise) return;
-          olderRequest = null;
-          if (!disposed && generation === requestGeneration) {
-            input.onOlderPageSettled?.();
-          }
-        });
+      });
       request.promise = promise;
       olderRequest = request;
       return promise;
@@ -397,17 +305,4 @@ export function createAgentConversationMessageController(
     },
     setActiveSession
   };
-}
-
-function assertPageIdentity(
-  expectedAgentSessionId: string,
-  page: AgentActivityMessagePage
-): void {
-  for (const message of page.messages) {
-    if (message.agentSessionId !== expectedAgentSessionId) {
-      throw new Error(
-        `conversation message page identity mismatch: expected ${expectedAgentSessionId}, received ${message.agentSessionId}`
-      );
-    }
-  }
 }

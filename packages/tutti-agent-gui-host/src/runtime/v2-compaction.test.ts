@@ -37,7 +37,8 @@ function sharedRows(conversation: ConversationModel) {
   });
   const vm = projectAgentActivitySessionToConversationVM({
     agentSessionId: "gui-1", sessionTurns: view.turns,
-    activitySnapshot: { workspaceId: "ws", sessions: [session], presences: [], sessionMessagesById: { "gui-1": view.messages.map((message, index) => ({ ...message, sequence: index + 1, version: index + 1 })) } },
+    activitySnapshot: { workspaceId: "ws", sessions: [session], presences: [] },
+    messages: view.messages.map((message, index) => ({ ...message, sequence: index + 1, version: index + 1 })),
   });
   expect(vm).not.toBeNull();
   expect(vm!.rows.some((row) => row.kind === "processing")).toBe(false);

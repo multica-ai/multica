@@ -1,4 +1,4 @@
-export type { AgentActivityAdapter } from "./adapter.ts";
+
 export type { AgentActivityDisplayStatus } from "./displayStatus.types.ts";
 export type { AgentActivityRailPlacement } from "./railPlacement.types.ts";
 export {
@@ -15,16 +15,12 @@ export {
 export {
   mergeAgentActivityMessages
 } from "./merge.ts";
-export type { AgentActivitySessionMessageWindow } from "./messageWindow.types.ts";
 export {
-  agentActivitySessionMessageWindowFromDescendingPage,
   loadAllAgentSessionMessages
 } from "./pagination.ts";
 export {
   normalizeAgentActivityDisplayStatus,
-  selectRootAgentActivitySessions,
-  selectNeedsAttentionCount,
-  selectNeedsAttentionItems
+  selectRootAgentActivitySessions
 } from "./selectors.ts";
 export {
   resolveAgentActivityUsage,
@@ -32,12 +28,7 @@ export {
 } from "./usage.ts";
 export {
   createAgentActivityEphemeralConversationProjector,
-  type AgentActivityEphemeralConversationEvent,
-  type AgentActivityEphemeralConversationProjection,
-  type AgentActivityEphemeralConversationProjector,
-  type AgentActivityEphemeralInteractionPatch,
-  type AgentActivityEphemeralStatePatch,
-  type AgentActivityEphemeralTurnPatch
+  type AgentActivityEphemeralConversationProjection
 } from "./ephemeralConversationProjector.ts";
 export {
   createAgentSessionEngine
@@ -54,11 +45,6 @@ export type {
 } from "./engine/types.ts";
 export { AGENT_SESSION_ENGINE_LOCAL_ORIGIN } from "./engine/types.ts";
 export { selectWorkspaceReconcileState } from "./engine/engineRuntime.selectors.ts";
-export {
-  selectSessionMessageWindow,
-  selectSessionMessages,
-  selectSessionMessagesById
-} from "./engine/sessionMessages.selectors.ts";
 export {
   createAgentSessionFamilySnapshotSelector,
   type AgentSessionFamilySnapshot
@@ -90,8 +76,7 @@ export {
   selectEngineSessionStateHydrated
 } from "./engine/sessionReconcile.selectors.ts";
 export {
-  canonicalInteractionKey,
-  canonicalTurnKey
+  canonicalInteractionKey
 } from "./engine/sessionEntityKeys.ts";
 export type {
   CanonicalAgentSession,
@@ -112,9 +97,6 @@ export type {
 } from "./engine/promptQueue.types.ts";
 export type {
   PendingActivationIntentRecord,
-  PendingActivationCommandOutcome,
-  PendingActivationLastObservedStage,
-  PendingActivationSnapshotOutcome,
   PendingActivationStatus,
   PendingSubmitIntentRecord
 } from "./engine/pendingIntents.types.ts";
@@ -126,7 +108,6 @@ export {
   selectLatestActivationForSession,
   selectLatestPendingSubmitForSession,
   selectLatestStopTargetSubmitForSession,
-  selectPendingSubmits,
   selectPendingSubmitsForSession,
   selectSessionActivationPresentations,
   selectSessionHasUnconfirmedSubmit,
@@ -145,11 +126,9 @@ export type {
   AgentActivityDurableMessage,
   AgentActivitySetCollaborationAdoptionInput,
   AgentActivityMessage,
-  AgentActivityMessageDeltaEvent,
   AgentActivityMessageSemantics,
   AgentActivityMessageOrder,
   AgentActivityMessagePage,
-  AgentActivityNeedsAttentionItem,
   AgentActivityPresence,
   AgentPromptContentBlock,
   AgentActivitySendInput,

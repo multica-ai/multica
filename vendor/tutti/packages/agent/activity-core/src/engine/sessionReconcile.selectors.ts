@@ -38,9 +38,6 @@ export function selectEngineAuthoritativeHistoryRequirement(
     requestedHistoryRevisions.length > 0
       ? Math.max(...requestedHistoryRevisions)
       : null;
-  const hasCachedMessages =
-    (id ? (state.sessionMessages.messagesBySessionId[id]?.length ?? 0) : 0) !==
-    0;
   return {
     appliedHistoryRevision,
     minimumHistoryRevision: Math.max(
@@ -52,7 +49,6 @@ export function selectEngineAuthoritativeHistoryRequirement(
       record?.authoritativeMessagesRequired === true ||
       (requiredHistoryRevision !== null &&
         requiredHistoryRevision > (appliedHistoryRevision ?? -1)) ||
-      (appliedHistoryRevision === null && hasCachedMessages) ||
       (appliedHistoryRevision !== null &&
         input.observedHistoryRevision !== appliedHistoryRevision)
   };
@@ -64,13 +60,7 @@ export function selectEngineSessionDetailHydrated(
 ): boolean {
   const id = agentSessionId?.trim() ?? "";
   if (!id) return false;
-  return (
-    Object.prototype.hasOwnProperty.call(
-      state.sessionMessages.messagesBySessionId,
-      id
-    ) ||
-    state.sessionReconcile.recordsBySessionId[id]?.messagesHydrated === true
-  );
+  return state.sessionReconcile.recordsBySessionId[id]?.messagesHydrated === true;
 }
 
 export function selectEngineSessionStateHydrated(

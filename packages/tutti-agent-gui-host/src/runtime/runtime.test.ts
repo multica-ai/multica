@@ -737,7 +737,7 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     const snapshot = handle.runtime.getSnapshot(init.workspaceId);
     expect(snapshot.sessions[0]?.agentSessionId).toBe("gui-session");
     expect(snapshot.sessions[0]?.railSectionKey).toBe("conversations");
-    expect(snapshot.sessionMessagesById["gui-session"]?.[0]).toMatchObject({
+    expect(handle.runtime.transcript.messages("gui-session")[0]).toMatchObject({
       messageId: "server-message-1", turnId: "server-task-1",
     });
     expect(handle.toServerSessionId("gui-session")).toBe("server-session");

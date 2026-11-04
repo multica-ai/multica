@@ -1,15 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
 import {
   createAgentSessionFamilySnapshotSelector,
-  normalizeAgentActivitySession,
-  type AgentActivityMessage
+  normalizeAgentActivitySession
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it } from "vitest";
 import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
 import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 
 describe("AgentGUI Session-family subscription", () => {
-  it("does not render an unrelated AgentGUI when another Session streams", () => {
+  it("does not render an unrelated AgentGUI when another Session changes", () => {
     const engine = createTestAgentSessionEngine("workspace-1");
     engine.dispatch({
       sessions: [
@@ -36,8 +35,8 @@ describe("AgentGUI Session-family subscription", () => {
 
     act(() => {
       engine.dispatch({
-        messages: [message("message-a", "session-a")],
-        type: "message/snapshotReceived"
+        session: normalizeAgentActivitySession({ ...session("session-a"), title: "renamed" }),
+        type: "session/upserted"
       });
     });
 
@@ -55,25 +54,6 @@ function session(agentSessionId: string) {
     pendingInteractions: [],
     provider: "codex",
     title: agentSessionId,
-    workspaceId: "workspace-1"
-  };
-}
-
-function message(
-  messageId: string,
-  agentSessionId: string
-): AgentActivityMessage {
-  return {
-    agentSessionId,
-    kind: "text",
-    messageId,
-    occurredAtUnixMs: 1,
-    payload: { text: messageId },
-    role: "assistant",
-    sequence: 1,
-    status: null,
-    turnId: "turn-1",
-    version: 1,
     workspaceId: "workspace-1"
   };
 }

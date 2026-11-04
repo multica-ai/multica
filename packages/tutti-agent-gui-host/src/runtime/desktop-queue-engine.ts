@@ -1,4 +1,4 @@
-import type { AgentSessionEngine, EngineQueuedPrompt, PromptQueueRecord } from "@tutti-os/agent-activity-core";
+import type { AgentActivityMessage, AgentSessionEngine, EngineQueuedPrompt, PromptQueueRecord } from "@tutti-os/agent-activity-core";
 import { selectEngineInteraction, selectEngineSubmitWouldBeVisibleInQueue, selectEngineTurn, selectLatestStopTargetSubmitForSession } from "@tutti-os/agent-activity-core";
 import { reaction } from "mobx";
 import { PromptService, type PromptQueueAction, type PromptServiceOptions, type PromptStatus } from "@multica/conversation-client/services";
@@ -19,6 +19,7 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
   editRetry: PromptServiceOptions<SubmitInput, EngineQueuedPrompt>["editRetry"];
   recoverEditRetry: PromptServiceOptions<SubmitInput, EngineQueuedPrompt>["recoverEditRetry"];
   reconcileWorkspace(): void;
+  messages(agentSessionId: string): readonly Pick<AgentActivityMessage, "role" | "turnId" | "payload">[];
   beforeTurnOperation?(): void;
 }) {
   const workspaceId = base.identity.workspaceId;
@@ -39,8 +40,8 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
       interactionStatus: (id, turnId, requestId) => selectEngineInteraction(base.getSnapshot(), id, turnId, requestId)?.status ?? null,
       // The presented state, because this client's messages on their way live in this service.
       stopTarget: (id) => selectLatestStopTargetSubmitForSession(snapshot(), id)?.clientSubmitId ?? null,
-      turnForSubmit: (id, clientSubmitId) => base.getSnapshot().sessionMessages.messagesBySessionId[id]
-        ?.find((message) => message.turnId && message.payload?.clientSubmitId === clientSubmitId)?.turnId ?? null,
+      turnForSubmit: (id, clientSubmitId) => options.messages(id)
+        .find((message) => message.turnId && message.payload?.clientSubmitId === clientSubmitId)?.turnId ?? null,
     },
     respondToInteraction: options.respondToInteraction,
     editRetry: options.editRetry,
@@ -76,7 +77,7 @@ export function createDesktopQueueEngine(base: AgentSessionEngine, options: {
       // Admission can fail or remain paused without starting a turn. Keep its
       // optimistic prompt until history contains it or the user removes it.
       const id = activation.agentSessionId;
-      const hasUserMessage = state.sessionMessages.messagesBySessionId[id]?.some((message) => message.role === "user");
+      const hasUserMessage = options.messages(id).some((message) => message.role === "user");
       const hasInitialPrompt = service.hasPrompt(id, activation.clientSubmitId);
       activations[requestId] = { ...activation, initialTurnExpected: false, initialPromptRetracted: Boolean(hasUserMessage || !hasInitialPrompt) };
     }

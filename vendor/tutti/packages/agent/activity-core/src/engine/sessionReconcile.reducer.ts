@@ -159,16 +159,6 @@ function receiveDetailSnapshot(
       (session): EngineIntent => ({ session, type: "session/upserted" })
     )
   );
-  if (intent.messages || intent.sessionMessageWindows) {
-    followUpIntents.push({
-      messages: intent.messages ?? [],
-      ...(intent.sessionMessageWindows
-        ? { sessionMessageWindows: intent.sessionMessageWindows }
-        : {}),
-      type: "message/snapshotReceived",
-      workspaceId: intent.workspaceId
-    });
-  }
   return { commands: NO_COMMANDS, followUpIntents, state };
 }
 
@@ -183,9 +173,7 @@ function receiveAuthoritativeHistorySnapshot(
     state,
     {
       childSessions: intent.childSessions,
-      messages: intent.messages,
       session: intent.session,
-      sessionMessageWindows: intent.sessionMessageWindows,
       turns: intent.turns,
       type: "session/detailSnapshotReceived",
       workspaceId: intent.workspaceId
@@ -201,10 +189,13 @@ function receiveAuthoritativeHistorySnapshot(
     },
     true
   );
+  const record = checkpoint.state.recordsBySessionId[intent.agentSessionId.trim()];
   return {
     commands: checkpoint.commands,
     followUpIntents: detail.followUpIntents,
-    state: checkpoint.state
+    state: record && !record.messagesHydrated
+      ? replaceRecord(checkpoint.state, { ...record, messagesHydrated: true })
+      : checkpoint.state
   };
 }
 

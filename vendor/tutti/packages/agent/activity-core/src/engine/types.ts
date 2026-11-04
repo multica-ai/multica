@@ -237,7 +237,6 @@ export interface AgentSessionEngineStateBase {
   promptQueue: PromptQueueState;
   sessionReconcile: SessionReconcileState;
   sessionLifecycle: SessionLifecycleState;
-  sessionMessages: SessionMessagesState;
 }
 
 /**
@@ -467,7 +466,6 @@ import type {
   SessionReconcileIntent,
   SessionReconcileState
 } from "./sessionReconcile.types.ts";
-import type { SessionMessagesState } from "./sessionMessages.types.ts";
 import type {
   AgentActivityComposerOptions,
   AgentActivityComposerSettings,

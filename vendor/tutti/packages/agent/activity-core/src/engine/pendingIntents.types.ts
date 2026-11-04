@@ -6,7 +6,6 @@ import type {
   AgentActivitySubmitSettingsPatch,
   AgentPromptContentBlock
 } from "../types.ts";
-import type { AgentActivitySessionMessageWindow } from "../messageWindow.types.ts";
 import type { AgentActivityRailPlacement } from "../railPlacement.types.ts";
 
 export type PendingActivationStatus =
@@ -279,17 +278,7 @@ export interface SubmitCanceledIntent {
   clientSubmitId: string;
 }
 
-export interface ActivityMessagesReceivedIntent {
-  type: "message/snapshotReceived";
-  messages: readonly AgentActivityMessage[];
-  sessionMessageWindows?: readonly (AgentActivitySessionMessageWindow & {
-    agentSessionId: string;
-  })[];
-  workspaceId?: string;
-}
-
 export type PendingIntentsIntent =
-  | ActivityMessagesReceivedIntent
   | SessionActivationDismissedIntent
   | SessionActivationSettingsPatchedIntent
   | SessionActivationFailureClearedIntent

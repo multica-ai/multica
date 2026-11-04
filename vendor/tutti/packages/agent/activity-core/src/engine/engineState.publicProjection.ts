@@ -15,7 +15,6 @@ export function projectPublicAgentSessionEngineState(
     pendingIntents: state.pendingIntents,
     promptQueue: state.promptQueue,
     sessionLifecycle: state.sessionLifecycle,
-    sessionMessages: state.sessionMessages,
     sessionReconcile: state.sessionReconcile
   };
   if (

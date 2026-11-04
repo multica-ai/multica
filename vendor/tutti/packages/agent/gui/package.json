@@ -9,7 +9,6 @@
     "./agent-gui": "./AgentGUI.tsx",
     "./startup-shell": "./AgentGUIStartupShell.tsx",
     "./agents": "./agents.ts",
-    "./dock-icons": "./dockIcons.ts",
     "./mention-search": "./agent-gui/agentGuiNode/AgentMentionSearchController.ts",
     "./agent-conversation/follow-end": "./shared/agentConversation/agentConversationFollowEndController.ts",
     "./agent-conversation/interactive-answer": "./shared/agentConversation/interactiveAnswerPayload.ts",
@@ -24,12 +23,6 @@
     "./workspace-agent-generated-files": "./shared/workspaceAgentGeneratedFiles.ts",
     "./conversation-message-controller": "./agentConversationMessageController.ts",
     "./i18n": "./i18n/index.ts",
-    "./workbench/contribution": "./workbench/contribution.ts",
-    "./workbench/launch": "./workbench/launch.ts",
-    "./workbench/providerCatalog": "./workbench/providerCatalog.ts",
-    "./workbench/sessionTitle": "./workbench/sessionTitle.ts",
-    "./workbench/state": "./workbench/state.ts",
-    "./workbench/types": "./workbench/types.ts",
     "./styles.css": "./app/renderer/agentactivity.css"
   },
   "files": [
