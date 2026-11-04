@@ -16,6 +16,12 @@ func init() {
 
 // Conditional move selectors are implemented in the application graph.
 var projectMoveManifest = map[string]string{
+	"wecom_install_session":              "n-a",
+	"skill_version":                      "n-a",
+	"member_delegation_day":              "n-a",
+	"issue_workflow":                     "n-a",
+	"issue_unread":                       "delete",
+	"cloud_agent_connection":             "n-a",
 	"activity_log":                       "rehome",
 	"agent":                              "n-a",
 	"agent_builder_draft":                "n-a",

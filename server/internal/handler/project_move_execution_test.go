@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func previewMove(t *testing.T, source, target, project string) ProjectMovePlan {
@@ -51,6 +53,9 @@ func TestProjectMoveExecution(t *testing.T) {
 	reaction := dbfx.Insert(t, "comment_reaction", testutil.Cols{"workspace_id": source, "comment_id": comment, "actor_type": "member", "actor_id": sourceOnly, "emoji": "👍"})
 	issueReaction := dbfx.Insert(t, "issue_reaction", testutil.Cols{"workspace_id": source, "issue_id": i1, "actor_type": "member", "actor_id": sourceOnly, "emoji": "👍"})
 	dbfx.Insert(t, "pinned_item", testutil.Cols{"workspace_id": source, "user_id": sourceOnly, "item_type": "project", "item_id": project, "position": 0})
+	workflow := dbfx.Insert(t, "issue_workflow", testutil.Cols{"workspace_id": source, "name": "Source flow", "initial_status_key": "todo", "steps": "[]"})
+	dbfx.Exec(t, `UPDATE project SET workflow_id=$1 WHERE id=$2`, workflow, project)
+	dbfx.InsertNoID(t, "issue_unread", testutil.Cols{"workspace_id": source, "user_id": sourceOnly, "issue_id": i1, "outcome": "manual"}, "issue_id=$1", i1)
 	dbfx.Insert(t, "inbox_item", testutil.Cols{"workspace_id": source, "recipient_type": "member", "recipient_id": sourceOnly, "issue_id": i1, "type": "issue_assigned", "severity": "info", "title": "Moved"})
 	for _, user := range []string{sourceOnly, testUserID} {
 		dbfx.InsertNoID(t, "issue_subscriber", testutil.Cols{"issue_id": i1, "user_type": "member", "user_id": user, "reason": "manual"}, "issue_id=$1 AND user_id=$2", i1, user)
@@ -94,6 +99,8 @@ func TestProjectMoveExecution(t *testing.T) {
 		{`SELECT count(*) FROM project_move WHERE source_workspace_id='` + source + `' AND target_workspace_id='` + target + `' AND project_id='` + project + `'`, 1},
 		{`SELECT count(*) FROM pinned_item WHERE item_id='` + project + `'`, 0},
 		{`SELECT count(*) FROM inbox_item WHERE issue_id='` + i1 + `'`, 0},
+		{`SELECT count(*) FROM issue_unread WHERE issue_id='` + i1 + `'`, 0},
+		{`SELECT count(*) FROM project WHERE id='` + project + `' AND workflow_id IS NULL`, 1},
 		{`SELECT count(*) FROM issue_subscriber WHERE issue_id='` + i1 + `' AND user_id='` + sourceOnly + `'`, 0},
 		{`SELECT count(*) FROM chat_session WHERE id='` + chat + `' AND project_id IS NULL`, 1},
 	} {
@@ -123,7 +130,7 @@ func TestProjectMoveExecution(t *testing.T) {
 	messagesReq.Header.Set("X-Workspace-ID", target)
 	messagesReq.Header.Set("X-User-ID", targetOnly)
 	var messages []map[string]any
-	testutil.Call(t, testHandler.ListTaskMessages, messagesReq).Want(http.StatusOK).JSON(&messages)
+	testutil.Call(t, testHandler.ListTaskMessagesByUser, messagesReq.WithContext(middleware.SetMemberContext(messagesReq.Context(), target, db.Member{}))).Want(http.StatusOK).JSON(&messages)
 	if len(messages) != 1 || messages[0]["content"] != "History message" {
 		t.Fatalf("messages lost: %#v", messages)
 	}

@@ -85,6 +85,7 @@ SELECT (jsonb_build_object(
  'views',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM deleted_views r), '[]'::jsonb),
  'view_preferences',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM issue_view_preference r WHERE workspace_id=p.source AND (scope_id=p.project OR scope_id IN (SELECT id FROM moving) OR prefs::text LIKE '%'||p.project::text||'%' OR EXISTS (SELECT 1 FROM moving i WHERE prefs::text LIKE '%'||i.id::text||'%'))), '[]'::jsonb),
  'inbox_items',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM inbox_item r WHERE issue_id IN (SELECT id FROM moving)), '[]'::jsonb),
+ 'unread_marks',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM issue_unread r WHERE issue_id IN (SELECT id FROM moving)), '[]'::jsonb),
  'chat_contexts',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM chat_session r WHERE project_id=p.project), '[]'::jsonb),
  'wakeups',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM issue_wakeup r WHERE issue_id IN (SELECT id FROM moving)), '[]'::jsonb),
  'wakeup_receipts',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text) FROM issue_wakeup_receipt r WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT id FROM moving))), '[]'::jsonb),
@@ -264,7 +265,7 @@ func (q *Queries) MoveProjectIssue(ctx context.Context, arg MoveProjectIssuePara
 }
 
 const moveProjectRoot = `-- name: MoveProjectRoot :execrows
-UPDATE project SET workspace_id= $1::uuid,
+UPDATE project SET workspace_id= $1::uuid,workflow_id=NULL,
  lead_type=CASE WHEN $2::boolean THEN NULL ELSE lead_type END,
  lead_id=CASE WHEN $2::boolean THEN NULL ELSE lead_id END,updated_at=now()
 WHERE id= $3::uuid AND workspace_id= $4::uuid
@@ -277,6 +278,7 @@ type MoveProjectRootParams struct {
 	SourceWorkspaceID pgtype.UUID `json:"source_workspace_id"`
 }
 
+// workflow_id names a source-workspace workflow; the target's Default applies.
 func (q *Queries) MoveProjectRoot(ctx context.Context, arg MoveProjectRootParams) (int64, error) {
 	result, err := q.db.Exec(ctx, moveProjectRoot,
 		arg.TargetWorkspaceID,
@@ -355,6 +357,7 @@ d_views AS (DELETE FROM issue_view r USING p WHERE r.workspace_id=p.source AND (
 d_pins AS (DELETE FROM pinned_item r USING p WHERE r.workspace_id=p.source AND (r.item_id=p.project OR r.item_id=ANY(p.issues) OR (r.item_type='view' AND r.item_id IN (SELECT id FROM d_views))) RETURNING 1),
 d_preferences AS (DELETE FROM issue_view_preference r USING p WHERE r.workspace_id=p.source AND (r.scope_id=p.project OR r.scope_id=ANY(p.issues) OR r.prefs::text LIKE '%'||p.project::text||'%' OR EXISTS (SELECT 1 FROM unnest(p.issues) i WHERE r.prefs::text LIKE '%'||i::text||'%')) RETURNING 1),
 d_inbox AS (DELETE FROM inbox_item r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) RETURNING 1),
+d_unread AS (DELETE FROM issue_unread r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) RETURNING 1),
 d_subscribers AS (DELETE FROM issue_subscriber r USING p WHERE r.issue_id=ANY(p.issues) AND (r.user_type<>'member' OR NOT EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=p.target AND m.user_id=r.user_id)) RETURNING 1),
 d_wakeups AS (DELETE FROM issue_wakeup r USING p WHERE r.workspace_id=p.source AND r.issue_id=ANY(p.issues) AND NOT r.enabled RETURNING id),
 d_receipts AS (DELETE FROM issue_wakeup_receipt r WHERE r.wakeup_id IN (SELECT id FROM d_wakeups) RETURNING 1),

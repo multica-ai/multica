@@ -192,7 +192,7 @@ func buildProjectMovePlan(ctx context.Context, q *db.Queries, project db.Project
 		_ = json.Unmarshal(rows[key], &a)
 		plan.Counts[key] = len(a)
 	}
-	for _, key := range []string{"pins", "views", "view_preferences", "inbox_items", "chat_contexts", "wakeups", "wakeup_receipts", "pr_links", "vcs_pr_links"} {
+	for _, key := range []string{"pins", "views", "view_preferences", "inbox_items", "unread_marks", "chat_contexts", "wakeups", "wakeup_receipts", "pr_links", "vcs_pr_links"} {
 		var a []json.RawMessage
 		_ = json.Unmarshal(rows[key], &a)
 		plan.SideEffects[key] = len(a)

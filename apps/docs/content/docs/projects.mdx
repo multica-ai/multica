@@ -78,7 +78,7 @@ Use the [CLI](/cli#move-a-project) to move one project. This is a Draft feature:
 
 The preview lists blockers, member access changes, catalog mappings, and source cleanup. Active runs, enabled wakeups, project automations, open linked PRs, cross-project issue links, and local-directory resources block a move. Resolve them before confirming.
 
-Issues, comments, attachments, and authorship move together. Labels match by name; statuses fall back to their lifecycle category; unmatched custom properties/options and assignees, leads, or subscribers outside target membership are cleared. Source pins, views, inbox items, disabled wakeups, closed PR links, and chat project context are removed.
+Issues, comments, attachments, and authorship move together. Labels match by name; statuses fall back to their lifecycle category; unmatched custom properties/options and assignees, leads, or subscribers outside target membership are cleared. Source pins, views, inbox items, unread marks, disabled wakeups, closed PR links, and chat project context are removed. The project switches to the target workspace's default workflow.
 
 Issues receive target numbers in their original order. Old keys resolve through `GET /api/moves/resolve?issue=OLD-7` with the source workspace header. Source-only members see only that the issue moved; target members also receive its current location. Returning to a previous workspace restores its original numbers when available. Old project references use `?project=<uuid>`.
 
