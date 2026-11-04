@@ -3174,6 +3174,33 @@ describe("ApiClient shared credential across windows", () => {
 
 describe("workspace response compatibility", () => {
   it.each([
+    { settings: [] },
+    { settings: "legacy" },
+    { settings: 42 },
+    { settings: true },
+    { settings: null },
+    { settings: undefined },
+  ])("keeps every workspace available with non-object settings: $settings", async ({ settings }) => {
+    const workspace = { id: "legacy", name: "Legacy", slug: "legacy", settings, restrict_issue_deletion: true };
+    const healthy = { id: "valid", name: "Valid", slug: "valid", settings: { github_enabled: true } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json([workspace, healthy]))
+      .mockResolvedValueOnce(Response.json(workspace))
+      .mockResolvedValueOnce(Response.json(workspace));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const list = await client.listWorkspaces();
+    expect(list.map((item) => item.id)).toEqual(["legacy", "valid"]);
+    expect(list[0]).toMatchObject({ settings: {}, restrict_issue_deletion: true });
+    expect(list[1]).toMatchObject(healthy);
+    expect(await client.updateWorkspace("legacy", { name: "Legacy" }))
+      .toMatchObject({ settings: {}, restrict_issue_deletion: true });
+    expect(await client.updateWorkspaceIssueDeletionPolicy("legacy", true))
+      .toMatchObject({ settings: {}, restrict_issue_deletion: true });
+  });
+
+  it.each([
     { repos: [{ url: "https://github.com/example/repo", description: null }], expected: [{ url: "https://github.com/example/repo" }] },
     { repos: ["https://github.com/example/repo"], expected: [] },
     { repos: null, expected: [] },

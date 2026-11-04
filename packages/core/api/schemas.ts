@@ -3920,7 +3920,7 @@ export const WorkspaceSchema = z.object({
   slug: z.string(),
   description: z.string().nullable().default(null),
   context: z.string().nullable().default(null),
-  settings: z.record(z.string(), z.unknown()).default({}),
+  settings: z.record(z.string(), z.unknown()).catch({}),
   restrict_issue_deletion: z.boolean().catch(true).optional(),
   repos: z.array(z.object({
     url: z.string(),
