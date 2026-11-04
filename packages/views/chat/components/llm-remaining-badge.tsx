@@ -4,6 +4,8 @@ import { parseWithFallback } from "@multica/core/api/schema";
 import { llmLimitStatusSchema, unavailableLlmLimitStatus, type LlmLimitStatus } from "@multica/core/api/schemas";
 
 
+import { useEffect, useState } from "react";
+import { useT } from "../../i18n";
 import { RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -52,6 +54,41 @@ function compactRemainingLabel(value: number | null): string {
   return value === null ? "확인 불가" : `${value}%`;
 }
 
+export function formatResetCountdown(resetAt: string | null | undefined, now: number): string {
+  const target = resetAt ? Date.parse(resetAt) : Number.NaN;
+  if (!Number.isFinite(target)) return "--:--:--";
+  const seconds = Math.max(0, Math.ceil((target - now) / 1000));
+  const days = Math.floor(seconds / 86400);
+  const time = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60]
+    .map((value) => String(value).padStart(2, "0")).join(":");
+  return `${days ? `D-${days} ` : ""}${time}`;
+}
+
+function ResetCountdown({ data }: { data: LlmLimitStatus }) {
+  const { t } = useT("chat");
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const sonnetLimits = remainingFromUsage(data.sonnet_pct) !== null &&
+    (remainingFromUsage(data.seven_day_pct) === null || data.sonnet_pct! > data.seven_day_pct!);
+  const resets = [
+    ["C", sonnetLimits ? data.sonnet_resets_at : data.seven_day_resets_at],
+    ["G", data.gpt_seven_resets_at],
+  ] as const;
+  return <div data-testid="chat-reset-countdown" className="@container max-w-full pb-0.5 text-[10px] leading-4 tabular-nums" aria-label={t($ => $.limit_reset.countdown_label)}>
+    <div className="flex flex-col @[330px]:flex-row @[330px]:gap-2">
+    {resets.map(([label, resetAt], index) => <span key={label} className="whitespace-nowrap">
+      {index > 0 && <span aria-hidden="true" className="hidden pr-2 @[330px]:inline">|</span>}
+      <span title={resetAt ? t($ => $.limit_reset.at, { time: new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "full", timeStyle: "long" }).format(new Date(resetAt)) }) : t($ => $.limit_reset.unknown)}>
+        {label} {t($ => $.limit_reset.label)} {formatResetCountdown(resetAt, now)}
+      </span>
+    </span>)}
+    </div>
+  </div>;
+}
+
 export function LlmRemainingBadge({ className }: { className?: string }) {
   const { data: fetchedData, isError, isFetching, refetch } = useQuery({
     queryKey: ["chat-llm-limit-status"],
@@ -88,16 +125,17 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
       data-acceptance="chat-token-remaining-badge"
       data-testid="chat-token-gauge"
       className={cn(
-        "hidden h-7 min-w-[18rem] items-center gap-1.5 rounded-md border px-2 text-[10px] leading-none text-muted-foreground sm:flex",
+        "flex min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1 text-[10px] leading-none text-muted-foreground",
         className,
       )}
       title={data.claude_last_observed_at ? `Claude 마지막 관측 ${new Date(data.claude_last_observed_at).toLocaleString()}` : undefined}
       aria-label={ariaLabel}
     >
+      <div className="flex w-full min-w-0 items-center gap-1.5">
       <span
         data-acceptance="chat-token-gauge"
         data-testid="chat-llm-gauge-compact"
-        className="min-w-0 flex-1 whitespace-nowrap font-medium tabular-nums text-foreground"
+        className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium tabular-nums text-foreground"
       >
         {compactLabel}
       </span>
@@ -124,6 +162,8 @@ export function LlmRemainingBadge({ className }: { className?: string }) {
       >
         <RefreshCw className={cn("h-3 w-3", isFetching && "animate-spin")} />
       </Button>
+      </div>
+      <ResetCountdown data={data} />
     </div>
   );
 }

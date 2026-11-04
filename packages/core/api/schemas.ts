@@ -1,7 +1,13 @@
 import { z } from "zod";
 
+const resetAt = z.string().datetime({ offset: true }).nullable().optional().catch(null);
 const quotaPct = z.number().min(0).max(100).nullable().optional().default(null);
 export const llmLimitStatusSchema = z.object({
+  five_hour_resets_at: resetAt,
+  seven_day_resets_at: resetAt,
+  sonnet_resets_at: resetAt,
+  gpt_five_resets_at: resetAt,
+  gpt_seven_resets_at: resetAt,
   five_hour_pct: quotaPct,
   seven_day_pct: quotaPct,
   sonnet_pct: quotaPct,
@@ -25,9 +31,11 @@ export const llmLimitStatusSchema = z.object({
   claude_last_seven_day_pct: quotaPct,
 }).transform((data) => {
   if (data.claude_status && data.claude_status !== "available") {
+    data.five_hour_resets_at = data.seven_day_resets_at = data.sonnet_resets_at = null;
     data.five_hour_pct = data.seven_day_pct = data.sonnet_pct = null;
   }
   if (data.gpt_status && data.gpt_status !== "available") {
+    data.gpt_five_resets_at = data.gpt_seven_resets_at = null;
     data.gpt_five_hour_pct = data.gpt_seven_day_pct = null;
   }
   return data;

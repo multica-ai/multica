@@ -1,4 +1,10 @@
 {
+  "limit_reset": {
+    "label": "リセット",
+    "countdown_label": "上限リセットまでの時間",
+    "unknown": "リセット時刻を確認できません",
+    "at": "リセット {{time}} (KST)"
+  },
   "fab": {
     "running": "AIDO が作業中です...",
     "unread_other": "未読のチャット {{count}}件",

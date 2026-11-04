@@ -1,4 +1,10 @@
 {
+  "limit_reset": {
+    "label": "重置",
+    "countdown_label": "距离额度重置的时间",
+    "unknown": "无法确认重置时间",
+    "at": "重置 {{time}} (KST)"
+  },
   "fab": {
     "running": "AIDO 正在工作...",
     "unread_other": "{{count}} 条未读对话",

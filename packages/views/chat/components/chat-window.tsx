@@ -980,7 +980,7 @@ export function ChatWindow() {
 }
 
 function ChatTokenBadges() {
-  return <LlmRemainingBadge className="w-full max-w-[22rem] bg-background/50" />;
+  return <LlmRemainingBadge className="w-full max-w-[44rem] bg-background/50" />;
 }
 
 /**

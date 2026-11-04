@@ -10,7 +10,7 @@ const FALLBACK_MAX_W = 800;
 const FALLBACK_MAX_H = 700;
 
 function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
+  return Math.min(max, Math.max(min, v));
 }
 
 export function useChatResize(

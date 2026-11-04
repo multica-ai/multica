@@ -1,4 +1,10 @@
 {
+  "limit_reset": {
+    "label": "리셋",
+    "countdown_label": "한도 초기화까지 남은 시간",
+    "unknown": "리셋 시각 확인 불가",
+    "at": "리셋 {{time}} (KST)"
+  },
   "fab": {
     "running": "AIDO가 작업 중입니다...",
     "unread_one": "읽지 않은 채팅 {{count}}개",

@@ -73,6 +73,13 @@ describe("useChatResize", () => {
     expect(get().isAtMax).toBe(false);
   });
 
+  it.each(["floating", "docked-right"] as const)("%s fits a container narrower than the preferred minimum", (mode) => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(320);
+    const get = renderResize(mode);
+    expect(get().renderWidth).toBe(288);
+    expect(state.chatWidth).toBe(380);
+  });
+
   it("docked-right mode always fills the container height, ignoring chatHeight", () => {
     const get = renderResize("docked-right");
     expect(get().renderHeight).toBe(800); // full container height, not clamp(600, 480, 720)

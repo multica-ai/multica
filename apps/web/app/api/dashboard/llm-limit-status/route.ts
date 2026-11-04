@@ -63,6 +63,12 @@ function snapshotState(snapshot: TokenSnapshot, observed: string | null) {
 	return age < -60_000 || age > MAX_AGE_MS ? "stale" : "available";
 }
 
+function resetTimestamp(value: unknown): string | null {
+	const ms = typeof value === "number" && value > 0 ? value * 1000
+		: typeof value === "string" && /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? Date.parse(value) : Number.NaN;
+	return Number.isFinite(ms) && !Number.isNaN(new Date(ms).getTime()) ? new Date(ms).toISOString() : null;
+}
+
 function formatResetAt(value: string | undefined) {
 	if (!value) return "—";
 	const date = new Date(value);
@@ -138,6 +144,11 @@ export async function GET() {
 	const weekly = weeklyResetStatus(sevenDayResetsAt);
 
 	return NextResponse.json({
+		five_hour_resets_at: claudeAvailable ? resetTimestamp(fiveHourResetsAt) : null,
+		seven_day_resets_at: claudeAvailable ? resetTimestamp(sevenDayResetsAt) : null,
+		sonnet_resets_at: claudeAvailable ? resetTimestamp(sonnetResetsAt) : null,
+		gpt_five_resets_at: codexStatusFresh ? resetTimestamp(codexStatus.five_hour_reset_at) : null,
+		gpt_seven_resets_at: codexStatusFresh ? resetTimestamp(codexStatus.seven_day_reset_at) : null,
 		five_hour_pct: claudeAvailable ? claudeFive : null,
 		seven_day_pct: claudeAvailable ? claudeSeven : null,
 		sonnet_pct: claudeAvailable ? nullableNumberFrom(snapshot, ["sonnet_pct", "seven_day_sonnet_utilization"]) : null,

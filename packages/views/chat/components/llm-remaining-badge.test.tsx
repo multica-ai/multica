@@ -1,16 +1,19 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithI18n } from "../../test/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LlmRemainingBadge } from "./llm-remaining-badge";
+import { llmLimitStatusSchema } from "@multica/core/api/schemas";
+import { formatResetCountdown, LlmRemainingBadge } from "./llm-remaining-badge";
 
 function renderBadge() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  return renderWithI18n(
     <QueryClientProvider client={queryClient}>
       <LlmRemainingBadge />
     </QueryClientProvider>,
+    { locale: "ko" },
   );
 }
 
@@ -116,4 +119,45 @@ it("does not invent quota for malformed API data", async () => {
  renderBadge();
  await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C: 5h 확인 불가/7d 확인 불가"));
  vi.unstubAllGlobals();
+});
+
+
+describe("reset countdown", () => {
+  it("formats day boundaries, expiry and unknown times without guessing", () => {
+    const now = Date.parse("2026-11-04T00:00:00Z");
+    expect(formatResetCountdown("2026-11-05T00:00:00Z", now)).toBe("D-1 00:00:00");
+    expect(formatResetCountdown("2026-11-04T23:59:59Z", now)).toBe("23:59:59");
+    expect(formatResetCountdown("2026-11-03T00:00:00Z", now)).toBe("00:00:00");
+    expect(formatResetCountdown(null, now)).toBe("--:--:--");
+    expect(formatResetCountdown("invalid", now)).toBe("--:--:--");
+  });
+
+  it("updates every second without refetching and gives an exact KST tooltip", async () => {
+    const now = Date.parse("2026-11-04T00:00:00Z");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({
+      five_hour_pct: 25, five_hour_resets_at: "2026-11-04T02:00:00Z",
+      seven_day_resets_at: "2026-11-04T01:00:00Z",
+    }) })));
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const view = renderBadge();
+    await screen.findByTestId("chat-reset-countdown");
+    vi.mocked(Date.now).mockReturnValue(now + 1000);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 리셋 00:59:59");
+    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("G 리셋 --:--:--");
+    expect(screen.getByTestId("chat-reset-countdown")).not.toHaveTextContent("5h");
+    expect(screen.getByTitle(/KST/).title).toContain("10시 0분 0초");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    view.unmount();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops malformed and unavailable reset timestamps at the API boundary", () => {
+    expect(llmLimitStatusSchema.parse({ five_hour_resets_at: 123 }).five_hour_resets_at).toBeNull();
+    expect(llmLimitStatusSchema.parse({ five_hour_resets_at: "bad" }).five_hour_resets_at).toBeNull();
+    expect(llmLimitStatusSchema.parse({ claude_status: "stale", five_hour_resets_at: "2026-11-04T00:00:00Z" }).five_hour_resets_at).toBeNull();
+  });
 });

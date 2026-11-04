@@ -1,4 +1,10 @@
 {
+  "limit_reset": {
+    "label": "Reset",
+    "countdown_label": "Time until limit reset",
+    "unknown": "Reset time unavailable",
+    "at": "Reset {{time}} (KST)"
+  },
   "fab": {
     "running": "AIDO is working...",
     "unread_one": "{{count}} unread chat",
