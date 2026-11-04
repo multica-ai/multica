@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
 )
 
 func queued(id, content string) json.RawMessage {
@@ -222,4 +225,58 @@ func TestQueueWaitsForTheUserAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "the queued message after resume", func() bool { return fmt.Sprint(again.sends(t)) == "[after restart]" })
+}
+
+func TestQueueResumeRetriesAMessageTheProviderNeverReceived(t *testing.T) {
+	t.Parallel()
+
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	var refused atomic.Bool
+	refused.Store(true)
+	f.reply = func(_ *fakeAdapter, typ string) (json.RawMessage, error) {
+		if typ == "send" && refused.Load() {
+			return nil, &claude.AdapterError{Code: "refused", Message: "refused", Dispatch: "not_dispatched"}
+		}
+		return nil, nil
+	}
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "hello"), false, TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the queue to pause on the failure", func() bool {
+		view, _ := f.svc.Queue(ctx, f.scopeID, "conv-1")
+		return view.Paused && view.Error != "" && len(view.Items) == 1
+	})
+
+	refused.Store(false)
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv-1", "resume", ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the message to reach the provider", func() bool {
+		for _, a := range f.allAdapters() {
+			a.mu.Lock()
+			for i, typ := range a.requests {
+				if typ == "send" && a.fields[i]["request_id"] != "q1" {
+					a.mu.Unlock()
+					return true
+				}
+			}
+			a.mu.Unlock()
+		}
+		return false
+	})
+	eventually(t, "the queue to empty", func() bool {
+		view, _ := f.svc.Queue(ctx, f.scopeID, "conv-1")
+		return len(view.Items) == 0 && !view.Paused
+	})
+	// The failed attempt stays in the conversation, and the retry is a turn of its own.
+	turns, err := f.svc.Store().ConversationTurns(ctx, "conv-1")
+	if err != nil || len(turns) != 2 || turns[0].Status != "failed" || turns[1].Status != "running" {
+		t.Fatalf("turns = %+v, %v", turns, err)
+	}
+	// Enqueuing the original id again is still a no-op: the message was handled.
+	if again, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued("q1", "hello"), false, TurnOrigin{}); err != nil || len(again.Items) != 0 {
+		t.Fatalf("re-enqueued a handled message: %+v, %v", again, err)
+	}
 }

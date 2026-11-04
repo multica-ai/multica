@@ -395,8 +395,45 @@ func (s *Service) sendQueued(ctx context.Context, conv sqlitedb.Conversation, it
 		_, err = s.SendToAgents(ctx, cmd, item.Agents)
 		return err
 	}
+	cmd.RequestID, err = s.queuedAttemptID(ctx, conv, item.RequestID)
+	if err != nil {
+		return err
+	}
 	_, err = s.Send(ctx, cmd)
 	return err
+}
+
+// queuedAttemptID is the request id to send a queued message under. A send
+// records its receipt before reaching the provider, so an id whose attempt the
+// provider refused would replay as done and the queue would drop the message
+// unsent. Those attempts stay in the conversation as failed turns, and the
+// message goes out under a new id. An attempt that may have been delivered
+// keeps its id, so its receipt stops it running twice.
+func (s *Service) queuedAttemptID(ctx context.Context, conv sqlitedb.Conversation, requestID string) (string, error) {
+	id := requestID
+	for attempt := 1; ; attempt++ {
+		receipt, err := s.store.Receipt(ctx, conv.ScopeID, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return id, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if receipt.Uncertain != 0 {
+			return id, nil
+		}
+		turn, err := s.store.Turn(ctx, conv.ID, "turn-"+id)
+		if errors.Is(err, store.ErrNotFound) {
+			return id, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if turn.Status != "failed" || (turn.ErrorKind != "provider_unavailable" && turn.ErrorKind != "provider_error") {
+			return id, nil
+		}
+		id = fmt.Sprintf("%s-retry-%d", requestID, attempt)
+	}
 }
 
 // rawOptionalString decodes an optional setting: absent keeps it, null
