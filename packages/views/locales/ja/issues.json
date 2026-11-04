@@ -38,6 +38,9 @@
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"
   },
+  "unread_filter_error": {
+    "title": "未読のタスクを読み込めませんでした"
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "ステータスを読み込むまでタスクを表示できません。",
@@ -181,6 +184,8 @@
     "relation_my_agents": "自分のエージェントが担当",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
+    "section_read_state": "既読状態",
+    "read_state_unread": "未読",
     "operator_label": "条件",
     "operator_is": "一致",
     "operator_is_not": "除外",
@@ -754,6 +759,7 @@
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
+    "unread_title": "未読のタスクはありません",
     "clear_button": "フィルターを解除"
   },
   "agent_live": {
@@ -1722,7 +1728,8 @@
     "builtin": {
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク"
+      "all_issues": "すべてのタスク",
+      "unread": "未読"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",

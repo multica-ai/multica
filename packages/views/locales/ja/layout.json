@@ -38,6 +38,28 @@
     "feedback": "フィードバック",
     "server_version": "サーバーバージョン {{version}}"
   },
+  "whats_new": {
+    "trigger": "新機能",
+    "card": {
+      "eyebrow": "Multica が更新されました · {{range}}",
+      "title_other": "前回の訪問以降、{{count}} 件の新機能が追加されました",
+      "dismiss": "閉じる",
+      "view_details": "詳細を見る",
+      "got_it": "了解"
+    },
+    "panel": {
+      "title": "新機能",
+      "close": "閉じる",
+      "new": "未読",
+      "release_notes": "v{{version}} の変更ログ",
+      "full_changelog": "すべての変更ログ"
+    },
+    "action": {
+      "try": "試してみる",
+      "open": "開く",
+      "learn_more": "詳しく見る"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
     "loading_named_prefix": "読み込み中"
@@ -87,6 +109,7 @@
     "work": {
       "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
+      "unread": "未読",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",
@@ -94,6 +117,7 @@
       "project_issues": "{{name}} のタスク",
       "project_issues_empty": "タスクはありません",
       "project_issues_error": "タスクを読み込めませんでした",
+      "project_issues_retry": "再試行",
       "project_issues_settings": "プロジェクトのタスク",
       "settings_status": "ステータス",
       "settings_assignee": "担当者",

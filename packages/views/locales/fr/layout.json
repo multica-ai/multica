@@ -38,6 +38,29 @@
     "feedback": "Faire un retour",
     "server_version": "Version du serveur {{version}}"
   },
+  "whats_new": {
+    "trigger": "Nouveautés",
+    "card": {
+      "eyebrow": "Multica mis à jour · {{range}}",
+      "title_one": "{{count}} nouveauté depuis votre dernière visite",
+      "title_other": "{{count}} nouveautés depuis votre dernière visite",
+      "dismiss": "Fermer",
+      "view_details": "Voir le détail",
+      "got_it": "Compris"
+    },
+    "panel": {
+      "title": "Nouveautés",
+      "close": "Fermer",
+      "new": "Nouveau",
+      "release_notes": "Journal des modifications v{{version}}",
+      "full_changelog": "Journal des modifications complet"
+    },
+    "action": {
+      "try": "Essayer",
+      "open": "Ouvrir",
+      "learn_more": "En savoir plus"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "Chargement de l'espace de travail…",
     "loading_named_prefix": "Chargement"
@@ -87,6 +110,7 @@
     "work": {
       "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
+      "unread": "Non lues",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",
@@ -95,6 +119,7 @@
       "project_issues": "Tâches de {{name}}",
       "project_issues_empty": "Aucune tâche",
       "project_issues_error": "Impossible de charger les tâches",
+      "project_issues_retry": "Réessayer",
       "project_issues_settings": "Tâches des projets",
       "settings_status": "Statut",
       "settings_assignee": "Responsable",

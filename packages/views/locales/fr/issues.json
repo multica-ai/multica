@@ -39,6 +39,9 @@
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
   },
+  "unread_filter_error": {
+    "title": "Impossible de charger vos tâches non lues"
+  },
   "status_catalog_error": {
     "title": "Impossible de charger la liste des états",
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",
@@ -183,6 +186,8 @@
     "relation_my_agents": "Assignés à mes agents",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "section_read_state": "État de lecture",
+    "read_state_unread": "Non lu",
     "operator_label": "Condition",
     "operator_is": "est",
     "operator_is_not": "n'est pas",
@@ -783,6 +788,7 @@
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",
+    "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
   "agent_live": {
@@ -1790,7 +1796,8 @@
     "builtin": {
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches"
+      "all_issues": "Toutes les tâches",
+      "unread": "Non lues"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

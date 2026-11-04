@@ -161,8 +161,9 @@ export function AgentAdvancedSettings({
     telegramListing?.configured === true;
 
   // The Qoder bridge fails every task carrying skills, MCP, connected apps,
-  // env, args or a model override, and runs issues only (no chat). Those
-  // editors are not offered; the agent in Qoder Cloud Agents owns that configuration.
+  // env, args or a model override. Those editors are not offered; the agent
+  // in Qoder Cloud Agents owns that configuration. It does run chat, so IM
+  // channels (Integrations) stay available.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
   // Claude Managed Agents refuses the same overrides; the Claude agent owns them.
   const claudeRuntime = runtime?.provider === "claude_managed";
@@ -194,7 +195,11 @@ export function AgentAdvancedSettings({
   );
 
   const capabilitySections = useMemo(() => {
-    if (cloudRuntime) return [];
+    if (cloudRuntime) {
+      return CAPABILITY_SECTIONS.filter(
+        (item) => item.id === "integrations" && integrationsConfigured,
+      );
+    }
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showComposioMcp =
       composioMCPAppsEnabled &&

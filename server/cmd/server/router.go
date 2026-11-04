@@ -21,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -440,6 +441,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudTimeout:                   35 * time.Second,
 		AttachmentDownloadMode:         os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL:       envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		MaxPreviewSizeBytes:            attachmentpreview.ConfiguredMaxSizeBytes(os.Getenv("MULTICA_MAX_PREVIEW_SIZE")),
 		AttachmentFrameAncestors:       origins,
 		PluginSurfaceOrigin:            strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
 		LLMAPIKey:                      strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
@@ -1719,6 +1721,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
+		r.Post("/api/me/whats-new/seen", h.MarkWhatsNewSeen)
 		// Credential minting is human-only (MUL-8154): an agent task token
 		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
 		// without this guard a prompt-injected agent could trade its scoped,

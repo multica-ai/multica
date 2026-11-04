@@ -115,6 +115,13 @@ describe("viewSidebarRequest", () => {
       }),
     ).toMatchObject({ advanced: { match: "any", children: [{ field: "priorities", values: ["urgent"] }] } });
     expect(filters({ agentRunningFilter: true })).toMatchObject({ working_only: true });
+    expect(filters({ unreadFilter: true })).toMatchObject({ unread_issue_ids: [] });
+    expect(
+      viewSidebarRequest({ ...workspace, query: { unreadFilter: true } }, TODAY, ["b", "a"])?.table.filters,
+    ).toMatchObject({ unread_issue_ids: ["a", "b"] });
+    expect(
+      viewSidebarRequest({ ...workspace, query: {} }, TODAY, ["a"])?.table.filters,
+    ).not.toHaveProperty("unread_issue_ids");
     // "Is not" with nothing selected is not a condition, and no due-date rule needs no day.
     expect(filters({ negatedFilters: ["status"] })).toEqual({ include_sub_issues: true });
   });
