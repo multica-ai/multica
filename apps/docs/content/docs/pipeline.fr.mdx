@@ -1,0 +1,69 @@
+---
+title: Pipeline et initiatives
+description: Une initiative est une entreprise menée au sein de la société, étape par étape, de la validation à l'apprentissage. Le pipeline montre toutes les initiatives et le squad responsable de chaque étape.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Une **initiative** est une entreprise en soi : un produit, une ligne de fonctionnalités ou une expérimentation de marché. Vous raisonnez en termes de « comment va l'outil de facturation ? ». Ce n'est ni un projet, qui désigne un ensemble de travaux, ni un ticket, qui désigne une tâche.
+
+Une initiative traverse le **pipeline**, une séquence fixe d'étapes. Chaque étape a un squad responsable et les livrables qu'elle doit produire, généralement des documents de connaissance.
+
+## Les étapes
+
+Le pipeline par défaut compte sept étapes. Chacune est aussi un statut de ticket, de sorte que le ticket rattaché à l'initiative suit sa progression.
+
+| Étape | Squad responsable dans l'entreprise de départ | Livrables typiques |
+| --- | --- | --- |
+| Validate (Valider) | Product Discovery | Rapport de validation |
+| Define (Définir) | Product Analysis | Brief produit, analyse |
+| Plan (Planifier) | Planning | Feuille de route, demande de budget, PRD |
+| Build (Construire) | Build | Rapport de tests, version candidate |
+| Launch (Lancer) | Release & Ops | Plan de lancement, liste de contrôle de lancement |
+| Operate (Exploiter) | Support | Rapport de métriques |
+| Learn (Apprendre) | Build | Rétrospective |
+
+La porte de lancement vous revient toujours. La porte de planification approuve une demande de budget, et l'étape d'exploitation se termine par une porte de revue qui prend l'un de trois résultats : continuer, passer à l'échelle ou arrêter. L'entreprise de départ crée ces squads. Voir [Entreprise de départ](/starter-company).
+
+## Lancer une initiative
+
+Une initiative démarre de deux façons :
+
+- **Une opportunité approuvée.** Un squad dépose une proposition `opportunity` avec une thèse. Son approbation crée l'initiative à son étape cible, `validate` par défaut.
+- **Directement.** Créez-la depuis la page Pipeline, ou avec `POST /api/initiatives`. La CLI n'a pas de commande de création.
+
+## Le tableau et le panneau d'initiative
+
+La page **Pipeline** affiche un tableau avec une colonne par étape et une carte par initiative. Ouvrez une carte pour son panneau. Le panneau présente la thèse, l'étape actuelle et le squad responsable, les livrables requis (avec **Waive** (Dispenser) pour un livrable dont vous n'avez pas besoin), les portes qui attendent votre décision, les commentaires de l'initiative et la chronologie des changements d'étape.
+
+Les administrateurs peuvent aussi **forcer** une initiative vers une étape. Le forçage est enregistré dans le journal de gouvernance.
+
+## Faire avancer une initiative
+
+Le squad responsable fait avancer son étape en la certifiant. L'initiative passe à l'étape suivante lorsque ses livrables sont en place.
+
+```bash
+multica initiative list
+multica initiative show <id>
+multica initiative attest <id>   # par le squad responsable : avance quand les livrables sont en place
+multica initiative advance <id>  # au-delà de l'étape courante quand sa sortie le permet
+multica initiative shelve <id>   # met l'initiative en pause ; propriétaires et administrateurs seulement
+```
+
+D'autres mouvements passent par l'API ou l'application : renvoyer une initiative à une étape antérieure, la clore, ou reprendre une initiative mise en pause. La mise en pause et la clôture sont enregistrées dans le journal de gouvernance.
+
+Une porte d'étape requiert votre décision. Le système dépose une proposition `stage_gate` lorsqu'une étape de porte est prête. Son approbation fait avancer l'initiative. Son rejet renvoie l'initiative et réveille son responsable. Voir [Propositions](/proposals).
+
+<Callout type="info">
+Un lancement n'est jamais automatique. Quel que soit votre niveau d'autonomie, la porte de lancement vous revient. Voir [Autonomie et approbations](/autonomy-and-approvals).
+</Callout>
+
+## Où vit le travail
+
+Les documents produits par une initiative vont dans la base de connaissances **ventures** (Entreprises), un dossier par initiative. Les constructions et les lancements de chaque étape sont des tickets du projet de tableau de l'initiative.
+
+## Étapes suivantes
+
+- [Propositions](/proposals) pour les types opportunité et porte.
+- [Budgets](/budgets) pour le budget qu'approuve une porte de planification.
+- [Taxonomie des connaissances](/knowledge-taxonomy) pour les documents que chaque étape exige.

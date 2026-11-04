@@ -1,0 +1,86 @@
+---
+title: Contrôles et journal
+description: Mettez en pause toute l'entreprise d'une seule action, définissez une plage calme quotidienne, et consultez le journal de gouvernance de chaque changement qui modifie la gouvernance de l'entreprise.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Deux outils vous gardent aux commandes. Les **contrôles de l'entreprise** arrêtent le travail automatisé à l'échelle de tout l'espace de travail, et le **journal de gouvernance** enregistre chaque changement qui modifie la gouvernance de l'entreprise. Le journal ne peut être ni modifié ni supprimé.
+
+## État de l'entreprise
+
+L'entreprise est dans l'un de trois états :
+
+| État | Routines et exécutions déléguées | Discussions et exécutions que vous lancez |
+| --- | --- | --- |
+| `running` (en marche) | S'exécutent normalement | S'exécutent normalement |
+| `paused` (en pause) | Suspendues avec la raison `company_paused`. Les automatismes sont ignorés, les réveils ne se déclenchent pas. | Continuent de fonctionner |
+| `quiet` (calme) | Reportées à la fin de la plage calme, et non abandonnées | Continuent de fonctionner |
+
+Pendant la pause, la publication automatique des connaissances et l'avancement automatique du pipeline s'arrêtent, et les approbations permanentes ne s'appliquent pas. Le brief du secrétaire et la discussion restent actifs, de sorte que vous voyez toujours l'entreprise et pouvez lui parler.
+
+**Pause** dans l'en-tête du bureau met l'entreprise en pause. La pause avec **stop running work** (arrêter le travail en cours) annule aussi les exécutions de routine et déléguées déjà en cours :
+
+```bash
+multica company status
+multica company pause --stop-running
+multica company resume
+```
+
+Les propriétaires et les administrateurs peuvent mettre en pause et reprendre. Les membres peuvent consulter l'état.
+
+### Plage calme
+
+Une plage calme est une période quotidienne, dans le fuseau horaire de l'espace de travail, pendant laquelle les exécutions de routine sont reportées. Par défaut, elle va de 22:00 à 07:00. Une exécution reportée démarre à la fin de la plage. Rien n'est abandonné.
+
+```bash
+multica company quiet --enable --start 22:00 --end 07:00 --timezone Europe/Paris
+multica company quiet --disable
+```
+
+Les heures sont au format `HH:MM` dans le fuseau horaire. Les plages calmes se règlent aussi dans l'onglet **Controls** (Contrôles).
+
+<Callout type="info">
+La pause arrête les exécutions de routine en une minute environ. Une exécution déclenchée par un webhook est retenue lors de sa prise en charge par un démon, de sorte que la liste des exécutions peut afficher `issue_created` pendant la pause. L'exécution ne démarre quand même pas.
+</Callout>
+
+## Le journal de gouvernance
+
+Le journal est un registre en ajout seul des actions qui modifient la gouvernance de l'entreprise. Il couvre :
+
+- les politiques de proposition créées, révoquées, et utilisées pour une approbation automatique ;
+- les budgets définis, prolongés, suspendus et libérés ;
+- les changements de niveau d'autonomie ;
+- les changements d'organisation appliqués et annulés ;
+- les publications automatiques de connaissances ;
+- les initiatives forcées vers une étape ;
+- l'entreprise mise en pause et reprise ;
+- les objectifs activés ;
+- les revues publiées.
+
+Chaque entrée comporte son type, l'acteur (une personne, un agent, le système ou une politique), l'objet, un résumé et des détails. Ouvrez l'onglet **Log** (Journal) dans **Gouvernance** pour filtrer par type, acteur ou objet, et exporter en CSV.
+
+```bash
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/governance/events?kind=budget_hold"
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -o governance.csv "$MULTICA_API/api/governance/events.csv"
+```
+
+L'export CSV est plafonné à 50 000 lignes. Au-delà, il renvoie HTTP 413 : resserrez les filtres puis exportez à nouveau.
+
+Le journal n'a pas de chemin de mise à jour ni de suppression dans l'application. Seule la suppression de tout l'espace de travail l'efface. La conservation est illimitée.
+
+## Santé du système
+
+L'onglet **Controls** affiche le dernier succès et le retard de chaque tâche planifiée, les échecs de livraison, la santé du sidecar de connaissances et l'âge du cache de la porte budgétaire. L'API est `GET /api/governance/health`. Une tâche bloquée apparaît comme risque dans le brief.
+
+## Limites
+
+- Les points d'entrée de l'état de l'entreprise sont `GET` et `PUT /api/office/company-state`, ainsi que `PUT /api/office/quiet-hours`. Les commandes CLI ci-dessus les enveloppent.
+
+## Étapes suivantes
+
+- [Budgets](/budgets) pour la limite qui suspend des exécutions sans mettre l'entreprise en pause.
+- [Autonomie et approbations](/autonomy-and-approvals) pour les politiques que consigne le journal.
+- [Revues et changements d'organisation](/reviews-and-org-changes) pour les changements que le journal enregistre à l'application et à l'annulation.

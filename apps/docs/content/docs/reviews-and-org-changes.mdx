@@ -1,0 +1,98 @@
+---
+title: Reviews and organisation changes
+description: Scorecards measure how agents and squads perform. Reviews turn them into a judgement with recommendations. Organisation changes apply those recommendations, with probation and rollback.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Reviews and organisation changes close the loop. A **scorecard** measures how an agent or squad performed. A **review** reads the scorecard and recommends changes. An **organisation change** applies a recommendation, once you approve it. The change then runs on **probation**, and the platform records whether it helped.
+
+## Scorecards
+
+A nightly job computes a scorecard for each agent, each squad, and the company. It covers the last completed week or month. A scorecard with too few runs for its period is marked `insufficient` and is never reviewed.
+
+The metrics are:
+
+- runs, and success rate, with failures split by cause. A runtime that was offline does not count against the agent;
+- issues done, first-pass rate (done without being reopened), cycle time, and cost per done issue;
+- human intervention, meaning comments or edits after an agent marked work done;
+- proposal acceptance rate, routine compliance, and knowledge contribution;
+- for the Secretary, brief usefulness.
+
+Some figures are proxies. Done time is the time the issue last moved into a done status. First-pass and intervention use completed-run counts and member comments. Cost is what the provider reports. Reopens are counted from the issue's done history, which starts with this release. Earlier reopens are not known.
+
+Owners, admins, and the subject's leader can read scorecards:
+
+```bash
+multica review scorecards --subject-type squad --subject-id <squad-id> --period month
+```
+
+## Reviews
+
+The **People & Performance** squad, on the Governance floor, holds a reviewer agent. Each month it reviews every squad with enough data, and every agent that its scorecard or a sample flags as `below`. Each review has a rating (`exceeds`, `meets`, `below`, or `at_risk`), a narrative, and recommendations. A review must cite the scorecard figures it relies on, and the evidence behind them.
+
+A review is a working tool, not a ranking. It is visible to owners, admins, and the subject squad's leader. Its metrics say what they measure.
+
+The reviewer publishes with a JSON file:
+
+```bash
+multica review publish --file review.json
+multica review list
+```
+
+Publishing a review files each change it recommends as an `org_change` proposal, so you decide with the evidence next to the proposal. The Reviews tab in **Governance** lists reviews, and shows proposal ids rather than links. The brief's **People** section lists new reviews and their recommendations.
+
+## Organisation changes
+
+An `org_change` proposal has one of eight types:
+
+| Type | What it changes | How it is applied |
+| --- | --- | --- |
+| `instruction_change` | An agent's instructions | The agent is updated, and a revision of the old text is written first |
+| `skill_change` | An agent's skills | Skills are added and removed |
+| `charter_change` | A squad's charter | The charter is updated, with a revision |
+| `autonomy_change` | A squad's autonomy level | The level is set |
+| `hire` | Adds an agent to a squad | An agent is created from a template, with the squad as its home squad |
+| `retire` | Removes an agent or squad | It is archived. Queued tasks are cancelled, running ones finish, and its knowledge stays. |
+| `move` | An agent's squad | Membership and home squad change |
+| `merge_squads` | Two squads | Members and routines move, and the source squad is archived. The charter text is merged by you in the dialog. |
+
+Organisation changes are filed by the reviewer, the Secretary, the leader of a squad the change concerns, or a person. They never auto-approve, and they never fall under a standing approval. The Decisions dialog shows an instruction or charter change as a diff.
+
+## Instruction revisions and rollback
+
+Every update to an agent's instructions writes a revision, whatever the path: the app, the CLI, a template, an import, or an applied organisation change. The revision records the text, its source (`human`, `proposal`, or `rollback`), and the proposal if there was one.
+
+On the agent's page, its history lists the revisions. Restoring one writes a new revision with the old text, so nothing is lost.
+
+```bash
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/agents/<agent-id>/instruction-revisions"
+curl -X POST -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/agents/<agent-id>/instruction-revisions/<revision>/restore"
+```
+
+Revision history starts at the first recorded change. Changes made before that are not in it. Builder carrier agents are not tracked.
+
+## Probation
+
+An applied change enters a **probation window of 14 days**. At its end, the reviewer compares the scorecards from before and after the change, and records one outcome:
+
+| Outcome | Meaning |
+| --- | --- |
+| `improved` | The measures moved the right way |
+| `neutral` | No clear change |
+| `worse` | The measures moved the wrong way. A rollback proposal is filed. |
+| `insufficient` | Too little data. The outcome is deferred. |
+
+Probation applies to all eight types. A rollback is possible only for a change that can be reverted. `hire`, `retire`, and `merge_squads` cannot be reverted, so a worse outcome for them files no rollback proposal. A charter that creates a squad's first charter cannot be reverted either. Plan around these limits when you approve.
+
+<Callout type="info">
+Org-change proposals count towards the attention limits. Each applied change and each outcome is in the [governance log](/controls-and-log).
+</Callout>
+
+## Next steps
+
+- [Proposals](/proposals) for how a review's recommendations reach you.
+- [Goals and metrics](/goals-and-metrics) for the metrics a scorecard draws on.
+- [Autonomy and approvals](/autonomy-and-approvals) for why organisation changes always stay with you.

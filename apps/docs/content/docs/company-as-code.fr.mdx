@@ -1,0 +1,68 @@
+---
+title: Entreprise en code
+description: Exportez la structure d'une entreprise dans un fichier JSON unique, et importez-le dans un autre espace de travail pour lancer une seconde entreprise de même forme.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+L'entreprise en code décrit la structure d'une entreprise dans un seul document JSON : les étages, les squads avec leurs chartes et routines, les rôles et instructions des agents, le pipeline, les types de connaissances, les politiques, ainsi que les objectifs et budgets. Vous pouvez l'utiliser comme sauvegarde de la structure, ou pour lancer une seconde entreprise de même forme.
+
+Seuls les propriétaires et les administrateurs peuvent exporter ou importer.
+
+## Export
+
+```bash
+multica company export --file company.json
+```
+
+L'export contient :
+
+- les étages et les sièges de squads ;
+- les squads, avec leurs chartes et routines ;
+- les rôles, instructions et références de modèles des agents ;
+- le pipeline et ses étapes ;
+- les types de connaissances, les responsables d'étage et les sections de gouvernance.
+
+Il exclut les secrets, les runtimes, les documents de connaissance, l'avancement, les dépenses et l'historique. Le fichier le précise. Conservez les secrets et les documents de connaissance dans leurs propres sauvegardes.
+
+## Import
+
+```bash
+multica company import --file company.json --runtime <runtime-id> --dry-run
+multica company import --file company.json --runtime <runtime-id>
+```
+
+Lancez d'abord avec `--dry-run`. Il affiche le plan et n'écrit rien.
+
+- Les entités sont appariées par nom. Importer deux fois le même fichier ne change rien.
+- Les agents sont créés sur le runtime indiqué par `--runtime`. Sans cette option, ils sont signalés comme bloqués.
+- Les routines importées sont créées **en pause**. Lancez-les vous-même, ou selon les options de démarrage de l'entreprise de départ.
+- Le corps de la requête est limité à 8 Mio.
+
+## Ce qui n'est pas transféré
+
+L'import ne recrée pas les éléments suivants. Vérifiez-les après un import :
+
+- les initiatives clôturées : elles font partie de l'historique et ne sont pas exportées. Une initiative non clôturée est transférée avec ses objectifs et ses budgets ;
+- l'avancement et les dépenses.
+
+## Ce qui est transféré autrement
+
+- Un objectif de squad actif revient en **brouillon**. Activez-le depuis Objectifs ; l'import ne l'approuve pas.
+- Une politique d'approbation permanente révoquée revient **révoquée** et n'approuve jamais rien.
+- Un squad archivé revient **archivé**. Ses membres et ses routines ne sont pas réactivés, et ses routines restent en pause.
+- Une initiative est identifiée par le nom de son pipeline, son étape et son titre. Son ticket de suivi est créé, mais rien n'est transmis ni réveillé.
+
+## Limites
+
+- Les points d'entrée d'export et d'import sont `GET /api/office/export` et `POST /api/office/import`.
+
+<Callout type="warning">
+Un import peut créer des agents qui agissent sur le runtime que vous indiquez. Vérifiez le plan du dry-run, et assurez-vous que ce runtime appartient à la machine prévue.
+</Callout>
+
+## Étapes suivantes
+
+- [Entreprise de départ](/starter-company) pour la structure avec laquelle l'entreprise démarre.
+- [Contrôles et journal](/controls-and-log) pour la piste d'audit d'un import.
+- [Auto-hébergement](/self-host-quickstart) pour sauvegarder la base de données et le sidecar de connaissances.

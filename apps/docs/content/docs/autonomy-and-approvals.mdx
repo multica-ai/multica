@@ -1,0 +1,62 @@
+---
+title: Autonomy and approvals
+description: Each squad has an autonomy level that sets how far the platform lets it act without you. Standing approvals let you pre-authorise a narrow class of proposals.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Some decisions should not wait for you every time. **Autonomy** sets how much a squad may do without asking, and a **standing approval** pre-authorises one narrow class of proposal. You see each of them afterwards, not beforehand.
+
+## Autonomy levels
+
+Each squad has a level from 0 to 3. The default is 1. Only you or an admin change it, and every change is recorded in the governance log. A review may recommend a change, filed as a proposal.
+
+| Level | Name | What the platform allows |
+| --- | --- | --- |
+| L0 | Suggest | The squad's routines are held. It runs only when someone assigns or mentions it. It can still file proposals. |
+| L1 | Work | Routines run. The squad researches, analyses, writes knowledge drafts, and files proposals. Every decision is yours. |
+| L2 | Trusted | As L1. Its knowledge drafts can publish after review. Standing approvals can approve its proposals. |
+| L3 | Autonomous | As L2. Standing approvals can also create initiatives from its own opportunities at the first stage, within the caps and the budget. |
+
+Two things never depend on the level. A **launch** is always your decision, and so is every **organisation change**. Spending is always bounded by [budgets](/budgets).
+
+<Callout type="warning">
+Autonomy limits what the platform does: which routines run, what is published into the shared record, which proposals are decided without you, which initiatives are created, and how much is spent. It does not limit what an agent does inside a run. An agent can call an external service its credentials allow. Keep those credentials scoped, and use an external gate for anything with effects outside the workspace.
+</Callout>
+
+The Autonomy tab in **Governance** lists each squad's level and changes it. The squad panel and the office show the level as a tag. The API is `GET` and `PUT /api/squads/{id}/autonomy`.
+
+## Standing approvals
+
+A **policy** describes a class of proposals you have approved in advance:
+
+- a **kind**, one of the proposal kinds (`decision`, `opportunity`, or `goal`). Kinds that are never eligible are refused: `org_change`, launch gates, `budget`, `stage_gate`, and `standing_approval` itself;
+- a **match**: which squads or floors it covers, a maximum cost, and fields the payload must equal. A match on tags is refused, because proposals carry no tags;
+- a **weekly cap**, from 1 to 50, default 3;
+- an optional **valid until** date, and an active flag.
+
+When a squad files a proposal, the policy engine checks each active policy. A policy applies only if the filing squad is at L2 or above, and at L3 for opportunities that create initiatives. The proposal must match, the weekly cap must not be used up, and the proposal must not be urgent. Its estimated cost must fit the policy's maximum and the squad's remaining budget.
+
+A match approves the proposal as the policy itself, applies it as a person's approval would, and records a governance event. The next brief lists it under **Auto-approved by policy**. A policy that auto-approved something later reversed on review is flagged in the weekly review.
+
+Only you or an admin create a policy. An agent may propose one as a `standing_approval` proposal, which you approve like any other. No agent can edit a policy or change autonomy.
+
+To revoke a policy, open **Policies** in the Autonomy tab and revoke it. Revocation takes effect at once and is recorded.
+
+```bash
+curl -X POST "$MULTICA_API/api/approval-policies" -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $WORKSPACE_ID" -H "Content-Type: application/json" \
+  -d '{"name": "Pilot follow-ups", "kind": "decision", "match": {"squad_ids": ["<squad-id>"], "max_cost_micros": 5000000}, "max_per_week": 2}'
+```
+
+Other policy endpoints are `GET /api/approval-policies`, `POST /api/approval-policies/{id}/revoke`, and `GET /api/approval-policies/{id}/auto-approvals`. The CLI has no policy commands.
+
+## Knowledge publishing and autonomy
+
+Knowledge drafts from a squad below L2 do not auto-publish, whatever the publish policy says. See [Knowledge taxonomy](/knowledge-taxonomy).
+
+## Next steps
+
+- [Proposals](/proposals) for what a standing approval can match.
+- [Budgets](/budgets) for the spending bound on every level.
+- [Controls and the log](/controls-and-log) for the pause and the audit trail.

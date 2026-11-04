@@ -1,0 +1,68 @@
+---
+title: Company as code
+description: Export a company's structure as one JSON file, and import it into another workspace to start a second company with the same shape.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Company as code describes a company's structure as a single JSON document: the floors, the squads and their charters and routines, the agents' roles and instructions, the pipeline, the knowledge kinds, the policies, and the goals and budgets. You can use it as a backup of the structure, or to start a second company with the same shape.
+
+Only owners and admins can export or import.
+
+## Export
+
+```bash
+multica company export --file company.json
+```
+
+The export contains:
+
+- floors and squad seats;
+- squads, with their charters and routines;
+- agents' roles, instructions, and template references;
+- the pipeline and its stages;
+- knowledge kinds, floor chiefs, and the governance sections.
+
+It leaves out secrets, runtimes, knowledge documents, progress, spend, and history. The file says so. Keep the secrets and the knowledge documents in their own backups.
+
+## Import
+
+```bash
+multica company import --file company.json --runtime <runtime-id> --dry-run
+multica company import --file company.json --runtime <runtime-id>
+```
+
+Run with `--dry-run` first. It prints the plan and writes nothing.
+
+- Entities are matched by name. Importing the same file twice changes nothing.
+- Agents are created on the runtime given with `--runtime`. Without it, agents are reported as blocked.
+- Imported routines are created **paused**. Start them yourself, or with the starter company's start options.
+- The request body is limited to 8 MiB.
+
+## What does not come across
+
+Import does not recreate these, so check them after an import:
+
+- closed initiatives. They are history and are not exported. An initiative that is not closed comes across with its goals and budgets;
+- progress and spend.
+
+## What comes across differently
+
+- An active squad goal comes across as a **draft**. Activate it from Goals; the import does not approve it.
+- A revoked standing approval policy comes across **revoked**, and it never approves anything.
+- An archived squad comes across **archived**. Its members and routines are not re-activated, and its routines stay paused.
+- An initiative is matched by its pipeline's name, stage and title. Its backing issue is created, but nothing is handed off or woken.
+
+## Limits
+
+- The export and import endpoints are `GET /api/office/export` and `POST /api/office/import`.
+
+<Callout type="warning">
+An import can create agents that act on the runtime you name. Check the dry-run plan, and make sure the runtime belongs to the machine you intend.
+</Callout>
+
+## Next steps
+
+- [Starter company](/starter-company) for the structure the company starts with.
+- [Controls and the log](/controls-and-log) for the audit trail of an import.
+- [Self-hosting](/self-host-quickstart) for backing up the database and the knowledge sidecar.

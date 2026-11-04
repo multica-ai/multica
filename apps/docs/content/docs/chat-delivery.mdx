@@ -1,0 +1,65 @@
+---
+title: Delivery to chat apps
+description: Get the Secretary's daily brief in Telegram, Slack, or Lark, decide proposals from a button, and talk to the Secretary from DingTalk and WeCom.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The Secretary can reach you outside the app. When you opt in, the daily brief is sent to your chat app, and in Telegram, Slack, and Lark you can decide proposals from buttons under the message. The other chat apps let you talk to the Secretary, but they do not receive the brief.
+
+## Which apps do what
+
+| Chat app | Talk to Secretary and agents | Brief push | Decide from a button |
+| --- | --- | --- | --- |
+| Telegram | Yes | Yes | Yes |
+| Slack | Yes | Yes | Yes |
+| Lark (Feishu) | Yes | Yes | Yes |
+| DingTalk | Yes | No | No |
+| WeCom | Yes | No | No |
+
+Set up each app by its own page: [Telegram](/telegram-bot-integration), [Slack](/slack-bot-integration), [Lark](/lark-bot-integration), and [DingTalk](/dingtalk-bot-integration). WeCom has no separate setup page in this release. Its operator configures it.
+
+<Callout type="info">
+The chat platform must already be connected to your Multica account. Brief push uses that connection. It does not create one.
+</Callout>
+
+## Opting in
+
+Each member chooses for themselves, in the Office's brief settings:
+
+- **Brief push**: on or off. Off by default.
+- **Chat**: which connected chat to send to. Each member can choose one.
+- **Quiet hours**: a window of hours, from 0 to 23, in which nothing is sent. The window may cross midnight. A brief that falls in the window is sent when it ends.
+
+The same settings are at `GET` and `PUT /api/office/brief-push`. The chats you can choose are at `GET /api/office/brief-push/bindings`.
+
+## What the message contains
+
+The push is short on purpose. It has the brief's headline, the number of decisions waiting, the top three decisions with their links, and a link to the full brief.
+
+Publishing a brief only queues a delivery for each member who opted in. A separate job sends it. A send that fails is retried up to five times, with waits of one, two, four, and eight minutes between attempts. A delivery that still fails is recorded as failed. A failed delivery never fails the brief itself.
+
+## Deciding from a button
+
+In Telegram, Slack, and Lark, each decision in the message has buttons: **approve**, **reject**, and **snooze**. Each button carries a signed token for that proposal and action. The token is valid for 24 hours.
+
+When you press a button, the server works out which Multica member the chat user is, through the connection you made. Only an owner or admin can decide. Agents cannot press buttons. If the chat user is not an owner or admin, the button replies with a link to the app instead. A settled decision removes its buttons from the message.
+
+## Commands in chat
+
+Members who are linked to Multica can send these commands in a chat with the Secretary:
+
+- `/brief` returns the latest brief.
+- `/decisions` lists the pending proposals.
+
+The command must be the whole first line of the message. `/briefing` and a command inside a sentence do not count.
+
+## Limits
+
+- DingTalk and WeCom do not receive briefs or buttons in this release. Their messages go to the Secretary and to agents as ordinary conversation.
+
+## Next steps
+
+- [Secretary and briefs](/secretary) for what a brief contains.
+- [Proposals](/proposals) for what the approve, reject, and snooze buttons do.
+- [Channels](/channels) for how chat apps connect to agents.

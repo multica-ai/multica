@@ -1,0 +1,79 @@
+---
+title: Charters and routines
+description: A squad's charter says what it is for and what it owes you. Its routines are the recurring work that delivers it, and the platform checks whether they did.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A squad with a charter has a standing job. The charter states its mission, the outputs it owes, what it must not do, and when it escalates to you. Its routines are the scheduled runs that produce those outputs. A squad without a charter only runs when someone assigns it work.
+
+## The charter
+
+Open the squad panel and choose the **Charter** tab. Members can read the charter. Owners, admins, and the squad's creator can edit it.
+
+| Field | Purpose |
+| --- | --- |
+| Mission | Why the squad exists, in up to 2,000 characters |
+| Responsibilities | The areas the squad covers, each with a short text |
+| Outputs | What the squad produces, its kind, and its cadence, such as a weekly market report |
+| Boundaries | What the squad may not do, such as spend money or change org structure |
+| Escalation | When it must ask you |
+| Intake | What other squads may ask of it |
+| Response hours | How long the squad takes to answer a request, 1 to 720, default 48 |
+
+Each save increments the charter's revision. If someone saved a newer revision since you opened the form, the save is refused with a conflict, so you can see the other change before you overwrite it.
+
+The squad's leader gets a system-managed block, **Your charter**, built from these fields. It is followed by standing rules: search company knowledge before starting, file proposals instead of acting on money, outside effects, or org changes, record `no action` with a reason instead of padding, and respect the attention limits.
+
+<Callout type="info">
+The charter replaces the squad's description for this purpose. The description stays a one-line label, and the instructions stay the leader's routing rules.
+</Callout>
+
+## Routines
+
+A routine is an ordinary [autopilot](/autopilots) linked to a squad, with a purpose and an expected output. It adds no second scheduler: the schedule, run history, and **Run now** are the autopilot's own.
+
+Open the **Routines** list in the squad panel to add one.
+
+- **Link an existing autopilot**, or **create one** from a cadence: `daily`, `weekdays`, `weekly`, `biweekly`, `monthly`, or a cron expression.
+- Give it a purpose of up to 200 characters, such as "Weekly competitor scan".
+- Choose the expected output: none, an issue, a proposal, a knowledge document, or a report.
+
+From the list you can run a routine now, pause it, or remove it. Removing a routine unlinks it, and you can pause its autopilot at the same time.
+
+The list shows each routine's state and its last and next run. The states are:
+
+| State | Meaning |
+| --- | --- |
+| `on_time` | The last run completed and produced the expected output, or recorded `no action` with a reason |
+| `no_output` | The last run completed, but nothing was produced and no `no action` was recorded |
+| `late` | The next run is overdue by more than the routine's grace period, 24 hours by default |
+| `failed` | The latest run failed |
+| `paused` | The autopilot is paused |
+| `held` | A company control is holding the run, such as a [pause](/controls-and-log) or a [budget](/budgets) limit |
+| `never_ran` | Created, and the first scheduled time has not arrived |
+
+The platform derives the state from the run history and the records the squad created. The squad does not report it.
+
+## The operating review
+
+The first time a charter is saved, the platform creates a weekly routine named **Operating review** for the squad. Its instructions ask the squad to:
+
+1. compare last week's outputs with the charter and list what was late or missing;
+2. search company knowledge for prior decisions and stale documents in its area;
+3. name at most one thing worth doing that nobody asked for, with evidence;
+4. file it as a proposal, subject to the attention limits, or record `no action` with a reason;
+5. draft updates for stale knowledge documents. Drafts only.
+
+The review is a routine like any other. Its compliance is measured, and you can pause it from the routines list.
+
+## Limits
+
+- Charters and routines are managed in the app. The `multica` CLI has no charter or routine commands. The API is `GET` and `PUT /api/squads/{id}/charter`, `GET` and `POST /api/squads/{id}/routines`, and `DELETE /api/squads/{id}/routines/{routine_id}`.
+- A routine that a company pause or quiet hours hold is recorded as `held`, not `failed`. See [Controls and the log](/controls-and-log).
+
+## Next steps
+
+- [Autopilots](/autopilots) for the schedules behind each routine.
+- [Proposals](/proposals) for how a routine's findings reach your decision.
+- [Starter company](/starter-company) for the charters and routines created for each squad card.

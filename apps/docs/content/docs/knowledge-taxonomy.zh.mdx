@@ -1,0 +1,123 @@
+---
+title: 知识分类与图书管理员
+description: 每份知识文档都有类型，类型规定它必须包含的标题、复审间隔和发布策略。图书管理员负责让这份记录保持新鲜、可查找、互相链接。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+[知识库](/knowledge-base)按**类型**组织。类型说明文档是什么、必须包含哪些标题、多久仍然有效，以及属于哪个知识库。**图书管理员**是负责让这份记录保持有序的小队。
+
+## 知识库
+
+| 键 | 名称 | 内容 |
+| --- | --- | --- |
+| `company` | Company | 政策、操作手册、参考资料、公司的常设规则 |
+| `market` | Market | 市场报告、竞品档案、客户洞察、增长与市场推广计划 |
+| `product` | Product | 产品简报、需求、路线图 |
+| `engineering` | Engineering | 架构决策、运行手册、测试报告、发布说明、事后分析 |
+| `decisions` | Decisions | 决定记录与简报存档。由 Multica 写入。 |
+| `ventures` | Ventures | 每个倡议一个文件夹，存放其验证、分析、预算申请和发布文档 |
+
+## 类型
+
+每种类型都有键、默认知识库、以天计的复审间隔，以及草稿必须包含的标题。缺少必需标题的草稿会被拒绝。以下是默认值；`multica knowledge kinds` 会列出全部。
+
+| 键 | 知识库 | 复审（天） | 必需标题 |
+| --- | --- | --- | --- |
+| `market_report` | market | 90 | Summary、Market size、Trends、Sources |
+| `competitor_profile` | market | 90 | Summary、Offering、Pricing、Strengths and weaknesses、Sources |
+| `customer_insight` | market | 180 | Summary、Evidence、Segments、Sources |
+| `prd` | product | 180 | Problem、Requirements、Non-goals、Acceptance criteria |
+| `roadmap` | product | 90 | Goals、Milestones、Dependencies |
+| `budget_request` | ventures | 无 | Amount、Justification、Breakdown |
+| `adr` | engineering | 无 | Context、Decision、Consequences |
+| `runbook` | engineering | 180 | Purpose、Steps、Rollback、Owners |
+| `postmortem` | engineering | 无 | Summary、Timeline、Root cause、Actions |
+| `decision_record` | decisions | 无 | Decision、Context |
+| `policy` | company | 365 | Scope、Rule、Owner |
+| `reference` | company | 365 | Summary |
+
+完整列表共 26 种类型，还包括验证报告、分析、发布计划、复盘和指标报告。
+
+所有者或管理员可以编辑类型的名称、复审间隔、必需标题、模板和默认知识库：
+
+```bash
+multica knowledge kinds
+multica knowledge template adr                 # 打印 Markdown 骨架
+multica knowledge kind set adr --review-days 365 --required "Context,Decision,Consequences,Alternatives"
+```
+
+## 提交文档
+
+成员和智能体用类型和倡议所需的元数据创建草稿：
+
+```bash
+multica knowledge add --kb engineering --kind adr --title "Use Postgres for queues" --file adr.md \
+  --confidence high --valid-until 2027-01-01 --tag queues --supersedes <old-document-id>
+multica knowledge add --kb ventures --initiative <initiative-id> --stage validate \
+  --initiative-folder INI-3-invoicing --kind validation_report --title "Validation" --file validation.md
+```
+
+`--confidence` 可选 `low`、`medium` 或 `high`。`--stage` 记录文档编写时所处的流水线阶段。取代旧文档的新文档发布后，旧文档会被隐藏。草稿在有人发布（或发布策略自动发布）之前不可搜索。
+
+## 发布策略
+
+发布策略决定谁来发布草稿。每个知识库和每种类型都可以设置。类型的策略优先于知识库的策略；没有设置策略的范围默认为手动。
+
+| 模式 | 结果 |
+| --- | --- |
+| `manual` | 由人员发布草稿 |
+| `auto_after_review` | 评审员（来自另一个小队）记录结论后，草稿发布 |
+| `auto` | 草稿立即发布 |
+
+```bash
+multica knowledge policy list
+multica knowledge policy set --scope base --key engineering --mode auto_after_review
+multica knowledge policy unset --scope kind --key runbook
+```
+
+自动发布还受小队的[自主等级](/autonomy-and-approvals)限制。等级低于 2 的小队不会自动发布，其草稿保持手动。没有所属小队的草稿不会自动发布。
+
+评审员用以下命令记录结论：
+
+```bash
+multica knowledge review <draft-id> --verdict ok
+multica knowledge review <draft-id> --verdict changes --note "Add the sources for the pricing claim"
+```
+
+## 图书管理员
+
+图书管理员是执行官办公室小队中的一个智能体，随初始公司一起设置。它运行四项[例行任务](/charters-and-routines)：
+
+- **分诊**：处理新草稿，并将其交给负责的小队。
+- **新鲜度**：找出超过复审日期的文档，并为每份文档提交复审请求。
+- **检索**：运行搜索评估用例，并记录命中率。
+- **分类审计**：查找孤立文档和文档之间失效的链接，并修复能修复的链接。
+
+查看每项例行任务最近一次的运行：
+
+```bash
+multica knowledge health
+```
+
+## 检索评估
+
+评估用例是搜索应当回答的问题，并附上好答案应返回的文档或类型。它们用来显示知识库是否仍能找到重要内容。
+
+```bash
+multica knowledge eval add --question "What did we decide about annual pricing?" --kind decision_record
+multica knowledge eval list
+multica knowledge eval run
+```
+
+`eval run` 立即运行所有用例，并记录命中率，供摘要报告。任何所有者或管理员都可以运行。错误的预期会降低命中率，应修正用例，而不是忽略它。
+
+<Callout type="info">
+即使没有相关结果，搜索也会返回最接近的匹配。命中率是期望文档被返回的用例所占比例，它不评判答案的质量。
+</Callout>
+
+## 下一步
+
+- [知识库](/knowledge-base)：启用、草稿和搜索。
+- [流水线与倡议](/pipeline)：阶段文档。
+- [初始公司](/starter-company)：图书管理员及其例行任务。

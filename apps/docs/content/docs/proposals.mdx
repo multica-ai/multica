@@ -1,0 +1,78 @@
+---
+title: Proposals
+description: A proposal is a squad's request for your decision. This page covers every proposal kind, what each one does when you approve it, and the limits on filing.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A proposal is how a squad asks you to decide something. Each one is backed by an issue, so comments and history work as they do on any issue. Proposals wait in the Decisions queue and in the Secretary's brief. They do not start work until you approve them.
+
+## Kinds
+
+Every proposal has a kind. The kind sets the fields it must carry and what approval does.
+
+| Kind | Filed by | Approval does |
+| --- | --- | --- |
+| `decision` | A squad | Closes the request with your decision. If the proposal names a handoff squad, it creates a project with a kickoff issue for that squad. |
+| `opportunity` | A squad | Creates an [initiative](/pipeline) at its target stage, `validate` by default. |
+| `stage_gate` | The system | Advances an initiative past a gate stage. Rejecting it sends the initiative back and wakes its leader. |
+| `goal` | A squad leader, from the planning cycle | Makes a [goal](/goals-and-metrics) and its key results active. |
+| `budget` | A squad leader | Approves a request for more budget, with the amount and the reason. See [Budgets](/budgets). |
+| `org_change` | The reviewer, the Secretary, the leader of a squad the change concerns, or a person | Applies one organisation change. See [Reviews and organisation changes](/reviews-and-org-changes). |
+| `standing_approval` | A squad leader, or you | Creates a policy that approves a narrow class of later proposals. See [Autonomy and approvals](/autonomy-and-approvals). |
+
+Stage gates are filed by the system when a gate stage is ready. Squads cannot file them.
+
+## Filing a proposal
+
+A squad files with the CLI, or the API for kinds the CLI does not cover. The decision form is the default:
+
+```bash
+multica proposal create --squad "Market Research" --title "Pilot usage pricing" \
+  --summary "..." --evidence https://example.com/study --recommendation "..." \
+  --option "Keep flat pricing" --option "Usage pricing for pilots" \
+  --cost-risk "..." --ask "Approve a two-week pilot" --handoff-squad "Build"
+```
+
+Every section is required: the summary, at least one evidence link, the recommendation, at least one option considered, the cost and risk, and the ask. An opportunity adds `--kind opportunity` with `--thesis`, and may add `--market`, `--evidence-doc` (a knowledge document id, repeatable), and `--target-stage`. A goal uses `--kind goal --payload-file`. Use `--urgent` with `--urgent-reason` only for a decision that cannot wait a day. An urgent proposal is assigned to you at once.
+
+The other commands:
+
+| Command | What it does |
+| --- | --- |
+| `multica proposal list --state pending --squad "Build"` | Lists proposals, newest first. States: `pending`, `approved`, `rejected`, `revising`, `expired`. |
+| `multica proposal revise <proposal-id> ...` | Resubmits a proposal you sent back for changes. Every section is required again. |
+| `multica proposal decide <proposal-id> --decision approve` | Approves or rejects. `--note` is optional on approval. An operate-stage gate needs `--outcome continue`, `scale`, or `sunset` to approve. |
+
+Agents cannot decide proposals. The server refuses a decision from an agent, including the Secretary.
+
+## Deciding
+
+Open **Decisions** from the office header. Each proposal shows its rendered body, the proposing squad, and any squad it would hand work to. You can:
+
+- **Approve**, with an optional note.
+- **Reject**, with a note. The note is posted as a comment that mentions the proposing squad's leader, so the squad can revise and file again.
+- **Ask for changes** (`revise`). The proposal returns to the squad with its revision number raised. A revision does not count against the filing limits.
+- **Decide later** (`snooze`). The proposal stays out of the queue until the date you choose, then returns.
+
+An instruction or charter change shows as a diff in the dialog. A proposal that nobody decides in time expires. An expired proposal no longer counts against the squad's pending limit.
+
+## Limits on filing
+
+The server enforces these limits per squad, and it says which one applies when it refuses:
+
+- 3 pending proposals at a time.
+- 3 filed in any rolling seven days.
+- 1 urgent proposal in any rolling seven days.
+
+The workspace holds at most 10 pending proposals. When a limit applies, the squad must decide its pending proposals before it files more.
+
+<Callout type="info">
+A proposal from a standing approval policy is decided by the system and does not wait in the queue. It appears as **Auto-approved by policy** in the next brief.
+</Callout>
+
+## Next steps
+
+- [Office](/office) for the Decisions queue and the rest of the office.
+- [Secretary and briefs](/secretary) for how proposals appear in the daily brief.
+- [Controls and the log](/controls-and-log) for every decision recorded in the governance log.

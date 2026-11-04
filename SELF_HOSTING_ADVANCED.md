@@ -348,7 +348,7 @@ Sidecar variables (read by the `knowledge` profile):
 | `KNOWLEDGE_DB_PASSWORD` / `KNOWLEDGE_REDIS_PASSWORD` | `weknora` | Internal credentials; the services are not published. |
 | `KNOWLEDGE_MAX_FILE_SIZE_MB` | `50` | Upload size limit. |
 | `KNOWLEDGE_DISABLE_REGISTRATION` | `false` | Close WeKnora self-registration once the service user exists. |
-| `KNOWLEDGE_TENANT_MAX_OWNED_PER_USER` | `-1` | WeKnora caps a user at 10 workspaces by default; the single service user owns one per Multica workspace, so the cap is lifted. |
+| `KNOWLEDGE_TENANT_MAX_OWNED_PER_USER` | `1000` | WeKnora caps a user at 10 workspaces by default; the single service user owns one per Multica workspace, so the cap is raised. When it is reached, enabling knowledge returns 502. |
 
 ### CLI / Daemon
 

@@ -20,7 +20,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 启用会先为工作区创建独立的存储，然后：
 
 - 创建嵌入模型，由运营者选定；
-- 创建下面列出的五个知识库；
+- 创建下面列出的六个知识库；
 - 创建一个名为 `company-read` 的只读 MCP 端点，交给工作区中的每个智能体，包括之后创建的智能体。
 
 页面会显示以下状态之一：
@@ -33,7 +33,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | **离线** | 边车服务没有响应。运行会在没有公司知识的情况下继续。 |
 | **设置失败** | 设置中途停止。点击 **重试设置** 会从中断处继续。 |
 
-## 五个知识库
+## 知识库
 
 每个知识库都有一个 CLI 使用的键，例如 `market`。成员和智能体可以在除 `decisions` 以外的所有知识库中创建草稿，`decisions` 只由 Multica 写入。
 
@@ -44,6 +44,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `product` | Product | 产品需求文档、规格、路线图、分析、用户研究 |
 | `engineering` | Engineering | 架构决策、运维手册、事后复盘 |
 | `decisions` | Decisions | 每个提案决定及其备注，以及每份已发布的简报 |
+| `ventures` | Ventures | 每个倡议一个文件夹，存放其验证、分析、预算申请和发布文档 |
 
 ## 草稿与发布
 
@@ -64,7 +65,7 @@ multica knowledge add --kb market --title "竞争对手定价页" --url https://
 `--file`、`--text` 和 `--url` 三者只能选一个。URL 只在草稿发布时才会抓取。`--source-issue` 记录文档的来源，使文档可以链接回对应任务。`--idempotency-key` 使重试返回同一份草稿，而不是再创建一份；默认值由参数推导。
 
 <Callout type="info">
-知识页面上的上传功能，以及任务或简报上的 **保存到知识库**，目前都不在本版本中。请使用 CLI 保存文件或网页。
+你可以在知识页面上传文件，也可以在任务中使用 **保存到知识库** 把内容保存为草稿。文档类型和发布策略参见[知识分类](/knowledge-taxonomy)。
 </Callout>
 
 ## 搜索与浏览
@@ -100,12 +101,12 @@ multica knowledge list --kb market --state published
 
 运营者配置了 WeKnora 网页界面后，知识页面会显示 **在 WeKnora 中打开** 按钮。点击后会在新标签页中打开该界面。用它来修改知识页面未涵盖的设置，例如分块、数据源同步和 Wiki 生成。登录由 WeKnora 自行处理。
 
-## 本版本不包含的功能
+## 询问秘书、新鲜度与发布策略
 
-- 用 **保存到知识库** 从任务、评论或简报保存内容。
-- 在知识页面上传文件。
-- 在知识页面中的 **询问秘书**。
-- 自动发布、新鲜度审查，以及 WeKnora 的单点登录。
+- 知识页面中的 **询问秘书**。秘书会先搜索知识库，并引用它使用的文档。参见[秘书与简报](/secretary)。
+- 新鲜度：图书管理员会报告超过复审日期的文档。参见[知识分类](/knowledge-taxonomy)。
+- 自动发布遵循为每个知识库或类型设置的发布策略。参见[知识分类](/knowledge-taxonomy)。
+- 不提供 WeKnora 的单点登录，WeKnora 自行处理登录。
 
 ## 运营者
 

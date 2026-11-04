@@ -1,0 +1,123 @@
+---
+title: 지식 분류와 사서
+description: 모든 지식 문서에는 종류가 있습니다. 종류는 반드시 포함해야 하는 제목, 검토 주기, 공개 정책을 정합니다. 사서는 기록을 최신 상태로, 찾기 쉽게, 서로 연결된 상태로 유지합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+[지식 베이스](/knowledge-base)는 **종류(kind)**로 정리됩니다. 종류는 문서가 무엇인지, 어떤 제목을 반드시 포함해야 하는지, 얼마나 오래 유효한지, 어떤 지식 베이스에 속하는지를 정합니다. **사서(Librarian)**는 이 기록을 정돈된 상태로 유지하는 스쿼드입니다.
+
+## 지식 베이스
+
+| 키 | 이름 | 내용 |
+| --- | --- | --- |
+| `company` | Company | 정책, 플레이북, 참고 자료, 회사의 상시 규칙 |
+| `market` | Market | 시장 보고서, 경쟁사 프로필, 고객 인사이트, 출시 계획 |
+| `product` | Product | 제품 브리프, 요구사항, 로드맵 |
+| `engineering` | Engineering | 아키텍처 결정, 런북, 테스트 보고서, 릴리스 노트, 사후 분석 |
+| `decisions` | Decisions | 결정 기록과 브리프 보관본. Multica가 씁니다. |
+| `ventures` | Ventures | 이니셔티브마다 폴더 하나. 검증, 분석, 예산 요청, 출시 문서를 담습니다 |
+
+## 종류
+
+각 종류에는 키, 기본 지식 베이스, 일 단위 검토 주기, 초안이 포함해야 하는 제목이 있습니다. 필수 제목이 빠진 초안은 거부됩니다. 아래는 기본값입니다. `multica knowledge kinds`에서 전체 목록을 볼 수 있습니다.
+
+| 키 | 지식 베이스 | 검토(일) | 필수 제목 |
+| --- | --- | --- | --- |
+| `market_report` | market | 90 | Summary, Market size, Trends, Sources |
+| `competitor_profile` | market | 90 | Summary, Offering, Pricing, Strengths and weaknesses, Sources |
+| `customer_insight` | market | 180 | Summary, Evidence, Segments, Sources |
+| `prd` | product | 180 | Problem, Requirements, Non-goals, Acceptance criteria |
+| `roadmap` | product | 90 | Goals, Milestones, Dependencies |
+| `budget_request` | ventures | 없음 | Amount, Justification, Breakdown |
+| `adr` | engineering | 없음 | Context, Decision, Consequences |
+| `runbook` | engineering | 180 | Purpose, Steps, Rollback, Owners |
+| `postmortem` | engineering | 없음 | Summary, Timeline, Root cause, Actions |
+| `decision_record` | decisions | 없음 | Decision, Context |
+| `policy` | company | 365 | Scope, Rule, Owner |
+| `reference` | company | 365 | Summary |
+
+전체 목록은 26가지이며, 검증 보고서, 분석, 출시 계획, 회고, 지표 보고서도 포함합니다.
+
+소유자나 관리자는 종류의 이름, 검토 주기, 필수 제목, 템플릿, 기본 지식 베이스를 편집할 수 있습니다.
+
+```bash
+multica knowledge kinds
+multica knowledge template adr                 # Markdown 골격 출력
+multica knowledge kind set adr --review-days 365 --required "Context,Decision,Consequences,Alternatives"
+```
+
+## 문서 등록
+
+멤버와 에이전트는 종류와 이니셔티브에 필요한 메타데이터를 붙여 초안을 만듭니다.
+
+```bash
+multica knowledge add --kb engineering --kind adr --title "Use Postgres for queues" --file adr.md \
+  --confidence high --valid-until 2027-01-01 --tag queues --supersedes <old-document-id>
+multica knowledge add --kb ventures --initiative <initiative-id> --stage validate \
+  --initiative-folder INI-3-invoicing --kind validation_report --title "Validation" --file validation.md
+```
+
+`--confidence`에는 `low`, `medium`, `high`를 씁니다. `--stage`는 문서가 작성된 파이프라인 단계를 기록합니다. 대체하는 문서가 공개되면 이전 문서는 숨겨집니다. 초안은 누군가 공개하거나 공개 정책이 공개하기 전까지 검색되지 않습니다.
+
+## 공개 정책
+
+공개 정책은 누가 초안을 공개하는지 정합니다. 각 지식 베이스와 각 종류에 설정할 수 있습니다. 종류의 정책이 지식 베이스의 정책보다 우선하며, 정책이 없는 범위는 수동입니다.
+
+| 모드 | 동작 |
+| --- | --- |
+| `manual` | 사람이 초안을 공개함 |
+| `auto_after_review` | 다른 스쿼드의 리뷰어가 결론을 기록한 뒤 초안이 공개됨 |
+| `auto` | 초안이 즉시 공개됨 |
+
+```bash
+multica knowledge policy list
+multica knowledge policy set --scope base --key engineering --mode auto_after_review
+multica knowledge policy unset --scope kind --key runbook
+```
+
+자동 공개는 스쿼드의 [자율성 수준](/autonomy-and-approvals)에도 제한됩니다. 레벨 2 미만인 스쿼드는 자동 공개하지 않으며, 그 초안은 수동으로 남습니다. 소속 스쿼드가 없는 초안은 자동 공개되지 않습니다.
+
+리뷰어는 다음과 같이 결론을 기록합니다.
+
+```bash
+multica knowledge review <draft-id> --verdict ok
+multica knowledge review <draft-id> --verdict changes --note "Add the sources for the pricing claim"
+```
+
+## 사서
+
+사서는 스타터 회사와 함께 설정되는 Executive Office 스쿼드의 에이전트입니다. 네 가지 [루틴](/charters-and-routines)을 실행합니다.
+
+- **분류(triage)**: 새 초안을 살펴보고 담당 스쿼드에 넘깁니다.
+- **신선도(freshness)**: 검토 기한이 지난 문서를 찾아, 문서마다 검토 요청을 만듭니다.
+- **검색(retrieval)**: 검색 평가 사례를 실행하고 적중률을 기록합니다.
+- **분류 감사(taxonomy)**: 연결되지 않은 고아 문서와 문서 사이의 끊어진 링크를 찾고, 고칠 수 있는 링크는 고칩니다.
+
+각 루틴의 마지막 실행 결과는 다음 명령으로 볼 수 있습니다.
+
+```bash
+multica knowledge health
+```
+
+## 검색 평가
+
+평가 사례는 검색이 답해야 하는 질문과, 좋은 답이라면 돌려줘야 할 문서 또는 종류입니다. 지식 베이스가 여전히 중요한 것을 찾는지 보여 줍니다.
+
+```bash
+multica knowledge eval add --question "What did we decide about annual pricing?" --kind decision_record
+multica knowledge eval list
+multica knowledge eval run
+```
+
+`eval run`은 모든 사례를 지금 실행하고 적중률을 기록합니다. 적중률은 다이제스트에 보고됩니다. 소유자나 관리자라면 누구나 실행할 수 있습니다. 기대값이 잘못되면 적중률이 떨어지므로, 무시하지 말고 사례를 고치세요.
+
+<Callout type="info">
+검색은 관련 결과가 없어도 가장 가까운 결과를 돌려줍니다. 적중률은 기대한 문서가 돌아온 사례의 비율이며, 답변의 품질을 평가하지는 않습니다.
+</Callout>
+
+## 다음 단계
+
+- [지식 베이스](/knowledge-base): 활성화, 초안, 검색.
+- [파이프라인과 이니셔티브](/pipeline): 단계별 문서.
+- [스타터 회사](/starter-company): 사서와 그 루틴.

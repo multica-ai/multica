@@ -1,0 +1,80 @@
+---
+title: 目标与指标
+description: 目标说明公司为了什么而努力。关键结果跟踪指标的进展，指标来自内置计算、手动录入，或来自你自己产品的 webhook。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**目标**说明公司、楼层、小队或倡议在某个周期内要达成什么。目标包含**关键结果**，每个关键结果跟随一个**指标**。进展和信心程度根据指标计算，因此无需有人撰写状态报告，目标也能显示当前状况。
+
+## 指标
+
+指标是带有单位和方向的命名序列。每条读数都有数值、时间和范围：公司、楼层、小队或倡议。指标来自三种来源。
+
+**内置**指标每晚根据工作区自身的记录计算：
+
+| 领域 | 指标 |
+| --- | --- |
+| 交付 | `delivery.issues_done`、`delivery.cycle_time_days`、`delivery.rework_rate` |
+| 运行 | `runs.count`、`runs.success_rate`、`runs.cost_usd` |
+| 提案 | `proposals.acceptance_rate`、`proposals.decision_hours` |
+| 例行任务 | `routines.compliance_rate` |
+| 流水线 | `pipeline.initiatives_active`、`pipeline.stalled`、`pipeline.stage_days` |
+| 知识 | `knowledge.docs_published`、`knowledge.fresh_ratio`、`knowledge.retrieval_hit_rate` |
+| 简报 | `brief.usefulness` |
+
+`knowledge.*` 指标和 `brief.usefulness` 仅限公司范围。运行成本只统计提供商报告的部分。
+
+**手动**读数由成员或智能体录入：
+
+```bash
+multica metric list
+multica metric report --key runs.count --scope squad:<squad-id> --value 42 --note "Checked by hand"
+multica metric report --key mrr --scope initiative:<initiative-id> --value 1200 --observed-at 2026-11-01T09:00:00Z
+```
+
+`--scope` 可选 `company`（默认）、`floor:<id>`、`squad:<id>` 或 `initiative:<id>`。内置指标拒绝手动读数。
+
+**Webhook** 读数用于引入产品外部的数据，例如注册数、收入或可用性。使用工作区成员的个人访问令牌（参见[认证令牌](/auth-tokens)）发送：
+
+```bash
+curl -X POST "$MULTICA_API/api/metrics/signups/readings" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"value": 128, "scope_type": "company", "source": "webhook", "note": "Weekly export"}'
+```
+
+请求体包括 `value`、`scope_type`、`scope_id`（非公司范围时必填）、`observed_at`、`note` 和 `source`。每个工作区、每个指标每分钟最多 60 次上报。由上报新建的指标会采用请求体中的名称、单位和方向。超过 16 KiB 的上报会被拒绝。
+
+读数完整保留 90 天。更早的读数会压缩为每天一个值。
+
+## 目标与关键结果
+
+关键结果会将指标的最新读数与起始值和目标值比较：
+
+- 进展是从起始值到目标值所走过的比例，限定在 0 到 1 之间。方向由差值的正负决定。
+- 目标的进展是其关键结果的加权平均，每项权重为 1 到 10。
+- 信心程度将进展与周期起点到终点的一条直线比较：进展不低于预期比例减去 10 个百分点时为 `on_track`（正常）；低于此值至 30 个百分点之间为 `at_risk`（有风险）；再低则为 `off_track`（偏离）。尚无读数时为 `unknown`（未知）。
+
+负责人可以用备注覆盖信心程度，覆盖结果会有标记。
+
+目标有以下状态：`draft`（草稿）、`active`（生效）、`achieved`（已达成）、`missed`（未达成）或 `dropped`（已放弃）。激活目标至少需要一个关键结果，服务器会拒绝没有关键结果的目标。
+
+**谁来设定目标。** 你和管理员在 **Goals** 标签页中创建公司和楼层目标。小队的目标来自规划周期：每个周期开始时，平台会为每个有章程的小队开一个规划议题，内容包括公司目标和该小队的章程。负责人以 `goal` 提案作答，批准后目标生效。参见[提案](/proposals)。
+
+负责人简报会列出小队本周期生效的关键结果，标题为 **Your goals this period**（本周期你的目标）。小队的运营评审需要报告其进展。
+
+<Callout type="info">
+**治理**中的 Goals 标签页以树形展示目标：公司、楼层、小队和倡议。每个关键结果都有一条迷你走势图。简报的 **Goals** 部分列出状态发生变化的目标，以及每个有风险或偏离的目标及其变化的指标。
+</Callout>
+
+## 限制
+
+- 目标和指标的端点为 `GET`、`POST /api/goals`，`GET`、`PATCH`、`DELETE /api/goals/{id}`，`POST /api/goals/{id}/activate`，`POST /api/goals/{id}/status`，`PUT /api/goals/{id}/confidence`，`GET /api/metrics`，以及 `GET` 和 `POST /api/metrics/{key}/readings`。目标没有 CLI 命令。
+- 公司导入不包含小队范围或倡议范围的目标。参见[公司即代码](/company-as-code)。
+
+## 下一步
+
+- [预算](/budgets)：目标可以跟踪的开支数据。
+- [评审与组织变更](/reviews-and-org-changes)：由同一批记录生成的评分卡。
+- [秘书与简报](/secretary)：目标如何进入每日简报。

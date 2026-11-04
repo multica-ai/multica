@@ -51,6 +51,96 @@ Use a new workspace with no floors or squads, where the boss is an owner.
 | 3.4 | Open the bases and check Wiki and Summaries. | Wiki is on for company, ventures and decisions, and no other base has Wiki. Summaries are on. | not verified |
 | 3.5 | Upload a short market note (a few paragraphs, with the headings the kind requires) with kind market_report into the ventures base. | The upload reads "is in the knowledge base". A Wiki page and a summary appear for the document. The 9router endpoint logs show requests for the chat model. | not verified |
 | 3.6 | Search for a phrase from the note. | The document is returned with its kind and source, and its Wiki page is linked. | not verified |
+| 3.7 | Add a Git repository with a `docs` folder over https (not private) under Knowledge, Sources, Repository docs, turn the sync on, and press Sync now. | Each Markdown file with a Summary heading appears in the engineering base as a reference document. A file without the heading is listed under the form as failed. Changing a file and syncing again replaces it. | not verified |
+| 3.8 | Remove one of the synced files from the repository, push, and press Sync now. | The document leaves the engineering base and its sync record reads archived. | not verified |
+
+### Live check, 2026-11-04 (covers 10.11, 10.12 and 10.14)
+
+An agent run on the development machine, not a sign-off. No row above was
+signed off, and every row stays **not verified**. The test workspace was
+deleted afterwards.
+
+- Router, checked directly: `VSF_Planner_Reviewer[1m]` answered a chat request
+  and accepted an image input. The router has no rerank model and no `/v1/rerank`
+  endpoint (404), so `KNOWLEDGE_RERANK_MODEL` is unset.
+- WeKnora `GET /health` on port 8090 answered `ok`. The local embedding service
+  (`bge-m3` on 172.17.0.1:11434) returned 1024-dimension vectors.
+- 3.1 (enable) failed. `POST /api/knowledge/enable` returned 502 "the knowledge
+  service refused to create another workspace". WeKnora answered HTTP 429 "reached
+  self-service workspace quota". The service account owns 10 tenants. Nine belong to
+  deleted workspaces and are held in `knowledge_tenant_deprovision` until
+  2026-11-10, so they still count against the quota.
+- 3.2 (models test) returned 409 "knowledge is not ready for this workspace"
+  (state `disabled`). Because of this, 3.3 to 3.6 and 4.2 to 4.5 were not run.
+  No Wiki page, summary or search result was produced.
+- 10.12 (repo-docs sync, 3.7 and 3.8) and 10.14 (deprovisioning and the owner
+  account) were not run. Both need an enabled base.
+- Not verified: whether WeKnora accepts `10.70.39.196` as a model endpoint. Its
+  `SSRF_WHITELIST_EXTRA` lists only `172.17.0.1`, so the registration may be refused.
+
+To unblock: raise `WEKNORA_TENANT_MAX_OWNED_PER_USER` for WeKnora, or remove the
+held tenants, then rerun 3.1 onward.
+
+### Live check, 2026-11-04 (rerun after the quota and gateway fixes)
+
+An agent run on the development machine, not a sign-off. No row above was
+signed off, and every row stays **not verified**. The test workspace was
+deleted afterwards.
+
+Settings changed:
+
+- WeKnora `WEKNORA_TENANT_MAX_OWNED_PER_USER` set to `1000` in the WeKnora
+  compose `.env` (no `system_settings` row overrode it). `WeKnora-app` was
+  recreated with `docker compose up -d --no-deps app`. Health on 8090 is `ok`.
+  The other containers were not touched.
+- Multica `KNOWLEDGE_LLM_BASE_URL` set to `http://172.17.0.1:20128/v1`, the
+  gateway as seen from the container. `SSRF_WHITELIST_EXTRA` already lists
+  `172.17.0.1`. WeKnora refused `10.70.39.196` with "direct IP address access is
+  not allowed", so the allow-list was not widened.
+
+Junk tenants removed (owned by deleted workspaces, deprovision rows `held`):
+WeKnora tenant ids 10009 to 10017. Their workspace rows are gone from Multica.
+WeKnora's `DELETE /tenants/{id}` answered 200, but those tenants were already
+soft-deleted (`deleted_at` set on 2026-11-03), so the call changed nothing.
+Their owner memberships still counted against the quota. The cap change
+removed that block. The Multica `knowledge_tenant_deprovision` rows were left
+as they are, so the hourly job will finish them after the hold (2026-11-10).
+Tenants 10007 and 10008 belong to the service account, have no deprovision
+row, and were not touched.
+
+- 3.1 (enable) passed. Knowledge reported `ready` with six bases.
+- 3.2 (models test) returned `chat` ok, `vision` ok. `rerank` was not
+  checked because no rerank model is configured. The embedding model
+  (`bge-m3`) is not probed by this test. It was registered at enable, and
+  the uploaded chunks were embedded and indexed.
+- 3.4 (Wiki and summaries) was set on `ventures` only, for this test.
+  `company` and `decisions` were not set.
+- 3.5 (upload) passed. `POST /api/knowledge/documents/upload` with kind
+  `market_report` in `ventures` returned 201 and `published`. A summary and a
+  Wiki set (three concept and entity pages plus one summary page) were written
+  for the document.
+- 3.6 (search) passed. The phrase returned the document with kind
+  `market_report`. The Wiki link was not checked.
+- 3.3, 3.7, 3.8, 10.14 and section 4 were not run.
+
+Defects found and fixed in Multica. The summary and Wiki calls failed with
+"decode response: invalid character 'd'". WeKnora omits `stream` on a
+non-streaming call, and the gateway then answers with `text/event-stream`. The
+chat and vision models are now registered with
+`spec.compat.extra_body.stream = false`
+(`server/internal/service/knowledge_provision.go`,
+`server/internal/knowledge/client.go`, regression test
+`TestEnsureModelSendsExtraBodyInCompatSpec`). A model created before this
+change keeps its old parameters, so it needs the same compat `extra_body` set
+in WeKnora before its Wiki and summaries will work.
+
+Open, not fixed: WeKnora's keyword retrieval fails for this query shape with
+"Unsupported query shape" (paradedb). The vector hit still returns. The cause is
+in WeKnora, not in Multica.
+
+Test workspaces (two were created and both deleted through the API). Their
+WeKnora tenants 10018 and 10019 are now `held` in Multica until 2026-11-11, which
+is the normal seven-day hold.
 
 ## 4. Uploads, headings and supersession
 

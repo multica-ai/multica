@@ -1,0 +1,98 @@
+---
+title: Revues et changements d'organisation
+description: Les scorecards mesurent la performance des agents et des squads. Les revues en tirent un jugement assorti de recommandations. Les changements d'organisation appliquent ces recommandations, avec période d'essai et retour arrière.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les revues et les changements d'organisation referment la boucle. Un **scorecard** mesure la performance d'un agent ou d'un squad. Une **revue** lit le scorecard et recommande des changements. Un **changement d'organisation** applique une recommandation une fois que vous l'avez approuvée. Le changement passe ensuite en **période d'essai**, et la plateforme enregistre s'il a aidé.
+
+## Scorecards
+
+Une tâche nocturne calcule un scorecard pour chaque agent, chaque squad et l'entreprise. Il couvre la dernière semaine ou le dernier mois complets. Un scorecard dont la période compte trop peu d'exécutions est marqué `insufficient` (insuffisant) et n'est jamais soumis à revue.
+
+Les métriques sont :
+
+- les exécutions et le taux de réussite, les échecs étant répartis par cause. Un runtime hors ligne ne pèse pas contre l'agent ;
+- les tickets terminés, le taux de réussite du premier coup (terminé sans être rouvert), le délai de cycle et le coût par ticket terminé ;
+- l'intervention humaine, c'est-à-dire les commentaires ou modifications humains après qu'un agent a marqué un travail terminé ;
+- le taux d'acceptation des propositions, le taux de conformité des routines et la contribution aux connaissances ;
+- pour le secrétaire, l'utilité du brief.
+
+Certains chiffres sont des indicateurs de substitution. La date de fin est l'heure à laquelle le ticket est entré pour la dernière fois dans un statut terminé. Le taux de réussite du premier coup et l'intervention reposent sur le nombre d'exécutions terminées et les commentaires des membres. Le coût ne compte que ce que déclare le fournisseur. Les réouvertures sont comptées à partir de l'historique de fin du ticket, qui commence avec cette version. Les réouvertures antérieures ne sont pas connues.
+
+Les propriétaires, les administrateurs et le responsable du sujet peuvent lire les scorecards :
+
+```bash
+multica review scorecards --subject-type squad --subject-id <squad-id> --period month
+```
+
+## Revues
+
+Le squad **People & Performance** (Personnes et performance), sur l'étage Gouvernance, compte un agent relecteur. Chaque mois, il examine chaque squad disposant de données suffisantes, ainsi que chaque agent que son scorecard ou un échantillon signale comme `below` (en dessous). Chaque revue comporte une note (`exceeds` (dépasse), `meets` (conforme), `below` (en dessous) ou `at_risk` (à risque)), un commentaire rédigé et des recommandations. Une revue doit citer les chiffres du scorecard sur lesquels elle s'appuie, ainsi que les preuves correspondantes.
+
+Une revue est un outil de travail, non un classement. Elle est visible des propriétaires, des administrateurs et du responsable du squad concerné. Ses métriques indiquent ce qu'elles mesurent.
+
+Le relecteur publie avec un fichier JSON :
+
+```bash
+multica review publish --file review.json
+multica review list
+```
+
+La publication d'une revue dépose chaque changement recommandé comme proposition `org_change`, afin que vous décidiez avec les preuves à côté. L'onglet Reviews de **Gouvernance** liste les revues et affiche les identifiants de proposition plutôt que des liens. La section **People** du brief énumère les nouvelles revues et leurs recommandations.
+
+## Changements d'organisation
+
+Une proposition `org_change` a l'un de huit types :
+
+| Type | Ce qui change | Mode d'application |
+| --- | --- | --- |
+| `instruction_change` | Les instructions d'un agent | Une révision de l'ancien texte est écrite, puis l'agent est mis à jour |
+| `skill_change` | Les compétences d'un agent | Des compétences sont ajoutées et retirées |
+| `charter_change` | La charte d'un squad | La charte est mise à jour, avec une révision |
+| `autonomy_change` | Le niveau d'autonomie d'un squad | Le niveau est fixé |
+| `hire` | Ajoute un agent à un squad | Un agent est créé à partir d'un modèle, avec le squad comme squad d'attache |
+| `retire` | Retire un agent ou un squad | Il est archivé. Les tâches en file sont annulées, les tâches en cours se terminent, et ses connaissances restent. |
+| `move` | Le squad d'un agent | Les appartenances et le squad d'attache changent |
+| `merge_squads` | Deux squads | Les membres et les routines sont transférés, et le squad source est archivé. Le texte de la charte est fusionné par vous dans la boîte de dialogue. |
+
+Les changements d'organisation sont déposés par le relecteur, le secrétaire, le responsable d'un squad concerné par le changement, ou une personne. Ils ne sont jamais approuvés automatiquement, et ne relèvent jamais d'une approbation permanente. La boîte de décision présente un changement d'instructions ou de charte sous forme de différence.
+
+## Révisions d'instructions et retour arrière
+
+Chaque mise à jour des instructions d'un agent écrit une révision, quelle que soit la voie : l'application, la CLI, un modèle, un import ou un changement d'organisation appliqué. La révision enregistre le texte, sa source (`human`, `proposal` ou `rollback`), et la proposition le cas échéant.
+
+Sur la page de l'agent, l'historique liste les révisions. Restaurer une révision écrit une nouvelle révision contenant l'ancien texte, de sorte que rien n'est perdu.
+
+```bash
+curl -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/agents/<agent-id>/instruction-revisions"
+curl -X POST -H "Authorization: Bearer $MULTICA_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+  "$MULTICA_API/api/agents/<agent-id>/instruction-revisions/<revision>/restore"
+```
+
+L'historique des révisions commence au premier changement enregistré. Les changements antérieurs n'y figurent pas. Les agents porteurs de type constructeur ne sont pas suivis.
+
+## Période d'essai
+
+Un changement appliqué entre dans une **période d'essai de 14 jours**. À son terme, le relecteur compare les scorecards d'avant et d'après le changement, et enregistre un seul résultat :
+
+| Résultat | Signification |
+| --- | --- |
+| `improved` (amélioré) | Les mesures ont évolué dans le bon sens |
+| `neutral` (neutre) | Pas de changement net |
+| `worse` (dégradé) | Les mesures ont évolué dans le mauvais sens. Une proposition de retour arrière est déposée. |
+| `insufficient` (insuffisant) | Données trop rares. Le résultat est reporté. |
+
+La période d'essai s'applique aux huit types. Un retour arrière n'est possible que pour un changement qui peut être annulé. `hire`, `retire` et `merge_squads` ne peuvent pas être annulés : un résultat dégradé pour eux ne dépose donc aucune proposition de retour arrière. Une charte qui crée la première charte d'un squad ne peut pas non plus être annulée. Tenez-en compte avant d'approuver.
+
+<Callout type="info">
+Les propositions de changement d'organisation comptent dans les limites d'attention. Chaque changement appliqué et chaque résultat figurent dans le [journal de gouvernance](/controls-and-log).
+</Callout>
+
+## Étapes suivantes
+
+- [Propositions](/proposals) pour savoir comment les recommandations d'une revue vous parviennent.
+- [Objectifs et métriques](/goals-and-metrics) pour les métriques qu'utilise un scorecard.
+- [Autonomie et approbations](/autonomy-and-approvals) pour comprendre pourquoi les changements d'organisation restent toujours de votre ressort.

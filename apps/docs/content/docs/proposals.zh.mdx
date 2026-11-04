@@ -1,0 +1,78 @@
+---
+title: 提案
+description: 提案是小队向你请求决定的方式。本页介绍每种提案类型、你批准后会发生什么，以及提交的限制。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+提案是小队请你做决定的方式。每份提案都关联一个议题，因此评论和历史记录的用法与任何议题相同。提案会在决策队列和秘书的简报中等待。你批准之前，它不会启动任何工作。
+
+## 类型
+
+每份提案都有类型。类型决定它必须包含的字段，以及批准后会产生什么效果。
+
+| 类型 | 由谁提交 | 批准后的效果 |
+| --- | --- | --- |
+| `decision` | 小队 | 以你的决定结束请求。如果提案指定了接手小队，会创建一个项目，并为该小队建立启动议题。 |
+| `opportunity` | 小队 | 在其目标阶段（默认 `validate`）创建一个[倡议](/pipeline)。 |
+| `stage_gate` | 系统 | 推动倡议越过关卡阶段。驳回会把倡议退回，并唤醒其负责人。 |
+| `goal` | 小队负责人，来自规划周期 | 使[目标](/goals-and-metrics)及其关键结果生效。 |
+| `budget` | 小队负责人 | 批准增加预算的请求，包括金额和理由。参见[预算](/budgets)。 |
+| `org_change` | 评审员、秘书、受影响小队的负责人，或某个人 | 应用一项组织变更。参见[评审与组织变更](/reviews-and-org-changes)。 |
+| `standing_approval` | 小队负责人，或你 | 创建一项策略，预先批准某一类之后的提案。参见[自主与授权](/autonomy-and-approvals)。 |
+
+关卡阶段由系统在关卡阶段就绪时提交，小队不能提交。
+
+## 提交提案
+
+小队用 CLI 提交；CLI 不覆盖的类型则通过 API 提交。默认是决定类提案：
+
+```bash
+multica proposal create --squad "Market Research" --title "Pilot usage pricing" \
+  --summary "..." --evidence https://example.com/study --recommendation "..." \
+  --option "Keep flat pricing" --option "Usage pricing for pilots" \
+  --cost-risk "..." --ask "Approve a two-week pilot" --handoff-squad "Build"
+```
+
+所有部分都必填：摘要、至少一个证据链接、建议、至少一个考虑过的选项、成本与风险，以及请求事项。机会类提案添加 `--kind opportunity`，并附 `--thesis`，还可加 `--market`、`--evidence-doc`（知识文档 ID，可重复）和 `--target-stage`。目标类提案使用 `--kind goal --payload-file`。只有无法等待一天的决定才使用 `--urgent`，并附 `--urgent-reason`。紧急提案会立即分配给你。
+
+其他命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `multica proposal list --state pending --squad "Build"` | 按时间倒序列出提案。状态包括 `pending`、`approved`、`rejected`、`revising` 和 `expired`。 |
+| `multica proposal revise <proposal-id> ...` | 重新提交你退回修改的提案。所有部分需再次填写。 |
+| `multica proposal decide <proposal-id> --decision approve` | 批准或驳回。批准时 `--note` 可选。运营阶段的关卡需要 `--outcome continue`、`scale` 或 `sunset` 才能批准。 |
+
+智能体不能做决定。服务器会拒绝智能体的决定请求，包括秘书。
+
+## 做决定
+
+从办公室标题栏打开 **Decisions**（决定）。每份提案都会显示渲染后的正文、提交小队，以及它会交给的接手小队。你可以：
+
+- **批准**，可选填备注。
+- **驳回**，并填写备注。备注会以评论形式发布，并提及提交小队的负责人，便于小队修改后重新提交。
+- **Ask for changes**（要求修改）。提案退回小队，修订号加一。修订不计入提交限制。
+- **Decide later**（稍后决定）。提案在你选择的日期前不会出现在队列中，之后再返回。
+
+指令或章程变更会在对话框中以差异形式显示。无人及时决定的提案会过期。过期的提案不再计入小队的待决上限。
+
+## 提交限制
+
+服务器按小队执行以下限制，拒绝时会说明触发的是哪一项：
+
+- 同时最多 3 份待决提案。
+- 任意连续七天内最多提交 3 份。
+- 任意连续七天内最多 1 份紧急提案。
+
+整个工作区最多保留 10 份待决提案。触发限制时，小队必须先处理待决提案，才能继续提交。
+
+<Callout type="info">
+由授权策略批准的提案由系统决定，不会进入队列。它会在下一份简报中显示为 **Auto-approved by policy**（由策略自动批准）。
+</Callout>
+
+## 下一步
+
+- [办公室](/office)：决策队列及办公室的其他部分。
+- [秘书与简报](/secretary)：提案如何出现在每日简报中。
+- [控制与日志](/controls-and-log)：治理日志中记录的每项决定。

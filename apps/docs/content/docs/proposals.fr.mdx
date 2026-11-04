@@ -1,0 +1,78 @@
+---
+title: Propositions
+description: Une proposition est une demande de décision adressée par un squad. Cette page couvre chaque type de proposition, ce que fait son approbation et les limites de dépôt.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Une proposition est la manière dont un squad vous demande de trancher. Chacune est adossée à un ticket, de sorte que commentaires et historique fonctionnent comme pour n'importe quel ticket. Les propositions attendent dans la file des décisions et dans le brief du secrétaire. Elles ne lancent aucun travail avant votre approbation.
+
+## Types
+
+Chaque proposition a un type. Le type fixe les champs obligatoires et l'effet de l'approbation.
+
+| Type | Déposé par | L'approbation fait |
+| --- | --- | --- |
+| `decision` | Un squad | Clôt la demande avec votre décision. Si la proposition désigne un squad repreneur, crée un projet avec un ticket de lancement pour ce squad. |
+| `opportunity` | Un squad | Crée une [initiative](/pipeline) à son étape cible, `validate` par défaut. |
+| `stage_gate` | Le système | Fait passer une initiative au-delà d'une étape de porte. Le rejet renvoie l'initiative et réveille son responsable. |
+| `goal` | Un responsable de squad, depuis le cycle de planification | Active un [objectif](/goals-and-metrics) et ses résultats clés. |
+| `budget` | Un responsable de squad | Approuve une demande de budget supplémentaire, avec le montant et la raison. Voir [Budgets](/budgets). |
+| `org_change` | Le relecteur, le secrétaire, le responsable d'un squad concerné, ou une personne | Applique un changement d'organisation. Voir [Revues et changements d'organisation](/reviews-and-org-changes). |
+| `standing_approval` | Un responsable de squad, ou vous | Crée une politique qui approuve à l'avance une catégorie étroite de propositions à venir. Voir [Autonomie et approbations](/autonomy-and-approvals). |
+
+Les portes d'étape sont déposées par le système lorsqu'une étape de porte est prête. Les squads ne peuvent pas les déposer.
+
+## Déposer une proposition
+
+Un squad dépose avec la CLI, ou avec l'API pour les types que la CLI ne couvre pas. Le formulaire de décision est le formulaire par défaut :
+
+```bash
+multica proposal create --squad "Market Research" --title "Pilot usage pricing" \
+  --summary "..." --evidence https://example.com/study --recommendation "..." \
+  --option "Keep flat pricing" --option "Usage pricing for pilots" \
+  --cost-risk "..." --ask "Approve a two-week pilot" --handoff-squad "Build"
+```
+
+Toutes les sections sont obligatoires : le résumé, au moins un lien de preuve, la recommandation, au moins une option étudiée, le coût et le risque, et la demande. Une opportunité ajoute `--kind opportunity` avec `--thesis`, et peut ajouter `--market`, `--evidence-doc` (un identifiant de document de connaissance, répétable) et `--target-stage`. Un objectif utilise `--kind goal --payload-file`. Utilisez `--urgent` avec `--urgent-reason` uniquement pour une décision qui ne peut pas attendre un jour. Une proposition urgente vous est assignée immédiatement.
+
+Les autres commandes :
+
+| Commande | Rôle |
+| --- | --- |
+| `multica proposal list --state pending --squad "Build"` | Liste les propositions, les plus récentes d'abord. États : `pending`, `approved`, `rejected`, `revising` et `expired`. |
+| `multica proposal revise <proposal-id> ...` | Redépose une proposition que vous avez renvoyée pour modifications. Toutes les sections sont à nouveau obligatoires. |
+| `multica proposal decide <proposal-id> --decision approve` | Approuve ou rejette. `--note` est facultatif à l'approbation. Une porte de la phase d'exploitation exige `--outcome continue`, `scale` ou `sunset` pour être approuvée. |
+
+Les agents ne peuvent pas décider de propositions. Le serveur refuse une décision venant d'un agent, y compris celle du secrétaire.
+
+## Décider
+
+Ouvrez **Decisions** (Décisions) depuis l'en-tête du bureau. Chaque proposition affiche son corps rendu, le squad qui la soumet et tout squad repreneur. Vous pouvez :
+
+- **Approuver**, avec une note facultative.
+- **Rejeter**, avec une note. La note est publiée comme commentaire qui mentionne le responsable du squad, afin que le squad puisse la revoir et la redéposer.
+- **Ask for changes** (Demander des modifications). La proposition retourne au squad, son numéro de révision augmente. Une révision ne compte pas dans les limites de dépôt.
+- **Decide later** (Décider plus tard). La proposition reste hors de la file jusqu'à la date que vous choisissez, puis revient.
+
+Un changement d'instructions ou de charte s'affiche sous forme de différence dans la boîte de dialogue. Une proposition que personne ne décide à temps expire. Une proposition expirée ne compte plus dans la limite de propositions en attente du squad.
+
+## Limites de dépôt
+
+Le serveur applique ces limites par squad et indique laquelle s'applique lorsqu'il refuse :
+
+- 3 propositions en attente à la fois.
+- 3 déposées sur une période glissante de sept jours.
+- 1 proposition urgente sur une période glissante de sept jours.
+
+L'espace de travail conserve au maximum 10 propositions en attente. Lorsqu'une limite s'applique, le squad doit décider ses propositions en attente avant d'en déposer d'autres.
+
+<Callout type="info">
+Une proposition issue d'une politique d'approbation permanente est décidée par le système et n'attend pas dans la file. Elle apparaît sous **Auto-approved by policy** (Approuvée automatiquement par politique) dans le brief suivant.
+</Callout>
+
+## Étapes suivantes
+
+- [Bureau](/office) pour la file des décisions et le reste du bureau.
+- [Secrétaire et briefs](/secretary) pour voir comment les propositions apparaissent dans le brief quotidien.
+- [Contrôles et journal](/controls-and-log) pour chaque décision enregistrée dans le journal de gouvernance.

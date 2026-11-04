@@ -1,0 +1,62 @@
+---
+title: 初始公司
+description: 一次运行即可搭建一个可用的公司。初始公司根据你选择的模板，创建楼层、小队、章程、例行任务，以及秘书和图书管理员。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**初始公司**是数字公司的现成结构：一名秘书、一名图书管理员，以及负责研究、产品、构建、发布和治理的小队。你选择要创建哪些小队，它会一并创建楼层、章程、例行任务，以及一项公司预算。
+
+适用于新的或几乎为空的工作区。它不会删除任何内容，重复运行也不会重复创建。
+
+## 向导
+
+打开办公室并启动公司向导，共四步：
+
+1. **运行时。** 新智能体所在的运行时。选择一个在线的运行时。
+2. **选择。** 要创建的小队。每张卡片显示小队的使命和例行任务。
+3. **估算。** 对所选例行任务成本的估算。
+4. **启动选项。** 三选一：
+   - `all`：所有例行任务立即启用。
+   - `per_floor`：每个楼层的主导例行任务启用，其余暂停。
+   - `leave_paused`：所有例行任务保持暂停，由你逐个启动。
+
+向导调用 `POST /api/office/company-template/apply`。响应是一份报告，列出它创建或找到的每个楼层、小队、智能体和例行任务。若运行中途停止，再次运行即可：它会从报告处继续，只创建缺少的部分。
+
+## 创建的内容
+
+小队按楼层分组。楼层名称固定为英文，使重复运行时能找到它们。
+
+| 楼层 | 小队 |
+| --- | --- |
+| Executive（执行） | **Executive Office**（执行办公室）：秘书和图书管理员，附每日简报和每周评审例行任务，以及图书管理员的例行任务 |
+| Research（研究） | **Market Research**、**Opportunity Lab**、**Competitor Intelligence**、**Customer Voice** |
+| Product（产品） | **Product Discovery**、**Product Analysis**、**Planning** |
+| Build（构建） | **Build** |
+| Launch（发布） | **Release & Ops**、**Growth & GTM**、**Support** |
+| Governance（治理） | **Finance & Risk**、**People & Performance** |
+
+每个小队都有一份章程，包含使命、职责、产出和边界，以及卡片中的例行任务。小队的指令按卡片中的角色编写。每个智能体获得其角色的指令，以及所有小队共同遵守的共享指令。
+
+**People & Performance** 小队持有[评审](/reviews-and-org-changes)所用的评审员智能体。**Executive Office** 小队持有负责维护[知识库](/knowledge-taxonomy)的图书管理员。
+
+流水线的各阶段由以下小队负责：Validate 由 Product Discovery 负责，Define 由 Product Analysis 负责，Plan 由 Planning 负责，Build 和 Learn 由 Build 负责，Launch 由 Release & Ops 负责，Operate 由 Support 负责。参见[流水线与倡议](/pipeline)。
+
+## 公司预算
+
+初始公司会创建一项全公司预算：每月 500 美元，处于 `warn`（仅警告）模式。它在 80% 时警告，不会暂停任何运行，因此不会在无声中停止工作。初始公司不设置楼层和小队的份额。如需设置，请在 Budgets 标签页中创建。参见[预算](/budgets)。
+
+## 限制
+
+- 需要至少一个在线的运行时。智能体会在你选择的运行时上创建。
+- 初始公司不会创建倡议。倡议来自已批准的机会以及你自己的请求。
+
+<Callout type="info">
+每个小队初始都处于自主等级 1。之后可在 Autonomy 标签页中提高小队的等级。参见[自主与授权](/autonomy-and-approvals)。
+</Callout>
+
+## 下一步
+
+- [秘书与简报](/secretary)：执行办公室的日常工作。
+- [章程与例行任务](/charters-and-routines)：编辑公司初始的章程和例行任务。
+- [公司即代码](/company-as-code)：把此结构导出到第二个工作区。

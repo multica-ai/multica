@@ -20,7 +20,7 @@ Seuls les propriétaires et les administrateurs peuvent activer les connaissance
 L'activation crée un espace de stockage distinct pour l'espace de travail, puis :
 
 - le modèle d'embedding choisi par l'opérateur ;
-- les cinq bases de connaissances listées ci-dessous ;
+- les six bases de connaissances listées ci-dessous ;
 - un point de terminaison MCP en lecture seule nommé `company-read`, donné à chaque agent de l'espace de travail, y compris ceux créés plus tard.
 
 La page affiche l'un de ces états :
@@ -33,7 +33,7 @@ La page affiche l'un de ces états :
 | **Hors ligne** | Le service auxiliaire ne répond pas. Les exécutions continuent sans les connaissances de l'entreprise. |
 | **Échec de la configuration** | La configuration s'est arrêtée en cours de route. **Réessayer la configuration** reprend là où elle s'est arrêtée. |
 
-## Les cinq bases de connaissances
+## Les bases de connaissances
 
 Chaque base de connaissances a une clé utilisée par la CLI, par exemple `market`. Les membres et les agents peuvent créer des brouillons dans toutes, sauf `decisions`, où seul Multica écrit.
 
@@ -44,6 +44,7 @@ Chaque base de connaissances a une clé utilisée par la CLI, par exemple `marke
 | `product` | Product | PRD, spécifications, feuille de route, analyses, recherche utilisateur |
 | `engineering` | Engineering | Décisions d'architecture, runbooks, post-mortems |
 | `decisions` | Decisions | Chaque décision de proposition avec sa note, et chaque bulletin publié |
+| `ventures` | Ventures | Un dossier par initiative : documents de validation, d'analyse, de demande de budget et de lancement |
 
 ## Brouillons et publication
 
@@ -64,7 +65,7 @@ multica knowledge add --kb market --title "Page tarifs d'un concurrent" --url ht
 Donnez exactement un seul parmi `--file`, `--text` ou `--url`. Une URL n'est récupérée que lorsque le brouillon est publié. `--source-issue` enregistre l'origine du document, qui peut alors renvoyer vers cette tâche. `--idempotency-key` fait qu'une nouvelle tentative renvoie le même brouillon au lieu d'en créer un second ; par défaut, la clé est dérivée des arguments.
 
 <Callout type="info">
-L'import depuis la page Connaissances et **Enregistrer dans les connaissances** depuis une tâche ou un bulletin ne font pas partie de cette version. Utilisez la CLI pour enregistrer un fichier ou une page.
+Vous pouvez importer un fichier depuis la page Connaissances, ou enregistrer le contenu d'une tâche avec **Enregistrer dans les connaissances**. Les types de documents et les politiques de publication sont décrits dans [Taxonomie des connaissances](/knowledge-taxonomy).
 </Callout>
 
 ## Rechercher et parcourir
@@ -100,12 +101,12 @@ Cette fonction s'exécute dès que les connaissances sont prêtes. Cette version
 
 La page Connaissances affiche **Ouvrir dans WeKnora** lorsque l'opérateur a configuré l'interface web de WeKnora. Le lien ouvre cette interface dans un nouvel onglet. Utilisez-la pour les réglages que la page Connaissances ne couvre pas, comme le découpage en morceaux, la synchronisation des sources de données ou la génération de wiki. La connexion est gérée par WeKnora.
 
-## Ce qui n'est pas dans cette version
+## Demander au Secrétaire, fraîcheur et publication
 
-- **Enregistrer dans les connaissances** depuis une tâche, un commentaire ou un bulletin.
-- L'import de fichiers depuis la page Connaissances.
-- **Demander au Secrétaire** depuis la page Connaissances.
-- La publication automatique, les revues de fraîcheur et l'authentification unique vers WeKnora.
+- **Demander au Secrétaire** depuis la page Connaissances : le Secrétaire consulte d'abord la base, puis cite ses sources. Voir [Secrétaire et bulletins](/secretary).
+- La fraîcheur : le Bibliothécaire signale les documents dont la date de révision est dépassée. Voir [Taxonomie des connaissances](/knowledge-taxonomy).
+- La publication automatique suit la politique choisie pour chaque base ou type de document. Voir [Taxonomie des connaissances](/knowledge-taxonomy).
+- L'authentification unique vers WeKnora n'est pas proposée : WeKnora gère sa propre connexion.
 
 ## Opérateurs
 

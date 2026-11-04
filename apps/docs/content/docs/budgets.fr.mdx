@@ -1,0 +1,69 @@
+---
+title: Budgets
+description: Un budget plafonne les dépenses d'un étage, d'un squad ou d'une initiative pour une période donnée. Il vous alerte à mesure que la limite approche et peut suspendre les nouvelles exécutions automatiques lorsqu'elle est atteinte.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un **budget** fixe un plafond de dépenses pour un périmètre et une période. Les dépenses sont comptées à partir des exécutions du périmètre. À l'approche de la limite, le budget émet un avertissement. En mode `hold` (suspension), une fois la limite atteinte, les nouvelles exécutions automatiques du périmètre attendent, avec une raison visible, jusqu'à ce que vous agissiez.
+
+## Définir un budget
+
+Ouvrez **Gouvernance**, puis l'onglet **Budgets**. Créez un budget avec :
+
+| Champ | Signification |
+| --- | --- |
+| Scope (Périmètre) | Entreprise, étage, squad ou initiative |
+| Period (Période) | Semaine, mois ou trimestre |
+| Amount (Montant) | La limite pour une période, en dollars américains |
+| Soft limit (Seuil d'alerte) | La part du montant à partir de laquelle le budget alerte, 80 % par défaut |
+| Mode | `warn` alerte seulement. `hold` suspend en plus les nouvelles exécutions à la limite. |
+| Run classes (Classes d'exécution) | Les types d'exécution que le budget peut suspendre. Routines et délégations par défaut. |
+
+La boîte de création propose `warn` par défaut. Un budget enregistré sans mode prend `hold`. Un nouveau budget non encore testé est plus sûr en `warn`.
+
+Des budgets sont aussi créés par une proposition `budget`. Un responsable de squad en dépose une avec le montant, la raison et la valeur attendue. Son approbation crée le budget. L'approbation d'une porte de la phase Plan dans une initiative crée un budget `warn` de 100 dollars par mois. L'entreprise de départ crée un budget `warn` de 500 dollars par mois pour l'entreprise. Voir [Entreprise de départ](/starter-company).
+
+## Classes d'exécution
+
+Chaque exécution appartient à une classe, qui détermine si un budget peut la suspendre :
+
+| Classe | Déclenchée par | Suspendue par un budget ? |
+| --- | --- | --- |
+| `human` | Une personne, en commentant, en discutant ou en assignant | Jamais. Vous pouvez toujours parler à l'entreprise. |
+| `routine` | Un automatisme, un réveil ou une revue opérationnelle | Oui, si les classes du budget la contiennent |
+| `delegated` | L'agent d'un squad confiant du travail à un autre, ou la répartition d'un responsable de squad | Oui, si les classes du budget la contiennent |
+
+Le brief quotidien du secrétaire et son exécution de rattrapage sont exemptés.
+
+## Fonctionnement de la suspension
+
+La vérification a lieu lorsqu'une tâche en file est remise à un démon, et lors du déclenchement d'un automatisme. Un budget en mode `hold` suspend une tâche lorsque ses dépenses, auxquelles s'ajoute le coût réservé aux exécutions en cours du périmètre, ont atteint le montant majoré de toute extension. La réservation de chaque exécution en cours est le 90e percentile des coûts récents d'exécution du périmètre.
+
+Une tâche suspendue reste en file. Elle n'échoue pas. La plateforme enregistre une suspension par tâche et l'affiche dans la liste des suspensions du budget, avec la raison **budget hold** (suspension budgétaire). Une exécution automatique suspendue est enregistrée comme ignorée, avec cette raison. Les suspensions sont levées lorsque le budget est prolongé ou relevé, lorsque vous les libérez, lorsque la période se renouvelle, ou lorsque la tâche est annulée.
+
+Les compteurs du budget se mettent à jour au fil de la fin des exécutions, de sorte que la vérification ne lit pas l'historique à chaque prise en charge. Les chiffres peuvent retarder de quelques secondes.
+
+## Vos leviers
+
+- **Prolonger** la période en cours d'un montant. La prolongation est enregistrée.
+- **Relever** le budget.
+- **Libérer les suspensions** une fois. Les tâches suspendues redeviennent prenables.
+- Ne rien faire : la période se renouvelle.
+
+Un responsable de squad qui a besoin de davantage peut plutôt déposer une proposition `budget`. Chaque prolongation, libération et suspension figure dans le [journal de gouvernance](/controls-and-log).
+
+<Callout type="info">
+Les dépenses sont comptées dans la période où l'exécution a été créée, en UTC. Le coût d'une exécution provient du fournisseur lorsqu'il le déclare. Sinon, le serveur l'estime à partir du nombre de jetons et de sa propre grille tarifaire.
+</Callout>
+
+## Limites
+
+- Les budgets se gèrent dans l'onglet Budgets, et par `GET` et `POST /api/budgets`, `PATCH /api/budgets/{id}`, `POST /api/budgets/{id}/extend`, `POST /api/budgets/{id}/release-holds`, `GET /api/budgets/{id}/periods`, ainsi que `GET /api/budget-holds`. La CLI n'a pas de commandes de budget.
+- Les corps de requête sont limités à 16 Kio.
+
+## Étapes suivantes
+
+- [Autonomie et approbations](/autonomy-and-approvals) pour voir comment les budgets bornent ce qu'une approbation permanente peut dépenser.
+- [Contrôles et journal](/controls-and-log) pour la pause qui arrête les exécutions sans geler toute l'entreprise.
+- [Pipeline et initiatives](/pipeline) pour la demande de budget de la porte de planification.
