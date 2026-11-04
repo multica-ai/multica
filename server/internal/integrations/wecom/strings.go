@@ -399,7 +399,7 @@ var copyPacks = map[Locale]copyPack{
 		BindingPromptSuffix:  "\n（链接 15 分钟内有效）",
 		BindingPending:       "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
 		BindingSentPrivately: "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。",
-		MessageMeFirst:       "👋 刚才找我的同事：企业微信要求你先在单聊里给我发过消息，我才能私信你。请打开与我的单聊，随便发一句，我会在那里回复你。",
+		MessageMeFirst:       "👋 请先私信我一句，我在那里回复你。",
 
 		IssueCreatedPrefix:   "✅ 已创建 ",
 		IssueTitleSeparator:  " — ",
@@ -477,7 +477,7 @@ var copyPacks = map[Locale]copyPack{
 		BindingPromptSuffix:  "\n(the link is good for 15 minutes)",
 		BindingPending:       "👋 I already sent you a link — it is just above, tap it to finish linking.",
 		BindingSentPrivately: "👋 I've sent the link to your direct chat with me — tap it there to finish linking.",
-		MessageMeFirst:       "👋 To whoever just asked me: WeCom only lets me message you privately after you've messaged me there first. Open a direct chat with me and send anything, and I'll reply there.",
+		MessageMeFirst:       "👋 Send me a direct message first, and I'll reply there.",
 
 		IssueCreatedPrefix:   "✅ Created ",
 		IssueTitleSeparator:  " — ",
