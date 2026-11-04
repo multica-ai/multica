@@ -441,4 +441,15 @@ describe("ProjectsPage header", () => {
     await user.click(screen.getByRole("button", { name: "New project" }));
     expect(mocks.openModal).toHaveBeenCalledWith("create-project");
   });
+
+  it("introduces projects when there are none and creates the first one", async () => {
+    const user = userEvent.setup();
+    mocks.projects = [];
+    renderProjects();
+
+    const intro = screen.getByRole("region", { name: "Break big work into projects" });
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    await user.click(within(intro).getByRole("button", { name: "New project" }));
+    expect(mocks.openModal).toHaveBeenCalledWith("create-project");
+  });
 });

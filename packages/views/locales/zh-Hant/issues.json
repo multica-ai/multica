@@ -38,10 +38,17 @@
   "working_filter_error": {
     "title": "無法載入 AI 代理正在處理的任務"
   },
+  "unread_filter_error": {
+    "title": "無法載入未讀任務"
+  },
   "status_catalog_error": {
     "title": "狀態列表載入失敗",
     "hint": "載入狀態後才能顯示任務。",
     "retry": "重試"
+  },
+  "relation_filter_error": {
+    "title": "「與我的關係」篩選載入失敗",
+    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「分配給我的 AI 代理的」篩選的任務。"
   },
   "source_context": {
     "create_action": "從這條評論建立子任務",
@@ -179,8 +186,11 @@
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
+    "section_read_state": "閱讀狀態",
+    "read_state_unread": "未讀",
     "operator_label": "關係",
     "operator_is": "是",
     "operator_is_not": "不是",
@@ -527,7 +537,6 @@
     "agents_group": "AI 代理",
     "mark_done_tooltip": "標記為已完成",
     "archive_tooltip": "歸檔",
-    "restore_to_inbox_tooltip": "恢復到收件箱",
     "pin_tooltip": "固定到側邊欄",
     "unpin_tooltip": "從側邊欄取消固定",
     "quick_jump_label": "快捷跳轉",
@@ -755,6 +764,7 @@
   },
   "filtered_empty": {
     "title": "沒有符合篩選條件的任務",
+    "unread_title": "沒有未讀任務",
     "clear_button": "清除篩選"
   },
   "agent_live": {
@@ -869,6 +879,7 @@
     "col_tokens": "Token",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} Token",
+    "credits_count": "{{credits}} {{provider}} 點數",
     "details_toggle": "執行詳情",
     "detail_breakdown": "費用明細",
     "detail_total": "合計",
@@ -887,6 +898,7 @@
     "confirm": "停止執行"
   },
   "batch": {
+    "delete_restricted": "你可以刪除本人或本人擁有的智慧體建立的任務。工作區 owner 和 admin 可以刪除任意任務。",
     "selected": "已選擇 {{count}} 個",
     "status": "狀態",
     "priority": "優先順序",
@@ -899,7 +911,6 @@
     "delete_failed": "刪除任務失敗",
     "delete_dialog_title_other": "刪除 {{count}} 個任務？",
     "delete_dialog_desc_other": "此操作無法撤銷，所選任務及其全部關聯資料都會被永久刪除。",
-    "delete_dialog_warning": "任何工作區成員都可以刪除任務。",
     "cancel": "取消"
   },
   "card": {
@@ -925,6 +936,7 @@
     "open_in_new_tab": "在新標籤頁開啟",
     "pin_to_sidebar": "固定到側邊欄",
     "unpin_from_sidebar": "從側邊欄取消固定",
+    "restore_to_inbox": "恢復到收件箱",
     "mark_read": "標為已讀",
     "mark_unread": "標為未讀",
     "copy_link": "複製連結",
@@ -1721,7 +1733,8 @@
     "builtin": {
       "my_issues": "我的任務",
       "my_agents": "我的 AI 代理在做",
-      "all_issues": "全部任務"
+      "all_issues": "全部任務",
+      "unread": "未讀"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",
@@ -1753,6 +1766,9 @@
     "save_as_new": "另存為新檢視",
     "save_as_new_hint": "「{{name}}」保持不變",
     "save_as_view": "儲存為檢視",
+    "save_view": "儲存檢視",
+    "add_filter": "新增篩選",
+    "setup_hint": "這個檢視還沒有條件，目前顯示全部任務",
     "set_by_view": "由此檢視設定",
     "new_issue": "新增任務",
     "unavailable": "此檢視已無法使用",

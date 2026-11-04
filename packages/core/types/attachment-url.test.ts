@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromStorageURL,
   contentReferencesAttachment,
   stripChannelMediaMarkers,
 } from "./attachment-url";
@@ -153,5 +154,34 @@ describe("contentReferencesAttachment", () => {
     // `md.includes(a.url)` check would have returned false here.
     expect(md.includes(att.url)).toBe(false);
     expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+});
+
+describe("attachmentIdFromStorageURL", () => {
+  const WS = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const CDN = "static.multica.ai";
+
+  it("extracts the attachment id from a workspace object on the CDN", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, CDN)).toBe(ID);
+  });
+
+  it("accepts an object without an extension and ignores query strings", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}?x=1`, CDN)).toBe(ID);
+  });
+
+  it("ignores URLs on another host", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://example.com/workspaces/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+  });
+
+  it("ignores non-workspace paths and an unset CDN domain", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/users/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, ""),
+    ).toBeUndefined();
+    expect(attachmentIdFromStorageURL(`/workspaces/${WS}/${ID}.jpg`, CDN)).toBeUndefined();
   });
 });

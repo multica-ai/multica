@@ -28,6 +28,16 @@ type event struct {
 			Type string `json:"type"`
 		} `json:"retry_status"`
 	} `json:"error"`
+	// ModelUsage is set on span.model_request_end; TotalCredits on
+	// session.usage, where it is the session's cumulative charge.
+	ModelUsage struct {
+		Credits *float64 `json:"credits"`
+	} `json:"model_usage"`
+	TotalCredits *float64 `json:"total_credits"`
+	// Set on agent.artifact_delivered.
+	FileID           string `json:"file_id"`
+	OriginalFilename string `json:"original_filename"`
+	Size             int64  `json:"size"`
 }
 
 func (e event) text() string {
@@ -96,6 +106,18 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 		}
 		msg := map[string]any{}
 		switch e.Type {
+		case "span.model_request_end":
+			if e.ModelUsage.Credits != nil {
+				r.addSpanCredits(*e.ModelUsage.Credits)
+			}
+		case "session.usage":
+			if e.TotalCredits != nil {
+				r.setSessionCredits(*e.TotalCredits)
+			}
+		case "agent.artifact_delivered":
+			if r.Reply != nil {
+				r.Reply.add(e)
+			}
 		case "agent.message":
 			msg["type"] = "text"
 			msg["content"] = e.text()

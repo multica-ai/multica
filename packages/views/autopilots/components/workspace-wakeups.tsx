@@ -68,6 +68,7 @@ import {
   useWakeupText,
 } from "../../issues/components/wakeup-presentation";
 import { wakeupCountsOptions } from "./wakeups-tab";
+import { WakeupsIntro } from "./wakeups-intro";
 
 const SCOPES = ["active", "paused", "disabled", "ended", "all"] as const;
 
@@ -497,26 +498,21 @@ export function WorkspaceWakeups() {
     );
   } else if (query.isPending) {
     body = <CollectionPageState icon={Clock3} title={t(($) => $.wakeups.loading)} />;
+  } else if (!rows.length && (page?.counts.all ?? 0) === 0 && filterCount === 0) {
+    body = <WakeupsIntro onCreate={() => setCreateOpen(true)} />;
   } else if (!rows.length) {
     const hasAny = (page?.counts.all ?? 0) > 0;
-    body =
-      hasAny || filtered ? (
-        <CollectionNoMatches
-          title={t(($) => $.wakeups.empty_filtered)}
-          onReset={
-            hasAny
-              ? () => change({ scope: "all", kind: "all", source: "", agent_id: "" })
-              : undefined
-          }
-          hasFilters={filtered}
-        />
-      ) : (
-        <CollectionPageState
-          icon={AlarmClock}
-          title={t(($) => $.wakeups.empty)}
-          description={t(($) => $.wakeups.empty_description)}
-        />
-      );
+    body = (
+      <CollectionNoMatches
+        title={t(($) => $.wakeups.empty_filtered)}
+        onReset={
+          hasAny
+            ? () => change({ scope: "all", kind: "all", source: "", agent_id: "" })
+            : undefined
+        }
+        hasFilters={filtered}
+      />
+    );
   } else {
     body = (
       <CollectionList

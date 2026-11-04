@@ -118,7 +118,9 @@ export const config = {
   // request time instead of being baked into next.config.js at build time.
   matcher: [
     "/v1/:path*",
-    "/api/:path*",
+    // Uploads stream through an App Router handler instead of Proxy's body clone.
+    "/api",
+    "/api/((?!upload-file(?:/|$)).*)",
     "/auth/:path*",
     "/uploads/:path*",
     "/docs/:path*",

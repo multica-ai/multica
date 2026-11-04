@@ -6,6 +6,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import type { ListProjectsResponse, Project, ProjectStatus } from "@multica/core/types";
 import { projectDetailOptions, projectKeys, useProjectViewStore } from "@multica/core/projects";
+import { useModalStore } from "@multica/core/modals";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider } from "../../navigation";
@@ -185,6 +186,7 @@ describe("project lifecycle browse integration", () => {
     qc.setQueryData(projectKeys.list("ws-1"), { projects: [fixtures[3]], total: 1 });
     renderWithI18n(page());
     expect(screen.getByText("No active projects")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Break big work into projects" })).toBeNull();
     await scope("Closed projects 1");
     await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
     expect(screen.getByText("No projects match")).toBeVisible();
@@ -192,7 +194,20 @@ describe("project lifecycle browse integration", () => {
     await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
     expect(screen.getByRole("link", { name: /Project completed/ })).toHaveAttribute("href", "/acme/projects/completed");
     await act(async () => qc.setQueryData(projectKeys.list("ws-1"), { projects: [], total: 0 }));
-    await waitFor(() => expect(screen.getByText("No projects yet")).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("region", { name: "Break big work into projects" })).toBeVisible());
+  });
+
+  it.each(["compact", "comfortable"] as const)("keeps first-run onboarding and creation when the saved lifecycle is closed in %s", async (mode) => {
+    useProjectViewStore.getState().setLifecycleView("closed");
+    useProjectViewStore.getState().setViewMode(mode);
+    useModalStore.getState().close();
+    qc.setQueryData(projectKeys.list("ws-1"), { projects: [], total: 0 });
+    renderWithI18n(page());
+    const intro = screen.getByRole("region", { name: "Break big work into projects" });
+    expect(screen.queryByText("No closed projects")).toBeNull();
+    await userEvent.click(within(intro).getByRole("button", { name: "New project" }));
+    expect(useModalStore.getState().modal).toBe("create-project");
+    useModalStore.getState().close();
   });
 
   it("combines explicit status filters in All and retains other filters and sort order when switching lifecycle", async () => {

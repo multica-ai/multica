@@ -7,7 +7,6 @@ import {
   LayoutGrid,
   Pin,
   PinOff,
-  Plus,
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
@@ -72,7 +71,6 @@ import {
   CollectionFilterButton,
   CollectionNoMatches,
   CollectionPageHeader,
-  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -87,6 +85,7 @@ import {
   type CollectionSort,
 } from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
+import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
@@ -857,17 +856,7 @@ function ProjectsBrowser() {
       />
 
       {showEmpty ? (
-        <CollectionPageState
-          icon={FolderKanban}
-          title={t(($) => $.page.empty)}
-          description={t(($) => $.page.empty_description)}
-          actions={
-            <Button size="sm" onClick={openCreateProject}>
-              <Plus aria-hidden="true" />
-              {t(($) => $.page.new_project)}
-            </Button>
-          }
-        />
+        <ProjectsIntro onCreate={openCreateProject} />
       ) : (
         <>
           {isCompact ? (

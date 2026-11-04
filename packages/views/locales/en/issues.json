@@ -39,10 +39,17 @@
   "working_filter_error": {
     "title": "Couldn't load issues with working agents"
   },
+  "unread_filter_error": {
+    "title": "Couldn't load your unread issues"
+  },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
     "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
+  },
+  "relation_filter_error": {
+    "title": "Couldn't load the \"Relation to me\" filter",
+    "hint": "Issues filtered by \"Subscribed by me\" or \"Assigned to my agents\" can't be shown until your subscriptions and agents load."
   },
   "source_context": {
     "create_action": "Create sub-issue from here",
@@ -181,8 +188,11 @@
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "Assigned to my agents",
+    "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
+    "section_read_state": "Read state",
+    "read_state_unread": "Unread",
     "operator_label": "Match",
     "operator_is": "is",
     "operator_is_not": "is not",
@@ -536,7 +546,6 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
-    "restore_to_inbox_tooltip": "Restore to inbox",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "quick_jump_label": "Quick navigation",
@@ -784,6 +793,7 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
+    "unread_title": "No unread issues",
     "clear_button": "Clear filters"
   },
   "agent_live": {
@@ -909,6 +919,7 @@
     "col_tokens": "Tokens",
     "col_cost": "Cost",
     "tokens_count": "{{tokens}} tokens",
+    "credits_count": "{{credits}} {{provider}} credits",
     "details_toggle": "Run details",
     "detail_breakdown": "Cost breakdown",
     "detail_total": "Total",
@@ -927,6 +938,7 @@
     "confirm": "Stop run"
   },
   "batch": {
+    "delete_restricted": "You can delete issues you created or that your agents created. Workspace owners and admins can delete any issue.",
     "selected": "{{count}} selected",
     "status": "Status",
     "priority": "Priority",
@@ -944,7 +956,6 @@
     "delete_dialog_title_other": "Delete {{count}} issues?",
     "delete_dialog_desc_one": "This action cannot be undone. This will permanently delete the selected issue and all associated data.",
     "delete_dialog_desc_other": "This action cannot be undone. This will permanently delete the selected issues and all associated data.",
-    "delete_dialog_warning": "Any workspace member can delete issues.",
     "cancel": "Cancel"
   },
   "card": {
@@ -970,6 +981,7 @@
     "open_in_new_tab": "Open in new tab",
     "pin_to_sidebar": "Pin to sidebar",
     "unpin_from_sidebar": "Unpin from sidebar",
+    "restore_to_inbox": "Restore to inbox",
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
     "copy_link": "Copy link",
@@ -1789,7 +1801,8 @@
     "builtin": {
       "my_issues": "My Issues",
       "my_agents": "My agents' work",
-      "all_issues": "All issues"
+      "all_issues": "All issues",
+      "unread": "Unread"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",
@@ -1822,6 +1835,9 @@
     "save_as_new": "Save as new view",
     "save_as_new_hint": "Keeps “{{name}}” unchanged",
     "save_as_view": "Save as view",
+    "save_view": "Save view",
+    "add_filter": "Add filter",
+    "setup_hint": "No conditions yet, so this view shows every issue",
     "set_by_view": "Set by this view",
     "new_issue": "New issue",
     "unavailable": "This view is no longer available",

@@ -593,121 +593,42 @@ describe("SlashCommandList built-in command rendering", () => {
 });
 
 
-// Async quick-action rendering in the `/` menu (MUL-5465, review finding #4).
-//
-// The render request resolves after an arbitrary delay, during which the user
-// keeps typing. Three behaviours have to hold, and each one was a real bug at
-// some point in this PR:
-//   - a rejection must not destroy what the user typed
-//   - a success must replace the ORIGINAL command, not wherever the caret is
-//   - a command edited mid-flight must be left alone, not overwritten
-describe("builtin `/` menu — async quick action rendering", () => {
-  // Minimal editor stand-in: enough ProseMirror surface for the command to
-  // read the range text and issue its chain.
-  function fakeEditor(text: string) {
-    const calls: { from: number; to: number; content: string; contentType?: string }[] = [];
-    let docText = text;
-    const chain = {
-      focus: () => chain,
-      insertContentAt: (
-        range: { from: number; to: number },
-        content: string,
-        opts?: { contentType?: string },
-      ) => {
-        calls.push({ from: range.from, to: range.to, content, contentType: opts?.contentType });
-        return chain;
-      },
-      insertContent: (content: string) => {
-        calls.push({ from: -1, to: -1, content });
-        return chain;
-      },
-      deleteRange: () => chain,
-      run: () => true,
-    };
-    return {
-      calls,
-      setText: (next: string) => {
-        docText = next;
-      },
-      editor: {
-        chain: () => chain,
-        state: {
-          doc: {
-            get content() {
-              return { size: docText.length + 1 };
-            },
-            textBetween: (from: number, to: number) => docText.slice(from, to),
-          },
-        },
-        view: { state: { selection: { $to: { nodeAfter: null } } } },
-      },
-    };
-  }
-
+describe("builtin `/` menu — cached quick action content", () => {
   const range = { from: 0, to: 7 };
   const item = { id: `${QUICK_ACTION_ITEM_PREFIX}qa-1`, label: "review" };
 
-  it("leaves the typed command intact and reports the failure when render rejects", async () => {
-    const { editor, calls } = fakeEditor("/review");
-    const onRenderError = vi.fn();
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => Promise.reject(new Error("boom")),
-      onRenderError,
-    });
+  function fakeEditor() {
+    const chain = {
+      focus: vi.fn(() => chain),
+      command: vi.fn(() => chain),
+      insertContentAt: vi.fn(() => chain),
+      run: vi.fn(() => true),
+    };
+    return { chain, editor: { chain: () => chain } };
+  }
+
+  it("replaces the command range synchronously and parses mention markdown", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const content = "[@Reviewer](mention://agent/agent-id)\n\nReview this";
+    const getQuickActionContent = vi.fn(() => content);
+    const suggestion = createBuiltinCommandSuggestion({ getQuickActionContent });
 
     suggestion.command!({ editor, range, props: item } as never);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
-    expect(calls).toHaveLength(0);
-    expect(onRenderError).toHaveBeenCalledTimes(1);
+    expect(getQuickActionContent).toHaveBeenCalledWith("qa-1");
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, content, { contentType: "markdown" });
+    expect(chain.run).toHaveBeenCalledOnce();
+    collapse.mockRestore();
   });
 
-  it("replaces the original range once a delayed render resolves", async () => {
-    const { editor, calls } = fakeEditor("/review");
-    let resolve!: (v: string) => void;
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
-    });
+  it("leaves the command untouched when content is unavailable", () => {
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion({ getQuickActionContent: () => "" });
 
     suggestion.command!({ editor, range, props: item } as never);
-    expect(calls).toHaveLength(0); // nothing destroyed while in flight
 
-    await act(async () => {
-      resolve("rendered body");
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    // contentType must be "markdown": inserted as a plain string, the
-    // server-rendered `[@Name](mention://…)` lands as literal text and
-    // serialises back out with escaped brackets, so the mention never becomes
-    // a node and renders as raw markup in the thread.
-    expect(calls).toEqual([
-      { from: 0, to: 7, content: "rendered body", contentType: "markdown" },
-    ]);
-  });
-
-  it("abandons the insert when the command was edited while the request was open", async () => {
-    const { editor, calls, setText } = fakeEditor("/review");
-    let resolve!: (v: string) => void;
-    const suggestion = createBuiltinCommandSuggestion({
-      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
-    });
-
-    suggestion.command!({ editor, range, props: item } as never);
-    // The user rewrites the command; a prefix-only check would still see a
-    // leading "/" here and clobber it.
-    setText("/fixnow");
-
-    await act(async () => {
-      resolve("rendered body");
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(calls).toHaveLength(0);
+    expect(chain.insertContentAt).not.toHaveBeenCalled();
   });
 });

@@ -175,28 +175,14 @@ export function AgentCreatePanel({
     () => new Set(visibleAgents.map((a) => a.id)),
     [visibleAgents],
   );
-  // Qoder Cloud Agents can draft a quick-create issue as a single agent, but
-  // its bridge cannot run the squad-leader task that follows a squad
-  // assignment, so squads led by a Qoder agent stay hidden.
-  const qoderAgentIds = useMemo(() => {
-    const qoderRuntimeIds = new Set(
-      runtimes.filter((r) => r.provider === "qoder_cloud").map((r) => r.id),
-    );
-    return new Set(
-      visibleAgents
-        .filter((a) => a.runtime_id != null && qoderRuntimeIds.has(a.runtime_id))
-        .map((a) => a.id),
-    );
-  }, [visibleAgents, runtimes]);
   const visibleSquads = useMemo(
     () =>
       squads.filter(
         (s) =>
           !s.archived_at &&
-          visibleAgentIds.has(s.leader_id) &&
-          !qoderAgentIds.has(s.leader_id),
+          visibleAgentIds.has(s.leader_id),
       ),
-    [squads, visibleAgentIds, qoderAgentIds],
+    [squads, visibleAgentIds],
   );
 
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);

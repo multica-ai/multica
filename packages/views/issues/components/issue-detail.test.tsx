@@ -2513,6 +2513,53 @@ describe("IssueDetail (shared)", () => {
       expect(hasHighlightedCommentBackground(reply)).toBe(false);
     });
 
+    it("lands on a run that left no comment by its task id", async () => {
+      const taskId = "7c1f3a9e-2b4d-4e8a-9f60-0a1b2c3d4e5f";
+      const task: AgentTask = {
+        id: taskId, agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "failed", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: "2026-01-18T00:00:01Z", dispatched_at: "2026-01-18T00:00:01Z",
+        completed_at: "2026-01-18T00:05:00Z", result: null, error: "go test timed out",
+        delivered_comment_ids: [],
+      };
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+
+      renderIssueDetailWithHighlight(taskId);
+
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById(`comment-${taskId}`))).toBe(true);
+      });
+    });
+
+    it.each([
+      ["an open thread", "open"],
+      ["a thread whose root is resolved", "root"],
+      ["a thread a later reply resolved", "reply"],
+    ])("unfolds and lands on a run that left no comment in %s", async (_case, fold) => {
+      const taskId = "7c1f3a9e-2b4d-4e8a-9f60-0a1b2c3d4e5f";
+      const root = { ...mockTimeline[0]!, id: "run-thread-root", parent_id: null,
+        resolved_at: fold === "root" ? "2026-01-19T00:00:00Z" : null };
+      const trigger = { ...mockTimeline[0]!, id: "run-trigger", parent_id: root.id,
+        content: "Please run this check", created_at: "2026-01-18T00:00:00Z" };
+      const resolution = { ...trigger, id: "run-resolution", content: "Resolved",
+        resolved_at: "2026-01-19T00:00:00Z", created_at: "2026-01-19T00:00:00Z" };
+      const task: AgentTask = {
+        id: taskId, agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "failed", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: "2026-01-18T00:00:01Z", dispatched_at: "2026-01-18T00:00:01Z",
+        completed_at: "2026-01-18T00:05:00Z", result: null, error: "go test timed out",
+        trigger_comment_id: trigger.id, delivered_comment_ids: [trigger.id],
+      };
+      mockApiObj.listTimeline.mockResolvedValue([root, trigger, ...(fold === "reply" ? [resolution] : [])]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+
+      renderIssueDetailWithHighlight(taskId);
+
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById(`comment-${taskId}`))).toBe(true);
+      });
+    });
+
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
       // Reproduces the inbox-click race: timeline data is in the cache
       // before the issue resolves. While loading is true, IssueDetail

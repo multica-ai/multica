@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
+import { issueUnreadOptions } from "@multica/core/issues/unread";
+import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { SidebarIssueList } from "./sidebar-tree";
@@ -57,6 +58,9 @@ vi.mock("../../navigation", () => ({
   ),
 }));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Lambda" }),
+}));
 vi.mock("../../agents/components/agent-avatar-stack", () => ({
   AgentAvatarStack: ({ agentIds }: { agentIds: string[] }) => <span data-testid="agents">{agentIds.join(",")}</span>,
 }));
@@ -74,11 +78,13 @@ function renderList({
   total = 18,
   params = PARAMS,
   tasks = [],
+  unread = [],
   onCollapse = vi.fn(),
 }: {
   total?: number;
   params?: ListIssuesParams | null;
   tasks?: Partial<AgentTask>[];
+  unread?: IssueUnread[];
   onCollapse?: () => void;
 } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
@@ -87,6 +93,7 @@ function renderList({
     qc.setQueryData(issueKeys.sidebar("ws-1", SOURCE, PARAMS, limit), { issues: all.slice(0, limit), total });
   }
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
+  qc.setQueryData(issueUnreadOptions("ws-1").queryKey, unread);
   renderWithI18n(
     <QueryClientProvider client={qc}>
       <IssueContextMenuProvider variant="sidebar">
@@ -107,6 +114,24 @@ function renderList({
 const rows = () => screen.getAllByRole("link");
 
 describe("SidebarIssueList", () => {
+  it("opens an unread issue on what its run left", () => {
+    const run = { outcome: "completed", agent_id: "agent-1", created_at: "2026-11-03T10:00:00Z" };
+    renderList({
+      unread: [
+        { ...run, issue_id: "issue-1", task_id: "task-1", comment_id: "comment-1" },
+        { ...run, issue_id: "issue-3", outcome: "failed", task_id: "task-3", comment_id: null },
+        { ...run, issue_id: "issue-4", outcome: "manual", agent_id: null, task_id: null, comment_id: null },
+      ],
+    });
+    expect(rows().map((row) => row.getAttribute("href"))).toEqual([
+      "/acme/issues/issue-1#comment-comment-1",
+      "/acme/issues/issue-2",
+      "/acme/issues/issue-3#comment-task-3",
+      "/acme/issues/issue-4",
+      "/acme/issues/issue-5",
+    ]);
+  });
+
   it("loads more in steps, then shows less", () => {
     renderList();
     expect(rows()).toHaveLength(5);

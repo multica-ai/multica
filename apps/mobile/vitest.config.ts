@@ -13,8 +13,8 @@ import path from "node:path";
 //
 // Co-located test files (foo.ts + foo.test.ts) match how the rest of the
 // monorepo organises vitest suites.
-// The run cancel button has headless callback/prop tests with native modules
-// mocked; the projects screen uses the same headless lane. These do not verify native rendering.
+// The run cancel button, projects screen and inbox have headless callback/prop
+// tests with native modules mocked; these do not verify native rendering.
 // App configuration tests also run here to cover native prebuild options
 // across environment variants without loading React Native.
 export default defineConfig({
@@ -32,6 +32,7 @@ export default defineConfig({
       "data/**/*.test.ts",
       "components/issue/run-cancel-button.test.ts",
       "app/**/projects.test.ts",
+      "components/inbox/inbox-screen.test.ts",
     ],
     passWithNoTests: true,
   },

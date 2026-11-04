@@ -5,8 +5,6 @@
     "scope_all": "すべてのプロジェクト",
     "scope_active": "進行中のプロジェクト",
     "scope_closed": "終了したプロジェクト",
-    "empty": "プロジェクトはまだありません",
-    "empty_description": "関連するタスクをプロジェクトにまとめ、進捗と担当者を追跡します。",
     "view_compact": "コンパクト",
     "view_comfortable": "ゆったり",
     "no_search_results": "検索条件に一致する結果はありません",
@@ -174,6 +172,37 @@
     "section_priority": "優先度",
     "section_lead": "リード",
     "view": "ビュー"
+  },
+  "intro": {
+    "title": "大きな仕事はプロジェクトに分けて進める",
+    "description": "プロジェクトは関連するタスクをまとめ、進捗をひとまとめに追えるようにします。プロジェクトの説明とリンクしたリポジトリは、エージェントの実行ごとにコンテキストとして渡されます。",
+    "slides": {
+      "progress": {
+        "title": "進捗がひと目でわかる",
+        "description": "ステータス、リード、期日、完了率が一枚のカードにまとまり、タスクを一つずつ開く必要はありません。"
+      },
+      "context": {
+        "title": "コンテキストは毎回自動で渡る",
+        "description": "説明を書き、リポジトリをリンクするのは一度だけ。プロジェクト内のタスクの実行すべてに引き継がれます。"
+      },
+      "sidebar": {
+        "title": "サイドバーに固定",
+        "description": "よく使うプロジェクトをサイドバーに固定し、展開すると中のタスクが見えます。"
+      }
+    },
+    "art": {
+      "project_website": "Web サイトのリニューアル",
+      "project_mobile": "モバイル 1.0",
+      "project_onboarding": "オンボーディング",
+      "context_label": "プロジェクトの説明",
+      "context_body": "新しいコーポレートサイト。Next.js + Tailwind。文言は docs/brand に従い、全ページでダークモードに対応する。",
+      "run_started": "実行を開始",
+      "context_loaded": "プロジェクトのコンテキストと 2 つのリポジトリを読み込みました",
+      "issue_count": "{{done}} / {{total}} タスク",
+      "issue_hero": "トップページのヒーローにアニメーション",
+      "issue_pricing": "料金ページの比較表",
+      "issue_blog": "ブログ一覧のページ送り"
+    }
   },
   "lifecycle": {
     "empty": {

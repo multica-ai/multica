@@ -173,6 +173,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "spanish": "Español",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
     "timezone": {
@@ -396,7 +397,7 @@
       "preferences": "Preferences",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
-      "notifications": "Inbox",
+      "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",
       "github": "GitHub",
@@ -652,61 +653,38 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Routing",
-    "description": "Changes apply to new notifications.",
-    "reset": "Restore defaults",
+    "title": "Inbox Notifications",
+    "description": "Muted events remain visible on the issue.",
     "toast_failed": "Failed to update notification settings",
-    "routes": {
-      "action": {
-        "label": "Needs action",
-        "description": "Counts as unread, can send a system notification"
+    "groups": {
+      "assignments": {
+        "label": "Assignments",
+        "description": "When you are assigned or unassigned from an issue"
       },
-      "activity": {
-        "label": "Activity",
-        "description": "Recorded quietly, never unread"
+      "status_changes": {
+        "label": "Status changes",
+        "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
       },
-      "muted": {
-        "label": "Off",
-        "description": "Not in the Inbox; still visible on the issue"
-      }
-    },
-    "kinds": {
-      "assigned": {
-        "label": "Assigned to me",
-        "description": "When an issue is assigned to you"
+      "comments": {
+        "label": "Comments",
+        "description": "New comments on issues you follow"
       },
       "mentions": {
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"
       },
-      "member_comments": {
-        "label": "Member comments",
-        "description": "When a member comments on an issue you follow"
-      },
-      "agent_failures": {
-        "label": "Agent errors",
-        "description": "When an agent run fails or is blocked and needs you"
-      },
-      "status_changes": {
-        "label": "Status changes",
-        "description": "When an issue you follow changes status"
-      },
-      "assignee_changes": {
-        "label": "Assignee changes",
-        "description": "When an issue changes assignee, or you are unassigned"
-      },
       "updates": {
-        "label": "Priority and dates",
-        "description": "When priority, start date, or due date changes"
+        "label": "Priority & Due date",
+        "description": "When priority or due date changes on issues you follow"
       },
-      "agent_comments": {
-        "label": "Agent comments",
-        "description": "When an agent replies on an issue you follow"
+      "agent_activity": {
+        "label": "Agent activity",
+        "description": "When an agent run fails"
       }
     },
     "system": {
       "title": "System Notifications",
-      "label": "Send a system notification for Needs action items while Multica is in the background"
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
