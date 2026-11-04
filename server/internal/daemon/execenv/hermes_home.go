@@ -409,11 +409,16 @@ func prepareHermesInstalls(sharedHome, hermesHome string) error {
 		if !fi.IsDir() {
 			return fmt.Errorf("source installs is not a directory: %s", src)
 		}
+		// Source dependencies take precedence even if PM initialized a local
+		// directory first. The linking helper intentionally removes that local
+		// directory before replacing it with a link to the source environment.
 		return linkSharedHermesEntry(src, dst)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat source installs: %w", err)
 	}
 
+	// Preserve a working directory link even if it points to another home;
+	// PM updates through that link intentionally reach the target home.
 	if fi, err := os.Stat(dst); err == nil {
 		if !fi.IsDir() {
 			return fmt.Errorf("installs is not a directory: %s", dst)
