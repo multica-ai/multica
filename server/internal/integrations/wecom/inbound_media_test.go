@@ -207,7 +207,7 @@ func TestOwnText_MixedDropsRunsItCannotRead(t *testing.T) {
 	t.Parallel()
 	env := mediaFrame(t, "mixed", map[string]any{"mixed": map[string]any{"msg_item": []map[string]any{
 		{"msgtype": "text", "text": map[string]any{"content": "hi"}},
-		{"msgtype": "location", "location": map[string]any{"name": "office"}},
+		{"msgtype": "location", "location": map[string]any{"name": "company"}},
 		{"msgtype": "image", "image": map[string]any{"url": "", "aeskey": "k"}},
 	}}})
 	got, called, _ := dispatchOne(t, env)
@@ -231,7 +231,7 @@ func TestOwnText_MixedDropsRunsItCannotRead(t *testing.T) {
 func TestOwnText_MixedWithNothingReadableTakesTheReceipt(t *testing.T) {
 	t.Parallel()
 	env := mediaFrame(t, "mixed", map[string]any{"mixed": map[string]any{"msg_item": []map[string]any{
-		{"msgtype": "location", "location": map[string]any{"name": "office"}},
+		{"msgtype": "location", "location": map[string]any{"name": "company"}},
 	}}})
 	_, called, conn := dispatchOne(t, env)
 	if called {

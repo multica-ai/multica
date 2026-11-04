@@ -6,7 +6,7 @@ reference. Each step lists its expected result. No step has been run yet, so eve
 row starts as **not verified**. The boss signs off each one by writing the date and
 the observed result in the Sign-off column, or by recording why it could not be done.
 
-The API part of 3.8 is automated in `e2e/phase3-office.spec.ts` and
+The API part of 3.8 is automated in `e2e/phase3-company.spec.ts` and
 `e2e/phase3-pipeline-ui.spec.ts`. The steps below cover what those tests skip.
 
 ## Prerequisites

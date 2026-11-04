@@ -7,7 +7,7 @@ func TestIsLikelyBinaryFilePath(t *testing.T) {
 		path string
 		want bool
 	}{
-		// The Office formats runtime-local skill bundles actually carry.
+		// The Company formats runtime-local skill bundles actually carry.
 		{"references/report.docx", true},
 		{"references/data.xlsx", true},
 		{"deck.pptx", true},

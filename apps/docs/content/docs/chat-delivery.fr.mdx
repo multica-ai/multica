@@ -25,13 +25,13 @@ La plateforme de messagerie doit déjà être connectée à votre compte Multica
 
 ## Activer l'envoi
 
-Chaque membre choisit pour lui-même, dans les réglages de brief du bureau :
+Chaque membre choisit pour lui-même, dans les réglages de brief de l'entreprise :
 
 - **Brief push** (Envoi du brief) : activé ou désactivé. Désactivé par défaut.
 - **Chat** (Discussion) : vers quelle discussion connectée envoyer. Chaque membre en choisit une.
 - **Quiet hours** (Heures calmes) : une plage horaire, de 0 à 23 heures, pendant laquelle rien n'est envoyé. La plage peut traverser minuit. Un brief tombant dans la plage est différé jusqu'à sa fin.
 
-Les mêmes réglages sont accessibles via `GET` et `PUT /api/office/brief-push`. Les discussions que vous pouvez choisir sont à `GET /api/office/brief-push/bindings`.
+Les mêmes réglages sont accessibles via `GET` et `PUT /api/company/brief-push`. Les discussions que vous pouvez choisir sont à `GET /api/company/brief-push/bindings`.
 
 ## Contenu du message
 

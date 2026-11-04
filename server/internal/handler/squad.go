@@ -36,10 +36,10 @@ type SquadResponse struct {
 	ArchivedBy    *string                      `json:"archived_by"`
 	MemberCount   int                          `json:"member_count"`
 	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
-	// FloorID and OfficeSlot are the squad's seat on the office, both null
+	// FloorID and CompanySlot are the squad's seat on the company, both null
 	// while the squad is unseated.
-	FloorID    *string `json:"floor_id"`
-	OfficeSlot *int16  `json:"office_slot"`
+	FloorID     *string `json:"floor_id"`
+	CompanySlot *int16  `json:"company_slot"`
 	// AutonomyLevel is the squad's autonomy level, 0 (Suggest) to 3 (Autonomous).
 	AutonomyLevel int32 `json:"autonomy_level"`
 }
@@ -67,10 +67,10 @@ type SquadMemberResponse struct {
 // ── Converters ──────────────────────────────────────────────────────────────
 
 func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
-	var officeSlot *int16
-	if s.OfficeSlot.Valid {
-		slot := s.OfficeSlot.Int16
-		officeSlot = &slot
+	var companySlot *int16
+	if s.CompanySlot.Valid {
+		slot := s.CompanySlot.Int16
+		companySlot = &slot
 	}
 	return SquadResponse{
 		ID:            uuidToString(s.ID),
@@ -88,7 +88,7 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		AutonomyLevel: s.AutonomyLevel,
 		MemberPreview: []SquadMemberPreviewResponse{},
 		FloorID:       uuidToPtr(s.FloorID),
-		OfficeSlot:    officeSlot,
+		CompanySlot:   companySlot,
 	}
 }
 
@@ -273,7 +273,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	floorName := ""
 	if req.FloorName != "" {
 		var ok bool
-		floorName, ok = normalizeOfficeFloorName(req.FloorName)
+		floorName, ok = normalizeCompanyFloorName(req.FloorName)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "floor_name must be 1 to 64 characters")
 			return
@@ -315,7 +315,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create, seat and wire the leader in one transaction: the squad takes the
-	// lowest free office seat (a new floor when every floor is full), and the
+	// lowest free company seat (a new floor when every floor is full), and the
 	// leader's first squad becomes its home squad.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -324,7 +324,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-	if err := qtx.LockOfficeLayout(r.Context(), wsUUID); err != nil {
+	if err := qtx.LockCompanyLayout(r.Context(), wsUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create squad")
 		return
 	}
@@ -361,7 +361,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		changedAgents = append(changedAgents, *homed)
 	}
 
-	seat, err := pickOfficeAutoSeat(r.Context(), qtx, wsUUID, floorName)
+	seat, err := pickCompanyAutoSeat(r.Context(), qtx, wsUUID, floorName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create squad")
 		return
@@ -371,7 +371,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 			ID:          squad.ID,
 			WorkspaceID: wsUUID,
 			FloorID:     seat.Floor.ID,
-			OfficeSlot:  pgtype.Int2{Int16: seat.Slot, Valid: true},
+			CompanySlot: pgtype.Int2{Int16: seat.Slot, Valid: true},
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create squad")
@@ -390,7 +390,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 	if seat != nil && seat.NewFloor {
-		h.publish(protocol.EventOfficeFloorCreated, workspaceID, "member", userID, map[string]any{"floor": officeFloorToResponse(seat.Floor)})
+		h.publish(protocol.EventCompanyFloorCreated, workspaceID, "member", userID, map[string]any{"floor": companyFloorToResponse(seat.Floor)})
 	}
 	h.publishAgentsChanged(workspaceID, userID, changedAgents)
 	h.publish(protocol.EventSquadCreated, workspaceID, "member", userID, map[string]any{"squad": resp})
@@ -615,7 +615,7 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
-	// Archiving frees the squad's office seat; agents homed here move to another
+	// Archiving frees the squad's company seat; agents homed here move to another
 	// squad they still belong to, or become unassigned.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -942,7 +942,7 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// An agent added to its first squad makes it its home squad (office desk).
+	// An agent added to its first squad makes it its home squad (company desk).
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add squad member")

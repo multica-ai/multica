@@ -2310,6 +2310,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
+					r.Post("/project", h.AssignSquadProject)
 					r.Get("/members/status", h.ListSquadMemberStatus)
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
@@ -2396,44 +2397,44 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			// Standing approvals (spec 4.4). Reads for members; creating and revoking
 			// are for owners and admins, decided in the handler. Flat registrations,
-			// as the office endpoints below are.
+			// as the company endpoints below are.
 			r.Get("/api/approval-policies", h.ListApprovalPolicies)
 			r.Post("/api/approval-policies", h.CreateApprovalPolicy)
 			r.Post("/api/approval-policies/{id}/revoke", h.RevokeApprovalPolicy)
 			r.Get("/api/approval-policies/{id}/auto-approvals", h.ListPolicyAutoApprovals)
-			// Digital company office: floors (owner/admin) and squad seats.
-			// Flat registrations on purpose: other office endpoints (digest,
+			// Digital company: floors (owner/admin) and squad seats.
+			// Flat registrations on purpose: other company endpoints (digest,
 			// briefs) live under the same prefix, and a second r.Route on it
 			// would panic at startup.
-			r.Get("/api/office/floors", h.ListOfficeFloors)
-			r.Post("/api/office/floors", h.CreateOfficeFloor)
-			r.Put("/api/office/floors/{id}", h.UpdateOfficeFloor)
-			r.Delete("/api/office/floors/{id}", h.DeleteOfficeFloor)
-			r.Put("/api/office/seats", h.PutOfficeSeats)
+			r.Get("/api/company/floors", h.ListCompanyFloors)
+			r.Post("/api/company/floors", h.CreateCompanyFloor)
+			r.Put("/api/company/floors/{id}", h.UpdateCompanyFloor)
+			r.Delete("/api/company/floors/{id}", h.DeleteCompanyFloor)
+			r.Put("/api/company/seats", h.PutCompanySeats)
 			// The Secretary's digest: facts about the company, any member.
-			r.Get("/api/office/digest", h.GetOfficeDigest)
+			r.Get("/api/company/digest", h.GetCompanyDigest)
 			// Floor chiefs (spec 4.8): one agent per floor publishes its brief. Reads
 			// for members; changes for owners and admins, decided in the handler.
-			r.Get("/api/office/floors/{id}/chief", h.GetFloorChief)
-			r.Put("/api/office/floors/{id}/chief", h.SetFloorChief)
-			r.Delete("/api/office/floors/{id}/chief", h.ClearFloorChief)
-			// The digest source (auto, squads or floors) and the office pulse strip.
-			r.Get("/api/office/digest-mode", h.GetDigestMode)
-			r.Put("/api/office/digest-mode", h.SetDigestMode)
-			r.Get("/api/office/pulse", h.GetOfficePulse)
+			r.Get("/api/company/floors/{id}/chief", h.GetFloorChief)
+			r.Put("/api/company/floors/{id}/chief", h.SetFloorChief)
+			r.Delete("/api/company/floors/{id}/chief", h.ClearFloorChief)
+			// The digest source (auto, squads or floors) and the company pulse strip.
+			r.Get("/api/company/digest-mode", h.GetDigestMode)
+			r.Put("/api/company/digest-mode", h.SetDigestMode)
+			r.Get("/api/company/pulse", h.GetCompanyPulse)
 			// Company as code (spec 4.9): the structure as a document, and its import.
-			r.Get("/api/office/export", h.ExportCompany)
-			r.Post("/api/office/import", h.ImportCompany)
+			r.Get("/api/company/export", h.ExportCompany)
+			r.Post("/api/company/import", h.ImportCompany)
 			// The Secretary setup and its readiness checklist (owner or admin).
 			// Setup is idempotent: a second POST changes nothing.
-			r.Get("/api/office/setup", h.GetOfficeSetup)
-			r.Post("/api/office/setup", h.SetupOffice)
-			r.Post("/api/office/company-template/apply", h.ApplyCompanyTemplate)
+			r.Get("/api/company/setup", h.GetCompanySetup)
+			r.Post("/api/company/setup", h.SetupCompany)
+			r.Post("/api/company/company-template/apply", h.ApplyCompanyTemplate)
 			// Company controls (spec 4.5): the state and quiet hours. Reads for
 			// members; changes for owners and admins, decided in the handler.
-			r.Get("/api/office/company-state", h.GetCompanyState)
-			r.Put("/api/office/company-state", h.SetCompanyState)
-			r.Put("/api/office/quiet-hours", h.SetQuietHours)
+			r.Get("/api/company/company-state", h.GetCompanyState)
+			r.Put("/api/company/company-state", h.SetCompanyState)
+			r.Put("/api/company/quiet-hours", h.SetQuietHours)
 			// The governance log (spec 4.5). Read-only: no route writes an entry.
 			r.Get("/api/governance/events", h.ListGovernanceEvents)
 			r.Get("/api/governance/events.csv", h.ExportGovernanceEvents)
@@ -2457,10 +2458,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/governance/health", h.GetGovernanceHealth)
 			// The caller's brief push to a chat app (plan 9.10). Member scope only:
 			// the handler reads and writes the caller's own row and refuses agents.
-			r.Get("/api/office/brief-push", h.GetBriefPushPreference)
-			r.Put("/api/office/brief-push", h.UpdateBriefPushPreference)
+			r.Get("/api/company/brief-push", h.GetBriefPushPreference)
+			r.Put("/api/company/brief-push", h.UpdateBriefPushPreference)
 			// The chats the caller can pick for that preference, with labels.
-			r.Get("/api/office/brief-push/bindings", h.ListBriefPushBindings)
+			r.Get("/api/company/brief-push/bindings", h.ListBriefPushBindings)
 			// Briefs: the Secretary's reports to the boss. Who may publish is
 			// decided in the handler (secretary agent or admin member).
 			r.Route("/api/briefs", func(r chi.Router) {

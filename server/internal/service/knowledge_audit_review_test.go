@@ -28,7 +28,7 @@ func (e *knowledgeEnv) reviewIssueCount(t *testing.T) int {
 
 // K1: a due document owned by a squad gets one review request from that squad,
 // and a second run does not repeat it. A document without an owning squad is
-// requested from the Executive Office, or reported when there is none.
+// requested from the Executive Company, or reported when there is none.
 func TestFreshnessReviewRequestsOnceFromTheOwningSquad(t *testing.T) {
 	e := newKnowledgeEnv(t).enabled()
 	ctx := context.Background()
@@ -176,9 +176,9 @@ func TestTaxonomyAuditRepairsNothingOnATruncatedListing(t *testing.T) {
 }
 
 // Spec 3.3: a due document with no owning squad gets its request from the
-// Executive Office, the Librarian's squad, so a draft update can follow. Without
+// Executive Company, the Librarian's squad, so a draft update can follow. Without
 // that squad the document is only reported (the test above).
-func TestFreshnessReviewSendsAnUnownedDocumentToTheExecutiveOffice(t *testing.T) {
+func TestFreshnessReviewSendsAnUnownedDocumentToTheExecutiveCompany(t *testing.T) {
 	e := newKnowledgeEnv(t).enabled()
 	ctx := context.Background()
 	exec := testutil.New(e.pool, e.wsID, e.userID).Squad(t, "Executive Office", e.liveAgent)

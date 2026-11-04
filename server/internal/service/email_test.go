@@ -58,7 +58,7 @@ func TestSMTPAuthWithFallback_UsesPlainWhenAccepted(t *testing.T) {
 	}
 }
 
-func TestSMTPAuthWithFallback_FallsBackToLoginOnOffice365Style504(t *testing.T) {
+func TestSMTPAuthWithFallback_FallsBackToLoginOnCompany365Style504(t *testing.T) {
 	client := &fakeSMTPAuthClient{
 		authErrs: []error{
 			errors.New("504 5.7.4 Unrecognized authentication type"),
@@ -68,7 +68,7 @@ func TestSMTPAuthWithFallback_FallsBackToLoginOnOffice365Style504(t *testing.T) 
 	}
 	fallback, err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
 	if !fallback {
-		t.Fatalf("expected fallback signal when Office 365 rejects PLAIN auth")
+		t.Fatalf("expected fallback signal when Company 365 rejects PLAIN auth")
 	}
 	if err == nil {
 		t.Fatalf("expected original PLAIN auth error to be returned for reconnect path")
@@ -497,7 +497,7 @@ func TestSendSMTP_OpenClientFailureNoPanic(t *testing.T) {
 
 // --- Full sendSMTP flow tests with a mock SMTP server ---
 
-// testSMTPServer is a minimal SMTP server that can simulate Office 365-style
+// testSMTPServer is a minimal SMTP server that can simulate Company 365-style
 // PLAIN auth rejection followed by LOGIN auth acceptance.
 type testSMTPServer struct {
 	Listener net.Listener

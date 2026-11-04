@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi, type Mock } from "vitest";
 import type { Agent, IssueWorkflow, Squad } from "../types";
-import type { OfficeFloor } from "../office/types";
+import type { CompanyFloor } from "../company/types";
 import {
   planQuickstartAgents,
   runSquadQuickstart,
@@ -14,7 +14,7 @@ const marketTemplate = SQUAD_TEMPLATES.find((t) => t.id === "market_research")!;
 const asAgent = (id: string, name: string, archived = false) =>
   ({ id, name, archived_at: archived ? "2026-01-01" : null }) as unknown as Agent;
 const asFloor = (id: string, name: string, position = 0) =>
-  ({ id, name, position, workspace_id: "ws-1", created_at: "", updated_at: "" }) as OfficeFloor;
+  ({ id, name, position, workspace_id: "ws-1", created_at: "", updated_at: "" }) as CompanyFloor;
 
 type FakeClient = {
   [K in keyof SquadQuickstartClient]: Mock<SquadQuickstartClient[K]>;
@@ -36,9 +36,9 @@ function fakeClient(over: Partial<FakeClient> = {}): FakeClient {
     listAutopilots: vi.fn(async () => ({ autopilots: [], total: 0 })),
     createAutopilot: vi.fn(async () => ({ id: "ap-1" }) as never),
     createAutopilotTrigger: vi.fn(async () => ({}) as never),
-    listOfficeFloors: vi.fn(async () => [] as OfficeFloor[]),
-    createOfficeFloor: vi.fn(async (data) => asFloor(`floor-${data.name}`, data.name, 9)),
-    setOfficeSeats: vi.fn(async () => ({ squads: [] }) as never),
+    listCompanyFloors: vi.fn(async () => [] as CompanyFloor[]),
+    createCompanyFloor: vi.fn(async (data) => asFloor(`floor-${data.name}`, data.name, 9)),
+    setCompanySeats: vi.fn(async () => ({ squads: [] }) as never),
     ...over,
   } as FakeClient;
   return client;
@@ -306,30 +306,30 @@ describe("runSquadQuickstart for market research", () => {
     const executive = asFloor("floor-exec", "Executive", 0);
     const research = asFloor("floor-research", "Research", 1);
     const seated = (id: string, floorId: string, slot: number) =>
-      ({ id, name: `Squad ${id}`, archived_at: null, floor_id: floorId, office_slot: slot }) as unknown as Squad;
+      ({ id, name: `Squad ${id}`, archived_at: null, floor_id: floorId, company_slot: slot }) as unknown as Squad;
 
     it("seats the squad on the first free slot of the existing Research floor", async () => {
       const client = fakeClient({
-        listOfficeFloors: vi.fn(async () => [executive, research]),
+        listCompanyFloors: vi.fn(async () => [executive, research]),
         listSquads: vi.fn(async () => [seated("a", research.id, 0), seated("b", research.id, 1)]),
       });
 
       const out = await runSquadQuickstart(client, market, options);
 
-      expect(client.createOfficeFloor).not.toHaveBeenCalled();
-      expect(client.setOfficeSeats).toHaveBeenCalledWith([
+      expect(client.createCompanyFloor).not.toHaveBeenCalled();
+      expect(client.setCompanySeats).toHaveBeenCalledWith([
         { squad_id: "squad-1", floor_id: research.id, slot: 2 },
       ]);
       expect(out.squad).toEqual({ id: "squad-1", status: "created" });
     });
 
     it("creates the Research floor when the workspace has none, then seats the squad on it", async () => {
-      const client = fakeClient({ listOfficeFloors: vi.fn(async () => [executive]) });
+      const client = fakeClient({ listCompanyFloors: vi.fn(async () => [executive]) });
 
       const out = await runSquadQuickstart(client, market, options);
 
-      expect(client.createOfficeFloor).toHaveBeenCalledWith({ name: "Research" });
-      expect(client.setOfficeSeats).toHaveBeenCalledWith([
+      expect(client.createCompanyFloor).toHaveBeenCalledWith({ name: "Research" });
+      expect(client.setCompanySeats).toHaveBeenCalledWith([
         { squad_id: "squad-1", floor_id: "floor-Research", slot: 0 },
       ]);
       expect(out.squad).toEqual({ id: "squad-1", status: "created" });
@@ -338,13 +338,13 @@ describe("runSquadQuickstart for market research", () => {
     it("reports the squad as created without a seat when the Research floor is full", async () => {
       const full = [0, 1, 2, 3, 4, 5].map((slot) => seated(`s${slot}`, research.id, slot));
       const client = fakeClient({
-        listOfficeFloors: vi.fn(async () => [research]),
+        listCompanyFloors: vi.fn(async () => [research]),
         listSquads: vi.fn(async () => full),
       });
 
       const out = await runSquadQuickstart(client, market, options);
 
-      expect(client.setOfficeSeats).not.toHaveBeenCalled();
+      expect(client.setCompanySeats).not.toHaveBeenCalled();
       expect(client.updateSquad).toHaveBeenCalledWith("squad-1", expect.anything());
       expect(out.squad).toEqual({
         id: "squad-1",
@@ -355,7 +355,7 @@ describe("runSquadQuickstart for market research", () => {
 
     it("still creates the squad when the floor cannot be set up, and says so", async () => {
       const client = fakeClient({
-        createOfficeFloor: vi.fn(async () => {
+        createCompanyFloor: vi.fn(async () => {
           throw new Error("admins only");
         }),
       });
@@ -363,7 +363,7 @@ describe("runSquadQuickstart for market research", () => {
       const out = await runSquadQuickstart(client, market, options);
 
       expect(client.createSquad).toHaveBeenCalledTimes(1);
-      expect(client.setOfficeSeats).not.toHaveBeenCalled();
+      expect(client.setCompanySeats).not.toHaveBeenCalled();
       expect(out.squad).toEqual({
         id: "squad-1",
         status: "created",
@@ -373,8 +373,8 @@ describe("runSquadQuickstart for market research", () => {
 
     it("reports a seat request the server refuses", async () => {
       const client = fakeClient({
-        listOfficeFloors: vi.fn(async () => [research]),
-        setOfficeSeats: vi.fn(async () => {
+        listCompanyFloors: vi.fn(async () => [research]),
+        setCompanySeats: vi.fn(async () => {
           throw new Error("seat is already taken");
         }),
       });
@@ -390,25 +390,25 @@ describe("runSquadQuickstart for market research", () => {
 
     it("does not move a squad the server already seated at the chosen slot", async () => {
       const client = fakeClient({
-        listOfficeFloors: vi.fn(async () => [research]),
+        listCompanyFloors: vi.fn(async () => [research]),
         createSquad: vi.fn(
-          async () => ({ id: "squad-1", floor_id: research.id, office_slot: 0 }) as unknown as Squad,
+          async () => ({ id: "squad-1", floor_id: research.id, company_slot: 0 }) as unknown as Squad,
         ),
       });
 
       const out = await runSquadQuickstart(client, market, options);
 
-      expect(client.setOfficeSeats).not.toHaveBeenCalled();
+      expect(client.setCompanySeats).not.toHaveBeenCalled();
       expect(out.squad).toEqual({ id: "squad-1", status: "created" });
     });
 
     it("sends the seat request as one assignment naming the squad, its floor and its slot", async () => {
-      const client = fakeClient({ listOfficeFloors: vi.fn(async () => [research]) });
+      const client = fakeClient({ listCompanyFloors: vi.fn(async () => [research]) });
 
       await runSquadQuickstart(client, market, options);
 
-      expect(client.setOfficeSeats).toHaveBeenCalledTimes(1);
-      expect(client.setOfficeSeats.mock.calls[0]![0]).toEqual([
+      expect(client.setCompanySeats).toHaveBeenCalledTimes(1);
+      expect(client.setCompanySeats.mock.calls[0]![0]).toEqual([
         { squad_id: "squad-1", floor_id: research.id, slot: 0 },
       ]);
     });
@@ -420,9 +420,9 @@ describe("runSquadQuickstart for market research", () => {
 
       const out = await runSquadQuickstart(client, market, options);
 
-      expect(client.listOfficeFloors).not.toHaveBeenCalled();
-      expect(client.createOfficeFloor).not.toHaveBeenCalled();
-      expect(client.setOfficeSeats).not.toHaveBeenCalled();
+      expect(client.listCompanyFloors).not.toHaveBeenCalled();
+      expect(client.createCompanyFloor).not.toHaveBeenCalled();
+      expect(client.setCompanySeats).not.toHaveBeenCalled();
       expect(out.squad).toEqual({ id: "s", status: "existing" });
     });
   });
@@ -506,8 +506,8 @@ describe("runSquadQuickstart for market research", () => {
     await runSquadQuickstart(client, greenfield, options);
 
     expect(client.createSquad.mock.calls[0]![0]).not.toHaveProperty("floor_name");
-    expect(client.listOfficeFloors).not.toHaveBeenCalled();
-    expect(client.setOfficeSeats).not.toHaveBeenCalled();
+    expect(client.listCompanyFloors).not.toHaveBeenCalled();
+    expect(client.setCompanySeats).not.toHaveBeenCalled();
   });
 });
 

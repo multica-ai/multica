@@ -278,7 +278,7 @@ func (q *Queries) KnowledgeACLAgentExists(ctx context.Context, arg KnowledgeACLA
 }
 
 const knowledgeACLFloorExists = `-- name: KnowledgeACLFloorExists :one
-SELECT EXISTS (SELECT 1 FROM office_floor WHERE id = $1 AND workspace_id = $2)
+SELECT EXISTS (SELECT 1 FROM company_floor WHERE id = $1 AND workspace_id = $2)
 `
 
 type KnowledgeACLFloorExistsParams struct {

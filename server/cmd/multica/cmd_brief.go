@@ -223,7 +223,7 @@ func runBriefDigest(cmd *cobra.Command, _ []string) error {
 	if floor, _ := cmd.Flags().GetString("floor"); floor != "" {
 		query.Set("floor_id", strings.TrimSpace(floor))
 	}
-	path := "/api/office/digest?" + query.Encode()
+	path := "/api/company/digest?" + query.Encode()
 	if err := client.GetJSON(ctx, path, &digest); err != nil {
 		return fmt.Errorf("get digest: %w", err)
 	}

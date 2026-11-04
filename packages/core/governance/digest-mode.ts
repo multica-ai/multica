@@ -29,6 +29,6 @@ export const FALLBACK_DIGEST_MODE: DigestModeInfo = {
 
 export function parseDigestMode(raw: unknown): DigestModeInfo {
   return parseWithFallback<DigestModeInfo>(raw, digestModeSchema, FALLBACK_DIGEST_MODE, {
-    endpoint: "GET /api/office/digest-mode",
+    endpoint: "GET /api/company/digest-mode",
   });
 }

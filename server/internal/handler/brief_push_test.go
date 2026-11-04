@@ -99,7 +99,7 @@ func briefPushBindingOn(t *testing.T, ws, userID, channelType, installationID, c
 
 func (e briefPushEnv) get(t *testing.T, userID string) *testutil.Response {
 	t.Helper()
-	req := newRequest("GET", "/api/office/brief-push", nil)
+	req := newRequest("GET", "/api/company/brief-push", nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
 	req = asUser(req, userID)
 	return testutil.Call(t, testHandler.GetBriefPushPreference, req)
@@ -107,7 +107,7 @@ func (e briefPushEnv) get(t *testing.T, userID string) *testutil.Response {
 
 func (e briefPushEnv) put(t *testing.T, userID string, body map[string]any) *testutil.Response {
 	t.Helper()
-	req := newRequest("PUT", "/api/office/brief-push", body)
+	req := newRequest("PUT", "/api/company/brief-push", body)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
 	req = asUser(req, userID)
 	return testutil.Call(t, testHandler.UpdateBriefPushPreference, req)
@@ -252,7 +252,7 @@ func TestBriefPushPreference_RefusesAnAgent(t *testing.T) {
 	agent := dbfx.Agent(t, "Brief push agent "+uuid.NewString(), runtime, testutil.Cols{"workspace_id": env.WorkspaceID})
 	taskID := dbfx.Task(t, agent, testutil.Cols{"status": "running", "runtime_id": runtime})
 
-	req := newRequest("GET", "/api/office/brief-push", nil)
+	req := newRequest("GET", "/api/company/brief-push", nil)
 	req.Header.Set("X-Workspace-ID", env.WorkspaceID)
 	req = asAgent(asUser(req, env.Alice), agent, taskID)
 	testutil.Call(t, testHandler.GetBriefPushPreference, req).Want(http.StatusForbidden)
@@ -260,7 +260,7 @@ func TestBriefPushPreference_RefusesAnAgent(t *testing.T) {
 
 func TestBriefPushPreference_MalformedBody(t *testing.T) {
 	env := newBriefPushEnv(t)
-	req := newRequest("PUT", "/api/office/brief-push", nil)
+	req := newRequest("PUT", "/api/company/brief-push", nil)
 	req.Header.Set("X-Workspace-ID", env.WorkspaceID)
 	req = asUser(req, env.Alice)
 	testutil.Call(t, testHandler.UpdateBriefPushPreference, req).Want(http.StatusBadRequest)
@@ -276,7 +276,7 @@ func TestBriefPushPreference_NoServiceRefusesBindings(t *testing.T) {
 
 func (e briefPushEnv) listBindings(t *testing.T, userID string) *testutil.Response {
 	t.Helper()
-	req := newRequest("GET", "/api/office/brief-push/bindings", nil)
+	req := newRequest("GET", "/api/company/brief-push/bindings", nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
 	req = asUser(req, userID)
 	return testutil.Call(t, testHandler.ListBriefPushBindings, req)

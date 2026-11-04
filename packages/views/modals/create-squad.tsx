@@ -14,7 +14,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -53,7 +53,14 @@ type SelectedMember = {
 // How many chips we show inline before collapsing the tail into "+N".
 const CHIP_DISPLAY_LIMIT = 3;
 
-export function CreateSquadModal({ onClose }: { onClose: () => void }) {
+export function CreateSquadModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  /** Called with the new squad instead of opening its page. */
+  onCreated?: (squad: Squad) => void;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
@@ -129,7 +136,8 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
       onClose();
       toast.success(t(($) => $.create_squad.toast_created));
-      router.push(wsPaths.squadDetail(squad.id));
+      if (onCreated) onCreated(squad);
+      else router.push(wsPaths.squadDetail(squad.id));
     } catch (err) {
       toast.error(
         err instanceof Error

@@ -35,10 +35,10 @@ vi.mock("@tanstack/react-query", () => ({
     isPending: false,
   }),
 }));
-vi.mock("@multica/core/office", () => ({
-  officeFloorsOptions: () => ({ queryKey: ["floors"] }),
+vi.mock("@multica/core/company", () => ({
+  companyFloorsOptions: () => ({ queryKey: ["floors"] }),
 }));
-vi.mock("../../office/lib/use-add-squad-to-company", () => ({
+vi.mock("../../company/lib/use-add-squad-to-company", () => ({
   useAddSquadToCompany: () => ({ addSquad: vi.fn(), pending: false }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({

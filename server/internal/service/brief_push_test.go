@@ -312,11 +312,11 @@ func TestBriefPushSendsMessageAndRecordsSent(t *testing.T) {
 	if strings.Contains(text, "Hire a copywriter") {
 		t.Fatalf("a snoozed decision was named:\n%s", text)
 	}
-	officeDecision := "https://app.example/" + f.slug + "/office?decision=" + p1
-	if !strings.Contains(text, "- Approve the research squad "+officeDecision) {
+	companyDecision := "https://app.example/" + f.slug + "/company?decision=" + p1
+	if !strings.Contains(text, "- Approve the research squad "+companyDecision) {
 		t.Fatalf("first decision line missing its link:\n%s", text)
 	}
-	briefURL := "https://app.example/" + f.slug + "/office?brief=" + briefID
+	briefURL := "https://app.example/" + f.slug + "/company?brief=" + briefID
 	if len(sent.msg.Buttons) != 1 || sent.msg.Buttons[0].URL != briefURL {
 		t.Fatalf("buttons = %+v, want one link to the brief", sent.msg.Buttons)
 	}
@@ -493,7 +493,7 @@ func TestBriefPushDoesNotSendToAChatAppWithNoNotifier(t *testing.T) {
 	}
 }
 
-func TestBriefPushOfficeLinksAreOmittedWithoutAnAppURL(t *testing.T) {
+func TestBriefPushCompanyLinksAreOmittedWithoutAnAppURL(t *testing.T) {
 	msg := renderBriefPush("Quiet day.", []briefPushDecision{{ID: "p1", Title: "Approve"}}, "b1", "")
 	if strings.Contains(msg.Text, "https://") || len(msg.Buttons) != 0 {
 		t.Fatalf("message carries links with no app URL: %+v", msg)
@@ -541,7 +541,7 @@ func TestQuietWindowEnd(t *testing.T) {
 }
 
 func TestRenderBriefPushLayout(t *testing.T) {
-	office := "https://app.example/acme/office"
+	company := "https://app.example/acme/company"
 	long := strings.Repeat("x", 300)
 	decisions := []briefPushDecision{
 		{ID: "p1", Title: "First"},
@@ -550,7 +550,7 @@ func TestRenderBriefPushLayout(t *testing.T) {
 		{ID: "p4", Title: "Fourth"},
 		{ID: "p5", Title: "Fifth"},
 	}
-	msg := renderBriefPush("Headline here.", decisions, "b1", office)
+	msg := renderBriefPush("Headline here.", decisions, "b1", company)
 
 	if !strings.HasPrefix(msg.Text, "Headline here.\n\n5 decisions need you:\n") {
 		t.Fatalf("opening lines = %q", msg.Text)
@@ -558,7 +558,7 @@ func TestRenderBriefPushLayout(t *testing.T) {
 	if got := strings.Count(msg.Text, "\n- "); got != briefPushDecisionLines {
 		t.Fatalf("decision lines = %d, want %d", got, briefPushDecisionLines)
 	}
-	if !strings.Contains(msg.Text, "- Line one line two "+office+"?decision=p3") {
+	if !strings.Contains(msg.Text, "- Line one line two "+company+"?decision=p3") {
 		t.Fatalf("multi-line title not collapsed to one line:\n%s", msg.Text)
 	}
 	if strings.Contains(msg.Text, "Fourth") || strings.Contains(msg.Text, "Fifth") {
@@ -567,19 +567,19 @@ func TestRenderBriefPushLayout(t *testing.T) {
 	if want := "- " + strings.Repeat("x", briefPushTitleRunes-1) + "…"; !strings.Contains(msg.Text, want) {
 		t.Fatalf("long title not cut to %d runes with an ellipsis", briefPushTitleRunes)
 	}
-	if !strings.Contains(msg.Text, "...and 2 more in the Office.") {
+	if !strings.Contains(msg.Text, "...and 2 more in the Company.") {
 		t.Fatalf("missing overflow line:\n%s", msg.Text)
 	}
-	if !strings.Contains(msg.Text, "Brief: "+office+"?brief=b1") {
+	if !strings.Contains(msg.Text, "Brief: "+company+"?brief=b1") {
 		t.Fatalf("missing brief link:\n%s", msg.Text)
 	}
-	if len(msg.Buttons) != 1 || msg.Buttons[0].URL != office+"?brief=b1" {
+	if len(msg.Buttons) != 1 || msg.Buttons[0].URL != company+"?brief=b1" {
 		t.Fatalf("buttons = %+v", msg.Buttons)
 	}
 }
 
 func TestRenderBriefPushQuietDay(t *testing.T) {
-	msg := renderBriefPush("Nothing needs you today.", nil, "b1", "https://app.example/acme/office")
+	msg := renderBriefPush("Nothing needs you today.", nil, "b1", "https://app.example/acme/company")
 	if strings.Contains(msg.Text, "decision") {
 		t.Fatalf("quiet day names decisions:\n%s", msg.Text)
 	}
@@ -642,7 +642,7 @@ func TestBriefPushDecisionButtonsOnlyForCallbackApps(t *testing.T) {
 		if got.Action != wantActions[i] || util.UUIDToString(got.ProposalID) != p1 {
 			t.Fatalf("button %q verifies as %+v, want %s on %s", b.Label, got, wantActions[i], p1)
 		}
-		if want := "https://app.example/" + f.slug + "/office?decision=" + p1; b.LinkURL != want {
+		if want := "https://app.example/" + f.slug + "/company?decision=" + p1; b.LinkURL != want {
 			t.Fatalf("button %q fallback link = %q, want %q", b.Label, b.LinkURL, want)
 		}
 	}

@@ -93,16 +93,16 @@ func (a *ChannelActions) Press(ctx context.Context, p channel.Press) (channel.Pr
 		return channel.PressResult{}, fmt.Errorf("load member: %w", err)
 	}
 	if !roleAllowed(member.Role, "owner", "admin") {
-		return a.refuse(chatToastNotOwner, chatMsgNotOwner, a.officeLink(ctx, binding.WorkspaceID, "")), nil
+		return a.refuse(chatToastNotOwner, chatMsgNotOwner, a.companyLink(ctx, binding.WorkspaceID, "")), nil
 	}
 
 	signed, err := a.signer.Verify(p.Data)
 	switch {
 	case errors.Is(err, service.ErrActionTokenExpired):
 		return a.refuse(chatToastExpired, chatMsgExpired,
-			a.officeLink(ctx, binding.WorkspaceID, uuidToString(signed.ProposalID))), nil
+			a.companyLink(ctx, binding.WorkspaceID, uuidToString(signed.ProposalID))), nil
 	case err != nil:
-		return a.refuse(chatToastInvalid, chatMsgInvalid, a.officeLink(ctx, binding.WorkspaceID, "")), nil
+		return a.refuse(chatToastInvalid, chatMsgInvalid, a.companyLink(ctx, binding.WorkspaceID, "")), nil
 	}
 	return a.apply(ctx, binding, signed), nil
 }
@@ -117,7 +117,7 @@ func (a *ChannelActions) apply(ctx context.Context, binding db.ChannelUserBindin
 		Member:      binding.MulticaUserID,
 		Decision:    signed.Action,
 	}
-	link := a.officeLink(ctx, binding.WorkspaceID, uuidToString(signed.ProposalID))
+	link := a.companyLink(ctx, binding.WorkspaceID, uuidToString(signed.ProposalID))
 
 	if signed.Action == service.ProposalDecisionSnooze {
 		row, err := a.h.Queries.GetProposalWithIssue(ctx, db.GetProposalWithIssueParams{
@@ -210,25 +210,25 @@ func (a *ChannelActions) binding(ctx context.Context, s channel.Sender) (db.Chan
 	return b, true, nil
 }
 
-// officeLink is the Office page of the workspace, with the decision in it when
+// companyLink is the Company page of the workspace, with the decision in it when
 // one is named. It is empty when the app URL or the workspace is unknown, and
 // the reply then has no link rather than a broken one.
-func (a *ChannelActions) officeLink(ctx context.Context, workspaceID pgtype.UUID, decisionID string) string {
+func (a *ChannelActions) companyLink(ctx context.Context, workspaceID pgtype.UUID, decisionID string) string {
 	var query url.Values
 	if decisionID != "" {
 		query = url.Values{"decision": {decisionID}}
 	}
-	return a.officeLinkQuery(ctx, workspaceID, query)
+	return a.companyLinkQuery(ctx, workspaceID, query)
 }
 
-// officeLinkQuery is the Office page of the workspace with the query appended.
-func (a *ChannelActions) officeLinkQuery(ctx context.Context, workspaceID pgtype.UUID, query url.Values) string {
+// companyLinkQuery is the Company page of the workspace with the query appended.
+func (a *ChannelActions) companyLinkQuery(ctx context.Context, workspaceID pgtype.UUID, query url.Values) string {
 	ws, err := a.h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		slog.Warn("chat link: could not load workspace", "error", err)
 		return ""
 	}
-	link := service.OfficeURL(a.h.cfg.AppURL, ws.Slug)
+	link := service.CompanyURL(a.h.cfg.AppURL, ws.Slug)
 	if link == "" || len(query) == 0 {
 		return link
 	}

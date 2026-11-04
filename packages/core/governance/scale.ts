@@ -2,10 +2,10 @@ import { z } from "zod";
 import { parseWithFallback } from "../api/schema";
 
 /**
- * The office pulse (spec 4.8): the company at a glance for the Office header
+ * The company pulse (spec 4.8): the company at a glance for the Company header
  * strip. The server caches it for a minute, so the strip polls no faster.
  */
-export interface OfficePulse {
+export interface CompanyPulse {
   /** running, paused, quiet, or unknown for a state this client does not know. */
   state: string;
   decisions_waiting: number;
@@ -29,7 +29,7 @@ export interface DigestMode {
   auto_floor_threshold: number;
 }
 
-export const OfficePulseSchema = z
+export const CompanyPulseSchema = z
   .object({
     state: z.string().default("unknown"),
     decisions_waiting: z.number().default(0),
@@ -44,10 +44,10 @@ export const OfficePulseSchema = z
     generated_at: z.string().default(""),
   })
   .loose()
-  .transform((pulse): OfficePulse => pulse);
+  .transform((pulse): CompanyPulse => pulse);
 
 /** What a pulse response degrades to: the strip shows nothing it cannot read. */
-export const EMPTY_OFFICE_PULSE: OfficePulse = {
+export const EMPTY_COMPANY_PULSE: CompanyPulse = {
   state: "unknown",
   decisions_waiting: 0,
   oldest_decision_age_seconds: -1,
@@ -71,6 +71,6 @@ export const DigestModeSchema = z
   .loose()
   .transform((mode): DigestMode => mode);
 
-export function parseOfficePulse(raw: unknown, endpoint = "GET /api/office/pulse"): OfficePulse {
-  return parseWithFallback<OfficePulse>(raw, OfficePulseSchema, EMPTY_OFFICE_PULSE, { endpoint });
+export function parseCompanyPulse(raw: unknown, endpoint = "GET /api/company/pulse"): CompanyPulse {
+  return parseWithFallback<CompanyPulse>(raw, CompanyPulseSchema, EMPTY_COMPANY_PULSE, { endpoint });
 }

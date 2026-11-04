@@ -74,9 +74,9 @@ export type WSEventType =
   | "proposal:created"
   | "proposal:updated"
   | "proposal:decided"
-  | "office_floor:created"
-  | "office_floor:updated"
-  | "office_floor:deleted"
+  | "company_floor:created"
+  | "company_floor:updated"
+  | "company_floor:deleted"
   | "label:created"
   | "label:updated"
   | "label:deleted"
@@ -699,9 +699,9 @@ export interface WSEventPayloadMap {
   "proposal:created": unknown;
   "proposal:updated": unknown;
   "proposal:decided": unknown;
-  "office_floor:created": unknown;
-  "office_floor:updated": unknown;
-  "office_floor:deleted": unknown;
+  "company_floor:created": unknown;
+  "company_floor:updated": unknown;
+  "company_floor:deleted": unknown;
   "label:created": unknown;
   "label:updated": unknown;
   "label:deleted": unknown;

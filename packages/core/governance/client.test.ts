@@ -39,7 +39,7 @@ describe("company state requests", () => {
     const updated = await client().setCompanyState({ state: "paused", stop_running: true });
     expect(sentOf(fetchMock)).toEqual({
       method: "PUT",
-      path: "/api/office/company-state",
+      path: "/api/company/company-state",
       body: { state: "paused", stop_running: true },
     });
     expect(updated.state).toBe("paused");
@@ -50,7 +50,7 @@ describe("company state requests", () => {
     await client().setQuietHours({ enabled: true, start: "21:30", end: "06:45", timezone: "Europe/Paris" });
     expect(sentOf(fetchMock)).toEqual({
       method: "PUT",
-      path: "/api/office/quiet-hours",
+      path: "/api/company/quiet-hours",
       body: { enabled: true, start: "21:30", end: "06:45", timezone: "Europe/Paris" },
     });
   });

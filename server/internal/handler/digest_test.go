@@ -37,8 +37,8 @@ func newDigestEnv(t *testing.T) digestEnv {
 // squad inserts a seated squad (floor and slot set) unless over says otherwise.
 func (e digestEnv) squad(t *testing.T, name string, over ...testutil.Cols) string {
 	t.Helper()
-	floorID := dbfx.Insert(t, "office_floor", testutil.Cols{"workspace_id": e.WorkspaceID, "name": "F " + uuid.NewString()[:8], "position": 0})
-	cols := testutil.Cols{"workspace_id": e.WorkspaceID, "floor_id": floorID, "office_slot": 0}
+	floorID := dbfx.Insert(t, "company_floor", testutil.Cols{"workspace_id": e.WorkspaceID, "name": "F " + uuid.NewString()[:8], "position": 0})
+	cols := testutil.Cols{"workspace_id": e.WorkspaceID, "floor_id": floorID, "company_slot": 0}
 	for _, o := range over {
 		for k, v := range o {
 			cols[k] = v
@@ -89,14 +89,14 @@ func (e digestEnv) failedRun(t *testing.T, squadID string, over ...testutil.Cols
 
 func (e digestEnv) digest(t *testing.T, since time.Time) service.Digest {
 	t.Helper()
-	path := "/api/office/digest"
+	path := "/api/company/digest"
 	if !since.IsZero() {
 		path += "?since=" + since.UTC().Format(time.RFC3339)
 	}
 	req := newRequest("GET", path, nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
 	var out service.Digest
-	testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK).JSON(&out)
+	testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK).JSON(&out)
 	return out
 }
 
@@ -149,14 +149,14 @@ func TestDigest_SquadCountsAndRules(t *testing.T) {
 	}
 
 	p1 := e.pendingProposal(t, sq, "Pilot usage pricing")
-	_ = e.pendingProposal(t, sq, "Open an EU office")
+	_ = e.pendingProposal(t, sq, "Open an EU company")
 	dbfx.Exec(t, `UPDATE proposal SET state = 'approved' WHERE id = $1`, p1)
 
 	got := findDigestSquad(t, e.digest(t, since), sq)
 	if got.Done != 2 || got.InProgress != 3 || got.Blocked != 1 || got.Stale != 1 || got.FailedRuns != 1 || got.LeaderNoAction != 2 {
 		t.Fatalf("counts wrong: %+v", got)
 	}
-	if got.PendingProposalCount != 1 || len(got.PendingProposals) != 1 || got.PendingProposals[0].Title != "Open an EU office" {
+	if got.PendingProposalCount != 1 || len(got.PendingProposals) != 1 || got.PendingProposals[0].Title != "Open an EU company" {
 		t.Fatalf("only the pending proposal is listed: %+v", got.PendingProposals)
 	}
 	if len(got.RecentDone) != 2 {
@@ -312,8 +312,8 @@ func TestDigest_CapsSquadsInFullAndCountsTheRest(t *testing.T) {
 func TestDigest_WorkspaceLevel(t *testing.T) {
 	e := newDigestEnv(t)
 	sq := e.squad(t, "Ops")
-	unseated := e.squad(t, "Unseated", testutil.Cols{"floor_id": nil, "office_slot": nil})
-	archived := e.squad(t, "Gone", testutil.Cols{"floor_id": nil, "office_slot": nil, "archived_at": testutil.Raw("now()")})
+	unseated := e.squad(t, "Unseated", testutil.Cols{"floor_id": nil, "company_slot": nil})
+	archived := e.squad(t, "Gone", testutil.Cols{"floor_id": nil, "company_slot": nil, "archived_at": testutil.Raw("now()")})
 	_ = archived
 
 	e.failedRun(t, sq)
@@ -371,24 +371,24 @@ func TestDigest_AccessAndSinceValidation(t *testing.T) {
 
 	// A user who is not a member of the workspace is refused.
 	stranger := dbfx.User(t, "Stranger", fmt.Sprintf("digest-stranger-%d@example.com", time.Now().UnixNano()))
-	req := asUser(newRequest("GET", "/api/office/digest", nil), stranger)
+	req := asUser(newRequest("GET", "/api/company/digest", nil), stranger)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-	testutil.Call(t, testHandler.GetOfficeDigest, req).WantOneOf(http.StatusForbidden, http.StatusNotFound)
+	testutil.Call(t, testHandler.GetCompanyDigest, req).WantOneOf(http.StatusForbidden, http.StatusNotFound)
 
 	// Any member, not only owners and admins, may read it.
 	member := newWorkspaceMemberUserIn(t, e.WorkspaceID, "member")
-	req = asUser(newRequest("GET", "/api/office/digest", nil), member)
+	req = asUser(newRequest("GET", "/api/company/digest", nil), member)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-	testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK)
+	testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK)
 
 	for name, since := range map[string]string{
 		"not a timestamp": "yesterday",
 		"future":          time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		"too old":         time.Now().Add(-service.DigestMaxWindow - time.Hour).UTC().Format(time.RFC3339),
 	} {
-		req := newRequest("GET", "/api/office/digest?since="+since, nil)
+		req := newRequest("GET", "/api/company/digest?since="+since, nil)
 		req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-		if got := testutil.Call(t, testHandler.GetOfficeDigest, req); got.Code != http.StatusBadRequest {
+		if got := testutil.Call(t, testHandler.GetCompanyDigest, req); got.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d, want 400", name, got.Code)
 		}
 	}

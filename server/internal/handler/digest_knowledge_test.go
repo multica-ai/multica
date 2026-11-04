@@ -124,9 +124,9 @@ func TestDigest_KnowledgeSectionEmptyWhenNotReady(t *testing.T) {
 	// Never enabled: the section is present, empty, and not an error.
 	never := newDigestEnv(t)
 	var out service.Digest
-	req := newRequest("GET", "/api/office/digest", nil)
+	req := newRequest("GET", "/api/company/digest", nil)
 	req.Header.Set("X-Workspace-ID", never.WorkspaceID)
-	testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK).JSON(&out)
+	testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK).JSON(&out)
 	if out.Knowledge.StalePublished.Count != 0 || len(out.Knowledge.StalePublished.Items) != 0 || out.Knowledge.PendingDrafts != 0 {
 		t.Fatalf("knowledge section for a workspace without knowledge = %+v", out.Knowledge)
 	}

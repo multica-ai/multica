@@ -14,21 +14,21 @@ import (
 // digest counts its own squads, initiatives, pending decisions, budgets and goals,
 // and its runs; the company digest counts all of them.
 func TestFloorDigestCountsOnlyTheFloorAcrossTwoFloors(t *testing.T) {
-	f, _ := officeWorkspace(t)
+	f, _ := companyWorkspace(t)
 	ctx := context.Background()
 	ws := util.MustParseUUID(f.WorkspaceID)
 	actor := GovernanceActor{Type: GovernanceActorMember, ID: util.MustParseUUID(f.UserID)}
 	runtimeID, leader := ownerAndLeader(t, f, "Floor Digest Lead")
 
-	floorA := f.Insert(t, "office_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Floor A", "position": 0})
-	floorB := f.Insert(t, "office_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Floor B", "position": 1})
+	floorA := f.Insert(t, "company_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Floor A", "position": 0})
+	floorB := f.Insert(t, "company_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Floor B", "position": 1})
 	squadA1 := f.Squad(t, "A1", leader)
 	squadA2 := f.Squad(t, "A2", leader)
 	squadB1 := f.Squad(t, "B1", leader)
 	loose := f.Squad(t, "Loose", leader)
-	f.Exec(t, `UPDATE squad SET floor_id = $1, office_slot = 0 WHERE id = $2`, floorA, squadA1)
-	f.Exec(t, `UPDATE squad SET floor_id = $1, office_slot = 1 WHERE id = $2`, floorA, squadA2)
-	f.Exec(t, `UPDATE squad SET floor_id = $1, office_slot = 0 WHERE id = $2`, floorB, squadB1)
+	f.Exec(t, `UPDATE squad SET floor_id = $1, company_slot = 0 WHERE id = $2`, floorA, squadA1)
+	f.Exec(t, `UPDATE squad SET floor_id = $1, company_slot = 1 WHERE id = $2`, floorA, squadA2)
+	f.Exec(t, `UPDATE squad SET floor_id = $1, company_slot = 0 WHERE id = $2`, floorB, squadB1)
 
 	// Two pending decisions on A1, one on B1, none on the loose squad.
 	for _, sq := range []string{squadA1, squadA1, squadB1} {

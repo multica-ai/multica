@@ -9,20 +9,24 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import {
-  EMPTY_OFFICE_FLOOR,
-  EMPTY_OFFICE_FLOOR_LIST,
-  EMPTY_OFFICE_SEATS_RESPONSE,
-  OfficeFloorListSchema,
-  OfficeFloorSchema,
-  OfficeSeatsResponseSchema,
-} from "../office/schemas";
+  EMPTY_COMPANY_FLOOR,
+  EMPTY_COMPANY_FLOOR_LIST,
+  EMPTY_COMPANY_SEATS_RESPONSE,
+  CompanyFloorListSchema,
+  CompanyFloorSchema,
+  CompanySeatsResponseSchema,
+  AssignSquadProjectResponseSchema,
+  EMPTY_ASSIGN_SQUAD_PROJECT_RESPONSE,
+} from "../company/schemas";
 import type {
-  CreateOfficeFloorRequest,
-  OfficeFloor,
-  OfficeSeatAssignment,
-  OfficeSeatsResponse,
-  UpdateOfficeFloorRequest,
-} from "../office/types";
+  CreateCompanyFloorRequest,
+  CompanyFloor,
+  CompanySeatAssignment,
+  CompanySeatsResponse,
+  UpdateCompanyFloorRequest,
+  AssignSquadProjectRequest,
+  AssignSquadProjectResponse,
+} from "../company/types";
 import type {
   Issue,
   IssuePriority,
@@ -299,13 +303,13 @@ import {
   type Brief,
   type ListBriefsParams,
   type PublishBriefRequest,
-} from "../office/brief-schema";
+} from "../company/brief-schema";
 import {
   DigestSchema,
   FALLBACK_DIGEST,
   type Digest,
   type DigestParams,
-} from "../office/digest-schema";
+} from "../company/digest-schema";
 import {
   BriefPushBindingListSchema,
   BriefPushPreferenceSchema,
@@ -313,19 +317,19 @@ import {
   type BriefPushBinding,
   type BriefPushPreference,
   type UpdateBriefPushRequest,
-} from "../office/brief-push-schema";
+} from "../company/brief-push-schema";
 import {
   BriefFeedbackOrNoneSchema,
   BriefFeedbackSummarySchema,
   type BriefFeedback,
   type BriefFeedbackSummary,
   type SubmitBriefFeedbackRequest,
-} from "../office/brief-feedback-schema";
+} from "../company/brief-feedback-schema";
 import {
   SquadAttentionSchema,
   type PinSquadAttentionRequest,
   type SquadAttention,
-} from "../office/squad-attention-schema";
+} from "../company/squad-attention-schema";
 import {
   EMPTY_SQUAD_ROUTINE,
   SquadCharterSchema,
@@ -336,21 +340,21 @@ import {
   type SquadCharter,
   type SquadRoutine,
   type UpdateSquadCharterRequest,
-} from "../office/charter-schema";
+} from "../company/charter-schema";
 import {
-  FALLBACK_OFFICE_SETUP_READINESS,
-  OfficeSetupReadinessSchema,
-  type OfficeSetupReadiness,
-  type OfficeSetupRequest,
-} from "../office/setup-schema";
+  FALLBACK_COMPANY_SETUP_READINESS,
+  CompanySetupReadinessSchema,
+  type CompanySetupReadiness,
+  type CompanySetupRequest,
+} from "../company/setup-schema";
 import {
   CompanyTemplateApplyResultSchema,
   FALLBACK_COMPANY_TEMPLATE_RESULT,
-} from "../office/company-template-schema";
+} from "../company/company-template-schema";
 import type {
   CompanyTemplateApplyRequest,
   CompanyTemplateApplyResult,
-} from "../office/company-template-types";
+} from "../company/company-template-types";
 import {
   FALLBACK_KNOWLEDGE_BASES,
   FALLBACK_KNOWLEDGE_DOCUMENT,
@@ -494,7 +498,7 @@ import {
   type CreateApprovalPolicyRequest,
   type PolicyAutoApprovalHistory,
 } from "../governance/approval-policy";
-import { parseOfficePulse, type OfficePulse } from "../governance/scale";
+import { parseCompanyPulse, type CompanyPulse } from "../governance/scale";
 import {
   BudgetHoldListSchema,
   BudgetListSchema,
@@ -529,7 +533,7 @@ import {
   type ListProposalsParams,
   type Proposal,
   type ProposalRevision,
-} from "../office/proposal-schema";
+} from "../company/proposal-schema";
 import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
@@ -5123,69 +5127,81 @@ export class ApiClient {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
   }
 
-  // Office floors and squad seats (the digital company office).
-  async listOfficeFloors(): Promise<OfficeFloor[]> {
-    const raw = await this.fetch<unknown>("/api/office/floors");
-    return parseWithFallback(raw, OfficeFloorListSchema, EMPTY_OFFICE_FLOOR_LIST, {
-      endpoint: "GET /api/office/floors",
-    }) as OfficeFloor[];
+  // Company floors and squad seats (the digital company).
+  async listCompanyFloors(): Promise<CompanyFloor[]> {
+    const raw = await this.fetch<unknown>("/api/company/floors");
+    return parseWithFallback(raw, CompanyFloorListSchema, EMPTY_COMPANY_FLOOR_LIST, {
+      endpoint: "GET /api/company/floors",
+    }) as CompanyFloor[];
   }
 
-  async createOfficeFloor(data: CreateOfficeFloorRequest): Promise<OfficeFloor> {
-    const raw = await this.fetch<unknown>("/api/office/floors", { method: "POST", body: JSON.stringify(data) });
-    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
-      endpoint: "POST /api/office/floors",
-    }) as OfficeFloor;
+  async createCompanyFloor(data: CreateCompanyFloorRequest): Promise<CompanyFloor> {
+    const raw = await this.fetch<unknown>("/api/company/floors", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, CompanyFloorSchema, EMPTY_COMPANY_FLOOR, {
+      endpoint: "POST /api/company/floors",
+    }) as CompanyFloor;
   }
 
-  async updateOfficeFloor(id: string, data: UpdateOfficeFloorRequest): Promise<OfficeFloor> {
-    const raw = await this.fetch<unknown>(`/api/office/floors/${id}`, { method: "PUT", body: JSON.stringify(data) });
-    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
-      endpoint: "PUT /api/office/floors/:id",
-    }) as OfficeFloor;
+  async updateCompanyFloor(id: string, data: UpdateCompanyFloorRequest): Promise<CompanyFloor> {
+    const raw = await this.fetch<unknown>(`/api/company/floors/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, CompanyFloorSchema, EMPTY_COMPANY_FLOOR, {
+      endpoint: "PUT /api/company/floors/:id",
+    }) as CompanyFloor;
   }
 
   /** Empty floors only: a floor that still holds a live squad is refused with 409 `floor_not_empty`. */
-  async deleteOfficeFloor(id: string): Promise<void> {
-    await this.fetch(`/api/office/floors/${id}`, { method: "DELETE" });
+  async deleteCompanyFloor(id: string): Promise<void> {
+    await this.fetch(`/api/company/floors/${id}`, { method: "DELETE" });
   }
 
   /**
    * Applies seat moves in one transaction (a swap is two entries). A taken seat
-   * is a 409 whose `ApiError.body` names the holder; see `parseOfficeSeatConflict`.
+   * is a 409 whose `ApiError.body` names the holder; see `parseCompanySeatConflict`.
    */
-  async setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse> {
-    const raw = await this.fetch<unknown>("/api/office/seats", { method: "PUT", body: JSON.stringify(seats) });
-    return parseWithFallback(raw, OfficeSeatsResponseSchema, EMPTY_OFFICE_SEATS_RESPONSE, {
-      endpoint: "PUT /api/office/seats",
-    }) as OfficeSeatsResponse;
+  /**
+   * Gives a project to a squad: the project takes the SDLC Auto workflow and the
+   * squad's previous project is unassigned. A 409 `workflow_status_mapping_required`
+   * (see `parseSquadProjectMapping`) changed nothing; retry with `status_mapping`.
+   */
+  async assignSquadProject(squadId: string, data: AssignSquadProjectRequest): Promise<AssignSquadProjectResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/project`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, AssignSquadProjectResponseSchema, EMPTY_ASSIGN_SQUAD_PROJECT_RESPONSE, {
+      endpoint: "POST /api/squads/:id/project",
+    }) as AssignSquadProjectResponse;
+  }
+
+  async setCompanySeats(seats: CompanySeatAssignment[]): Promise<CompanySeatsResponse> {
+    const raw = await this.fetch<unknown>("/api/company/seats", { method: "PUT", body: JSON.stringify(seats) });
+    return parseWithFallback(raw, CompanySeatsResponseSchema, EMPTY_COMPANY_SEATS_RESPONSE, {
+      endpoint: "PUT /api/company/seats",
+    }) as CompanySeatsResponse;
   }
 
   // The caller's chat push for the daily brief (spec 2.7). Member-only: an agent
   // is refused by the server.
   async getBriefPushPreference(): Promise<BriefPushPreference> {
-    const raw = await this.fetch<unknown>("/api/office/brief-push");
+    const raw = await this.fetch<unknown>("/api/company/brief-push");
     return parseWithFallback(raw, BriefPushPreferenceSchema, EMPTY_BRIEF_PUSH, {
-      endpoint: "GET /api/office/brief-push",
+      endpoint: "GET /api/company/brief-push",
     });
   }
 
   async updateBriefPushPreference(data: UpdateBriefPushRequest): Promise<BriefPushPreference> {
-    const raw = await this.fetch<unknown>("/api/office/brief-push", {
+    const raw = await this.fetch<unknown>("/api/company/brief-push", {
       method: "PUT",
       body: JSON.stringify(data),
     });
     return parseWithFallback(raw, BriefPushPreferenceSchema, EMPTY_BRIEF_PUSH, {
-      endpoint: "PUT /api/office/brief-push",
+      endpoint: "PUT /api/company/brief-push",
     });
   }
 
   // The caller's own chats in this workspace that can take brief pushes. Empty
   // until a chat is linked.
   async listBriefPushBindings(): Promise<BriefPushBinding[]> {
-    const raw = await this.fetch<unknown>("/api/office/brief-push/bindings");
+    const raw = await this.fetch<unknown>("/api/company/brief-push/bindings");
     return parseWithFallback<BriefPushBinding[]>(raw, BriefPushBindingListSchema, [], {
-      endpoint: "GET /api/office/brief-push/bindings",
+      endpoint: "GET /api/company/brief-push/bindings",
     });
   }
 
@@ -5974,44 +5990,44 @@ export class ApiClient {
   }
 
   // The Secretary's digest and briefs
-  async getOfficeDigest(params?: DigestParams): Promise<Digest> {
+  async getCompanyDigest(params?: DigestParams): Promise<Digest> {
     const search = new URLSearchParams();
     if (params?.since) search.set("since", params.since);
     const qs = search.toString();
-    const raw = await this.fetch<unknown>(`/api/office/digest${qs ? `?${qs}` : ""}`);
+    const raw = await this.fetch<unknown>(`/api/company/digest${qs ? `?${qs}` : ""}`);
     return parseWithFallback(raw, DigestSchema, FALLBACK_DIGEST, {
-      endpoint: "GET /api/office/digest",
+      endpoint: "GET /api/company/digest",
     });
   }
 
   // The Secretary setup and its readiness checklist (owner or admin).
-  async getOfficeSetup(): Promise<OfficeSetupReadiness> {
-    const raw = await this.fetch<unknown>("/api/office/setup");
-    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
-      endpoint: "GET /api/office/setup",
+  async getCompanySetup(): Promise<CompanySetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/company/setup");
+    return parseWithFallback(raw, CompanySetupReadinessSchema, FALLBACK_COMPANY_SETUP_READINESS, {
+      endpoint: "GET /api/company/setup",
     });
   }
 
   // Idempotent: a second call changes nothing. Without an online Hermes runtime
-  // it rejects with an ApiError whose body parseOfficeSetupRefusal reads.
-  async setupOffice(data: OfficeSetupRequest): Promise<OfficeSetupReadiness> {
-    const raw = await this.fetch<unknown>("/api/office/setup", {
+  // it rejects with an ApiError whose body parseCompanySetupRefusal reads.
+  async setupCompany(data: CompanySetupRequest): Promise<CompanySetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/company/setup", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
-      endpoint: "POST /api/office/setup",
+    return parseWithFallback(raw, CompanySetupReadinessSchema, FALLBACK_COMPANY_SETUP_READINESS, {
+      endpoint: "POST /api/company/setup",
     });
   }
 
   // The starter company (owner or admin). Idempotent; a step that failed is reported in the result.
   async applyCompanyTemplate(data: CompanyTemplateApplyRequest): Promise<CompanyTemplateApplyResult> {
-    const raw = await this.fetch<unknown>("/api/office/company-template/apply", {
+    const raw = await this.fetch<unknown>("/api/company/company-template/apply", {
       method: "POST",
       body: JSON.stringify(data),
     });
     return parseWithFallback(raw, CompanyTemplateApplyResultSchema, FALLBACK_COMPANY_TEMPLATE_RESULT, {
-      endpoint: "POST /api/office/company-template/apply",
+      endpoint: "POST /api/company/company-template/apply",
     });
   }
 
@@ -6387,29 +6403,29 @@ export class ApiClient {
   // two writes return the whole company state, so the caller reflects what the
   // server kept rather than what it sent.
   async getCompanyState(): Promise<CompanyStateInfo> {
-    const raw = await this.fetch<unknown>("/api/office/company-state");
+    const raw = await this.fetch<unknown>("/api/company/company-state");
     return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
-      endpoint: "GET /api/office/company-state",
+      endpoint: "GET /api/company/company-state",
     });
   }
 
   async setCompanyState(data: SetCompanyStateRequest): Promise<CompanyStateInfo> {
-    const raw = await this.fetch<unknown>("/api/office/company-state", {
+    const raw = await this.fetch<unknown>("/api/company/company-state", {
       method: "PUT",
       body: JSON.stringify(data),
     });
     return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
-      endpoint: "PUT /api/office/company-state",
+      endpoint: "PUT /api/company/company-state",
     });
   }
 
   /** The Secretary's digest source and what it resolves to (spec 4.8). */
   async getDigestMode(): Promise<DigestModeInfo> {
-    return parseDigestMode(await this.fetch<unknown>("/api/office/digest-mode"));
+    return parseDigestMode(await this.fetch<unknown>("/api/company/digest-mode"));
   }
 
   async setDigestMode(mode: DigestSetting): Promise<DigestModeInfo> {
-    const raw = await this.fetch<unknown>("/api/office/digest-mode", {
+    const raw = await this.fetch<unknown>("/api/company/digest-mode", {
       method: "PUT",
       body: JSON.stringify({ mode }),
     });
@@ -6417,12 +6433,12 @@ export class ApiClient {
   }
 
   async setQuietHours(data: QuietHours): Promise<CompanyStateInfo> {
-    const raw = await this.fetch<unknown>("/api/office/quiet-hours", {
+    const raw = await this.fetch<unknown>("/api/company/quiet-hours", {
       method: "PUT",
       body: JSON.stringify(data),
     });
     return parseWithFallback<CompanyStateInfo>(raw, CompanyStateSchema, FALLBACK_COMPANY_STATE, {
-      endpoint: "PUT /api/office/quiet-hours",
+      endpoint: "PUT /api/company/quiet-hours",
     });
   }
 
@@ -6468,10 +6484,10 @@ export class ApiClient {
     return parsePolicyAutoApprovals(raw, "GET /api/approval-policies/:id/auto-approvals");
   }
 
-  /** The office pulse strip's read. The server caches it for a minute. */
-  async getOfficePulse(): Promise<OfficePulse> {
-    const raw = await this.fetch<unknown>("/api/office/pulse");
-    return parseOfficePulse(raw);
+  /** The company pulse strip's read. The server caches it for a minute. */
+  async getCompanyPulse(): Promise<CompanyPulse> {
+    const raw = await this.fetch<unknown>("/api/company/pulse");
+    return parseCompanyPulse(raw);
   }
 
   /** System health for the Controls tab (spec 4.9). */

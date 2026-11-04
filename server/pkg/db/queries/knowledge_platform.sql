@@ -142,7 +142,7 @@ WHERE workspace_id = @workspace_id AND archived_at IS NULL AND kind = 'user';
 SELECT EXISTS (SELECT 1 FROM squad WHERE id = @id AND workspace_id = @workspace_id AND archived_at IS NULL);
 
 -- name: KnowledgeACLFloorExists :one
-SELECT EXISTS (SELECT 1 FROM office_floor WHERE id = @id AND workspace_id = @workspace_id);
+SELECT EXISTS (SELECT 1 FROM company_floor WHERE id = @id AND workspace_id = @workspace_id);
 
 -- name: KnowledgeACLAgentExists :one
 SELECT EXISTS (SELECT 1 FROM agent WHERE id = @id AND workspace_id = @workspace_id AND archived_at IS NULL);

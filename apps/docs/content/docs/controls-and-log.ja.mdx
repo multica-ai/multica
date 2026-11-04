@@ -19,7 +19,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 一時停止中は、ナレッジの自動公開とパイプラインの自動進行が止まり、常時承認も適用されません。秘書のブリーフとチャットは動き続けるので、会社の状況を見たり会社と話したりできます。
 
-オフィスのヘッダーにある **Pause**（一時停止）で会社を一時停止します。**stop running work**（実行中の作業を停止）を付けると、進行中のルーティンとデリゲートの実行もキャンセルされます。
+会社のヘッダーにある **Pause**（一時停止）で会社を一時停止します。**stop running work**（実行中の作業を停止）を付けると、進行中のルーティンとデリゲートの実行もキャンセルされます。
 
 ```bash
 multica company status
@@ -77,7 +77,7 @@ CSV のエクスポートは50,000行が上限です。それを超えると HTT
 
 ## 制限
 
-- 会社の状態のエンドポイントは、`GET` と `PUT /api/office/company-state`、および `PUT /api/office/quiet-hours` です。上記の CLI コマンドはこれらをラップしています。
+- 会社の状態のエンドポイントは、`GET` と `PUT /api/company/company-state`、および `PUT /api/company/quiet-hours` です。上記の CLI コマンドはこれらをラップしています。
 
 ## 次のステップ
 

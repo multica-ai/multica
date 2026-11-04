@@ -112,7 +112,7 @@ func runCompanyExport(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var doc json.RawMessage
-	if err := client.GetJSON(ctx, "/api/office/export", &doc); err != nil {
+	if err := client.GetJSON(ctx, "/api/company/export", &doc); err != nil {
 		return fmt.Errorf("export company: %w", err)
 	}
 	pretty, err := json.MarshalIndent(doc, "", "  ")
@@ -152,7 +152,7 @@ func runCompanyImport(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	path := "/api/office/import"
+	path := "/api/company/import"
 	if dryRun {
 		path += "?dry_run=true"
 	}
@@ -199,7 +199,7 @@ func runCompanyStatus(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var state map[string]any
-	if err := client.GetJSON(ctx, "/api/office/company-state", &state); err != nil {
+	if err := client.GetJSON(ctx, "/api/company/company-state", &state); err != nil {
 		return fmt.Errorf("read company state: %w", err)
 	}
 	return printCompanyState(cmd, state)
@@ -222,7 +222,7 @@ func putCompanyState(cmd *cobra.Command, body map[string]any) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var state map[string]any
-	if err := client.PutJSON(ctx, "/api/office/company-state", body, &state); err != nil {
+	if err := client.PutJSON(ctx, "/api/company/company-state", body, &state); err != nil {
 		return fmt.Errorf("change company state: %w", err)
 	}
 	return printCompanyState(cmd, state)
@@ -236,7 +236,7 @@ func runCompanyQuiet(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var state map[string]any
-	if err := client.GetJSON(ctx, "/api/office/company-state", &state); err != nil {
+	if err := client.GetJSON(ctx, "/api/company/company-state", &state); err != nil {
 		return fmt.Errorf("read company state: %w", err)
 	}
 	change, changing, err := quietChangeFromFlags(cmd)
@@ -248,7 +248,7 @@ func runCompanyQuiet(cmd *cobra.Command, _ []string) error {
 	}
 	qh, _ := state["quiet_hours"].(map[string]any)
 	var saved map[string]any
-	if err := client.PutJSON(ctx, "/api/office/quiet-hours", quietBodyFrom(qh, change), &saved); err != nil {
+	if err := client.PutJSON(ctx, "/api/company/quiet-hours", quietBodyFrom(qh, change), &saved); err != nil {
 		return fmt.Errorf("save quiet hours: %w", err)
 	}
 	return printCompanyState(cmd, saved)

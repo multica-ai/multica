@@ -14,15 +14,15 @@ import (
 // naming the same chief again creates nothing, a new chief pauses the previous
 // routine and gets its own, and clearing a chief pauses its routine.
 func TestFloorChiefRoutineIsCreatedOncePerChief(t *testing.T) {
-	f, _ := officeWorkspace(t)
+	f, _ := companyWorkspace(t)
 	ctx := context.Background()
 	ws := util.MustParseUUID(f.WorkspaceID)
 	actor := util.MustParseUUID(f.UserID)
 	runtimeID, chiefA := ownerAndLeader(t, f, "Chief A")
 	chiefB := f.Agent(t, "Chief B", runtimeID)
 	chiefC := f.Agent(t, "Chief C", runtimeID)
-	floorA := f.Insert(t, "office_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Research", "position": 0})
-	floorB := f.Insert(t, "office_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Build", "position": 1})
+	floorA := f.Insert(t, "company_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Research", "position": 0})
+	floorB := f.Insert(t, "company_floor", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "Build", "position": 1})
 
 	name := func(floor, agent string) FloorChiefInput {
 		return FloorChiefInput{

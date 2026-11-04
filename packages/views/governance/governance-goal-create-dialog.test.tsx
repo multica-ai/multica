@@ -11,7 +11,7 @@ import { GovernanceGoalCreateDialog } from "./governance-goal-create-dialog";
 const api = vi.hoisted(() => ({
   createGoal: vi.fn(),
   listMetrics: vi.fn(),
-  listOfficeFloors: vi.fn(),
+  listCompanyFloors: vi.fn(),
   listInitiatives: vi.fn(),
   listSquads: vi.fn(),
   listAgents: vi.fn(),
@@ -56,7 +56,7 @@ describe("GovernanceGoalCreateDialog", { timeout: 30_000 }, () => {
     api.listMetrics.mockResolvedValue([
       { key: "mrr", name: "Monthly recurring revenue", unit: "USD", source: "manual", direction: "increase", description: "", created_at: "" },
     ]);
-    api.listOfficeFloors.mockResolvedValue([]);
+    api.listCompanyFloors.mockResolvedValue([]);
     api.listInitiatives.mockResolvedValue([]);
     api.listSquads.mockResolvedValue([]);
     api.listAgents.mockResolvedValue([]);

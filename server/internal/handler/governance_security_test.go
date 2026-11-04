@@ -61,7 +61,7 @@ func TestGovernanceWritesRefuseBodiesOverTheirCap(t *testing.T) {
 // takes a whole company document, so its cap is the largest.
 func TestCompanyImportRefusesBodiesOverItsCap(t *testing.T) {
 	fx := newCompanyWorkspace(t)
-	req := companyReq(fx.Owner, fx.ID, http.MethodPost, "/api/office/import", oversizedBody(int(companyImportBodyLimit)))
+	req := companyReq(fx.Owner, fx.ID, http.MethodPost, "/api/company/import", oversizedBody(int(companyImportBodyLimit)))
 	testutil.Call(t, testHandler.ImportCompany, req).Want(http.StatusRequestEntityTooLarge)
 }
 

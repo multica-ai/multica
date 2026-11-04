@@ -100,7 +100,7 @@ func RunClassOfTask(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) 
 }
 
 // isSecretaryBriefAutopilot reports whether an autopilot is the Secretary's
-// daily brief or weekly review: the titles the office setup gives them, assigned
+// daily brief or weekly review: the titles the company setup gives them, assigned
 // to the workspace's current Secretary.
 func isSecretaryBriefAutopilot(title, assigneeType string, assigneeID, secretaryID pgtype.UUID) bool {
 	if assigneeType != "agent" || !secretaryID.Valid || assigneeID != secretaryID {

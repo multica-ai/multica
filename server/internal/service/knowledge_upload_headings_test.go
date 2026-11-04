@@ -19,7 +19,7 @@ import (
 //     no heading styles.
 //   - headings-sample.pdf: Apache PDFBox test resource eu-001.pdf, an E-PRTR
 //     thresholds table from an EU/EEA document with section headings.
-//   - no-headings-sample.pdf: Apache PDFBox test resource openoffice-test-document.pdf,
+//   - no-headings-sample.pdf: Apache PDFBox test resource opencompany-test-document.pdf,
 //     text "Test" only.
 //   - corrupt-truncated.docx and corrupt-truncated.pdf: the first 20000 and 15000
 //     bytes of the two samples above, so the zip directory and the PDF trailer are cut off.

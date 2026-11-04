@@ -167,7 +167,7 @@ SELECT id, name, count(*) OVER ()::int AS total_count
 FROM squad
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND archived_at IS NULL
-  AND (floor_id IS NULL OR office_slot IS NULL)
+  AND (floor_id IS NULL OR company_slot IS NULL)
 ORDER BY created_at, id
 LIMIT sqlc.arg('row_limit')::int;
 

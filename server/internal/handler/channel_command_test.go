@@ -59,7 +59,7 @@ func TestChannelCommand_BriefRepliesWithTheHeadlineAndALink(t *testing.T) {
 	sender := bindChatSender(t, installs, env.WorkspaceID, member)
 
 	msg, handled := chatCommand(t, installs, sender, channel.CommandBrief)
-	want := "Nothing needs you today.\n\nBrief: https://app.example/" + workspaceSlug(t, env.WorkspaceID) + "/office?brief=" + brief.ID
+	want := "Nothing needs you today.\n\nBrief: https://app.example/" + workspaceSlug(t, env.WorkspaceID) + "/company?brief=" + brief.ID
 	if !handled || msg.Text != want {
 		t.Fatalf("/brief = %q (handled %v), want %q", msg.Text, handled, want)
 	}
@@ -131,7 +131,7 @@ func TestChannelCommand_DecisionsListsFiveAndLeavesOutSnoozed(t *testing.T) {
 	if !strings.Contains(lines[0], titles[5]) || !strings.Contains(lines[0], "decision="+ids[5]) {
 		t.Fatalf("the newest pending decision should lead, with its link:\n%s", msg.Text)
 	}
-	if !strings.Contains(msg.Text, "...and 1 more in the Office") {
+	if !strings.Contains(msg.Text, "...and 1 more in the Company") {
 		t.Fatalf("the overflow was not counted:\n%s", msg.Text)
 	}
 }
@@ -198,7 +198,7 @@ func TestChannelCommandLark_BriefRepliesToABoundLarkMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Command: %v", err)
 	}
-	want := "Nothing needs you today.\n\nBrief: https://app.example/" + workspaceSlug(t, env.WorkspaceID) + "/office?brief=" + brief.ID
+	want := "Nothing needs you today.\n\nBrief: https://app.example/" + workspaceSlug(t, env.WorkspaceID) + "/company?brief=" + brief.ID
 	if !handled || msg.Text != want {
 		t.Fatalf("Lark /brief = %q (handled %v), want %q", msg.Text, handled, want)
 	}

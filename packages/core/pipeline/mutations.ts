@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { issueKeys } from "../issues/queries";
-import { proposalKeys } from "../office/proposals";
-import type { DecideProposalRequest, Proposal } from "../office/proposal-schema";
+import { proposalKeys } from "../company/proposals";
+import type { DecideProposalRequest, Proposal } from "../company/proposal-schema";
 import { initiativeKeys } from "./queries";
 import type { CreateInitiativeRequest, ForceInitiativeRequest, Initiative } from "./types";
 

@@ -95,7 +95,7 @@ func (h *Handler) briefPushMember(w http.ResponseWriter, r *http.Request) (wsUUI
 // GetBriefPushPreference returns the caller's brief push preference. A member
 // who has never set one gets the default: off, with no chat and no quiet hours.
 //
-//	GET /api/office/brief-push
+//	GET /api/company/brief-push
 func (h *Handler) GetBriefPushPreference(w http.ResponseWriter, r *http.Request) {
 	wsUUID, userUUID, ok := h.briefPushMember(w, r)
 	if !ok {
@@ -119,7 +119,7 @@ func (h *Handler) GetBriefPushPreference(w http.ResponseWriter, r *http.Request)
 // own bindings in this workspace on an active installation, for chat apps that
 // have a notifier. The list is an empty array when there are none.
 //
-//	GET /api/office/brief-push/bindings
+//	GET /api/company/brief-push/bindings
 func (h *Handler) ListBriefPushBindings(w http.ResponseWriter, r *http.Request) {
 	wsUUID, userUUID, ok := h.briefPushMember(w, r)
 	if !ok {
@@ -149,7 +149,7 @@ func (h *Handler) ListBriefPushBindings(w http.ResponseWriter, r *http.Request) 
 // UpdateBriefPushPreference replaces the caller's brief push preference. The
 // body carries all three fields; an omitted one is cleared.
 //
-//	PUT /api/office/brief-push {brief_push, binding_id?, quiet_hours?}
+//	PUT /api/company/brief-push {brief_push, binding_id?, quiet_hours?}
 func (h *Handler) UpdateBriefPushPreference(w http.ResponseWriter, r *http.Request) {
 	wsUUID, userUUID, ok := h.briefPushMember(w, r)
 	if !ok {

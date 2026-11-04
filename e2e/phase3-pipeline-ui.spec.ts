@@ -5,7 +5,7 @@ import { createTestApi } from "./helpers";
 import { TestApiClient } from "./fixtures";
 
 // Phase 3 pipeline UI, the /pipeline checks of spec 3.7 (plan 10.15, 10.20).
-// Setup goes through the API, as in phase3-office.spec.ts: the Office setup, the
+// Setup goes through the API, as in phase3-company.spec.ts: the Company setup, the
 // starter company, and one initiative started directly by the owner. A second
 // user joins the workspace as a member. The checks run on /pipeline.
 //
@@ -56,7 +56,7 @@ test("the pipeline board shows an initiative, its panel opens, and Force is for 
   try {
     const workspace = await api.createWorkspace(`Phase 3 UI ${id}`, `e2e-phase3-ui-${id}`);
     const runtimeId = await api.seedRuntime("Phase 3 UI Hermes runtime", "hermes");
-    await api.setupOffice();
+    await api.setupCompany();
     await api.applyStarterCompany({ runtime_id: runtimeId, squads: STARTER_SQUAD_KEYS, start: "leave_paused" });
     const pipeline = (await api.listPipelines()).find((candidate) => candidate.is_default);
     if (!pipeline) throw new Error("the starter company installed no default pipeline");

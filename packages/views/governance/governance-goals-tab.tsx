@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { canGovern, goalsOptions, type Goal } from "@multica/core/governance";
-import { officeFloorsOptions } from "@multica/core/office";
+import { companyFloorsOptions } from "@multica/core/company";
 import { squadListOptions } from "@multica/core/workspace";
 import { initiativeListOptions } from "@multica/core/pipeline";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -36,7 +36,7 @@ export function GovernanceGoalsTab() {
   const { pathname, searchParams, replace } = useNavigation();
   const selected = searchParams.get("goal") ?? "";
   const goals = useQuery(goalsOptions(wsId));
-  const floors = useQuery(officeFloorsOptions(wsId));
+  const floors = useQuery(companyFloorsOptions(wsId));
   const squads = useQuery(squadListOptions(wsId));
   const initiatives = useQuery(initiativeListOptions(wsId));
 

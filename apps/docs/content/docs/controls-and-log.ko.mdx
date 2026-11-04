@@ -19,7 +19,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 일시 정지 중에는 지식 자동 공개와 파이프라인 자동 진행이 멈추고, 상시 승인도 적용되지 않습니다. 비서의 브리프와 채팅은 계속 동작하므로, 회사의 상황을 보고 회사와 대화할 수 있습니다.
 
-오피스 헤더의 **Pause**(일시 정지)가 회사를 일시 정지합니다. **stop running work**(실행 중인 작업 중지)를 함께 선택하면, 진행 중인 루틴과 위임 실행도 취소됩니다.
+회사 헤더의 **Pause**(일시 정지)가 회사를 일시 정지합니다. **stop running work**(실행 중인 작업 중지)를 함께 선택하면, 진행 중인 루틴과 위임 실행도 취소됩니다.
 
 ```bash
 multica company status
@@ -77,7 +77,7 @@ CSV 내보내기는 최대 50,000행입니다. 그 이상이면 HTTP 413을 반�
 
 ## 제한 사항
 
-- 회사 상태 엔드포인트는 `GET`과 `PUT /api/office/company-state`, 그리고 `PUT /api/office/quiet-hours`입니다. 위의 CLI 명령은 이들을 감쌉니다.
+- 회사 상태 엔드포인트는 `GET`과 `PUT /api/company/company-state`, 그리고 `PUT /api/company/quiet-hours`입니다. 위의 CLI 명령은 이들을 감쌉니다.
 
 ## 다음 단계
 

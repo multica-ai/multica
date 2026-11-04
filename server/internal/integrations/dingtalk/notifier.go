@@ -18,7 +18,7 @@ import (
 // message with buttons is an action card whose buttons open links. DingTalk
 // action cards cannot call the server back, so no button here carries a signed
 // token: a press would need an interactive card with a Stream callback, which
-// this adapter does not build. The decision links in the text lead to the Office,
+// this adapter does not build. The decision links in the text lead to the Company,
 // where the member decides in the app.
 
 const (

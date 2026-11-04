@@ -26,7 +26,7 @@ func IsLikelyBinaryFilePath(path string) bool {
 		".ttf", ".otf", ".woff", ".woff2", ".eot",
 		// archives
 		".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
-		// documents (binary office)
+		// documents (binary company)
 		".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
 		// media
 		".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".m4a", ".flac",

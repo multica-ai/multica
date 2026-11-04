@@ -16,7 +16,7 @@ import {
   type CreateBudgetRequest,
 } from "@multica/core/governance";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { officeFloorsOptions } from "@multica/core/office";
+import { companyFloorsOptions } from "@multica/core/company";
 import { initiativeListOptions } from "@multica/core/pipeline";
 import { squadListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
@@ -72,7 +72,7 @@ function CreateBudgetForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useT("governance");
   const wsId = useWorkspaceId();
   const create = useCreateBudget(wsId);
-  const floors = useQuery(officeFloorsOptions(wsId));
+  const floors = useQuery(companyFloorsOptions(wsId));
   const squads = useQuery(squadListOptions(wsId));
   const initiatives = useQuery(initiativeListOptions(wsId));
 

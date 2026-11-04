@@ -5,13 +5,13 @@ import { paths } from "./paths";
 /**
  * Priority (onboarded-first):
  *   !hasOnboarded               → /onboarding
- *   hasOnboarded + workspace[0] → /<first.slug>/office
+ *   hasOnboarded + workspace[0] → /<first.slug>/company
  *   hasOnboarded + no workspace → /workspaces/new
  *
  * V3 invariant: `onboarded_at != null` is the single source of truth for
  * "may access /<slug>/*". The web workspace layout and the desktop App.tsx
  * overlay decision both gate on this — sending an un-onboarded user
- * straight to /office would just be redirected back to /onboarding by
+ * straight to /company would just be redirected back to /onboarding by
  * the layout gate, costing a navigation round-trip. Check onboarded
  * first.
  *
@@ -36,7 +36,7 @@ export function resolvePostAuthDestination(
   }
   const first = workspaces[0];
   if (first) {
-    return paths.workspace(first.slug).office();
+    return paths.workspace(first.slug).company();
   }
   return paths.newWorkspace();
 }

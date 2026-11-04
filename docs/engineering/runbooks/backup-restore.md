@@ -31,7 +31,7 @@ Core workspace and people: `workspace` (including `company_state`,
 Work: `issue`, `comment`, `project`, `issue_workflow`, `issue_status`, `agent_task_queue`,
 `issue_wakeup`, `inbox_item`, `activity_log`.
 
-Office: `office_floor`, `squad`, `squad_member`, `squad_routine`, `squad_charter`,
+Office: `company_floor`, `squad`, `squad_member`, `squad_routine`, `squad_charter`,
 `autopilot`, `autopilot_trigger`, `autopilot_run`, `floor_chief`.
 
 Phase 2: `brief`, `brief_delivery`, `brief_feedback`, `brief_inquiry`,

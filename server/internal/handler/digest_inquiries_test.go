@@ -34,9 +34,9 @@ func TestDigest_InquiriesOfTodayAndYesterdayOnly(t *testing.T) {
 		"question": "asked two days ago", "asked_on": testutil.Raw("(now() AT TIME ZONE 'UTC')::date - 2"),
 	})
 
-	req := newRequest("GET", "/api/office/digest", nil)
+	req := newRequest("GET", "/api/company/digest", nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-	res := testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK)
+	res := testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK)
 
 	raw, ok := res.Map()["inquiries"].([]any)
 	if !ok || len(raw) != 2 {
@@ -73,9 +73,9 @@ func TestDigest_InquiriesOfTodayAndYesterdayOnly(t *testing.T) {
 
 func TestDigest_InquiriesIsAnArrayWhenEmpty(t *testing.T) {
 	e := newDigestEnv(t)
-	req := newRequest("GET", "/api/office/digest", nil)
+	req := newRequest("GET", "/api/company/digest", nil)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
-	res := testutil.Call(t, testHandler.GetOfficeDigest, req).Want(http.StatusOK)
+	res := testutil.Call(t, testHandler.GetCompanyDigest, req).Want(http.StatusOK)
 	raw, ok := res.Map()["inquiries"].([]any)
 	if !ok || len(raw) != 0 {
 		t.Fatalf("an empty inquiries section must be [], got %#v", res.Map()["inquiries"])

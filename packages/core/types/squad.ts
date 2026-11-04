@@ -23,10 +23,10 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
-  /** The office floor this squad is seated on. Null while unseated; older backends omit it. */
+  /** The company floor this squad is seated on. Null while unseated; older backends omit it. */
   floor_id?: string | null;
   /** The room slot (0 to 5) on that floor. Set exactly when `floor_id` is. */
-  office_slot?: number | null;
+  company_slot?: number | null;
   /** The squad's autonomy level, 0 (Suggest) to 3 (Autonomous). Older backends omit it: the default is 1. */
   autonomy_level?: number;
 }

@@ -110,7 +110,7 @@ func notifierMessage() channel.Message {
 	return channel.Message{
 		Text: "Brief ready\nTwo decisions need you.",
 		Buttons: []channel.Button{
-			{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+			{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 			{Label: "Decide", CallbackData: "decide:p1"},
 		},
 	}
@@ -148,7 +148,7 @@ func TestNotifierSendsMessageWithInlineKeyboard(t *testing.T) {
 		t.Fatalf("inline_keyboard rows = %d, want 2 (one button per row)", len(rows))
 	}
 	first := rows[0].([]any)[0].(map[string]any)
-	if first["url"] != "https://app.example/acme/office?brief=b1" || first["text"] != "Open the brief" {
+	if first["url"] != "https://app.example/acme/company?brief=b1" || first["text"] != "Open the brief" {
 		t.Fatalf("url button = %v", first)
 	}
 	second := rows[1].([]any)[0].(map[string]any)
@@ -326,7 +326,7 @@ func TestNotifierSameRowPairsButtons(t *testing.T) {
 		{Label: "Approve", CallbackData: "a"},
 		{Label: "Reject", CallbackData: "r", SameRow: true},
 		{Label: "Snooze", CallbackData: "s"},
-		{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+		{Label: "Open the brief", URL: "https://app.example/acme/company?brief=b1"},
 	}}
 
 	if err := n.Send(context.Background(), notifierBinding(), msg); err != nil {
@@ -347,7 +347,7 @@ func TestNotifierUsesCallbackAndIgnoresLinkURL(t *testing.T) {
 	t.Parallel()
 	n, srv, _, _ := newNotifierFixture(t, http.StatusOK, notifierSuccessBody)
 	msg := channel.Message{Text: "x", Buttons: []channel.Button{
-		{Label: "Approve", CallbackData: "a", LinkURL: "https://app.example/acme/office?decision=p1"},
+		{Label: "Approve", CallbackData: "a", LinkURL: "https://app.example/acme/company?decision=p1"},
 	}}
 
 	if err := n.Send(context.Background(), notifierBinding(), msg); err != nil {

@@ -46,8 +46,8 @@ func TestParseBriefSince(t *testing.T) {
 func TestBriefDigestSendsSinceAndPrintsJSON(t *testing.T) {
 	var gotSince string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/office/digest" {
-			t.Errorf("request = %s %s, want GET /api/office/digest", r.Method, r.URL.Path)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/company/digest" {
+			t.Errorf("request = %s %s, want GET /api/company/digest", r.Method, r.URL.Path)
 		}
 		gotSince = r.URL.Query().Get("since")
 		_ = json.NewEncoder(w).Encode(map[string]any{"squads": []any{}, "omitted_squad_count": 0})

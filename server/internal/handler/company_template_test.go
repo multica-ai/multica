@@ -33,7 +33,7 @@ func newCompanyTemplateEnv(t *testing.T) companyTemplateEnv {
 			`DELETE FROM autopilot WHERE workspace_id = $1`,
 			`DELETE FROM squad_charter WHERE workspace_id = $1`,
 			`DELETE FROM pipeline WHERE workspace_id = $1`,
-			`DELETE FROM office_floor WHERE workspace_id = $1`,
+			`DELETE FROM company_floor WHERE workspace_id = $1`,
 		} {
 			testPool.Exec(ctx, stmt, ws)
 		}
@@ -43,7 +43,7 @@ func newCompanyTemplateEnv(t *testing.T) companyTemplateEnv {
 
 func (e companyTemplateEnv) apply(t *testing.T, userID string, body map[string]any) *testutil.Response {
 	t.Helper()
-	req := newRequest("POST", "/api/office/company-template/apply", body)
+	req := newRequest("POST", "/api/company/company-template/apply", body)
 	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
 	if userID != "" {
 		req = asUser(req, userID)

@@ -74,7 +74,7 @@ type CompanyApplyResult struct {
 	PipelineID    pgtype.UUID
 	UnownedStages []string
 
-	Floors     []db.OfficeFloor
+	Floors     []db.CompanyFloor
 	Agents     []db.Agent
 	Squads     []db.Squad
 	Autopilots []db.Autopilot
@@ -111,8 +111,8 @@ func (s *CompanyTemplateService) Apply(ctx context.Context, in CompanyApplyInput
 }
 
 // BackfillLibrarian adds the Librarian to each knowledge-ready workspace that
-// has an Executive Office. The Librarian is part of the starter company's
-// Executive Office, so a workspace set up before phase 3 gets it here. Nothing
+// has an Executive Company. The Librarian is part of the starter company's
+// Executive Company, so a workspace set up before phase 3 gets it here. Nothing
 // else is installed: the pipeline, the charter and the brief stay as they are.
 // It returns how many workspaces it changed.
 func (s *CompanyTemplateService) BackfillLibrarian(ctx context.Context) (int, error) {
@@ -142,7 +142,7 @@ func (s *CompanyTemplateService) BackfillLibrarianIn(ctx context.Context, worksp
 			continue
 		}
 		// The backfill has no runtime choice of its own, so the Librarian runs on
-		// the Secretary's runtime, the one the boss chose for the office.
+		// the Secretary's runtime, the one the boss chose for the company.
 		runtime, ok, err := s.secretaryRuntime(ctx, ws)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("workspace %s: %w", util.UUIDToString(ws), err))
@@ -305,8 +305,8 @@ func (r *companyRun) apply(ctx context.Context) {
 }
 
 // librarian runs the Librarian's part of the starter company for the Executive
-// Office: its agent, its membership and its routines. It changes nothing when the
-// workspace has no Executive Office squad yet.
+// Company: its agent, its membership and its routines. It changes nothing when the
+// workspace has no Executive Company squad yet.
 func (r *companyRun) librarian(ctx context.Context) error {
 	executive, ok := r.data.squad("executive_office")
 	if !ok {
@@ -385,13 +385,13 @@ func (r *companyRun) knowledge() *KnowledgeService {
 
 func (r *companyRun) ensureFloor(ctx context.Context, key string) (string, string, error) {
 	name := r.data.FloorNames[key]
-	var created *db.OfficeFloor
+	var created *db.CompanyFloor
 	status, msg := CompanyStepReused, "the floor exists"
 	err := r.inTx(ctx, func(q *db.Queries) error {
-		if err := q.LockOfficeLayout(ctx, r.in.WorkspaceID); err != nil {
+		if err := q.LockCompanyLayout(ctx, r.in.WorkspaceID); err != nil {
 			return err
 		}
-		floors, err := q.ListOfficeFloors(ctx, r.in.WorkspaceID)
+		floors, err := q.ListCompanyFloors(ctx, r.in.WorkspaceID)
 		if err != nil {
 			return err
 		}
@@ -400,10 +400,10 @@ func (r *companyRun) ensureFloor(ctx context.Context, key string) (string, strin
 				return nil
 			}
 		}
-		if len(floors) >= OfficeMaxFloors {
-			return companyErr("a workspace can have at most %d floors", OfficeMaxFloors)
+		if len(floors) >= CompanyMaxFloors {
+			return companyErr("a workspace can have at most %d floors", CompanyMaxFloors)
 		}
-		floor, err := q.CreateOfficeFloor(ctx, db.CreateOfficeFloorParams{WorkspaceID: r.in.WorkspaceID, Name: name})
+		floor, err := q.CreateCompanyFloor(ctx, db.CreateCompanyFloorParams{WorkspaceID: r.in.WorkspaceID, Name: name})
 		if err != nil {
 			return err
 		}
@@ -462,9 +462,9 @@ func (r *companyRun) ensureAgent(ctx context.Context, role companyRole) (string,
 	}
 	if role.Runtime == "secretary" {
 		if !found || existing.ArchivedAt.Valid {
-			return "", "", companyErr("the Secretary is not set up; run the office setup first")
+			return "", "", companyErr("the Secretary is not set up; run the company setup first")
 		}
-		return CompanyStepReused, "the Secretary of the office", nil
+		return CompanyStepReused, "the Secretary of the company", nil
 	}
 	if found {
 		if existing.ArchivedAt.Valid {
@@ -538,7 +538,7 @@ func (r *companyRun) ensureSquad(ctx context.Context, card companySquad) (string
 	var squad db.Squad
 	created := false
 	err := r.inTx(ctx, func(q *db.Queries) error {
-		if err := q.LockOfficeLayout(ctx, r.in.WorkspaceID); err != nil {
+		if err := q.LockCompanyLayout(ctx, r.in.WorkspaceID); err != nil {
 			return err
 		}
 		leaderRole, ok := companyRoleNamed(card, card.Leader)
@@ -618,7 +618,7 @@ func (r *companyRun) ensureSquad(ctx context.Context, card companySquad) (string
 			if err != nil {
 				return err
 			}
-			slot, err := freeOfficeSeat(ctx, q, r.in.WorkspaceID, floor.ID)
+			slot, err := freeCompanySeat(ctx, q, r.in.WorkspaceID, floor.ID)
 			if errors.Is(err, ErrExecutiveFloorFull) {
 				return companyErr("the %s floor has no free seat", floor.Name)
 			}
@@ -629,7 +629,7 @@ func (r *companyRun) ensureSquad(ctx context.Context, card companySquad) (string
 				ID:          squad.ID,
 				WorkspaceID: r.in.WorkspaceID,
 				FloorID:     floor.ID,
-				OfficeSlot:  pgtype.Int2{Int16: slot, Valid: true},
+				CompanySlot: pgtype.Int2{Int16: slot, Valid: true},
 			})
 			if err != nil {
 				return err
@@ -647,18 +647,18 @@ func (r *companyRun) ensureSquad(ctx context.Context, card companySquad) (string
 	return CompanyStepReused, "the squad exists", nil
 }
 
-func (r *companyRun) floorNamed(ctx context.Context, q *db.Queries, key string) (db.OfficeFloor, error) {
+func (r *companyRun) floorNamed(ctx context.Context, q *db.Queries, key string) (db.CompanyFloor, error) {
 	name := r.data.FloorNames[key]
-	floors, err := q.ListOfficeFloors(ctx, r.in.WorkspaceID)
+	floors, err := q.ListCompanyFloors(ctx, r.in.WorkspaceID)
 	if err != nil {
-		return db.OfficeFloor{}, err
+		return db.CompanyFloor{}, err
 	}
 	for _, f := range floors {
 		if f.Name == name {
 			return f, nil
 		}
 	}
-	return db.OfficeFloor{}, companyErr("the %s floor is missing", name)
+	return db.CompanyFloor{}, companyErr("the %s floor is missing", name)
 }
 
 func companyRoleNamed(card companySquad, key string) (companyRole, bool) {
@@ -901,7 +901,7 @@ func (r *companyRun) ensureOperatingReview(ctx context.Context, q *db.Queries, s
 }
 
 // ensureBrief makes sure one of the Secretary's brief autopilots exists, with the
-// schedule and description the office setup gives it, and runs when wanted. The
+// schedule and description the company setup gives it, and runs when wanted. The
 // setup makes the daily brief active and the weekly review paused.
 func (r *companyRun) ensureBrief(ctx context.Context, title string, wanted bool) (string, string, error) {
 	var created *db.Autopilot
@@ -916,7 +916,7 @@ func (r *companyRun) ensureBrief(ctx context.Context, title string, wanted bool)
 			return err
 		}
 		if !found || !ws.SecretaryAgentID.Valid || secretary.ArchivedAt.Valid {
-			return companyErr("the Secretary is not set up; run the office setup first")
+			return companyErr("the Secretary is not set up; run the company setup first")
 		}
 		ap, found, err := findAutopilotTitled(ctx, q, r.in.WorkspaceID, "agent", secretary.ID, title)
 		if err != nil {
@@ -930,7 +930,7 @@ func (r *companyRun) ensureBrief(ctx context.Context, title string, wanted bool)
 			resumed = changed
 			return nil
 		}
-		in := OfficeSetupInput{WorkspaceID: r.in.WorkspaceID, Actor: db.Member{UserID: r.in.ActorUserID}}
+		in := CompanySetupInput{WorkspaceID: r.in.WorkspaceID, Actor: db.Member{UserID: r.in.ActorUserID}}
 		tz := companyTimezone(ctx, q, r.in.ActorUserID)
 		switch title {
 		case DailyBriefTitle:

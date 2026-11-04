@@ -172,7 +172,7 @@ func (h *Handler) validateBudgetScopeTarget(w http.ResponseWriter, r *http.Reque
 	case service.BudgetScopeSquad:
 		_, err = h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
 	case service.BudgetScopeFloor:
-		_, err = h.Queries.GetOfficeFloorInWorkspace(r.Context(), db.GetOfficeFloorInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
+		_, err = h.Queries.GetCompanyFloorInWorkspace(r.Context(), db.GetCompanyFloorInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
 	case service.BudgetScopeInitiative:
 		_, err = h.Queries.GetInitiativeInWorkspace(r.Context(), db.GetInitiativeInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
 	}

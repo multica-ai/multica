@@ -1,4 +1,4 @@
--- The office pulse (spec 4.8) and the system health readings (spec 4.9). Every
+-- The company pulse (spec 4.8) and the system health readings (spec 4.9). Every
 -- query filters by workspace_id unless it reads the scheduler's own log.
 
 -- name: CountPendingProposalsForPulse :one

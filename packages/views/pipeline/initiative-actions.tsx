@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
-import { officeSquadMembersOptions } from "@multica/core/office";
+import { companySquadMembersOptions } from "@multica/core/company";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   initiativeActions,
@@ -71,7 +71,7 @@ export function InitiativeActions({
   const { t } = useT("pipeline");
   const wsId = useWorkspaceId();
   const { userId } = useCurrentMember(wsId);
-  const members = useQuery(officeSquadMembersOptions(wsId, initiative.owner_squad_id ?? ""));
+  const members = useQuery(companySquadMembersOptions(wsId, initiative.owner_squad_id ?? ""));
   const squadMember =
     !!userId &&
     !!initiative.owner_squad_id &&

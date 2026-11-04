@@ -2430,9 +2430,9 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
-  // Office seat. Older backends omit both; null means unseated.
+  // Company seat. Older backends omit both; null means unseated.
   floor_id: z.string().nullable().optional().transform((v) => v ?? null),
-  office_slot: z.number().nullable().optional().transform((v) => v ?? null),
+  company_slot: z.number().nullable().optional().transform((v) => v ?? null),
   // Autonomy (spec 4.3). Older backends omit it: a squad is at L1 until changed.
   autonomy_level: z.number().int().nullish().transform((v) => v ?? 1),
 }).loose();
@@ -2455,7 +2455,7 @@ export const EMPTY_SQUAD: Squad = {
   member_count: 0,
   member_preview: [],
   floor_id: null,
-  office_slot: null,
+  company_slot: null,
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status

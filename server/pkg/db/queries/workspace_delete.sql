@@ -626,8 +626,8 @@ DELETE FROM vcs_connection WHERE vcs_connection.workspace_id = $1;
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
 ),
-deleted_office_floors AS (
-    DELETE FROM office_floor WHERE office_floor.workspace_id = $1
+deleted_company_floors AS (
+    DELETE FROM company_floor WHERE company_floor.workspace_id = $1
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
 

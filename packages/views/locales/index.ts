@@ -26,11 +26,17 @@ import enUi from "./en/ui.json";
 import enSquads from "./en/squads.json";
 import enPipeline from "./en/pipeline.json";
 import enGovernance from "./en/governance.json";
+import enCompany from "./en/company.json";
 import zhHansGovernance from "./zh-Hans/governance.json";
+import zhHansCompany from "./zh-Hans/company.json";
 import zhHantGovernance from "./zh-Hant/governance.json";
+import zhHantCompany from "./zh-Hant/company.json";
 import koGovernance from "./ko/governance.json";
+import koCompany from "./ko/company.json";
 import jaGovernance from "./ja/governance.json";
+import jaCompany from "./ja/company.json";
 import frGovernance from "./fr/governance.json";
+import frCompany from "./fr/company.json";
 import enBilling from "./en/billing.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
@@ -200,6 +206,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: enSquads,
     pipeline: enPipeline,
     governance: enGovernance,
+    company: enCompany,
     billing: enBilling,
   },
   "zh-Hans": {
@@ -230,6 +237,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: zhHansSquads,
     pipeline: zhHansPipeline,
     governance: zhHansGovernance,
+    company: zhHansCompany,
     billing: zhHansBilling,
   },
   "zh-Hant": {
@@ -260,6 +268,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: zhHantSquads,
     pipeline: zhHantPipeline,
     governance: zhHantGovernance,
+    company: zhHantCompany,
     billing: zhHantBilling,
   },
   ko: {
@@ -290,6 +299,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: koSquads,
     pipeline: koPipeline,
     governance: koGovernance,
+    company: koCompany,
     billing: koBilling,
   },
   ja: {
@@ -320,6 +330,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: jaSquads,
     pipeline: jaPipeline,
     governance: jaGovernance,
+    company: jaCompany,
     billing: jaBilling,
   },
   fr: {
@@ -350,6 +361,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: frSquads,
     pipeline: frPipeline,
     governance: frGovernance,
+    company: frCompany,
     billing: frBilling,
   },
 };

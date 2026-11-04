@@ -25,13 +25,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 동의하기
 
-각 멤버는 오피스의 브리프 설정에서 직접 선택합니다.
+각 멤버는 회사의 브리프 설정에서 직접 선택합니다.
 
 - **Brief push**(브리프 전송): 켜기 또는 끄기. 기본값은 끔입니다.
 - **Chat**(채팅): 연결된 채팅 중 어디로 보낼지. 멤버마다 하나를 고를 수 있습니다.
 - **Quiet hours**(조용한 시간): 0시에서 23시 사이의 시간대입니다. 그 시간대에는 아무것도 보내지 않습니다. 시간대는 자정을 넘을 수 있습니다. 시간대에 걸린 브리프는 시간대가 끝날 때까지 보류됩니다.
 
-같은 설정은 `GET`과 `PUT /api/office/brief-push`로 다룰 수 있습니다. 고를 수 있는 채팅 목록은 `GET /api/office/brief-push/bindings`입니다.
+같은 설정은 `GET`과 `PUT /api/company/brief-push`로 다룰 수 있습니다. 고를 수 있는 채팅 목록은 `GET /api/company/brief-push/bindings`입니다.
 
 ## 메시지 내용
 

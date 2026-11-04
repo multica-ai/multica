@@ -182,7 +182,7 @@ describe("LoginPage", () => {
       render(<LoginPage />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        expect(mockReplace).toHaveBeenCalledWith("/acme/office");
+        expect(mockReplace).toHaveBeenCalledWith("/acme/company");
       });
       expect(mockListWorkspaces).toHaveBeenCalledTimes(1);
     });

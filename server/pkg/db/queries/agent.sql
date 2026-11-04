@@ -149,7 +149,7 @@ WHERE id = $1
 RETURNING *;
 
 -- name: SetAgentHomeSquad :one
--- Sets or clears the squad an agent is drawn in on the office. A non-null
+-- Sets or clears the squad an agent is drawn in on the company. A non-null
 -- squad must be a live squad of the workspace that the agent is a member of; the
 -- guard sits in the statement so a concurrent membership removal cannot leave a
 -- dangling home. No row means the guard failed (or the agent is not in the

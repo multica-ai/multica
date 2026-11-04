@@ -138,10 +138,10 @@ export function WorkPanel() {
         <PanelBody onClickCapture={rememberClickedIssue}>
           <PanelList className="mb-2">
             <PanelLink
-              href={p.office()}
+              href={p.company()}
               icon={<Building2 className="size-4 shrink-0" />}
-              label={t(($) => $.nav.office)}
-              active={pathname === p.office()}
+              label={t(($) => $.nav.company)}
+              active={pathname === p.company()}
             />
             <PanelLink
               href={p.pipeline()}

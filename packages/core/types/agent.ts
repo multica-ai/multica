@@ -624,7 +624,7 @@ export interface Agent {
    */
   service_tier?: string;
   /**
-   * The squad whose office room this agent is drawn in. `null` means the agent
+   * The squad whose company room this agent is drawn in. `null` means the agent
    * is unassigned. Older backends omit the field; treat undefined as null.
    */
   home_squad_id?: string | null;
@@ -780,7 +780,7 @@ export interface AgentBuilderRuntimeSwitch {
 export interface UpdateAgentRequest {
   name?: string;
   /**
-   * Sets the squad this agent is drawn in on the office. Must be a live squad
+   * Sets the squad this agent is drawn in on the company. Must be a live squad
    * the agent is a member of; `null` clears it, omitting it leaves it alone.
    */
   home_squad_id?: string | null;

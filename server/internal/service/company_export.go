@@ -61,7 +61,7 @@ type CompanyExport struct {
 	Governance map[string]json.RawMessage `json:"governance"`
 }
 
-// ExportFloor is a floor by name. Position orders the floors on the Office.
+// ExportFloor is a floor by name. Position orders the floors on the Company.
 type ExportFloor struct {
 	Name     string `json:"name"`
 	Position int32  `json:"position"`
@@ -75,7 +75,7 @@ type ExportSquad struct {
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Floor         string          `json:"floor"`
-	OfficeSlot    *int32          `json:"office_slot"`
+	CompanySlot   *int32          `json:"company_slot"`
 	Leader        string          `json:"leader"`
 	AutonomyLevel int32           `json:"autonomy_level"`
 	Status        string          `json:"status"`
@@ -276,7 +276,7 @@ func ExportCompany(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, 
 		Governance:       map[string]json.RawMessage{},
 	}
 
-	floors, err := q.ListOfficeFloors(ctx, workspaceID)
+	floors, err := q.ListCompanyFloors(ctx, workspaceID)
 	if err != nil {
 		return CompanyExport{}, fmt.Errorf("export floors: %w", err)
 	}
@@ -448,9 +448,9 @@ func exportSquad(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, sq
 	if sq.FloorID.Valid {
 		es.Floor = floorName[util.UUIDToString(sq.FloorID)]
 	}
-	if sq.OfficeSlot.Valid {
-		slot := int32(sq.OfficeSlot.Int16)
-		es.OfficeSlot = &slot
+	if sq.CompanySlot.Valid {
+		slot := int32(sq.CompanySlot.Int16)
+		es.CompanySlot = &slot
 	}
 	members, err := q.ListSquadMembers(ctx, sq.ID)
 	if err != nil {

@@ -747,3 +747,23 @@ export function queueWaitingOn(
   }
   return nearest;
 }
+
+/**
+ * The issues one squad or agent is assigned to, for the company hub. Under
+ * `issueKeys.all` so issue realtime events refresh it with the other lists.
+ */
+export function issuesByAssigneeOptions(
+  wsId: string,
+  assignee: { type: "squad" | "agent"; id: string },
+) {
+  return queryOptions({
+    queryKey: [...issueKeys.all(wsId), "assignee", assignee.type, assignee.id] as const,
+    queryFn: (): Promise<ListIssuesResponse> =>
+      api.listIssues({
+        assignee_id: assignee.id,
+        assignee_types: [assignee.type],
+        limit: 100,
+      }),
+    enabled: !!wsId && !!assignee.id,
+  });
+}

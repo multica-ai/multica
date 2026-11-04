@@ -29,7 +29,7 @@ type companyEnv struct {
 	userID string
 }
 
-// newCompanyEnv returns a fresh workspace with the Executive Office set up, the
+// newCompanyEnv returns a fresh workspace with the Executive Company set up, the
 // Secretary included. Its knowledge base is not enabled; a test enables it when
 // it needs to.
 func newCompanyEnv(t *testing.T) *companyEnv {
@@ -64,14 +64,14 @@ func newCompanyEnv(t *testing.T) *companyEnv {
 			ke.pool.Exec(context.Background(), stmt, ke.wsID)
 		}
 	})
-	if _, err := NewOfficeSetupService(ke.q, ke.pool).Setup(ctx, OfficeSetupInput{
+	if _, err := NewCompanySetupService(ke.q, ke.pool).Setup(ctx, CompanySetupInput{
 		WorkspaceID:           ke.ws,
 		Actor:                 db.Member{UserID: ke.user},
 		Runtime:               rt,
 		SecretaryInstructions: "You are the Secretary.",
 		Timezone:              "UTC",
 	}); err != nil {
-		t.Fatalf("office setup: %v", err)
+		t.Fatalf("company setup: %v", err)
 	}
 	return e
 }
@@ -229,7 +229,7 @@ func TestCompanyApplyInstallsTheWholeCompanyOnAnEmptyWorkspace(t *testing.T) {
 	if got := e.count(`SELECT count(*) FROM squad WHERE workspace_id = $1 AND archived_at IS NULL`); got != len(e.data.Squads) {
 		t.Fatalf("squads = %d, want %d", got, len(e.data.Squads))
 	}
-	if got := e.count(`SELECT count(*) FROM office_floor WHERE workspace_id = $1`); got != len(e.data.FloorKeys) {
+	if got := e.count(`SELECT count(*) FROM company_floor WHERE workspace_id = $1`); got != len(e.data.FloorKeys) {
 		t.Fatalf("floors = %d, want %d", got, len(e.data.FloorKeys))
 	}
 	if got := e.count(`SELECT count(*) FROM squad_charter WHERE workspace_id = $1`); got != len(e.data.Squads) {
@@ -281,7 +281,7 @@ func TestCompanyApplyInstallsTheWholeCompanyOnAnEmptyWorkspace(t *testing.T) {
 		}
 	}
 
-	// The Librarian sits in the Executive Office, with its routines paused.
+	// The Librarian sits in the Executive Company, with its routines paused.
 	exec := e.squadByName("Executive Office")
 	librarian := e.agentNamed("Librarian")
 	if !e.isMember(exec.ID, librarian.ID) {
@@ -359,7 +359,7 @@ func (e *companyEnv) snapshot() map[string]int {
 	return map[string]int{
 		"agents":     e.count(`SELECT count(*) FROM agent WHERE workspace_id = $1`),
 		"squads":     e.count(`SELECT count(*) FROM squad WHERE workspace_id = $1`),
-		"floors":     e.count(`SELECT count(*) FROM office_floor WHERE workspace_id = $1`),
+		"floors":     e.count(`SELECT count(*) FROM company_floor WHERE workspace_id = $1`),
 		"members":    e.count(`SELECT count(*) FROM squad_member sm JOIN squad s ON s.id = sm.squad_id WHERE s.workspace_id = $1`),
 		"charters":   e.count(`SELECT count(*) FROM squad_charter WHERE workspace_id = $1`),
 		"autopilots": e.count(`SELECT count(*) FROM autopilot WHERE workspace_id = $1`),
@@ -424,7 +424,7 @@ func TestCompanyApplyCompletesAfterAnInterruptedRun(t *testing.T) {
 		t.Fatalf("squad:planning is %q", statuses["squad:planning"])
 	}
 	if statuses["squad:executive_office"] != CompanyStepReused {
-		t.Fatalf("squad:executive_office is %q, want reused: the office setup made it", statuses["squad:executive_office"])
+		t.Fatalf("squad:executive_office is %q, want reused: the company setup made it", statuses["squad:executive_office"])
 	}
 }
 
@@ -493,9 +493,9 @@ func TestCompanyApplyLeavesUnchosenStagesUnowned(t *testing.T) {
 	}
 }
 
-func TestCompanyApplyNeedsTheSecretaryForTheExecutiveOffice(t *testing.T) {
+func TestCompanyApplyNeedsTheSecretaryForTheExecutiveCompany(t *testing.T) {
 	e := newCompanyEnv(t)
-	// A workspace whose Secretary is gone: the Executive Office cannot be built.
+	// A workspace whose Secretary is gone: the Executive Company cannot be built.
 	if _, err := e.ke.pool.Exec(e.ctx, `UPDATE workspace SET secretary_agent_id = NULL WHERE id = $1`, e.ws); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestCompanyApplyNeedsTheSecretaryForTheExecutiveOffice(t *testing.T) {
 	if len(failed) != 1 || failed[0].Key != "agent:Secretary" {
 		t.Fatalf("failed steps = %+v, want the Secretary step", failed)
 	}
-	if !strings.Contains(failed[0].Message, "office setup") {
+	if !strings.Contains(failed[0].Message, "company setup") {
 		t.Fatalf("message %q does not say what to do", failed[0].Message)
 	}
 	if res.PipelineID.Valid {
@@ -578,7 +578,7 @@ func TestBackfillAddsTheLibrarianToAWorkspaceSetUpBeforePhase3(t *testing.T) {
 	}
 }
 
-func TestBackfillSkipsAWorkspaceWithoutAnExecutiveOffice(t *testing.T) {
+func TestBackfillSkipsAWorkspaceWithoutAnExecutiveCompany(t *testing.T) {
 	e := newCompanyEnv(t)
 	e.enableKnowledge()
 	if _, err := e.ke.pool.Exec(e.ctx, `UPDATE squad SET archived_at = now() WHERE workspace_id = $1 AND name = 'Executive Office'`, e.ws); err != nil {

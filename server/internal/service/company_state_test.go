@@ -111,9 +111,9 @@ func TestQuietWindowOpensAndClosesInItsTimezone(t *testing.T) {
 }
 
 func TestQuietWindowSameDayAndDegenerateCases(t *testing.T) {
-	office := QuietHours{Enabled: true, Start: "09:00", End: "17:00", Timezone: "UTC"}
+	company := QuietHours{Enabled: true, Start: "09:00", End: "17:00", Timezone: "UTC"}
 	at := func(h, m int) time.Time { return time.Date(2026, time.November, 3, h, m, 0, 0, time.UTC) }
-	if quietWindowOpen(office, at(8, 59)) || !quietWindowOpen(office, at(9, 0)) || !quietWindowOpen(office, at(16, 59)) || quietWindowOpen(office, at(17, 0)) {
+	if quietWindowOpen(company, at(8, 59)) || !quietWindowOpen(company, at(9, 0)) || !quietWindowOpen(company, at(16, 59)) || quietWindowOpen(company, at(17, 0)) {
 		t.Fatal("a window within one day is [start, end)")
 	}
 	same := QuietHours{Enabled: true, Start: "12:00", End: "12:00", Timezone: "UTC"}

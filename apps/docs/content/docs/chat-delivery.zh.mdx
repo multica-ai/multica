@@ -25,13 +25,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 选择加入
 
-每位成员在办公室的简报设置中自行选择：
+每位成员在公司的简报设置中自行选择：
 
 - **Brief push**（简报推送）：开或关。默认关闭。
 - **Chat**（聊天）：发送到哪个已连接的聊天。每位成员可以选择一个。
 - **Quiet hours**（安静时段）：一段小时范围（0 到 23），期间不发送任何内容。该时段可以跨越午夜。落在时段内的简报会推迟到时段结束后发送。
 
-相同设置可通过 `GET` 和 `PUT /api/office/brief-push` 访问。可选择的聊天列表位于 `GET /api/office/brief-push/bindings`。
+相同设置可通过 `GET` 和 `PUT /api/company/brief-push` 访问。可选择的聊天列表位于 `GET /api/company/brief-push/bindings`。
 
 ## 消息内容
 

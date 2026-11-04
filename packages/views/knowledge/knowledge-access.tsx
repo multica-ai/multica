@@ -20,7 +20,7 @@ import {
   type KnowledgeGrant,
   type KnowledgeSubjectType,
 } from "@multica/core/knowledge";
-import { officeFloorsOptions } from "@multica/core/office/queries";
+import { companyFloorsOptions } from "@multica/core/company/queries";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useT } from "../i18n";
 
@@ -35,7 +35,7 @@ export function KnowledgeAccessEditor({ wsId, baseKey }: { wsId: string; baseKey
   const { t } = useT("knowledge");
   const access = useQuery(knowledgeAccessOptions(wsId, baseKey));
   const squads = useQuery(squadListOptions(wsId));
-  const floors = useQuery(officeFloorsOptions(wsId));
+  const floors = useQuery(companyFloorsOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
   const put = usePutKnowledgeGrant(wsId);
   const remove = useRemoveKnowledgeGrant(wsId);

@@ -248,7 +248,7 @@ func (s *MetricService) ValidateScope(ctx context.Context, q *db.Queries, ws pgt
 	var err error
 	switch scopeType {
 	case ScopeFloor:
-		_, err = q.GetOfficeFloorInWorkspace(ctx, db.GetOfficeFloorInWorkspaceParams{ID: scopeID, WorkspaceID: ws})
+		_, err = q.GetCompanyFloorInWorkspace(ctx, db.GetCompanyFloorInWorkspaceParams{ID: scopeID, WorkspaceID: ws})
 	case ScopeSquad:
 		_, err = q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: scopeID, WorkspaceID: ws})
 	case ScopeInitiative:

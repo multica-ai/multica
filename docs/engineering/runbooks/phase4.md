@@ -21,7 +21,7 @@ The company is stored in two places.
 
 | Store | What it holds | How to back it up |
 |---|---|---|
-| Multica Postgres (`pgdata` in the self-hosted compose file) | Everything the office governs: `workspace` (company state, quiet hours, digest mode), `office_floor`, `squad`, `squad_member`, `squad_charter`, `squad_routine`, `agent`, `agent_task_queue`, `proposal`, `brief`, `initiative`, `initiative_stage_event`, `governance_event`, `retro_trigger`, `floor_chief`, `sys_cron_executions`, and the knowledge registry tables (`knowledge_base`, `knowledge_link`, `knowledge_kind`, `knowledge_eval_run`, `knowledge_health_run`). | `pg_dump` of the database, nightly, kept with the upload volume. |
+| Multica Postgres (`pgdata` in the self-hosted compose file) | Everything the office governs: `workspace` (company state, quiet hours, digest mode), `company_floor`, `squad`, `squad_member`, `squad_charter`, `squad_routine`, `agent`, `agent_task_queue`, `proposal`, `brief`, `initiative`, `initiative_stage_event`, `governance_event`, `retro_trigger`, `floor_chief`, `sys_cron_executions`, and the knowledge registry tables (`knowledge_base`, `knowledge_link`, `knowledge_kind`, `knowledge_eval_run`, `knowledge_health_run`). | `pg_dump` of the database, nightly, kept with the upload volume. |
 | WeKnora Postgres (`knowledge-postgres-data`) and WeKnora files (`knowledge-data-files`) | The document bodies, chunks and the vector index of the knowledge bases. | Back up both volumes together, in the same snapshot. Keep `KNOWLEDGE_SYSTEM_AES_KEY`: without it the sealed per-owner keys cannot be opened. See `SELF_HOSTING.md`. |
 | Uploads (`backend_uploads`) | Attachments and imported files. | Copy the volume with the database dump. |
 
@@ -67,7 +67,7 @@ Governance → Controls, the System health section, shows what the machinery did
 - **Budget gate**: when its counters were last refreshed. Holds are late when they are
   more than ten minutes old.
 
-The API is `GET /api/governance/health`. The pulse is `GET /api/office/pulse`, cached for
+The API is `GET /api/governance/health`. The pulse is `GET /api/company/pulse`, cached for
 one minute.
 
 ## 4. Drill record

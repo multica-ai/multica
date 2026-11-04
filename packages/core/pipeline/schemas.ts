@@ -6,7 +6,7 @@ import type {
   Pipeline,
   PipelineExitMode,
 } from "./types";
-import type { ProposalState } from "../office/proposal-schema";
+import type { ProposalState } from "../company/proposal-schema";
 
 // Lenient on purpose (see parseWithFallback): optional fields default, unknown
 // fields pass through, and an enum this client does not know degrades to its
