@@ -550,5 +550,16 @@
     "title": "Deja que los agentes empiecen a trabajar por su cuenta",
     "description": "Configura una programación o un webhook. Cada vez que se active, Multica crea una tarea para un agente o ejecuta el agente directamente. Elige una plantilla y ajústala.",
     "templates": "Empezar con una plantilla"
+  },
+  "execution_limit": {
+    "label": "Límite de ejecuciones",
+    "unlimited": "Sin límite",
+    "once": "Una vez",
+    "custom": "Número personalizado",
+    "count": "Número de ejecuciones",
+    "invalid": "Introduce un número entero entre 1 y 2147483647, ambos inclusive.",
+    "used": "Ejecuciones aceptadas hasta ahora: {{count}}. Este recuento se conserva al editar.",
+    "completed": "Completado",
+    "progress": "Ejecuciones aceptadas: {{used}} / {{limit}}"
   }
 }
