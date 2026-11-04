@@ -21,7 +21,7 @@ WITH newest AS MATERIALIZED (
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (
-    SELECT newest.*, iss.status AS issue_status, iss.priority AS issue_priority
+    SELECT newest.*, iss.status AS issue_status, iss.priority AS issue_priority, iss.title AS issue_title
     FROM newest
     LEFT JOIN issue iss ON iss.id = newest.issue_id
       AND iss.workspace_id = sqlc.arg(workspace_id)::uuid
@@ -41,7 +41,7 @@ WITH newest AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT sqlc.arg(page_limit)::int
 )
-SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority,
+SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority, selected.issue_title,
        COALESCE(anchor.comment_id, '')::text AS comment_id
 FROM selected
 JOIN inbox_item i ON i.id = selected.id

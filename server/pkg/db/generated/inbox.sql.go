@@ -436,7 +436,8 @@ WITH eligible_archived AS MATERIALIZED (
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.title AS issue_title
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -468,6 +469,7 @@ type ListArchivedInboxItemsRow struct {
 	Section       pgtype.Text        `json:"section"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	IssuePriority pgtype.Text        `json:"issue_priority"`
+	IssueTitle    pgtype.Text        `json:"issue_title"`
 }
 
 // Archived counterpart of ListInboxItems, backing the inbox's "Archived"
@@ -519,6 +521,7 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 			&i.Section,
 			&i.IssueStatus,
 			&i.IssuePriority,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -533,7 +536,8 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.title AS issue_title
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -565,6 +569,7 @@ type ListInboxItemsRow struct {
 	Section       pgtype.Text        `json:"section"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	IssuePriority pgtype.Text        `json:"issue_priority"`
+	IssueTitle    pgtype.Text        `json:"issue_title"`
 }
 
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
@@ -595,6 +600,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.Section,
 			&i.IssueStatus,
 			&i.IssuePriority,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}
