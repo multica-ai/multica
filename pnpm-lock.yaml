@@ -777,6 +777,9 @@ importers:
       linkify-it:
         specifier: ^5.0.0
         version: 5.0.0
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -844,6 +847,9 @@ importers:
       '@types/linkify-it':
         specifier: ^5.0.0
         version: 5.0.0
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.14
