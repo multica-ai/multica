@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Fresh-machine bootstrap: starts the WeKnora knowledge services, fills in the
-# knowledge secrets that are still empty, then runs `make dev` (migrations, API,
-# web). Re-running is safe: values already in the env file are kept, and
-# containers that already exist are not stopped.
+# Fresh-machine bootstrap: installs and configures Hermes, starts the WeKnora
+# knowledge services, fills in the knowledge secrets that are still empty, then
+# runs `make dev` (migrations, API, web) and starts the daemon when a Multica
+# login exists. Re-running is safe: values already in the env file are kept,
+# existing config files are backed up before they are changed, and containers
+# that already exist are not stopped.
 #
-# Steps that need software or accounts outside this repo (the model gateway,
-# Hermes, the daemon) are described in docs/engineering/runbooks/fresh-machine-install.md.
+# The Multica account, the first workspace and the CLI login are browser steps.
+# They are described in docs/engineering/runbooks/fresh-machine-install.md.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,9 +22,17 @@ REQUIRED_KNOWLEDGE=(
   KNOWLEDGE_LLM_BASE_URL
   KNOWLEDGE_LLM_API_KEY
   KNOWLEDGE_LLM_MODEL
+  KNOWLEDGE_VISION_MODEL
   KNOWLEDGE_EMBEDDING_URL
   KNOWLEDGE_EMBEDDING_MODEL
 )
+HERMES_KEYS=(HERMES_BASE_URL HERMES_MODEL HERMES_API_KEY)
+# The official installer, pinned to the Hermes version this repo was verified with
+# (Hermes Agent v0.22.5). The installer takes --commit, so the pin is exact.
+HERMES_INSTALL_URL="https://hermes-agent.nousresearch.com/install.sh"
+HERMES_PIN_COMMIT="bf0203a794a07aac3ff764972ab9087baa4e4f4e"
+HERMES_STATUS="not installed"
+DAEMON_STATUS="not started"
 
 info() { echo "==> $*"; }
 ok() { echo "✓ $*"; }
@@ -43,13 +53,6 @@ check_prerequisites() {
     || fail "Docker Compose ('docker compose') was not found. Install the compose plugin: $GUIDE#prerequisites"
   docker info >/dev/null 2>&1 || fail "The Docker daemon is not running. Start Docker and run make dev-full again."
   ok "Prerequisites found"
-
-  if command -v hermes >/dev/null 2>&1; then
-    HERMES_STATUS="on PATH; the daemon registers it when the daemon starts"
-  else
-    HERMES_STATUS="not registered (hermes is not on PATH)"
-    echo "! Hermes CLI not found on PATH. Continuing without it. Install steps: $GUIDE#hermes"
-  fi
 }
 
 # ---------- Env file: same resolution as scripts/dev.sh ----------
@@ -144,8 +147,12 @@ explain_knowledge_key() {
     KNOWLEDGE_LLM_BASE_URL) echo "OpenAI-compatible chat endpoint for summaries, Wiki and reranking, such as the 9router gateway" ;;
     KNOWLEDGE_LLM_API_KEY) echo "Key for the chat endpoint" ;;
     KNOWLEDGE_LLM_MODEL) echo "Chat model name that the endpoint serves" ;;
+    KNOWLEDGE_VISION_MODEL) echo "Vision model name that the endpoint serves; Setup > Models tests it" ;;
     KNOWLEDGE_EMBEDDING_URL) echo "Embedding endpoint WeKnora calls; Ollama on the Docker host is http://host.docker.internal:11434" ;;
     KNOWLEDGE_EMBEDDING_MODEL) echo "Embedding model, fixed for each knowledge base (for example bge-m3)" ;;
+    HERMES_BASE_URL) echo "OpenAI-compatible endpoint Hermes sends its chat requests to, usually ending in /v1" ;;
+    HERMES_MODEL) echo "Model name that endpoint serves, written as Hermes's default model" ;;
+    HERMES_API_KEY) echo "Key for the Hermes endpoint; it is stored in ~/.hermes/.env, not in config.yaml" ;;
   esac
 }
 
@@ -231,6 +238,188 @@ compose_cli_hint() {
   echo "JWT_SECRET=unused docker compose --env-file $ENV_FILE -f $COMPOSE_FILE --profile knowledge"
 }
 
+### Hermes: the agent CLI that Multica's Hermes runtime runs. Installed only when it is
+### missing from PATH; configured from HERMES_* in the env file.
+
+# Makes the installer's target directory visible to this run, so a Hermes installed
+# by an earlier run (or by the installer above) is found without a new shell.
+hermes_on_path() {
+  if ! command -v hermes >/dev/null 2>&1 && [ -x "$HOME/.local/bin/hermes" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+  command -v hermes >/dev/null 2>&1
+}
+
+install_hermes() {
+  if hermes_on_path; then
+    ok "Hermes found: $(hermes --version 2>/dev/null | head -n 1)"
+    return 0
+  fi
+  info "Installing Hermes ${HERMES_PIN_COMMIT:0:12} with the official installer. The first install can take several minutes."
+  if ! curl -fsSL "$HERMES_INSTALL_URL" | bash -s -- --commit "$HERMES_PIN_COMMIT" --non-interactive; then
+    echo "! The Hermes installer failed. Install steps: $GUIDE#hermes" >&2
+    return 1
+  fi
+  hermes_on_path || {
+    echo "! Hermes installed, but 'hermes' is not on PATH. Open a new shell (or add ~/.local/bin to PATH) and run make dev-full again." >&2
+    return 1
+  }
+  # The first --version starts Hermes's Python runtime, which takes 30 to 40 seconds.
+  # Running it here keeps the daemon's own 60-second probe from timing out later.
+  ok "Hermes installed: $(hermes --version 2>/dev/null | head -n 1)"
+}
+
+# The env name Hermes gives a custom endpoint's key. Mirrors
+# custom_endpoint_key_env() and its caller in hermes_cli (config.py, model_setup_flows_custom.py):
+# HERMES_CUSTOM_ + the host and port, upper-cased, with every other character replaced by _.
+hermes_key_env() {
+  local rest hostport host port identity slug
+  rest=${1#*://}
+  hostport=${rest%%/*}
+  hostport=${hostport##*@}
+  host=${hostport%%:*}
+  port=""
+  case "$hostport" in
+    *:*) port=${hostport##*:} ;;
+  esac
+  identity=$host
+  if [ -n "$port" ]; then
+    identity="${host}_${port}"
+  fi
+  slug=$(printf '%s' "$identity" | tr '[:lower:]' '[:upper:]' | sed -E 's/[^A-Z0-9]+/_/g; s/^_+//; s/_+$//')
+  printf 'HERMES_CUSTOM_%s_API_KEY' "$slug"
+}
+
+# Sets KEY=VALUE in FILE: replaces the line when present, keeps every other line,
+# and leaves the file mode 600. The value is never printed.
+upsert_env_line() {
+  local file=$1 key=$2 value=$3 tmp
+  tmp=$(mktemp "${file}.XXXXXX")
+  grep -v -E "^${key}=" "$file" > "$tmp" || true
+  if [ -s "$tmp" ] && [ -n "$(tail -c 1 "$tmp")" ]; then
+    printf '\n' >> "$tmp"
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+}
+
+# Writes the custom endpoint into Hermes's own config. An existing ~/.hermes/config.yaml
+# and .env are copied to a timestamped .bak first. Changes go through `hermes config set`,
+# so every other setting in config.yaml is kept.
+configure_hermes() {
+  local base model key key_env hermes_home stamp env_file cfg
+  base=$(env_value "$ENV_FILE" HERMES_BASE_URL)
+  model=$(env_value "$ENV_FILE" HERMES_MODEL)
+  key=$(env_value "$ENV_FILE" HERMES_API_KEY)
+  if [ -z "$base" ] || [ -z "$model" ] || [ -z "$key" ]; then
+    local missing=() name
+    for name in "${HERMES_KEYS[@]}"; do
+      [ -n "$(env_value "$ENV_FILE" "$name")" ] || missing+=("$name")
+    done
+    echo "! Hermes is installed but not configured. Fill in these values in $ENV_FILE, then run make dev-full again:" >&2
+    for name in "${missing[@]}"; do
+      echo "    $name" >&2
+      echo "        $(explain_knowledge_key "$name")" >&2
+    done
+    echo "  Hermes setup: $GUIDE#hermes" >&2
+    return 1
+  fi
+
+  hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+  stamp=$(date +%Y%m%d%H%M%S)
+  mkdir -p "$hermes_home"
+  env_file="$hermes_home/.env"
+  cfg="$hermes_home/config.yaml"
+  key_env=$(hermes_key_env "$base")
+
+  if [ -f "$env_file" ]; then
+    cp -p "$env_file" "$env_file.bak-$stamp"
+  else
+    (umask 077 && : > "$env_file")
+  fi
+  upsert_env_line "$env_file" "$key_env" "$key"
+
+  if [ -f "$cfg" ]; then
+    cp -p "$cfg" "$cfg.bak-$stamp"
+  fi
+  # The key is referenced, not stored: model.api_key names the variable in .env.
+  hermes config set model.provider custom >/dev/null
+  hermes config set model.base_url "$base" >/dev/null
+  hermes config set model.default "$model" >/dev/null
+  hermes config set model.api_key "\${env:$key_env}" >/dev/null
+  ok "Hermes configured: custom endpoint $base, model $model, key in $env_file as $key_env"
+}
+
+# One-shot prompt through the configured endpoint. Prints the first line of the reply.
+verify_hermes() {
+  local reply err
+  err=$(mktemp)
+  if command -v timeout >/dev/null 2>&1; then
+    reply=$(timeout 180 hermes -z "Reply with the word ok." 2>"$err" || true)
+  else
+    reply=$(hermes -z "Reply with the word ok." 2>"$err" || true)
+  fi
+  if [ -n "$reply" ]; then
+    ok "hermes -z replied: $(printf '%s' "$reply" | head -n 1)"
+    rm -f "$err"
+    return 0
+  fi
+  echo "! hermes -z returned no reply. Last stderr lines:" >&2
+  tail -n 3 "$err" >&2
+  rm -f "$err"
+  return 1
+}
+
+setup_hermes() {
+  if ! install_hermes; then
+    HERMES_STATUS="not installed (see above)"
+    return 0
+  fi
+  if ! configure_hermes; then
+    HERMES_STATUS="installed, not configured (see above)"
+    return 0
+  fi
+  if verify_hermes; then
+    HERMES_STATUS="installed and replying; the daemon registers it when the daemon starts"
+  else
+    HERMES_STATUS="configured, but hermes -z did not reply (see above)"
+  fi
+}
+
+### Daemon: started only when the local CLI profile has a login. Profile names match
+### the runbook (`--profile local`), which is what make daemon uses.
+
+MULTICA_PROFILE_CONFIG="$HOME/.multica/profiles/local/config.json"
+
+multica_logged_in() {
+  [ -f "$MULTICA_PROFILE_CONFIG" ] && grep -q -E '"token"[[:space:]]*:[[:space:]]*"[^"]' "$MULTICA_PROFILE_CONFIG"
+}
+
+# The local profile records the API address. Setup is non-interactive and only runs
+# when the profile does not exist yet, so an existing login is never overwritten.
+setup_multica_profile() {
+  if [ -f "$MULTICA_PROFILE_CONFIG" ]; then
+    return 0
+  fi
+  info "Creating the local CLI profile (make cli ARGS=\"--profile local setup self-host\")"
+  make cli ARGS="--profile local setup self-host --port ${PORT} --frontend-port ${FRONTEND_PORT}" \
+    || echo "! Profile setup failed. Run the command above by hand, then make dev-full again." >&2
+}
+
+start_daemon() {
+  if ! multica_logged_in; then
+    DAEMON_STATUS="not started: no Multica login yet (see the next steps)"
+    return 0
+  fi
+  info "Starting the daemon: make daemon"
+  if make daemon; then
+    DAEMON_STATUS="running (profile local); status: make cli ARGS=\"--profile local daemon status\""
+  else
+    DAEMON_STATUS="failed to start (see the make daemon output above)"
+  fi
+}
+
 print_summary() {
   echo ""
   echo "Multica and WeKnora are up."
@@ -242,15 +431,21 @@ print_summary() {
   echo ""
   echo "  Running       Multica API, Multica web, WeKnora (${KNOWLEDGE_SERVICES[*]})"
   echo "  Hermes        $HERMES_STATUS"
-  echo "  Daemon        not started by this target; run make daemon after the CLI login"
+  echo "  Daemon        $DAEMON_STATUS"
   echo ""
-  echo "Next steps in the web app. Full steps: $GUIDE#first-run-in-the-ui"
-  echo "  1. Create the account and the first workspace."
-  echo "  2. Knowledge: enable knowledge, then check Setup > Models."
-  echo "  3. Office: Set up your company, then Build your company."
-  echo "  4. Office: check the Secretary's daily brief."
-  echo ""
-  echo "Ctrl-C stops Multica. WeKnora keeps running. To stop WeKnora:"
+  if ! multica_logged_in; then
+    echo "Next steps. Full steps: $GUIDE#first-run-in-the-ui"
+    echo "  1. In the web app, create the account and the first workspace."
+    echo "  2. Sign the CLI in, then start the daemon (it registers Hermes):"
+    echo "       make cli ARGS=\"--profile local login\""
+    echo "       make daemon"
+    echo "     Running make dev-full again also starts the daemon once the login exists."
+    echo "  3. Knowledge: enable knowledge, then check Setup > Models."
+    echo "  4. Office: Set up your company, then Build your company."
+    echo ""
+  fi
+  echo "Ctrl-C stops Multica. The daemon and WeKnora keep running. To stop them:"
+  echo "  make cli ARGS=\"--profile local daemon stop\""
   echo "  $(compose_cli_hint) stop ${KNOWLEDGE_SERVICES[*]}"
   echo ""
 }
@@ -264,6 +459,8 @@ start_multica() {
     || fail "Multica API did not answer. Read the make dev output above."
   wait_for_url "Multica web" "http://localhost:${FRONTEND_PORT}/" "$DEV_PID" \
     || fail "Multica web did not answer. Read the make dev output above."
+  setup_multica_profile
+  start_daemon
   print_summary
   # make dev runs until it is stopped; keep this script attached to it.
   wait "$DEV_PID"
@@ -277,6 +474,7 @@ main() {
   resolve_knowledge_urls
   load_env
   start_knowledge
+  setup_hermes
   start_multica
 }
 
