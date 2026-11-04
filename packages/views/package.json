@@ -77,6 +77,7 @@
     "@multica/ui": "workspace:*",
     "@tanstack/react-virtual": "catalog:",
     "@tiptap/core": "3.31.3",
+    "@tiptap/extension-blockquote": "3.31.3",
     "@tiptap/extension-code-block-lowlight": "3.31.3",
     "@tiptap/extension-document": "3.31.3",
     "@tiptap/extension-highlight": "3.31.3",

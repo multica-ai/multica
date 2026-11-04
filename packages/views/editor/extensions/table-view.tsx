@@ -13,6 +13,7 @@ import { RichContent } from "../../rich-content/rich-content";
 import { RichTableFrame } from "../../rich-content/rich-table";
 import type { RichTableModel } from "../../rich-content/rich-table-model";
 import { BaseMentionExtension, mentionText } from "./mention-extension";
+import { TableEditControls } from "./table-edit-controls";
 
 function serialize(editor: Editor, content: ProseMirrorNode[]): string {
   return (
@@ -68,16 +69,17 @@ export function tableModelFromNode(node: ProseMirrorNode, editor: Editor): RichT
  * The editor's table, in the same frame as readonly tables. ProseMirror keeps
  * owning the rows: its `<tbody>` is handed to the frame's `<table>`.
  */
-export function TableView({ node, editor }: NodeViewProps) {
+export function TableView({ node, editor, getPos }: NodeViewProps) {
   const { nodeViewContentRef } = useReactNodeView();
   const model = useMemo(() => tableModelFromNode(node, editor), [node, editor]);
   return (
-    <NodeViewWrapper className="table-node">
+    <NodeViewWrapper className="table-node group/table-node relative">
       <RichTableFrame
         model={model}
         getMarkdown={() => serialize(editor, [node])}
         tableRef={nodeViewContentRef}
       />
+      <TableEditControls editor={editor} node={node} getPos={getPos} />
     </NodeViewWrapper>
   );
 }

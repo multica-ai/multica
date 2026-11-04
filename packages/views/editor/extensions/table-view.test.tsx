@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
@@ -155,5 +155,93 @@ describe("editor TableView", () => {
     const dialog = await screen.findByRole("dialog");
     expect(dialog.querySelector("code")?.textContent).toBe("code");
     expect(dialog).toHaveTextContent("harness switch");
+  });
+});
+
+function caretIn(editor: Editor, text: string) {
+  let pos = -1;
+  editor.state.doc.descendants((node, at) => {
+    if (pos < 0 && node.type.name === "paragraph" && node.textContent === text) pos = at + 1;
+  });
+  act(() => {
+    editor.chain().focus().setTextSelection(pos).run();
+  });
+}
+
+function markdownRows(editor: Editor): string[] {
+  return editor.getMarkdown().trim().split("\n");
+}
+
+describe("editor table structure controls", () => {
+  // The commands scroll the caret into view, which reads layout jsdom lacks.
+  beforeAll(() => {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+  });
+
+  it("appends a column and a row from the rails", async () => {
+    const { editor } = await renderEditor();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add column" }));
+    expect(markdownRows(editor)[0]?.split("|")).toHaveLength(6);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(markdownRows(editor)).toHaveLength(5);
+    // The caret lands in the new row, ready to type.
+    act(() => {
+      editor.commands.insertContent("new");
+    });
+    expect(markdownRows(editor)[4]).toMatch(/^\| new /);
+  });
+
+  it("shows row and column handles only while the caret is in the table", async () => {
+    const { editor } = await renderEditor(`Intro\n\n${TABLE}`);
+    expect(screen.queryByRole("button", { name: "Row options" })).toBeNull();
+
+    caretIn(editor, "tracks it");
+    expect(await screen.findByRole("button", { name: "Row options" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Column options" })).toBeInTheDocument();
+  });
+
+  it("inserts a row below the active row from the row menu", async () => {
+    const { editor } = await renderEditor();
+    caretIn(editor, "tracks it");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Row options" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Insert row below" }));
+
+    const rows = markdownRows(editor);
+    expect(rows).toHaveLength(5);
+    expect(rows[2]).toContain("harness switch");
+    expect(rows[3]?.replace(/[|\s]/g, "")).toBe("");
+    expect(rows[4]).toContain("agent registry");
+  });
+
+  it("deletes the active column from the column menu", async () => {
+    const { editor } = await renderEditor();
+    caretIn(editor, "tracks it");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Column options" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete column" }));
+
+    expect(editor.getMarkdown()).not.toContain("Relation");
+    expect(editor.getMarkdown()).toContain("| GitHub");
+  });
+
+  it("keeps the header row: no insert above or delete on it", async () => {
+    const { editor } = await renderEditor();
+    caretIn(editor, "Relation");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Row options" }));
+    expect(await screen.findByRole("menuitem", { name: "Delete row" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Insert row above" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("renders no controls in a read-only editor", async () => {
+    const { editor } = await renderEditor();
+    act(() => {
+      editor.setEditable(false);
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Add row" })).toBeNull());
   });
 });

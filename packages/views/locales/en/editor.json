@@ -182,5 +182,38 @@
     "clear_filter": "Clear filter",
     "no_matches": "No matching rows",
     "close": "Close"
+  },
+  "details": {
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "summary_placeholder": "Summary"
+  },
+  "block_menu": {
+    "turn_into": "Turn into",
+    "insert": "Insert",
+    "divider": "Divider",
+    "table": "Table",
+    "code_block": "Code block",
+    "mermaid": "Mermaid diagram",
+    "details": "Collapsible block",
+    "file": "Image or file"
+  },
+  "block_handle": {
+    "label": "Drag to move, click for options",
+    "duplicate": "Duplicate",
+    "delete": "Delete"
+  },
+  "table_edit": {
+    "row_options": "Row options",
+    "column_options": "Column options",
+    "insert_row_above": "Insert row above",
+    "insert_row_below": "Insert row below",
+    "delete_row": "Delete row",
+    "insert_column_left": "Insert column left",
+    "insert_column_right": "Insert column right",
+    "delete_column": "Delete column",
+    "delete_table": "Delete table",
+    "add_row": "Add row",
+    "add_column": "Add column"
   }
 }

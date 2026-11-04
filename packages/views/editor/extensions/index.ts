@@ -47,6 +47,7 @@ import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
+import { createBlockMenuSuggestion } from "./block-menu";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
 import { RICH_TABLE_CHROME_ATTRIBUTE } from "../../rich-content/rich-table";
@@ -60,6 +61,12 @@ import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
+import { PatchedBlockquote } from "./blockquote";
+import {
+  DetailsContentExtension,
+  DetailsExtension,
+  DetailsSummaryExtension,
+} from "./details";
 import { codeLowlight } from "../syntax-highlight";
 
 const LinkExtension = Link.extend({ inclusive: false }).configure({
@@ -174,8 +181,10 @@ export interface EditorExtensionsOptions {
    * Which `/` menu to attach when enableSlashCommands is true:
    * - "skill" (default) — the chat picker listing the active agent's skills.
    * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "block" — the block menu of document editors (descriptions): turn the
+   *   current block into another type or insert a table, code block, etc.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "block";
   /**
    * Quick actions offered in the "command" `/` menu, plus the resolver that
    * turns a pick into the text it would post (MUL-5465). Both are functions so
@@ -222,7 +231,10 @@ export function createEditorExtensions(
       // list item (see list-item.ts). PatchedListItem below restores the
       // standard split → lift fallback chain.
       listItem: false,
+      // Replaced by PatchedBlockquote, which keeps GitHub alert markers intact.
+      blockquote: false,
     }),
+    PatchedBlockquote,
     PatchedListItem,
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
@@ -263,6 +275,9 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
+    DetailsExtension,
+    DetailsSummaryExtension,
+    DetailsContentExtension,
     HighlightExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
@@ -297,7 +312,9 @@ export function createEditorExtensions(
         ? { char: "/", allow: () => false }
         : options.slashCommandMode === "command"
           ? createBuiltinCommandSuggestion(options.quickActionMenu)
-          : options.queryClient
+          : options.slashCommandMode === "block"
+            ? createBlockMenuSuggestion({ onUploadFileRef: options.onUploadFileRef })
+            : options.queryClient
             ? createSlashCommandSuggestion(options.queryClient)
             : { char: "/", allow: () => false },
     }),

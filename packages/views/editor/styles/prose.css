@@ -534,6 +534,119 @@
   border-left-color: color-mix(in srgb, var(--muted-foreground) 15%, transparent);
 }
 
+/* Collapsible blocks: a bordered card whose header row is the summary. The
+   readonly render is a native <details>; the editor renders .details-node
+   (DetailsView) with the same box so both line up. */
+.rich-text-editor details,
+.rich-text-editor .details-node {
+  position: relative;
+  margin: 0.625rem 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.rich-text-editor summary,
+.rich-text-editor [data-type="detailsSummary"] {
+  position: relative;
+  display: block;
+  min-height: calc(1lh + 0.75rem);
+  margin: 0 -0.75rem;
+  padding: 0.375rem 0.75rem 0.375rem 2rem;
+  font-weight: 500;
+}
+
+.rich-text-editor summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.rich-text-editor summary::-webkit-details-marker {
+  display: none;
+}
+
+.rich-text-editor summary::before {
+  content: "";
+  position: absolute;
+  top: calc(0.375rem + (1lh - 0.875rem) / 2);
+  left: 0.75rem;
+  width: 0.875rem;
+  height: 0.875rem;
+  background-color: var(--muted-foreground);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 150ms ease-out;
+}
+
+.rich-text-editor details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.rich-text-editor details[open] {
+  padding-bottom: 0.625rem;
+}
+
+.rich-text-editor details > summary + *,
+.rich-text-editor [data-type="detailsContent"] > :first-child {
+  margin-top: 0.125rem;
+}
+
+.rich-text-editor details > :last-child,
+.rich-text-editor [data-type="detailsContent"] > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-editor [data-type="detailsContent"] {
+  padding-bottom: 0.625rem;
+}
+
+.rich-text-editor .details-node:not([data-open]) [data-type="detailsContent"] {
+  display: none;
+}
+
+.rich-text-editor .details-toggle {
+  position: absolute;
+  z-index: 1;
+  top: calc(0.375rem + (1lh - 1.125rem) / 2);
+  left: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: calc(var(--radius) - 4px);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.rich-text-editor .details-toggle:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.rich-text-editor .details-toggle svg {
+  transition: transform 150ms ease-out;
+}
+
+.rich-text-editor .details-node[data-open] .details-toggle svg {
+  transform: rotate(90deg);
+}
+
+.rich-text-editor .details-summary-placeholder {
+  position: absolute;
+  top: 0.375rem;
+  left: 2rem;
+  color: var(--muted-foreground);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rich-text-editor summary::before,
+  .rich-text-editor .details-toggle svg {
+    transition: none;
+  }
+}
+
 /* Horizontal rules */
 .rich-text-editor hr {
   border: none;

@@ -178,5 +178,38 @@
     "clear_filter": "清除篩選",
     "no_matches": "沒有匹配的行",
     "close": "關閉"
+  },
+  "details": {
+    "expand": "展開",
+    "collapse": "收合",
+    "summary_placeholder": "摺疊區塊標題"
+  },
+  "block_menu": {
+    "turn_into": "轉換為",
+    "insert": "插入",
+    "divider": "分隔線",
+    "table": "表格",
+    "code_block": "程式碼區塊",
+    "mermaid": "Mermaid 圖表",
+    "details": "摺疊區塊",
+    "file": "圖片或檔案"
+  },
+  "block_handle": {
+    "label": "拖曳以移動，點擊開啟選單",
+    "duplicate": "複製",
+    "delete": "刪除"
+  },
+  "table_edit": {
+    "row_options": "列操作",
+    "column_options": "欄操作",
+    "insert_row_above": "在上方插入列",
+    "insert_row_below": "在下方插入列",
+    "delete_row": "刪除列",
+    "insert_column_left": "在左側插入欄",
+    "insert_column_right": "在右側插入欄",
+    "delete_column": "刪除欄",
+    "delete_table": "刪除表格",
+    "add_row": "新增列",
+    "add_column": "新增欄"
   }
 }

@@ -178,5 +178,38 @@
     "clear_filter": "絞り込みを解除",
     "no_matches": "一致する行がありません",
     "close": "閉じる"
+  },
+  "details": {
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "summary_placeholder": "サマリー"
+  },
+  "block_menu": {
+    "turn_into": "変換",
+    "insert": "挿入",
+    "divider": "区切り線",
+    "table": "表",
+    "code_block": "コードブロック",
+    "mermaid": "Mermaid 図",
+    "details": "折りたたみブロック",
+    "file": "画像またはファイル"
+  },
+  "block_handle": {
+    "label": "ドラッグで移動、クリックでメニュー",
+    "duplicate": "複製",
+    "delete": "削除"
+  },
+  "table_edit": {
+    "row_options": "行の操作",
+    "column_options": "列の操作",
+    "insert_row_above": "上に行を挿入",
+    "insert_row_below": "下に行を挿入",
+    "delete_row": "行を削除",
+    "insert_column_left": "左に列を挿入",
+    "insert_column_right": "右に列を挿入",
+    "delete_column": "列を削除",
+    "delete_table": "表を削除",
+    "add_row": "行を追加",
+    "add_column": "列を追加"
   }
 }

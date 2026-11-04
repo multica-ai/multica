@@ -17,6 +17,8 @@ interface SuggestionPopupRenderOptions<
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
   /** Refresh an active popup when its externally supplied catalog changes. */
   subscribe?: (refresh: () => void) => () => void;
+  /** Preferred side; `flip` still moves it when there is no room. */
+  placement?: "top-start" | "bottom-start";
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
@@ -34,6 +36,7 @@ export function createSuggestionPopupRender<
   getProps,
   subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
@@ -118,7 +121,9 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The block menu, which only document editors attach, opens down like
+        // a menu under the line being written.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),

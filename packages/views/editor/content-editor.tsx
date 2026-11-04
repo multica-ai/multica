@@ -65,6 +65,7 @@ import {
 } from "./extensions/file-upload";
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { BlockHandle } from "./block-handle";
 import { repairEmptyListItems } from "./utils/repair-list-items";
 import { resolveClickIntent, useAppOrigin } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
@@ -200,9 +201,10 @@ interface ContentEditorBaseProps {
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
    * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * command menu (issue comments), e.g. /note; "block" is the block menu of
+   * document editors (descriptions), which also adds the ⋮⋮ block handle.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "block";
   /**
    * Quick actions to offer in the "command" `/` menu, plus the resolver that
    * turns a pick into the text it would post (MUL-5465). Read through
@@ -1022,6 +1024,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {enableSlashCommands && slashCommandMode === "block" && (
+            <BlockHandle editor={editor} containerRef={wrapperRef} />
+          )}
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}

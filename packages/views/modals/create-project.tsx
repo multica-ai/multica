@@ -565,6 +565,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             ref={descEditorRef}
             defaultValue={draft.description}
             placeholder={t(($) => $.create_project.description_placeholder)}
+            enableSlashCommands
+            slashCommandMode="block"
             onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
