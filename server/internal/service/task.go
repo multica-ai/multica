@@ -5035,7 +5035,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, selectedModels ...string) (*db.AgentTaskQueue, bool, error) {
+	selectedModel := ""
+	if len(selectedModels) > 0 {
+		selectedModel = selectedModels[0]
+	}
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -5075,12 +5079,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryOverlay     runtimeMCPOverlayData
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
+		retryDelay       time.Duration
+		retrySkipReason  string
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryDelay = retryDelayForAttempt(failureReason, parent.Attempt); retryEligible(failureReason, parent) &&
+			(failureReason != string(taskfailure.ReasonCodexServerOverloaded) ||
+				(!sessionRolloutMissing && s.codexRetryReady(ctx, parent, selectedModel, time.Now(), retryDelay))) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -5089,8 +5097,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+			if retryDelay > 0 {
+				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(retryDelay), Valid: true}
 			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
@@ -5101,7 +5109,19 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			} else {
 				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 			}
+		} else if failureReason == string(taskfailure.ReasonCodexServerOverloaded) && retryEligible(failureReason, parent) {
+			switch {
+			case sessionRolloutMissing:
+				retrySkipReason = "the Codex session rollout is unavailable"
+			case selectedModel == "":
+				retrySkipReason = "the selected model was not recorded"
+			default:
+				retrySkipReason = "the original model, runtime, issue assignment, or recovery deadline could not be verified"
+			}
 		}
+	}
+	if retrySkipReason != "" {
+		errMsg += "; [multica] automatic retry skipped: " + retrySkipReason
 	}
 
 	var task db.AgentTaskQueue
@@ -5114,6 +5134,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			ID:             taskID,
 			Error:          pgtype.Text{String: errMsg, Valid: true},
 			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
+			SelectedModel:  pgtype.Text{String: selectedModel, Valid: selectedModel != ""},
 			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
 			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
 			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
@@ -5464,6 +5485,7 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonTimeout):                true,
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
+	string(taskfailure.ReasonCodexServerOverloaded):  true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
 }
 
@@ -5513,6 +5535,16 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // the child is created 'queued', claimable at once). Callers pass the returned
 // delay to CreateRetryTask via fire_at.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+	if reason == string(taskfailure.ReasonCodexServerOverloaded) {
+		base := time.Minute
+		if failedAttempt > 1 {
+			base = time.Duration(1<<min(failedAttempt-1, 3)) * time.Minute
+			if base > 5*time.Minute {
+				base = 5 * time.Minute
+			}
+		}
+		return base - 10*time.Second + time.Duration(time.Now().UnixNano()%int64(20*time.Second))
+	}
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
 	}
@@ -5521,6 +5553,84 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 		return providerNetworkFinalRetryWait
 	}
 	return 0
+}
+
+func codexRetryExpectation(task db.AgentTaskQueue) (model string, deadline time.Time, ok bool) {
+	var contextData struct {
+		Model    string `json:"codex_retry_model"`
+		Deadline string `json:"codex_retry_deadline"`
+	}
+	if json.Unmarshal(task.Context, &contextData) != nil || contextData.Model == "" || contextData.Deadline == "" {
+		return "", time.Time{}, false
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, contextData.Deadline)
+	return contextData.Model, deadline, err == nil
+}
+
+func (s *TaskService) codexRetryReady(ctx context.Context, parent db.AgentTaskQueue, selectedModel string, now time.Time, delay time.Duration) bool {
+	if selectedModel == "" {
+		return false
+	}
+	if expected, deadline, ok := codexRetryExpectation(parent); ok {
+		if expected != selectedModel || !now.Add(delay).Before(deadline) {
+			return false
+		}
+	} else if parent.Attempt > 1 {
+		return false
+	}
+	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
+	if err != nil || agent.Model.String != selectedModel || agent.RuntimeID != parent.RuntimeID {
+		return false
+	}
+	if parent.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, parent.IssueID)
+		if err != nil || (issue.Status != "todo" && issue.Status != "in_progress") ||
+			issue.AssigneeType.String != "agent" || issue.AssigneeID != parent.AgentID {
+			return false
+		}
+	}
+	return true
+}
+
+// CodexRetryClaimProblem checks the original selection immediately before a
+// deferred child is delivered. A changed model or issue ends the child with a
+// visible reason instead of leaving it queued forever or silently switching.
+func (s *TaskService) CodexRetryClaimProblem(ctx context.Context, child db.AgentTaskQueue, agent db.Agent) (bool, string) {
+	if !child.RetryOfTaskID.Valid {
+		return false, ""
+	}
+	parent, err := s.Queries.GetAgentTask(ctx, child.RetryOfTaskID)
+	if err != nil {
+		if model, _, ok := codexRetryExpectation(child); ok && model != "" {
+			return true, "Codex retry source is unavailable."
+		}
+		return false, ""
+	}
+	if parent.FailureReason.String != string(taskfailure.ReasonCodexServerOverloaded) {
+		return false, ""
+	}
+	model, deadline, ok := codexRetryExpectation(child)
+	if !ok || model == "" {
+		return true, "Codex retry model or recovery deadline could not be verified."
+	}
+	if !time.Now().Before(deadline) {
+		return true, "Codex overload recovery window expired."
+	}
+	if child.AgentID != parent.AgentID || child.RuntimeID != parent.RuntimeID ||
+		agent.RuntimeID != child.RuntimeID || agent.Model.String != model {
+		return true, "Codex retry stopped because the agent, runtime, or selected model changed."
+	}
+	if !child.SessionID.Valid || child.SessionRolloutMissing || parent.SessionRolloutMissing {
+		return true, "Codex retry stopped because the previous session is unavailable."
+	}
+	if child.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, child.IssueID)
+		if err != nil || (issue.Status != "todo" && issue.Status != "in_progress") ||
+			issue.AssigneeType.String != "agent" || issue.AssigneeID != child.AgentID {
+			return true, "Codex retry stopped because the issue is no longer assigned and runnable."
+		}
+	}
+	return true, ""
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -5679,6 +5789,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if !retryEligible(reason, parent) {
 		return nil, nil
 	}
+	retryDelay := retryDelayForAttempt(reason, parent.Attempt)
+	if reason == string(taskfailure.ReasonCodexServerOverloaded) {
+		model, _, ok := codexRetryExpectation(parent)
+		if !ok || parent.SessionRolloutMissing || !s.codexRetryReady(ctx, parent, model, time.Now(), retryDelay) {
+			return nil, nil
+		}
+	}
 
 	var runtimeMCPOverlay runtimeMCPOverlayData
 	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
@@ -5699,8 +5816,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// NULL for an immediate child), and write the reason-aware ceiling into the
 	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
-	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
-		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+	if retryDelay > 0 {
+		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(retryDelay), Valid: true}
 	}
 	// Same advisory slot check as FailTask's path, for the same reason: skip the
 	// work when a successor is already visible. Losing the race is handled by

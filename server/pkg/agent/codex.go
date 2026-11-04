@@ -118,22 +118,6 @@ var codexCleanupConfirmationOverride atomic.Int32
 // production never reassigns it.
 var codexCatalogRetryBackoff = 500 * time.Millisecond
 
-// Five waits total about 21 minutes. The recovery window leaves up to nine
-// minutes for resumed turns while bounding a persistent overload.
-var codexCapacityRetryBackoffs = [5]time.Duration{time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}
-
-const codexCapacityRetryWindow = 30 * time.Minute
-
-// Downward jitter avoids synchronizing agents after a provider overload while
-// keeping the first wait near one minute and the later waits near five.
-func codexCapacityRetryDelay(base time.Duration) time.Duration {
-	spread := base / 10
-	if spread <= 0 {
-		return base
-	}
-	return base - time.Duration(time.Now().UnixNano()%int64(spread))
-}
-
 func sanitizeCodexDiagnostic(value string) string {
 	return sanitizeAgentDiagnostic(value)
 }
@@ -996,7 +980,6 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	go func() {
 		defer cancelRun()
 		retryCtx := runCtx
-		var cancelCapacity context.CancelFunc
 		defer func() {
 			sessionMu.Lock()
 			currentSession = nil
@@ -1006,7 +989,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(resCh)
 		session := firstSession
 		attemptOpts := opts
-		var startupRetries, capacityRetries int
+		var startupRetries int
 		var priorUsage map[string]TokenUsage
 		var lastResult Result
 		for attempt := 1; ; attempt++ {
@@ -1068,16 +1051,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				retryReason = "initialize"
 			case result.codexStartupRefreshRetrySafe && startupRetries < 1:
 				retryReason = "model_catalog_refresh"
-			case result.codexCapacityRetrySafe && capacityRetries < len(codexCapacityRetryBackoffs) && retryCtx.Err() == nil:
-				retryReason = "selected_model_capacity"
 			}
 			if retryReason == "" {
 				flushHeldPins()
 				result.Usage = mergeCodexAttemptUsage(priorUsage, result.Usage)
-				if result.codexCapacityRetrySafe && capacityRetries == len(codexCapacityRetryBackoffs) {
-					result.Error += fmt.Sprintf("; capacity retry limit exhausted after %d retries", capacityRetries)
-					b.cfg.Logger.Warn("codex capacity retry limit exhausted", "task_id", b.cfg.TaskID, "retries", capacityRetries)
-				}
 				resCh <- result
 				return
 			}
@@ -1103,27 +1080,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					attemptOpts.ResumeExpected = true
 				}
 			}
-			if retryReason == "selected_model_capacity" {
-				if cancelCapacity == nil {
-					retryCtx, cancelCapacity = context.WithTimeout(runCtx, codexCapacityRetryWindow)
-					defer cancelCapacity()
-				}
-				backoff = codexCapacityRetryDelay(codexCapacityRetryBackoffs[capacityRetries])
-				if deadline, ok := retryCtx.Deadline(); ok && time.Until(deadline) <= backoff {
-					flushHeldPins()
-					result.Usage = priorUsage
-					result.Error += "; capacity retry deadline has insufficient time for next wait"
-					resCh <- result
-					return
-				}
-				capacityRetries++
-				// This failed turn emitted no item or text, so the input can be
-				// resubmitted without replaying tools. Keep the thread and model.
-				attemptOpts.ResumeSessionID = result.SessionID
-				attemptOpts.ResumeExpected = true
-			} else {
-				startupRetries++
-			}
+			startupRetries++
 			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
 			if err := waitCodexRetry(retryCtx, backoff); err != nil {
 				flushHeldPins()
@@ -1154,7 +1111,7 @@ func codexRetryInterruptedResult(result Result, usage map[string]TokenUsage, err
 	result.Usage = usage
 	if errors.Is(err, context.DeadlineExceeded) {
 		result.Status = "timeout"
-		result.Error += "; capacity retry deadline exceeded"
+		result.Error += "; retry deadline exceeded"
 	} else {
 		result.Status = "aborted"
 		result.Error = "execution cancelled during retry wait"
@@ -1440,12 +1397,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
-			if strings.HasPrefix(description, "item/") {
-				turnEffectsObserved.Store(true)
-			}
 			semanticObserved.Store(true)
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
 			trySendString(semanticActivityCh, description)
+		},
+		onItemProgress: func(itemType string) {
+			// An input echo acknowledges the prompt; it is not agent output.
+			// Unknown item types remain unsafe to replay.
+			if itemType != "userMessage" {
+				turnEffectsObserved.Store(true)
+			}
 		},
 		onTurnDone: func(aborted bool) {
 			select {
@@ -2047,7 +2008,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			DurationMs:                   duration.Milliseconds(),
 			Usage:                        usageMap,
 			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
-			codexCapacityRetrySafe:       capacityRetrySafe,
+			CodexServerOverloaded:        capacityRetrySafe,
 		}
 	}()
 
@@ -2557,6 +2518,7 @@ type codexClient struct {
 	// Result.Output fallbacks must use this callback rather than the last chunk.
 	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
+	onItemProgress           func(itemType string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
@@ -3898,6 +3860,9 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	}
 	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+	if isCodexItemProgressActivity(method) && c.onItemProgress != nil {
+		c.onItemProgress(itemType)
 	}
 	if item == nil && method != "item/agentMessage/delta" {
 		return

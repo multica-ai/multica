@@ -337,10 +337,10 @@ type Result struct {
 	// its model catalog, and that the process tree was reaped afterwards.
 	// Like codexInitializeRetrySafe it is not part of the public contract.
 	codexStartupRefreshRetrySafe bool
-	// codexCapacityRetrySafe proves that a failed Codex turn reported the
-	// structured serverOverloaded rejection before any output or tool activity and
-	// that its process tree was reaped. Only the Codex backend consumes it.
-	codexCapacityRetrySafe bool
+	// CodexServerOverloaded is structured provider evidence that the selected
+	// model was overloaded before any agent action and after process cleanup.
+	// The daemon forwards it as a dedicated task failure reason.
+	CodexServerOverloaded bool
 }
 
 // Config configures a Backend instance.

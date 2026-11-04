@@ -543,10 +543,15 @@ SELECT
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
+  AND NOT EXISTS (SELECT 1 FROM agent_task_queue child WHERE child.retry_of_task_id = p.id)
+  AND (p.failure_reason IS DISTINCT FROM 'agent_error.codex_server_overloaded' OR (
+    p.context->>'codex_retry_model' IS NOT NULL
+    AND (p.context->>'codex_retry_deadline')::timestamptz > COALESCE(sqlc.narg(fire_at)::timestamptz, now())
+    AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
+    AND (p.issue_id IS NULL OR EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status IN ('todo', 'in_progress') AND i.assignee_type = 'agent' AND i.assignee_id = p.agent_id))
+  ))
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
-ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
-       OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING *;
 
 -- name: SetTaskWorkflowStep :exec
@@ -1167,6 +1172,12 @@ SET status = 'failed',
     completed_at = now(),
     error = $2,
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
+    context = CASE WHEN sqlc.narg('failure_reason')::text = 'agent_error.codex_server_overloaded'
+      AND NULLIF(sqlc.narg('selected_model')::text, '') IS NOT NULL THEN
+      COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+        'codex_retry_model', sqlc.narg('selected_model')::text,
+        'codex_retry_deadline', COALESCE(context->>'codex_retry_deadline', to_jsonb(now() + interval '30 minutes') #>> '{}'))
+      ELSE context END,
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE COALESCE(sqlc.narg('session_id'), session_id) END,
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
