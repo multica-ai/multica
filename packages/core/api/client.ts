@@ -280,6 +280,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { EMPTY_ORG_MAP, OrgMapSchema, type OrgMap } from "../company/org-map-schema";
 import {
   parseInstructionRevisions,
   type InstructionRevision,
@@ -5126,6 +5127,15 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // The org map: floors, squads, leaders and open work (any member may read it).
+  async getCompanyOrgMap(params?: { floorId?: string }): Promise<OrgMap> {
+    const search = new URLSearchParams();
+    if (params?.floorId) search.set("floor_id", params.floorId);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/company/org-map${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, OrgMapSchema, EMPTY_ORG_MAP, { endpoint: "GET /api/company/org-map" });
   }
 
   // Company floors and squad seats (the digital company).

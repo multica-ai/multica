@@ -558,6 +558,7 @@ describe("company role templates", () => {
       "initiative show",
       "issue create",
       "issue status",
+      "issue wakeup",
       "knowledge add",
       "knowledge list",
       "knowledge publish",

@@ -82,7 +82,8 @@ test.describe("Secretary chief-of-staff plumbing", () => {
         const leader = await api.createAgent(`${name} leader`, runtimeId);
         squads.push(await api.createSquad(name, leader.id));
       }
-      await api.seatCompanySquads(squads.map((s) => ({ squad_id: s.id, floor_id: floor.id, slot: null })));
+      // The server needs floor_id and slot set together, so each squad gets its own slot.
+      await api.seatCompanySquads(squads.map((s, slot) => ({ squad_id: s.id, floor_id: floor.id, slot })));
 
       const parent = (await api.createIssue("Eval: how is research doing?", {
         status: "todo",
@@ -147,9 +148,18 @@ test.describe("Secretary chief-of-staff plumbing", () => {
   });
 
   test("child_done is on for the parent request, so the rule is listed", async () => {
-    const { api, workspace } = await emptyWorkspace();
+    const { api, workspace, runtimeId } = await emptyWorkspace();
     try {
-      const parent = (await api.createIssue("Eval: child_done rule", { status: "todo" })) as { id: string };
+      // The rule is listed only for an issue with an assignee to wake: a request is
+      // assigned to the Secretary, so the parent gets the same assignment here.
+      const secretary = await api.createAgent("Phase 5 Secretary", runtimeId);
+      const parent = (await api.createIssue("Eval: child_done rule", {
+        status: "todo",
+        assignee_type: "agent",
+        assignee_id: secretary.id,
+      })) as { id: string };
+      // The rule is listed only while a child is open, so the request gets one.
+      await api.createIssue("Eval: open child", { status: "todo", parent_issue_id: parent.id });
       const rules = await json<unknown>(await raw(api, workspace, "GET", `/api/issues/${parent.id}/system-wakeups`));
       expect(JSON.stringify(rules)).toContain("child_done");
     } finally {

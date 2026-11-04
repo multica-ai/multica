@@ -1838,6 +1838,7 @@
     "seat_failed": "スクワッドを配置できませんでした",
     "squad_members": "メンバー",
     "squad_autopilots": "オートパイロット",
+    "squad_open_items": "未完了の項目",
     "squad_proposals": "判断待ち",
     "no_desk": "席なし",
     "decisions_open": "判断",

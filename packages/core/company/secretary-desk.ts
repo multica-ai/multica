@@ -4,8 +4,23 @@ import { api } from "../api";
 import { issueKeys } from "../issues/queries";
 import type { Issue } from "../types";
 
-/** Newest rows the desk reads per source; the desk is a glance, not a log. */
-export const SECRETARY_DESK_LIMIT = 100;
+/** Page size per request; the server caps a page at this many rows. */
+const DESK_PAGE_SIZE = 100;
+
+type DeskIssueParams = Omit<NonNullable<Parameters<typeof api.listIssues>[0]>, "limit" | "offset">;
+
+/**
+ * Reads every row the filter matches, page by page, so the desk never drops
+ * older requests or directives. `total` from the server is authoritative.
+ */
+async function listAllDeskIssues(params: DeskIssueParams): Promise<Issue[]> {
+  const issues: Issue[] = [];
+  for (;;) {
+    const page = await api.listIssues({ ...params, limit: DESK_PAGE_SIZE, offset: issues.length });
+    issues.push(...page.issues);
+    if (page.issues.length === 0 || issues.length >= page.total) return issues;
+  }
+}
 
 // Under the issue key tree, so issue realtime invalidation refreshes the desk.
 export const secretaryDeskKeys = {
@@ -19,8 +34,7 @@ export function secretaryDeskDirectivesOptions(wsId: string) {
   return queryOptions({
     queryKey: secretaryDeskKeys.directives(wsId),
     queryFn: async () => {
-      const res = await api.listIssues({ origin_type: "directive", limit: SECRETARY_DESK_LIMIT });
-      return res.issues;
+      return listAllDeskIssues({ origin_type: "directive" });
     },
     enabled: !!wsId,
   });
@@ -36,15 +50,11 @@ export function secretaryDeskRequestsOptions(wsId: string, secretaryId: string |
     queryFn: async (): Promise<Issue[]> => {
       if (!secretaryId) return [];
       const [parents, requests] = await Promise.all([
-        api.listIssues({
-          assignee_id: secretaryId,
-          assignee_types: ["agent"],
-          limit: SECRETARY_DESK_LIMIT,
-        }),
-        api.listIssues({ origin_type: "squad_request", limit: SECRETARY_DESK_LIMIT }),
+        listAllDeskIssues({ assignee_id: secretaryId, assignee_types: ["agent"] }),
+        listAllDeskIssues({ origin_type: "squad_request" }),
       ]);
-      const parentIds = new Set(parents.issues.map((issue) => issue.id));
-      return requests.issues.filter(
+      const parentIds = new Set(parents.map((issue) => issue.id));
+      return requests.filter(
         (issue) => issue.parent_issue_id !== null && parentIds.has(issue.parent_issue_id),
       );
     },

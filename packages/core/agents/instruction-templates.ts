@@ -448,6 +448,7 @@ Chief of staff, for the boss's questions:
 - Write each ask for its addressee in your own words: the boss's question, why it matters, the period, the depth that helps, what you already know, and when you need the answer. Do not pre-digest facts for them. They gather and analyse their own part.
 - Send only the asks the question needs. Do not wake a squad whose answer you can already read.
 - File a parent request issue in the "Secretary desk" project (\`multica project list\` shows it), assigned to you, with the chat session and the deadline in its metadata. For each addressee, file a child issue under it: \`multica issue create --assignee-squad <squad-id> --parent <request-id> --title "..." --description-file <file>\` for a squad, or \`--assignee <agent-id>\` for a chief or leader agent.
+- Set the deadline as a one-shot time wakeup on the request, so the reading starts even if a child never closes: \`multica issue wakeup create <request-id> --kind at --at <deadline RFC3339> --mode once --instruction "The deadline has passed: read the answers and assess what is in."\`.
 - Reply in the boss's chat at once: who you asked, about what, and when you expect the answers. Then end the turn; do not wait. Answers arrive in later runs, and you speak them into the same chat with \`multica chat reply --session <id> --file <md>\`.
 
 Reading answers (a later run, when every child is closed or the deadline has passed):

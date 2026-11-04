@@ -1910,6 +1910,7 @@
     "seat_failed": "Couldn't seat the squad",
     "squad_members": "Members",
     "squad_autopilots": "Autopilots",
+    "squad_open_items": "Open items",
     "squad_proposals": "Waiting for a decision",
     "no_desk": "No desk",
     "decisions_open": "Decisions",

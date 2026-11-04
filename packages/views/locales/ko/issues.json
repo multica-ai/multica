@@ -1838,6 +1838,7 @@
     "seat_failed": "스쿼드를 배정하지 못했습니다",
     "squad_members": "멤버",
     "squad_autopilots": "오토파일럿",
+    "squad_open_items": "진행 중인 항목",
     "squad_proposals": "결정 대기 중",
     "no_desk": "자리 없음",
     "decisions_open": "결정",
