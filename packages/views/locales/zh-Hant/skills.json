@@ -126,6 +126,8 @@
     },
     "toast_saved": "已儲存 skill",
     "toast_save_failed": "儲存 skill 失敗",
+    "toast_saved_version": "已儲存為 v{{version}}",
+    "toast_view_history": "查看歷史",
     "toast_deleted": "已刪除 skill",
     "toast_delete_failed": "刪除 skill 失敗",
     "refresh": {
@@ -224,7 +226,8 @@
       "files": "檔案",
       "edit": "編輯",
       "open": "開啟",
-      "add": "新增"
+      "add": "新增",
+      "history": "歷史"
     },
     "menu": {
       "copy_link": "複製連結",
@@ -233,7 +236,9 @@
       "version_history": "版本歷史"
     },
     "panel": {
-      "add_description": "新增描述"
+      "add_description": "新增描述",
+      "version": "版本",
+      "no_versions": "暫無版本"
     }
   },
   "create": {

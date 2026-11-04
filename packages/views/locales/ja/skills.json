@@ -126,6 +126,8 @@
     },
     "toast_saved": "スキルを保存しました",
     "toast_save_failed": "スキルを保存できませんでした",
+    "toast_saved_version": "v{{version}} として保存しました",
+    "toast_view_history": "履歴を表示",
     "toast_deleted": "スキルを削除しました",
     "toast_delete_failed": "スキルを削除できませんでした",
     "refresh": {
@@ -224,7 +226,8 @@
       "files": "ファイル",
       "edit": "編集",
       "open": "開く",
-      "add": "追加"
+      "add": "追加",
+      "history": "履歴"
     },
     "menu": {
       "copy_link": "リンクをコピー",
@@ -233,7 +236,9 @@
       "version_history": "バージョン履歴"
     },
     "panel": {
-      "add_description": "説明を追加"
+      "add_description": "説明を追加",
+      "version": "バージョン",
+      "no_versions": "バージョンなし"
     }
   },
   "create": {

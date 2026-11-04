@@ -134,6 +134,8 @@
     },
     "toast_saved": "Skill saved",
     "toast_save_failed": "Failed to save skill",
+    "toast_saved_version": "Saved as v{{version}}",
+    "toast_view_history": "View history",
     "toast_deleted": "Skill deleted",
     "toast_delete_failed": "Failed to delete skill",
     "refresh": {
@@ -235,7 +237,8 @@
       "files": "Files",
       "edit": "Edit",
       "open": "Open",
-      "add": "Add"
+      "add": "Add",
+      "history": "History"
     },
     "menu": {
       "copy_link": "Copy link",
@@ -244,7 +247,9 @@
       "version_history": "Version history"
     },
     "panel": {
-      "add_description": "Add description"
+      "add_description": "Add description",
+      "version": "Version",
+      "no_versions": "No versions yet"
     }
   },
   "create": {

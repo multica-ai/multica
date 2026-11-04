@@ -126,6 +126,8 @@
     },
     "toast_saved": "已保存 skill",
     "toast_save_failed": "保存 skill 失败",
+    "toast_saved_version": "已保存为 v{{version}}",
+    "toast_view_history": "查看历史",
     "toast_deleted": "已删除 skill",
     "toast_delete_failed": "删除 skill 失败",
     "refresh": {
@@ -224,7 +226,8 @@
       "files": "文件",
       "edit": "编辑",
       "open": "打开",
-      "add": "添加"
+      "add": "添加",
+      "history": "历史"
     },
     "menu": {
       "copy_link": "复制链接",
@@ -233,7 +236,9 @@
       "version_history": "版本历史"
     },
     "panel": {
-      "add_description": "添加描述"
+      "add_description": "添加描述",
+      "version": "版本",
+      "no_versions": "暂无版本"
     }
   },
   "create": {

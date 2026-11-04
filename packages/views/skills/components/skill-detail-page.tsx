@@ -371,6 +371,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { data: runtimes = [], error: runtimesError } = useQuery(
     runtimeListOptions(wsId),
   );
+  // Same cache entry as the versions view. Drives the version shown in the
+  // properties panel and the Content header, and the save toast.
+  const { data: versions } = useQuery(skillVersionsOptions(wsId, skillId));
+  // `null`: no history yet (a skill that predates versioning and has not
+  // changed since). `undefined`: still loading, or the load failed.
+  const latestVersion: number | null | undefined = versions
+    ? (versions[0]?.version ?? null)
+    : undefined;
 
   const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
 
@@ -616,11 +624,34 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         exact: true,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      qc.invalidateQueries({
-        queryKey: skillVersionsOptions(wsId, skill.id).queryKey,
-        exact: true,
-      });
-      toast.success(t(($) => $.detail.toast_saved));
+      // Read the history back so the toast can name the version this save
+      // became. The save already succeeded, so a failed read only costs the
+      // version number in the toast.
+      let savedVersion: number | null = null;
+      try {
+        const list = await qc.fetchQuery({
+          ...skillVersionsOptions(wsId, skill.id),
+          staleTime: 0,
+        });
+        savedVersion = list[0]?.version ?? null;
+      } catch {
+        savedVersion = null;
+      }
+      const viewHistory = {
+        label: t(($) => $.detail.toast_view_history),
+        onClick: openVersions,
+      };
+      if (savedVersion === null) {
+        toast.success(t(($) => $.detail.toast_saved));
+      } else if (savedVersion !== latestVersion) {
+        toast.success(
+          t(($) => $.detail.toast_saved_version, { version: savedVersion }),
+          { action: viewHistory },
+        );
+      } else {
+        // Content-identical saves record no version; don't claim one.
+        toast.success(t(($) => $.detail.toast_saved), { action: viewHistory });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.detail.toast_save_failed));
     } finally {
@@ -864,8 +895,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       origin={origin}
       originRuntime={originRuntime}
       creator={creator}
+      latestVersion={latestVersion}
       onNameChange={setName}
       onDescriptionChange={setDescription}
+      onOpenVersions={openVersions}
     />
   );
 
@@ -897,23 +930,40 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
       <ObjectSection
         title={t(($) => $.detail.sections.content)}
-        count={<span className="font-mono">{SKILL_MD}</span>}
+        count={
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono">{SKILL_MD}</span>
+            {typeof latestVersion === "number" && (
+              <span
+                data-testid="skill-version-chip"
+                className="rounded-full border px-1.5 font-mono text-micro leading-4 text-muted-foreground"
+              >
+                {t(($) => $.detail.versions.version_label, { version: latestVersion })}
+              </span>
+            )}
+          </span>
+        }
         action={
-          canEdit ? (
-            <ObjectSectionAction
-              icon={Pencil}
-              onClick={() => openFiles(SKILL_MD, { edit: true })}
-            >
-              {t(($) => $.detail.sections.edit)}
+          <>
+            <ObjectSectionAction icon={History} onClick={openVersions}>
+              {t(($) => $.detail.sections.history)}
             </ObjectSectionAction>
-          ) : (
-            <ObjectSectionAction
-              icon={FileText}
-              onClick={() => openFiles(SKILL_MD)}
-            >
-              {t(($) => $.detail.sections.open)}
-            </ObjectSectionAction>
-          )
+            {canEdit ? (
+              <ObjectSectionAction
+                icon={Pencil}
+                onClick={() => openFiles(SKILL_MD, { edit: true })}
+              >
+                {t(($) => $.detail.sections.edit)}
+              </ObjectSectionAction>
+            ) : (
+              <ObjectSectionAction
+                icon={FileText}
+                onClick={() => openFiles(SKILL_MD)}
+              >
+                {t(($) => $.detail.sections.open)}
+              </ObjectSectionAction>
+            )}
+          </>
         }
       >
         <SkillContentPreview content={content} />

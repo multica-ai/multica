@@ -126,6 +126,8 @@
     },
     "toast_saved": "스킬을 저장했습니다",
     "toast_save_failed": "스킬을 저장하지 못했습니다",
+    "toast_saved_version": "v{{version}}(으)로 저장했습니다",
+    "toast_view_history": "기록 보기",
     "toast_deleted": "스킬을 삭제했습니다",
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "refresh": {
@@ -224,7 +226,8 @@
       "files": "파일",
       "edit": "편집",
       "open": "열기",
-      "add": "추가"
+      "add": "추가",
+      "history": "기록"
     },
     "menu": {
       "copy_link": "링크 복사",
@@ -233,7 +236,9 @@
       "version_history": "버전 기록"
     },
     "panel": {
-      "add_description": "설명 추가"
+      "add_description": "설명 추가",
+      "version": "버전",
+      "no_versions": "아직 버전 없음"
     }
   },
   "create": {

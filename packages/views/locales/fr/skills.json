@@ -134,6 +134,8 @@
     },
     "toast_saved": "Skill enregistré",
     "toast_save_failed": "Échec de l'enregistrement du skill",
+    "toast_saved_version": "Enregistré en v{{version}}",
+    "toast_view_history": "Voir l'historique",
     "toast_deleted": "Skill supprimé",
     "toast_delete_failed": "Échec de la suppression du skill",
     "refresh": {
@@ -235,7 +237,8 @@
       "files": "Fichiers",
       "edit": "Modifier",
       "open": "Ouvrir",
-      "add": "Ajouter"
+      "add": "Ajouter",
+      "history": "Historique"
     },
     "menu": {
       "copy_link": "Copier le lien",
@@ -244,7 +247,9 @@
       "version_history": "Historique des versions"
     },
     "panel": {
-      "add_description": "Ajouter une description"
+      "add_description": "Ajouter une description",
+      "version": "Version",
+      "no_versions": "Aucune version"
     }
   },
   "create": {
