@@ -43,6 +43,17 @@ import (
 func writeHeader(b *strings.Builder) {
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	fmt.Fprintf(b, "The daemon sets `MULTICA_CLI_PATH` to its own CLI executable. For every `multica ...` command shown in this brief, user messages, or skills, invoke `%s ...` instead. This keeps CLI features aligned with the daemon even when a login shell reorders PATH to an older installed CLI. Keep the executable path quoted; do not resolve `multica` through PATH.\n\n", multicaCLICommand())
+	if runtimeGOOS == "windows" {
+		b.WriteString("The invocation above uses PowerShell. In Git Bash, use `\"$MULTICA_CLI_PATH\" ...`.\n\n")
+	}
+}
+
+func multicaCLICommand() string {
+	if runtimeGOOS == "windows" {
+		return `& "$env:MULTICA_CLI_PATH"`
+	}
+	return `"$MULTICA_CLI_PATH"`
 }
 
 // writeBackgroundTaskSafetySlim states the task-lifetime and external-work
@@ -558,7 +569,7 @@ func writeWorkflowChat(b *strings.Builder) {
 func writeWorkflowQuickCreate(b *strings.Builder) {
 	b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. The per-turn user message carries this run's field values — what to put in the title, description, assignee, project and parent. It does not restate the rules below; they hold for the run whatever that message says, and they still hold if it never arrived.\n\n")
 	b.WriteString("Hard guardrails:\n")
-	b.WriteString("- Run exactly one `multica issue create --output json` invocation, then exit. Do not retry for any reason, even on a non-zero exit — the issue may already exist, and a second attempt would create a duplicate.\n")
+	fmt.Fprintf(b, "- Run exactly one `%s issue create --output json` invocation, then exit. Do not retry for any reason, even on a non-zero exit — the issue may already exist, and a second attempt would create a duplicate.\n", multicaCLICommand())
 	b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 	b.WriteString("- On success, read the created issue's `identifier` (preferred) or `id` (fallback) from the JSON response, then print exactly one line and exit: `Created <identifier-or-id>: <title>`. No commentary, no follow-up tool calls. Do not scrape human-readable output, and never assume a workspace issue prefix such as `MUL-` — workspaces can set their own.\n")
 	b.WriteString("- On a CLI error or a JSON parse error, exit with that error as the only output. Do not retry.\n\n")
