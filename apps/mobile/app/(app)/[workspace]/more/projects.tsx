@@ -28,11 +28,13 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ProjectRow } from "@/components/project/project-row";
 import { projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useCanManageProjects } from "@/lib/use-can-manage-projects";
 import { useT } from "@/lib/i18n";
 
 export default function ProjectsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const canManage = useCanManageProjects();
   const { t } = useT("projects");
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
@@ -52,8 +54,8 @@ export default function ProjectsPage() {
   }, [wsSlug]);
 
   const headerRight = useCallback(() => {
-    return <PlusButton onPress={goCreate} />;
-  }, [goCreate]);
+    return canManage ? <PlusButton onPress={goCreate} /> : null;
+  }, [canManage, goCreate]);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={[]}>
@@ -75,7 +77,7 @@ export default function ProjectsPage() {
           </Button>
         </View>
       ) : sorted.length === 0 ? (
-        <EmptyState onCreate={goCreate} />
+        <EmptyState onCreate={canManage ? goCreate : undefined} />
       ) : (
         <FlatList
           data={sorted}
@@ -112,16 +114,22 @@ function PlusButton({ onPress }: { onPress: () => void }) {
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate }: { onCreate?: () => void }) {
   const { t } = useT("projects");
   return (
     <View className="flex-1 items-center justify-center px-6 gap-4">
       <Text className="text-base font-medium text-foreground">
         {t("list.empty")}
       </Text>
-      <Button variant="default" onPress={onCreate}>
-        <Text>{t("common:actions.create")}</Text>
-      </Button>
+      {onCreate ? (
+        <Button variant="default" onPress={onCreate}>
+          <Text>{t("common:actions.create")}</Text>
+        </Button>
+      ) : (
+        <Text className="text-sm text-muted-foreground text-center">
+          {t("permissions.create")}
+        </Text>
+      )}
     </View>
   );
 }

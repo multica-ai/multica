@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "只有工作区 owner 和 admin 可以创建项目。"
+  },
   "list": {
     "title": "项目",
     "empty": "还没有项目",

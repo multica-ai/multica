@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "Only workspace owners and admins can create projects."
+  },
   "list": {
     "title": "Projects",
     "empty": "No projects yet",

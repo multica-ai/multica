@@ -44,12 +44,14 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useCanManageProjects } from "@/lib/use-can-manage-projects";
 import { useT } from "@/lib/i18n";
 
 export default function ProjectDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const canManage = useCanManageProjects();
   const qc = useQueryClient();
 
   const detail = useQuery(projectDetailOptions(wsId, id));
@@ -91,7 +93,7 @@ export default function ProjectDetail() {
     const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
     const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
     if (wsUrl) actions.push("open_web");
-    actions.push("delete");
+    if (canManage) actions.push("delete");
     const options = actions.map((action) =>
       action === "cancel"
         ? t("common:actions.cancel")
@@ -105,7 +107,7 @@ export default function ProjectDetail() {
                 ? t("menu.open_web")
                 : t("common:actions.delete"),
     );
-    const destructiveIndex = options.length - 1;
+    const destructiveIndex = canManage ? actions.indexOf("delete") : undefined;
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options,
@@ -130,7 +132,7 @@ export default function ProjectDetail() {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }
-        if (i === destructiveIndex) {
+        if (action === "delete" && canManage) {
           onDelete();
         }
       },
@@ -138,6 +140,7 @@ export default function ProjectDetail() {
   };
 
   const onDelete = () => {
+    if (!canManage) return;
     Alert.alert(
       t("delete.title"),
       t("delete.message"),

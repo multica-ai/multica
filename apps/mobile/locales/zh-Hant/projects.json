@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "create": "只有工作區 owner 和 admin 可以建立專案。"
+  },
   "list": {
     "title": "專案",
     "empty": "還沒有專案",

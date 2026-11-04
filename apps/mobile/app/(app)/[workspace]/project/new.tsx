@@ -42,6 +42,7 @@ import {
 import { useCreateProject } from "@/data/mutations/projects";
 import { useNewProjectDraftStore } from "@/data/stores/new-project-draft-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useCanManageProjects } from "@/lib/use-can-manage-projects";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -56,6 +57,24 @@ const NEW_PROJECT_PICKER_PATHNAMES = {
 } as const satisfies Record<NewProjectPickerField, string>;
 
 export default function NewProject() {
+  const canManage = useCanManageProjects();
+  const { t } = useT("projects");
+  if (!canManage) {
+    return (
+      <>
+        <Stack.Screen options={{ headerRight: () => null }} />
+        <View className="flex-1 bg-background items-center justify-center px-6">
+          <Text className="text-sm text-muted-foreground text-center">
+            {t("permissions.create")}
+          </Text>
+        </View>
+      </>
+    );
+  }
+  return <NewProjectForm />;
+}
+
+function NewProjectForm() {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("projects");
   const create = useCreateProject();
