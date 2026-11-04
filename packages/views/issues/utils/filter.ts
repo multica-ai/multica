@@ -113,8 +113,12 @@ export interface IssueFilterContext {
 
 export interface IssueRelationContext {
   userId: string;
-  /** Agents the viewer owns. */
-  myAgentIds: ReadonlySet<string>;
+  /** Agents the viewer owns. Loaded only while a filter tests "my_agents";
+   *  without it that relation is left to the server. */
+  myAgentIds?: ReadonlySet<string>;
+  /** Issues the viewer subscribes to. Loaded only while a filter tests the
+   *  relation; without it "subscribed" is left to the server. */
+  subscribedIssueIds?: ReadonlySet<string>;
 }
 
 /**
@@ -349,10 +353,8 @@ export function applyIssueFilters(
     }
 
     if (hasRelationFilter) {
-      const matched = relationFilters.some((relation) =>
-        issueMatchesRelation(issue, relation, relationContext),
-      );
-      if (!passes("relation", matched)) return false;
+      const matched = issueMatchesRelations(issue, relationFilters, relationContext);
+      if (matched !== undefined && !passes("relation", matched)) return false;
     }
 
     if (dueDateFilters.length > 0) {
@@ -369,17 +371,36 @@ export function applyIssueFilters(
   });
 }
 
+/** OR across relations, or undefined when no listed relation matches and one
+ *  of them cannot be answered with this context. */
+function issueMatchesRelations(
+  issue: Issue,
+  relations: readonly IssueRelationFilter[],
+  context: IssueRelationContext,
+): boolean | undefined {
+  let unknown = false;
+  for (const relation of relations) {
+    const matched = issueMatchesRelation(issue, relation, context);
+    if (matched) return true;
+    if (matched === undefined) unknown = true;
+  }
+  return unknown ? undefined : false;
+}
+
 function issueMatchesRelation(
   issue: Issue,
   relation: IssueRelationFilter,
   context: IssueRelationContext,
-): boolean {
+): boolean | undefined {
   switch (relation) {
+    case "subscribed":
+      return context.subscribedIssueIds?.has(issue.id);
     case "assigned":
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":
       return issue.creator_type === "member" && issue.creator_id === context.userId;
     case "my_agents":
+      if (!context.myAgentIds) return undefined;
       return (
         issue.assignee_type === "agent" &&
         !!issue.assignee_id &&
@@ -463,9 +484,9 @@ function issueMatchesFilterCondition(
     case "relation": {
       const relation = context.relation;
       if (!relation) return undefined;
-      matched = values.some((value) =>
-        issueMatchesRelation(issue, value as IssueRelationFilter, relation),
-      );
+      const answer = issueMatchesRelations(issue, values as IssueRelationFilter[], relation);
+      if (answer === undefined) return undefined;
+      matched = answer;
       break;
     }
     case "dueDate":

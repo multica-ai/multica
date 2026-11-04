@@ -296,6 +296,8 @@ function IssueSurfaceContent({
           <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
         ) : controller.isUnreadFilterError ? (
           <FilterDependencyErrorState kind="unread" onRetry={controller.retryUnreadFilter} />
+        ) : controller.isRelationFilterError ? (
+          <FilterDependencyErrorState kind="relation" onRetry={controller.retryRelationFilter} />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -422,7 +424,7 @@ function FilterDependencyErrorState({
   kind,
   onRetry,
 }: {
-  kind: "status" | "working" | "unread";
+  kind: "status" | "working" | "unread" | "relation";
   onRetry: () => void;
 }) {
   const { t } = useT("issues");
@@ -436,9 +438,17 @@ function FilterDependencyErrorState({
           ? t(($) => $.working_filter_error.title)
           : kind === "unread"
             ? t(($) => $.unread_filter_error.title)
-            : t(($) => $.status_catalog_error.title)
+            : kind === "relation"
+              ? t(($) => $.relation_filter_error.title)
+              : t(($) => $.status_catalog_error.title)
       }
-      description={kind === "status" ? t(($) => $.status_catalog_error.hint) : undefined}
+      description={
+        kind === "status"
+          ? t(($) => $.status_catalog_error.hint)
+          : kind === "relation"
+            ? t(($) => $.relation_filter_error.hint)
+            : undefined
+      }
       actions={
         <Button variant="outline" size="sm" onClick={onRetry}>
           {t(($) => $.status_catalog_error.retry)}

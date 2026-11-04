@@ -46,6 +46,10 @@
     "hint": "載入狀態後才能顯示任務。",
     "retry": "重試"
   },
+  "relation_filter_error": {
+    "title": "「與我的關係」篩選載入失敗",
+    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「分配給我的 AI 代理的」篩選的任務。"
+  },
   "source_context": {
     "create_action": "從這條評論建立子任務",
     "preview_loading": "正在載入來源上下文預覽...",
@@ -182,6 +186,7 @@
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
     "section_read_state": "閱讀狀態",

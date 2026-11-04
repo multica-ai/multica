@@ -417,6 +417,7 @@ import {
   EMPTY_INBOX_UNREAD_SUMMARY,
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
+  SubscribedIssueIdsSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2952,6 +2953,15 @@ export class ApiClient {
       cursor = page.next_cursor === cursor ? null : page.next_cursor;
     } while (cursor);
     return items;
+  }
+
+  async listSubscribedIssueIds(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/issues/subscribed");
+    const parsed = parseWithFallback<{ issue_ids: string[] } | null>(raw, SubscribedIssueIdsSchema, null, {
+      endpoint: "GET /api/issues/subscribed",
+    });
+    if (!parsed) throw new Error("GET /api/issues/subscribed returned a malformed body");
+    return parsed.issue_ids;
   }
 
   async markIssueRead(issueId: string): Promise<void> {

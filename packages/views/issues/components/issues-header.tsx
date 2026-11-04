@@ -3,6 +3,7 @@
 import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  BellRing,
   Bot,
   CalendarClock,
   CalendarDays,
@@ -938,6 +939,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, typeof User> = {
   assigned: CircleUser,
   created: UserPen,
   my_agents: Bot,
+  subscribed: BellRing,
 };
 
 /** Read-only sentence form of the active filters, shown on hover so a closed
@@ -1379,8 +1381,8 @@ export function IssueFilterMenu({
             </DropdownMenuSub>
             )}
 
-            {/* Relation to me — OR across assigned / created / my agents,
-                which no single actor dimension can express. */}
+            {/* Relation to me — OR across assigned / created / my agents /
+                subscribed, which no single actor dimension can express. */}
             {showRelation && show("relation") && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>

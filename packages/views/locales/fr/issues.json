@@ -47,6 +47,10 @@
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",
     "retry": "Réessayer"
   },
+  "relation_filter_error": {
+    "title": "Impossible de charger le filtre « Lien avec moi »",
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
+  },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
     "preview_loading": "Chargement de l'aperçu de la source capturée…",
@@ -184,6 +188,7 @@
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Assignés à mes agents",
+    "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
     "section_read_state": "État de lecture",

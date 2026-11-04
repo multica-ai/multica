@@ -47,6 +47,10 @@
     "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
   },
+  "relation_filter_error": {
+    "title": "Couldn't load the \"Relation to me\" filter",
+    "hint": "Issues filtered by \"Subscribed by me\" or \"Assigned to my agents\" can't be shown until your subscriptions and agents load."
+  },
   "source_context": {
     "create_action": "Create sub-issue from here",
     "preview_loading": "Loading captured source preview…",
@@ -184,6 +188,7 @@
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "Assigned to my agents",
+    "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
     "section_read_state": "Read state",

@@ -422,7 +422,7 @@ func parseIssueTableActor(w http.ResponseWriter, actor issueTableActorRef, field
 }
 
 // issueTableRelations are the viewer relations `filters.relations` accepts.
-var issueTableRelations = []string{"assigned", "created", "my_agents"}
+var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed"}
 
 // issueTableNegatableFilters are the `filters` fields `filters.negate` may name.
 var issueTableNegatableFilters = []string{
@@ -437,6 +437,14 @@ func issueTableRelationPredicate(relation string, userRef string) string {
 		return fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id = %s::uuid)", userRef)
 	case "created":
 		return fmt.Sprintf("(i.creator_type = 'member' AND i.creator_id = %s::uuid)", userRef)
+	case "subscribed":
+		return fmt.Sprintf(`EXISTS (
+    SELECT 1 FROM issue_subscriber isub
+     WHERE isub.issue_id  = i.id
+       AND isub.user_type = 'member'
+       AND isub.user_id   = %s::uuid
+       AND isub.unsubscribed_at IS NULL
+  )`, userRef)
 	default: // my_agents
 		return fmt.Sprintf(`(i.assignee_type = 'agent' AND i.assignee_id IN (
        SELECT a.id FROM agent a

@@ -46,6 +46,10 @@
     "hint": "加载状态后才能显示任务。",
     "retry": "重试"
   },
+  "relation_filter_error": {
+    "title": "“与我的关系”筛选加载失败",
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
+  },
   "source_context": {
     "create_action": "从这条评论创建子任务",
     "preview_loading": "正在加载来源上下文预览...",
@@ -182,6 +186,7 @@
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "分配给我的智能体的",
+    "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
     "section_read_state": "阅读状态",

@@ -46,6 +46,10 @@
     "hint": "ステータスを読み込むまでタスクを表示できません。",
     "retry": "再試行"
   },
+  "relation_filter_error": {
+    "title": "「自分との関係」フィルターを読み込めませんでした",
+    "hint": "「自分が購読中」または「自分のエージェントが担当」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
+  },
   "source_context": {
     "create_action": "このコメントからサブタスクを作成",
     "preview_loading": "参照コンテキストのプレビューを読み込み中…",
@@ -182,6 +186,7 @@
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
     "relation_my_agents": "自分のエージェントが担当",
+    "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
     "section_read_state": "既読状態",
