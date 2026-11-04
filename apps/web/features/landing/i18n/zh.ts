@@ -4276,7 +4276,7 @@ export function createZhDict(
       sub: "我们将为你托管 runtime，目前尚未上线——留下邮箱，上线后通知你。",
     },
     footer: {
-      releaseNotes: "v{version} 更新内容",
+      releaseNotes: "{version} 更新内容",
       allReleases: "查看所有版本",
       currentVersion: "当前版本：{version}",
       versionUnavailable: "版本获取失败——请前往 GitHub 查看",
