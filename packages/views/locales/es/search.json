@@ -1,0 +1,175 @@
+{
+  "title": "Barra de comandos",
+  "description": "Busca, ejecuta comandos o encarga trabajo a un agente",
+  "placeholder": "Busca o escribe lo que necesitas hacer...",
+  "groups": {
+    "pages": "Páginas",
+    "commands": "Comandos",
+    "members": "Miembros",
+    "projects": "Proyectos",
+    "issues": "Incidencias",
+    "cancelled": "Cancelado",
+    "recent": "Reciente",
+    "workspaces": "Espacios de trabajo",
+    "agents": "Agentes",
+    "squads": "Equipos",
+    "autopilots": "Pilotos automáticos",
+    "chats": "Chats",
+    "skills": "Skills",
+    "new": "Nuevo",
+    "best_match": "Mejor coincidencia",
+    "actions": "Acciones"
+  },
+  "commands": {
+    "current_theme_aria": "Tema actual",
+    "new_issue": "Nueva incidencia",
+    "new_project": "Nuevo proyecto",
+    "copy_issue_link": "Copiar enlace de la incidencia",
+    "copy_identifier": "Copiar identificador ({{identifier}})",
+    "fold_all_comments": "Plegar todos los comentarios",
+    "unfold_all_comments": "Desplegar todos los comentarios",
+    "new_autopilot": "Piloto automático nuevo",
+    "chat_with_agent": "Conversar con un agente",
+    "change_theme": "Cambiar tema...",
+    "send_feedback": "Enviar comentarios"
+  },
+  "toast": {
+    "link_copied": "Enlace copiado",
+    "copied_identifier": "{{identifier}} copiado",
+    "run_retried": "Ejecución reiniciada",
+    "run_cancelled": "Ejecución cancelada",
+    "subscribed": "Suscrito",
+    "unsubscribed": "Suscripción cancelada",
+    "label_added": "Etiqueta {{name}} añadida",
+    "label_removed": "Etiqueta {{name}} quitada",
+    "label_failed": "No se pudo añadir la etiqueta {{name}} a todas las incidencias",
+    "update_failed": "La actualización falló",
+    "assigned": "{{identifier}} asignada a {{name}}"
+  },
+  "empty": {
+    "no_results": "No se encontraron resultados.",
+    "no_labels": "Sin etiquetas",
+    "type_to_find_issue": "Escribe para buscar una incidencia",
+    "type_to_find_people": "Escribe para buscar personas y agentes"
+  },
+  "trigger": {
+    "label": "Buscar..."
+  },
+  "page_placeholder": "Filtrar...",
+  "breadcrumb_aria": "Menú actual",
+  "context": {
+    "current_issue": "Incidencia actual",
+    "selected_issues_one": "{{count}} incidencia seleccionada",
+    "selected_issues_other": "{{count}} incidencias seleccionadas",
+    "current_project": "Proyecto actual",
+    "current_agent": "Agente actual",
+    "current_autopilot": "Piloto automático actual",
+    "inbox": "Bandeja de entrada",
+    "current_chat": "Chat actual"
+  },
+  "issue": {
+    "change_status": "Cambiar estado...",
+    "assign_to": "Asignar a...",
+    "set_priority": "Establecer prioridad...",
+    "run_quick_action": "Ejecutar acción rápida...",
+    "quick_actions_available_one": "{{count}} disponible",
+    "quick_actions_available_other": "{{count}} disponibles",
+    "add_label": "Añadir etiqueta...",
+    "set_due_date": "Establecer fecha de fin...",
+    "move_to_project": "Mover a proyecto...",
+    "set_parent": "Establecer incidencia padre...",
+    "cancel_run": "Cancelar ejecución actual",
+    "retry_run": "Reintentar última ejecución",
+    "create_sub_issue": "Nueva subincidencia",
+    "subscribe": "Suscribirse",
+    "unsubscribe": "Darse de baja",
+    "delete": "Eliminar incidencia",
+    "delete_selected_one": "Eliminar {{count}} incidencia",
+    "delete_selected_other": "Eliminar {{count}} incidencias"
+  },
+  "project": {
+    "change_status": "Cambiar estado del proyecto...",
+    "new_issue": "Nueva incidencia en este proyecto",
+    "pin": "Fijar en la barra lateral",
+    "unpin": "Desfijar de la barra lateral",
+    "copy_link": "Copiar enlace del proyecto"
+  },
+  "agent": {
+    "chat": "Chatear con {{name}}",
+    "assign_issue": "Asignar una incidencia a {{name}}...",
+    "new_issue": "Nueva incidencia para {{name}}",
+    "pin_in_chat": "Fijar en el chat",
+    "unpin_in_chat": "Desfijar del chat",
+    "settings": "Abrir ajustes del agente"
+  },
+  "autopilot": {
+    "run_now": "Ejecutar una vez ahora",
+    "pause": "Pausar",
+    "resume": "Reanudar"
+  },
+  "inbox": {
+    "archive": "Archivar",
+    "mark_unread": "Marcar como no leído",
+    "mark_all_read": "Marcar toda la bandeja de entrada como leída",
+    "archive_all_read": "Archivar todos los elementos leídos de la bandeja de entrada"
+  },
+  "chat": {
+    "link_project": "Vincular a proyecto...",
+    "pin": "Fijar chat",
+    "unpin": "Desfijar chat",
+    "archive": "Archivar chat"
+  },
+  "pages": {
+    "status": "Estado",
+    "priority": "Prioridad",
+    "assignee": "Asignado",
+    "labels": "Etiquetas",
+    "due_date": "Fecha de entrega",
+    "project": "Proyecto",
+    "parent": "Incidencia principal",
+    "quick_actions": "Acciones rápidas",
+    "theme": "Tema",
+    "project_status": "Estado del proyecto",
+    "no_project": "Sin proyecto",
+    "current": "Actual"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "delegate": {
+    "heading": "Encargar a un agente",
+    "create_and_assign": "Nueva incidencia y asignar a {{name}}",
+    "squad": "Equipo",
+    "context_aria": "Creada con",
+    "parent": "Bajo {{identifier}}",
+    "pick_crumb": "Elegir",
+    "pick_another": "Encargar a otro agente o equipo...",
+    "detected": "Instrucción"
+  },
+  "best": {
+    "assign": "Asignar {{subject}} a {{name}}",
+    "chat": "Chatear con {{name}}",
+    "new_issue_in": "Nueva incidencia en {{name}}"
+  },
+  "types": {
+    "issue": "Incidencia",
+    "project": "Proyecto",
+    "agent": "Agente",
+    "autopilot": "Piloto automático",
+    "squad": "Equipo",
+    "member": "Miembro"
+  },
+  "footer": {
+    "navigate": "Navegar",
+    "select": "Selección",
+    "open_in_new_tab": "Abrir en una pestaña nueva",
+    "delegate": "Crear y encargar a {{name}}",
+    "search_instead": "Buscar como palabras clave",
+    "back": "Atrás",
+    "prefix_commands": "Comandos",
+    "prefix_issues": "Incidencias",
+    "prefix_people": "Personas y agentes"
+  }
+}

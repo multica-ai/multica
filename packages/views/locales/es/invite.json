@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Volver",
+    "log_out": "Cerrar sesión"
+  },
+  "not_found": {
+    "title": "Invitación no encontrada",
+    "description": "Es posible que esta invitación haya caducado, se haya revocado o no pertenezca a tu cuenta.",
+    "go_to_dashboard": "Ir al panel"
+  },
+  "accepted": {
+    "title": "¡Te uniste a {{workspace_name}}!",
+    "redirecting": "Redirigiendo al espacio de trabajo..."
+  },
+  "declined": {
+    "title": "Invitación rechazada",
+    "description": "No se te añadirá a este espacio de trabajo.",
+    "go_to_dashboard": "Ir al panel"
+  },
+  "main": {
+    "join_title": "Únete a {{workspace_name}}",
+    "fallback_workspace_name": "espacio de trabajo",
+    "invited_role_admin": "te invitó a unirte como administrador.",
+    "invited_role_member": "te invitó a unirte como miembro.",
+    "already_handled_accepted": "Esta invitación ya fue aceptada.",
+    "already_handled_declined": "Esta invitación ya fue rechazada.",
+    "expired": "Esta invitación ha caducado.",
+    "decline": "Rechazar",
+    "declining": "Rechazando...",
+    "accept": "Aceptar y unirse",
+    "joining": "Uniéndose..."
+  },
+  "errors": {
+    "accept_failed": "No se pudo aceptar la invitación",
+    "decline_failed": "No se pudo rechazar la invitación"
+  },
+  "batch": {
+    "log_out": "Cerrar sesión",
+    "empty_title": "Sin invitaciones pendientes",
+    "empty_hint": "Continúa para configurar tu propio espacio de trabajo.",
+    "empty_continue": "Continuar a la configuración",
+    "title": "Has sido invitado",
+    "subtitle": "Elige los espacios de trabajo a los que quieres unirte. Siempre puedes gestionar el resto más tarde desde la barra lateral.",
+    "submit_skip": "Omitir y configurar mi propio espacio de trabajo",
+    "submit_join_one": "Unirse a 1 espacio de trabajo",
+    "submit_join_other": "Unirse a {{count}} espacios de trabajo",
+    "joining": "Uniéndose...",
+    "error_generic": "No se pudieron procesar las invitaciones. Inténtalo de nuevo.",
+    "row_workspace_fallback": "Espacio de trabajo",
+    "row_inviter_fallback": "Alguien",
+    "row_invited_admin": "{{inviter}} te invitó como administrador",
+    "row_invited_member": "{{inviter}} te invitó como miembro"
+  }
+}

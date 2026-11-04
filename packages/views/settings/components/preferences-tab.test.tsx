@@ -196,6 +196,7 @@ describe("PreferencesTab — Language switcher", () => {
     { name: "简体中文", locale: "zh-Hans" },
     { name: "繁體中文", locale: "zh-Hant" },
     { name: "Français", locale: "fr" },
+    { name: "Spanish", locale: "es" },
   ])("when logged in: saves $locale before reloading", async ({ name, locale }) => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
