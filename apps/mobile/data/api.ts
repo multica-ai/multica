@@ -92,6 +92,7 @@ import {
   EMPTY_ACTIVE_TASKS_RESPONSE,
   EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
+  EMPTY_ATTACHMENT,
   EMPTY_ATTACHMENT_LIST,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
@@ -730,6 +731,34 @@ class ApiClient {
       AttachmentListSchema,
       EMPTY_ATTACHMENT_LIST,
       { ...opts, endpoint: "GET /api/issues/:id/attachments" },
+    );
+  }
+
+  // GET /api/attachments/:id/download-metadata — fresh, credential-free
+  // download URLs for one attachment.
+  //
+  // List responses hand out the auth-gated `/api/attachments/{id}/download`
+  // path, which a native request outside the app (Safari via Linking, an
+  // expo-image load) cannot authenticate. The server re-signs
+  // `download_url` on every call: a CloudFront / S3 presigned URL, or in
+  // proxy mode a short-lived single-attachment capability. Mobile's file
+  // taps therefore re-resolve through here instead of handing the list
+  // value to the system.
+  //
+  // Uses the download-metadata route rather than `/api/attachments/{id}`
+  // because a Markdown link may point at an attachment in another
+  // workspace; this route resolves the workspace from the row and checks
+  // membership there, so the current workspace header cannot change the
+  // target (same choice web makes in `use-download-attachment.ts`).
+  async getAttachmentForDownload(
+    id: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Attachment> {
+    return this.fetchValidated(
+      `/api/attachments/${id}/download-metadata`,
+      AttachmentSchema,
+      EMPTY_ATTACHMENT,
+      { ...opts, endpoint: "GET /api/attachments/:id/download-metadata" },
     );
   }
 
