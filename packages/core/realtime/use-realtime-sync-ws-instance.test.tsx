@@ -231,6 +231,32 @@ describe("useRealtimeSync — ws instance change", () => {
     }
   });
 
+  it("refreshes the skill catalog and agent list/details after a remote skill deletion", () => {
+    vi.useFakeTimers();
+    try {
+      const keys = [
+        workspaceKeys.skills("ws-1"),
+        workspaceKeys.agents("ws-1"),
+        workspaceKeys.agent("ws-1", "agent-1"),
+      ];
+      for (const key of keys) qc.setQueryData(key, []);
+      qc.setQueryData(workspaceKeys.agents("ws-2"), []);
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+
+      onAny({ type: "skill:deleted", payload: { skill_id: "skill-1" } } as never);
+      // A following catalog event must not swallow the deletion's agent refresh.
+      onAny({ type: "skill:updated", payload: { skill_id: "skill-2" } } as never);
+      vi.advanceTimersByTime(100);
+
+      for (const key of keys) expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(workspaceKeys.agents("ws-2"))?.isInvalidated).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("invalidates agent projections when a daemon changes liveness", () => {
     vi.useFakeTimers();
     try {
