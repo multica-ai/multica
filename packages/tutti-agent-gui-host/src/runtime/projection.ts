@@ -10,7 +10,7 @@ import type { PendingChatTaskItem } from "@multica/core/types";
 import type { AgentGuiSession, AgentGuiExecutionTarget, AgentGuiSessionDetail } from "../protocol";
 import { localProjectSectionKey } from "../local-projects";
 import { RuntimeLedger } from "./ledger";
-import type { V2Conversation } from "@multica/core/local-conversation/conversation";
+import type { ConversationModel } from "@multica/conversation-client/models";
 import { projectV2Conversation } from "./v2-projection";
 
 export const MULTICA_GUI_CAPABILITIES: AgentActivitySessionCapabilities = {
@@ -121,7 +121,7 @@ function millis(value: string): number {
  */
 export function projectV2Detail(
   detail: AgentGuiSessionDetail,
-  conversation: V2Conversation,
+  conversation: ConversationModel,
   agent: AgentGuiExecutionTarget | undefined,
   ledger: RuntimeLedger,
   locale: "en" | "zh-CN" = "en",

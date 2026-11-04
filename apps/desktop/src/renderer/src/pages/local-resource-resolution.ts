@@ -1,7 +1,7 @@
 import type { LocalPreviewFile, LocalPreviewLocation } from "@multica/core/local-conversation/protocol";
 import { localResourceTarget } from "@multica/tutti-agent-gui-host/message-resource-links";
-import type { V2Conversation } from "@multica/core/local-conversation/conversation";
-import { LocalV2RequestError } from "../platform/conversation-store";
+import type { ConversationModel } from "@multica/conversation-client/models";
+import { LocalV2RequestError } from "@multica/conversation-client/services";
 
 export class FileLinkPreviewError extends Error {
   constructor(readonly kind: "missing" | "ambiguous" | "denied" | "incomplete") {
@@ -17,11 +17,11 @@ const denied = (error: unknown) => error instanceof LocalV2RequestError && error
 /** What a conversation cites: its message texts and its tools' inputs. */
 export interface ResolutionSource { cwd: string; texts: string[]; toolInputs: Record<string, unknown>[] }
 
-export function resolutionSource(conversation: V2Conversation): ResolutionSource {
+export function resolutionSource(conversation: ConversationModel): ResolutionSource {
   const items = [...conversation.items.values()].sort((a, b) => a.order - b.order);
   return {
     cwd: conversation.summary.cwd,
-    texts: [...[...conversation.messages.values()].map((message) => message.content), ...items.flatMap((item) => item.kind === "assistant_text" && typeof item.state.text === "string" ? [item.state.text] : [])],
+    texts: [...[...conversation.messages.values()].map((message) => message.content), ...items.flatMap((item) => item.kind === "assistant_text" ? [item.text] : [])],
     toolInputs: items.flatMap((item) => item.kind === "command" ? [{ command: item.state.command }]
       : item.kind === "tool_call" && item.state.input && typeof item.state.input === "object" ? [item.state.input as Record<string, unknown>] : []),
   };

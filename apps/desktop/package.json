@@ -47,6 +47,7 @@
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@modelcontextprotocol/sdk": "1.27.1",
     "@multica/computer-use": "workspace:*",
+    "@multica/conversation-client": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/tutti-agent-gui-host": "workspace:*",
     "@multica/ui": "workspace:*",

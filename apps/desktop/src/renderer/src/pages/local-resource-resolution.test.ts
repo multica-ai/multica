@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from "vitest";
 import type { LocalPreviewFile, LocalPreviewLocation } from "@multica/core/local-conversation/protocol";
-import { LocalV2RequestError } from "../platform/conversation-store";
+import { LocalV2RequestError } from "@multica/conversation-client/services";
 import { FileLinkPreviewError, fileLinkErrorMessage, resolveConversationFile } from "./local-resource-resolution";
 
 function fixture(contents = "See `output/batch/walkthrough.md`.") {

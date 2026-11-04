@@ -14,6 +14,7 @@ Multica is a task management platform where people and agents collaborate on iss
 | --- | --- |
 | `server/` | Go backend; Chi, sqlc, WebSocket |
 | `packages/core/` | Headless logic, API client, Query hooks, shared Zustand stores. No UI libraries, `react-dom`, `localStorage`, or `process.env`; use `StorageAdapter` for persistence. |
+| `packages/conversation-client/` | AI conversation models and services on MobX. Depends on core and `mobx`; no React, UI libraries, or `@tutti-os/*`. |
 | `packages/ui/` | UI primitives and shared styles. No business logic or `@multica/core` imports. |
 | `packages/views/` | Shared web/desktop pages and business components. No store definitions, `next/*`, or `react-router-dom`; use `NavigationAdapter`, `useNavigation()`, and `<AppLink>`. |
 | `apps/web/` | Next.js routes/layouts and web-only UI. Framework APIs stay here; shared navigation adapters live in `apps/web/platform/`. |
@@ -50,7 +51,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 ## State Rules
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
-- Desktop local conversations are the exception: `ConversationStore` (`apps/desktop/src/renderer/src/platform/conversation-store.ts`) owns their list and content, because they update by sequence over a stream. Views ask it for work and watch for changes; nothing in it depends on a mounted component, and leaving a conversation finishes the batch in progress and starts nothing new.
+- AI conversations (`packages/conversation-client/`) use MobX. Data is an `XxxModel` class holding its data and domain methods, with no IO; logic lives in the matching `XxxService`, which maintains its models. Views read models under `observer` and act through services, passing instances through provider + `useContext` when deep. Where state lives depends on whether it must survive the UI being destroyed: anything that need not stays in the component; agent data goes in services and models. Fields are not observable by default: annotate what the UI watches with `makeObservable`, and do not read model fields in `useMemo` or effect dependencies. A view asks a service for work and watches for changes; nothing there depends on a mounted component, and leaving a conversation finishes the batch in progress and starts nothing new. Other modules keep TanStack Query and Zustand.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.

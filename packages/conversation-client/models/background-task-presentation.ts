@@ -1,7 +1,14 @@
 import type { LocalBackgroundTask } from "@multica/core/local-conversation/protocol";
-import type { AgentGuiTaskMessagePayload } from "../protocol";
 
-export function backgroundTaskPresentation(task: LocalBackgroundTask, events: readonly AgentGuiTaskMessagePayload[], locale: "en" | "zh-CN") {
+/** The fields of a saved task event that identify a background task's call. */
+export interface BackgroundTaskEvent {
+  type: string;
+  call_id?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+}
+
+export function backgroundTaskPresentation(task: LocalBackgroundTask, events: readonly BackgroundTaskEvent[], locale: "en" | "zh-CN") {
   const chinese = locale === "zh-CN";
   // Old saved cards only carry a description. Join only a unique exact match in the same turn.
   const calls = events.filter((event) => event.type === "tool_use" && (task.toolUseId ? event.call_id === task.toolUseId : event.input?.description === task.description));

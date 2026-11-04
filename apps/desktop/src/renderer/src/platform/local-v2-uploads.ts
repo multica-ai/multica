@@ -1,4 +1,4 @@
-import type { ConversationStore } from "./conversation-store";
+import type { ConversationService } from "@multica/conversation-client/services";
 
 /** The daemon can name attachments for clients, link stored content and discard uploads. */
 export const ATTACHMENT_RESERVE_CAPABILITY = "attachment-reserve-v1";
@@ -29,7 +29,7 @@ export async function contentHash(file: File): Promise<string | null> {
  * before its bytes arrive; the sender waits for the outcome instead of the
  * composer. Content the daemon already has is never transferred again.
  */
-export function createLocalV2Uploads(client: Pick<ConversationStore, "upload" | "linkUpload" | "discardUpload">, capabilities: () => Promise<string[]>, onOutcome: (outcome: UploadOutcome) => void, hash: (file: File) => Promise<string | null> = contentHash) {
+export function createLocalV2Uploads(client: Pick<ConversationService, "upload" | "linkUpload" | "discardUpload">, capabilities: () => Promise<string[]>, onOutcome: (outcome: UploadOutcome) => void, hash: (file: File) => Promise<string | null> = contentHash) {
   const jobs = new Map<string, Job>();
   const waiting: (() => void)[] = [];
   let active = 0;

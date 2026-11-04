@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { LocalPreviewFile, LocalPreviewLocation } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
-import { conversationStore, type ConversationStore } from "./conversation-store";
+import { conversationService } from "./conversation-services";
+import { type ConversationService } from "@multica/conversation-client/services";
 
 const TEXT_LIMIT = 1024 * 1024;
 const locationSchema = z.object({ root: z.string(), path: z.string(), name: z.string(), kind: z.enum(["file", "directory"]) });
@@ -15,8 +16,8 @@ const query = (values: Record<string, string | undefined>) => new URLSearchParam
  * daemon's kind, e.g. not_found or outside_folder.
  */
 export class LocalV2Preview {
-  private client: ConversationStore;
-  constructor(private transport: LocalV2Transport, private scope: LocalV2Scope) { this.client = conversationStore(transport, scope); }
+  private client: ConversationService;
+  constructor(private transport: LocalV2Transport, private scope: LocalV2Scope) { this.client = conversationService(transport, scope); }
 
   async locate(conversationId: string, path: string): Promise<LocalPreviewLocation> {
     return locationSchema.parse(await this.client.request("GET", `/preview/locate?${query({ conversation_id: conversationId, path })}`));

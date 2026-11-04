@@ -1,4 +1,5 @@
-import { conversationStore, localV2Error, LocalV2RequestError } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
+import { localV2Error, LocalV2RequestError } from "@multica/conversation-client/services";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
 import { LocalRuntimeNotice } from "./local-runtime-notice";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -120,7 +121,7 @@ function LocalConversationFlow() {
   const [referenceDraft, setReferenceDraft] = useState<RestoreDraftRequest | null>(null);
   const [locateRequest, setLocateRequest] = useState<{ sessionId: string; turnId?: string; quote?: string; sequence: number } | null>(null);
   const scope = { userId: userId || "", workspaceId: workspace?.id || "" };
-  const v2 = conversationStore(transport, scope);
+  const v2 = conversationService(transport, scope);
   // Other devices with a conversation open; shown on this device's own page only.
   const [, setPresenceVersion] = useState(0);
   useEffect(() => remote ? undefined : v2.onPresence(() => setPresenceVersion((version) => version + 1)), [v2, remote]);

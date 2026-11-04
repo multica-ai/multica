@@ -1,56 +1,56 @@
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
-import { localV2ServerMessageSchema, localV2SnapshotSchema, type LocalV2Event } from "@multica/core/local-conversation/v2";
+import { ConversationServiceManager } from "@multica/conversation-client/services";
+import { createFakeTransport } from "@multica/conversation-client/testing";
+import { localV2ServerMessageSchema } from "@multica/core/local-conversation/v2";
 import type { AgentGuiSessionDetail, LocalConversationSource } from "../protocol";
 
 type Request = (method: string, params: any, options?: { signal?: AbortSignal }) => Promise<any>;
 
+const scope = { userId: "test", workspaceId: "test" };
+
 /**
- * Test hosts describe conversations as `session.load` details. This source
- * builds conversations from the same detail, so a test's own `session.load`
- * overrides also shape them.
+ * Test hosts describe conversations as `session.load` details. This answers the
+ * real service from the same detail, so a test's own `session.load` overrides
+ * also shape what it reads.
  */
 export function localSourceFromClient(client: { request: Request; subscribe(listener: (event: never) => void): () => void }): LocalConversationSource & { opened: string[] } {
   const opened: string[] = [];
-  const conversations = new Map<string, V2Conversation>();
   const details = new Map<string, AgentGuiSessionDetail>();
-  const observers = new Map<string, Set<(events: readonly LocalV2Event[]) => void>>();
-  const notify = (id: string, events: readonly LocalV2Event[]) => { for (const observer of [...observers.get(id) ?? []]) observer(events); };
-  const read = async (sessionId: string) => {
+  const transport = createFakeTransport(scope, async (method, path) => {
+    const id = /^\/sessions\/([^/]+)\/snapshot/.exec(path)?.[1];
+    if (method !== "GET" || !id) return {};
+    const sessionId = decodeURIComponent(id);
     const detail = await client.request("session.load", { sessionId }) as AgentGuiSessionDetail;
-    const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse(snapshotFromDetail(detail)));
     details.set(sessionId, detail);
-    conversations.set(sessionId, conversation);
-    return conversation;
-  };
+    return snapshotFromDetail(detail);
+  });
+  const service = new ConversationServiceManager({ snapshots: () => ({ read: async () => null, write: async () => {} }) }).get(transport, scope);
+  const reload = (id: string) => { void service.refresh(id).catch(() => {}); };
   // Tests drive a conversation with these two events.
   client.subscribe(((event: { type: string; sessionId: string; message?: unknown }) => {
-    if (event.type === "local.reload") { void read(event.sessionId).then(() => notify(event.sessionId, [])).catch(() => {}); return; }
+    if (event.type === "local.reload") { reload(event.sessionId); return; }
     if (event.type !== "local.events") return;
     const parsed = localV2ServerMessageSchema.safeParse(event.message);
     if (!parsed.success) return;
-    const reload = () => { void read(event.sessionId).then(() => notify(event.sessionId, [])).catch(() => {}); };
     if (parsed.data.type === "subscription.status") {
-      if (["resubscribe", "snapshot_required", "rejected"].includes(parsed.data.status)) reload();
+      if (["resubscribe", "snapshot_required", "rejected"].includes(parsed.data.status)) reload(event.sessionId);
       return;
     }
     if (parsed.data.type !== "conversation.events") return;
-    if (conversations.get(event.sessionId)?.apply(parsed.data.events) === "gap") { reload(); return; }
-    notify(event.sessionId, parsed.data.events);
+    const conversation = service.conversation(event.sessionId);
+    const after = conversation?.seq ?? 0;
+    // A daemon answers a missed sequence with a snapshot here, rather than replaying.
+    if (parsed.data.events.some((value, index) => value.seq > after + index + 1)) { reload(event.sessionId); return; }
+    transport.deliver({ ...parsed.data, conversation_id: event.sessionId });
   }) as never);
   return {
     opened,
-    open: (id) => { opened.push(id); return () => {}; },
+    open: (id) => { opened.push(id); return service.open(id); },
     // Test hosts change their answers between reads, so this always reads.
-    ensure: read,
-    refresh: read,
+    ensure: (id) => service.refresh(id),
+    refresh: (id) => service.refresh(id),
     loadOlder: async () => {},
-    observe(id, listener) {
-      const set = observers.get(id) ?? new Set();
-      observers.set(id, set);
-      set.add(listener);
-      return () => { set.delete(listener); };
-    },
-    conversation: (id) => conversations.get(id),
+    observe: (id, listener) => service.observe(id, listener),
+    conversation: (id) => service.conversation(id),
     detail: (id) => details.get(id) ?? null,
   };
 }

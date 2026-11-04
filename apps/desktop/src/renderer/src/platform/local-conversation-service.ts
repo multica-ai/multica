@@ -11,7 +11,8 @@ import { localV2SummarySchema, type LocalV2Scope, type LocalV2Summary, type Loca
 import { isAutomaticLocalDirectory } from "@multica/tutti-agent-gui-host/local-projects";
 import { projectForDirectory } from "./local-conversation-projects";
 import { blobBase64 } from "./local-preview-file";
-import { conversationStore, type ConversationStore } from "./conversation-store";
+import { conversationService } from "./conversation-services";
+import { type ConversationService } from "@multica/conversation-client/services";
 import { createLocalV2Uploads } from "./local-v2-uploads";
 
 /** Query keys of a device's conversations; deviceId is "local" or another device's peer ID. */
@@ -43,17 +44,17 @@ export type LocalProviderList = { providers: { id: LocalProviderId; name: string
 export type LocalFolderProjectList = { projects: { id: string; title: string; path: string; created_at: string }[] };
 
 /** One query per device for what the page and the GUI both show, so they read one answer. */
-export function localProvidersQuery(store: ConversationStore, deviceId: string) {
+export function localProvidersQuery(store: ConversationService, deviceId: string) {
   return { queryKey: [...localConversationKey(store.scope, deviceId), "providers"], queryFn: () => store.request("GET", "/providers") as Promise<LocalProviderList> };
 }
-export function localFolderProjectsQuery(store: ConversationStore, deviceId: string) {
+export function localFolderProjectsQuery(store: ConversationService, deviceId: string) {
   return { queryKey: [...localConversationKey(store.scope, deviceId), "folder-projects"], queryFn: () => store.request("GET", "/folder-projects") as Promise<LocalFolderProjectList> };
 }
 
 /** Survives a tab's page being rebuilt, so @agent does not start empty each time. */
-const lastAgents = new WeakMap<ConversationStore, AgentGuiWorkspaceState["agents"]>();
+const lastAgents = new WeakMap<ConversationService, AgentGuiWorkspaceState["agents"]>();
 
-export function localConversationSource(store: ConversationStore, scope: LocalV2Scope): LocalConversationSource {
+export function localConversationSource(store: ConversationService, scope: LocalV2Scope): LocalConversationSource {
   return {
     open: (id) => store.open(id),
     ensure: (id) => store.ensure(id),
@@ -71,7 +72,7 @@ export function localConversationSource(store: ConversationStore, scope: LocalV2
         ? { forkedFrom: { sessionId: conversation.forkedFromId, turnId: conversation.forkedFromTurnId, targetTurnId: branched?.id ?? "", operationId: id, createdAt: conversation.createdAt } } : {};
       return {
         session: projectLocalSession(store.summary(id) ?? conversation.summary, scope), model: (settings.model ?? null) as string | null, reasoningEffort: (settings.reasoning_effort ?? null) as AgentGuiSessionDetail["reasoningEffort"],
-        permissionMode: settings.permission_mode as AgentGuiSessionDetail["permissionMode"], promptQueue: projectQueue(conversation.queue),
+        permissionMode: settings.permission_mode as AgentGuiSessionDetail["permissionMode"], promptQueue: projectQueue(conversation.queue.toQueue()),
         messages: [], pending: {}, tasks: [], ...forked,
       };
     },
@@ -91,7 +92,7 @@ export function createLocalConversationParentService(options: ParentServiceOptio
   const storage = options.storage ?? defaultStorage;
   const usageStorageKey = `multica:local-agent-mentions:v1:${JSON.stringify([api.getBaseUrl(), options.userId, options.workspaceId])}`;
   const scope: LocalV2Scope = { userId: options.userId, workspaceId: options.workspaceId };
-  const client: ConversationStore = conversationStore(transport, scope);
+  const client: ConversationService = conversationService(transport, scope);
   const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
   const providersQuery = localProvidersQuery(client, deviceId);
   const foldersQuery = localFolderProjectsQuery(client, deviceId);

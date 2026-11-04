@@ -1,0 +1,27 @@
+{
+  "name": "@multica/conversation-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "exports": {
+    "./models": "./models/index.ts",
+    "./services": "./services/index.ts",
+    "./testing": "./testing/fake-transport.ts"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "mobx": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
+    "@multica/tsconfig": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

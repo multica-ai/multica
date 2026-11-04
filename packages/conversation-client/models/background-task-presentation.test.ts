@@ -1,13 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { backgroundTaskPresentation } from "./background-task-presentation";
-import type { AgentGuiTaskMessagePayload } from "../protocol";
+import { backgroundTaskPresentation, type BackgroundTaskEvent } from "./background-task-presentation";
 
 const task = { id: "shell", description: "Inspect releases", status: "completed" as const, summary: "Inspect releases" };
 const events = [
   { seq: 1, type: "tool_use", call_id: "call", tool: "Bash", input: { description: task.description, command: "fixture release list" } },
   { seq: 2, type: "tool_result", call_id: "call", output: "v2.1.0\nnode v24" },
-] as AgentGuiTaskMessagePayload[];
+] as (BackgroundTaskEvent & { seq: number })[];
 
 describe("background task display", () => {
   it("shows the saved command and output on an older card instead of repeating its title", () => {

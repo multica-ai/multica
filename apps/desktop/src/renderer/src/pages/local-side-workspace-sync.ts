@@ -1,7 +1,7 @@
 import type { SideWorkspaceControlRequest } from "../../../shared/side-workspace";
 import { sideWorkspaceSyncSchema, type LocalConversationScope, type LocalPreviewLocation, type SideWorkspaceSnapshot } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Transport } from "@multica/core/local-conversation/v2";
-import { conversationStore } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
 import { localV2Preview } from "../platform/local-v2-preview";
 
 export type SideTab = { id: string; kind: "side"; sessionId: string }
@@ -39,7 +39,7 @@ export function readSideLayout(key: string): SideLayout {
 }
 /** Records a Side workspace layout in the daemon, where the conversation's tools read it. */
 export async function syncSideWorkspace(transport: LocalV2Transport, scope: LocalConversationScope, snapshot: SideWorkspaceSnapshot) {
-  const result = await conversationStore(transport, scope).command(snapshot.conversationId, { type: "side_workspace_sync", workspace: snapshot }) as { revision?: unknown } | null;
+  const result = await conversationService(transport, scope).command(snapshot.conversationId, { type: "side_workspace_sync", workspace: snapshot }) as { revision?: unknown } | null;
   // The browser tabs follow the layout the daemon accepted.
   if (result?.revision === snapshot.revision) await window.desktopAPI.sideWorkspace?.reconcile(scope, snapshot.conversationId, (transport as { deviceId?: string }).deviceId ?? "local");
 }
@@ -53,7 +53,7 @@ export async function prepareSideTab(request: SideWorkspaceControlRequest, trans
   }
   if (request.tab.kind === "side") {
     if (request.tab.sessionId === request.conversationId) throw new Error("Cannot open this conversation inside itself");
-    await conversationStore(transport, request.scope).snapshot(request.tab.sessionId);
+    await conversationService(transport, request.scope).snapshot(request.tab.sessionId);
     return { id: `side:${request.tab.sessionId}`, kind: "side", sessionId: request.tab.sessionId };
   }
   const file = await localV2Preview(transport, request.scope).locate(request.conversationId, request.tab.path);

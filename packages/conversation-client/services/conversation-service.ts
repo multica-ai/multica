@@ -1,12 +1,17 @@
 import type { z } from "zod";
 import { parseWithFallback } from "@multica/core/api/schema";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
 import {
   LOCAL_V2_VERSION, localV2HistorySchema, localV2QueueSchema, localV2ServerMessageSchema, localV2SessionListSchema, localV2SnapshotSchema, localV2UploadSchema,
   type LocalV2Device, type LocalV2Event, type LocalV2Scope, type LocalV2Snapshot, type LocalV2Summary, type LocalV2Transport,
 } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
-import { createLocalV2SnapshotStore, type LocalV2SnapshotStore } from "./local-v2-snapshot-store";
+import { ConversationModel } from "../models";
+
+/** Conversations of other devices as last read, shown while the current state travels. */
+export interface ConversationSnapshotStore {
+  read(key: string): Promise<LocalV2Snapshot | null>;
+  write(key: string, snapshot: LocalV2Snapshot): Promise<void>;
+}
 
 /** A failed v2 request with the daemon's stable error kind. */
 export class LocalV2RequestError extends Error {
@@ -25,20 +30,17 @@ const SUMMARY_PAGES = 100;
 const PAGE_TURNS = 10;
 const LIST_RETRY_MIN_MS = 1_000;
 const LIST_RETRY_MAX_MS = 30_000;
-/** Conversations whose content is kept across all stores. */
-const MAX_RETAINED_CONVERSATIONS = 100;
-
 interface ContentEntry {
   /** Replaced when the entry is dropped, so a late answer cannot land in a new one. */
   epoch: number;
-  conversation?: V2Conversation;
+  conversation?: ConversationModel;
   /** Views holding the conversation live. None left means it is being left or was left. */
   users: number;
   observers: Set<(events: readonly LocalV2Event[]) => void>;
-  /** Changes whenever the conversation does: V2Conversation updates in place. */
+  /** Changes whenever the conversation does: the model updates in place. */
   version: number;
   error: Error | null;
-  loading?: Promise<V2Conversation>;
+  loading?: Promise<ConversationModel>;
   older?: Promise<void>;
   /** A subscription exists on the daemon. */
   subscribed: boolean;
@@ -50,12 +52,12 @@ interface ContentEntry {
   retries: number;
 }
 
-export interface ConversationStoreOptions {
+export interface ConversationServiceOptions {
   /** Told each store generation the daemon reports. */
   onGeneration(generation: string): void;
   /** Told a conversation's content is in use, to retain it. */
-  onUsed(store: ConversationStore, id: string): void;
-  snapshots: LocalV2SnapshotStore | null;
+  onUsed(service: ConversationService, id: string): void;
+  snapshots: ConversationSnapshotStore | null;
   deviceId: string;
 }
 
@@ -69,7 +71,7 @@ export interface ConversationStoreOptions {
  * live with open(); returning to one kept here costs only the events since,
  * not a snapshot.
  */
-export class ConversationStore {
+export class ConversationService {
   private summaryMap = new Map<string, LocalV2Summary>();
   /** The list as last read; replaced on each change so React sees a new value. */
   private summaryList: LocalV2Summary[] = [];
@@ -93,7 +95,7 @@ export class ConversationStore {
     } catch { return false; }
   });
 
-  constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope, private options: ConversationStoreOptions) {}
+  constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope, private options: ConversationServiceOptions) {}
 
   /** Someone is looking at a conversation until the returned function is called. Only views call this: it keeps the provider's process warm. */
   focus(id: string): () => void { return this.focused.hold(id); }
@@ -178,7 +180,7 @@ export class ConversationStore {
     this.summaryMap.set(summary.conversation_id, summary);
     this.summaryList = [...this.summaryMap.values()];
     const entry = this.entries.get(summary.conversation_id);
-    if (entry?.conversation) entry.conversation.summary = summary;
+    entry?.conversation?.setSummary(summary);
     return true;
   }
 
@@ -207,7 +209,7 @@ export class ConversationStore {
     return entry;
   }
 
-  conversation(id: string): V2Conversation | undefined { return this.entries.get(id)?.conversation; }
+  conversation(id: string): ConversationModel | undefined { return this.entries.get(id)?.conversation; }
   version(id: string): number { return this.entries.get(id)?.version ?? 0; }
   status(id: string): { error: Error | null; loading: boolean } {
     const entry = this.entries.get(id);
@@ -281,14 +283,14 @@ export class ConversationStore {
   }
 
   /** The conversation with at least its first turns; reads them only if missing. */
-  ensure(id: string): Promise<V2Conversation> {
+  ensure(id: string): Promise<ConversationModel> {
     const entry = this.entry(id);
     if (entry.conversation) return Promise.resolve(entry.conversation);
     return this.read(id, entry);
   }
 
   /** Reads the conversation's current state from the daemon, for a caller that must see what it just caused. */
-  refresh(id: string): Promise<V2Conversation> { return this.read(id, this.entry(id)); }
+  refresh(id: string): Promise<ConversationModel> { return this.read(id, this.entry(id)); }
 
   retry(id: string): void {
     const entry = this.entry(id);
@@ -297,29 +299,30 @@ export class ConversationStore {
     void this.read(id, entry).catch(() => {});
   }
 
-  private read(id: string, entry: ContentEntry): Promise<V2Conversation> {
+  private read(id: string, entry: ContentEntry): Promise<ConversationModel> {
     return entry.loading ??= (async () => {
       const epoch = entry.epoch;
       // Another device's conversation shows as last read while the current one travels.
       if (!entry.conversation && this.options.snapshots) {
         const stored = await this.options.snapshots.read(this.snapshotKey(id)).catch(() => null);
         if (stored && !entry.conversation && this.entries.get(id)?.epoch === epoch) {
-          entry.conversation = V2Conversation.fromSnapshot(stored);
+          entry.conversation = ConversationModel.fromSnapshot(stored);
           this.changed(id, entry);
         }
       }
       const snapshot = await this.snapshot(id, PAGE_TURNS);
-      if (this.entries.get(id)?.epoch !== epoch && !this.entries.has(id)) return V2Conversation.fromSnapshot(snapshot);
-      const next = V2Conversation.fromSnapshot(snapshot);
-      if (entry.conversation) next.retainHistoryFrom(entry.conversation);
-      entry.conversation = next;
+      if (this.entries.get(id)?.epoch !== epoch && !this.entries.has(id)) return ConversationModel.fromSnapshot(snapshot);
+      // The same instance: views hold on to it.
+      const conversation = entry.conversation;
+      if (conversation) conversation.replaceSnapshot(snapshot);
+      else entry.conversation = ConversationModel.fromSnapshot(snapshot);
       entry.error = null;
       entry.retries = 0;
       void this.options.snapshots?.write(this.snapshotKey(id), snapshot);
       this.changed(id, entry);
       // Subscribed already and the new cursor is ahead: duplicates are skipped by sequence.
       if (entry.users > 0 && !entry.subscribed) this.subscribe(id, entry);
-      return next;
+      return entry.conversation!;
     })().catch((error: unknown) => {
       const failure = error instanceof Error ? error : new Error(String(error));
       entry.error = failure;
@@ -403,7 +406,7 @@ export class ConversationStore {
     const conversation = entry.conversation;
     // Before the answer, these belong to a subscription already cancelled.
     if (!conversation || !entry.confirmed) return;
-    if (conversation.apply(events) === "gap") { this.recover(id, entry); return; }
+    if (conversation.applyEvents(events) === "gap") { this.recover(id, entry); return; }
     entry.retries = 0;
     if (conversation.queueItemsStale()) this.readQueue(id, entry);
     this.changed(id, entry, events);
@@ -508,97 +511,4 @@ export class ConversationStore {
     this.presenceListeners.clear();
     this.transport.release?.(this.scope);
   }
-}
-
-/**
- * Every ConversationStore: one per workspace on each device. Created on first
- * use and independent of any view; only signing out or leaving a workspace ends
- * one. Content is retained up to one limit across all of them.
- */
-export class ConversationStoreManager {
-  /** Each device's stores; a transport is one device. */
-  private devices = new Map<LocalV2Transport, Map<string, ConversationStore>>();
-  private retained = new Map<string, { store: ConversationStore; id: string }>();
-  private generations = new WeakMap<LocalV2Transport, string>();
-
-  constructor(private limit = MAX_RETAINED_CONVERSATIONS) {}
-
-  get(transport: LocalV2Transport, scope: LocalV2Scope): ConversationStore {
-    let stores = this.devices.get(transport);
-    if (!stores) {
-      const own = new Map<string, ConversationStore>();
-      stores = own;
-      this.devices.set(transport, own);
-      const find = (value: LocalV2Scope) => own.get(JSON.stringify([value.userId, value.workspaceId]));
-      transport.subscribe((value, message) => find(value)?.receive(message));
-      transport.onConnection((value, connected) => find(value)?.connection(connected));
-    }
-    const key = JSON.stringify([scope.userId, scope.workspaceId]);
-    let store = stores.get(key);
-    if (!store) {
-      const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
-      store = new ConversationStore(transport, scope, {
-        deviceId,
-        // Only another device's conversations cost anything to read.
-        snapshots: deviceId === "local" ? null : createLocalV2SnapshotStore(),
-        onGeneration: (generation) => this.generationChanged(transport, generation),
-        onUsed: (owner, id) => this.used(owner, id),
-      });
-      stores.set(key, store);
-    }
-    return store;
-  }
-
-  /** One daemon, one database: every workspace on the device is out of date together. */
-  private generationChanged(transport: LocalV2Transport, generation: string) {
-    const previous = this.generations.get(transport);
-    if (previous === generation) return;
-    this.generations.set(transport, generation);
-    if (previous === undefined) return;
-    for (const store of this.devices.get(transport)?.values() ?? []) store.invalidate();
-  }
-
-  private retainKey(store: ConversationStore, id: string) { return JSON.stringify([store.scope.userId, store.scope.workspaceId, id, this.indexOf(store)]); }
-  private ids = new WeakMap<ConversationStore, number>();
-  private nextId = 1;
-  private indexOf(store: ConversationStore) {
-    let value = this.ids.get(store);
-    if (!value) { value = this.nextId++; this.ids.set(store, value); }
-    return value;
-  }
-
-  private used(store: ConversationStore, id: string) {
-    const key = this.retainKey(store, id);
-    this.retained.delete(key);
-    this.retained.set(key, { store, id });
-    if (this.retained.size <= this.limit) return;
-    for (const [candidate, { store: owner, id: conversation }] of this.retained) {
-      if (this.retained.size <= this.limit) break;
-      if (owner.inUse(conversation)) continue;
-      owner.evict(conversation);
-      this.retained.delete(candidate);
-    }
-  }
-
-  private disposeWhere(match: (scope: LocalV2Scope) => boolean) {
-    for (const stores of this.devices.values()) {
-      for (const [key, store] of stores) {
-        if (!match(store.scope)) continue;
-        store.dispose();
-        stores.delete(key);
-        for (const [retainKey, value] of this.retained) if (value.store === store) this.retained.delete(retainKey);
-      }
-    }
-  }
-
-  disposeWorkspace(userId: string, workspaceId: string): void { this.disposeWhere((scope) => scope.userId === userId && scope.workspaceId === workspaceId); }
-  /** Signing out or a session ending: the next user must not inherit anything. */
-  disposeAll(): void { this.disposeWhere(() => true); }
-}
-
-export const conversationStores = new ConversationStoreManager();
-
-/** The store of a workspace on the device behind a transport. */
-export function conversationStore(transport: LocalV2Transport, scope: LocalV2Scope): ConversationStore {
-  return conversationStores.get(transport, scope);
 }

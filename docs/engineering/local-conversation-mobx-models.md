@@ -1,6 +1,6 @@
 # AI 会话状态迁移到 MobX 方案
 
-日期：2026-11-03。状态：待评审，尚未实现，已合入一轮代码评审的结论。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
+日期：2026-11-03。状态：实施中，按第 9 节分阶段合入。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
 
 把 AI 会话模块的状态统一到 MobX：数据是带方法的 `XxxModel`，逻辑在维护它们的 `XxxService`，并替换 Tutti engine。Web 上的 AI 会话页面删除，Tutti GUI 只服务 Desktop 的本地会话，最终由我们自己管理，view 直接读 Model、调 Service。
 
@@ -96,7 +96,7 @@ packages/conversation-client/
 
 - **item 由 `ConversationModel` 持有，不由 Turn 持有。** `open_background_items` 可能指向未加载的轮次，Turn 按 id 引用。
 - **消息从 Turn 派生，不是一个 item 对应一条消息。** 有的 item 不产出消息（`ask_user_question`、无附件图片、未知 kind）；子 item 喂给父 background_task；`turnSettling`、reasoning、compaction 依赖轮次状态；用户消息和交互不来自 item。
-- **Model 实例保持稳定。** refresh 原地重置，不替换实例，否则 observer 继续盯着旧对象，界面不更新也不报错。`conversation-store.ts` 现在每次 refresh 都换新实例，要改。
+- **Model 实例保持稳定。** refresh 原地重置 `ConversationModel`，不替换实例，否则 observer 继续盯着旧对象，界面不更新也不报错。Turn、Item 这些内部实例会换新，它们从 `ConversationModel` 的 observable 映射读取，映射变化时读取方会跟着更新。generation 失效时内容已不属于当前数据库，整个 Model 丢弃重建。
 - **待确认的发送不放在 `ConversationModel`。** 它会被 refresh、generation 失效和 LRU 影响，新建中的会话也还没有 Model。放在 `PromptService`，见第 6 节。
 
 ### observable 规则
@@ -270,6 +270,7 @@ class ItemModel {
 | 0. 删除 Web 页面 | 第 8 节 | 无，GUI 只服务本地会话 |
 | 1. 打点 | 投影（①②）、engine 分发（③）、React 提交（④⑤，`Profiler` 无法再细分）按 5 秒窗口汇总，并记录 item 数和堆大小，用真实长会话记录基线 | 无 |
 | 2a. Model 和 Service | 新包；`ConversationStore`、`V2Conversation` 迁入，Model 实例稳定；派生逻辑从投影移进 Turn；测试假后端移到 `LocalV2Transport` 层 | 无 |
+| 2a+. 读取一致性 | 第 13 节：旧快照和换库前的读取不再覆盖 Model，`refresh` 合并 | 无，修复现有问题 |
 | 2b. 增量提交 | 第 10 节；merge 保留未变化消息的引用并改为有序插入 | ①、②，③ 的大部分 |
 | 3. 转录 | 按轮次的行 computed 和不依赖内容的结构索引；view 直接读 Model；engine 不再持有 assistant 内容，只留 reducer 需要的轮次和用户消息 | ③、④ |
 | 3b. 列表 | 列表和未读迁入 `ConversationListModel`；**删除** rail 的分页查询层，本地列表本来就全在内存里 | 列表的全量计算 |
@@ -281,6 +282,15 @@ class ItemModel {
 **controller 重写的主体在阶段 3 到 5，不在阶段 7**：删除 engine 前，controller 的 69 处 `useEngineSelector`、28 处 `getSnapshot`、18 处 `dispatch` 都要替换。
 
 每到一个阶段结束，用打点结果重新评估下一阶段的节奏。
+
+### 阶段 2a 的范围说明
+
+- 迁入的是内容部分和 `ConversationService`。`ConversationListModel` 和 Service 的 observable 入口留到阶段 3、3b，那时才有 view 读它们。
+- 消息列表由 Model 派生：Turn 产出 assistant 行，用户消息和交互各自产出自己的行，`ConversationModel.transcript()` 按原有顺序拼起来。按轮次排序和 `(turnIndex, rank)` 位置留到阶段 2b。
+- 派生仍是普通方法，每次调用都重算，和现在的投影开销一样。`computed` 留到阶段 3，那时才有 reaction 观察它。
+- 第 4 节的事件缓冲还没做：现在没有 observer 读 Model，流式更新仍走 runtime 已有的合并。阶段 3 接入 view 时一起做。
+- `observer` 和 React 19 的配合只验证了 host 里的组件测试（批量事件只渲染一次，且只渲染变化的行）。虚拟列表要到阶段 3 才验证。
+
 
 ## 10. 增量提交通道（阶段 2b）
 
@@ -301,10 +311,77 @@ class ItemModel {
 4. **最被低估的部分。** 转录的行投影和 `AgentConversationVM` 这层契约（`shared/agentConversation` 约 1.9 万行）、Side 专用的 runtime 和 controller、`useAgentHostApi` 的第三层转译。
 5. **内存。** LRU 按会话数（100 个）计算，对 item 数没有约束，长会话可能有几千个 `ItemModel`。阶段 1 记录实际数据；如果有问题，已结束的轮次改用轻量对象，等有后台事件时再升级。
 6. **observer 覆盖不全。** 组件漏了 `observer` 不会报错，只是不更新。用约定和 lint 把关，迁移时逐个组件核对。
-7. **MobX 尚未实际验证。** 依赖还没有安装，它和 React 19、虚拟列表的配合来自读代码和文档，阶段 2a 要先验证。
+7. **MobX 和虚拟列表的配合尚未验证。** React 19 下的 `observer` 已在阶段 2a 的组件测试中验证；虚拟列表要到阶段 3 接入转录时才验证。
 
 ## 12. `AGENTS.md` 规则
 
 替换 #122 中关于 `ConversationStore` 的那条：
 
 > AI 会话模块（`packages/conversation-client/`）统一使用 MobX。数据定义为 `XxxModel` 类，同时持有数据和领域方法，不做 IO；逻辑放在对应的 `XxxService`，由它维护 Model。view 用 `observer` 读取 Model，通过 Service 操作；层级很深时用 provider + `useContext` 传实例。状态放哪看 UI 销毁后要不要保留：不需要的放组件，Agent 数据放 Service 和 Model。字段默认不是 observable，UI 要监听的才用 `makeObservable` 标注；不在 `useMemo` 或 effect 依赖里读 Model 字段。其他模块继续使用 TanStack Query 和 Zustand。
+
+## 13. 读取一致性（阶段 2a+）
+
+单独一个 PR，放在 2a 之后、2b 之前。这些问题在迁移前就存在。只改客户端，不改 daemon 和协议。
+
+### 问题
+
+事件、item、队列和摘要都有序号或 revision 保护，只有快照写入没有比较，会整体替换 Model。
+
+**同一数据库内：旧快照盖掉新事件（已用临时测试复现）。** 快照走 HTTP，事件走 WebSocket，到达顺序没有保证：
+
+```text
+daemon 生成快照（seq=5）
+WS 先送到 seq=6 的 turn.completed → seq=6，completed
+HTTP 后送到 seq=5 的快照        → seq=5，running
+```
+
+之后不会重新订阅。后面还有事件时，gap 会把内容补回来；丢的是最后一条事件时，会话一直显示运行中，直到切走再回来。
+
+**换库之后：旧读取没有被作废（只读了代码，未复现）。** 新旧数据库的 `seq` 不可比。`invalidate()` 之后，还在途的旧读取有三处漏洞：
+
+| 位置 | 问题 | 后果 |
+| --- | --- | --- |
+| `read()` 的 epoch 检查 | 条件要求 entry 同时不存在，entry 还在时检查不生效 | 旧数据写进 Model |
+| `snapshot()` | 检查之前就上报 generation 和摘要 | Manager 以为又换了一次库，再次失效整台设备；旧摘要写回刚清空的列表 |
+| `read()` 的 `finally` | 无条件清空 `entry.loading` | 清掉新读取的标记，可能多发一次读取 |
+
+**并发 `refresh`：可能读不到自己刚造成的变化。** 读取进行中再调用 `refresh` 时会共用那次读取，而它可能在调用方的写操作之前就已被 daemon 应答。未订阅时，这个旧状态会一直留到下次读取。
+
+### 修复
+
+**同库比较序号：** `snapshot_seq` 取自 `conv.LastSeq`，和轮次、待回答问题在同一个只读事务内读出，可以直接比较。`queue` 是事务结束后单独读的，可能更新，所以丢弃快照时队列仍要按 `revision` 接收。
+
+```ts
+// ConversationModel.replaceSnapshot
+if (sameStore && snapshot.snapshot_seq < this.seq) {
+  this.queue.receive(snapshot.queue);
+  return;
+}
+```
+
+序号相等时内容相同，正常替换。
+
+**换库作废旧读取：**
+
+1. `read()` 只要 `epoch` 不一致就丢弃结果，调用方改为等待当前那次读取。
+2. `snapshot()` 发请求前记下失效计数，返回时计数变了就不上报 generation 和摘要。直接调用 `snapshot()` 的路径也一并覆盖。
+3. `finally` 只在 `entry.loading` 还是自己时才清空；被作废的读取失败时不写 `entry.error`。
+
+**`refresh` 合并：** 同时最多一次读取，后面最多排一次补读。
+
+```text
+没有读取在进行 → 立即读
+有读取在进行   → 标记“读完再读一次”，返回那次补读的 promise
+再来 N 次调用  → 共用同一次补读
+```
+
+`ensure`、`open` 不要求最新，继续共用当前读取。`loadFreshSession` 和 `dirtySessions` 这层绕路等阶段 4 写路径迁入 `PromptService` 时再删。
+
+### 测试
+
+都放在 `packages/conversation-client`，先写失败的回归测试：
+
+- 迟到的同库旧快照不改变 `seq` 和轮次状态，更新的队列仍被接收。
+- 换库前发出的读取无论先回还是后回，都不写入 Model，也不再次触发失效。
+- 读取进行中调用 `refresh`，返回的结果来自调用之后才发出的读取；多次调用只多读一次。
+- `runtime.test.ts` 里“等上一次读完”的等待可以去掉。

@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Custom chunking replaces the externals electron-vite would otherwise add, so list them here:
 // Electron, Node built-ins and runtime dependencies, except workspace packages that ship raw TypeScript.
-const bundledDeps = new Set(["@multica/tutti-agent-gui-host", "@multica/core", "@tutti-os/browser-node", "@multica/computer-use"]);
+const bundledDeps = new Set(["@multica/tutti-agent-gui-host", "@multica/conversation-client", "@multica/core", "@tutti-os/browser-node", "@multica/computer-use"]);
 const runtimeDeps = Object.keys(JSON.parse(readFileSync(resolve("package.json"), "utf8")).dependencies ?? {}).filter((dep) => !bundledDeps.has(dep));
 const mainExternal = (id: string) => id === "electron" || id.startsWith("electron/") || id.startsWith("node:") || builtinModules.includes(id)
   || runtimeDeps.some((dep) => id === dep || id.startsWith(`${dep}/`));
@@ -76,7 +76,7 @@ export default defineConfig({
       alias: {
         "@": resolve("src/renderer/src"),
       },
-      dedupe: ["react", "react-dom", "@tanstack/react-query"],
+      dedupe: ["react", "react-dom", "@tanstack/react-query", "mobx", "mobx-react-lite"],
     },
   },
 });

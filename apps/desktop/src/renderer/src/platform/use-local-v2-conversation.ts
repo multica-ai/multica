@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import type { V2Conversation } from "@multica/core/local-conversation/conversation";
+import type { ConversationModel } from "@multica/conversation-client/models";
 import type { LocalV2Scope } from "@multica/core/local-conversation/v2";
-import { conversationStore } from "./conversation-store";
+import { conversationService } from "./conversation-services";
 import { useLocalDevice } from "./local-device";
 
 export interface LiveConversation {
-  conversation?: V2Conversation;
-  /** Changes whenever the conversation does; V2Conversation updates in place. */
+  conversation?: ConversationModel;
+  /** Changes whenever the conversation does; ConversationModel updates in place. */
   version: number;
   error: Error | null;
   pending: boolean;
@@ -16,7 +16,7 @@ export interface LiveConversation {
 /** A conversation from the store, held live while enabled. */
 export function useLocalV2Conversation(scope: LocalV2Scope, id: string | null | undefined, enabled = true): LiveConversation {
   const device = useLocalDevice();
-  const store = conversationStore(device.transport, scope);
+  const store = conversationService(device.transport, scope);
   const version = useSyncExternalStore(
     useCallback((listener: () => void) => id ? store.observe(id, listener) : () => {}, [store, id]),
     () => id ? store.version(id) : 0,

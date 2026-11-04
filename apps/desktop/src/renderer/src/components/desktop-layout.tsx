@@ -37,7 +37,7 @@ import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
 import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 import { deviceName, useLinkedDevices } from "../platform/linked-devices";
-import { conversationStores } from "../platform/conversation-store";
+import { conversationServices } from "../platform/conversation-services";
 import { useAuthStore } from "@multica/core/auth";
 
 const TOP_BAR_HEIGHT_CLASS = "h-10";
@@ -309,7 +309,7 @@ function useReleaseConversationsOfLeftWorkspaces(workspaces: { id: string }[]) {
   useEffect(() => {
     if (!userId) return;
     const current = new Set(workspaces.map((workspace) => workspace.id));
-    for (const id of known.current) if (!current.has(id)) conversationStores.disposeWorkspace(userId, id);
+    for (const id of known.current) if (!current.has(id)) conversationServices.disposeWorkspace(userId, id);
     known.current = current;
   }, [userId, workspaces]);
 }

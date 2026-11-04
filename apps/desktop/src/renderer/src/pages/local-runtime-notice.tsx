@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
 import type { LocalConversationScope } from "@multica/core/local-conversation/protocol";
 import { localHostAvailabilityMessage, type LocalHostAvailability } from "../../../shared/local-host-availability";
-import { conversationStore, LocalV2RequestError } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
+import { LocalV2RequestError } from "@multica/conversation-client/services";
 import { useLocalDevice } from "../platform/local-device";
 
 export function localRuntimeRestartMessage(chinese: boolean): string {
@@ -13,7 +14,7 @@ export function localRuntimeRestartMessage(chinese: boolean): string {
 export function LocalRuntimeNotice({ scope, chinese }: { scope: LocalConversationScope; chinese: boolean }) {
   const device = useLocalDevice();
   // A daemon older than the local v2 API answers its routes with 404.
-  const probe = useQuery({ queryKey: ["local-v2-providers", device.id, scope.userId, scope.workspaceId], queryFn: () => conversationStore(device.transport, scope).request("GET", "/providers"), retry: false, staleTime: 60_000 });
+  const probe = useQuery({ queryKey: ["local-v2-providers", device.id, scope.userId, scope.workspaceId], queryFn: () => conversationService(device.transport, scope).request("GET", "/providers"), retry: false, staleTime: 60_000 });
   const outdated = probe.error instanceof LocalV2RequestError && probe.error.kind === "http_404";
   const [availability, setAvailability] = useState<LocalHostAvailability | null>(() => device.transport.availability());
   useEffect(() => device.transport.onAvailability(setAvailability), [device.transport]);

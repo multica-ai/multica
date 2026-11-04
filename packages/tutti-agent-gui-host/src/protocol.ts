@@ -1,4 +1,4 @@
-import type { V2Conversation } from "@multica/core/local-conversation/conversation";
+import type { ConversationModel } from "@multica/conversation-client/models";
 import type { LocalV2Event } from "@multica/core/local-conversation/v2";
 import type {
   Agent,
@@ -203,14 +203,14 @@ export interface LocalConversationSource {
   /** Starts keeping a conversation current; the returned function is leaving it. */
   open(sessionId: string): () => void;
   /** The conversation with at least its first turns. */
-  ensure(sessionId: string): Promise<V2Conversation>;
+  ensure(sessionId: string): Promise<ConversationModel>;
   /** The conversation as the daemon has it now, for a caller that must see what it just caused. */
-  refresh(sessionId: string): Promise<V2Conversation>;
+  refresh(sessionId: string): Promise<ConversationModel>;
   /** Reads the next older page, if any. */
   loadOlder(sessionId: string): Promise<void>;
   /** Watches changes; events is empty for a change that is not new events. */
   observe(sessionId: string, listener: (events: readonly LocalV2Event[]) => void): () => void;
-  conversation(sessionId: string): V2Conversation | undefined;
+  conversation(sessionId: string): ConversationModel | undefined;
   /** What the GUI's session model needs from a loaded conversation. */
   detail(sessionId: string): AgentGuiSessionDetail | null;
 }

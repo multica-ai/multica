@@ -8,7 +8,7 @@ import type { WorkspaceAgentSessionDetailTurn } from "../../../../vendor/tutti/p
 import type { AgentGuiSessionDetail } from "../protocol";
 import { RuntimeLedger } from "./ledger";
 import { projectLocalMetadata, projectV2Detail } from "./projection";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { ConversationModel } from "@multica/conversation-client/models";
 
 const at = "2026-10-29T12:00:00Z";
 const reason = "Authentication failed: please sign in again.";
@@ -31,9 +31,9 @@ describe("local failure detail disclosure", () => {
       conversation: { conversation_id: session.id, summary_seq: 1, provider: "claude", title: "", status: "idle", pinned: false, archived: false, updated_at: at },
       turns: source === "events" ? [] : [{ id: "turn", turn_index: 0, request_id: "request", status: "failed", started_at: at, completed_at: at, error: { kind: code, message: reason }, messages: [], events: [] }],
     });
-    const conversation = V2Conversation.fromSnapshot(snapshot);
+    const conversation = ConversationModel.fromSnapshot(snapshot);
     if (source === "events") {
-      expect(conversation.apply([
+      expect(conversation.applyEvents([
         { seq: 1, turn_id: "turn", turn_seq: 1, item_id: null, type: "turn.started", final: false, created_at: at, payload: { request_id: "request" } },
         { seq: 2, turn_id: "turn", turn_seq: 2, item_id: null, type: "turn.completed", final: true, created_at: at, payload: { status: "failed", error: { kind: code, message: reason } } },
       ])).toBe("applied");
@@ -44,10 +44,10 @@ describe("local failure detail disclosure", () => {
     expect(visibleError(project().turns)).toMatchObject({ detail: reason, detailAvailable: true });
 
     const longReason = `  ${"Diagnostic\n".repeat(500)}  `;
-    conversation.turns.get("turn")!.error!.message = longReason;
+    conversation.turns.get("turn")!.complete("failed", at, { kind: code, message: longReason });
     expect(visibleError(project().turns)).toMatchObject({ detail: longReason, detailAvailable: true });
     for (const message of ["", " \n\t "]) {
-      conversation.turns.get("turn")!.error!.message = message;
+      conversation.turns.get("turn")!.complete("failed", at, { kind: code, message });
       expect(project().turns[0]?.error?.detail).toBeUndefined();
       expect(visibleError(project().turns)).toBeUndefined();
     }

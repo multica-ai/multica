@@ -2,11 +2,11 @@ import { sideLayoutKey, sideSnapshot, readSideLayout as readLayout, prepareSideT
 import { sideWorkspaceControlSchema } from "../../../shared/side-workspace";
 import { SideActivityIcon, SideActivitySummary, useSideActivity } from "./local-side-feedback";
 import { LocalRuntimeNotice } from "./local-runtime-notice";
-import { conversationStore } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
 import { localV2Preview } from "../platform/local-v2-preview";
 import { sessionEntry, type LocalSessionEntry } from "../platform/local-conversation-projects";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { ConversationModel } from "@multica/conversation-client/models";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type SetStateAction } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowLeft, File, FolderOpen, Globe, Loader2, Maximize2, MessagesSquare, Minimize2, PanelRightOpen, Plus, X } from "lucide-react";
@@ -47,7 +47,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
   const layoutsRef = useRef(layouts); layoutsRef.current = layouts;
   const layout = layouts[key] ?? (sessionId ? readLayout(key) : emptyLayout());
   // Sides the list has not loaded yet are read once; reading records their summary.
-  const v2 = conversationStore(transport, props.scope);
+  const v2 = conversationService(transport, props.scope);
   const known = useSyncExternalStore(useCallback((listener: () => void) => v2.onSummaries(listener), [v2]), () => v2.summaries());
   const listed = new Set(props.sessions.map((entry) => entry.id));
   const extra = known.filter((summary) => !listed.has(summary.conversation_id) && layout.tabs.some((tab) => tab.kind === "side" && tab.sessionId === summary.conversation_id)).map(sessionEntry);
@@ -176,7 +176,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
       if (isCurrent()) { setOpeningFiles((count) => count + 1); setError(""); }
       updateLayout(owner, (current) => ({ ...current, open: true }));
       try {
-        const source = resolutionSource(V2Conversation.fromSnapshot(await conversationStore(transport, scope).snapshot(sessionId)));
+        const source = resolutionSource(ConversationModel.fromSnapshot(await conversationService(transport, scope).snapshot(sessionId)));
         const preview = localV2Preview(transport, scope);
         const { file, line } = await resolveConversationFile({ source, value,
           read: async (path) => preview.read(await preview.locate(sessionId, path), sessionId),
@@ -201,7 +201,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
     const started = epoch.current;
     const isCurrent = () => mounted.current && epoch.current === started;
     try {
-      const client = conversationStore(transport, props.scope);
+      const client = conversationService(transport, props.scope);
       let sourceId = props.source?.id ?? sessionId;
       if (!sourceId) {
         const created = localV2SummarySchema.parse(await client.request("POST", "/sessions", { id: crypto.randomUUID(), provider: props.provider, title: "" }));
@@ -260,7 +260,7 @@ export const LocalSideWorkspace = forwardRef<SideWorkspaceHandle, Props>(functio
           </div>
           {Object.values(browserActivity).some((activity) => activity.conversationId === sessionId) && <div role="status" className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2 text-caption text-muted-foreground"><span>{props.chinese ? "助手操作中 · 使用当前网页登录状态" : "Assistant is using this page and its signed-in session"}</span><Button variant="outline" size="xs" onClick={() => {
             const activity = Object.values(browserActivity).find((activity) => activity.conversationId === sessionId);
-            if (activity) void conversationStore(transport, props.scope).command(activity.conversationId, { type: "interrupt" }).catch(showError);
+            if (activity) void conversationService(transport, props.scope).command(activity.conversationId, { type: "interrupt" }).catch(showError);
           }}>{props.chinese ? "停止" : "Stop"}</Button></div>}
           {openingFiles > 0 && <div role="status" className="flex items-center gap-2 border-b px-3 py-2 text-caption text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{props.chinese ? "正在定位文件…" : "Locating file…"}</div>}
           {error && <div role="alert" className="flex items-center justify-between border-b px-3 py-2 text-caption text-destructive"><span>{error}</span><IconButton label={props.chinese ? "关闭错误提示" : "Dismiss error"} onClick={() => setError("")}><X /></IconButton></div>}

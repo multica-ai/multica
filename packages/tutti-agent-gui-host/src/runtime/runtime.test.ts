@@ -1087,6 +1087,8 @@ describe("local conversations over protocol v2", () => {
     const { data } = await localRuntime();
     data.emit({ type: "local.events", sessionId: session.id, message: batch([event(5, "turn.started", { request_id: "r1" })]) });
     await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(2));
+    // The service shares a read under way, so let this one finish.
+    await new Promise((resolve) => setTimeout(resolve));
     data.emit({ type: "local.reload", sessionId: session.id });
     await vi.waitFor(() => expect(data.request.mock.calls.filter(([method]) => method === "session.load")).toHaveLength(3));
   });

@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import type { ConversationStore } from "./conversation-store";
+import type { ConversationService } from "@multica/conversation-client/services";
 
 /**
  * Reports the conversation on show. Only the active tab's page is mounted, so
  * active plus a visible window means someone can actually be looking at it.
  */
-export function useConversationFocus(client: ConversationStore, conversationId: string | null, active: boolean): void {
+export function useConversationFocus(client: ConversationService, conversationId: string | null, active: boolean): void {
   useEffect(() => {
     if (!conversationId || !active) return;
     let release: (() => void) | undefined;

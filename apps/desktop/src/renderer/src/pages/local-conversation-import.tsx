@@ -12,7 +12,7 @@ import { ProviderLogo } from "@multica/views/runtimes/provider-logo";
 import type { LocalProviderId } from "@multica/core/local-conversation/protocol";
 import { parseWithFallback } from "@multica/core/api/schema";
 import { localV2ImportPageSchema, localV2ImportResultSchema, type LocalV2ImportPage, type LocalV2ImportResult, type LocalV2Scope, type LocalV2Transport } from "@multica/core/local-conversation/v2";
-import { conversationStore } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
 
 export function LocalConversationImportButton({ scope, client, projects, chinese, onImported }: {
   scope: LocalV2Scope; client: LocalV2Transport; projects: { id: string; title: string }[]; chinese: boolean; onImported(): void;
@@ -28,7 +28,7 @@ export function LocalConversationImportButton({ scope, client, projects, chinese
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<LocalV2ImportResult | null>(null);
-  const v2 = conversationStore(client, scope);
+  const v2 = conversationService(client, scope);
   const cancelled = useRef(false);
   const qc = useQueryClient();
   const queryKey = ["local-native-history", scope.userId, scope.workspaceId, provider];

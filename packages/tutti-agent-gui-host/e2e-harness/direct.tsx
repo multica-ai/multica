@@ -5,8 +5,9 @@ import "../../../apps/desktop/src/renderer/src/globals.css";
 import AgentGuiMount from "../src/mount";
 import { createInProcessRpcClient } from "../src/in-process-client";
 import { localSourceFromClient } from "../src/runtime/local-snapshot-test-host";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
-import { localV2SnapshotSchema, type LocalV2SnapshotTurn } from "@multica/core/local-conversation/v2";
+import { ConversationServiceManager } from "@multica/conversation-client/services";
+import { createFakeTransport } from "@multica/conversation-client/testing";
+import type { LocalV2SnapshotTurn } from "@multica/core/local-conversation/v2";
 import type { AgentGuiHostEvent, AgentGuiInitSnapshot, LocalConversationSource } from "../src/protocol";
 
 const at = "2026-11-03T10:00:00Z";
@@ -47,32 +48,34 @@ function turnOf(index: number): LocalV2SnapshotTurn {
   return { id, turn_index: index, request_id: id, status: "completed", started_at: started, completed_at: started, messages: [{ id: `${id}-q`, role: "user", content: `Question ${index}`, attachment_ids: [], steered: false, failed: false, created_at: started }],
     events: [{ seq: index + 1, turn_id: id, turn_seq: 1, item_id: `${id}-a`, type: "item.completed", final: true, created_at: started, payload: { kind: "assistant_text", status: "completed", text: `Answer ${index}\n\n${"Line of a long reply. ".repeat(40)}` } }] };
 }
-/** Pages like the store, over a real V2Conversation, with the daemon's paging answered here. */
+/** The real service paging a conversation, with the daemon's answers given here. */
 function pagedSource(id: string): LocalConversationSource {
-  const conversation = V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({
-    version: 2, store_generation: "g", snapshot_seq: TOTAL_TURNS, has_older_turns: true,
-    conversation: { conversation_id: id, summary_seq: 1, provider: "codex", title: id, status: "idle", pinned: false, archived: false, updated_at: at, turn_count: TOTAL_TURNS },
-    turns: Array.from({ length: PAGE_TURNS }, (_, i) => turnOf(TOTAL_TURNS - PAGE_TURNS + i)),
-  }));
-  const observers = new Set<(events: readonly never[]) => void>();
+  const scope = { userId: "u", workspaceId: "w" };
+  const conversationSummary = { conversation_id: id, summary_seq: 1, provider: "codex", title: id, status: "idle", pinned: false, archived: false, updated_at: at, turn_count: TOTAL_TURNS };
+  const transport = createFakeTransport(scope, async (_method, path) => {
+    if (path.includes("/snapshot")) return {
+      version: 2, store_generation: "g", snapshot_seq: TOTAL_TURNS, has_older_turns: true, conversation: conversationSummary,
+      turns: Array.from({ length: PAGE_TURNS }, (_, i) => turnOf(TOTAL_TURNS - PAGE_TURNS + i)),
+    };
+    const before = Number(/before_index=(\d+)/.exec(path)?.[1] ?? 0);
+    if (!path.includes("/history")) return {};
+    paging.reads++;
+    paging.started.push(before);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (paging.failing) throw new Error("device_unreachable: offline");
+    const from = Math.max(0, before - PAGE_TURNS);
+    return { store_generation: "g", has_older_turns: from > 0, turns: Array.from({ length: before - from }, (_, i) => turnOf(from + i)) };
+  });
+  const service = new ConversationServiceManager({ snapshots: () => ({ read: async () => null, write: async () => {} }) }).get(transport, scope);
   const session = snapshot(id, "light", false).sessions[0]!;
   return {
-    open: () => () => {},
-    ensure: async () => conversation,
-    refresh: async () => conversation,
-    observe(_id, listener) { observers.add(listener); return () => { observers.delete(listener); }; },
-    conversation: () => conversation,
+    open: () => service.open(id),
+    ensure: () => service.ensure(id),
+    refresh: () => service.refresh(id),
+    loadOlder: () => service.loadOlder(id),
+    observe: (_id, listener) => service.observe(id, listener),
+    conversation: () => service.conversation(id),
     detail: () => ({ session, model: null, reasoningEffort: null, permissionMode: "default", promptQueue: { revision: 0, paused: false, items: [] }, messages: [], pending: {}, tasks: [] }) as never,
-    async loadOlder() {
-      const before = conversation.oldestTurnIndex() ?? 0;
-      paging.reads++;
-      paging.started.push(before);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      if (paging.failing) throw new Error("device_unreachable: offline");
-      const from = Math.max(0, before - PAGE_TURNS);
-      conversation.mergeHistory({ store_generation: "g", has_older_turns: from > 0, turns: Array.from({ length: before - from }, (_, i) => turnOf(from + i)) });
-      for (const observer of observers) observer([]);
-    },
   };
 }
 

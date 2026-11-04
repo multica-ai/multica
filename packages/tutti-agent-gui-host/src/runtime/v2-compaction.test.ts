@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { localV2ServerMessageSchema, localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 import { projectAgentActivitySessionToConversationVM } from "../../../../vendor/tutti/packages/agent/gui/shared/agentConversation/projection/workspaceAgentMessageProjection";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { ConversationModel } from "@multica/conversation-client/models";
 import { projectV2Conversation } from "./v2-projection";
 
 const at = "2026-10-29T12:00:00Z";
@@ -21,9 +21,9 @@ function snapshot(provider: string, history = events.slice(0, 1)) {
   });
 }
 
-const project = (conversation: V2Conversation) => projectV2Conversation(conversation, { workspaceId: "ws", agentSessionId: "gui-1", locale: "en" });
+const project = (conversation: ConversationModel) => projectV2Conversation(conversation, { workspaceId: "ws", agentSessionId: "gui-1", locale: "en" });
 
-function sharedRows(conversation: V2Conversation) {
+function sharedRows(conversation: ConversationModel) {
   const view = project(conversation);
   const session = normalizeAgentActivitySession({
     workspaceId: "ws", agentSessionId: "gui-1", provider: conversation.summary.provider, title: "test", cwd: "",
@@ -41,26 +41,26 @@ function sharedRows(conversation: V2Conversation) {
 
 describe.each(["codex", "claude"])("%s compaction", (provider) => {
   it("replaces live progress with one durable divider and replays without duplication", () => {
-    const conversation = V2Conversation.fromSnapshot(snapshot(provider));
+    const conversation = ConversationModel.fromSnapshot(snapshot(provider));
     expect(project(conversation).messages).toMatchObject([{ messageId: "compact-1", status: "running", semantics: { noticeCommand: "compact", noticeCommandStatus: "running", turnSettling: false } }]);
     // The shared GUI treats this as specific progress, suppressing its generic processing hint.
     expect(sharedRows(conversation)).toMatchObject([{ presentationKind: "specific-progress", systemNotice: { command: "compact", commandStatus: "running" } }]);
     expect(project(conversation).activeTurnId).toBe("turn-1");
 
-    expect(conversation.apply(events.slice(1))).toBe("applied");
-    expect(conversation.apply(events)).toBe("applied");
+    expect(conversation.applyEvents(events.slice(1))).toBe("applied");
+    expect(conversation.applyEvents(events)).toBe("applied");
     const completed = project(conversation);
     expect(completed.messages).toHaveLength(1);
     expect(completed.messages[0]).toMatchObject({ messageId: "compact-1", occurredAtUnixMs: Date.parse(at), status: "completed", semantics: { noticeCommandStatus: "completed", turnSettling: false } });
     expect(sharedRows(conversation)).toMatchObject([{ presentationKind: "turn-boundary", systemNotice: { commandStatus: "completed" } }]);
-    const restored = V2Conversation.fromSnapshot(snapshot(provider, events));
+    const restored = ConversationModel.fromSnapshot(snapshot(provider, events));
     expect(project(restored)).toEqual(completed);
     expect(project(restored).activeTurnId).toBe("turn-1");
   });
 
   it.each([["failed", "failed"], ["cancelled", "canceled"]])("projects %s compaction and its error", (status, commandStatus) => {
-    const conversation = V2Conversation.fromSnapshot(snapshot(provider));
-    conversation.apply([{ ...events[1]!, payload: { kind: "compaction", status, error: { kind: "compaction_failed", message: "exhausted" } } }]);
+    const conversation = ConversationModel.fromSnapshot(snapshot(provider));
+    conversation.applyEvents([{ ...events[1]!, payload: { kind: "compaction", status, error: { kind: "compaction_failed", message: "exhausted" } } }]);
     expect(project(conversation).messages).toMatchObject([{ status: commandStatus, payload: { detail: "exhausted" }, semantics: { noticeCommand: "compact", noticeCommandStatus: commandStatus, userVisibleAssistantResponse: false, turnSettling: false } }]);
     expect(sharedRows(conversation)).toMatchObject([{ presentationKind: "turn-boundary", systemNotice: { commandStatus, detail: "exhausted" } }]);
   });

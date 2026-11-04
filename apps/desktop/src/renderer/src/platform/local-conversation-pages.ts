@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { LocalFolderProject } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { groupLocalConversations, sessionEntry, type LocalConversationProjectGroup, type LocalSessionEntry } from "./local-conversation-projects";
-import { conversationStore } from "./conversation-store";
+import { conversationService } from "./conversation-services";
 import type { DirectLocalV2Transport } from "./local-v2-transport";
 
 const PAGE = 8;
@@ -19,7 +19,7 @@ export interface ConversationPageGroup extends LocalConversationProjectGroup {
  * show eight conversations per page, pinned first, then most recent.
  */
 export function useLocalConversationPages(transport: LocalV2Transport & Pick<DirectLocalV2Transport, "availability" | "onAvailability">, scope: LocalV2Scope, projects: LocalFolderProject[], hidden: string[], archived: boolean, search: string, enabled: boolean) {
-  const client = conversationStore(transport, scope);
+  const client = conversationService(transport, scope);
   const [status, setStatus] = useState<{ pending: boolean; error: Error | null; fetching: boolean }>({ pending: true, error: null, fetching: false });
   const [pages, setPages] = useState(new Map<string | null, number>());
   const version = useSyncExternalStore(useCallback((listener) => client.onSummaries(listener), [client]), () => client.summaries());

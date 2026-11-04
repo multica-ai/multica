@@ -8,7 +8,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useLocalDevice } from "../platform/local-device";
-import { conversationStore, localV2Error } from "../platform/conversation-store";
+import { conversationService } from "../platform/conversation-services";
+import { localV2Error } from "@multica/conversation-client/services";
 
 const listingSchema = z.object({
   path: z.string(), parent: z.string().default(""),
@@ -40,7 +41,7 @@ export function RemoteFolderPicker({ chinese }: { chinese: boolean }) {
   useEffect(() => { if (open) setPath("defaultPath" in request.request && request.request.defaultPath ? request.request.defaultPath : ""); }, [open, request]);
   const listing = useQuery({
     queryKey: ["device-link", device.id, "directories", path],
-    queryFn: async () => parseWithFallback<z.infer<typeof listingSchema>>(await conversationStore(device.transport, request!.scope).request("GET", `/directories?${new URLSearchParams({ path })}`), listingSchema, { path, parent: "", entries: [] }, { endpoint: "local-v2.directories" }),
+    queryFn: async () => parseWithFallback<z.infer<typeof listingSchema>>(await conversationService(device.transport, request!.scope).request("GET", `/directories?${new URLSearchParams({ path })}`), listingSchema, { path, parent: "", entries: [] }, { endpoint: "local-v2.directories" }),
     enabled: open,
     retry: false,
   });

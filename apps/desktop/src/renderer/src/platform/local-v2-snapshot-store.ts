@@ -1,14 +1,10 @@
-import { localV2SnapshotSchema, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
+import type { ConversationSnapshotStore } from "@multica/conversation-client/services";
+import { localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 
 const DATABASE = "multica-local-v2-snapshots";
 const STORE = "snapshots";
 const MAX_SNAPSHOTS = 40;
 
-/** Conversations of other devices as last read, shown while the current state travels. */
-export interface LocalV2SnapshotStore {
-  read(key: string): Promise<LocalV2Snapshot | null>;
-  write(key: string, snapshot: LocalV2Snapshot): Promise<void>;
-}
 
 const done = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
   request.onsuccess = () => resolve(request.result);
@@ -24,7 +20,7 @@ function open(factory: IDBFactory): Promise<IDBDatabase> {
 }
 
 /** Storage is an optimization: every failure reads as "nothing stored". */
-export function createLocalV2SnapshotStore(factory: IDBFactory | undefined = globalThis.indexedDB): LocalV2SnapshotStore {
+export function createLocalV2SnapshotStore(factory: IDBFactory | undefined = globalThis.indexedDB): ConversationSnapshotStore {
   let database: Promise<IDBDatabase> | undefined;
   const connect = () => {
     if (!factory) return Promise.reject(new Error("IndexedDB is unavailable"));

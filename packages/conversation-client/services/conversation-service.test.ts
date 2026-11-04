@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { localV2SnapshotSchema, localV2SummarySchema, type LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_STABLE_MS } from "@multica/core/local-conversation/focus";
-import { ConversationStore, ConversationStoreManager, localV2Error } from "./conversation-store";
+import { ConversationService, localV2Error } from "./conversation-service";
+import { ConversationServiceManager } from "./conversation-service-manager";
 
 const scope = { userId: "u", workspaceId: "w" };
 const at = "2026-10-29T00:00:00Z";
@@ -19,9 +20,10 @@ function transport(pages: unknown[] = []) {
   return { t, sent };
 }
 
-const newStore = (t: LocalV2Transport, snapshots: never | null = null) => new ConversationStore(t, scope, { deviceId: "local", snapshots, onGeneration: vi.fn(), onUsed: vi.fn() });
+const snapshots = () => ({ read: async () => null, write: async () => {} });
+const newStore = (t: LocalV2Transport, snapshots: never | null = null) => new ConversationService(t, scope, { deviceId: "local", snapshots, onGeneration: vi.fn(), onUsed: vi.fn() });
 
-describe("ConversationStore", () => {
+describe("ConversationService", () => {
   it("loads every summary page, then follows the scope stream", async () => {
     const { t, sent } = transport([
       { scope_seq: 2, summaries: [summary("a", 1), summary("b", 2)], has_more: true },
@@ -141,7 +143,7 @@ function daemon(routes: Record<string, unknown> = {}) {
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve));
 
-describe("ConversationStore content", () => {
+describe("ConversationService content", () => {
   it("reads the first turns once and asks only for later events when reopened", async () => {
     const d = daemon({ "/sessions/a/snapshot": snapshotOf("a", 4) });
     const store = newStore(d.t);
@@ -309,7 +311,7 @@ describe("ConversationStore content", () => {
     let answer!: (value: unknown) => void;
     const d = daemon({ "/sessions/a/snapshot": () => new Promise((resolve) => { answer = resolve; }) });
     const snapshots = { read: vi.fn(async () => localV2SnapshotSchema.parse(snapshotOf("a", 2))), write: vi.fn(async () => {}) };
-    const store = new ConversationStore(d.t, scope, { deviceId: "peer", snapshots, onGeneration: vi.fn(), onUsed: vi.fn() });
+    const store = new ConversationService(d.t, scope, { deviceId: "peer", snapshots, onGeneration: vi.fn(), onUsed: vi.fn() });
     const loading = store.ensure("a");
     await settle();
     expect(store.conversation("a")?.seq).toBe(2);
@@ -348,9 +350,9 @@ describe("ConversationStore content", () => {
   });
 });
 
-describe("ConversationStoreManager", () => {
+describe("ConversationServiceManager", () => {
   it("keeps one store per device and workspace", () => {
-    const manager = new ConversationStoreManager();
+    const manager = new ConversationServiceManager({ snapshots });
     const a = daemon().t, b = daemon().t;
     expect(manager.get(a, scope)).toBe(manager.get(a, scope));
     expect(manager.get(a, scope)).not.toBe(manager.get(b, scope));
@@ -358,7 +360,7 @@ describe("ConversationStoreManager", () => {
   });
 
   it("evicts only content that is not in use, oldest first, across stores", async () => {
-    const manager = new ConversationStoreManager(2);
+    const manager = new ConversationServiceManager({ snapshots, limit: 2 });
     const d = daemon({ "/sessions/a/snapshot": snapshotOf("a", 1), "/sessions/b/snapshot": snapshotOf("b", 1), "/sessions/c/snapshot": snapshotOf("c", 1), "/sessions": { scope_seq: 1, summaries: [summary("a", 1)], has_more: false } });
     const store = manager.get(d.t, scope);
     await store.loadSummaries();
@@ -375,7 +377,7 @@ describe("ConversationStoreManager", () => {
   });
 
   it("invalidates every store of the device when its database is replaced, and no other device", async () => {
-    const manager = new ConversationStoreManager();
+    const manager = new ConversationServiceManager({ snapshots });
     const first = daemon({ "/sessions/a/snapshot": snapshotOf("a", 4), "/sessions": { scope_seq: 1, summaries: [], has_more: false } });
     const other = daemon({ "/sessions/a/snapshot": snapshotOf("a", 4) });
     const here = manager.get(first.t, scope), sibling = manager.get(first.t, { ...scope, workspaceId: "other" }), elsewhere = manager.get(other.t, scope);
@@ -390,7 +392,7 @@ describe("ConversationStoreManager", () => {
   });
 
   it("disposes everything on sign-out", () => {
-    const manager = new ConversationStoreManager();
+    const manager = new ConversationServiceManager({ snapshots });
     const d = daemon();
     const store = manager.get(d.t, scope);
     manager.disposeAll();

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
-import { V2Conversation } from "@multica/core/local-conversation/conversation";
+import { ConversationModel } from "@multica/conversation-client/models";
 import { localSideActivity } from "./local-side-activity";
 
 const at = "2026-10-27T09:00:00Z";
@@ -17,7 +17,7 @@ function conversation(status: string, items: Item[] = [], turns = true) {
   ]);
   const old = events("old", [{ id: "old-text", kind: "assistant_text", status: "completed", state: { text: "Previous result" } }]);
   const current = events("current", items);
-  return V2Conversation.fromSnapshot(localV2SnapshotSchema.parse({
+  return ConversationModel.fromSnapshot(localV2SnapshotSchema.parse({
     version: 2, store_generation: "g", snapshot_seq: seq,
     conversation: { conversation_id: "side", summary_seq: 1, provider: "claude", title: "Source title is not a work summary", status: status === "running" ? "running" : "idle", pinned: false, archived: false, updated_at: at },
     turns: turns ? [
@@ -51,25 +51,25 @@ describe("side activity", () => {
   });
   it("distinguishes an unanswered question from active processing", () => {
     const session = conversation("running");
-    session.interactions.set("q", { id: "q", turnId: "current", kind: "question", request: {}, status: "pending", answer: null, createdAt: at, updatedAt: at });
+    session.applyEvents([{ seq: session.seq + 1, turn_id: "current", item_id: null, type: "interaction.requested", final: false, created_at: at, payload: { interaction_id: "q", kind: "question", request: {} } }] as never);
     expect(localSideActivity(session)).toMatchObject({ state: "waiting", spinning: false });
   });
   it("keeps running background work visible after its turn finished", () => {
     const session = conversation("completed", [{ id: "bg", kind: "background_task", state: { description: "Verify dark theme" } }]);
     expect(localSideActivity(session)).toMatchObject({ state: "running", spinning: true, background: "Verify dark theme" });
-    session.items.get("bg")!.status = "completed";
+    session.applyEvents([{ seq: session.seq + 1, turn_id: "current", item_id: "bg", type: "item.completed", final: true, created_at: at, payload: { kind: "background_task", status: "completed", description: "Verify dark theme" } }] as never);
     expect(localSideActivity(session)).toMatchObject({ state: "completed", spinning: false });
   });
   it("does not display the last turn as the activity of a newly dispatching prompt", () => {
     const session = conversation("completed", [{ id: "read", kind: "tool_call", status: "completed", state: { tool: "Read" } }, { id: "t", kind: "assistant_text", status: "completed", state: { text: "Old result" } }]);
-    session.queue = { revision: 1, paused: false, items: [], dispatching_request_id: "next" };
+    session.receiveQueue({ revision: 1, paused: false, items: [], dispatching_request_id: "next" });
     expect(localSideActivity(session)).toMatchObject({ state: "running", output: "", tool: undefined, totalTools: 0 });
   });
   it("retains errors and partial text after a failure or cancellation", () => {
     const failed = conversation("failed", [{ id: "t", kind: "assistant_text", state: { text: "Partial result" } }]);
-    failed.turns.get("current")!.error = { kind: "provider", message: "Connection interrupted" };
+    failed.turns.get("current")!.complete("failed", at, { kind: "provider", message: "Connection interrupted" });
     expect(localSideActivity(failed)).toMatchObject({ state: "failed", spinning: false, error: "Connection interrupted", output: "Partial result" });
-    failed.turns.get("current")!.status = "cancelled";
+    failed.turns.get("current")!.complete("cancelled", at, { kind: "provider", message: "Connection interrupted" });
     expect(localSideActivity(failed)).toMatchObject({ state: "cancelled", spinning: false, error: undefined, output: "Partial result" });
   });
 });
