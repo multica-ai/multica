@@ -343,29 +343,35 @@ configure_hermes() {
   if [ -f "$cfg" ]; then
     cp -p "$cfg" "$cfg.bak-$stamp"
   fi
-  # The key is referenced, not stored: model.api_key names the variable in .env.
+  # The key is referenced, not stored: model.api_key names the variable in .env. This
+  # is the form Hermes's own custom-endpoint setup writes.
   hermes config set model.provider custom >/dev/null
   hermes config set model.base_url "$base" >/dev/null
   hermes config set model.default "$model" >/dev/null
-  hermes config set model.api_key "\${env:$key_env}" >/dev/null
+  hermes config set model.api_key "\${$key_env}" >/dev/null
   ok "Hermes configured: custom endpoint $base, model $model, key in $env_file as $key_env"
 }
 
 # One-shot prompt through the configured endpoint. Prints the first line of the reply.
+# A one-shot starts Hermes's background gateway, which can miss its startup deadline on a
+# cold start, so a call without a reply is retried.
 verify_hermes() {
-  local reply err
+  local attempt reply err
   err=$(mktemp)
-  if command -v timeout >/dev/null 2>&1; then
-    reply=$(timeout 180 hermes -z "Reply with the word ok." 2>"$err" || true)
-  else
-    reply=$(hermes -z "Reply with the word ok." 2>"$err" || true)
-  fi
-  if [ -n "$reply" ]; then
-    ok "hermes -z replied: $(printf '%s' "$reply" | head -n 1)"
-    rm -f "$err"
-    return 0
-  fi
-  echo "! hermes -z returned no reply. Last stderr lines:" >&2
+  for attempt in 1 2 3; do
+    if command -v timeout >/dev/null 2>&1; then
+      reply=$(timeout 180 hermes -z "Reply with the word ok." 2>"$err" || true)
+    else
+      reply=$(hermes -z "Reply with the word ok." 2>"$err" || true)
+    fi
+    if [ -n "$reply" ]; then
+      ok "hermes -z replied (attempt $attempt): $(printf '%s' "$reply" | head -n 1)"
+      rm -f "$err"
+      return 0
+    fi
+    echo "  hermes -z attempt $attempt gave no reply" >&2
+  done
+  echo "! hermes -z returned no reply after 3 attempts. Last stderr lines:" >&2
   tail -n 3 "$err" >&2
   rm -f "$err"
   return 1

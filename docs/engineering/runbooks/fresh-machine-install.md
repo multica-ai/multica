@@ -171,7 +171,7 @@ model:
   provider: custom
   base_url: <HERMES_BASE_URL>
   default: <HERMES_MODEL>
-  api_key: ${env:HERMES_CUSTOM_10_70_39_196_20128_API_KEY}   # the name depends on the host and port
+  api_key: ${HERMES_CUSTOM_10_70_39_196_20128_API_KEY}   # the name depends on the host and port
 ```
 
 `~/.hermes/.env`, mode 600, holds the key under the same name:
@@ -191,6 +191,11 @@ it by hand:
 ```bash
 hermes -z "Reply with the word ok."
 ```
+
+The first one-shot starts Hermes's background gateway, which can take a minute on a cold
+start, so `make dev-full` retries up to three times. The gateway reads `~/.hermes/.env` for
+the key. The client can print `Config ref '${HERMES_CUSTOM_...}' ... is not set` before that;
+the reply still comes back, and it shows the key was resolved.
 
 Multica finds Hermes on PATH when the daemon starts. `MULTICA_HERMES_PATH` in the Multica env
 file overrides the location if you need one.
