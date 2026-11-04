@@ -671,6 +671,8 @@ function SwimLaneViewImpl({
     // the same running-task issue ids returned by `/api/working-agents`.
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
     runningIssueIds: activeFiltersProp?.runningIssueIds,
+    unreadFilter: activeFiltersProp?.unreadFilter ?? false,
+    unreadIssueIds: activeFiltersProp?.unreadIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,

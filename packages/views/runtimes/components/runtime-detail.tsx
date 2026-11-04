@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bot,
   ChevronRight,
   Lock,
   MoreHorizontal,
@@ -46,6 +47,7 @@ import {
   ObjectProperty,
   ObjectSection,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
@@ -54,6 +56,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
+import { RuntimeConcurrencyField } from "./runtime-concurrency-field";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
@@ -191,6 +194,7 @@ export function RuntimeDetail({
             device={device}
             cliVersion={cliVersion}
             canEditVisibility={!!isRuntimeOwner}
+            canEditRuntime={!!canEditRuntime}
           />
         }
       >
@@ -306,6 +310,7 @@ function RuntimeProperties({
   device,
   cliVersion,
   canEditVisibility,
+  canEditRuntime,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -319,6 +324,8 @@ function RuntimeProperties({
    * though they may still rename or delete the runtime.
    */
   canEditVisibility: boolean;
+  /** Runtime owner or workspace admin; gates the concurrency cap. */
+  canEditRuntime: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tLayout } = useT("layout");
@@ -383,6 +390,11 @@ function RuntimeProperties({
           )}
         </div>
       </ObjectPanelSection>
+      <ObjectPanelSection title={t(($) => $.detail.concurrency_title)}>
+        <div className="pr-0.5 pt-1">
+          <RuntimeConcurrencyField runtime={runtime} canEdit={canEditRuntime} />
+        </div>
+      </ObjectPanelSection>
     </div>
   );
 }
@@ -400,9 +412,7 @@ export function ServingAgentList({
   const { t: tAgents } = useT("agents");
   if (agents.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
-        {t(($) => $.detail.no_agents)}
-      </p>
+      <ObjectSectionEmpty icon={Bot} description={t(($) => $.detail.no_agents)} />
     );
   }
   return (

@@ -214,6 +214,45 @@ func TestAutopilotScheduleLimitConcurrentLastSlot(t *testing.T) {
 	}
 }
 
+func TestAutopilotScheduleLimitQueuedAtRuntimeCapacity(t *testing.T) {
+	ctx := context.Background()
+	ap, trig, svc := finiteScheduleFixture(t, "run_only", 1)
+	blocker := dbfx.Agent(t, "Runtime slot holder", testRuntimeID)
+	blockerTask := dbfx.Task(t, blocker, testutil.Cols{"runtime_id": testRuntimeID, "status": "running"})
+	dbfx.Exec(t, `UPDATE agent_runtime SET max_concurrent_tasks=1 WHERE id=$1`, testRuntimeID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE agent_runtime SET max_concurrent_tasks=NULL WHERE id=$1`, testRuntimeID)
+	})
+	planned := time.Now().UTC().Truncate(time.Second)
+	run, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned)
+	if err != nil || run == nil || !run.TaskID.Valid {
+		t.Fatalf("enqueue while runtime full: %#v, %v", run, err)
+	}
+	q := db.New(testPool)
+	tasks := service.NewTaskService(q, testPool, nil, events.New())
+	claimed, err := tasks.ClaimTask(ctx, ap.AssigneeID)
+	if err != nil || claimed != nil {
+		t.Fatalf("full runtime claimed queued work: %#v, %v", claimed, err)
+	}
+	if count := scheduleCount(t, trig); count != 1 {
+		t.Fatalf("waiting for claim refunded accepted occurrence: %d", count)
+	}
+	if _, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE agent_id=$1`, ap.AssigneeID); n != 1 {
+		t.Fatalf("exhausted schedule enqueued %d tasks", n)
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE id=$1`, blockerTask)
+	claimed, err = tasks.ClaimTask(ctx, ap.AssigneeID)
+	if err != nil || claimed == nil || claimed.ID != run.TaskID {
+		t.Fatalf("accepted work did not claim after capacity freed: %#v, %v", claimed, err)
+	}
+	if count := scheduleCount(t, trig); count != 1 {
+		t.Fatalf("claim counted acceptance again: %d", count)
+	}
+}
+
 func TestAutopilotScheduleLimitConcurrentSamePlan(t *testing.T) {
 	ap, trig, svc := finiteScheduleFixture(t, "run_only", 3)
 	planned := time.Now().UTC().Truncate(time.Second)
@@ -519,11 +558,11 @@ func TestAutopilotScheduleLimitMigrationRoundTrip(t *testing.T) {
 	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE autopilot_trigger (kind text NOT NULL); INSERT INTO autopilot_trigger VALUES ('schedule'),('webhook')`); err != nil {
 		t.Fatal(err)
 	}
-	up, err := os.ReadFile("../../migrations/600_autopilot_schedule_limit.up.sql")
+	up, err := os.ReadFile("../../migrations/615_autopilot_schedule_limit.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	down, err := os.ReadFile("../../migrations/600_autopilot_schedule_limit.down.sql")
+	down, err := os.ReadFile("../../migrations/615_autopilot_schedule_limit.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

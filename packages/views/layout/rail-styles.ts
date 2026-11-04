@@ -10,6 +10,13 @@
 export const NAV_COLUMN_MOTION_CLASS =
   "transition-[width] duration-(--nav-panel-duration) ease-(--nav-panel-easing) motion-reduce:transition-none";
 
+/**
+ * The Inbox and Chat list width. Capped against the viewport so a column
+ * dragged wide on a large display leaves the detail pane usable on a smaller
+ * one.
+ */
+export const LIST_COLUMN_WIDTH_CLASS = "w-[min(var(--list-column-width),40vw)]";
+
 /** A collapsed panel or list column previewed over the card's leading edge. */
 export const NAV_PEEK_CLASS =
   "absolute inset-y-0 left-0 z-30 flex w-(--sidebar-width) flex-col overflow-hidden rounded-xl bg-page-canvas shadow-[var(--floating-shadow)] ring-1 ring-surface-border";

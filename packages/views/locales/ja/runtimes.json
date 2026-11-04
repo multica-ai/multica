@@ -162,6 +162,10 @@
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
+    "concurrency_title": "同時実行数",
+    "concurrency_none": "制限なし",
+    "concurrency_hint": "このランタイム上のすべてのエージェントで同時に行える実行の最大数（{{min}}–{{max}}）。空欄にすると制限なし。",
+    "toast_concurrency_failed": "同時実行数の上限を更新できませんでした",
     "visibility_label": {
       "private": "非公開",
       "public": "公開",
@@ -647,6 +651,30 @@
       "working": "解除しています…",
       "cancel": "キャンセル",
       "done": "Qoder の接続を解除しました"
+    }
+  },
+  "intro": {
+    "title": "エージェントに作業用のコンピューターを",
+    "description": "ランタイムは、エージェントが実際にタスクを実行する場所です。手元のコンピューター、サーバー、またはクラウドサービスを使えます。",
+    "slides": {
+      "local": {
+        "title": "このコンピューターは自動で接続",
+        "description": "デスクトップアプリをダウンロードしてサインインすると、このコンピューターの Claude Code や Codex などが自動的に表示されます。"
+      },
+      "remote": {
+        "title": "ほかのマシンはコマンド 2 つ",
+        "description": "サーバーや別のコンピューターに CLI をインストールし、multica setup を実行すれば接続できます。"
+      },
+      "cloud": {
+        "title": "クラウドノードも使える",
+        "description": "マシンを自分で管理したくないなら、Multica がホストするクラウドノードを作成できます。"
+      }
+    },
+    "art": {
+      "this_computer": "このコンピューター · デスクトップ",
+      "detected": "検出された harness",
+      "run_there": "そのマシンで実行",
+      "connected": "{{name}} が Multica に接続されました"
     }
   }
 }

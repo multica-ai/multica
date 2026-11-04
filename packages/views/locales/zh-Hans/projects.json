@@ -5,8 +5,6 @@
     "scope_all": "全部项目",
     "scope_active": "进行中的项目",
     "scope_closed": "已结束的项目",
-    "empty": "还没有项目",
-    "create_first": "创建第一个项目",
     "view_compact": "紧凑视图",
     "view_comfortable": "舒适视图",
     "no_search_results": "未找到匹配的项目",
@@ -56,6 +54,8 @@
   },
   "detail": {
     "not_found": "未找到该项目",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部项目",
     "breadcrumb_fallback": "项目",
     "title_placeholder": "项目标题",
     "icon_tooltip": "更换图标",
@@ -73,9 +73,10 @@
     "no_due_date": "无截止日期",
     "description_placeholder": "添加描述...",
     "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每次运行。",
-    "empty_issues_title": "还没有关联的任务",
-    "empty_issues_hint": "也可把已有任务加入此项目。",
+    "empty_issues_title": "这个项目还没有任务",
+    "empty_issues_hint": "新建一个，或把已有任务移进来。",
     "empty_issues_new_button": "新建任务",
+    "empty_issues_add_existing": "添加已有任务",
     "no_issues_yet": "目前还没有任务",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
@@ -171,5 +172,36 @@
     "section_priority": "优先级",
     "section_lead": "负责人",
     "view": "视图"
+  },
+  "intro": {
+    "title": "把一件大事拆成项目来推进",
+    "description": "项目把相关任务收在一起，统一看进度。项目描述和关联的仓库会作为上下文，自动带进每一次智能体运行。",
+    "slides": {
+      "progress": {
+        "title": "进度一眼看清",
+        "description": "状态、负责人、截止日期和完成比例都在一张卡上，不用逐个翻任务。"
+      },
+      "context": {
+        "title": "上下文自动带给智能体",
+        "description": "写一次项目描述、关联一次仓库，项目里每个任务的运行都会带上。"
+      },
+      "sidebar": {
+        "title": "钉在侧栏，随手进入",
+        "description": "常用项目固定在侧栏，展开就能看到里面的任务。"
+      }
+    },
+    "art": {
+      "project_website": "官网改版",
+      "project_mobile": "移动端 1.0",
+      "project_onboarding": "新手引导",
+      "context_label": "项目描述",
+      "context_body": "新版官网，Next.js + Tailwind。文案以 docs/brand 为准，所有页面都要支持深色模式。",
+      "run_started": "开始运行",
+      "context_loaded": "已载入项目上下文和 2 个仓库",
+      "issue_count": "{{done}} / {{total}} 个任务",
+      "issue_hero": "首页 Hero 动效",
+      "issue_pricing": "定价页对比表",
+      "issue_blog": "博客列表分页"
+    }
   }
 }
