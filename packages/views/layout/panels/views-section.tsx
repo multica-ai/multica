@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "zustand";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -33,6 +33,7 @@ import { todayDateOnly } from "@multica/core/issues/date";
 import { useIssueUnreadIds } from "@multica/core/issues/unread";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import {
   myIssuesRelationFromScope,
@@ -398,10 +399,28 @@ function BuiltinViewRow({
   );
 }
 
+/** The Unread row's key in the kept-rows store, apart from its issue list's. */
+const UNREAD_ROW_KEPT = "unread-row";
+
+/**
+ * Whether the open issue was unread when it opened. Opening it marks it
+ * read, so the unread list alone cannot tell; the kept-rows store remembers
+ * it across panel remounts until the issue is no longer the page.
+ */
+function useOpenedUnread(activeIssueId: string | null, unreadIds: readonly string[] | undefined): boolean {
+  const index = activeIssueId && unreadIds ? unreadIds.indexOf(activeIssueId) : -1;
+  const held = useSidebarKeptStore((s) => s.held[UNREAD_ROW_KEPT]);
+  useLayoutEffect(() => {
+    if (activeIssueId && index !== -1) useSidebarKeptStore.getState().hold(UNREAD_ROW_KEPT, activeIssueId, index);
+  }, [activeIssueId, index]);
+  return !!activeIssueId && (index !== -1 || held?.id === activeIssueId);
+}
+
 /**
  * The built-in Unread view. It shows only while the viewer has unread
- * issues, and stays while its page is open so reading the last one does not
- * pull the row out from under the reader.
+ * issues, and stays while its page is open, or while an issue that was
+ * unread when it opened is open, so reading the last one does not pull the
+ * row (and that issue's place under it) out from under the reader.
  */
 function UnreadViewRow({
   wsId,
@@ -430,8 +449,9 @@ function UnreadViewRow({
   const count = unread.ids?.length ?? 0;
   const request = unread.ids ? viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.ids) : undefined;
   const prefetch = usePrefetch(wsId, source, request);
+  const readingUnread = useOpenedUnread(activeIssueId, unread.ids);
 
-  if (count === 0 && !open) return null;
+  if (count === 0 && !open && !readingUnread) return null;
   const label = t(($) => $.panels.work.unread);
   return (
     <li>
