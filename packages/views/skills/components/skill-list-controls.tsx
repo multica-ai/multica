@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import {
   Download,
   FolderOpen,
@@ -334,27 +334,31 @@ export function SkillFilterMenu({
   );
 }
 
-const CREATE_METHODS: { key: CreateSkillMethod; icon: typeof Plus }[] = [
+export const SKILL_CREATE_METHODS: { key: CreateSkillMethod; icon: typeof Plus }[] = [
   { key: "manual", icon: Plus },
   { key: "local", icon: FolderOpen },
   { key: "url", icon: Download },
   { key: "runtime", icon: HardDrive },
 ];
 
-/** The "+" icon, opening the ways a skill can be added. */
+/** The "+" icon (or a custom trigger), opening the ways a skill can be added. */
 export function SkillCreateMenu({
   onCreate,
+  trigger,
+  align = "end",
 }: {
   onCreate: (method: CreateSkillMethod) => void;
+  trigger?: ReactElement;
+  align?: "start" | "end";
 }) {
   const { t } = useT("skills");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<CollectionCreateButton label={t(($) => $.page.new_skill)} />}
+        render={trigger ?? <CollectionCreateButton label={t(($) => $.page.new_skill)} />}
       />
-      <DropdownMenuContent align="end" className="w-auto min-w-48">
-        {CREATE_METHODS.map(({ key, icon: Icon }) => (
+      <DropdownMenuContent align={align} className="w-auto min-w-48">
+        {SKILL_CREATE_METHODS.map(({ key, icon: Icon }) => (
           <DropdownMenuItem key={key} onClick={() => onCreate(key)}>
             <Icon />
             {t(($) => $.create.method[key].title)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, HardDrive, Pencil } from "@multica/ui/icons";
+import { ChevronRight, Download, HardDrive, History, Pencil } from "@multica/ui/icons";
 import type { AgentRuntime, MemberWithUser, Skill } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -138,8 +138,57 @@ function DescriptionValue({
 }
 
 /**
+ * A panel value that opens the version history, so the row reads as a link.
+ * The accessible name keeps the visible value and says where it leads.
+ */
+function HistoryLinkValue({
+  label,
+  value,
+  muted = false,
+  mono = false,
+  icon,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  mono?: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}: ${value}`}
+      title={label}
+      className="group/history flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      {icon}
+      <span
+        className={cn(
+          "truncate",
+          muted && "text-muted-foreground",
+          mono && "font-mono tabular-nums",
+        )}
+      >
+        {value}
+      </span>
+      <ChevronRight
+        className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/history:opacity-100 group-focus-visible/history:opacity-100"
+        aria-hidden="true"
+      />
+    </button>
+  );
+}
+
+/**
  * The skill's properties. Name and description edit the page's draft, so
  * they save with the files through the same Save pill; labels save on pick.
+ *
+ * `latestVersion` is the current version number, `null` when the skill has no
+ * history yet (it predates versioning and has not changed since), and
+ * `undefined` while the history is loading or failed to load.
  */
 export function SkillPropertiesPanel({
   skill,
@@ -149,8 +198,10 @@ export function SkillPropertiesPanel({
   origin,
   originRuntime,
   creator,
+  latestVersion,
   onNameChange,
   onDescriptionChange,
+  onOpenVersions,
 }: {
   skill: Skill;
   name: string;
@@ -159,11 +210,14 @@ export function SkillPropertiesPanel({
   origin: OriginInfo;
   originRuntime: AgentRuntime | null;
   creator: MemberWithUser | null;
+  latestVersion: number | null | undefined;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
+  onOpenVersions: () => void;
 }) {
   const { t } = useT("skills");
   const timeAgo = useTimeAgo();
+  const historyLabel = t(($) => $.detail.menu.version_history);
 
   return (
     <div className="space-y-5">
@@ -214,8 +268,31 @@ export function SkillPropertiesPanel({
             <span className="text-muted-foreground">—</span>
           )}
         </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.panel.version)}>
+          <HistoryLinkValue
+            label={historyLabel}
+            icon={
+              <History className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            }
+            value={
+              latestVersion === undefined
+                ? "—"
+                : latestVersion === null
+                  ? t(($) => $.detail.panel.no_versions)
+                  : t(($) => $.detail.versions.version_label, { version: latestVersion })
+            }
+            muted={latestVersion == null}
+            mono={typeof latestVersion === "number"}
+            onClick={onOpenVersions}
+          />
+        </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.updated)}>
-          {timeAgo(skill.updated_at)}
+          {/* "Who changed what just now" is the usual reason to open history. */}
+          <HistoryLinkValue
+            label={historyLabel}
+            value={timeAgo(skill.updated_at)}
+            onClick={onOpenVersions}
+          />
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.created)}>
           {timeAgo(skill.created_at)}

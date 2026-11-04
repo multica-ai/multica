@@ -24,15 +24,27 @@ RETURNING workspace_id, user_id;
 -- One page of the caller's unread issues in one workspace, newest first. Pages
 -- continue strictly after the (created_at, issue_id) of the previous page's
 -- last row, so every row is reachable however many there are.
-SELECT issue_id, outcome, agent_id, created_at
-FROM issue_unread
-WHERE workspace_id = sqlc.arg(workspace_id)
-  AND user_id = sqlc.arg(user_id)
+-- comment_id is the last live comment the unread run posted on this issue: where
+-- opening the issue from the sidebar lands. The run just ended, so its comment
+-- is among the issue's newest and the newest-first timeline index finds it fast.
+SELECT u.issue_id, u.outcome, u.agent_id, u.task_id, u.created_at, run_comment.id AS comment_id
+FROM issue_unread u
+LEFT JOIN LATERAL (
+  SELECT c.id
+  FROM comment c
+  WHERE c.issue_id = u.issue_id
+    AND c.source_task_id = u.task_id
+    AND c.deleted_at IS NULL
+  ORDER BY c.created_at DESC, c.id DESC
+  LIMIT 1
+) run_comment ON true
+WHERE u.workspace_id = sqlc.arg(workspace_id)
+  AND u.user_id = sqlc.arg(user_id)
   AND (
     sqlc.narg(before_created_at)::timestamptz IS NULL
-    OR (created_at, issue_id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_issue_id)::uuid)
+    OR (u.created_at, u.issue_id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_issue_id)::uuid)
   )
-ORDER BY created_at DESC, issue_id DESC
+ORDER BY u.created_at DESC, u.issue_id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- name: MarkIssueRead :execrows

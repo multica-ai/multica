@@ -68,7 +68,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
     }
-    return { data: [], isLoading: false, isPending: false };
+    return { data: [], isLoading: false, isPending: false, isSuccess: true };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -345,10 +345,12 @@ describe("AgentsPage listReady gate", () => {
     const header = screen.getByRole("banner");
     expect(within(header).getByTestId("agent-list-filter")).toBeInTheDocument();
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
-    expect(screen.queryByText("No agents yet")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Hire your first AI teammate" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows the empty state without blocking on auxiliary queries when there are no agents", () => {
+  it("introduces agents without blocking on auxiliary queries when there are none", () => {
     mocks.agents = [];
     // All auxiliary queries pending — the empty state must not wait on them.
     mocks.activity = { byAgent: new Map(), loading: true };
@@ -357,7 +359,17 @@ describe("AgentsPage listReady gate", () => {
 
     renderPage();
 
-    expect(screen.getByText("No agents yet")).toBeInTheDocument();
+    const intro = screen.getByRole("region", { name: "Hire your first AI teammate" });
+    expect(within(intro).getByRole("button", { name: "New agent" })).toBeInTheDocument();
+    expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
+      "href",
+      "https://multica.ai/docs/agents",
+    );
+    const steps = within(intro).getByRole("list", { name: "Setup steps" });
+    expect(within(steps).getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/test-workspace/runtimes",
+    );
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });
 });

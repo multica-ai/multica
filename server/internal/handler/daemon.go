@@ -3657,6 +3657,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
+		resp.ChatNoticeLocale = h.qoderChatNoticeLocale(r.Context(), runtime, *task, cs, resp.ChatChannelType, resp.ChatType)
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
