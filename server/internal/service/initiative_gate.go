@@ -83,6 +83,11 @@ func (s *InitiativeService) sweepOne(ctx context.Context, ini db.Initiative) (ad
 			if locked.StageKey != ini.StageKey || live(locked) != nil {
 				return nil
 			}
+			// A paused company's pipeline does not move on its own (spec 4.5).
+			paused, err := CompanyIsPaused(ctx, q, ini.WorkspaceID)
+			if err != nil || paused {
+				return err
+			}
 			_, err = s.advanceLocked(ctx, q, locked, pipe, stages, InitiativeActor{Type: "system"},
 				"Every required artifact of the stage is published.", pgtype.UUID{}, time.Now())
 			advanced = err == nil

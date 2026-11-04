@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
@@ -399,4 +401,18 @@ func latestPlan(
 		info.NextRetryAt = nextRetry.Time.UTC()
 	}
 	return info, nil
+}
+
+// recordJobOutcome writes a finished plan to the job status registry (spec 4.9),
+// the one hook every scheduled job passes through. A failure to write it is
+// logged and does not change the job's own outcome: the registry is a report.
+func recordJobOutcome(ctx context.Context, pool *pgxpool.Pool, jobName string, at time.Time, succeeded bool, errMsg string) {
+	if err := db.New(pool).RecordJobOutcome(ctx, db.RecordJobOutcomeParams{
+		JobName:   jobName,
+		At:        pgtype.Timestamptz{Time: at, Valid: true},
+		Succeeded: succeeded,
+		ErrorMsg:  errMsg,
+	}); err != nil {
+		slog.Warn("scheduler: record job status", "job", jobName, "error", err)
+	}
 }

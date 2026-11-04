@@ -184,6 +184,18 @@ func (s *KnowledgeService) SeedKnowledgeKinds(ctx context.Context, workspaceID p
 	return nil
 }
 
+// SeedKnowledgeKindIn writes one kind when the workspace does not have it, inside
+// q's transaction, and reports whether it wrote one. An existing kind, which an
+// admin may have edited, is left alone, as the provisioning seed leaves it. The
+// company import creates the kinds its export carries through it (spec 4.9).
+func SeedKnowledgeKindIn(ctx context.Context, q *db.Queries, p db.SeedKnowledgeKindParams) (bool, error) {
+	n, err := q.SeedKnowledgeKind(ctx, p)
+	if err != nil {
+		return false, fmt.Errorf("seed knowledge kind %q: %w", p.Key, err)
+	}
+	return n > 0, nil
+}
+
 // ListKnowledgeKinds returns the workspace's kinds, by key. A workspace without
 // knowledge has none.
 func (s *KnowledgeService) ListKnowledgeKinds(ctx context.Context, workspaceID pgtype.UUID) ([]KnowledgeKindView, error) {

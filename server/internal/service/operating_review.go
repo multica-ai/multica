@@ -77,8 +77,9 @@ func OperatingReviewDescription(charter db.SquadCharter) (string, error) {
 	if charter.Escalation != "" {
 		b.WriteString("Escalation: " + charter.Escalation + "\n")
 	}
-	// Goals are recorded once phase 4 adds them; until then the line says so.
-	b.WriteString("\nGoals: none recorded yet\n\n")
+	// The goals are the current ones in the briefing, which is where the
+	// description says to look.
+	b.WriteString("\nGoals: see \"Your goals this period\" in your briefing\n\n")
 
 	b.WriteString("Steps\n")
 	b.WriteString("1. Compare last week's outputs with the charter; list what was late or missing.\n")
@@ -86,6 +87,7 @@ func OperatingReviewDescription(charter db.SquadCharter) (string, error) {
 	b.WriteString("3. Name at most one thing worth doing that no one asked for, with evidence.\n")
 	b.WriteString("4. File it as a proposal (the attention limits apply) or record `no action` with the reason. Padding is a failure; an honest `no action` is a success.\n")
 	b.WriteString("5. Draft updates for stale knowledge-base documents (drafts only).\n")
+	b.WriteString("6. Report progress against your goals this period: for each key result in your briefing, say where its latest reading stands and what moved it.\n")
 	return b.String(), nil
 }
 

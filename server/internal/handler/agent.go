@@ -1716,6 +1716,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
+	if req.Instructions != "" {
+		if _, err := service.WriteAgentInstructionRevision(r.Context(), qtx, wsUUID, created.ID, req.Instructions, service.InstructionChange{
+			Source: service.InstructionSourceHuman,
+			Actor:  service.GovernanceActor{Type: service.GovernanceActorMember, ID: parseUUID(ownerID)},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record the instruction revision")
+			return
+		}
+	}
 	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
@@ -1988,6 +1997,23 @@ func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
+// instructionChange is who changed an agent's instructions on this request, for
+// the revision history: the member whose request it is, or the agent that
+// made the request.
+func (h *Handler) instructionChange(r *http.Request, source string) service.InstructionChange {
+	change := service.InstructionChange{Source: source}
+	userID := requestUserID(r)
+	if uid, err := util.ParseUUID(userID); err == nil {
+		change.Actor = service.GovernanceActor{Type: service.GovernanceActorMember, ID: uid}
+	}
+	if agentID := r.Header.Get("X-Agent-ID"); agentID != "" && r.Header.Get("X-Actor-Source") == "task_token" {
+		if aid, err := util.ParseUUID(agentID); err == nil {
+			change.Actor = service.GovernanceActor{Type: service.GovernanceActorAgent, ID: aid}
+		}
+	}
+	return change
+}
+
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
@@ -2501,6 +2527,26 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
+	// An instruction change is recorded in the same transaction as the write
+	// (spec 4.6). The hook locks the agent row and records only a text that
+	// differs from the stored one.
+	var instructionTx pgx.Tx
+	if req.Instructions != nil {
+		if bindingTx == nil {
+			instructionTx, err = h.TxStarter.Begin(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to start agent instruction transaction")
+				return
+			}
+			defer instructionTx.Rollback(r.Context())
+			updateQueries = h.Queries.WithTx(instructionTx)
+		}
+		if _, err := service.ChangeAgentInstructions(r.Context(), updateQueries, existing.ID, *req.Instructions, h.instructionChange(r, service.InstructionSourceHuman)); err != nil {
+			slog.Warn("record agent instruction revision failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to record the instruction revision")
+			return
+		}
+	}
 	updated, err := updateQueries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
@@ -2526,6 +2572,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if bindingTx != nil {
 		if err := bindingTx.Commit(r.Context()); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
+			return
+		}
+	}
+	if instructionTx != nil {
+		if err := instructionTx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit agent instructions")
 			return
 		}
 	}

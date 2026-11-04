@@ -448,6 +448,7 @@ func addProposalCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().String("market", "", "Opportunity: the market it is in")
 	cmd.Flags().StringArray("evidence-doc", nil, "Opportunity: a knowledge document id that supports it; repeat for more")
 	cmd.Flags().String("target-stage", "", "Opportunity: the pipeline stage it starts at (default validate)")
+	cmd.Flags().String("payload-file", "", "Goal: a JSON file with the goal and its key results — required with --kind goal")
 	cmd.Flags().Bool("urgent", false, "Only for a decision that cannot wait a day; assigns the boss at once")
 	cmd.Flags().String("urgent-reason", "", "Why this cannot wait a day — required with --urgent")
 }
@@ -537,6 +538,9 @@ func runProposalDecide(cmd *cobra.Command, args []string) error {
 // A kind the CLI does not know is sent as given, and the server refuses it.
 func proposalKindFromFlags(cmd *cobra.Command) (string, map[string]any, error) {
 	kind, _ := cmd.Flags().GetString("kind")
+	if kind == "goal" {
+		return goalPayloadFromFile(cmd)
+	}
 	thesis, _ := cmd.Flags().GetString("thesis")
 	market, _ := cmd.Flags().GetString("market")
 	docs, _ := cmd.Flags().GetStringArray("evidence-doc")
@@ -564,4 +568,22 @@ func proposalKindFromFlags(cmd *cobra.Command) (string, map[string]any, error) {
 		payload["target_stage"] = target
 	}
 	return kind, payload, nil
+}
+
+// goalPayloadFromFile reads the payload of a goal proposal: one goal with its key
+// results, as a JSON object. The server checks its fields.
+func goalPayloadFromFile(cmd *cobra.Command) (string, map[string]any, error) {
+	file, _ := cmd.Flags().GetString("payload-file")
+	if file == "" {
+		return "", nil, fmt.Errorf("--payload-file is required with --kind goal: a JSON file with the goal and its key results")
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return "", nil, fmt.Errorf("read --payload-file: %w", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", nil, fmt.Errorf("--payload-file must be a JSON object: %w", err)
+	}
+	return "goal", payload, nil
 }

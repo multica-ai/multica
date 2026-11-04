@@ -304,15 +304,25 @@ func (s *KnowledgeService) RunRepoDocsSync(ctx context.Context) (int, error) {
 	return done, errors.Join(failures...)
 }
 
-// gitRepoDocs clones the branch shallowly into a temporary directory and reads
-// the docs directory from it. The git binary runs with a fixed argument list, a
-// timeout, and no prompts. Only https addresses are accepted.
+// gitRepoDocs is the production RepoDocsSource: it clones the configured https
+// address with cloneRepoDocs. The git binary runs with a fixed argument list, a
+// timeout, and no prompts.
 type gitRepoDocs struct{}
 
 func (gitRepoDocs) Snapshot(ctx context.Context, cfg RepoSyncSettings) ([]RepoDoc, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	return cloneRepoDocs(ctx, cfg.RepoURL, cfg.Branch, cfg.DocsPath)
+}
+
+// cloneRepoDocs clones one branch shallowly and reads the Markdown under its
+// docs directory. repo is a clone address: an https address in production, a
+// local repository in tests. Submodules are not cloned (git clone does not
+// recurse by default), and LFS objects are not downloaded: an LFS file reads as
+// its pointer text, which then fails the reference kind's heading check and is
+// recorded as a failed file.
+func cloneRepoDocs(ctx context.Context, repo, branch, docsPath string) ([]RepoDoc, error) {
 	dir, err := os.MkdirTemp("", "multica-repo-docs-")
 	if err != nil {
 		return nil, fmt.Errorf("repo sync: temporary directory: %w", err)
@@ -320,12 +330,12 @@ func (gitRepoDocs) Snapshot(ctx context.Context, cfg RepoSyncSettings) ([]RepoDo
 	defer os.RemoveAll(dir)
 	ctx, cancel := context.WithTimeout(ctx, repoSyncTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--single-branch", "--branch", cfg.Branch, "--", cfg.RepoURL, dir)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--single-branch", "--branch", branch, "--", repo, dir)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_LFS_SKIP_SMUDGE=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("repo sync: git clone failed: %w: %s", err, truncateRunes(strings.TrimSpace(string(out)), 500))
 	}
-	return readRepoDocs(dir, cfg.DocsPath)
+	return readRepoDocs(dir, docsPath)
 }
 
 // readRepoDocs reads the Markdown files under docsPath of a checkout. Symlinks

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -61,9 +63,13 @@ var briefKindWindow = map[string]time.Duration{
 }
 
 type BriefResponse struct {
-	ID          string   `json:"id"`
-	WorkspaceID string   `json:"workspace_id"`
-	Kind        string   `json:"kind"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Kind        string `json:"kind"`
+	// ScopeType is company, or floor for a floor chief's brief; ScopeID names the
+	// floor and is empty for the company.
+	ScopeType   string   `json:"scope_type"`
+	ScopeID     string   `json:"scope_id"`
 	PeriodStart string   `json:"period_start"`
 	PeriodEnd   string   `json:"period_end"`
 	Title       string   `json:"title"`
@@ -85,6 +91,8 @@ func briefToResponse(b db.Brief) BriefResponse {
 		ID:          uuidToString(b.ID),
 		WorkspaceID: uuidToString(b.WorkspaceID),
 		Kind:        b.Kind,
+		ScopeType:   b.ScopeType,
+		ScopeID:     uuidToString(b.ScopeID),
 		PeriodStart: timestampToString(b.PeriodStart),
 		PeriodEnd:   timestampToString(b.PeriodEnd),
 		Title:       b.Title,
@@ -100,11 +108,33 @@ func briefToResponse(b db.Brief) BriefResponse {
 	return resp
 }
 
-// validateBriefBody checks the body's H2 headings: each named section at most
-// once, in the order of briefSections, and every required section present. It
-// returns a message written for the publishing agent, or "". Headings inside
-// fenced code blocks do not count.
+// floorBriefSections is a floor brief's layout: a subset of the company brief's
+// headings, in the same order and with the same names (spec 4.8).
+var floorBriefSections = []briefSection{
+	{"Headline", true},
+	{"Progress", true},
+	{"Pipeline", false},
+	{"Blockers and risks", true},
+	{"Watch", false},
+	{"FYI", true},
+}
+
+// briefScopeCompany and briefScopeFloor are the scopes of a brief.
+const (
+	briefScopeCompany = "company"
+	briefScopeFloor   = "floor"
+)
+
+// validateBriefBody checks a company brief's H2 headings.
 func validateBriefBody(body string) string {
+	return validateBriefBodyWith(body, briefSections)
+}
+
+// validateBriefBodyWith checks the body's H2 headings against a layout: each
+// named section at most once, in the layout's order, and every required section
+// present. It returns a message written for the publishing agent, or "". Headings
+// inside fenced code blocks do not count.
+func validateBriefBodyWith(body string, sections []briefSection) string {
 	var found []string
 	inFence := false
 	for _, line := range strings.Split(body, "\n") {
@@ -119,12 +149,12 @@ func validateBriefBody(body string) string {
 		found = append(found, strings.TrimSpace(strings.TrimRight(strings.TrimSpace(line[3:]), "#")))
 	}
 
-	layout := "a brief's H2 headings come in this order, and the required ones must be present: " + briefLayout()
+	layout := "a brief's H2 headings come in this order, and the required ones must be present: " + briefLayout(sections)
 
-	next := 0 // index into briefSections of the next section that may appear
+	next := 0 // index into sections of the next section that may appear
 	seen := map[string]bool{}
 	for _, heading := range found {
-		for i, want := range briefSections {
+		for i, want := range sections {
 			if !strings.EqualFold(heading, want.name) {
 				continue
 			}
@@ -139,7 +169,7 @@ func validateBriefBody(body string) string {
 		}
 	}
 	var missing []string
-	for _, want := range briefSections {
+	for _, want := range sections {
 		if want.required && !seen[want.name] {
 			missing = append(missing, "## "+want.name)
 		}
@@ -151,9 +181,9 @@ func validateBriefBody(body string) string {
 }
 
 // briefLayout names the sections in order, marking the optional ones.
-func briefLayout() string {
-	parts := make([]string, 0, len(briefSections))
-	for _, s := range briefSections {
+func briefLayout(sections []briefSection) string {
+	parts := make([]string, 0, len(sections))
+	for _, s := range sections {
 		if s.required {
 			parts = append(parts, "## "+s.name)
 		} else {
@@ -170,6 +200,83 @@ type CreateBriefRequest struct {
 	ProposalIDs []string `json:"proposal_ids"`
 	PeriodStart *string  `json:"period_start"`
 	PeriodEnd   *string  `json:"period_end"`
+	// ScopeType is company (the default) or floor. A floor brief names its floor
+	// in ScopeID and is published by that floor's chief.
+	ScopeType string  `json:"scope_type"`
+	ScopeID   *string `json:"scope_id"`
+}
+
+// mayPublishFloorBrief reports whether the actor may publish a floor's brief: the
+// floor's chief agent, or an owner or admin member. It writes the refusal.
+func (h *Handler) mayPublishFloorBrief(w http.ResponseWriter, r *http.Request, workspaceID, userID, actorType, actorID string, floorID pgtype.UUID) bool {
+	refusal := "only the floor's chief agent or an admin member may publish this floor's brief"
+	if actorType == "agent" {
+		agentID, err := util.ParseUUID(actorID)
+		if err != nil {
+			writeError(w, http.StatusForbidden, refusal)
+			return false
+		}
+		wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+		if !ok {
+			return false
+		}
+		floors, err := h.Queries.ListFloorsChairedByAgent(r.Context(), db.ListFloorsChairedByAgentParams{WorkspaceID: wsUUID, AgentID: agentID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check the floor's chief")
+			return false
+		}
+		for _, f := range floors {
+			if uuidToString(f) == uuidToString(floorID) {
+				return true
+			}
+		}
+		writeError(w, http.StatusForbidden, refusal)
+		return false
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, refusal)
+		return false
+	}
+	return true
+}
+
+// parseBriefScope reads the scope of a brief. A company brief names no floor; a
+// floor brief names a floor of the workspace. It writes the refusal.
+func (h *Handler) parseBriefScope(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, req CreateBriefRequest) (string, pgtype.UUID, bool) {
+	switch req.ScopeType {
+	case "", briefScopeCompany:
+		if req.ScopeID != nil && *req.ScopeID != "" {
+			writeError(w, http.StatusBadRequest, "scope_id applies only to a floor brief")
+			return "", pgtype.UUID{}, false
+		}
+		return briefScopeCompany, pgtype.UUID{}, true
+	case briefScopeFloor:
+	default:
+		writeError(w, http.StatusBadRequest, "scope_type must be company or floor")
+		return "", pgtype.UUID{}, false
+	}
+	if req.ScopeID == nil || *req.ScopeID == "" {
+		writeError(w, http.StatusBadRequest, "scope_id names the floor of a floor brief")
+		return "", pgtype.UUID{}, false
+	}
+	floorID, err := util.ParseUUID(*req.ScopeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scope_id must be a floor id")
+		return "", pgtype.UUID{}, false
+	}
+	if _, err := h.Queries.GetOfficeFloorByID(r.Context(), db.GetOfficeFloorByIDParams{ID: floorID, WorkspaceID: workspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "floor not found")
+			return "", pgtype.UUID{}, false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read the floor")
+		return "", pgtype.UUID{}, false
+	}
+	return briefScopeFloor, floorID, true
 }
 
 // mayPublishBrief reports whether the actor may publish: the workspace's
@@ -226,8 +333,16 @@ func (h *Handler) CreateBrief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scopeType, floorID, ok := h.parseBriefScope(w, r, wsUUID, req)
+	if !ok {
+		return
+	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.mayPublishBrief(w, r, workspaceID, userID, actorType, actorID) {
+	if scopeType == briefScopeFloor {
+		if !h.mayPublishFloorBrief(w, r, workspaceID, userID, actorType, actorID, floorID) {
+			return
+		}
+	} else if !h.mayPublishBrief(w, r, workspaceID, userID, actorType, actorID) {
 		return
 	}
 
@@ -259,11 +374,15 @@ func (h *Handler) CreateBrief(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("body is %d characters; a brief is at most %d. Shorten it: a quiet day is a short brief, and the rest belongs in links", n, briefMaxBodyLen))
 		return
 	}
+	sections := briefSections
+	if scopeType == briefScopeFloor {
+		sections = floorBriefSections
+	}
 	if params.Body == "" {
-		writeError(w, http.StatusBadRequest, "body is required; "+validateBriefBody(""))
+		writeError(w, http.StatusBadRequest, "body is required; "+validateBriefBodyWith("", sections))
 		return
 	}
-	if msg := validateBriefBody(params.Body); msg != "" {
+	if msg := validateBriefBodyWith(params.Body, sections); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -301,7 +420,19 @@ func (h *Handler) CreateBrief(w http.ResponseWriter, r *http.Request) {
 	}
 	params.ProposalIds = proposalIDs
 
-	brief, err := h.Queries.CreateBrief(r.Context(), params)
+	var brief db.Brief
+	var err error
+	if scopeType == briefScopeFloor {
+		brief, err = h.Queries.CreateScopedBrief(r.Context(), db.CreateScopedBriefParams{
+			ID: params.ID, WorkspaceID: params.WorkspaceID, Kind: params.Kind,
+			PeriodStart: params.PeriodStart, PeriodEnd: params.PeriodEnd,
+			Title: params.Title, Body: params.Body, ProposalIds: params.ProposalIds,
+			CreatedByAgentID: params.CreatedByAgentID, CreatedByMemberID: params.CreatedByMemberID,
+			ScopeType: briefScopeFloor, ScopeID: floorID,
+		})
+	} else {
+		brief, err = h.Queries.CreateBrief(r.Context(), params)
+	}
 	if err != nil {
 		slog.Warn("create brief failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create brief")
@@ -309,8 +440,12 @@ func (h *Handler) CreateBrief(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := briefToResponse(brief)
-	h.publish(protocol.EventBriefCreated, workspaceID, actorType, actorID, map[string]any{"brief": resp})
-	slog.Info("brief published", append(logger.RequestAttrs(r), "brief_id", resp.ID, "kind", resp.Kind)...)
+	// A floor brief is not announced to the owners and not pushed to chat: the
+	// company brief is the boss's report, and floor briefs feed the Secretary.
+	if resp.ScopeType == briefScopeCompany {
+		h.publish(protocol.EventBriefCreated, workspaceID, actorType, actorID, map[string]any{"brief": resp})
+	}
+	slog.Info("brief published", append(logger.RequestAttrs(r), "brief_id", resp.ID, "kind", resp.Kind, "scope_type", resp.ScopeType)...)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -363,6 +498,11 @@ func (h *Handler) ListBriefs(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	// A floor's own briefs, for its chief and the boss: GET /api/briefs?scope_type=floor&scope_id=.
+	if r.URL.Query().Get("scope_type") == briefScopeFloor {
+		h.listFloorBriefs(w, r, wsUUID)
 		return
 	}
 	params := db.ListBriefsParams{WorkspaceID: wsUUID, RowLimit: briefDefaultLimit}
@@ -419,4 +559,25 @@ func (h *Handler) GetBrief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, briefToResponse(brief))
+}
+
+// listFloorBriefs returns one floor's briefs, newest first.
+func (h *Handler) listFloorBriefs(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID) {
+	floorID, err := util.ParseUUID(r.URL.Query().Get("scope_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scope_id must be a floor id")
+		return
+	}
+	rows, err := h.Queries.ListFloorBriefsForFloor(r.Context(), db.ListFloorBriefsForFloorParams{
+		WorkspaceID: wsUUID, ScopeID: floorID, RowLimit: briefDefaultLimit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list briefs")
+		return
+	}
+	out := make([]BriefResponse, 0, len(rows))
+	for _, b := range rows {
+		out = append(out, briefToResponse(b))
+	}
+	writeJSON(w, http.StatusOK, out)
 }

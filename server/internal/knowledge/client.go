@@ -628,6 +628,9 @@ func (w *workspace) EnsureModel(ctx context.Context, spec ModelSpec) (Model, err
 	if spec.APIKey != "" {
 		params["api_key"] = spec.APIKey
 	}
+	if len(spec.ExtraBody) > 0 {
+		params["spec"] = map[string]any{"compat": map[string]any{"extra_body": spec.ExtraBody}}
+	}
 	return w.ensureModel(ctx, spec.Name, string(spec.Type), "remote", params)
 }
 

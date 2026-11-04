@@ -55,9 +55,12 @@ type ProposalResponse struct {
 	CreatedByType string          `json:"created_by_type"`
 	CreatedByID   string          `json:"created_by_id"`
 	DecidedBy     *string         `json:"decided_by"`
-	DecidedAt     *string         `json:"decided_at"`
-	DecisionNote  string          `json:"decision_note"`
-	CreatedAt     string          `json:"created_at"`
+	// DecidedByPolicyID is set when a standing approval decided the proposal; the
+	// decision then has no member (spec 4.4).
+	DecidedByPolicyID *string `json:"decided_by_policy_id"`
+	DecidedAt         *string `json:"decided_at"`
+	DecisionNote      string  `json:"decision_note"`
+	CreatedAt         string  `json:"created_at"`
 	// Revision starts at 1 and goes up each time the squad resubmits after
 	// the boss asked for changes.
 	Revision int32 `json:"revision"`
@@ -110,28 +113,29 @@ type ProposalRelatedResponse struct {
 
 func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix string, issueNumber int32) ProposalResponse {
 	return ProposalResponse{
-		ID:              uuidToString(p.ID),
-		WorkspaceID:     uuidToString(p.WorkspaceID),
-		SquadID:         uuidToString(p.SquadID),
-		IssueID:         uuidToString(p.IssueID),
-		IssueIdentifier: issuePrefix + "-" + strconv.Itoa(int(issueNumber)),
-		IssueStatus:     issueStatus,
-		Title:           issueTitle,
-		HandoffSquadID:  uuidToPtr(p.HandoffSquadID),
-		Urgent:          p.Urgent,
-		UrgentReason:    p.UrgentReason,
-		State:           p.State,
-		Kind:            p.Kind,
-		Payload:         rawJSONOrEmpty(p.Payload),
-		CreatedByType:   p.CreatedByType,
-		CreatedByID:     uuidToString(p.CreatedByID),
-		DecidedBy:       uuidToPtr(p.DecidedBy),
-		DecidedAt:       timestampToPtr(p.DecidedAt),
-		DecisionNote:    p.DecisionNote,
-		CreatedAt:       timestampToString(p.CreatedAt),
-		Revision:        p.Revision,
-		ExpiresAt:       timestampToPtr(p.ExpiresAt),
-		SnoozedUntil:    timestampToPtr(p.SnoozedUntil),
+		ID:                uuidToString(p.ID),
+		WorkspaceID:       uuidToString(p.WorkspaceID),
+		SquadID:           uuidToString(p.SquadID),
+		IssueID:           uuidToString(p.IssueID),
+		IssueIdentifier:   issuePrefix + "-" + strconv.Itoa(int(issueNumber)),
+		IssueStatus:       issueStatus,
+		Title:             issueTitle,
+		HandoffSquadID:    uuidToPtr(p.HandoffSquadID),
+		Urgent:            p.Urgent,
+		UrgentReason:      p.UrgentReason,
+		State:             p.State,
+		Kind:              p.Kind,
+		Payload:           rawJSONOrEmpty(p.Payload),
+		CreatedByType:     p.CreatedByType,
+		CreatedByID:       uuidToString(p.CreatedByID),
+		DecidedBy:         uuidToPtr(p.DecidedBy),
+		DecidedByPolicyID: uuidToPtr(p.DecidedByPolicyID),
+		DecidedAt:         timestampToPtr(p.DecidedAt),
+		DecisionNote:      p.DecisionNote,
+		CreatedAt:         timestampToString(p.CreatedAt),
+		Revision:          p.Revision,
+		ExpiresAt:         timestampToPtr(p.ExpiresAt),
+		SnoozedUntil:      timestampToPtr(p.SnoozedUntil),
 		// Reads and events fill Related themselves; this default keeps it an array.
 		Related: []ProposalRelatedResponse{},
 	}
@@ -189,6 +193,10 @@ type CreateProposalRequest struct {
 	// fields and is checked by the kind's handler.
 	Kind    string          `json:"kind"`
 	Payload json.RawMessage `json:"payload"`
+	// EstimatedCostMicros is the filing's cost estimate in micros (one millionth of
+	// the workspace currency). Optional; a standing approval needs it to fit a
+	// policy's cost limit (spec 4.4).
+	EstimatedCostMicros *int64 `json:"estimated_cost_micros"`
 }
 
 // cleanProposalText trims a proposal text field and strips the bytes
@@ -253,6 +261,9 @@ func validateProposalRequest(req *CreateProposalRequest) string {
 	if !req.Urgent && req.UrgentReason != "" {
 		return "urgent_reason is only allowed when urgent"
 	}
+	if req.EstimatedCostMicros != nil && *req.EstimatedCostMicros < 0 {
+		return "estimated_cost_micros must not be negative"
+	}
 	return ""
 }
 
@@ -308,6 +319,9 @@ func (h *Handler) proposalService() *service.ProposalService {
 		svc.DecisionSearch = h.Knowledge
 	}
 	svc.AppURL = h.cfg.AppURL
+	// The org_change kind (spec 4.6) is registered per service, as the other
+	// kinds that need the handler's services are.
+	svc.Kinds.Register(proposalkinds.NewOrgChangeKind(h.orgChanges()))
 	return svc
 }
 
@@ -351,6 +365,19 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// An organisation change is filed only by the reviewer, the Secretary, the
+	// leader of a squad it concerns, or a person (spec 4.6).
+	if req.Kind == proposalkinds.KeyOrgChange && actorType == "agent" {
+		allowed, err := service.OrgChangeFilerMayFile(r.Context(), h.Queries, wsUUID, creatorUUID, req.Payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check the filing rule")
+			return
+		}
+		if !allowed {
+			writeErrorCode(w, http.StatusForbidden, "org_change_not_permitted", "only the reviewer, the Secretary, or the leader of a squad the change concerns may file an organisation change")
+			return
+		}
+	}
 
 	res, err := h.proposalService().Create(r.Context(), service.ProposalCreateParams{
 		WorkspaceID:    wsUUID,
@@ -361,12 +388,13 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 			Recommendation: req.Recommendation, Options: req.Options,
 			CostRisk: req.CostRisk, Ask: req.Ask,
 		},
-		Urgent:       req.Urgent,
-		UrgentReason: req.UrgentReason,
-		CreatorType:  actorType,
-		CreatorID:    creatorUUID,
-		Kind:         req.Kind,
-		Payload:      req.Payload,
+		Urgent:              req.Urgent,
+		UrgentReason:        req.UrgentReason,
+		CreatorType:         actorType,
+		CreatorID:           creatorUUID,
+		Kind:                req.Kind,
+		Payload:             req.Payload,
+		EstimatedCostMicros: req.EstimatedCostMicros,
 	})
 	var limitErr *service.ProposalLimitError
 	var payloadErr *service.ProposalPayloadError
@@ -405,11 +433,20 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	h.fillStatusCategory(r.Context(), wsUUID, &issueResp)
 	resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
 	resp.Related = relatedToResponse(res.Related)
+	if res.AutoDecision != nil && res.AutoDecision.Project != nil && res.AutoDecision.Kickoff != nil {
+		resp.Handoff = &ProposalHandoffResponse{
+			ProjectID:      uuidToString(res.AutoDecision.Project.ID),
+			KickoffIssueID: uuidToString(res.AutoDecision.Kickoff.ID),
+		}
+	}
 
 	// The ordinary issue:created event is what raises the boss's issue_assigned
 	// inbox item for an urgent proposal; an unassigned one raises nothing.
 	h.publish(protocol.EventIssueCreated, workspaceID, actorType, actorID, map[string]any{"issue": issueResp})
 	h.publish(protocol.EventProposalCreated, workspaceID, actorType, actorID, map[string]any{"proposal": resp})
+	if res.AutoDecision != nil {
+		h.publishStandingApproval(r.Context(), prefix, wsUUID, *res.AutoDecision)
+	}
 	slog.Info("proposal created", append(logger.RequestAttrs(r),
 		"proposal_id", resp.ID, "squad_id", resp.SquadID, "urgent", resp.Urgent, "related", len(res.Related))...)
 	writeJSON(w, http.StatusCreated, ProposalCreateResponse{ProposalResponse: resp})
@@ -650,7 +687,7 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusConflict, "proposal_revising", "the squad is revising this proposal; decide it once the revised version comes back")
 		return
 	case errors.Is(err, service.ErrProposalAlreadyDecided):
-		writeErrorCode(w, http.StatusConflict, "proposal_decided", "this proposal has already been decided")
+		writeErrorCode(w, http.StatusConflict, "proposal_decided", h.alreadyDecidedMessage(r.Context(), wsUUID, proposalID))
 		return
 	case errors.Is(err, service.ErrProposalHandoffSquadNotFound):
 		writeErrorCode(w, http.StatusConflict, "handoff_squad_unavailable", "the handoff squad no longer exists or is archived; approve without it or ask the squad to refile")
@@ -906,6 +943,20 @@ func (h *Handler) publishProposalIssueUpdated(ctx context.Context, wsUUID pgtype
 	})
 }
 
+// publishStandingApproval publishes the events of a decision a standing approval
+// made when the filing was filed. The decision has no member, so the events carry
+// the system actor, and the proposal's own decided event tells clients it is
+// approved.
+func (h *Handler) publishStandingApproval(ctx context.Context, prefix string, wsUUID pgtype.UUID, res service.ProposalDecideResult) {
+	workspaceID := uuidToString(wsUUID)
+	h.publishProposalIssueUpdated(ctx, wsUUID, prefix, "system", "", res.Issue, res.PrevIssueStatus)
+	if res.Project != nil {
+		h.publish(protocol.EventProjectCreated, workspaceID, "system", "", map[string]any{"project": projectToResponse(*res.Project)})
+	}
+	resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
+	h.publish(protocol.EventProposalDecided, workspaceID, "system", "", map[string]any{"proposal": resp})
+}
+
 // publishProposalDecision publishes the events for a committed decision and
 // wakes the proposing squad's leader when the decision left a note on the
 // issue: a rejection, or a request for changes.
@@ -933,4 +984,20 @@ func (h *Handler) publishProposalDecision(ctx context.Context, userID, prefix st
 		// enqueues the run, attributed to the deciding member.
 		h.triggerTasksForComment(ctx, res.Issue, comment, nil, "member", userID, userID, nil, commentSteerRequest{})
 	}
+}
+
+// alreadyDecidedMessage says who decided a proposal, for the second decision
+// that loses the race (spec 4.9: 409 with the decider's name). A decision made
+// without a member (a standing approval) names no one.
+func (h *Handler) alreadyDecidedMessage(ctx context.Context, workspaceID, proposalID pgtype.UUID) string {
+	const fallback = "this proposal has already been decided"
+	p, err := h.Queries.GetProposalInWorkspace(ctx, db.GetProposalInWorkspaceParams{ID: proposalID, WorkspaceID: workspaceID})
+	if err != nil || !p.DecidedBy.Valid {
+		return fallback
+	}
+	decider, err := h.Queries.GetUser(ctx, p.DecidedBy)
+	if err != nil || decider.Name == "" {
+		return fallback
+	}
+	return "this proposal was already decided by " + decider.Name
 }

@@ -227,6 +227,22 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 		return run, nil
 	}
 
+	// Quiet hours defer a webhook's routine run (spec 4.5), as they defer a
+	// scheduled one. A paused company or a budget at its limit does not stop it
+	// here: the run creates its issue and queued task, and the claim gate holds
+	// the task until the hold releases (spec 4.10(b); see dispatchAutopilot).
+	if _, code, held := s.companyHold(ctx, autopilot, "webhook"); held && code == dispatch.ReasonQuietHours {
+		deferred, err := s.recordDeferredRun(ctx, autopilot, triggerID, "webhook", payload, pgtype.Timestamptz{}, deliveryID)
+		if err != nil {
+			return s.recoverConcurrentWebhookAdmission(
+				ctx,
+				deliveryID,
+				fmt.Errorf("admit webhook delivery: record deferred run: %w", err),
+			)
+		}
+		return deferred, nil
+	}
+
 	initialStatus := "issue_created"
 	if autopilot.ExecutionMode == "run_only" {
 		initialStatus = "running"
@@ -288,6 +304,11 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	run, err := s.AdmitAutopilotWebhookDelivery(ctx, autopilot, triggerID, payload, deliveryID)
 	if err != nil {
 		return nil, err
+	}
+	// Quiet hours deferred this run; the one-minute sweep dispatches it when the
+	// window closes. The worker must not dispatch it now.
+	if run.Status == "deferred" {
+		return run, nil
 	}
 	if isAutopilotRunComplete(*run) {
 		if autopilot.ExecutionMode == "create_issue" && run.IssueID.Valid {
@@ -556,6 +577,13 @@ func isAutopilotRunComplete(run db.AutopilotRun) bool {
 // for manual / webhook / api dispatch it is the zero pgtype.Timestamptz and
 // the resulting autopilot_run row has planned_at IS NULL. webhookDeliveryID
 // is set only by the durable webhook worker.
+//
+// Holds split by trigger. Scheduled dispatch (and catch-up) is skipped with
+// reason budget_hold or company_paused (spec 4.2, 4.5): no issue, no task.
+// A webhook-triggered routine run is not skipped. AdmitAutopilotWebhookDelivery
+// creates its issue and queued task, and the claim gate holds the task
+// (spec 4.10(b)). Quiet hours defer both kinds, and a person's run and the
+// Secretary's brief are exempt from every hold.
 func (s *AutopilotService) dispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -569,6 +597,20 @@ func (s *AutopilotService) dispatchAutopilot(
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
 	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID, triggerID); skip {
 		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason)
+		return run, code, err
+	}
+	if reason, code, held := s.companyHold(ctx, autopilot, source); held {
+		if code == dispatch.ReasonQuietHours {
+			// Deferred, not dropped: the sweep dispatches it when the window closes.
+			run, err := s.recordDeferredRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID)
+			return run, code, err
+		}
+		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason, code)
+		return run, code, err
+	}
+	// The squad's autonomy level holds its routine runs at L0 (spec 4.3).
+	if reason, code, held := s.autonomyHold(ctx, autopilot, source); held {
+		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason, code)
 		return run, code, err
 	}
 

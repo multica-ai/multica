@@ -1504,17 +1504,19 @@ func cleanupMcpConfigTemp(path string) {
 	_ = os.Remove(path)
 }
 
-// detectVersionTimeout bounds a single `<cli> --version` probe. Version
-// detection runs inside the daemon's blocking preflight (registerRuntimesForWorkspace),
-// so a CLI that never returns from `--version` — e.g. a brew-installed claude
-// wedged by a bun regression (MUL-3812) — would otherwise stall the whole
-// registration loop, the daemon would never flip /health from "starting" to
-// "running", and *every* runtime on the host would appear disconnected. A real
-// `--version` returns well under this bound even on a cold cache or with
-// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
-// in isolation so the remaining runtimes still register. A var (not const) so
-// tests can shrink it without waiting out the real bound.
-var detectVersionTimeout = 10 * time.Second
+// versionProbeTimeout is the bound on one `<cli> --version` probe, shared by
+// every CLI. Version detection runs inside the daemon's blocking preflight
+// (registerRuntimesForWorkspace), so a CLI that never returns from `--version`
+// — e.g. a brew-installed claude wedged by a bun regression (MUL-3812) — must
+// fail on its own rather than stall the whole registration loop. The bound must
+// still cover real installs: Hermes is a Python CLI whose `--version` takes
+// about 30-40 seconds of CPU on a developer machine, and the old 10-second bound
+// made the daemon skip it as "version detection failed: signal: killed".
+const versionProbeTimeout = 60 * time.Second
+
+// detectVersionTimeout is the bound detectCLIVersion applies. A var (not const)
+// so tests can shrink it without waiting out the real bound.
+var detectVersionTimeout = versionProbeTimeout
 
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)

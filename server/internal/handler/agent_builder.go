@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -129,6 +130,13 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 		},
 	})
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare agent builder")
+		return
+	}
+	// The carrier's instructions are its first revision too: every instruction
+	// text the platform stores has a revision (spec 4.6).
+	if _, err := service.WriteAgentInstructionRevision(r.Context(), qtx, workspaceUUID, builder.ID, agentBuilderInstructions,
+		h.instructionChange(r, service.InstructionSourceHuman)); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to prepare agent builder")
 		return
 	}

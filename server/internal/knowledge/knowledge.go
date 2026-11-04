@@ -253,6 +253,10 @@ type ModelSpec struct {
 	BaseURL string
 	// APIKey is optional and write-only.
 	APIKey string
+	// ExtraBody is merged into every request WeKnora sends to this model. WeKnora
+	// omits "stream" on a non-streaming call, and a gateway that streams by
+	// default needs {"stream": false} to return JSON.
+	ExtraBody map[string]any
 }
 
 // ModelType is the role a model plays in WeKnora.

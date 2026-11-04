@@ -66,6 +66,17 @@ func GeneratePATToken() (string, error) {
 	return "mul_" + hex.EncodeToString(b), nil
 }
 
+// GenerateMetricWebhookToken creates a workspace metric token: "mwt_" + 40 random
+// hex chars. It authenticates outside feeds that report readings (spec 4.1), and
+// is shown once, at creation.
+func GenerateMetricWebhookToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate metric webhook token: %w", err)
+	}
+	return "mwt_" + hex.EncodeToString(b), nil
+}
+
 // GenerateDaemonToken creates a new daemon auth token: "mdt_" + 40 random hex chars.
 func GenerateDaemonToken() (string, error) {
 	b := make([]byte, 20) // 20 bytes = 40 hex chars

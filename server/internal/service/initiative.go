@@ -50,6 +50,7 @@ const (
 	InitiativeEventAttested        = "attested"
 	InitiativeEventArtifactWaive   = "artifact_waived"
 	InitiativeEventArtifactLinked  = "artifact_linked"
+	InitiativeEventScaled          = "scaled"
 	InitiativeEventGateDaysChanged = "gate_days_changed"
 )
 
@@ -122,6 +123,11 @@ type CreateInitiativeParams struct {
 	SponsorUserID    pgtype.UUID
 	// Actor creates the backing issue, so it must be a member or an agent.
 	Actor InitiativeActor
+	// Quiet is set by the company import. The initiative is recreated with the owner
+	// squad the export names (OwnerSquadID), and nothing is handed off or woken: an
+	// import starts no work.
+	Quiet        bool
+	OwnerSquadID pgtype.UUID
 }
 
 // ActionParams are the already-authorized inputs to a transition on one
@@ -151,14 +157,17 @@ type InitiativeService struct {
 }
 
 // NewInitiativeSet wires an initiative service and the proposal service that
-// files its gates and decides them. A nil retro uses NoopRetroHook.
+// files its gates and decides them. A nil retro uses RetroRequestHook.
 func NewInitiativeSet(issues *IssueService, retro RetroHook) (*InitiativeService, *ProposalService) {
 	if retro == nil {
-		retro = NoopRetroHook{}
+		retro = RetroRequestHook{}
 	}
 	ini := &InitiativeService{Queries: issues.Queries, TxStarter: issues.TxStarter, Issues: issues, Retro: retro}
 	props := NewProposalService(issues, ini)
 	ini.Proposals = props
+	// The goal kind (spec 4.1) needs the goal service, which exists once the
+	// queries and the transaction starter do, so it is registered here.
+	props.registry().Register(proposalkinds.NewGoalKind(NewGoalServiceFor(issues)))
 	return ini, props
 }
 
@@ -240,6 +249,9 @@ func (s *InitiativeService) openInTx(ctx context.Context, tx pgx.Tx, q *db.Queri
 	}
 	statusKey := StatusKeyForStage(stageKey)
 	assigneeType, assigneeID, hasOwner := handoffFor(def, statusKey, p.Actor.Type, p.Actor.ID)
+	if p.Quiet {
+		assigneeType, assigneeID, hasOwner = pgtype.Text{}, pgtype.UUID{}, false
+	}
 
 	policy := ResolveIssueCountPolicy(ctx, s.Issues.Entitlements, p.WorkspaceID)
 	number, err := AllocateIssueNumber(ctx, q, p.WorkspaceID, policy)
@@ -270,6 +282,10 @@ func (s *InitiativeService) openInTx(ctx context.Context, tx pgx.Tx, q *db.Queri
 		return db.Initiative{}, fmt.Errorf("create initiative issue: %w", err)
 	}
 
+	ownerSquad := ownerIfHanded(assigneeType, assigneeID, hasOwner)
+	if p.Quiet {
+		ownerSquad = p.OwnerSquadID
+	}
 	ini, err := q.CreateInitiative(ctx, db.CreateInitiativeParams{
 		ID:               dbid.NewV7(),
 		WorkspaceID:      p.WorkspaceID,
@@ -278,7 +294,7 @@ func (s *InitiativeService) openInTx(ctx context.Context, tx pgx.Tx, q *db.Queri
 		Title:            p.Title,
 		Thesis:           p.Thesis,
 		StageKey:         stageKey,
-		OwnerSquadID:     ownerIfHanded(assigneeType, assigneeID, hasOwner),
+		OwnerSquadID:     ownerSquad,
 		IssueID:          issue.ID,
 		SourceProposalID: p.SourceProposalID,
 		SponsorUserID:    p.SponsorUserID,
@@ -983,6 +999,11 @@ func (s *InitiativeService) advanceWhenComplete(ctx context.Context, ws, initiat
 		if idx < 0 || stages[idx].Exit.Mode != PipelineExitAuto {
 			return nil
 		}
+		// A paused company's pipeline waits; the sweep advances it after resume.
+		paused, err := CompanyIsPaused(ctx, q, ws)
+		if err != nil || paused {
+			return err
+		}
 		missing, err := s.missingRequired(ctx, q, ini)
 		if err != nil || len(missing) > 0 {
 			return err
@@ -1080,6 +1101,12 @@ func (s *InitiativeService) AdvanceFromGate(ctx context.Context, q *db.Queries, 
 	}
 	if g.To == "" || stageIndex(stages, g.To) < 0 {
 		return ErrUnknownStage
+	}
+	// Approving the Plan gate approves the initiative's budget (spec 4.2).
+	if g.From == "plan" {
+		if err := approveInitiativeBudget(ctx, q, d.WorkspaceID, ini, g.From, GovernanceActor{Type: GovernanceActorMember, ID: d.DeciderID}); err != nil {
+			return err
+		}
 	}
 	_, err = s.moveTo(ctx, q, ini, pipe, stages, g.To, InitiativeEventAdvanced, actor, d.Note, d.Proposal.ID, now)
 	return err

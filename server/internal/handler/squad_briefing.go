@@ -478,6 +478,13 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 		}
 	}
 
+	// The squad's active goals for this period (spec 4.1). A failed lookup leaves
+	// the block out, as the initiatives block does above.
+	if block, err := service.SquadGoalsBriefing(ctx, q, squad.WorkspaceID, squad.ID, time.Now()); err == nil && block != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(block)
+	}
+
 	// A failed lookup leaves the block out: the leader works as before, and a
 	// squad that proposes less is the safe direction to fail in.
 	if scheduled, err := q.HasActiveSquadAutopilot(ctx, db.HasActiveSquadAutopilotParams{

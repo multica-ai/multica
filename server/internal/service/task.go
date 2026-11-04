@@ -68,6 +68,9 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// Budget is the budget gate of the claim (spec 4.2). NewTaskService wires
+	// it; a nil gate is replaced by a fresh one per claim.
+	Budget *BudgetGate
 	// ReclaimCheck schedules the next time a runtime can plausibly contain a
 	// stale dispatched task. It removes the unconditional reclaim UPDATE from
 	// idle claim polls while missing/error states preserve the DB fallback.
@@ -337,7 +340,7 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup, Budget: NewBudgetGate(bus)}
 }
 
 var trivialDoneMarkers = []string{
@@ -3622,93 +3625,114 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		s.recordClaimDecision(agentID, runtimeID, outcome, scope, decisionDetail)
 	}()
 
-	err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		t0 := time.Now()
-		agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
-		getAgentMs = time.Since(t0).Milliseconds()
-		if err != nil {
-			outcome = "error_get_agent"
-			return fmt.Errorf("agent not found: %w", err)
-		}
-		claimRuntimeID := runtimeID
-		if !claimRuntimeID.Valid {
-			claimRuntimeID = agent.RuntimeID
-		}
-		if !claimRuntimeID.Valid {
-			outcome = "no_runtime"
-			return nil
-		}
-		// A daemon may still hold a stale candidate after the agent is rebound.
-		// Reject it before doing capacity work. ClaimAgentTask repeats the fence
-		// before its state transition; the claim handler then rechecks the freshly
-		// loaded Agent before returning any payload. Runtime mutation teardown is
-		// responsible for serializing and settling the remaining queued rows.
-		if runtimeID.Valid && agent.RuntimeID != runtimeID {
-			outcome = "runtime_mismatch"
-			return nil
-		}
-
-		t0 = time.Now()
-		running, err := qtx.CountRunningTasks(ctx, agentID)
-		countRunningMs = time.Since(t0).Milliseconds()
-		if err != nil {
-			outcome = "error_count_running"
-			return fmt.Errorf("count running tasks: %w", err)
-		}
-		if running >= int64(agent.MaxConcurrentTasks) {
-			decisionDetail = claimDecisionDetail{running: running, maxConcurrent: int64(agent.MaxConcurrentTasks)}
-			outcome = "no_capacity"
-			return nil
-		}
-
-		t0 = time.Now()
-		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
-		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
-			AgentID:          agentID,
-			RuntimeID:        claimRuntimeID,
-			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
-			RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
-		})
-		claimAgentMs = time.Since(t0).Milliseconds()
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				outcome = "no_tasks"
+	var refused []pgtype.UUID
+	for {
+		err := s.runInTx(ctx, func(qtx *db.Queries) error {
+			t0 := time.Now()
+			agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
+			getAgentMs = time.Since(t0).Milliseconds()
+			if err != nil {
+				outcome = "error_get_agent"
+				return fmt.Errorf("agent not found: %w", err)
+			}
+			claimRuntimeID := runtimeID
+			if !claimRuntimeID.Valid {
+				claimRuntimeID = agent.RuntimeID
+			}
+			if !claimRuntimeID.Valid {
+				outcome = "no_runtime"
 				return nil
 			}
-			outcome = "error_claim"
-			return fmt.Errorf("claim task: %w", err)
-		}
-
-		// An idle task-owned direct-chat row may already be visible as the
-		// positional queue head. Normal completion reanchors a successor beside
-		// the assistant outcome before commit; this claim-time query is the
-		// compatibility fallback for an older or otherwise out-of-order row.
-		// It only moves that row inside the claim transaction, so full-list and
-		// cursor readers see the corrected boundary once it is dispatched. Retry
-		// children keep the root input owner and stale-dispatch reclaim uses a
-		// separate query, so neither path moves an already-visible turn again.
-		if task.ChatSessionID.Valid && task.ChatInputTaskID.Valid && task.ChatInputTaskID == task.ID {
-			t0 = time.Now()
-			if err := qtx.ReanchorClaimedDirectChatInput(ctx, db.ReanchorClaimedDirectChatInputParams{
-				DispatchedAt: task.DispatchedAt,
-				TaskID:       task.ID,
-			}); err != nil {
-				reanchorMs = time.Since(t0).Milliseconds()
-				outcome = "error_reanchor_chat_input"
-				return fmt.Errorf("reanchor claimed direct chat input: %w", err)
+			// A daemon may still hold a stale candidate after the agent is rebound.
+			// Reject it before doing capacity work. ClaimAgentTask repeats the fence
+			// before its state transition; the claim handler then rechecks the freshly
+			// loaded Agent before returning any payload. Runtime mutation teardown is
+			// responsible for serializing and settling the remaining queued rows.
+			if runtimeID.Valid && agent.RuntimeID != runtimeID {
+				outcome = "runtime_mismatch"
+				return nil
 			}
-			reanchorMs = time.Since(t0).Milliseconds()
-		}
 
-		claimedTask := task
-		claimed = &claimedTask
-		return nil
-	})
-	if err != nil {
-		if outcome == "unknown" {
-			outcome = "error_transaction"
+			t0 = time.Now()
+			running, err := qtx.CountRunningTasks(ctx, agentID)
+			countRunningMs = time.Since(t0).Milliseconds()
+			if err != nil {
+				outcome = "error_count_running"
+				return fmt.Errorf("count running tasks: %w", err)
+			}
+			if running >= int64(agent.MaxConcurrentTasks) {
+				decisionDetail = claimDecisionDetail{running: running, maxConcurrent: int64(agent.MaxConcurrentTasks)}
+				outcome = "no_capacity"
+				return nil
+			}
+
+			t0 = time.Now()
+			reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
+			task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+				AgentID:          agentID,
+				RuntimeID:        claimRuntimeID,
+				PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+				RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+				ExcludedTaskIds:  refused,
+			})
+			claimAgentMs = time.Since(t0).Milliseconds()
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					outcome = "no_tasks"
+					return nil
+				}
+				outcome = "error_claim"
+				return fmt.Errorf("claim task: %w", err)
+			}
+
+			// The claim gate (spec 4.2, 4.5) runs on the row just selected, inside the
+			// transaction, so a refusal rolls the selection back and leaves it queued.
+			if err := s.admitClaimedTask(ctx, qtx, agent.WorkspaceID, task); err != nil {
+				return err
+			}
+
+			// An idle task-owned direct-chat row may already be visible as the
+			// positional queue head. Normal completion reanchors a successor beside
+			// the assistant outcome before commit; this claim-time query is the
+			// compatibility fallback for an older or otherwise out-of-order row.
+			// It only moves that row inside the claim transaction, so full-list and
+			// cursor readers see the corrected boundary once it is dispatched. Retry
+			// children keep the root input owner and stale-dispatch reclaim uses a
+			// separate query, so neither path moves an already-visible turn again.
+			if task.ChatSessionID.Valid && task.ChatInputTaskID.Valid && task.ChatInputTaskID == task.ID {
+				t0 = time.Now()
+				if err := qtx.ReanchorClaimedDirectChatInput(ctx, db.ReanchorClaimedDirectChatInputParams{
+					DispatchedAt: task.DispatchedAt,
+					TaskID:       task.ID,
+				}); err != nil {
+					reanchorMs = time.Since(t0).Milliseconds()
+					outcome = "error_reanchor_chat_input"
+					return fmt.Errorf("reanchor claimed direct chat input: %w", err)
+				}
+				reanchorMs = time.Since(t0).Milliseconds()
+			}
+
+			claimedTask := task
+			claimed = &claimedTask
+			return nil
+		})
+		var refusal *claimRefusal
+		if errors.As(err, &refusal) {
+			s.recordClaimRefusal(ctx, refusal)
+			refused = append(refused, refusal.Task.ID)
+			if len(refused) < maxClaimGateRefusals {
+				continue
+			}
+			outcome = "gate_refused"
+			return nil, nil
 		}
-		return nil, err
+		if err != nil {
+			if outcome == "unknown" {
+				outcome = "error_transaction"
+			}
+			return nil, err
+		}
+		break
 	}
 	if claimed == nil {
 		return nil, nil
@@ -4031,7 +4055,13 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 	}
 	s.forgetTaskReclaim(requeued)
 	s.ReconcileAgentStatus(ctx, requeued.AgentID)
-	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, requeued)
+	// The requeue has committed, so its event must not depend on what is left
+	// of the caller's budget. Batch recovery shares one short deadline across
+	// the SQL, cache and status work above; a scope lookup on that spent
+	// context resolved to no workspace and silently dropped task:queued.
+	eventCtx, cancelEvent := context.WithTimeout(context.WithoutCancel(ctx), taskEventScopeTimeout)
+	s.broadcastTaskEvent(eventCtx, protocol.EventTaskQueued, requeued)
+	cancelEvent()
 	s.notifyTaskAvailable(requeued)
 	slog.Info("task requeued after claim finalization failure",
 		"task_id", util.UUIDToString(requeued.ID),
@@ -7555,9 +7585,22 @@ func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.Ag
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue, extra ...map[string]any) {
-	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	workspaceID, err := s.ResolveTaskWorkspaceIDChecked(ctx, task)
+	if err != nil {
+		// An unresolved scope drops the event. Log it so a lost realtime update
+		// is visible instead of silent.
+		slog.Warn("task event not published: workspace lookup failed",
+			"event_type", eventType,
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+	}
 	s.publishTaskEvent(eventType, workspaceID, task, extra...)
 }
+
+// taskEventScopeTimeout bounds the workspace lookup for an event whose
+// transaction has already committed. The caller's context may be spent by then.
+const taskEventScopeTimeout = 2 * time.Second
 
 // taskFailedFields adds the terminal failure context required by channel
 // outbounds without changing the long-standing map payload used by existing

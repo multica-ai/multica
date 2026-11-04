@@ -300,6 +300,8 @@ func (r *companyRun) apply(ctx context.Context) {
 	}
 	r.run("knowledge:ventures", func() (string, string, error) { return r.ensureVentures(ctx) })
 	r.run("knowledge:policies", func() (string, string, error) { return r.ensurePublishPolicies(ctx) })
+	// The company budget in warn mode at the stated default, so nothing holds silently (spec 4.2).
+	r.run("budgets:company", func() (string, string, error) { return r.ensureBudgets(ctx) })
 }
 
 // librarian runs the Librarian's part of the starter company for the Executive
@@ -499,6 +501,13 @@ func (r *companyRun) ensureAgent(ctx context.Context, role companyRole) (string,
 		if err := q.AssignKnowledgeMcpToAgent(ctx, db.AssignKnowledgeMcpToAgentParams{AgentID: a.ID, WorkspaceID: r.in.WorkspaceID}); err != nil {
 			return err
 		}
+		// The template's instructions are the agent's first revision (spec 4.6).
+		if _, err := WriteAgentInstructionRevision(ctx, q, r.in.WorkspaceID, a.ID, instructions, InstructionChange{
+			Source: InstructionSourceHuman,
+			Actor:  GovernanceActor{Type: GovernanceActorMember, ID: r.in.ActorUserID},
+		}); err != nil {
+			return err
+		}
 		agent = a
 		return nil
 	})
@@ -586,6 +595,10 @@ func (r *companyRun) ensureSquad(ctx context.Context, card companySquad) (string
 			memberRole := "member"
 			if role.Key == card.Leader {
 				memberRole = "leader"
+			} else if role.Key == CompanyReviewerRoleKey {
+				// The reviewer is the squad member the monthly review routine and
+				// the review publisher look for (spec 4.6).
+				memberRole = CompanyReviewerMemberRole
 			}
 			if _, err := q.AddSquadMember(ctx, db.AddSquadMemberParams{
 				SquadID: squad.ID, MemberType: "agent", MemberID: agent.ID, Role: memberRole,

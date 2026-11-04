@@ -174,10 +174,14 @@ type AutopilotRunResponse struct {
 	// non-success run (skipped/failed), persisted at the decision source. The UI
 	// localizes it instead of echoing the raw English reason (which may name a
 	// private assignee agent). Additive: nil for legacy/success-path runs.
-	ReasonCode     *string `json:"reason_code,omitempty"`
-	TriggerPayload any     `json:"trigger_payload"`
-	Result         any     `json:"result"`
-	CreatedAt      string  `json:"created_at"`
+	ReasonCode *string `json:"reason_code,omitempty"`
+	// Held is true while the claim gate holds the run's queued task (spec 4.10(b)):
+	// the run has its issue or task, and it runs once the hold releases. ReasonCode
+	// then names the hold (company_paused, budget_hold or quiet_hours).
+	Held           bool   `json:"held"`
+	TriggerPayload any    `json:"trigger_payload"`
+	Result         any    `json:"result"`
+	CreatedAt      string `json:"created_at"`
 }
 
 // ── Converters ──────────────────────────────────────────────────────────────
@@ -2303,7 +2307,7 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		// can be up to 256 KiB and `limit` defaults to 20, so the full
 		// list would be a ~5 MB worst case. Detail dialog fetches the
 		// full payload from GetAutopilotRun.
-		resp[i] = runToResponseSlim(run)
+		resp[i] = h.withRunHold(r.Context(), autopilot.WorkspaceID, run, runToResponseSlim(run))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": len(resp)})
 }
@@ -2340,7 +2344,24 @@ func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runToResponse(run))
+	writeJSON(w, http.StatusOK, h.withRunHold(r.Context(), autopilot.WorkspaceID, run, runToResponse(run)))
+}
+
+// withRunHold marks a run its claim gate is holding now (see
+// AutopilotService.HeldRunReason). A failed read leaves the run unmarked and is
+// logged: the hold is a display of the gate's state, not part of the run.
+func (h *Handler) withRunHold(ctx context.Context, ws pgtype.UUID, run db.AutopilotRun, resp AutopilotRunResponse) AutopilotRunResponse {
+	code, held, err := h.AutopilotService.HeldRunReason(ctx, ws, run)
+	if err != nil {
+		slog.Warn("read run hold failed", "run_id", uuidToString(run.ID), "error", err)
+		return resp
+	}
+	if held {
+		c := string(code)
+		resp.Held = true
+		resp.ReasonCode = &c
+	}
+	return resp
 }
 
 // ── Manual trigger ──────────────────────────────────────────────────────────
