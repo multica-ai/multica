@@ -17,6 +17,7 @@ const transcript = {
   hasOlderMessages: () => false,
   conversationIds: () => [...committed.keys()]
 };
+const workspaceLoad = { status: "ready" as const, errorMessage: null };
 function commitMessages(messages: readonly AgentActivityMessage[]) {
   runInAction(() => {
     for (const message of messages) {
@@ -45,7 +46,7 @@ describe("useAgentGuiConversationList", () => {
       sessionOrigin: "test"
     };
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -137,7 +138,7 @@ describe("useAgentGuiConversationList", () => {
     const displayPrompt =
       "[@Task](mention://workspace-issue/issue-1?workspaceId=workspace-1) 看看";
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -184,7 +185,7 @@ describe("useAgentGuiConversationList", () => {
     const displayPrompt =
       "[@<div>](mention://browser-element/browser-element%3A1?tag=div&workspaceId=workspace-1) 这里说的什么";
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -230,7 +231,7 @@ describe("useAgentGuiConversationList", () => {
     const displayPrompt =
       "[@<div>](mention://browser-element/browser-element%3A1?tag=div&workspaceId=workspace-1) 这里说的什么";
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -295,7 +296,7 @@ describe("useAgentGuiConversationList", () => {
     const displayPrompt =
       "[@Previous chat](mention://agent-session/session-previous?workspaceId=workspace-1) 看看";
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -364,7 +365,7 @@ describe("useAgentGuiConversationList", () => {
       sessionOrigin: "test"
     };
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -438,7 +439,7 @@ describe("useAgentGuiConversationList", () => {
       sessionOrigin: "test"
     };
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -512,7 +513,7 @@ describe("useAgentGuiConversationList", () => {
       sessionOrigin: "test"
     };
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {
@@ -622,7 +623,7 @@ describe("useAgentGuiConversationList", () => {
       createLocalAgentGUIAgentTarget("claude-code")
     ];
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query, targets)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query, targets)
     );
 
     act(() => {
@@ -724,7 +725,7 @@ describe("useAgentGuiConversationList", () => {
       sessionOrigin: "test"
     };
     const { result } = renderHook(() =>
-      useAgentGuiConversationList(engine, transcript, query)
+      useAgentGuiConversationList(engine, transcript, workspaceLoad, query)
     );
 
     act(() => {

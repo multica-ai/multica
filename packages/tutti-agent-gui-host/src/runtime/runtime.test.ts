@@ -706,6 +706,24 @@ describe("Multica Agent GUI runtime with the original session engine", () => {
     await vi.waitFor(() => expect(handle.runtime.getSnapshot(init.workspaceId).sessions[0]).toMatchObject({ activeTurnId: "another-surface-run", activeTurn: { phase: "running", startedAtUnixMs: Date.parse(time) } }));
   });
 
+  it("reads the workspace again when the connection comes back, and shows a read that failed", async () => {
+    const data = backend();
+    const { handle } = await setup(data);
+    await vi.waitFor(() => expect(handle.runtime.workspaceLoad.status).toBe("ready"));
+    const loads = () => data.request.mock.calls.filter(([method]) => method === "workspace.load").length;
+    const before = loads();
+    data.emit({ type: "connection", connected: false });
+    expect(loads()).toBe(before);
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "workspace.load") throw new Error("daemon unavailable");
+      return original(method, params);
+    });
+    data.emit({ type: "connection", connected: true });
+    await vi.waitFor(() => expect(handle.runtime.workspaceLoad).toMatchObject({ status: "failed", errorMessage: "daemon unavailable" }));
+    expect(loads()).toBe(before + 1);
+  });
+
   it("settles completed conversation history without generating a new reconcile demand", async () => {
     const data = backend();
     data.sessions.push(session);

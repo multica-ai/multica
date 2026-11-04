@@ -30,7 +30,7 @@ export function useAgentGUIConversationListState({
   sessionEngine,
   workspaceId
 }: UseAgentGUIConversationListStateInput) {
-  const { transcript } = useAgentGUIRuntime();
+  const { transcript, workspaceLoad } = useAgentGUIRuntime();
   const [conversationFilter, setConversationFilter] =
     useState<AgentGUIConversationFilter>(
       () => createAgentGUIConversationFilterState().filter
@@ -61,6 +61,7 @@ export function useAgentGUIConversationListState({
   const conversationListState = useAgentGuiConversationList(
     sessionEngine,
     transcript,
+    workspaceLoad,
     conversationListQuery,
     normalizedProviderTargets
   );

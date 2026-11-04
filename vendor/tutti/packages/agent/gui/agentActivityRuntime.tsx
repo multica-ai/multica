@@ -37,6 +37,11 @@ export type AgentActivitySessionMessages = Readonly<
   Record<string, readonly AgentActivityMessage[]>
 >;
 
+export interface AgentGUIWorkspaceLoadReader {
+  readonly status: "idle" | "loading" | "ready" | "failed";
+  readonly errorMessage: string | null;
+}
+
 export interface AgentGUITranscriptReader {
   messages(agentSessionId: string): readonly AgentActivityMessage[];
   hasOlderMessages(agentSessionId: string): boolean;
@@ -306,6 +311,8 @@ export interface AgentGUIRuntime {
   mutations: AgentGUIConversationMutations;
   /** Each target's composer choices, for reading; getComposerOptions asks for them. Also writes a conversation's settings. */
   composer: AgentGUIComposerOptionsReader & AgentGUIComposerSettingsLane;
+  /** Whether the conversation list has been read. */
+  workspaceLoad: AgentGUIWorkspaceLoadReader;
   /** Each conversation's committed messages, for reading. */
   transcript: AgentGUITranscriptReader;
   /** Stops, answers to interactions and edit retries. */

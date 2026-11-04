@@ -4,12 +4,11 @@ import {
   selectPendingActivations,
   selectRootAgentSessionIdsWithPendingInteractions,
   selectWorkspaceAgentConsumerSessions,
-  selectWorkspaceReconcileState,
   type AgentSessionEngine,
   type PendingActivationIntentRecord
 } from "@tutti-os/agent-activity-core";
 import { useEngineSelector, useModelValue } from "../../../../../shared/engine/useEngineSelector";
-import type { AgentGUITranscriptReader } from "../../../../../agentActivityRuntime";
+import type { AgentGUITranscriptReader, AgentGUIWorkspaceLoadReader } from "../../../../../agentActivityRuntime";
 import {
   matchesAgentGUIConversationSummaryFilter,
   normalizeAgentGUIConversationFilter,
@@ -42,13 +41,12 @@ const EMPTY_AGENT_GUI_AGENT_TARGETS: readonly AgentGUIAgentTarget[] = [];
 export function useAgentGuiConversationList(
   engine: AgentSessionEngine,
   transcript: AgentGUITranscriptReader,
+  workspaceLoad: AgentGUIWorkspaceLoadReader,
   query: AgentGUIConversationListQuery | null,
   agentTargets: readonly AgentGUIAgentTarget[] = EMPTY_AGENT_GUI_AGENT_TARGETS
 ) {
-  const workspaceReconcile = useEngineSelector(
-    engine,
-    selectWorkspaceReconcileState
-  );
+  const loadStatus = useModelValue(() => workspaceLoad.status, [workspaceLoad]);
+  const loadError = useModelValue(() => workspaceLoad.errorMessage, [workspaceLoad]);
   const sessions = useEngineSelector(
     engine,
     selectWorkspaceAgentConsumerSessions,
@@ -213,14 +211,9 @@ export function useAgentGuiConversationList(
       );
     return {
       conversations,
-      error: workspaceReconcile.errorMessage,
-      initialized:
-        workspaceReconcile.status === "ready" ||
-        workspaceReconcile.status === "failed" ||
-        workspaceReconcile.status === "unknown",
-      isLoading:
-        workspaceReconcile.status === "idle" ||
-        workspaceReconcile.status === "loading",
+      error: loadError,
+      initialized: loadStatus === "ready" || loadStatus === "failed",
+      isLoading: loadStatus === "idle" || loadStatus === "loading",
       query,
       queryKey: [
         query.workspaceId,
@@ -235,8 +228,9 @@ export function useAgentGuiConversationList(
     pendingActivations,
     query,
     rootAgentSessionIdsWithPendingInteractions,
-    sessions,
-    workspaceReconcile
+    loadError,
+    loadStatus,
+    sessions
   ]);
 }
 
