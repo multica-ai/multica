@@ -193,13 +193,16 @@ export function useKeptActiveItem<T extends { id: string }>(
 /**
  * The issues under an expanded row: the first page, then "Load more" in
  * steps. `params: null` means the row's settings can match nothing;
- * `undefined` that they are still resolving.
+ * `undefined` that they are still resolving, or — with `paramsError` — that
+ * they could not resolve, which `onRetry` tries again.
  */
 export function SidebarIssueList({
   id,
   wsId,
   source,
   params,
+  paramsError = false,
+  onRetry,
   activeIssueId,
   onCollapse,
 }: {
@@ -207,6 +210,8 @@ export function SidebarIssueList({
   wsId: string;
   source: string;
   params: SidebarIssuesRequest | null | undefined;
+  paramsError?: boolean;
+  onRetry?: () => void;
   activeIssueId: string | null;
   onCollapse: () => void;
 }) {
@@ -240,7 +245,21 @@ export function SidebarIssueList({
 
   return (
     <ul id={id} className="mb-2 ml-5 border-l border-surface-border pl-1.5">
-      {params === undefined || (params && query.isPending) ? (
+      {params === undefined && paramsError ? (
+        <li className="flex h-[26px] items-center gap-2 px-2 text-caption text-faint-foreground">
+          <span className="min-w-0 truncate">{t(($) => $.panels.work.project_issues_error)}</span>
+          {onRetry && (
+            <button
+              type="button"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              onKeyDown={onKeyDown}
+              onClick={onRetry}
+            >
+              {t(($) => $.panels.work.project_issues_retry)}
+            </button>
+          )}
+        </li>
+      ) : params === undefined || (params && query.isPending) ? (
         <li className="flex h-[26px] items-center gap-2 px-2">
           <div className="size-3 shrink-0 rounded-full bg-muted" />
           <div className="h-3 w-24 rounded-xs bg-muted" />

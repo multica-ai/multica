@@ -39,6 +39,9 @@
   "working_filter_error": {
     "title": "Couldn't load issues with working agents"
   },
+  "unread_filter_error": {
+    "title": "Couldn't load your unread issues"
+  },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
     "hint": "Issues can't be shown until statuses load.",
@@ -183,6 +186,8 @@
     "relation_my_agents": "Assigned to my agents",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
+    "section_read_state": "Read state",
+    "read_state_unread": "Unread",
     "operator_label": "Match",
     "operator_is": "is",
     "operator_is_not": "is not",
@@ -783,6 +788,7 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
+    "unread_title": "No unread issues",
     "clear_button": "Clear filters"
   },
   "agent_live": {
@@ -1790,7 +1796,8 @@
     "builtin": {
       "my_issues": "My Issues",
       "my_agents": "My agents' work",
-      "all_issues": "All issues"
+      "all_issues": "All issues",
+      "unread": "Unread"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

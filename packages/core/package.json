@@ -125,6 +125,7 @@
     "./issue-views/preferences": "./issue-views/preferences.ts",
     "./issue-views/sidebar-views": "./issue-views/sidebar-views.ts",
     "./issue-views/view-target": "./issue-views/view-target.ts",
+    "./issue-views/unread-view": "./issue-views/unread-view.ts",
     "./issue-views/definition": "./issue-views/definition.ts",
     "./issue-views/rename-store": "./issue-views/rename-store.ts",
     "./billing": "./billing/index.ts",
