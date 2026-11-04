@@ -7,21 +7,16 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Check the entire selection before cancelling runs or deleting any records.
-// Agent requests never inherit the role or ownership rights of their token's user.
+// requireIssueDeletion checks the entire selection before cancelling runs or
+// deleting any records. Owners and admins may delete any issue; members may
+// delete issues they created or that agents they currently own created; an
+// agent may delete only issues it created. Agent requests never inherit the
+// role or ownership rights of their token's user.
 func (h *Handler) requireIssueDeletion(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, issues []db.Issue) bool {
-	workspace, err := h.Queries.GetWorkspace(r.Context(), workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load issue deletion policy")
-		return false
-	}
-	if !workspace.RestrictIssueDeletion {
-		return true
-	}
 	// Cloud PATs have a user but no bound agent. They cannot claim that user's
 	// deletion rights; only task tokens identify a machine creator reliably.
 	if isMachineCredentialActor(r) && r.Header.Get("X-Actor-Source") != "task_token" {
-		writeError(w, http.StatusForbidden, "restricted issue deletion requires a human or a bound agent identity")
+		writeError(w, http.StatusForbidden, "issue deletion requires a human or a bound agent identity")
 		return false
 	}
 	wsID := uuidToString(workspaceID)

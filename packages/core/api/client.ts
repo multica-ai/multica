@@ -318,8 +318,6 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
-  WorkspaceSchema,
-  WorkspaceIssueDeletionPolicySchema,
   type AppConfigResponse,
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
@@ -3092,10 +3090,7 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    const raw = await this.fetch<unknown>("/api/workspaces");
-    const parsed = parseWithFallback(raw, WorkspaceSchema.array(), null, { endpoint: "GET /api/workspaces" });
-    if (!parsed) throw new Error("Invalid workspace response");
-    return parsed;
+    return this.fetch("/api/workspaces");
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
@@ -3110,27 +3105,10 @@ export class ApiClient {
   }
 
   async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`, {
+    return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
-    const parsed = parseWithFallback(raw, WorkspaceSchema, null, { endpoint: "PATCH /api/workspaces/:id" });
-    if (!parsed) throw new Error("Invalid workspace response");
-    return parsed;
-  }
-
-  async updateWorkspaceIssueDeletionPolicy(id: string, restricted: boolean): Promise<Workspace> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${id}/issue-deletion-policy`, {
-      method: "PATCH",
-      body: JSON.stringify({ restrict_issue_deletion: restricted }),
-    });
-    const parsed = parseWithFallback<Workspace | null>(raw, WorkspaceIssueDeletionPolicySchema, null, {
-      endpoint: "PATCH /api/workspaces/:id/issue-deletion-policy",
-    });
-    if (!parsed || parsed.restrict_issue_deletion !== restricted) {
-      throw new Error("Invalid issue deletion policy response");
-    }
-    return parsed;
   }
 
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {

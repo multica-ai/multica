@@ -13,9 +13,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true, restricted: false }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ restricted: deletionPolicy.restricted, canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -199,7 +199,6 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   deletionPolicy.allowed = true;
-  deletionPolicy.restricted = false;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   getShareableUrlMock.mockClear();
@@ -337,9 +336,8 @@ describe("IssueActionsDropdown", () => {
     expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
   });
 
-  it("disables Delete issue when the workspace policy denies it", async () => {
+  it("disables Delete issue when the user cannot delete the issue", async () => {
     deletionPolicy.allowed = false;
-    deletionPolicy.restricted = true;
     render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
     fireEvent.click(screen.getByTestId("trigger"));
     const item = await screen.findByText("Delete issue");

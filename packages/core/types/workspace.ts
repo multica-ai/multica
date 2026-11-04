@@ -12,7 +12,6 @@ export interface Workspace {
   description: string | null;
   context: string | null;
   settings: Record<string, unknown>;
-  restrict_issue_deletion?: boolean;
   repos: WorkspaceRepo[];
   issue_prefix: string;
   avatar_url: string | null;

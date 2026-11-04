@@ -896,7 +896,6 @@
     "delete_failed": "刪除任務失敗",
     "delete_dialog_title_other": "刪除 {{count}} 個任務？",
     "delete_dialog_desc_other": "此操作無法撤銷，所選任務及其全部關聯資料都會被永久刪除。",
-    "delete_dialog_warning": "任何工作區成員都可以刪除任務。",
     "cancel": "取消"
   },
   "card": {

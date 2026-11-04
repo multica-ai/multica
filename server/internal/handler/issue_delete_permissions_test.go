@@ -9,32 +9,30 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-func TestIssueDeletionPolicy(t *testing.T) {
+func TestIssueDeletionPermissions(t *testing.T) {
 	for _, tc := range []struct {
 		name, role, actor, creator string
-		restricted, allowed        bool
+		allowed                    bool
 	}{
-		{"default member deletes others", "member", "member", "other", false, true},
-		{"default cloud PAT deletes others", "owner", "cloud", "other", false, true},
-		{"cloud PAT denied admin rights", "admin", "cloud", "other", true, false},
-		{"cloud PAT denied owner rights", "owner", "cloud", "other", true, false},
-		{"cloud PAT denied member ownership", "member", "cloud", "self", true, false},
-		{"cloud PAT denied agent ownership", "owner", "cloud", "owned-agent", true, false},
-		{"default agent deletes others", "owner", "agent", "other", false, true},
-		{"member deletes own", "member", "member", "self", true, true},
-		{"member denied others", "member", "member", "other", true, false},
-		{"member deletes own agent issue", "member", "member", "owned-agent", true, true},
-		{"member denied other agent issue", "member", "member", "other-agent", true, false},
-		{"owner deletes others", "owner", "member", "other", true, true},
-		{"admin deletes others", "admin", "member", "other", true, true},
-		{"agent deletes own", "member", "agent", "owned-agent", true, true},
-		{"agent denied human issue", "owner", "agent", "self", true, false},
-		{"agent denied sibling issue", "owner", "agent", "other-agent", true, false},
-		{"member denied missing agent", "member", "member", "missing-agent", true, false},
+		{"cloud PAT denied admin rights", "admin", "cloud", "other", false},
+		{"cloud PAT denied owner rights", "owner", "cloud", "other", false},
+		{"cloud PAT denied member ownership", "member", "cloud", "self", false},
+		{"cloud PAT denied agent ownership", "owner", "cloud", "owned-agent", false},
+		{"member deletes own", "member", "member", "self", true},
+		{"member denied others", "member", "member", "other", false},
+		{"member deletes own agent issue", "member", "member", "owned-agent", true},
+		{"member denied other agent issue", "member", "member", "other-agent", false},
+		{"owner deletes others", "owner", "member", "other", true},
+		{"admin deletes others", "admin", "member", "other", true},
+		{"agent deletes own", "member", "agent", "owned-agent", true},
+		{"agent denied human issue", "owner", "agent", "self", false},
+		{"agent denied sibling issue", "owner", "agent", "other-agent", false},
+		{"member denied missing agent", "member", "member", "missing-agent", false},
+		{"admin deletes missing agent issue", "admin", "member", "missing-agent", true},
 	} {
 		for _, batch := range []bool{false, true} {
 			t.Run(tc.name+"/batch="+strconv.FormatBool(batch), func(t *testing.T) {
-				ws := dbfx.Workspace(t, "deletion policy", "delete-"+uuid.NewString(), testutil.Cols{"restrict_issue_deletion": tc.restricted})
+				ws := dbfx.Workspace(t, "deletion permissions", "delete-"+uuid.NewString())
 				dbfx.Member(t, ws, testUserID, tc.role)
 				agent := dbfx.Agent(t, "own agent", "", testutil.Cols{"workspace_id": ws})
 				other := dbfx.User(t, "Other", "delete-"+uuid.NewString()+"@example.test")
@@ -89,7 +87,7 @@ func TestIssueDeletionPolicy(t *testing.T) {
 }
 
 func TestIssueDeletionBatchRejectsBeforeCancellingRuns(t *testing.T) {
-	ws := dbfx.Workspace(t, "batch deletion", "delete-"+uuid.NewString(), testutil.Cols{"restrict_issue_deletion": true})
+	ws := dbfx.Workspace(t, "batch deletion", "delete-"+uuid.NewString())
 	dbfx.Member(t, ws, testUserID, "member")
 	other := dbfx.User(t, "Other", "delete-"+uuid.NewString()+"@example.test")
 	owned := dbfx.Issue(t, "owned", testutil.Cols{"workspace_id": ws})

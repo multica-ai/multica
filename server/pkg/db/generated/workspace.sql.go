@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, restrict_issue_deletion
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
 `
 
 type CreateWorkspaceParams struct {
@@ -48,7 +48,6 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.RestrictIssueDeletion,
 	)
 	return i, err
 }
@@ -231,7 +230,7 @@ func (q *Queries) GetDaemonWorkspace(ctx context.Context, id pgtype.UUID) (GetDa
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, restrict_issue_deletion FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed FROM workspace
 WHERE id = $1
 `
 
@@ -252,7 +251,6 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.RestrictIssueDeletion,
 	)
 	return i, err
 }
@@ -272,7 +270,7 @@ func (q *Queries) GetWorkspaceAttributionFailClosed(ctx context.Context, id pgty
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, restrict_issue_deletion FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed FROM workspace
 WHERE slug = $1
 `
 
@@ -293,7 +291,6 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.RestrictIssueDeletion,
 	)
 	return i, err
 }
@@ -351,7 +348,7 @@ func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) 
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, w.restrict_issue_deletion
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -381,7 +378,6 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
-			&i.RestrictIssueDeletion,
 		); err != nil {
 			return nil, err
 		}
@@ -448,7 +444,7 @@ UPDATE workspace SET
     avatar_url = COALESCE($8, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, restrict_issue_deletion
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
 `
 
 type UpdateWorkspaceParams struct {
@@ -488,40 +484,6 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.RestrictIssueDeletion,
-	)
-	return i, err
-}
-
-const updateWorkspaceIssueDeletionPolicy = `-- name: UpdateWorkspaceIssueDeletionPolicy :one
-UPDATE workspace SET restrict_issue_deletion = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, restrict_issue_deletion
-`
-
-type UpdateWorkspaceIssueDeletionPolicyParams struct {
-	ID                    pgtype.UUID `json:"id"`
-	RestrictIssueDeletion bool        `json:"restrict_issue_deletion"`
-}
-
-func (q *Queries) UpdateWorkspaceIssueDeletionPolicy(ctx context.Context, arg UpdateWorkspaceIssueDeletionPolicyParams) (Workspace, error) {
-	row := q.db.QueryRow(ctx, updateWorkspaceIssueDeletionPolicy, arg.ID, arg.RestrictIssueDeletion)
-	var i Workspace
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Slug,
-		&i.Description,
-		&i.Settings,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Context,
-		&i.Repos,
-		&i.IssuePrefix,
-		&i.IssueCounter,
-		&i.AvatarUrl,
-		&i.AttributionFailClosed,
-		&i.RestrictIssueDeletion,
 	)
 	return i, err
 }

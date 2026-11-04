@@ -896,7 +896,6 @@
     "delete_failed": "タスクを削除できませんでした",
     "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
     "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
-    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル"
   },
   "card": {

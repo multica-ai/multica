@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Copy } from "@multica/ui/icons";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
@@ -146,7 +145,6 @@ export function WorkspaceTab() {
   const [prefixDraft, setPrefixDraft] = useState<string | null>(null);
   const [prefixSaveStatus, setPrefixSaveStatus] =
     useState<SettingsSaveStatus>("idle");
-  const [savingDeletionPolicy, setSavingDeletionPolicy] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -476,37 +474,6 @@ export function WorkspaceTab() {
                 </Button>
               ) : null}
             </span>
-          </SettingsRow>
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title={t(($) => $.workspace.permissions_title)}>
-        <SettingsCard>
-          <SettingsRow
-            anchor="issue-deletion"
-            label={t(($) => $.workspace.restrict_issue_deletion)}
-            description={typeof workspace.restrict_issue_deletion === "boolean"
-              ? t(($) => $.workspace.restrict_issue_deletion_hint)
-              : t(($) => $.workspace.issue_deletion_policy_unsupported)}
-          >
-            <Switch
-              aria-label={t(($) => $.workspace.restrict_issue_deletion)}
-              checked={workspace.restrict_issue_deletion === true}
-              disabled={!canManageWorkspace || savingDeletionPolicy || typeof workspace.restrict_issue_deletion !== "boolean"}
-              onCheckedChange={async (checked) => {
-                setSavingDeletionPolicy(true);
-                try {
-                  const updated = await api.updateWorkspaceIssueDeletionPolicy(workspace.id, checked);
-                  qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-                    old?.map((item) => item.id === updated.id ? updated : item),
-                  );
-                } catch {
-                  toast.error(t(($) => $.workspace.toast_save_failed));
-                } finally {
-                  setSavingDeletionPolicy(false);
-                }
-              }}
-            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

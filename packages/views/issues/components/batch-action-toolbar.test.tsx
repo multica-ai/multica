@@ -11,9 +11,9 @@ const selection = vi.hoisted(() => ({
   clear: () => {},
 }));
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true, restricted: false }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ restricted: deletionPolicy.restricted, canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -127,7 +127,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 beforeEach(() => {
   deletionPolicy.allowed = true;
-  deletionPolicy.restricted = false;
   selection.selectedIds = new Set();
 });
 

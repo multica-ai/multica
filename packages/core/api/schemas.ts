@@ -3912,26 +3912,3 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
-
-// The policy is separate from replaceable settings.
-export const WorkspaceSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  slug: z.string(),
-  description: z.string().nullable().default(null),
-  context: z.string().nullable().default(null),
-  settings: z.record(z.string(), z.unknown()).catch({}),
-  restrict_issue_deletion: z.boolean().catch(true).optional(),
-  repos: z.array(z.object({
-    url: z.string(),
-    description: z.string().optional().catch(undefined),
-  }).loose()).catch([]),
-  issue_prefix: z.string().default(""),
-  avatar_url: z.string().nullable().default(null),
-  created_at: z.string().default(""),
-  updated_at: z.string().default(""),
-}).loose();
-
-export const WorkspaceIssueDeletionPolicySchema = WorkspaceSchema.extend({
-  restrict_issue_deletion: z.boolean(),
-});

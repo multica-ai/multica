@@ -97,7 +97,7 @@ export function BatchActionToolbar({
     return first && selectedIssues.every((i) => i.project_id === first) ? first : null;
   }, [selectedIssues]);
   const wsId = useWorkspaceId();
-  const { restricted, canDelete } = useIssueDeletion(wsId);
+  const { canDelete } = useIssueDeletion(wsId);
   const canDeleteSelection = selectedIssues.every(canDelete);
   const { workflows } = useIssueWorkflows(wsId);
   const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: count > 0 && !sharedProjectId });
@@ -273,9 +273,6 @@ export function BatchActionToolbar({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(($) => $.batch.delete_dialog_desc, { count })}
-              <span className="mt-2 block text-caption text-muted-foreground">
-                {restricted ? t(($) => $.batch.delete_restricted) : t(($) => $.batch.delete_dialog_warning)}
-              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
