@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { proxyUpload } from "./upload-proxy";
 
@@ -8,6 +9,51 @@ const production = { NODE_ENV: "production", REMOTE_API_URL: "http://backend:808
 afterEach(() => vi.restoreAllMocks());
 
 describe("proxyUpload", () => {
+  it("uploads a 2 MiB multipart body with Expect: 100-continue through real fetch", async () => {
+    let receivedBody: Buffer | undefined;
+    let receivedExpect: string | undefined;
+    const upstream = createServer((request, response) => {
+      receivedExpect = request.headers.expect;
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        receivedBody = Buffer.concat(chunks);
+        response.end("uploaded");
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = upstream.address();
+      if (!address || typeof address === "string") throw new Error("missing upstream port");
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(2 * 1024 * 1024)]), "attachment.bin");
+      const request = new Request("https://app.test/api/upload-file", {
+        method: "POST",
+        headers: { Expect: "100-continue" },
+        body: form,
+      });
+      const expectedBody = Buffer.from(await request.clone().arrayBuffer());
+      const response = await proxyUpload(request, {
+        ...production,
+        REMOTE_API_URL: `http://127.0.0.1:${address.port}`,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("uploaded");
+      expect(receivedExpect).toBeUndefined();
+      expect(receivedBody?.equals(expectedBody)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => error ? reject(error) : resolve());
+        upstream.closeAllConnections();
+      });
+    }
+  });
+
   it("forwards the untouched multipart stream, credentials, workspace, and query", async () => {
     const body = new ReadableStream<Uint8Array>();
     const request = new Request("https://app.test/api/upload-file?draft=1", {

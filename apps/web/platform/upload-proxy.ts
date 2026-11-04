@@ -48,6 +48,8 @@ export async function proxyUpload(
   const headers = forwardedHeaders(request.headers);
   // The outgoing streaming request uses its own transfer framing.
   headers.delete("content-length");
+  // Next's HTTP server handles 100-continue; Node fetch rejects Expect.
+  headers.delete("expect");
   headers.set("x-forwarded-host", request.headers.get("host") ?? incomingURL.host);
   headers.set("accept-encoding", "identity");
 
