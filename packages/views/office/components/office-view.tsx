@@ -256,7 +256,10 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       {firstRun ? (
         <OfficeFirstRun />
       ) : (
+        // A floor is its own office: a new worker per floor seats its workers at their desks from the
+        // first frame, instead of walking the previous floor's workers out of the door.
         <OfficeCanvas
+          key={floor?.id ?? "no-floor"}
           sessions={sessions}
           tagText={tagText}
           onPick={onPick}
