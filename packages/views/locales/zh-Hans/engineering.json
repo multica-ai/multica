@@ -1,38 +1,80 @@
 {
   "title": "工程总览",
-  "summary": {
-    "label": "项目工程速览",
-    "decisions": "待拍板",
-    "stage": "当前阶段",
-    "blocked": "阻塞任务",
-    "recent": "最近拍板"
+  "views": {
+    "label": "工程视图",
+    "overview": "总览",
+    "baseline": "项目基线",
+    "pending": "有修订待确认"
+  },
+  "hero": {
+    "allComplete": "所有交付阶段都完成了。",
+    "allCompleteHint": "项目可以验收并收尾归档。",
+    "review": "Stage {{stage}} 的 {{count}} 项任务全部完成。",
+    "reviewHint": "该复盘了：确认没有偏差，再解锁下一阶段。",
+    "empty": "从 Stage {{stage}} 开始规划交付。",
+    "emptyHint": "添加一个阶段，写清这一阶段要交付什么。",
+    "current": "现在在 Stage {{stage}}「{{title}}」，已完成 {{closed}}/{{total}}。",
+    "blocked": "其中 {{count}} 项被卡住，在等你。",
+    "unblocked": "没有被卡住的事项。"
   },
   "stage": {
-    "title": "工程阶段与推进策略",
-    "flowLabel": "工程阶段",
-    "summaryLabel": "推进策略",
-    "defaults": {
-      "1": "0→1 需求探索",
-      "2": "规格与基线锁定",
-      "3": "切片开发执行",
-      "4": "四轴审阅",
-      "5": "验收归档"
+    "flowLabel": "交付阶段",
+    "summaryLabel": "推进方针",
+    "summaryEmpty": "还没有写下推进方针。",
+    "editSummary": "编辑方针",
+    "label": "Stage {{number}}",
+    "default": "阶段 {{number}}",
+    "add": "添加阶段",
+    "newStage": "新阶段",
+    "nameLabel": "阶段名称",
+    "goalLabel": "阶段目标",
+    "edit": "改名称与目标",
+    "moveEarlier": "前移阶段",
+    "moveLater": "后移阶段",
+    "reorderHint": "只有当前主攻阶段之后、两侧都没有任务的阶段才能重排。",
+    "leftover": "遗留 {{count}}",
+    "makeCurrent": "设为主攻阶段",
+    "completedCount": "{{closed}}/{{total}} 完成",
+    "reviewAction": "复盘 Stage {{stage}}，解锁下一阶段",
+    "reviewDialogTitle": "复盘 Stage {{stage}}",
+    "reviewDialogDescription": "「{{title}}」的任务已全部完成。请对照基线确认结果，再将主攻阶段推进到 Stage {{next}}。",
+    "reviewTasksComplete": "任务 {{closed}}/{{total}} 完成",
+    "confirmAdvance": "解锁 Stage {{next}}",
+    "status": {
+      "completed": "已完成",
+      "review": "待复盘",
+      "current": "主攻中",
+      "locked": "未解锁"
     }
   },
   "decisions": {
-    "title": "需要你拍板的事项",
-    "count": "{{count}} 项待拍板",
-    "emptyTitle": "当前没有需要你拍板的事项",
-    "noComment": "暂时没有讲解评论"
+    "title": "等你处理",
+    "emptyTitle": "眼下没有要你处理的事，团队正在继续推进。",
+    "loading": "正在加载最新上下文",
+    "blockedHint": "阻塞任务正在等待拍板",
+    "openIssue": "打开 {{identifier}}",
+    "noComment": "暂时没有决策卡或讲解评论。",
+    "baselinePending": "基线修订 v{{number}} 待确认",
+    "reviewPending": "复盘 Stage {{stage}}，解锁下一阶段",
+    "reviewHint": "任务已全部完成，确认结果后再往下走。"
   },
   "progress": {
-    "title": "阶段任务进展与阻塞",
-    "emptyTitle": "项目中还没有任务",
-    "unstaged": "未划分阶段",
-    "stage": "第 {{number}} 阶段",
-    "closed": "{{total}} 项中已闭环 {{count}} 项",
-    "blocked": "{{count}} 项阻塞",
-    "percent": "已闭环 {{percent}}%"
+    "blockedGroup": "卡住了",
+    "reviewGroup": "审阅中",
+    "progressGroup": "进行中",
+    "todoGroup": "待开始",
+    "emptyStage": "这个阶段还没有任务。",
+    "showCompleted": "展开已完成的 {{count}} 项",
+    "hideCompleted": "收起已完成的 {{count}} 项",
+    "outside": "主线之外",
+    "outsideHint": "未分阶段的未关闭任务，不影响阶段推进与解锁。",
+    "outsideEmpty": "主线之外没有未关闭任务。"
+  },
+  "skills": {
+    "title": "Strixnova 工程技能绑定状态",
+    "loading": "正在检查活跃智能体的 skill 绑定",
+    "unavailable": "暂时无法读取 skill 绑定状态，工程管理功能仍可正常使用。",
+    "empty": "当前尚无活跃智能体绑定 Strixnova 工程管理系列 skill。智能体侧自动工程管理能力需绑定 skill 后生效；本页面的启用与所有功能不受影响。"
   },
   "recent": {
     "title": "上次看过之后，定了什么",
@@ -40,27 +82,60 @@
     "noSummary": "基线版本已拍板"
   },
   "baseline": {
-    "title": "受管项目基线与修订审批",
+    "title": "工程基线",
     "chaptersLabel": "基线章节",
-    "adoptedTitle": "已采用基线",
-    "candidateTitle": "修订候选与结构化 Diff",
-    "adoptedLabel": "已采用",
-    "candidateLabel": "修订候选",
-    "noAdopted": "本章还没有已采用的基线",
-    "noCandidate": "本章没有待确认候选",
+    "reviewLabel": "待确认的基线修订",
+    "revisionWaiting": "修订 v{{number}}",
+    "changeCount": "{{count}} 处变更",
+    "sourceIssue": "来源任务",
+    "reviewModeLabel": "修订显示方式",
+    "baseMode": "正本 v{{number}}",
+    "compareMode": "对照 v{{number}}",
+    "previousChange": "上一处变更",
+    "nextChange": "下一处变更",
     "candidateMissing": "找不到链接指定的修订版本",
     "candidateMissingDescription": "该链接不匹配任何当前或历史版本，未替你改选其他候选。",
-    "warningTitle": "核心规则降级红牌",
-    "unchanged": "{{count}} 个锚点未变化",
     "added": "新增",
     "modified": "修改",
     "removed": "删除",
-    "noChanges": "没有锚点变化",
+    "removedSection": "候选修订将删除本小节。",
+    "noChanges": "没有小节变化",
     "openIssuesTitle": "拍板后的未完成任务",
     "inFlight": "在途",
     "queued": "排队",
     "openIssuesTruncated": "仅显示前 200 项未完成任务。",
     "readOnlyRevision": "这是历史版本的只读视图，不能在此处采用。"
+  },
+  "wiki": {
+    "meta": "{{chapters}} 章 · {{sections}} 节",
+    "lensLabel": "视角",
+    "lens": {
+      "understand": "项目理解",
+      "manage": "项目管理"
+    },
+    "tocLabel": "基线目录",
+    "searchPlaceholder": "在基线中查找",
+    "searchCount": "{{count}} 处匹配",
+    "searchEmpty": "没有找到「{{query}}」",
+    "readProgress": "已读 {{read}}/{{total}} 节",
+    "continueReading": "接着读",
+    "startReading": "从这里开始",
+    "allRead": "全部读完了",
+    "read": "已读",
+    "untitled": "引言",
+    "whyLabel": "为什么这样规定",
+    "whyShort": "为什么",
+    "exampleShort": "例",
+    "relatedConcepts": "相关概念",
+    "backlinks": "被引用",
+    "linkedIssues": "关联任务",
+    "latestRevision": "最近修订 v{{number}}",
+    "referenceCount": "被 {{count}} 个小节引用",
+    "goToSection": "跳转到该节",
+    "openInOverview": "打开",
+    "noStage": "未分阶段",
+    "backTo": "返回「{{title}}」",
+    "emptyChapter": "本章还没有已采用的基线内容。"
   },
   "chapters": {
     "overview": "项目概览",
@@ -73,7 +148,7 @@
     "adopted": "已采用",
     "superseded": "已被新版取代",
     "withdrawn": "已撤回",
-    "rejected": "已驳回",
+    "rejected": "已退回",
     "unknown": "未知状态"
   },
   "credentials": {
@@ -82,15 +157,8 @@
     "agent_task": "智能体执行",
     "unknown": "未知凭据"
   },
-  "warnings": {
-    "rule_removed": "{{anchor}} 删除了必做规则",
-    "rule_shrunk": "{{anchor}} 明显缩减了必做规则",
-    "rule_deferred": "{{anchor}} 将必做规则延后",
-    "defer_missing_pool": "{{anchor}} 延后但未关联非阻断优化池任务",
-    "unknown": "{{anchor}} 出现未识别的规则告警"
-  },
   "history": {
-    "title": "历史版本",
+    "title": "修订历史",
     "revision": "第 {{number}} 版",
     "empty": "本章还没有历史版本",
     "more": "加载更早版本"
@@ -104,32 +172,36 @@
   },
   "actions": {
     "save": "保存",
-    "reject": "驳回",
-    "adopt": "确认采用",
+    "cancel": "取消",
+    "close": "关闭",
+    "expand": "展开全文",
+    "collapse": "收起",
+    "reject": "退回修改",
+    "adopt": "采用",
     "enable": "启用总览"
   },
   "disabled": {
     "title": "尚未启用工程总览",
     "description": "项目仍保持原有界面。请联系工作区 owner 或 admin 启用。",
-    "adminDescription": "启用 Strixnova 后，可在这里查看阶段、待拍板事项、进展和受管基线。"
+    "adminDescription": "启用 Strixnova 后，可在这里查看交付阶段、待拍板事项、进展和受管基线。"
   },
   "errors": {
     "title": "暂时无法读取工程数据",
     "overview": "项目工程数据加载失败或响应无效，请稍后重试。",
-    "timeline": "讲解评论加载失败。",
+    "timeline": "决策上下文加载失败。",
     "decisionIssues": "待拍板任务加载失败。",
     "graph": "项目阶段进展加载失败。",
     "history": "历史版本加载失败。",
     "chapter": "服务端响应中没有这个基线章节。",
-    "decisionTitle": "候选未能完成拍板",
-    "decision": "候选可能已变化或已拍板，请核对当前版本后重试。",
+    "decisionTitle": "候选未能完成处理",
+    "decision": "候选可能已变化或已处理，请核对当前版本后重试。",
     "configTitle": "工程设置未保存",
     "config": "修改未生效，请检查权限后重试。"
   },
   "messages": {
     "configSaved": "工程设置已保存",
     "adopted": "候选已采用",
-    "rejected": "候选已驳回",
+    "rejected": "候选已退回修改",
     "serverAuthoritative": "权限与版本校验均由服务端执行"
   }
 }

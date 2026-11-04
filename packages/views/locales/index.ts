@@ -109,6 +109,7 @@ import zhHantUsage from "./zh-Hant/usage.json";
 import zhHantUi from "./zh-Hant/ui.json";
 import zhHantSquads from "./zh-Hant/squads.json";
 import zhHantBilling from "./zh-Hant/billing.json";
+import zhHantEngineering from "./zh-Hant/engineering.json";
 import koCommon from "./ko/common.json";
 import koQuota from "./ko/quota.json";
 import koThinking from "./ko/thinking.json";
@@ -323,6 +324,7 @@ export const UPSTREAM_RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: zhHantUi,
     squads: zhHantSquads,
     billing: zhHantBilling,
+    engineering: zhHantEngineering,
   },
   ko: {
     common: koCommon,

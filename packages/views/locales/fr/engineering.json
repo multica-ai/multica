@@ -1,30 +1,207 @@
 {
-  "title": "Vue d’ingénierie",
-  "summary": { "label": "Aperçu de l’ingénierie du projet", "decisions": "Décisions en attente", "stage": "Étape actuelle", "blocked": "Tâches bloquées", "recent": "Décision récente" },
+  "title": "Vue d’ensemble de l’ingénierie",
+  "views": {
+    "label": "Vues de l’ingénierie",
+    "overview": "Vue d’ensemble",
+    "baseline": "Référence du projet",
+    "pending": "Révisions à examiner"
+  },
+  "hero": {
+    "allComplete": "Toutes les étapes de livraison sont terminées.",
+    "allCompleteHint": "Le projet est prêt pour la recette et l’archivage.",
+    "review": "Les {{count}} tâches de l’étape {{stage}} sont terminées.",
+    "reviewHint": "Il est temps de faire le bilan avant de débloquer l’étape suivante.",
+    "empty": "Commencez à planifier la livraison à l’étape {{stage}}.",
+    "emptyHint": "Ajoutez une étape et décrivez clairement son résultat.",
+    "current": "Vous êtes à l’étape {{stage}} « {{title}} », avec {{closed}}/{{total}} tâches terminées.",
+    "blocked": "{{count}} tâches sont bloquées et attendent votre attention.",
+    "unblocked": "Aucun élément n’est bloqué."
+  },
   "stage": {
-    "title": "Étapes d’ingénierie et stratégie de livraison", "flowLabel": "Étapes d’ingénierie", "summaryLabel": "Stratégie de livraison",
-    "defaults": { "1": "Exploration 0→1", "2": "Spécifications et référence", "3": "Livraison incrémentale", "4": "Revue sur quatre axes", "5": "Acceptation et archivage" }
+    "flowLabel": "Étapes de livraison",
+    "summaryLabel": "Stratégie de livraison",
+    "summaryEmpty": "Aucune stratégie de livraison n’a encore été rédigée.",
+    "editSummary": "Modifier la stratégie",
+    "label": "Stage {{number}}",
+    "default": "Étape {{number}}",
+    "add": "Ajouter une étape",
+    "newStage": "Nouvelle étape",
+    "nameLabel": "Nom de l’étape",
+    "goalLabel": "Objectif de l’étape",
+    "edit": "Modifier le nom et l’objectif",
+    "moveEarlier": "Avancer l’étape",
+    "moveLater": "Reculer l’étape",
+    "reorderHint": "Seules les étapes vides situées après l’étape actuelle peuvent être réordonnées.",
+    "leftover": "{{count}} restantes",
+    "makeCurrent": "Définir comme étape actuelle",
+    "completedCount": "{{closed}}/{{total}} terminées",
+    "reviewAction": "Faire le bilan de l’étape {{stage}} et débloquer la suivante",
+    "reviewDialogTitle": "Bilan de l’étape {{stage}}",
+    "reviewDialogDescription": "Tout le travail de « {{title}} » est terminé. Vérifiez le résultat par rapport à la référence avant de passer à l’étape {{next}}.",
+    "reviewTasksComplete": "{{closed}}/{{total}} tâches terminées",
+    "confirmAdvance": "Débloquer l’étape {{next}}",
+    "status": {
+      "completed": "Terminée",
+      "review": "Bilan requis",
+      "current": "Actuelle",
+      "locked": "Verrouillée"
+    }
   },
-  "decisions": { "title": "Décisions nécessitant votre validation", "count": "{{count}} en attente", "emptyTitle": "Aucune décision n’attend votre validation", "noComment": "Aucun commentaire explicatif pour le moment" },
+  "decisions": {
+    "title": "En attente de votre action",
+    "emptyTitle": "Rien ne demande votre attention pour le moment.",
+    "loading": "Chargement du contexte récent",
+    "blockedHint": "Une tâche bloquée attend une décision",
+    "openIssue": "Ouvrir {{identifier}}",
+    "noComment": "Aucune carte de décision ni explication pour le moment.",
+    "baselinePending": "La révision v{{number}} de la référence doit être confirmée",
+    "reviewPending": "Faire le bilan de l’étape {{stage}} et débloquer la suivante",
+    "reviewHint": "Toutes les tâches sont terminées. Vérifiez le résultat avant de continuer."
+  },
   "progress": {
-    "title": "Progression par étape et blocages", "emptyTitle": "Aucune tâche dans ce projet", "unstaged": "Sans étape", "stage": "Étape {{number}}", "closed": "{{count}} sur {{total}} terminées", "blocked": "{{count}} bloquées", "percent": "{{percent}} % terminé"
+    "blockedGroup": "Bloquées",
+    "reviewGroup": "En revue",
+    "progressGroup": "En cours",
+    "todoGroup": "À commencer",
+    "emptyStage": "Aucune tâche n’est encore attribuée à cette étape.",
+    "showCompleted": "Afficher les {{count}} tâches terminées",
+    "hideCompleted": "Masquer les {{count}} tâches terminées",
+    "outside": "Hors du parcours principal",
+    "outsideHint": "Les tâches ouvertes sans étape n’affectent ni la progression ni le déblocage.",
+    "outsideEmpty": "Aucune tâche ouverte en dehors des étapes de livraison."
   },
-  "recent": { "title": "Décisions depuis votre dernière visite", "empty": "Aucune révision de référence n’a encore été décidée", "noSummary": "Révision de référence décidée" },
+  "skills": {
+    "title": "Liaisons des skills d’ingénierie Strixnova",
+    "loading": "Vérification des skills des agents actifs",
+    "unavailable": "Impossible de charger les liaisons de skills. La gestion de l’ingénierie reste disponible.",
+    "empty": "Aucun agent actif n’est lié aux skills d’ingénierie Strixnova. Les fonctions automatiques côté agent seront actives après la liaison ; cette page reste entièrement disponible."
+  },
+  "recent": {
+    "title": "Changements depuis votre dernière visite",
+    "empty": "Aucune décision de référence n’a encore été prise",
+    "noSummary": "Révision de référence décidée"
+  },
   "baseline": {
-    "title": "Référence gérée et approbation des révisions", "chaptersLabel": "Chapitres de référence", "adoptedTitle": "Référence adoptée", "candidateTitle": "Candidat et diff structuré", "adoptedLabel": "Adopté", "candidateLabel": "Candidat", "noAdopted": "Aucune référence adoptée dans ce chapitre", "noCandidate": "Aucun candidat en attente dans ce chapitre", "candidateMissing": "La révision demandée est introuvable", "candidateMissingDescription": "Le lien ne correspond à aucune révision actuelle ou historique. Aucun autre candidat n’a été sélectionné.", "warningTitle": "Alertes de downgrade des règles", "unchanged": "{{count}} ancres inchangées", "added": "Ajouté", "modified": "Modifié", "removed": "Supprimé", "noChanges": "Aucun changement d’ancre", "openIssuesTitle": "Tâches ouvertes après la décision", "inFlight": "En cours", "queued": "En attente", "openIssuesTruncated": "Seules les 200 premières tâches ouvertes sont affichées.", "readOnlyRevision": "Cette révision historique est en lecture seule et ne peut pas être adoptée ici."
+    "title": "Référence d’ingénierie",
+    "chaptersLabel": "Chapitres de référence",
+    "reviewLabel": "Examen de la révision de référence",
+    "revisionWaiting": "Révision v{{number}}",
+    "changeCount": "{{count}} modifications",
+    "sourceIssue": "Tâche d’origine",
+    "reviewModeLabel": "Affichage de la révision",
+    "baseMode": "Original v{{number}}",
+    "compareMode": "Comparer v{{number}}",
+    "previousChange": "Modification précédente",
+    "nextChange": "Modification suivante",
+    "candidateMissing": "La révision demandée est introuvable",
+    "candidateMissingDescription": "Le lien ne correspond à aucune révision actuelle ou historique. Aucun autre candidat n’a été sélectionné.",
+    "added": "Ajoutée",
+    "modified": "Modifiée",
+    "removed": "Supprimée",
+    "removedSection": "Cette section est supprimée par le candidat.",
+    "noChanges": "Aucune modification de section",
+    "openIssuesTitle": "Tâches ouvertes après la décision",
+    "inFlight": "En cours",
+    "queued": "En file d’attente",
+    "openIssuesTruncated": "Seules les 200 premières tâches ouvertes sont affichées.",
+    "readOnlyRevision": "Cette révision historique est en lecture seule et ne peut pas être adoptée ici."
   },
-  "chapters": { "overview": "Présentation du projet", "domain_rules": "Domaine et règles obligatoires", "architecture": "Architecture et décisions techniques", "exclusions_and_risks": "Exclusions, reports et risques" },
-  "status": { "candidate": "Candidat", "adopted": "Adopté", "superseded": "Remplacé", "withdrawn": "Retiré", "rejected": "Rejeté", "unknown": "État inconnu" },
-  "credentials": { "session": "Confirmé dans le tableau de bord", "pat": "Confirmé avec un jeton personnel", "agent_task": "Décidé par un agent", "unknown": "Identifiant inconnu" },
-  "warnings": { "rule_removed": "{{anchor}} supprime une règle obligatoire", "rule_shrunk": "{{anchor}} réduit fortement une règle obligatoire", "rule_deferred": "{{anchor}} reporte une règle obligatoire", "defer_missing_pool": "{{anchor}} est reporté sans tâche du pool non bloquant", "unknown": "{{anchor}} présente une alerte de règle inconnue" },
-  "history": { "title": "Historique des révisions", "revision": "Révision {{number}}", "empty": "Aucune révision dans ce chapitre", "more": "Charger les révisions précédentes" },
+  "wiki": {
+    "meta": "{{chapters}} chapitres · {{sections}} sections",
+    "lensLabel": "Perspective",
+    "lens": {
+      "understand": "Compréhension du projet",
+      "manage": "Gestion du projet"
+    },
+    "tocLabel": "Sommaire de la référence",
+    "searchPlaceholder": "Rechercher dans la référence",
+    "searchCount": "{{count}} résultats",
+    "searchEmpty": "Aucun résultat pour « {{query}} »",
+    "readProgress": "{{read}}/{{total}} sections lues",
+    "continueReading": "Continuer",
+    "startReading": "Commencer ici",
+    "allRead": "Toutes les sections sont lues",
+    "read": "Lue",
+    "untitled": "Introduction",
+    "whyLabel": "Pourquoi cette règle existe",
+    "whyShort": "Pourquoi",
+    "exampleShort": "Exemple",
+    "relatedConcepts": "Concepts associés",
+    "backlinks": "Référencée par",
+    "linkedIssues": "Tâches associées",
+    "latestRevision": "Dernière révision v{{number}}",
+    "referenceCount": "Référencée par {{count}} sections",
+    "goToSection": "Aller à la section",
+    "openInOverview": "Ouvrir",
+    "noStage": "Aucune étape de livraison",
+    "backTo": "Revenir à « {{title}} »",
+    "emptyChapter": "Aucun contenu de référence n’a été adopté dans ce chapitre."
+  },
+  "chapters": {
+    "overview": "Présentation du projet",
+    "domain_rules": "Domaine et règles",
+    "architecture": "Architecture et décisions",
+    "exclusions_and_risks": "Exclusions et risques"
+  },
+  "status": {
+    "candidate": "Candidate",
+    "adopted": "Adoptée",
+    "superseded": "Remplacée",
+    "withdrawn": "Retirée",
+    "rejected": "Renvoyée",
+    "unknown": "Inconnu"
+  },
+  "credentials": {
+    "session": "Confirmée dans le tableau de bord",
+    "pat": "Confirmée avec un jeton personnel",
+    "agent_task": "Décidée par un agent",
+    "unknown": "Identifiant inconnu"
+  },
+  "history": {
+    "title": "Historique des révisions",
+    "revision": "Révision {{number}}",
+    "empty": "Aucune révision dans ce chapitre",
+    "more": "Charger les révisions précédentes"
+  },
   "settings": {
-    "title": "Paramètres d’ingénierie", "enabledLabel": "Activer la vue d’ingénierie", "enabledHint": "La désactivation masque la vue sans modifier les données du projet.", "decidersLabel": "Décideurs", "decidersHint": "Les owners et admins de l’espace de travail sont toujours inclus. Sans sélection, le responsable humain du projet est utilisé."
+    "title": "Paramètres d’ingénierie",
+    "enabledLabel": "Activer la vue d’ensemble de l’ingénierie",
+    "enabledHint": "La désactivation masque la vue sans modifier les données du projet.",
+    "decidersLabel": "Décideurs",
+    "decidersHint": "Les owner et admin de l’espace de travail sont toujours inclus. Sans sélection, le responsable humain du projet décide."
   },
-  "actions": { "save": "Enregistrer", "reject": "Rejeter", "adopt": "Adopter", "enable": "Activer" },
-  "disabled": { "title": "La vue d’ingénierie n’est pas activée", "description": "Le projet conserve son interface habituelle. Demandez à un owner ou admin de l’espace de travail de l’activer.", "adminDescription": "Activez Strixnova pour voir ici les étapes, décisions, progrès et la référence gérée." },
+  "actions": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "expand": "Tout afficher",
+    "collapse": "Réduire",
+    "reject": "Renvoyer pour modification",
+    "adopt": "Adopter",
+    "enable": "Activer la vue"
+  },
+  "disabled": {
+    "title": "La vue d’ensemble de l’ingénierie n’est pas activée",
+    "description": "Le projet conserve son interface habituelle. Demandez à un owner ou admin de l’espace de travail d’activer la vue.",
+    "adminDescription": "Activez Strixnova pour voir ici les étapes, les décisions, la progression et la référence gérée."
+  },
   "errors": {
-    "title": "Les données d’ingénierie sont indisponibles", "overview": "La réponse d’ingénierie n’a pas pu être chargée ou est invalide. Réessayez plus tard.", "timeline": "Impossible de charger le commentaire de décision.", "decisionIssues": "Impossible de charger les tâches en attente de décision.", "graph": "Impossible de charger la progression par étape.", "history": "Impossible de charger l’historique des révisions.", "chapter": "Ce chapitre est absent de la réponse du serveur.", "decisionTitle": "La décision du candidat a échoué", "decision": "Le candidat a peut-être changé ou a déjà été décidé. Vérifiez la révision actuelle avant de réessayer.", "configTitle": "Les paramètres n’ont pas été enregistrés", "config": "Vos modifications n’ont pas été appliquées. Vérifiez vos permissions et réessayez."
+    "title": "Les données d’ingénierie sont indisponibles",
+    "overview": "La réponse d’ingénierie du projet n’a pas pu être chargée ou est invalide. Réessayez plus tard.",
+    "timeline": "Le contexte de décision n’a pas pu être chargé.",
+    "decisionIssues": "Les tâches en attente de décision n’ont pas pu être chargées.",
+    "graph": "La progression des étapes n’a pas pu être chargée.",
+    "history": "L’historique des révisions n’a pas pu être chargé.",
+    "chapter": "Ce chapitre de référence est absent de la réponse du serveur.",
+    "decisionTitle": "Le candidat n’a pas pu être traité",
+    "decision": "Le candidat a peut-être changé ou a déjà été traité. Vérifiez la révision actuelle avant de réessayer.",
+    "configTitle": "Les paramètres d’ingénierie n’ont pas été enregistrés",
+    "config": "Vos modifications n’ont pas été appliquées. Vérifiez vos permissions et réessayez."
   },
-  "messages": { "configSaved": "Paramètres d’ingénierie enregistrés", "adopted": "Candidat adopté", "rejected": "Candidat rejeté", "serverAuthoritative": "Les permissions et révisions sont vérifiées par le serveur" }
+  "messages": {
+    "configSaved": "Paramètres d’ingénierie enregistrés",
+    "adopted": "Candidat adopté",
+    "rejected": "Candidat renvoyé pour modification",
+    "serverAuthoritative": "Les permissions et les révisions sont vérifiées par le serveur"
+  }
 }
