@@ -105,9 +105,17 @@ func runIssueLabelAdd(cmd *cobra.Command, args []string) error {
 	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/labels", body, &result); err != nil {
 		return fmt.Errorf("attach label: %w", err)
 	}
-	labelsRaw, _ := result["labels"].([]any)
+	labelsRaw, ok := result["labels"].([]any)
 
 	output, _ := cmd.Flags().GetString("output")
+	// The attachment can succeed even when the server cannot read back the list.
+	if !ok {
+		if output == "json" {
+			return cli.PrintJSON(os.Stdout, map[string]any{"attached": true})
+		}
+		fmt.Fprintln(os.Stdout, "Label attached.")
+		return nil
+	}
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, labelsRaw)
 	}

@@ -226,6 +226,36 @@ describe("useAgentsViewStore", () => {
 
       expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["model"]);
     });
+
+    it("moves a v1 payload still on the old default to the new default", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "owner",
+        "access",
+        "created",
+      ]);
+    });
+
+    it("keeps a customised v1 column choice", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created", "runs"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["created", "runs"]);
+    });
   });
 
   describe("search (session-only)", () => {
@@ -244,18 +274,20 @@ describe("useAgentsViewStore", () => {
     it("clears the query on workspace switch", async () => {
       localStorage.setItem(
         "multica_agents_view:beta",
-        JSON.stringify({ state: { scope: "all" }, version: 1 }),
+        JSON.stringify({ state: { scope: "all" }, version: 2 }),
       );
       setCurrentWorkspace("acme", "ws_a");
       await flush();
       await flush();
       useAgentsViewStore.getState().setSearch("reviewer");
 
+      // A workspace with saved preferences.
       setCurrentWorkspace("beta", "ws_b");
       await flush();
       await flush();
       expect(useAgentsViewStore.getState().search).toBe("");
 
+      // A workspace with nothing saved.
       useAgentsViewStore.getState().setSearch("reviewer");
       setCurrentWorkspace("gamma", "ws_c");
       await flush();

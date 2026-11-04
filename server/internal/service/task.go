@@ -2811,6 +2811,13 @@ func (s *TaskService) BroadcastTaskQueued(ctx context.Context, task db.AgentTask
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 }
 
+// BroadcastTaskCoalesced tells clients a pending run took in another comment.
+// The run keeps its status, but its trigger and covered comments changed, and
+// clients place the run under the newest comment it answers.
+func (s *TaskService) BroadcastTaskCoalesced(ctx context.Context, task db.AgentTaskQueue) {
+	s.broadcastTaskEvent(ctx, protocol.EventTaskCoalesced, task)
+}
+
 // CaptureCancelledTasks records analytics for an already-committed bulk
 // cancellation. It deliberately does NOT settle delegated-failure recoveries:
 // by the time it runs the cancel has committed, so a failure here could not be
@@ -3575,17 +3582,19 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 }
 
 func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.AgentTaskQueue, payload protocol.ChatCancelFinalizedPayload) {
-	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	scope := s.ResolveTaskScope(ctx, task)
+	workspaceID := scope.WorkspaceID
 	if workspaceID == "" {
 		return
 	}
 	s.Bus.Publish(events.Event{
-		Type:          protocol.EventChatCancelFinalized,
-		WorkspaceID:   workspaceID,
-		ActorType:     "system",
-		ActorID:       "",
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		Payload:       payload,
+		Type:               protocol.EventChatCancelFinalized,
+		WorkspaceID:        workspaceID,
+		ActorType:          "system",
+		ActorID:            "",
+		ChatSessionID:      util.UUIDToString(task.ChatSessionID),
+		ChatSessionOwnerID: scope.ChatSessionOwnerID,
+		Payload:            payload,
 	})
 }
 
@@ -3650,6 +3659,42 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "no_capacity"
 			return nil
 		}
+
+		// Runtime-wide cap (GitHub #9626): several agents can share one
+		// runtime (e.g. one local GPU), so the per-agent cap alone cannot
+		// keep their combined work bounded.
+		//
+		// The lock is taken before the cap is read, on every claim. The cap
+		// update (UpdateAgentRuntimeMaxConcurrentTasks in the handler) takes
+		// the same lock before committing, so once a PATCH returns, no claim
+		// can still commit against the old value: a claim either finished
+		// before the update got the lock, or reads the new value after it.
+		// Reading the cap first and locking only when it is set would let a
+		// claim that waited on the lock (or read NULL) dispatch against a
+		// stale cap. Claims on one runtime are already short and nearly
+		// serial (one daemon per runtime), so the extra lock is cheap.
+		if err := qtx.LockRuntimeClaimCapacity(ctx, claimRuntimeID); err != nil {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("lock runtime claim capacity: %w", err)
+		}
+		runtimeCap, err := qtx.GetAgentRuntimeMaxConcurrentTasks(ctx, claimRuntimeID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("get runtime concurrency cap: %w", err)
+		}
+		if err == nil && runtimeCap.Valid {
+			runtimeRunning, err := qtx.CountActiveTasksByRuntime(ctx, claimRuntimeID)
+			if err != nil {
+				outcome = claimOutcomeErrorCountRunning
+				return fmt.Errorf("count runtime running tasks: %w", err)
+			}
+			if runtimeRunning >= int64(runtimeCap.Int32) {
+				decisionDetail = claimDecisionDetail{running: runtimeRunning, maxConcurrent: int64(runtimeCap.Int32)}
+				outcome = claimOutcomeRuntimeNoCapacity
+				return nil
+			}
+		}
+		countRunningMs = time.Since(t0).Milliseconds()
 
 		t0 = time.Now()
 		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
@@ -6853,6 +6898,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 				"failed_task_id", util.UUIDToString(target.failed.ID),
 				"coordinator_task_id", util.UUIDToString(merged.ID),
 			)
+			s.BroadcastTaskCoalesced(ctx, merged)
 			return delegatedFailureRecoveryReplayed, nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return delegatedFailureRecoveryCovered, fmt.Errorf("merge recovery into pending task: %w", err)
@@ -7389,6 +7435,13 @@ func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 }
 
+// NotifyRuntimeCapacityChanged wakes a runtime's daemon after its
+// runtime-wide concurrency cap was raised or removed (GitHub #9626), since
+// queued work held back by the old cap may now be claimable.
+func (s *TaskService) NotifyRuntimeCapacityChanged(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
+}
+
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
@@ -7574,6 +7627,28 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 // keeps a task carrying several links working during a partial outage while
 // still refusing to call an unknown state "not found".
 func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db.AgentTaskQueue) (string, error) {
+	scope, err := s.ResolveTaskScopeChecked(ctx, task)
+	return scope.WorkspaceID, err
+}
+
+// TaskScope is where a task's realtime events belong.
+type TaskScope struct {
+	WorkspaceID string
+	// ChatSessionOwnerID is the chat session creator when the workspace was
+	// resolved through the task's chat session, and "" otherwise.
+	ChatSessionOwnerID string
+}
+
+// ResolveTaskScope is ResolveTaskWorkspaceID plus the chat session owner, read
+// from the same chat_session row so chat broadcasts cost no extra query.
+func (s *TaskService) ResolveTaskScope(ctx context.Context, task db.AgentTaskQueue) TaskScope {
+	scope, _ := s.ResolveTaskScopeChecked(ctx, task)
+	return scope
+}
+
+// ResolveTaskScopeChecked is ResolveTaskWorkspaceIDChecked plus the chat
+// session owner, with the same failure semantics.
+func (s *TaskService) ResolveTaskScopeChecked(ctx context.Context, task db.AgentTaskQueue) (TaskScope, error) {
 	// isNotFound is the "genuinely absent" signal; every other error means the
 	// lookup itself did not complete. pgx.ErrNoRows is the only error the
 	// queries below use to say "this row does not exist".
@@ -7587,14 +7662,17 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 	if task.IssueID.Valid {
 		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 		if err == nil {
-			return util.UUIDToString(issue.WorkspaceID), nil
+			return TaskScope{WorkspaceID: util.UUIDToString(issue.WorkspaceID)}, nil
 		}
 		note(err)
 	}
 	if task.ChatSessionID.Valid {
 		cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
 		if err == nil {
-			return util.UUIDToString(cs.WorkspaceID), nil
+			return TaskScope{
+				WorkspaceID:        util.UUIDToString(cs.WorkspaceID),
+				ChatSessionOwnerID: util.UUIDToString(cs.CreatorID),
+			}, nil
 		}
 		note(err)
 	}
@@ -7603,7 +7681,7 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 		if err == nil {
 			ap, apErr := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 			if apErr == nil {
-				return util.UUIDToString(ap.WorkspaceID), nil
+				return TaskScope{WorkspaceID: util.UUIDToString(ap.WorkspaceID)}, nil
 			}
 			note(apErr)
 		}
@@ -7615,16 +7693,17 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 	// for the daemon) and silently dropped task:dispatch / task:completed
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
-		return qc.WorkspaceID, nil
+		return TaskScope{WorkspaceID: qc.WorkspaceID}, nil
 	}
 	if lookupErr != nil {
-		return "", fmt.Errorf("resolve task workspace: %w", lookupErr)
+		return TaskScope{}, fmt.Errorf("resolve task workspace: %w", lookupErr)
 	}
-	return "", nil
+	return TaskScope{}, nil
 }
 
 func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage, quickActionsPending bool) {
-	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	scope := s.ResolveTaskScope(ctx, task)
+	workspaceID := scope.WorkspaceID
 	if workspaceID == "" {
 		return
 	}
@@ -7648,12 +7727,13 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		}
 	}
 	s.Bus.Publish(events.Event{
-		Type:          protocol.EventChatDone,
-		WorkspaceID:   workspaceID,
-		ActorType:     "system",
-		ActorID:       "",
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		Payload:       payload,
+		Type:               protocol.EventChatDone,
+		WorkspaceID:        workspaceID,
+		ActorType:          "system",
+		ActorID:            "",
+		ChatSessionID:      util.UUIDToString(task.ChatSessionID),
+		ChatSessionOwnerID: scope.ChatSessionOwnerID,
+		Payload:            payload,
 	})
 }
 

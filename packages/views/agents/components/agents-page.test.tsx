@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import type { AgentActivity } from "@multica/core/agents";
 import type { SupportedLocale } from "@multica/core/i18n";
@@ -68,7 +68,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
     }
-    return { data: [], isLoading: false, isPending: false };
+    return { data: [], isLoading: false, isPending: false, isSuccess: true };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -132,6 +132,7 @@ vi.mock("@multica/core/paths", () => ({
     newAgent: () => "/test-workspace/agents/new",
     newAgentManual: () => "/test-workspace/agents/new/manual",
     agentDetail: (id: string) => `/test-workspace/agents/${id}`,
+    runtimes: () => "/test-workspace/runtimes",
   }),
 }));
 
@@ -146,12 +147,14 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 
 // View-layer children with heavy / portal deps — stub to keep the test focused
-// on the gate, not on avatars, row menus, the toolbar, or tooltip portals.
+// on the gate, not on avatars, row menus, the filter/display menus, or
+// tooltip portals.
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("./agent-row-actions", () => ({ AgentRowActions: () => null }));
 vi.mock("./agent-list-toolbar", () => ({
-  AgentListToolbar: () => <div data-testid="agent-list-toolbar" />,
-  countActiveFilterDimensions: () => 0,
+  AgentListFilterMenu: () => <div data-testid="agent-list-filter" />,
+  countActiveFilterDimensions: (filters: Record<string, unknown[]>) =>
+    Object.values(filters).filter((values) => values.length > 0).length,
 }));
 vi.mock("../presence", () => ({ availabilityConfig: {} }));
 vi.mock("@multica/ui/components/ui/skeleton", () => ({
@@ -223,12 +226,14 @@ function makeAdapter(
 }
 
 function renderPage(locale?: SupportedLocale) {
+  const adapter = makeAdapter();
   renderWithI18n(
-    <NavigationProvider value={makeAdapter()}>
+    <NavigationProvider value={adapter}>
       <AgentsPage />
     </NavigationProvider>,
     { locale },
   );
+  return adapter;
 }
 
 /** Beta before Alpha in document order? */
@@ -241,6 +246,7 @@ function betaPrecedesAlpha(): boolean {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.agents = [ALPHA, BETA];
   mocks.agentsLoading = false;
   mocks.runCounts = [];
@@ -328,20 +334,23 @@ describe("AgentsPage listReady gate", () => {
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
   });
 
-  it("keeps the toolbar above the skeleton while the agent list loads", () => {
-    // A toolbar that only mounts once rows land pushes the list down by its
-    // height mid-navigation (MUL-8337).
+  it("keeps the header tools above the skeleton while the agent list loads", () => {
+    // Tools that only mount once rows land shift the page mid-navigation
+    // (MUL-8337).
     mocks.agents = [];
     mocks.agentsLoading = true;
 
     renderPage();
 
-    expect(screen.getByTestId("agent-list-toolbar")).toBeInTheDocument();
+    const header = screen.getByRole("banner");
+    expect(within(header).getByTestId("agent-list-filter")).toBeInTheDocument();
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
-    expect(screen.queryByText("No agents yet")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Hire your first AI teammate" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows the empty state without blocking on auxiliary queries when there are no agents", () => {
+  it("introduces agents without blocking on auxiliary queries when there are none", () => {
     mocks.agents = [];
     // All auxiliary queries pending — the empty state must not wait on them.
     mocks.activity = { byAgent: new Map(), loading: true };
@@ -350,34 +359,121 @@ describe("AgentsPage listReady gate", () => {
 
     renderPage();
 
-    expect(screen.getByText("No agents yet")).toBeInTheDocument();
+    const intro = screen.getByRole("region", { name: "Hire your first AI teammate" });
+    expect(within(intro).getByRole("button", { name: "New agent" })).toBeInTheDocument();
+    expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
+      "href",
+      "https://multica.ai/docs/agents",
+    );
+    const steps = within(intro).getByRole("list", { name: "Setup steps" });
+    expect(within(steps).getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/test-workspace/runtimes",
+    );
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });
 });
 
-describe("AgentsPage docs link", () => {
-  it("points Learn more at the viewer's docs locale", () => {
+describe("AgentsPage header", () => {
+  it("titles the page with the scope and switches scope from its menu", () => {
+    renderPage();
+
+    const header = screen.getByRole("banner");
+    const title = within(header).getByRole("heading", { level: 1 });
+    expect(title).toHaveTextContent("All agents");
+    expect(within(header).queryByText(/\d/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Learn more/ })).not.toBeInTheDocument();
+
+    fireEvent.click(within(title).getByRole("button"));
+    const options = screen.getAllByRole("menuitemradio");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "My agents2",
+      "All agents2",
+      "Archived agents0",
+    ]);
+    fireEvent.click(options[0]!);
+    expect(mocks.viewState.setScope).toHaveBeenCalledWith("mine");
+  });
+
+  it("localizes the scope title", () => {
+    mocks.viewState.scope = "archived";
     renderPage("fr");
 
     expect(
-      screen.getByRole("link", { name: "En savoir plus →" }),
-    ).toHaveAttribute("href", "https://multica.ai/docs/fr/agents");
+      within(screen.getByRole("banner")).getByRole("heading", { level: 1 }),
+    ).toHaveTextContent("Agents archivés");
+  });
+
+  it("offers Reset only while a filter narrows the list", () => {
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+  });
+
+  it("resets the filters", () => {
+    mocks.viewState.filters.access = ["workspace"];
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(mocks.viewState.clearFilters).toHaveBeenCalled();
+  });
+
+  it("puts display and create on the right, with create opening the new-agent flow", () => {
+    const adapter = renderPage();
+
+    const header = screen.getByRole("banner");
+    expect(
+      within(header).getByRole("button", { name: "Display settings" }),
+    ).toBeInTheDocument();
+    fireEvent.click(within(header).getByRole("button", { name: "New agent" }));
+    expect(adapter.push).toHaveBeenCalledWith("/test-workspace/agents/new");
   });
 });
 
-describe("AgentsPage search + model column (GitHub #9500)", () => {
-  it("filters by the store's search query so it survives leaving the page", () => {
-    // The query comes from the view store, not page-local state: a remount
-    // (open agent → back) renders with the same query already applied.
+describe("AgentsPage search (MUL-8490)", () => {
+  it("opens the search from an icon beside the filter and writes the query to the store", () => {
+    renderPage();
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(within(header).getByRole("button", { name: "Search agents" }));
+    const field = within(header).getByRole("textbox", { name: "Search agents" });
+    expect(field).toHaveFocus();
+
+    fireEvent.change(field, { target: { value: "beta" } });
+    expect(mocks.viewState.setSearch).toHaveBeenCalledWith("beta");
+  });
+
+  it("narrows the list by the store's query, so it is still applied on return", () => {
     mocks.viewState.sortField = "name";
     mocks.viewState.search = "beta";
 
     renderPage();
 
+    expect(screen.getByRole("textbox", { name: "Search agents" })).toHaveValue("beta");
     expect(screen.getByText("Beta Agent")).toBeInTheDocument();
     expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
   });
 
+  it("names the query when nothing matches", () => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.search = "zeta";
+
+    renderPage();
+
+    expect(screen.getByText('No agents match "zeta".')).toBeInTheDocument();
+  });
+
+  it("clears the search together with the filters on Reset", () => {
+    mocks.viewState.search = "beta";
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(mocks.viewState.clearFilters).toHaveBeenCalled();
+    expect(mocks.viewState.setSearch).toHaveBeenCalledWith("");
+  });
+});
+
+describe("AgentsPage model column (GitHub #9500)", () => {
   it("renders the model column by default", () => {
     mocks.viewState.sortField = "name";
 

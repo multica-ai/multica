@@ -2,11 +2,11 @@
   "page": {
     "title": "プロジェクト",
     "new_project": "新規プロジェクト",
-    "empty": "プロジェクトはまだありません",
-    "create_first": "最初のプロジェクトを作成",
+    "scope_all": "すべてのプロジェクト",
+    "scope_active": "進行中のプロジェクト",
+    "scope_closed": "終了したプロジェクト",
     "view_compact": "コンパクト",
     "view_comfortable": "ゆったり",
-    "search_placeholder": "プロジェクトを検索...",
     "no_search_results": "検索条件に一致する結果はありません",
     "view_table": "テーブル",
     "view_cards": "カード",
@@ -14,9 +14,7 @@
     "pin": "サイドバーにピン留め",
     "unpin": "ピン留め解除",
     "delete": "削除",
-    "no_matches": "該当するプロジェクトはありません",
-    "selected_other": "{{count}} 件選択中",
-    "clear_selection": "選択を解除"
+    "no_matches": "該当するプロジェクトはありません"
   },
   "table": {
     "name": "名前",
@@ -56,6 +54,8 @@
   },
   "detail": {
     "not_found": "プロジェクトが見つかりません",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのプロジェクト",
     "breadcrumb_fallback": "プロジェクト",
     "title_placeholder": "プロジェクトのタイトル",
     "icon_tooltip": "アイコンを変更",
@@ -73,9 +73,10 @@
     "no_due_date": "期限なし",
     "description_placeholder": "説明を追加...",
     "description_hint": "このプロジェクトのすべての実行で、コンテキストとしてエージェントに共有されます。",
-    "empty_issues_title": "リンクされたタスクはありません",
-    "empty_issues_hint": "既存のタスクをこのプロジェクトに追加することもできます。",
+    "empty_issues_title": "このプロジェクトにはまだタスクがありません",
+    "empty_issues_hint": "新しく作成するか、既存のタスクをここに移します。",
     "empty_issues_new_button": "新規タスク",
+    "empty_issues_add_existing": "既存のタスクを追加",
     "no_issues_yet": "タスクはまだありません",
     "toast_link_copied": "リンクをコピーしました",
     "toast_project_deleted": "プロジェクトを削除しました",
@@ -167,18 +168,40 @@
     "fallback_label": "プロジェクト"
   },
   "toolbar": {
-    "result_count_title": "該当プロジェクト / すべてのプロジェクト",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターをクリア",
     "section_status": "ステータス",
     "section_priority": "優先度",
     "section_lead": "リード",
-    "display": "表示",
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "列",
     "view": "ビュー"
+  },
+  "intro": {
+    "title": "大きな仕事はプロジェクトに分けて進める",
+    "description": "プロジェクトは関連するタスクをまとめ、進捗をひとまとめに追えるようにします。プロジェクトの説明とリンクしたリポジトリは、エージェントの実行ごとにコンテキストとして渡されます。",
+    "slides": {
+      "progress": {
+        "title": "進捗がひと目でわかる",
+        "description": "ステータス、リード、期日、完了率が一枚のカードにまとまり、タスクを一つずつ開く必要はありません。"
+      },
+      "context": {
+        "title": "コンテキストは毎回自動で渡る",
+        "description": "説明を書き、リポジトリをリンクするのは一度だけ。プロジェクト内のタスクの実行すべてに引き継がれます。"
+      },
+      "sidebar": {
+        "title": "サイドバーに固定",
+        "description": "よく使うプロジェクトをサイドバーに固定し、展開すると中のタスクが見えます。"
+      }
+    },
+    "art": {
+      "project_website": "Web サイトのリニューアル",
+      "project_mobile": "モバイル 1.0",
+      "project_onboarding": "オンボーディング",
+      "context_label": "プロジェクトの説明",
+      "context_body": "新しいコーポレートサイト。Next.js + Tailwind。文言は docs/brand に従い、全ページでダークモードに対応する。",
+      "run_started": "実行を開始",
+      "context_loaded": "プロジェクトのコンテキストと 2 つのリポジトリを読み込みました",
+      "issue_count": "{{done}} / {{total}} タスク",
+      "issue_hero": "トップページのヒーローにアニメーション",
+      "issue_pricing": "料金ページの比較表",
+      "issue_blog": "ブログ一覧のページ送り"
+    }
   }
 }

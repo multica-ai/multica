@@ -7,7 +7,6 @@ import {
   Globe,
   Users,
   Loader2,
-  MoreHorizontal,
   Pencil,
   Trash2,
 } from "@multica/ui/icons";
@@ -36,25 +35,22 @@ import {
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  ListGrid,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-} from "@multica/ui/components/ui/list-grid";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useIntentNavigate, useRowLink } from "../../navigation";
+import { useIntentNavigate } from "../../navigation";
+import {
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  CollectionRowMenu,
+  type CollectionColumn,
+} from "../../layout/collection-list";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
@@ -75,62 +71,11 @@ import {
   pendingRuntimeCommandName,
 } from "./pending-runtime";
 import { useT, useTimeAgo } from "../../i18n";
-import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
-// The machine detail's runtimes table on the shared ListGrid. Paradigm
-// pieces are taken À LA CARTE here: subgrid template + var-width tracks +
-// two-zone responsiveness (the detail pane gets squeezed by the machine
-// list, so the container-driven core-set collapse matters more than on the
-// full-width pages), but NO virtualization / sorting / filters / column
-// toggles / batch selection — a machine hosts 1-5 runtimes, those would all
-// be dead weight, and batch-deleting runtimes (a cascade-confirm heavy
-// operation) is deliberately not offered.
-const GRID_COLS =
-  "grid-cols-[0.75rem_minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
-
-const COLUMN_WIDTHS = {
-  // Health folds the workload in as a suffix ("Healthy · 2 running") —
-  // same merge as the agents list's status cell.
-  health: 176,
-  owner: 96,
-  agents: 92,
-  cost: 96,
-  cli: 112,
-} as const;
-
-// Fixed tracks (edges 12+12, name min 140) plus the 8 gap-x-3 gaps
-// between the wide template's 9 tracks (zero-width tracks still carry
-// gaps).
-const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
-
-// The kebab track is conditional like the owner column: on a list where
-// no row carries a delete-permission, EVERY row's only action is hidden,
-// and an unconditionally reserved 28px action track would hang a
-// permanent dead zone off the last column.
-function columnTrackVars(
-  showOwner: boolean,
-  showActions: boolean,
-): React.CSSProperties {
-  const minWidth =
-    FIXED_TRACKS_WIDTH +
-    COLUMN_WIDTHS.health +
-    (showOwner ? COLUMN_WIDTHS.owner : 0) +
-    COLUMN_WIDTHS.agents +
-    COLUMN_WIDTHS.cost +
-    COLUMN_WIDTHS.cli +
-    (showActions ? 28 : 0);
-  return {
-    "--rtc-health": `${COLUMN_WIDTHS.health}px`,
-    "--rtc-owner": showOwner ? `${COLUMN_WIDTHS.owner}px` : "0px",
-    "--rtc-agents": `${COLUMN_WIDTHS.agents}px`,
-    "--rtc-cost": `${COLUMN_WIDTHS.cost}px`,
-    "--rtc-cli": `${COLUMN_WIDTHS.cli}px`,
-    "--rtc-kebab": showActions ? "1.75rem" : "0px",
-    "--rtc-minw": `${minWidth}px`,
-  } as React.CSSProperties;
-}
+// The machine detail's runtimes table. A machine hosts 1-5 runtimes, so no
+// sorting, filters, column toggles or batch selection — and batch-deleting
+// runtimes (a cascade-confirm heavy operation) is deliberately not offered.
 
 interface RuntimeWorkload {
   agentIds: string[];
@@ -203,21 +148,18 @@ function RuntimeNameCell({
    */
   machineTitle?: string;
 }) {
-  const label = runtimeRowLabel(runtime, machineTitle ?? "");
   return (
-    <ListGridCell className="gap-2">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
-      </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 shrink truncate text-body font-medium">
-          {label}
-        </span>
-        <RuntimeKindBadge runtime={runtime} />
-        <PendingRuntimeBadge runtime={runtime} />
-        <VisibilityBadge runtime={runtime} />
-      </div>
-    </ListGridCell>
+    <CollectionNameCell
+      icon={<ProviderLogo provider={runtime.provider} className="size-4 shrink-0" />}
+      title={runtimeRowLabel(runtime, machineTitle ?? "")}
+      badges={
+        <>
+          <RuntimeKindBadge runtime={runtime} />
+          <PendingRuntimeBadge runtime={runtime} />
+          <VisibilityBadge runtime={runtime} />
+        </>
+      }
+    />
   );
 }
 
@@ -305,43 +247,34 @@ function HealthCell({
   const labelOf = useHealthLabel();
   const timeAgo = useTimeAgo();
   if (isDisabledCustomRuntime(runtime)) {
-    return (
-      <ListGridCell>
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.list.pending_health_disabled)}
-        </span>
-      </ListGridCell>
-    );
+    return <span className="truncate">{t(($) => $.list.pending_health_disabled)}</span>;
   }
   const registrationFailure = customRuntimeRegistrationFailure(runtime);
   if (registrationFailure) {
     return (
-      <ListGridCell className="gap-1.5">
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-        <span
-          className="block min-w-0 truncate text-caption text-destructive"
-          title={registrationFailure}
-        >
+      <>
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+        <span className="min-w-0 truncate text-destructive" title={registrationFailure}>
           {t(($) => $.list.pending_health_error)}
         </span>
-      </ListGridCell>
+      </>
     );
   }
   if (isPendingCustomRuntime(runtime)) {
     const warning = isPendingCustomRuntimeWarning(runtime, now);
     return (
-      <ListGridCell className="gap-1.5">
+      <>
         {warning ? (
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
+          <AlertTriangle className="size-3.5 shrink-0 text-warning" />
         ) : (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-info" />
         )}
-        <span className="block min-w-0 truncate text-caption">
+        <span className="min-w-0 truncate text-foreground">
           {warning
             ? t(($) => $.list.pending_health_warning)
             : t(($) => $.list.pending_health)}
         </span>
-      </ListGridCell>
+      </>
     );
   }
 
@@ -351,21 +284,19 @@ function HealthCell({
   const active = workload.runningCount + workload.queuedCount;
 
   return (
-    <ListGridCell className="gap-1.5">
+    <>
       <HealthIcon health={health} />
-      <span className="block min-w-0 truncate text-caption">
-        {labelOf(health)}
-        {health !== "online" && lastSeen && (
-          <span className="text-muted-foreground"> · {lastSeen}</span>
-        )}
+      <span className="min-w-0 truncate">
+        <span className="text-foreground">{labelOf(health)}</span>
+        {health !== "online" && lastSeen && <> · {lastSeen}</>}
         {!offline && active > 0 && (
-          <span className="text-muted-foreground">
+          <>
             {" · "}
             {tAgents(($) => $.row.task_count, { count: active })}
-          </span>
+          </>
         )}
       </span>
-    </ListGridCell>
+    </>
   );
 }
 
@@ -407,13 +338,7 @@ export function CostCell({
   );
   const delta = pctChange(cost7d, costPrev7d);
 
-  if (usage.length === 0) {
-    return (
-      <div className="w-full text-right">
-        <span className="text-caption text-faint-foreground">—</span>
-      </div>
-    );
-  }
+  if (usage.length === 0) return <CollectionEmptyValue />;
   const fmt = cost7d >= 100 ? `$${cost7d.toFixed(0)}` : `$${cost7d.toFixed(2)}`;
   const deltaTone =
     delta == null
@@ -430,19 +355,19 @@ export function CostCell({
         ? t(($) => $.list.cost_delta_flat)
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
-    <div className="flex w-full flex-col items-end leading-tight">
+    <span className="flex items-baseline gap-1.5">
       <CurrencyNumberFlow
         value={cost7d}
         locales={locales}
         aria-label={fmt}
-        className="text-body font-medium"
+        className="text-caption font-medium text-foreground"
       />
       {deltaLabel && (
         <span className={`text-micro tabular-nums ${deltaTone}`}>
           {deltaLabel}
         </span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -452,49 +377,24 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   if (failure) {
     const command = pendingRuntimeCommandName(runtime);
     return (
-      <div className="flex min-w-0 flex-col text-caption">
-        {command && (
-          <TruncatedTooltip content={command}>
-            <span
-              className="truncate font-mono text-muted-foreground"
-            >
-              {command}
-            </span>
-          </TruncatedTooltip>
-        )}
-        <TruncatedTooltip content={failure}>
-          <span className="truncate text-destructive">
-            {failure}
-          </span>
-        </TruncatedTooltip>
-      </div>
+      <TruncatedTooltip content={command ? `${command}: ${failure}` : failure}>
+        <span className="truncate text-destructive">{failure}</span>
+      </TruncatedTooltip>
     );
   }
   if (isPendingCustomRuntime(runtime)) {
     const command = pendingRuntimeCommandName(runtime);
     if (!command) {
-      return (
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.list.pending_cli_unknown)}
-        </span>
-      );
+      return <span className="truncate">{t(($) => $.list.pending_cli_unknown)}</span>;
     }
     return (
-      <div className="flex min-w-0 items-center text-caption">
-        <TruncatedTooltip content={command}>
-          <span
-            className="truncate font-mono text-muted-foreground"
-          >
-            {command}
-          </span>
-        </TruncatedTooltip>
-      </div>
+      <TruncatedTooltip content={command}>
+        <span className="truncate font-mono">{command}</span>
+      </TruncatedTooltip>
     );
   }
 
-  if (runtime.runtime_mode === "cloud") {
-    return <span className="text-caption text-faint-foreground">—</span>;
-  }
+  if (runtime.runtime_mode === "cloud") return <CollectionEmptyValue />;
   const meta = runtime.metadata as Record<string, unknown> | null;
   // `version` is the agent's own underlying CLI tool version — distinct per
   // provider (e.g. "2.1.5 (Claude Code)", "codex-cli 0.118.0", "0.42.0").
@@ -506,26 +406,16 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   const version =
     meta && typeof meta.version === "string" ? meta.version : null;
 
-  if (!version) {
-    return <span className="text-caption text-faint-foreground">—</span>;
-  }
+  if (!version) return <CollectionEmptyValue />;
 
-  return (
-    <div className="flex min-w-0 items-center text-caption">
-      <span className="truncate font-mono text-muted-foreground">
-        {version}
-      </span>
-    </div>
-  );
+  return <span className="truncate font-mono">{version}</span>;
 }
 
 // Stacks up to 3 agent avatars, then a "+N" pill if more bind to this
 // runtime. Each avatar uses the wrapping ActorAvatar so hover automatically
 // surfaces AgentProfileCard.
 function AgentStack({ agentIds }: { agentIds: string[] }) {
-  if (agentIds.length === 0) {
-    return <span className="text-caption text-faint-foreground">—</span>;
-  }
+  if (agentIds.length === 0) return <CollectionEmptyValue />;
   const visible = agentIds.slice(0, 3);
   const extra = agentIds.length - visible.length;
   return (
@@ -538,13 +428,13 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
           <ActorAvatar
             actorType="agent"
             actorId={id}
-            size="md"
+            size="sm"
             enableHoverCard
           />
         </span>
       ))}
       {extra > 0 && (
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
+        <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-2 ring-background">
           +{extra}
         </span>
       )}
@@ -583,59 +473,39 @@ export function RuntimeRowMenu({
   // would undo this". The dialog now carries the self-heal warning and
   // the user gets to decide.
 
-  if (!canDelete) {
-    return <span aria-hidden />;
-  }
+  if (!canDelete) return null;
 
   return (
     <>
-      <DropdownMenu>
-        <DeferredTooltip
-          content={t(($) => $.list.row_actions_aria)}
-          trigger={
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.list.row_actions_aria)}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-              }
-            />
-          }
-        />
-        <DropdownMenuContent align="end" className="w-40">
-          {detailHref && (
-            <>
-              <DropdownMenuItem
-                onClick={() => intentNavigate(detailHref, "foreground-tab")}
-              >
-                <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
-                {tCommon(($) => $.navigation.open_in_new_tab)}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          {isCustomRuntime && profile && (
-            <DropdownMenuItem onClick={() => setEditOpen(true)}>
-              <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-              {t(($) => $.list.edit_action)}
+      <CollectionRowMenu label={t(($) => $.list.row_actions_aria)} contentClassName="w-40">
+        {detailHref && (
+          <>
+            <DropdownMenuItem
+              onClick={() => intentNavigate(detailHref, "foreground-tab")}
+            >
+              <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+              {tCommon(($) => $.navigation.open_in_new_tab)}
             </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setDeleteOpen(true)}
-            title={t(($) => $.list.delete_permission_hint)}
-          >
-            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-            {isCustomRuntime
-              ? t(($) => $.list.delete_profile_action)
-              : t(($) => $.list.delete_action)}
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {isCustomRuntime && profile && (
+          <DropdownMenuItem onClick={() => setEditOpen(true)}>
+            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+            {t(($) => $.list.edit_action)}
           </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        )}
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => setDeleteOpen(true)}
+          title={t(($) => $.list.delete_permission_hint)}
+        >
+          <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+          {isCustomRuntime
+            ? t(($) => $.list.delete_profile_action)
+            : t(($) => $.list.delete_action)}
+        </DropdownMenuItem>
+      </CollectionRowMenu>
       {isCustomRuntime && profile && editOpen && (
         <RuntimeProfilesDialog
           wsId={wsId}
@@ -690,7 +560,6 @@ export function RuntimeList({
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const rowLink = useRowLink();
   const user = useAuthStore((s) => s.user);
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -754,113 +623,96 @@ export function RuntimeList({
     });
   }, [runtimes, profileById, memberById, workloadIndex, isAdmin, user]);
 
-  // Mirrors RuntimeRowMenu's render guard: the kebab track only earns its
-  // width when at least one row will actually show the menu.
-  const showActions = rows.some((row) => row.canDelete);
+  const columns: CollectionColumn<RuntimeRow>[] = [
+    {
+      key: "name",
+      header: t(($) => $.list.col_runtime),
+      cell: (row) => <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />,
+    },
+    {
+      // Health folds the workload in as a suffix ("Healthy · 2 tasks") —
+      // same merge as the agents list's status cell.
+      key: "health",
+      header: t(($) => $.list.col_health),
+      width: 176,
+      core: true,
+      cell: (row) => <HealthCell runtime={row.runtime} workload={row.workload} now={now} />,
+    },
+    // Owner only earns its space when the list has more than one owner.
+    ...(showOwner
+      ? [
+          {
+            key: "owner",
+            header: t(($) => $.list.col_owner),
+            width: 120,
+            cell: (row: RuntimeRow) =>
+              row.ownerMember ? (
+                <>
+                  <ActorAvatar actorType="member" actorId={row.ownerMember.user_id} size="sm" />
+                  <span className="min-w-0 truncate">{row.ownerMember.name}</span>
+                </>
+              ) : (
+                <CollectionEmptyValue />
+              ),
+          },
+        ]
+      : []),
+    {
+      key: "agents",
+      header: t(($) => $.list.col_agents),
+      width: 92,
+      cell: (row) => <AgentStack agentIds={row.workload.agentIds} />,
+    },
+    {
+      key: "cost",
+      header: t(($) => $.list.col_cost),
+      width: 96,
+      align: "end",
+      cell: (row) =>
+        isPendingCustomRuntime(row.runtime) ? (
+          <CollectionEmptyValue />
+        ) : (
+          <CostCell
+            runtimeId={row.runtime.id}
+            enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
+          />
+        ),
+    },
+    {
+      key: "cli",
+      header: t(($) => $.list.col_cli),
+      width: 112,
+      cell: (row) => <CliCell runtime={row.runtime} />,
+    },
+  ];
+
+  const detailHrefOf = (row: RuntimeRow) =>
+    isPendingCustomRuntime(row.runtime)
+      ? undefined
+      : (runtimeHref?.(row.runtime.id) ?? wsPaths.runtimeDetail(row.runtime.id));
 
   return (
-    <div className="overflow-x-auto overflow-y-hidden @container">
-      <ListGrid
-        className={`${GRID_COLS} @2xl:min-w-[var(--rtc-minw)]`}
-        style={columnTrackVars(showOwner, showActions)}
-      >
-        <ListGridHeader>
-          <ListGridHeaderCell>
-            {t(($) => $.list.col_runtime)}
-          </ListGridHeaderCell>
-          <ListGridHeaderCell>{t(($) => $.list.col_health)}</ListGridHeaderCell>
-          {showOwner ? (
-            <ListGridHeaderCell className="hidden @2xl:flex">
-              {t(($) => $.list.col_owner)}
-            </ListGridHeaderCell>
-          ) : (
-            <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-          )}
-          <ListGridHeaderCell className="hidden @2xl:flex">
-            {t(($) => $.list.col_agents)}
-          </ListGridHeaderCell>
-          <ListGridHeaderCell className="hidden @2xl:flex" align="right">
-            {t(($) => $.list.col_cost)}
-          </ListGridHeaderCell>
-          <ListGridHeaderCell className="hidden @2xl:flex">
-            {t(($) => $.list.col_cli)}
-          </ListGridHeaderCell>
-          <span aria-hidden="true" />
-        </ListGridHeader>
-        {rows.map((row) => {
-          const pending = isPendingCustomRuntime(row.runtime);
-          const detailHref = pending
-            ? undefined
-            : runtimeHref?.(row.runtime.id) ??
-              wsPaths.runtimeDetail(row.runtime.id);
-          return (
-            <ListGridRow
-              key={row.runtime.id}
-              className={pending ? "cursor-default" : "cursor-pointer"}
-              {...(detailHref ? rowLink(detailHref) : {})}
-            >
-              <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />
-              <HealthCell
+    <CollectionList
+      embedded
+      label={t(($) => $.list.col_runtime)}
+      columns={columns}
+      rows={rows}
+      getRowId={(row) => row.runtime.id}
+      getRowHref={detailHrefOf}
+      // The ⋯ slot only earns its width when some row can show the menu.
+      rowMenu={
+        rows.some((row) => row.canDelete)
+          ? (row) => (
+              <RuntimeRowMenu
                 runtime={row.runtime}
-                workload={row.workload}
-                now={now}
+                profile={row.profile}
+                wsId={wsId}
+                canDelete={row.canDelete}
+                detailHref={detailHrefOf(row)}
               />
-              {showOwner ? (
-                <ListGridCell className="hidden gap-1.5 @2xl:flex">
-                  {row.ownerMember ? (
-                    <>
-                      <ActorAvatar
-                        actorType="member"
-                        actorId={row.ownerMember.user_id}
-                        size="sm"
-                      />
-                      <span className="min-w-0 truncate text-caption text-muted-foreground">
-                        {row.ownerMember.name}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-caption text-faint-foreground">—</span>
-                  )}
-                </ListGridCell>
-              ) : (
-                <ListGridCell className="hidden px-0 @2xl:flex" />
-              )}
-              <ListGridCell className="hidden @2xl:flex">
-                <AgentStack agentIds={row.workload.agentIds} />
-              </ListGridCell>
-              <ListGridCell className="hidden @2xl:flex">
-                {pending ? (
-                  <div className="w-full text-right">
-                    <span className="text-caption text-faint-foreground">—</span>
-                  </div>
-                ) : (
-                  <CostCell
-                    runtimeId={row.runtime.id}
-                    enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
-                  />
-                )}
-              </ListGridCell>
-              <ListGridCell className="hidden @2xl:flex">
-                <CliCell runtime={row.runtime} />
-              </ListGridCell>
-              <ListGridCell className="justify-end px-0">
-                <span
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center"
-                >
-                  <RuntimeRowMenu
-                    runtime={row.runtime}
-                    profile={row.profile}
-                    wsId={wsId}
-                    canDelete={row.canDelete}
-                    detailHref={detailHref}
-                  />
-                </span>
-              </ListGridCell>
-            </ListGridRow>
-          );
-        })}
-      </ListGrid>
-    </div>
+            )
+          : undefined
+      }
+    />
   );
 }

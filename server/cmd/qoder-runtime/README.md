@@ -100,11 +100,26 @@ GitHub integration links the pull request back to the issue.
   connections, at most 10) execute at once per bridge; further tasks stay
   queued in Multica. Deploy one instance per configuration with its dedicated
   persistent state volume; this is not an HA service.
-- A follow-up run on the same issue continues the agent's previous Qoder session
-  when that session is idle, uses the same Qoder agent and environment, and no
-  other run is using it. Otherwise a fresh session starts with the current issue
-  and triggering/coalesced comment context. Do not send additional messages
+- A follow-up run on the same issue, or the next turn in the same chat,
+  continues the agent's previous Qoder session when that session is idle, uses
+  the same Qoder agent and environment, and no other run is using it. Otherwise
+  a fresh session starts with the current issue and triggering/coalesced comment
+  context, or with the current chat message. Do not send additional messages
   directly to a bridge-owned session while its run is active.
+- Issue and chat attachments: PNG, JPEG, WebP and GIF images (at most 8000 px
+  per side, about 4.5 MB in total per run so Qoder's echo of the message stays
+  readable) are sent as base64 image blocks in the task message; use a Qoder
+  Agent model with image input. Other files up to 5 MB, PDFs and Office
+  documents included, are uploaded through Qoder Files and mounted under
+  `/data/attachments/`, a chat message's files under
+  `/data/attachments/<run id>/`. Reading a binary format needs a tool for it in
+  the Qoder environment. An issue run uploads every issue attachment again, so
+  it always starts a fresh session. A chat turn that continues a session mounts
+  its files into that session before sending the message, and starts a fresh
+  session if Qoder refuses them. Larger files, files Qoder Files rejects,
+  images over the limits, and chat attachments deleted before the run are
+  listed in the prompt as unavailable; the run does not fail. Uploaded Qoder
+  files are not deleted by the bridge.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without
@@ -136,9 +151,9 @@ GitHub integration links the pull request back to the issue.
 
 ## Current boundaries
 
-This is an issue-execution PoC. Chat, squad coordination, local directories,
-attachments, arbitrary Git hosts, tag/commit checkout, full comment-history
-hydration, interactive tool approval, custom client-side tools, terminal access,
+This is a PoC for issue runs and chat turns. Squad coordination, local
+directories, arbitrary Git hosts,
+tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 file transfer and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
@@ -217,7 +232,7 @@ first. Stopping keeps Qoder Cloud Agents/repository credentials for a later Save
 standalone bridge for the same connection alongside the managed service. When
 migrating, stop the standalone bridge at idle before saving the managed config.
 
-This does not add chat support, session continuation, or delivery validation:
+This does not add delivery validation:
 The end of a turn in Qoder Cloud Agents remains execution completion, not proof that a PR was created.
 
 

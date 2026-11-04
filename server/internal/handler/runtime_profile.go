@@ -399,10 +399,9 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 	total := summary.TotalCount
 
 	classes := map[blockingAgentClass]bool{
-		blockingAgentUser:           summary.UserCount > 0,
-		blockingAgentMika:           summary.MikaCount > 0,
-		blockingAgentBuilderCarrier: summary.AgentBuilderCount > 0,
-		blockingAgentOtherSystem:    summary.OtherSystemCount > 0,
+		blockingAgentUser:        summary.UserCount > 0,
+		blockingAgentMika:        summary.MikaCount > 0,
+		blockingAgentOtherSystem: summary.OtherSystemCount > 0,
 	}
 
 	named := make([]string, 0, maxNamedBlockingAgents)
@@ -468,8 +467,10 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 // DeleteRuntimeProfile removes a profile and, in the same transaction, the
 // agent_runtime instance rows registered against it. Migration 120 dropped the
 // DB ON DELETE CASCADE, so this app-layer cleanup is what prevents orphaned
-// runtime rows. Refuses (409) while active agents are still bound to the
-// profile's runtimes. Admin-gated by the router.
+// runtime rows. Refuses (409) while active user agents are still bound to the
+// profile's runtimes. Hidden Agent Builder carriers do not block: the teardown
+// deletes them with their sessions, as the single-runtime delete already does
+// (GH #9762). Admin-gated by the router.
 func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	wsID := strings.TrimSpace(chi.URLParam(r, "id"))
 	member, ok := h.requireWorkspaceMember(w, r, wsID, "workspace not found")
@@ -488,10 +489,11 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	// The profile-delete cascade must run the SAME teardown the runtime-delete
 	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
 	// agent still pointing at one of these rows would turn a bare delete into a
-	// 500. Active agents are refused (409); everything else is unbound rather
-	// than destroyed, exactly as in service.TeardownRuntime.
-	// Guard: refuse while any active (non-archived) agent is bound to one of
-	// the profile's runtimes. Keep this a 409 — the profile is the thing that
+	// 500. Active user agents are refused (409); archived user agents are
+	// unbound rather than destroyed, and system agents (Builder carriers) are
+	// deleted, exactly as in service.TeardownRuntime.
+	// Guard: refuse while any active (non-archived) user agent is bound to one
+	// of the profile's runtimes. Keep this a 409 — the profile is the thing that
 	// defines those runtimes, so the user should retire the agents or move them
 	// deliberately instead of having them silently unbound in bulk.
 	tx, err := h.TxStarter.Begin(r.Context())

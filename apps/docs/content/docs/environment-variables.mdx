@@ -123,6 +123,10 @@ For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#s
 
 When `S3_BUCKET` is unset, Multica uses local disk.
 
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Maximum body size for online text/HTML previews, up to `16MiB`. Accepts positive integer bytes or `KB`/`KiB`, `MB`/`MiB` (binary units). Valid values above `16MiB` are clamped to `16MiB`; invalid values use the default. Larger limits can slow browser previews, especially syntax highlighting and Markdown rendering. Restart the API after changing it. Upload and download limits are unchanged. |
+
 ### S3 or compatible storage
 
 | Variable | Default | Description |

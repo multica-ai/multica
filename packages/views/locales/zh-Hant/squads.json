@@ -2,7 +2,6 @@
   "page": {
     "title": "小隊",
     "new_button": "新建小隊",
-    "empty_no_squads": "暫無小隊。",
     "empty_no_match": "沒有匹配篩選條件的小隊。",
     "table": {
       "name": "小隊",
@@ -15,12 +14,8 @@
     "row_menu": "小隊操作",
     "archive_action": "歸檔"
   },
-  "inspector": {
-    "details_section": "詳情",
-    "archive_button": "歸檔"
-  },
   "member_type": {
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "member": "成員"
   },
   "archive_dialog": {
@@ -42,15 +37,15 @@
   },
   "add_member_dialog": {
     "title": "新增成員",
-    "description": "可選擇工作區成員或智慧體。",
+    "description": "可選擇工作區成員或 AI 代理。",
     "label_member": "成員",
     "label_role": "角色",
     "label_optional": "（可選）",
     "cancel": "取消",
-    "select_target": "選擇成員或智慧體",
-    "search_placeholder": "搜尋成員或智慧體...",
+    "select_target": "選擇成員或 AI 代理",
+    "search_placeholder": "搜尋成員或 AI 代理...",
     "members_section": "成員",
-    "agents_section": "智慧體",
+    "agents_section": "AI 代理",
     "role_placeholder": "例如：審查者、前端負責人",
     "add": "新增"
   },
@@ -65,19 +60,14 @@
     "responsibility_placeholder": "這個小隊負責什麼？",
     "save": "儲存"
   },
-  "discard_changes_dialog": {
-    "title": "放棄未儲存的修改？",
-    "description": "當前標籤頁有未儲存的修改，切換標籤會丟棄這些修改。",
-    "keep_editing": "繼續編輯",
-    "discard_button": "放棄"
-  },
   "members_tab": {
     "section_title": "成員",
-    "section_count_other": "該小隊有 {{count}} 名成員",
     "add_member_button": "新增成員",
-    "create_agent_button": "建立智慧體",
+    "empty_title": "還沒有成員",
+    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。",
+    "create_agent_button": "建立 AI 代理",
     "leader_chip": "隊長",
-    "view_agent_tooltip": "開啟智慧體詳情",
+    "view_agent_tooltip": "開啟 AI 代理詳情",
     "make_leader_tooltip": "設為小隊負責人",
     "remove_member_tooltip": "從小隊移除",
     "status_working": "工作中",
@@ -86,19 +76,31 @@
     "status_unstable": "不穩定",
     "status_archived": "已歸檔",
     "issue_status_blocked": "已阻塞",
-    "active_issue_more": "還有 {{count}} 個",
-    "last_active_label": "最近活動 {{time}}"
+    "active_issue_more": "還有 {{count}} 個"
   },
-  "detail_tabs": {
-    "members": "成員",
-    "instructions": "指引"
+  "detail": {
+    "assign_work": "指派工作",
+    "copy_link": "複製連結",
+    "link_copied": "已複製連結",
+    "not_found": "找不到該小隊",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部小隊",
+    "instructions": "指引",
+    "edit": "編輯",
+    "cancel": "取消",
+    "recent_work": "近期工作",
+    "recent_work_empty": "還沒有指派給這個小隊的任務。",
+    "member_menu": "{{name}} 的操作",
+    "working_on": "正在處理"
   },
   "details": {
     "leader": "隊長",
     "members": "成員",
     "created_by": "建立者",
     "created": "建立時間",
-    "updated": "更新時間"
+    "updated": "更新時間",
+    "visibility": "可見範圍",
+    "visibility_workspace": "工作區"
   },
   "toasts": {
     "member_added": "已新增成員",
@@ -127,18 +129,38 @@
     "placeholder": "例如：始終先編寫失敗測試。提交應保持小而獨立。"
   },
   "scope": {
-    "mine": "我的",
-    "all": "全部"
+    "mine": "我的小隊",
+    "all": "全部小隊"
   },
-  "toolbar": {
-    "display": "顯示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
-    "result_count_title": "當前結果 / 全部小隊",
-    "filter_label": "篩選",
-    "filter_active_count_other": "{{count}} 項篩選",
-    "clear_filters": "清除篩選"
+  "toolbar": {},
+  "intro": {
+    "title": "讓 AI 代理組隊，像團隊一樣做事",
+    "description": "把任務交給小隊，隊長 AI 代理會讀懂需求，依成員的角色分派下一步，並追蹤到目標完成。你只需要對接一個入口。",
+    "slides": {
+      "route": {
+        "title": "一個入口，自動分派",
+        "description": "隊長讀懂任務後，@ 最適合下一步的成員。只有被點名的成員會開始工作。"
+      },
+      "roles": {
+        "title": "依角色分工",
+        "description": "角色描述告訴隊長每位成員擅長什麼。成員可以是 AI 代理，也可以是人。"
+      },
+      "progress": {
+        "title": "進展集中在一處",
+        "description": "小隊詳情頁列出近期的任務，以及每位成員正在做什麼。"
+      }
+    },
+    "art": {
+      "assignee": "負責人",
+      "squad_name": "前端小隊",
+      "issue_dark_mode": "設定頁支援深色模式切換",
+      "issue_board_columns": "看板欄寬可拖曳調整",
+      "issue_inbox_gestures": "行動版收件箱手勢",
+      "issue_paste_images": "留言支援貼上圖片",
+      "delegating": "依角色挑選成員...",
+      "role_frontend": "前端",
+      "role_testing": "測試",
+      "role_product": "產品"
+    }
   }
 }

@@ -786,7 +786,7 @@ func validImportOnConflict(strategy string) bool {
 const (
 	maxImportFileSize  = 1 << 20 // 1 MiB per file
 	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
-	maxImportFileCount = 256     // max number of supporting files
+	maxImportFileCount = 512     // max number of supporting files
 )
 
 // importedSkill holds the data extracted from an external source.
@@ -1478,7 +1478,7 @@ func acceptConventionalSkillDir(ctx context.Context, httpClient *http.Client, ra
 // treeDownloadConcurrency bounds how many supporting files are downloaded in
 // parallel during tree-based collection. Small enough that one import cannot
 // open hundreds of sockets to GitHub at once, large enough to keep the download
-// phase well under the overall import deadline for a full (256-file) bundle.
+// phase well under the overall import deadline for a full (512-file) bundle.
 const treeDownloadConcurrency = 8
 
 // addSupportingFilesFromTree enumerates the supporting files under skillDir from
@@ -2540,9 +2540,26 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// The baseline runs before TouchSkill: it locks the skill row (the same
+	// lock TouchSkill and UpdateSkill take, so lock order is unchanged) and
+	// stamps a pre-versioning skill's baseline with its real updated_at.
 	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
 		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	// Touch the parent first so its row lock is taken before the file write,
+	// in the same order UpdateSkill takes them.
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return
 	}
 	sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
@@ -2563,11 +2580,17 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
 
+	h.publishSkillFilesChanged(r, resp)
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
 }
 
@@ -2593,6 +2616,7 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "skill file not found")
 		return
 	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -2604,6 +2628,18 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
 		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return
 	}
 	if err := qtx.DeleteSkillFile(r.Context(), file.ID); err != nil {
@@ -2618,11 +2654,44 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
+
+	h.publishSkillFilesChanged(r, resp)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// skillWithFilesInTx builds the skill:updated payload from reads inside the
+// writing transaction, so the event carries exactly the state it committed.
+func skillWithFilesInTx(ctx context.Context, qtx *db.Queries, skill db.Skill) (SkillWithFilesResponse, error) {
+	files, err := qtx.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+// publishSkillFilesChanged announces a supporting-file write the same way
+// UpdateSkill announces an edit: a file change is a change to the skill, and
+// clients holding the skill (detail page, agent skill lists) must refetch it.
+func (h *Handler) publishSkillFilesChanged(r *http.Request, resp SkillWithFilesResponse) {
+	wsID := h.resolveWorkspaceID(r)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 }
 
 // --- Agent-Skill junction ---

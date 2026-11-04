@@ -1,7 +1,7 @@
 {
   "name": "@multica/desktop",
   "productName": "Multica",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",
   "homepage": "https://multica.ai",
@@ -67,6 +67,7 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^44.9.3",
     "electron-builder": "^26.0.12",

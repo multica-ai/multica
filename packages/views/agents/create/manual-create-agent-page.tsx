@@ -128,6 +128,14 @@ export function ManualCreateAgentPage() {
       }),
     );
 
+  // A duplicate arrives from the agents list, so going back returns there.
+  // Behind step 2 is step 1, so leaving the flow has to go forward to where it
+  // was opened from instead.
+  const leave = () =>
+    duplicateId
+      ? backOrReplace(paths.agents())
+      : navigation.push(squadId ? paths.squadDetail(squadId) : paths.agents());
+
   // Hands the current draft to a builder conversation on the same runtime.
   const [startingAi, setStartingAi] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -185,11 +193,7 @@ export function ManualCreateAgentPage() {
       }
       step={t(($) => $.creation_studio.steps.configure)}
       stepIndex={duplicateId ? undefined : 2}
-      // A duplicate arrives from the agents list, not from step 1, so it
-      // returns to where it came from instead of offering a runtime to pick.
-      onBack={() =>
-        duplicateId ? backOrReplace(paths.agents()) : changeRuntime()
-      }
+      onClose={leave}
       chips={
         duplicateId && form.selectedRuntime ? (
           <AgentCreateChip>
@@ -261,14 +265,16 @@ export function ManualCreateAgentPage() {
             }
           />
         </div>
-        <CreateAgentFooter
-          canCreate={canCreate}
-          creating={submit.creating}
-          squad={!!squadId}
-          error={submit.formError}
-          onCreate={() => void submit.create()}
-        />
       </div>
+      <CreateAgentFooter
+        stepIndex={duplicateId ? undefined : 2}
+        canCreate={canCreate}
+        creating={submit.creating}
+        squad={!!squadId}
+        error={submit.formError}
+        onCreate={() => void submit.create()}
+        onCancel={leave}
+      />
     </AgentCreateShell>
   );
 }

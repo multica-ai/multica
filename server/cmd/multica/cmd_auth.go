@@ -525,7 +525,7 @@ const callbackSuccessHTML = `<!DOCTYPE html>
   .icon-wrap { width: 48px; height: 48px; margin: 0 auto 24px; background: var(--accent-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
   .icon-wrap svg { width: 24px; height: 24px; color: var(--accent); }
   .brand { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 8px; }
-  .asterisk { display: inline-block; width: 14px; height: 14px; background: var(--fg); clip-path: polygon(45% 62.1%,45% 100%,55% 100%,55% 62.1%,81.8% 88.9%,88.9% 81.8%,62.1% 55%,100% 55%,100% 45%,62.1% 45%,88.9% 18.2%,81.8% 11.1%,55% 37.9%,55% 0%,45% 0%,45% 37.9%,18.2% 11.1%,11.1% 18.2%,37.9% 45%,0% 45%,0% 55%,37.9% 55%,11.1% 81.8%,18.2% 88.9%); }
+  .brand svg { display: block; color: var(--fg); }
   h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
   p { font-size: 14px; color: var(--fg2); line-height: 1.5; }
   .hint { margin-top: 24px; font-size: 13px; color: var(--fg2); opacity: 0.7; }
@@ -536,7 +536,7 @@ const callbackSuccessHTML = `<!DOCTYPE html>
     <div class="icon-wrap">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
     </div>
-    <div class="brand"><span class="asterisk"></span></div>
+    <div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -30.5 421.36 106.5" height="18" width="71" role="img" aria-label="Multica"><g fill="none" stroke="currentColor" stroke-width="16"><path d="M8 76V31A23 23 0 0 1 54 31V76M54 31A23 23 0 0 1 100 31V76"/><path d="M128 0V45A23 23 0 0 0 174 45M174 0V76"/><path d="M202 -30V76"/><path d="M239.6 -19.8V76M219.6 8H259.6"/><path d="M277.8 0V76"/><circle cx="277.8" cy="-18.6" r="8.96" fill="currentColor" stroke="none"/><path d="M344.103 14.737A23 23 0 0 0 304.84 31V45A23 23 0 0 0 344.103 61.263"/><path d="M367.36 31A23 23 0 0 1 413.36 31V45A23 23 0 0 1 367.36 45ZM413.36 0V76"/></g></svg></div>
     <h1>Authentication successful</h1>
     <p>You can close this tab and return to the terminal.</p>
     <p class="hint">Your CLI session is now authenticated.</p>

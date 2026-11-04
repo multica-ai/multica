@@ -43,7 +43,7 @@ export default function Login() {
       >
         <View className="flex-1 justify-center px-6 gap-6">
           <View className="items-center gap-3">
-            <MulticaLogo size={32} />
+            <MulticaLogo size={28} />
             <View className="gap-1 items-center">
               <Text className="text-2xl font-semibold text-foreground">
                 {t("login.title")}

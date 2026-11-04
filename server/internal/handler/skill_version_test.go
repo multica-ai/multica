@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -166,6 +167,58 @@ func TestSkillVersionBaselineForUnversionedSkill(t *testing.T) {
 		Want(http.StatusOK).JSON(&baseline)
 	if baseline.Content != "legacy body" {
 		t.Fatalf("baseline must hold the pre-write content, got %q", baseline.Content)
+	}
+}
+
+// The single-file endpoints also bump the skill's updated_at (TouchSkill). The
+// baseline must be taken before that bump, so it keeps the time the legacy
+// content was actually written and holds none of the incoming file write.
+func TestSkillVersionBaselineForUnversionedSkillFileWrites(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database available")
+	}
+
+	skill := createVersionTestSkill(t, "test-skill-version-baseline-files", []CreateSkillFileRequest{
+		{Path: "notes.md", Content: "legacy notes"},
+	})
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM skill_version WHERE skill_id = $1`, skill.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacyUpdatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := testPool.Exec(ctx, `UPDATE skill SET updated_at = $2 WHERE id = $1`, skill.ID, legacyUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	fileReq := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", CreateSkillFileRequest{
+		Path: "extra.md", Content: "new extra",
+	}), "id", skill.ID)
+	testutil.Call(t, testHandler.UpsertSkillFile, fileReq).Want(http.StatusOK)
+
+	versions := listVersions(t, skill.ID)
+	if len(versions) != 2 || versions[1].Source != skillVersionSourceBaseline || versions[0].Source != skillVersionSourceUpdate {
+		t.Fatalf("want [v2 update, v1 baseline], got %+v", versions)
+	}
+	if got, err := time.Parse(time.RFC3339, versions[1].CreatedAt); err != nil || !got.Equal(legacyUpdatedAt) {
+		t.Fatalf("baseline must keep the legacy updated_at %s, got %q (err %v)", legacyUpdatedAt, versions[1].CreatedAt, err)
+	}
+	var baseline SkillVersionResponse
+	testutil.Call(t, testHandler.GetSkillVersion, skillVersionRequest(http.MethodGet, skill.ID, strconv.Itoa(int(versions[1].Version)), "")).
+		Want(http.StatusOK).JSON(&baseline)
+	if len(baseline.Files) != 1 || baseline.Files[0].Path != "notes.md" {
+		t.Fatalf("baseline must hold the pre-write files, got %+v", baseline.Files)
+	}
+
+	// Deleting a file is one more version, not a second baseline.
+	var fileID string
+	if err := testPool.QueryRow(ctx, `SELECT id::text FROM skill_file WHERE skill_id = $1 AND path = 'extra.md'`, skill.ID).Scan(&fileID); err != nil {
+		t.Fatal(err)
+	}
+	delReq := withURLParams(newRequest(http.MethodDelete, "/api/skills/"+skill.ID+"/files/"+fileID, nil), "id", skill.ID, "fileId", fileID)
+	testutil.Call(t, testHandler.DeleteSkillFile, delReq).Want(http.StatusNoContent)
+	versions = listVersions(t, skill.ID)
+	if len(versions) != 3 || versions[0].Version != 3 || versions[0].Source != skillVersionSourceUpdate {
+		t.Fatalf("after file delete: want v3 update on top, got %+v", versions)
 	}
 }
 

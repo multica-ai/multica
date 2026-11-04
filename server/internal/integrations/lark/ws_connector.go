@@ -2,6 +2,7 @@ package lark
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -60,6 +61,10 @@ type WSConnectorConfig struct {
 	// disables enrichment (the decoded body is emitted as-is).
 	Enricher Enricher
 
+	// InboundVerifier records receipt evidence independently of business routing.
+	// A failed write must not change dispatch or acknowledgement behavior.
+	InboundVerifier InboundVerifier
+
 	// EnrichTimeout caps a single message's enrichment (at most two
 	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
 	// ACK window, since enrichment runs before the frame is ACKed.
@@ -74,7 +79,7 @@ type WSConnectorConfig struct {
 
 	// PingInterval is the fallback cadence for the app-layer ping.
 	// In production it is overridden per-installation by the
-	// PingInterval Lark returns in the bootstrap ClientConfig.
+	// PingInterval Lark returns in the bootstrap ClientConfig or a pong.
 	// Zero defaults to 2 minutes (matches the SDK default in
 	// `larksuite/oapi-sdk-go/v3/ws/client.go`).
 	PingInterval time.Duration
@@ -83,7 +88,9 @@ type WSConnectorConfig struct {
 	// each read; expiry yields a transient read error which the
 	// connector logs and uses to exit, deferring to the Hub's
 	// reconnect backoff. Zero defaults to 6 minutes so a healthy
-	// connection with the 2-minute default ping never trips it.
+	// connection with the 2-minute default ping never trips it. The
+	// effective deadline is raised to 3x the active ping interval when
+	// Lark asks for a longer cadence.
 	ReadDeadline time.Duration
 
 	// WriteTimeout bounds a single WriteMessage. Zero defaults to 10s.
@@ -223,10 +230,12 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 	// type once per connection rather than once per frame. Read-loop-local:
 	// no lock, and a reconnect re-reports.
 	reportedDrops := make(map[string]struct{})
+	receiptRecorded := false
 
 	// Ping loop: app-layer binary ping frames at the server's PingInterval.
 	pingDone := make(chan struct{})
-	go c.pingLoop(runCtx, conn, &writeMu, endpoint.ServiceID, pingInterval, log, pingDone)
+	pingUpdates := make(chan time.Duration)
+	go c.pingLoop(runCtx, conn, &writeMu, endpoint.ServiceID, pingInterval, pingUpdates, closeConn, log, pingDone)
 
 	defer func() {
 		runCancel()
@@ -243,7 +252,7 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 	for {
 		// Re-arm the read deadline before every Read so a stalled
 		// connection eventually unblocks the syscall.
-		if err := conn.SetReadDeadline(c.cfg.Now().Add(c.cfg.ReadDeadline)); err != nil {
+		if err := conn.SetReadDeadline(c.cfg.Now().Add(readDeadlineFor(c.cfg.ReadDeadline, pingInterval))); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -283,13 +292,41 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			continue
 		}
 
-		// Control frames carry ping / pong / config updates. We
-		// only have to act on pings (reply with a pong); pongs and
-		// config payloads are accepted silently.
+		// Lark sends updated ClientConfig JSON in application-level pongs.
 		if frame.Method == FrameMethodControl {
-			if frame.HeaderValue(FrameHeaderTypeKey) == FrameHeaderTypePing {
+			switch frame.HeaderValue(FrameHeaderTypeKey) {
+			case FrameHeaderTypePing:
 				if werr := c.writeFrame(&writeMu, conn, NewPongFrame(endpoint.ServiceID)); werr != nil {
 					log.Warn("lark ws connector: pong write failed", "err", werr.Error())
+				}
+			case FrameHeaderTypePong:
+				if len(frame.Payload) == 0 {
+					break
+				}
+				var config struct {
+					PingInterval int64 `json:"PingInterval"`
+				}
+				if err := json.Unmarshal(frame.Payload, &config); err != nil {
+					log.Warn("lark ws connector: pong config decode failed", "err", err.Error())
+					break
+				}
+				// Seconds must fit in a positive time.Duration before conversion.
+				if config.PingInterval <= 0 || config.PingInterval > int64((1<<63-1)/time.Second) {
+					break
+				}
+				updated := time.Duration(config.PingInterval) * time.Second
+				if updated != pingInterval {
+					select {
+					case pingUpdates <- updated:
+						pingInterval = updated
+					case <-pingDone:
+						if ctx.Err() != nil {
+							return nil
+						}
+						return errors.New("ping loop stopped during config update")
+					case <-runCtx.Done():
+						return nil
+					}
 				}
 			}
 			continue
@@ -366,6 +403,19 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			continue
 		}
 
+		if !receiptRecorded && c.cfg.InboundVerifier != nil &&
+			frame.Method == FrameMethodData && frame.HeaderValue(FrameHeaderTypeKey) == FrameHeaderTypeEvent &&
+			validReceiptMessage(inst, msg) {
+			verifyCtx, cancelVerify := context.WithTimeout(ctx, 250*time.Millisecond)
+			verifyErr := c.cfg.InboundVerifier.RecordInboundReceipt(verifyCtx, inst, msg)
+			cancelVerify()
+			if verifyErr != nil {
+				log.Warn("lark ws connector: record inbound receipt failed", "err", verifyErr.Error())
+			} else {
+				receiptRecorded = true
+			}
+		}
+
 		// Enrich the decoded body with explicitly-attached context
 		// (quoted reply / forwarded bundle) before emitting. This runs
 		// before the frame ACK, so it is bounded by EnrichTimeout and
@@ -413,29 +463,60 @@ func (c *WSLongConnConnector) writeFrame(mu *sync.Mutex, conn WSConn, f *Frame) 
 	return conn.WriteMessage(websocket.BinaryMessage, payload)
 }
 
+// readDeadlineFor keeps the read deadline above the ping cadence.
+// Pongs are the only guaranteed inbound traffic on an idle session, so
+// a deadline shorter than two ping intervals would drop healthy
+// connections whenever Lark asks for a long cadence.
+func readDeadlineFor(base, pingInterval time.Duration) time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
+	if pingInterval <= 0 {
+		return base
+	}
+	if pingInterval > maxDuration/3 {
+		return maxDuration
+	}
+	if min := 3 * pingInterval; min > base {
+		return min
+	}
+	return base
+}
+
 // pingLoop sends a periodic app-layer ping frame on the cadence Lark
 // asked for. The previous implementation used WebSocket protocol PING
 // (WriteControl), which the SDK source confirms Lark ignores.
-func (c *WSLongConnConnector) pingLoop(ctx context.Context, conn WSConn, writeMu *sync.Mutex, serviceID int32, interval time.Duration, log *slog.Logger, done chan<- struct{}) {
+func (c *WSLongConnConnector) pingLoop(ctx context.Context, conn WSConn, writeMu *sync.Mutex, serviceID int32, interval time.Duration, updates <-chan time.Duration, closeConn func(), log *slog.Logger, done chan<- struct{}) {
 	defer close(done)
-	if interval <= 0 {
-		// A zero / negative interval would tick infinitely; bail out
-		// quietly. We logged the chosen interval at connect time.
-		<-ctx.Done()
-		return
+	// A zero / negative interval would tick infinitely, so the ticker
+	// stays unarmed until a positive update arrives. Updates are still
+	// received in that state so Run never blocks delivering one.
+	var t *time.Ticker
+	var tick <-chan time.Time
+	if interval > 0 {
+		t = time.NewTicker(interval)
+		tick = t.C
 	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
+	defer func() {
+		if t != nil {
+			t.Stop()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case interval = <-updates:
+			if t == nil {
+				t = time.NewTicker(interval)
+				tick = t.C
+			} else {
+				t.Reset(interval)
+			}
+		case <-tick:
 			if err := c.writeFrame(writeMu, conn, NewPingFrame(serviceID)); err != nil {
 				log.Warn("lark ws connector: ping write failed", "err", err.Error())
-				// Don't tear down here — the read loop will exit on
-				// its own when the conn dies. Closing here would race
-				// with the read loop's own cleanup.
+				// Closing unblocks ReadMessage so Run returns to Hub backoff.
+				// closeConn is shared with cleanup and guarded by sync.Once.
+				closeConn()
 				return
 			}
 		}

@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, charts and files in comments, mentions, agents, squads, autopilots, projects, runtimes, skill import. Not for the product code you are working on."
+description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, sub-issues, charts and files in comments, mentions, agents, squads, autopilots, projects, runtimes, skill import. Not for the product code you are working on."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -19,12 +19,13 @@ Read the invariants below, then open the reference(s) your task actually needs
 
 | Open | When the task is about |
 |---|---|
-| `references/issues.md` | Issues: PR linking, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running, wakeups (events, conditions, timers, check-ins), charts vs attached files in a comment |
+| `references/issues.md` | Issues: PR linking, reading a linked PR's state, custom properties, status side effects, who else is running, wakeups (events, conditions, timers, check-ins), charts vs attached files in a comment |
+| `references/sub-issues.md` | Sub-issues: whether to split an issue at all, `todo` vs `backlog` children, serial chains, stages and the parent wakeups they drive |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; steering another agent's running turn (`comment add --steer`) |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
-| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt |
+| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt, reading or changing a workflow (`multica workflow`, `multica project workflow`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 
@@ -33,7 +34,7 @@ crosses domains needs each domain it touches — creating a squad, assigning it 
 issue, then writing a mention needs `squads.md`, `issues.md` and `mentions.md`,
 and skipping one of those means acting on a contract you have not read.
 
-What is never right is reading all eight because you are not sure. Each
+What is never right is reading all nine because you are not sure. Each
 reference states its own contracts in full and none depends on another, so
 pick by domain and skip the rest.
 
