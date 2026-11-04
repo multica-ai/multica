@@ -20,6 +20,10 @@ type squadLeader struct {
 	TriggerCommentID string `json:"trigger_comment_id,omitempty"`
 	Commented        bool   `json:"commented,omitempty"`
 	Recorded         bool   `json:"recorded,omitempty"`
+	// Persist write intent before each POST. Neither endpoint deduplicates an
+	// ambiguous response, so it must never cause an automatic replay.
+	CommentSubmitted    bool `json:"comment_submitted,omitempty"`
+	EvaluationSubmitted bool `json:"evaluation_submitted,omitempty"`
 	// The task credential is never persisted; after a restart it is gone and
 	// the run fails instead of delivering the turn.
 	token string
@@ -57,51 +61,118 @@ func parseLeaderOutput(output string) (outcome, reason, comment string) {
 	return outcome, reason, comment
 }
 
-// deliverLeader posts the delegation comment and records the evaluation
-// before the run completes. Each step is saved once it succeeds so a retry
-// after a later failure does not post the comment twice.
+// deliverLeader posts the delegation comment and records its actual dispatch
+// result before completing. Only a definite rate-limit refusal permits retry.
 func (b *Bridge) deliverLeader(ctx context.Context, r *run) error {
 	l := r.Leader
-	if l.token == "" {
-		r.Outcome = "failed"
-		r.Failure = "the bridge restarted before the squad leader turn was delivered; trigger the leader again"
+	if l.Recorded {
+		return nil
+	}
+	fail := func(reason string) error {
+		r.Outcome, r.Failure = "failed", reason
 		return b.persist()
+	}
+	if l.token == "" {
+		if l.CommentSubmitted || l.Commented {
+			return fail("the bridge restarted during squad leader delivery; check the issue comments and activity before retrying, because members may already be running")
+		}
+		return fail("the bridge restarted before the squad leader turn was delivered; trigger the leader again")
 	}
 	taskAPI := *b.multica
 	taskAPI.token = l.token
 	outcome, reason, comment := parseLeaderOutput(r.Output)
-	if !l.Commented && comment != "" {
+	if outcome == "action" && comment == "" && r.Failure == "" {
+		r.Failure = "the squad leader reported action without a delegation comment"
+	}
+	const uncertainComment = "squad leader comment delivery could not be confirmed; check the issue comments before retrying, because members may already be running"
+	if l.CommentSubmitted && !l.Commented && r.Failure == "" {
+		r.Failure = uncertainComment
+	}
+	if !l.Commented && comment != "" && r.Failure == "" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		body := map[string]any{"content": comment, "type": "comment"}
 		if l.TriggerCommentID != "" {
 			body["parent_id"] = l.TriggerCommentID
 		}
-		if err := taskAPI.call(ctx, http.MethodPost, "/api/issues/"+url.PathEscape(l.IssueID)+"/comments", body, nil); err != nil {
+		l.CommentSubmitted = true
+		if err := b.persist(); err != nil {
+			return err
+		}
+		var posted struct {
+			TriggerOutcomes []struct {
+				TargetID   string `json:"target_id"`
+				Status     string `json:"status"`
+				ReasonCode string `json:"reason_code"`
+			} `json:"trigger_outcomes"`
+		}
+		if err := taskAPI.call(ctx, http.MethodPost, "/api/issues/"+url.PathEscape(l.IssueID)+"/comments", body, &posted); err != nil {
+			if rateLimited(err) {
+				l.CommentSubmitted = false
+				if persistErr := b.persist(); persistErr != nil {
+					return persistErr
+				}
+				return err
+			}
 			if definitelyRejected(err) {
-				r.Outcome = "failed"
 				r.Failure = "Multica rejected the squad leader comment: " + err.Error()
-				return b.persist()
+			} else {
+				r.Failure = uncertainComment
+			}
+		} else {
+			l.Commented = true
+			var blocked []string
+			for _, target := range posted.TriggerOutcomes {
+				if target.Status == "blocked" {
+					blocked = append(blocked, fmt.Sprintf("%s (%s)", target.TargetID, target.ReasonCode))
+				}
+			}
+			if len(blocked) > 0 {
+				r.Failure = "squad delegation blocked for " + strings.Join(blocked, ", ") + "; other targets may already be running, so do not repeat the delegation"
+			}
+		}
+		if err := b.persist(); err != nil {
+			return err
+		}
+	}
+	if r.Failure != "" {
+		outcome, reason = "failed", r.Failure
+	}
+	if reason == "" {
+		reason = fmt.Sprintf("Recorded by the Qoder Cloud Agents bridge (%s)", outcome)
+	}
+	if l.EvaluationSubmitted {
+		return fail("squad evaluation delivery could not be confirmed; check the issue activity before retrying and do not repeat the delegation")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	l.EvaluationSubmitted = true
+	if err := b.persist(); err != nil {
+		return err
+	}
+	err := taskAPI.call(ctx, http.MethodPost, "/api/issues/"+url.PathEscape(l.IssueID)+"/squad-evaluated", map[string]string{"outcome": outcome, "reason": reason}, nil)
+	if err != nil {
+		if rateLimited(err) {
+			l.EvaluationSubmitted = false
+			if persistErr := b.persist(); persistErr != nil {
+				return persistErr
 			}
 			return err
 		}
-		l.Commented = true
-		if err := b.persist(); err != nil {
-			return err
+		failure := "squad evaluation delivery could not be confirmed; check the issue activity before retrying and do not repeat the delegation"
+		if definitelyRejected(err) {
+			failure = "Multica rejected the squad leader evaluation: " + err.Error()
 		}
+		if r.Failure != "" {
+			failure = r.Failure + "; " + failure
+		}
+		return fail(failure)
 	}
-	if !l.Recorded {
-		if reason == "" {
-			reason = fmt.Sprintf("Recorded by the Qoder Cloud Agents bridge (%s)", outcome)
-		}
-		err := taskAPI.call(ctx, http.MethodPost, "/api/issues/"+url.PathEscape(l.IssueID)+"/squad-evaluated", map[string]string{"outcome": outcome, "reason": reason}, nil)
-		if err != nil && !definitelyRejected(err) {
-			return err
-		}
-		// A rejected record must not fail a turn whose comment already
-		// delegated; the completion fallback comment then keeps a record.
-		l.Recorded = true
-		if err := b.persist(); err != nil {
-			return err
-		}
+	l.Recorded = true
+	if outcome == "failed" {
+		r.Outcome, r.Failure = "failed", reason
 	}
-	return nil
+	return b.persist()
 }

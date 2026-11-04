@@ -185,6 +185,15 @@ Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
 implicitly.
 
+Squad quick-create supports Qoder leaders, but quick-create attachments remain
+unsupported. A blocked delegation target fails the leader run and records the
+target ID and admission reason; successfully triggered members keep running.
+Check these results before delegating again. If a comment or evaluation response
+is lost, the bridge fails the run without automatically replaying that write.
+After a restart, delivery that still needs the task credential fails with a
+notice to inspect comments and activity before retrying. Fully delivered turns
+can still finish reporting completion after a restart.
+
 Multica custom skills and execution overrides are rejected; built-in Multica
 CLI skills are omitted because their local tools are unavailable. Qoder sessions
 keep any artifacts they produce; textual result and PR/MR links are returned in
