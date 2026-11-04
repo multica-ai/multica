@@ -3,6 +3,7 @@ import { createStore } from "zustand/vanilla";
 import { viewStoreSlice, type IssueViewState } from "../issues/stores/view-store";
 import {
   isIssueViewModified,
+  isIssueViewUndefined,
   issueViewDefinitionFromState,
   issueViewSeedDefinition,
   modifiedFilterDimensions,
@@ -56,6 +57,27 @@ describe("isIssueViewModified", () => {
       negatedFilters: ["status"],
       relationFilters: ["assigned"],
     });
+  });
+});
+
+describe("isIssueViewUndefined", () => {
+  const created = { ...issueViewSeedDefinition({ query: {}, display: {} }), scope_variant: null };
+
+  it("holds for a view as it is created: no conditions, default display", () => {
+    expect(isIssueViewUndefined(created)).toBe(true);
+    expect(isIssueViewUndefined({ query: {}, display: {}, scope_variant: "any" })).toBe(true);
+  });
+
+  it("ignores 'is not' on a dimension with no values", () => {
+    expect(isIssueViewUndefined({ ...created, query: { negatedFilters: ["label"] } })).toBe(true);
+  });
+
+  it("stops holding once the view saves a condition, a display or a narrower scope", () => {
+    expect(isIssueViewUndefined({ ...created, query: { labelFilters: ["bug"] } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, query: { agentRunningFilter: true } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, display: { viewMode: "list" } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, scope_variant: "agents" })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, scope_variant: "assigned" })).toBe(false);
   });
 });
 
