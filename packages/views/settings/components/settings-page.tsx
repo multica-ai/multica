@@ -151,9 +151,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
@@ -228,6 +225,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
+            ...(appsAvailable
+              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
+              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),

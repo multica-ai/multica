@@ -1795,5 +1795,24 @@
       "empty_title": "還沒有儲存的檢視",
       "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
     }
+  },
+  "app_calls": {
+    "section_title": "應用",
+    "chips_label": "本次執行用到的應用",
+    "calls_count_other": "{{count}} 次呼叫",
+    "more": "還有 {{count}} 個",
+    "scope": {
+      "team": "團隊帳號",
+      "personal": "個人帳號"
+    },
+    "outcome": {
+      "ok": "已執行",
+      "error": "失敗",
+      "blocked": "已攔截",
+      "pending": "等待確認",
+      "approved": "已核准",
+      "rejected": "已拒絕",
+      "rate_limited": "已限流"
+    }
   }
 }

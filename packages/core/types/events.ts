@@ -77,6 +77,8 @@ export type WSEventType =
   | "label:deleted"
   | "issue_labels:changed"
   | "issue_unread:changed"
+  | "app_request:changed"
+  | "app_call:created"
   | "issue_metadata:changed"
   | "issue_properties:changed"
   | "property:created"

@@ -80,7 +80,11 @@
     "quick_create_unconfirmed": "透過 AI 代理建立結果未確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
-    "autopilot_quota_exceeded": "自動化執行次數已用完"
+    "autopilot_quota_exceeded": "自動化執行次數已用完",
+    "app_action_requested": "等待你確認",
+    "app_action_reminder": "確認即將過期",
+    "app_connect_requested": "請連線應用",
+    "app_action_result": "應用操作結果"
   },
   "labels": {
     "set_status_to": "狀態設為",

@@ -154,6 +154,7 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	}
 	var b strings.Builder
 	var lines strings.Builder
+	gateway := ""
 	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
@@ -167,6 +168,11 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 		if name == "" {
 			name = toolkitSlug
 		}
+		if app.Provider == "multica" {
+			gateway = serverName
+			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
+			continue
+		}
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
@@ -174,8 +180,41 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	}
 	b.WriteString("## Connected Apps\n\n")
 	b.WriteString(lines.String())
-	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n")
+	if gateway != "" {
+		fmt.Fprintf(&b, "On `%s`, find tools with `apps_search_tools`, read the schema with `apps_get_tool`, then call `apps_run_tool`. "+
+			"When `apps_run_tool` answers `submitted`, the call waits for a person's confirmation: end your turn — you are resumed with the outcome. "+
+			"Never retry a submitted call or work around a blocked one. For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
+	}
+	b.WriteString("\n")
 	return b.String()
+}
+
+// gatewayAppDetail is the account, level and connection note for one
+// gateway app line.
+func gatewayAppDetail(app runtimeapps.ConnectedApp) string {
+	var parts []string
+	switch app.AccountScope {
+	case "team":
+		parts = append(parts, "team account")
+	case "personal":
+		parts = append(parts, "account of the person who triggered this run")
+	}
+	switch app.Level {
+	case "read":
+		parts = append(parts, "read only")
+	case "confirm_writes":
+		parts = append(parts, "writes need confirmation")
+	case "write":
+		parts = append(parts, "can write")
+	}
+	if app.AccountStatus == "not_connected" {
+		parts = append(parts, "not connected")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — " + strings.Join(parts, ", ")
 }
 
 func sanitizeBriefCodeToken(s string) string {

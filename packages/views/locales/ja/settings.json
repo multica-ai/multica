@@ -948,35 +948,6 @@
     "inbound_pending_hint": "Feishu/Lark でこのボットにメッセージを送り、受信を確認してください。届かない場合は長時間接続、im.message.receive_v1 の購読、アプリの公開・承認状態を確認してください。既存の連携には確認記録がない場合があります。",
     "inbound_verified_hint": "今回の連携で有効なメッセージを受信しました。継続的な接続、エージェントの実行、返信の成功を保証するものではありません。"
   },
-  "composio": {
-    "page_description": "エージェントが使えるアプリに接続します。",
-    "not_enabled_title": "Composio integration not enabled",
-    "not_enabled_description_prefix": "Set",
-    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
-    "loading": "Loading toolkits…",
-    "load_failed": "Failed to load Composio toolkits.",
-    "empty_title": "No connectable apps yet",
-    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
-    "search_placeholder": "Search toolkits…",
-    "connect": "Connect",
-    "connecting": "Connecting…",
-    "connected": "Connected",
-    "disconnect": "Disconnect",
-    "disconnecting": "Disconnecting…",
-    "connect_failed": "Couldn't start the connection. Please try again.",
-    "disconnect_failed": "Couldn't disconnect. Please try again.",
-    "toast_disconnected": "Disconnected",
-    "disconnect_confirm_title": "Disconnect this app?",
-    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
-    "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
-    "toast_connected": "接続しました",
-    "toast_connect_failed": "接続を完了できませんでした。もう一度お試しください。",
-    "last_used": "最終使用 {{when}}",
-    "last_used_never": "未使用",
-    "expired": "トークンの有効期限切れ",
-    "reconnect": "再接続"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "Slack でエージェントと対話し、/issue でタスクを作成できます。",
@@ -1465,7 +1436,175 @@
     "title": "エージェントにツールを与える方法",
     "current": "このページ",
     "mcp": "管理者が追加してワークスペースで共有し、エージェントごとに割り当てます。",
-    "apps": "自分のアカウントで Composio 経由で承認し、自分が所有するエージェントで有効にします。",
+    "apps": "Multica で接続したチームまたは個人のアカウント。エージェントごとにアカウントと権限レベルを割り当てます。",
     "plugins": "インストールするとツール、定期フック、ストレージを追加でき、プラグインごとに権限を付与します。"
+  },
+  "connected_apps": {
+    "description": "エージェントが外部アプリを操作するアカウントです。すべての呼び出しは Multica を経由し、ルールを適用し、送信・削除・共有の前に確認を求めます。",
+    "add_app": "アプリを追加",
+    "loading": "アプリを読み込み中…",
+    "load_failed": "アプリを読み込めませんでした。",
+    "team_title": "チームアカウント",
+    "team_description": "サポート用メールや会社の GitHub など、ワークスペースが所有する共有アカウントです。管理者が接続し、チームアカウントを付与されたエージェントはその名義で操作します。",
+    "team_empty": "チームアカウントはまだありません。",
+    "team_empty_member": "チームアカウントはまだありません。ワークスペース管理者に接続を依頼してください。",
+    "personal_title": "自分のアカウント",
+    "personal_description": "あなた自身のアカウントです。あなたが起動した実行では、「起動した人のアカウント」に設定されたアプリがこれを使います。",
+    "personal_empty": "まだアカウントを接続していません。",
+    "connected_by": "{{name}} が接続",
+    "last_used": "最終使用 {{when}}",
+    "last_used_never": "未使用",
+    "used_by_other": "{{count}} 個のエージェントが使用",
+    "expired": "再接続が必要",
+    "reconnect": "再接続",
+    "rules": "ルール",
+    "activity": "アクティビティ",
+    "disconnect": "接続を解除",
+    "catalog_title": "利用できるアプリ",
+    "catalog_label": "メンバーが追加できるアプリ",
+    "catalog_description": "厳選アプリにはレビュー済みの既定ルールがあります。「すべてのアプリ」は Composio で接続できるすべてを含み、Multica が分類できない操作は必ず確認を求めます。カスタムリストでは選んだアプリだけを許可します。",
+    "catalog_all": "すべてのアプリ",
+    "catalog_curated": "厳選のみ",
+    "catalog_custom": "カスタムリスト",
+    "toast_connected": "アカウントを接続しました",
+    "toast_connect_failed": "接続を完了できませんでした。もう一度お試しください。",
+    "toast_disconnected": "接続を解除しました",
+    "toast_failed": "問題が発生しました。もう一度お試しください。",
+    "add": {
+      "title": "アプリを追加",
+      "description": "チームまたは自分用にアカウントを接続します。どのエージェントが使うかは各エージェントの「アプリ」ページで設定します。",
+      "search": "アプリを検索…",
+      "empty": "一致するアプリはありません。",
+      "curated": "厳選",
+      "recommended_team": "通常はチームアカウント",
+      "recommended_personal": "通常は個人アカウント",
+      "connect_team": "チーム用に接続",
+      "connect_personal": "自分のアカウントを接続",
+      "connecting": "接続中…",
+      "connected": "接続済み"
+    },
+    "disconnect_team": {
+      "title": "チームの {{app}} アカウントの接続を解除しますか？",
+      "description": "チームアカウントを使うエージェントはすぐにアクセスできなくなります。",
+      "agents": "使用中のエージェント",
+      "no_agents": "使用しているエージェントはありません。",
+      "active_tasks": "実行中: {{count}}",
+      "active_autopilots": "有効なオートパイロット: {{count}}",
+      "pending": "取り消される確認待ち: {{count}}",
+      "cancel": "キャンセル",
+      "confirm": "接続を解除"
+    },
+    "disconnect_personal": {
+      "title": "あなたの {{app}} アカウントの接続を解除しますか？",
+      "description": "あなたが起動した実行では使えなくなります。後で再接続できます。",
+      "cancel": "キャンセル",
+      "confirm": "接続を解除"
+    },
+    "detail": {
+      "team_title": "{{app}} · チームアカウント",
+      "personal_title": "{{app}} · 自分のアカウント",
+      "rules_description": "エージェントがこのアカウントでできること。エージェントのレベルはこれをより厳しくすることしかできません。",
+      "rules_read_only": "チームアカウントのルールを変更できるのはワークスペース管理者のみです。",
+      "default": "既定: {{policy}}",
+      "activity_empty": "まだ呼び出しはありません。",
+      "activity_failed": "アクティビティを読み込めませんでした。"
+    },
+    "classes": {
+      "read": {
+        "label": "読み取り",
+        "description": "検索・一覧・取得"
+      },
+      "write": {
+        "label": "書き込み",
+        "description": "コンテンツの作成・更新"
+      },
+      "send": {
+        "label": "送信",
+        "description": "メールやメッセージの送信、投稿、招待"
+      },
+      "delete": {
+        "label": "削除",
+        "description": "削除またはアーカイブ"
+      },
+      "share": {
+        "label": "共有",
+        "description": "権限の変更や外部への共有"
+      }
+    },
+    "policies": {
+      "allow": "許可",
+      "confirm": "先に確認",
+      "block": "ブロック"
+    },
+    "outcomes": {
+      "ok": "実行済み",
+      "error": "失敗",
+      "blocked": "ブロック",
+      "pending": "確認待ち",
+      "approved": "承認済み",
+      "rejected": "却下",
+      "rate_limited": "レート制限"
+    },
+    "scopes": {
+      "team": "チームアカウント",
+      "personal": "起動した人のアカウント"
+    },
+    "levels": {
+      "read": "読み取りのみ",
+      "confirm_writes": "書き込み前に確認",
+      "write": "書き込み可"
+    },
+    "request": {
+      "title_action": "{{agent}} が {{tool}} を実行しようとしています",
+      "title_connect": "{{agent}} が {{app}} の接続を依頼しています",
+      "pending_count_other": "{{count}} 件のアプリ操作が確認待ち",
+      "waiting_for": "{{name}} の確認待ち",
+      "expires": "{{when}}に期限切れ",
+      "redacted": "詳細は {{name}} だけが見られます。",
+      "arguments": "引数",
+      "edit": "編集",
+      "invalid_json": "引数は JSON オブジェクトである必要があります。",
+      "approve": "承認して実行",
+      "approve_all": "すべて承認",
+      "reject": "却下",
+      "reject_reason": "理由（任意、エージェントに表示されます）",
+      "connect": "{{app}} を接続",
+      "connected_continue": "接続しました",
+      "status": {
+        "approved": "承認済み",
+        "rejected": "却下",
+        "failed": "失敗",
+        "expired": "期限切れ",
+        "cancelled": "取り消し"
+      },
+      "toast_approved": "承認しました。エージェントが続行します。",
+      "toast_rejected": "却下しました。エージェントが方針を調整します。",
+      "toast_failed": "判断を記録できませんでした。",
+      "not_connected": "先にアカウントを接続してください。",
+      "connected_resumed": "{{app}} を接続しました。エージェントは中断したところから再開します。",
+      "rate_limited": "このアカウントは 1 分あたりの呼び出し上限に達しました。1 分後にもう一度承認してください。",
+      "rate_limited_some_other": "{{count}} 件のリクエストが 1 分あたりの上限に達しました。1 分後にもう一度承認してください。",
+      "withdrawn": "このエージェントを使えなくなったため、リクエストは取り下げられました。"
+    },
+    "tools": {
+      "tab": "ツール",
+      "description": "ツールの分類によって適用されるルールが決まります。自動分類が誤っているツールは修正できます。変更はワークスペース内のこのアプリのすべてのアカウントに適用されます。",
+      "read_only": "ツールの分類を変更できるのはワークスペース管理者のみです。",
+      "search": "ツールを検索",
+      "empty": "一致するツールはありません。",
+      "auto": "自動（{{class}}）",
+      "truncated": "{{total}} 件中 {{shown}} 件を表示しています。検索して絞り込んでください。"
+    },
+    "custom": {
+      "title": "カスタムアプリリスト",
+      "description": "エージェントには選んだアプリだけが表示され、ほかのアプリのアカウントは誰も接続できません。",
+      "selected_other": "{{count}} 個のアプリを選択中",
+      "cancel": "キャンセル",
+      "save": "リストを保存",
+      "saved": "アプリリストを保存しました",
+      "edit": "リストを編集",
+      "row_label": "許可するアプリ",
+      "row_description_other": "{{count}} 個のアプリを許可"
+    }
   }
 }

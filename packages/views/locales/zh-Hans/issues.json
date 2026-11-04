@@ -1795,5 +1795,24 @@
       "empty_title": "还没有保存的视图",
       "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
     }
+  },
+  "app_calls": {
+    "section_title": "应用",
+    "chips_label": "本次运行用到的应用",
+    "calls_count_other": "{{count}} 次调用",
+    "more": "还有 {{count}} 个",
+    "scope": {
+      "team": "团队账号",
+      "personal": "个人账号"
+    },
+    "outcome": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
+    }
   }
 }

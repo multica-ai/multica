@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  AppCatalogResponse,
+  AppsOverview,
+  TeamAppImpact,
   WorkflowHandoffPreview,
   IssueWorkflow,
   IssueWorkflowDryRunResponse,
@@ -3966,4 +3969,175 @@ export const ListLarkInstallationsResponseSchema = z.object({
 export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+// Connected Apps (MUL-8516). Enum fields the UI indexes into label tables
+// fall back to their most cautious value, so a value this client does not
+// know yet renders as something safe instead of a missing label; statuses
+// and outcomes stay strings because their renderers already handle unknowns.
+
+const appNullableString = z.string().nullish().transform((v) => v ?? null);
+const AppAccountScopeSchema = z.enum(["team", "personal"]).catch("personal");
+const AppAccessLevelSchema = z.enum(["read", "confirm_writes", "write"]).catch("confirm_writes");
+const AppActionClassSchema = z.enum(["read", "write", "send", "delete", "share"]).catch("send");
+const AppActionPolicySchema = z.enum(["allow", "confirm", "block"]).catch("confirm");
+const AppCatalogModeSchema = z.enum(["all", "curated", "custom"]).catch("curated");
+
+const AppConnectionSchema = z.object({
+  id: z.string(),
+  toolkit_slug: z.string(),
+  status: z.string().default("active"),
+  connected_by: appNullableString,
+  connected_at: z.string().default(""),
+  last_used_at: appNullableString,
+}).loose();
+
+const AgentAppSchema = z.object({
+  agent_id: z.string(),
+  toolkit_slug: z.string(),
+  account_scope: AppAccountScopeSchema,
+  level: AppAccessLevelSchema,
+}).loose();
+
+export const AppsOverviewSchema = z.object({
+  catalog_mode: AppCatalogModeSchema,
+  allowed_toolkits: z.array(z.string()).default([]).catch([]),
+  can_manage: z.boolean().default(false).catch(false),
+  team: z.array(AppConnectionSchema).default([]),
+  personal: z.array(AppConnectionSchema).default([]),
+  agent_apps: z.array(AgentAppSchema).default([]),
+}).loose();
+
+const AppCatalogEntrySchema = z.object({
+  slug: z.string(),
+  name: z.string().default(""),
+  logo: z.string().optional().catch(undefined),
+  category: z.string().optional().catch(undefined),
+  curated: z.boolean().default(false).catch(false),
+  recommended_scope: AppAccountScopeSchema.optional(),
+  allowed: z.boolean().optional().catch(undefined),
+}).loose();
+
+export const AppCatalogResponseSchema = z.object({
+  catalog_mode: AppCatalogModeSchema,
+  apps: z.array(AppCatalogEntrySchema).default([]),
+}).loose();
+
+export const AppSettingsResponseSchema = z.object({
+  catalog_mode: AppCatalogModeSchema,
+  allowed_toolkits: z.array(z.string()).default([]).catch([]),
+}).loose();
+
+export const AppRulesResponseSchema = z.object({
+  rules: z.array(z.object({
+    action_class: AppActionClassSchema,
+    policy: AppActionPolicySchema,
+    default_policy: AppActionPolicySchema,
+    custom: z.boolean().default(false).catch(false),
+  }).loose()).default([]),
+}).loose();
+
+export const AppActivityResponseSchema = z.object({
+  calls: z.array(z.object({
+    id: z.string(),
+    agent_id: z.string(),
+    issue_id: appNullableString,
+    chat_session_id: appNullableString,
+    triggered_by: appNullableString,
+    tool_slug: z.string(),
+    action_class: AppActionClassSchema,
+    outcome: z.string(),
+    error: appNullableString,
+    created_at: z.string(),
+  }).loose()).default([]),
+}).loose();
+
+export const TeamAppImpactSchema = z.object({
+  agents: z.array(z.object({ id: z.string(), name: z.string().default("") }).loose()).default([]),
+  active_tasks: z.number().default(0).catch(0),
+  active_autopilots: z.number().default(0).catch(0),
+  pending_requests: z.number().default(0).catch(0),
+}).loose();
+
+export const AgentAppsResponseSchema = z.object({
+  apps: z.array(AgentAppSchema).default([]),
+}).loose();
+
+export const AppRequestSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["action", "connect"]).catch("action"),
+  status: z.string(),
+  agent_id: z.string(),
+  issue_id: appNullableString,
+  chat_session_id: appNullableString,
+  approver_user_id: z.string(),
+  account_scope: AppAccountScopeSchema,
+  toolkit_slug: z.string(),
+  tool_slug: z.string().default(""),
+  action_class: AppActionClassSchema,
+  summary: z.string().default(""),
+  arguments: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  approved_arguments: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  result: z.unknown().optional(),
+  error: appNullableString,
+  reason: appNullableString,
+  // Withhold the details unless the server said otherwise.
+  redacted: z.boolean().default(true).catch(true),
+  expires_at: z.string(),
+  decided_by: appNullableString,
+  decided_at: appNullableString,
+  created_at: z.string(),
+}).loose();
+
+export const AppRequestListSchema = z.object({
+  requests: z.array(AppRequestSchema).default([]),
+  next_before: appNullableString,
+}).loose();
+
+export const AppToolsResponseSchema = z.object({
+  tools: z.array(z.object({
+    slug: z.string(),
+    name: z.string().default(""),
+    description: z.string().default(""),
+    auto_class: AppActionClassSchema,
+    class: AppActionClassSchema,
+    overridden: z.boolean().default(false).catch(false),
+  }).loose()).default([]),
+}).loose();
+
+export const IssueAppCallsResponseSchema = z.object({
+  calls: z.array(z.object({
+    id: z.string(),
+    task_id: appNullableString,
+    agent_id: z.string(),
+    account_scope: AppAccountScopeSchema,
+    account_owner_user_id: appNullableString,
+    toolkit_slug: z.string(),
+    tool_slug: z.string(),
+    action_class: AppActionClassSchema,
+    outcome: z.string(),
+    request_id: appNullableString,
+    error: appNullableString,
+    created_at: z.string(),
+  }).loose()).default([]),
+}).loose();
+
+export const AppConnectInitSchema = z.object({ redirect_url: z.string().min(1) }).loose();
+
+export const EMPTY_APPS_OVERVIEW: AppsOverview = {
+  catalog_mode: "curated",
+  allowed_toolkits: [],
+  can_manage: false,
+  team: [],
+  personal: [],
+  agent_apps: [],
+};
+
+export const EMPTY_APP_CATALOG: AppCatalogResponse = { catalog_mode: "curated", apps: [] };
+
+export const EMPTY_TEAM_APP_IMPACT: TeamAppImpact = {
+  agents: [],
+  active_tasks: 0,
+  active_autopilots: 0,
+  pending_requests: 0,
 };
