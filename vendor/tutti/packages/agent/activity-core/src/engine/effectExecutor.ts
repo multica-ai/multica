@@ -177,26 +177,10 @@ function executeCommand(
   command: EngineExternalCommand,
   signal: AbortSignal
 ): Promise<unknown> {
-  if (
-    command.type === "queue/sendPrompt" &&
-    command.requiredSettingsPatch !== undefined
-  ) {
-    return Promise.reject(
-      new Error(
-        "queue/sendPrompt settings preconditions must be resolved by the Engine before execution"
-      )
-    );
-  }
   const effects = commandPort.effects;
   switch (command.type) {
     case "session/activate":
       return effects.activateSession(activationInput(command), {
-        commandId: command.commandId,
-        origin: "engine",
-        signal
-      });
-    case "queue/sendPrompt":
-      return effects.sendInput(promptInput(command), {
         commandId: command.commandId,
         origin: "engine",
         signal
@@ -226,28 +210,6 @@ function commandResultContract(
 ): EngineCommandResultContract {
   if (command.type === "session/activate") return "activation-v1";
   return "opaque";
-}
-
-function promptInput(
-  command: Extract<EngineExternalCommand, { type: "queue/sendPrompt" }>
-): AgentActivitySendInput {
-  return {
-    agentSessionId: command.agentSessionId,
-    ...(command.capabilityRefs?.length
-      ? { capabilityRefs: command.capabilityRefs }
-      : {}),
-    clientSubmitId: command.clientSubmitId,
-    content: [...command.content],
-    displayPrompt: command.displayPrompt ?? null,
-    ...(command.guidance === true ? { guidance: true } : {}),
-    ...(command.guidance === true && command.targetTurnId?.trim()
-      ? { targetTurnId: command.targetTurnId.trim() }
-      : {}),
-    ...(command.submitDiagnostics
-      ? { submitDiagnostics: { ...command.submitDiagnostics } }
-      : {}),
-    workspaceId: command.workspaceId
-  };
 }
 
 function activationInput(

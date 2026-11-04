@@ -111,7 +111,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     kind: "typed",
     effects: {
       activateSession: (input, options) => activate(input, options.signal),
-      sendInput: (input, options) => send(input, options.signal),
       // Only a new conversation's patch reaches the engine's port; later choices go straight to the composer.
       updateSessionSettings: async (input) => {
         scope(input.workspaceId);
@@ -607,62 +606,6 @@ export function createMulticaAgentGuiRuntime(client: AgentGuiRpcClient, init: Ag
     return result;
   }
 
-  async function send(input: AgentActivitySendInput, signal?: AbortSignal): Promise<unknown> {
-    const startedAt = Date.now();
-    scope(input.workspaceId);
-    await composer.selectionsSettled();
-    scope(input.workspaceId);
-    const submissionError = promptSubmissionError(input, init.locale);
-    if (submissionError) throw new MulticaAgentGuiError(submissionError, "unsupported");
-    const detail = details.get(input.agentSessionId);
-    const session = detail?.session ?? workspace.sessions.find((entry) => entry.id === ledger.serverId(input.agentSessionId));
-    if (!session) throw new MulticaAgentGuiError("Conversation is not loaded.", "session_not_loaded");
-    if (session.status === "archived") throw new MulticaAgentGuiError("This conversation is archived.", "session_archived");
-    const pending = sendPromises.get(input.clientSubmitId);
-    if (pending) return pending;
-    const previous = ledger.submission(input.clientSubmitId);
-    if (previous && previous.state !== "accepted") throw unconfirmed();
-    const operation = (async () => {
-      if (!previous?.response) {
-        const encoded = encodeContent(input.content);
-        await uploads.ensure(encoded.attachmentIds ?? []);
-        const recipients = encoded.references?.filter((entry) => entry.kind === "agent") ?? [];
-        if (recipients.length) recipients.forEach((entry) => {
-          const target = workspace.agents.find((item) => item.agent.id === entry.id);
-          if (!target?.canInvoke || !target.runtimeBound || target.agent.archived_at) throw new MulticaAgentGuiError("Mentioned agent is unavailable.", "agent_unavailable", 403);
-        });
-        else assertInvoke(session.agent_id, input.agentSessionId);
-        ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "pending" });
-        await persist();
-        try {
-          const timing = sendTiming.begin(session.id, input.clientSubmitId, startedAt);
-          const reasoningEffort = !recipients.length ? await composer.reasoningForSend(session.agent_id, input.agentSessionId) : null;
-          const submit = () => client.request("session.send", {
-            sessionId: session.id, ...encoded, requestId: input.clientSubmitId,
-            ...(input.submitDiagnostics?.queued === true ? { queued: true as const } : {}),
-            ...(!recipients.length && composer.selectedModel(session.agent_id, input.agentSessionId) ? { model: composer.selectedModel(session.agent_id, input.agentSessionId)! } : {}),
-            ...(!recipients.length ? { reasoningEffort, permissionMode: composer.selectedPermission(session.agent_id, input.agentSessionId) } : {}),
-          }, { signal });
-          const response = await timing.measure("client.request", submit);
-          uploads.forget(encoded.attachmentIds ?? []);
-          ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "accepted", response });
-          await persist();
-        } catch (error) {
-          if (definitiveRejection(error)) ledger.discardSubmission(input.clientSubmitId);
-          else ledger.setSubmission(input.clientSubmitId, { sessionId: session.id, state: "unknown" });
-          await persist();
-          throw error;
-        }
-      }
-      const projected = await loadFreshSession(input.agentSessionId);
-      const response = ledger.submission(input.clientSubmitId)!.response!;
-      const turn = Object.values(engine.getSnapshot().sessionLifecycle.turnsById).find((item) => item.agentSessionId === input.agentSessionId && item.turnId === response.task_id);
-      if (!turn) throw new MulticaAgentGuiError("The message was accepted; the run is still synchronizing. Refresh this conversation.", "accepted_pending_sync");
-      return { kind: "turn", session: projected, turnId: response.task_id, turn };
-    })().finally(() => { sendPromises.delete(input.clientSubmitId); });
-    sendPromises.set(input.clientSubmitId, operation);
-    return operation;
-  }
 
   async function uploadAttachment(file: File) {
     const attachment = await client.request("attachment.upload", { file, background: true });

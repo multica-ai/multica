@@ -36,7 +36,6 @@ export function sessionLifecycleReducer(
   state: SessionLifecycleState,
   intent: EngineIntent,
   context: {
-    sendResultValidation?: SendInputResultValidation | null;
     settingsResultValidation?: ScopedSessionResultValidation | null;
   } = {}
 ): EngineReducerResult<SessionLifecycleState> {
@@ -111,18 +110,6 @@ export function sessionLifecycleReducer(
             initialOperation
           )
         };
-      if (
-        intent.commandType === "queue/sendPrompt" &&
-        context.sendResultValidation?.kind === "valid"
-      ) {
-        const { session, turn } = context.sendResultValidation.result;
-        return result(
-          upsertCanonicalTurn(
-            upsertCanonicalSession(state, session, initialOperation),
-            turn
-          )
-        );
-      }
       return unchanged(state);
     default:
       return unchanged(state);

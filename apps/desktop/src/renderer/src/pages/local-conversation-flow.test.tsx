@@ -153,7 +153,18 @@ function listedIds() {
 let route = 0;
 const page = () => <mock.Route.Provider value={++route}><QueryClientProvider client={qc}><LocalConversationFlowPage /></QueryClientProvider></mock.Route.Provider>;
 const folder = (id: string, title: string, path = "/owned/work"): LocalFolderProject => ({ id, title, path, createdAt: "2026-01-01T00:00:00Z" });
-function activateWithPointer(element: HTMLElement) {
+/**
+ * A menu trigger takes clicks once its effects have run, which it shows by gaining
+ * aria-expanded. A query can return before then on a loaded machine, and that click
+ * would do nothing.
+ */
+async function clickMenuTrigger(trigger: HTMLElement) {
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded"));
+  fireEvent.click(trigger);
+}
+
+async function activateWithPointer(element: HTMLElement) {
+  await waitFor(() => expect(element).toHaveAttribute("aria-expanded"));
   const pointerDown = new MouseEvent("pointerdown", { bubbles: true, button: 0 });
   Object.defineProperty(pointerDown, "pointerType", { value: "mouse" });
   fireEvent(element, pointerDown);
@@ -511,7 +522,7 @@ describe("local conversation execution indicators", () => {
     render(page());
     expect(await screen.findByRole("status", { name: "后台运行中：Original（1）" })).toBeVisible();
     expect(screen.queryByRole("status", { name: "会话运行中：Original" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Original" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "停止后台任务" }));
     await waitFor(() => expect(screen.queryByRole("status", { name: "后台运行中：Original（1）" })).not.toBeInTheDocument());
     expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "stopBackgroundTasks", { id: "source" });
@@ -550,7 +561,7 @@ describe("local conversation execution indicators", () => {
     expect(screen.queryByRole("status", { name: "会话运行中：Original" })).not.toBeInTheDocument();
     const menu = screen.getByRole("button", { name: "会话操作：Background conversation" });
     expect(menu).toBeEnabled();
-    fireEvent.click(menu);
+    await clickMenuTrigger(menu);
     expect(await screen.findByRole("menuitem", { name: "复制会话 ID" })).toBeVisible();
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
 
@@ -571,7 +582,7 @@ describe("removing projects from the local conversation list", () => {
     render(page());
     const group = await screen.findByRole("region", { name: "Pointer project" });
     const trigger = within(group).getByRole("button", { name: "项目操作：Pointer project" });
-    activateWithPointer(trigger);
+    await activateWithPointer(trigger);
     expect(await screen.findByRole("menuitem", { name: "从列表移除" })).toBeVisible();
   });
   it("hides a project without mutating its conversations or replacing the active draft, and restores it from the list", async () => {
@@ -598,7 +609,7 @@ describe("removing projects from the local conversation list", () => {
     expect(draft).toHaveValue("Keep this draft");
     fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Original" } });
     expect(screen.queryByRole("region", { name: "Removable project" })).not.toBeInTheDocument();
-    activateWithPointer(screen.getByRole("button", { name: "已移除项目（1）" }));
+    await activateWithPointer(screen.getByRole("button", { name: "已移除项目（1）" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "恢复项目：Removable project" }));
     expect(await screen.findByRole("region", { name: "Removable project" })).toBeVisible();
     expect(screen.getByRole("link", { name: /Original/ })).toBeVisible();
@@ -608,7 +619,7 @@ describe("removing projects from the local conversation list", () => {
     mock.folders = [folder("project-a", "Empty project", "/owned/empty")];
     const mounted = render(page());
     const group = await screen.findByRole("region", { name: "Empty project" });
-    fireEvent.click(within(group).getByRole("button", { name: "项目操作：Empty project" }));
+    await clickMenuTrigger(within(group).getByRole("button", { name: "项目操作：Empty project" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "从列表移除" }));
     const notification = mock.success.mock.calls.at(-1)!;
     mounted.unmount();
@@ -696,7 +707,7 @@ describe("local conversation context menu", () => {
     render(page());
     const row = await screen.findByRole("link", { name: /Other conversation/ });
     if (menu === "context") fireEvent.contextMenu(row, { button: 2 });
-    else fireEvent.click(screen.getByRole("button", { name: "会话操作：Other conversation" }));
+    else await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Other conversation" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "复制会话 ID" }));
     await waitFor(() => expect(mock.success).toHaveBeenCalledWith("已复制会话 ID"));
     expect(mock.copyText).toHaveBeenCalledExactlyOnceWith("copied-multica-id");
@@ -722,7 +733,7 @@ describe("local conversation context menu", () => {
     fireEvent.change(draft, { target: { value: "Keep my draft" } });
     const row = await screen.findByRole("link", { name: /Other conversation/ });
     if (menu === "context") fireEvent.contextMenu(row, { button: 2 });
-    else fireEvent.click(screen.getByRole("button", { name: "会话操作：Other conversation" }));
+    else await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Other conversation" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "重命名" }));
     const dialog = await screen.findByRole("dialog", { name: "重命名会话" });
     const input = within(dialog).getByRole("textbox", { name: "会话名称" });
@@ -997,7 +1008,7 @@ describe("local conversation fork entry", () => {
       return method === "listPage" ? [source] : [];
     });
     render(page());
-    fireEvent.click(await screen.findByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(await screen.findByRole("button", { name: "会话操作：Original" }));
     fireEvent.keyDown(await screen.findByRole("menuitem", { name: "关联工作区项目" }), { key: "ArrowRight" });
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Multica Project" }));
     await waitFor(() => expect(mock.error).toHaveBeenCalledWith("Could not save project"));
@@ -1016,7 +1027,7 @@ describe("local conversation fork entry", () => {
     const draft = screen.getByRole("textbox", { name: "Conversation draft" });
     fireEvent.change(draft, { target: { value: "Keep my draft" } });
     const move = async (label: string) => {
-      fireEvent.click(await screen.findByRole("button", { name: "会话操作：Original" }));
+      await clickMenuTrigger(await screen.findByRole("button", { name: "会话操作：Original" }));
       fireEvent.keyDown(await screen.findByRole("menuitem", { name: "关联工作区项目" }), { key: "ArrowRight" });
       fireEvent.click(await screen.findByRole("menuitemradio", { name: label }));
     };
@@ -1100,9 +1111,9 @@ describe("local conversation fork entry", () => {
     let release!: (branch: LocalConversation) => void;
     mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? [source] : method === "fork" ? new Promise((resolve) => { release = resolve; }) : []);
     render(page());
-    fireEvent.click(await screen.findByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(await screen.findByRole("button", { name: "会话操作：Original" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "分叉" }));
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Original" }));
     const button = await screen.findByRole("menuitem", { name: "正在分叉…" });
     expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "fork", { id: "source" });
     expect(button).toHaveAttribute("aria-disabled", "true"); expect(button).toHaveAttribute("aria-busy", "true");
@@ -1114,15 +1125,15 @@ describe("local conversation fork entry", () => {
   it("keeps the current conversation on failure and does not redirect after the user selects another session", async () => {
     mock.request.mockImplementation(async (_scope, method) => { if (method === "fork") throw new Error("Native fork failed"); return method === "listPage" ? [source] : []; });
     const view = render(page());
-    fireEvent.click(await screen.findByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(await screen.findByRole("button", { name: "会话操作：Original" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "分叉" }));
     await waitFor(() => expect(mock.error).toHaveBeenCalledWith("Native fork failed"));
     expect(mock.replace).not.toHaveBeenCalled();
     let release!: (branch: LocalConversation) => void;
     mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? [source, { ...source, id: "other" }] : method === "fork" ? new Promise((resolve) => { release = resolve; }) : []);
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Original" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "分叉" }));
-    fireEvent.click(screen.getByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(screen.getByRole("button", { name: "会话操作：Original" }));
     act(() => { qc.setQueryData(["test-local-sessions"], [source, { ...source, id: "other" }]); });
     mock.selected = "other"; view.rerender(page());
     release({ ...source, id: "branch" });
@@ -1132,7 +1143,7 @@ describe("local conversation fork entry", () => {
   it("disables forking while an execution is running", async () => {
     source.turns = [{ id: "turn", status: "running", createdAt: "2026-01-01", events: [] }];
     render(page());
-    fireEvent.click(await screen.findByRole("button", { name: "会话操作：Original" }));
+    await clickMenuTrigger(await screen.findByRole("button", { name: "会话操作：Original" }));
     expect(await screen.findByRole("menuitem", { name: "分叉" })).toHaveAttribute("aria-disabled", "true");
   });
 });

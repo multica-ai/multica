@@ -10,7 +10,7 @@ function setup(running = false, pendingStore?: DesktopPendingStore) {
   const sendInput = vi.fn();
   const base = createAgentSessionEngine({ identity: { workspaceId: "ws", origin: "multica" },
     clock: { nowUnixMs: () => Date.now() }, scheduler: { schedule: (delay, callback) => { const timer = setTimeout(callback, delay); return { cancel: () => clearTimeout(timer) }; } },
-    commandPort: { kind: "typed", effects: { sendInput, activateSession: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
+    commandPort: { kind: "typed", effects: { activateSession: vi.fn(), updateSessionSettings: vi.fn() }, execute: vi.fn() } });
   base.dispatch({ type: "session/snapshotReceived", sessions: [{ agentSessionId: "session", workspaceId: "ws", provider: "codex", title: "Conversation", cwd: "/workspace", activeTurnId: running ? "active" : null,
     ...(running ? { activeTurn: { agentSessionId: "session", turnId: "active", origin: "user_prompt", phase: "running", startedAtUnixMs: 1, updatedAtUnixMs: 1 } } : {}), pendingInteractions: [], latestTurnInteractions: [] }] });
   const options = { pendingStore, enabled: () => true, enqueue: vi.fn(async (_input: SubmitInput): Promise<LocalPromptQueue> => ({ revision: 1, paused: false, items: [] })),

@@ -7,6 +7,8 @@ import {
   selectLatestStopTargetSubmitForSession,
   selectSessionHasPendingSubmitStopTarget
 } from "./pendingIntents.selectors.ts";
+import type { PendingSubmitIntentRecord } from "./pendingIntents.types.ts";
+import { createInitialAgentSessionEngineState } from "./rootReducer.ts";
 import { canonicalTurnKey } from "./sessionEntityKeys.ts";
 import { createTestEngineCommandPort } from "./testEngineCommandPort.ts";
 import type { EngineExternalCommand, EngineScheduler } from "./types.ts";
@@ -53,225 +55,9 @@ function createHarness(active: boolean) {
   };
 }
 
-test("stop target selection does not target a visible queued prompt that was never dispatched", () => {
-  const harness = createHarness(true);
 
-  assert.deepEqual(
-    harness.engine.submitPrompt({
-      agentSessionId: "session-1",
-      clientSubmitId: "submit-queued",
-      content: [{ text: "send after the turn", type: "text" }]
-    }),
-    { accepted: true, queued: true }
-  );
 
-  harness.engine.dispatch({
-    agentSessionId: "session-1",
-    type: "session/stopRequested",
-    workspaceId: "workspace-1"
-  });
 
-  const turn = settledTurn();
-  harness.engine.dispatch({
-    sessions: [
-      {
-        ...session(null),
-        latestTurn: turn,
-        updatedAtUnixMs: turn.updatedAtUnixMs
-      }
-    ],
-    type: "session/snapshotReceived"
-  });
-
-  const snapshot = harness.engine.getSnapshot();
-  assert.equal(
-    snapshot.promptQueue.recordsBySessionId["session-1"]?.suspendReason,
-    "user_stop"
-  );
-  assert.equal(
-    snapshot.promptQueue.recordsBySessionId["session-1"]?.inFlight,
-    null
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(snapshot, "session-1"),
-    false
-  );
-});
-
-test("stop target selection keeps a queued prompt during in-flight and uncertain delivery", () => {
-  const harness = createHarness(true);
-
-  assert.deepEqual(
-    harness.engine.submitPrompt({
-      agentSessionId: "session-1",
-      clientSubmitId: "submit-queued",
-      content: [{ text: "send after the turn", type: "text" }]
-    }),
-    { accepted: true, queued: true }
-  );
-  const turn = settledTurn();
-  harness.engine.dispatch({
-    sessions: [
-      {
-        ...session(null),
-        latestTurn: turn,
-        updatedAtUnixMs: turn.updatedAtUnixMs
-      }
-    ],
-    type: "session/snapshotReceived"
-  });
-
-  const snapshot = harness.engine.getSnapshot();
-  assert.equal(
-    snapshot.promptQueue.recordsBySessionId["session-1"]?.inFlight?.promptId,
-    "submit-queued"
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(snapshot, "session-1"),
-    true
-  );
-
-  const commandId =
-    snapshot.promptQueue.recordsBySessionId["session-1"]?.inFlight?.commandId;
-  assert.ok(commandId);
-  harness.engine.dispatch({
-    commandId,
-    commandType: "queue/sendPrompt",
-    correlationId: "submit-queued",
-    errorCode: "timeout",
-    outcome: "timedOut",
-    type: "engine/commandResult"
-  });
-
-  const uncertainSnapshot = harness.engine.getSnapshot();
-  assert.equal(
-    uncertainSnapshot.promptQueue.recordsBySessionId["session-1"]
-      ?.uncertainDelivery?.promptId,
-    "submit-queued"
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(uncertainSnapshot, "session-1"),
-    true
-  );
-});
-
-test("stop target selection never correlates a queued prompt by prompt id alone", () => {
-  const harness = createHarness(true);
-
-  harness.engine.submitPrompt({
-    agentSessionId: "session-1",
-    clientSubmitId: "submit-target",
-    content: [{ text: "target", type: "text" }]
-  });
-  harness.engine.dispatch({
-    agentSessionId: "session-1",
-    promptId: "submit-target",
-    type: "queue/removed"
-  });
-  harness.engine.dispatch({
-    agentSessionId: "session-1",
-    prompt: {
-      clientSubmitId: "other-submit",
-      content: [{ text: "other", type: "text" }],
-      createdAtUnixMs: 101,
-      id: "submit-target"
-    },
-    type: "queue/enqueued",
-    workspaceId: "workspace-1"
-  });
-  const turn = settledTurn();
-  harness.engine.dispatch({
-    sessions: [
-      {
-        ...session(null),
-        latestTurn: turn,
-        updatedAtUnixMs: turn.updatedAtUnixMs
-      }
-    ],
-    type: "session/snapshotReceived"
-  });
-
-  const snapshot = harness.engine.getSnapshot();
-  assert.equal(
-    snapshot.promptQueue.recordsBySessionId["session-1"]?.inFlight?.promptId,
-    "submit-target"
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(snapshot, "session-1"),
-    false
-  );
-});
-
-test("stop target selection keeps immediate submits with missing or running canonical Turn evidence", () => {
-  const missingTurnHarness = createHarness(false);
-  missingTurnHarness.engine.submitPrompt({
-    agentSessionId: "session-1",
-    clientSubmitId: "submit-missing-turn",
-    content: [{ text: "hello", type: "text" }]
-  });
-  const missingTurnSnapshot = missingTurnHarness.engine.getSnapshot();
-  const missingTurnPending =
-    missingTurnSnapshot.pendingIntents.submitsByClientSubmitId[
-      "submit-missing-turn"
-    ];
-  assert.ok(missingTurnPending);
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(
-      {
-        ...missingTurnSnapshot,
-        pendingIntents: {
-          ...missingTurnSnapshot.pendingIntents,
-          submitsByClientSubmitId: {
-            ...missingTurnSnapshot.pendingIntents.submitsByClientSubmitId,
-            "submit-missing-turn": {
-              ...missingTurnPending,
-              turnId: "turn-not-observed"
-            }
-          }
-        }
-      },
-      "session-1"
-    ),
-    true
-  );
-
-  const runningTurnHarness = createHarness(true);
-  runningTurnHarness.engine.submitPrompt({
-    agentSessionId: "session-1",
-    clientSubmitId: "submit-running-turn",
-    content: [{ text: "hello", type: "text" }]
-  });
-  const runningTurnSnapshot = runningTurnHarness.engine.getSnapshot();
-  const runningTurnPending =
-    runningTurnSnapshot.pendingIntents.submitsByClientSubmitId[
-      "submit-running-turn"
-    ];
-  assert.ok(runningTurnPending);
-  assert.ok(
-    runningTurnSnapshot.sessionLifecycle.turnsById[
-      canonicalTurnKey("session-1", "turn-1")
-    ]
-  );
-  assert.equal(
-    selectSessionHasPendingSubmitStopTarget(
-      {
-        ...runningTurnSnapshot,
-        pendingIntents: {
-          ...runningTurnSnapshot.pendingIntents,
-          submitsByClientSubmitId: {
-            ...runningTurnSnapshot.pendingIntents.submitsByClientSubmitId,
-            "submit-running-turn": {
-              ...runningTurnPending,
-              turnId: "turn-1"
-            }
-          }
-        }
-      },
-      "session-1"
-    ),
-    true
-  );
-});
 
 test("stop target selection does not target a failed submit admission", () => {
   const harness = createHarness(false);
@@ -300,31 +86,6 @@ test("stop target selection does not target a failed submit admission", () => {
   );
 });
 
-test("stop target selection keeps a delivery-unknown submit as its target", () => {
-  const harness = createHarness(false);
-
-  harness.engine.submitPrompt({
-    agentSessionId: "session-1",
-    clientSubmitId: "submit-1",
-    content: [{ text: "hello", type: "text" }]
-  });
-  harness.engine.dispatch({
-    commandId: "send-1",
-    commandType: "queue/sendPrompt",
-    correlationId: "submit-1",
-    errorCode: "timeout",
-    outcome: "timedOut",
-    type: "engine/commandResult"
-  });
-
-  assert.equal(
-    selectLatestStopTargetSubmitForSession(
-      harness.engine.getSnapshot(),
-      "session-1"
-    )?.clientSubmitId,
-    "submit-1"
-  );
-});
 
 test("stop target selection ignores a submit whose canonical Turn is settled", () => {
   const harness = createHarness(false);
@@ -394,3 +155,75 @@ function session(turn: AgentActivityTurn | null) {
     workspaceId: "workspace-1"
   });
 }
+
+function stopTargetFor(input: {
+  pending: Partial<PendingSubmitIntentRecord>;
+  queue?: Record<string, unknown>;
+  turnPhase?: AgentActivityTurn["phase"];
+}) {
+  const initial = createInitialAgentSessionEngineState();
+  const record = {
+    agentSessionId: "session-1",
+    clientSubmitId: "submit-1",
+    requestedAtUnixMs: 1,
+    status: "requested",
+    turnId: null,
+    workspaceId: "workspace-1",
+    ...input.pending
+  } as PendingSubmitIntentRecord;
+  const state = {
+    ...initial,
+    pendingIntents: {
+      ...initial.pendingIntents,
+      submitsByClientSubmitId: { "submit-1": record }
+    },
+    promptQueue: {
+      ...initial.promptQueue,
+      recordsBySessionId: input.queue ? { "session-1": input.queue } : {}
+    },
+    sessionLifecycle: {
+      ...initial.sessionLifecycle,
+      turnsById: input.turnPhase
+        ? {
+            [canonicalTurnKey("session-1", "turn-1")]: {
+              agentSessionId: "session-1",
+              phase: input.turnPhase,
+              turnId: "turn-1"
+            }
+          }
+        : {}
+    }
+  } as unknown as Parameters<typeof selectLatestStopTargetSubmitForSession>[0];
+  return selectLatestStopTargetSubmitForSession(state, "session-1");
+}
+
+const queuedPrompt = { clientSubmitId: "submit-1", id: "prompt-1" };
+const queuedPending = { submitDiagnostics: { queued: true } } as Partial<PendingSubmitIntentRecord>;
+
+test("stop target selection does not target a queued prompt never dispatched", () => {
+  assert.equal(stopTargetFor({ pending: queuedPending, queue: { prompts: [queuedPrompt] } }), null);
+});
+
+test("stop target selection keeps a queued prompt during in-flight and uncertain delivery", () => {
+  for (const delivery of [{ inFlight: { promptId: "prompt-1" } }, { uncertainDelivery: { promptId: "prompt-1" } }]) {
+    const target = stopTargetFor({ pending: queuedPending, queue: { prompts: [queuedPrompt], ...delivery } });
+    assert.equal(target?.clientSubmitId, "submit-1");
+  }
+});
+
+test("stop target selection never correlates a queued prompt by prompt id alone", () => {
+  const other = { clientSubmitId: "other", id: "prompt-1" };
+  assert.equal(stopTargetFor({ pending: queuedPending, queue: { prompts: [other], inFlight: { promptId: "prompt-1" } } }), null);
+});
+
+test("stop target selection keeps immediate submits until their turn settles", () => {
+  assert.equal(stopTargetFor({ pending: {} })?.clientSubmitId, "submit-1");
+  assert.equal(stopTargetFor({ pending: { status: "accepted", turnId: "turn-1" } })?.clientSubmitId, "submit-1");
+  assert.equal(stopTargetFor({ pending: { status: "accepted", turnId: "turn-1" }, turnPhase: "running" })?.clientSubmitId, "submit-1");
+  assert.equal(stopTargetFor({ pending: { status: "accepted", turnId: "turn-1" }, turnPhase: "settled" }), null);
+});
+
+test("stop target selection keeps a delivery-unknown submit and drops a failed one", () => {
+  assert.equal(stopTargetFor({ pending: { status: "uncertain" } })?.clientSubmitId, "submit-1");
+  assert.equal(stopTargetFor({ pending: { status: "failed" } }), null);
+});

@@ -33,9 +33,6 @@ export function createTestEngineCommandPort(
     activateSession(_input, options) {
       return executeObserved(options);
     },
-    sendInput(_input, options) {
-      return executeObserved(options);
-    },
     updateSessionSettings(_input, options) {
       return executeObserved(options);
     }

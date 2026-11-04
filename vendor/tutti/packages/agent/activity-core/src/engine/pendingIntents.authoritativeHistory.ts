@@ -3,7 +3,6 @@ import type {
   PendingActivationIntentRecord,
   PendingIntentsState
 } from "./pendingIntents.types.ts";
-import { deleteSubmit, submitExpiryId } from "./pendingSubmit.reducer.ts";
 import type { SessionHistoryAuthoritativeSnapshotReceivedIntent } from "./sessionLifecycle.types.ts";
 import type { EngineCommand, EngineReducerResult } from "./types.ts";
 
@@ -24,12 +23,6 @@ export function reconcilePendingIntentsFromAuthoritativeHistory(
     return unchanged(state);
   }
 
-  const effectiveTurnIds = new Set(
-    intent.turns
-      .filter((turn) => turn.agentSessionId.trim() === agentSessionId)
-      .map((turn) => turn.turnId.trim())
-      .filter(Boolean)
-  );
   const effectiveClientSubmitIds = new Set(
     intent.messages
       .filter(
@@ -43,25 +36,6 @@ export function reconcilePendingIntentsFromAuthoritativeHistory(
 
   const commands: EngineCommand[] = [];
   let next = state;
-  for (const record of Object.values(state.submitsByClientSubmitId)) {
-    const turnId = record.turnId?.trim() ?? "";
-    if (
-      record.agentSessionId !== agentSessionId ||
-      record.workspaceId !== workspaceId ||
-      (record.status !== "accepted" && record.status !== "confirmed") ||
-      !turnId ||
-      effectiveTurnIds.has(turnId) ||
-      effectiveClientSubmitIds.has(record.clientSubmitId)
-    ) {
-      continue;
-    }
-    next = deleteSubmit(next, record.clientSubmitId);
-    commands.push({
-      expiryId: submitExpiryId(record.clientSubmitId),
-      type: "engine/cancelExpiry"
-    });
-  }
-
   for (const record of Object.values(state.activationsByRequestId)) {
     if (
       record.agentSessionId !== agentSessionId ||

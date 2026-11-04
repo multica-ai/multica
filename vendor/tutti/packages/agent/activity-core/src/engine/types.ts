@@ -116,7 +116,6 @@ export type EngineIntent =
   | PendingIntentsIntent
   | PromptQueueIntent
   | SessionReconcileIntent
-  | SessionCommandsIntent
   | SessionLifecycleIntent;
 
 // ---------------------------------------------------------------------------
@@ -180,14 +179,12 @@ export type EngineInternalCommand =
 export type EngineExternalCommand =
   | EngineProbeCommand
   | EngineReconcileWorkspaceCommand
-  | PromptQueueSendCommand
   | SessionActivateCommand
   | SessionUpdateSettingsCommand
   | SessionUnactivateCommand
   | SessionReconcileCommand;
 
 type AgentSessionEffectCommand =
-  | PromptQueueSendCommand
   | SessionActivateCommand
   | SessionUpdateSettingsCommand;
 
@@ -239,7 +236,6 @@ export interface AgentSessionEngineStateBase {
   pendingIntents: PendingIntentsState;
   promptQueue: PromptQueueState;
   sessionReconcile: SessionReconcileState;
-  sessionCommands: SessionCommandsState;
   sessionLifecycle: SessionLifecycleState;
   sessionMessages: SessionMessagesState;
 }
@@ -343,10 +339,6 @@ export interface AgentSessionEffectPort {
     input: AgentSessionActivateEffectInput,
     options: EngineEffectOptions
   ): Promise<AgentSessionActivateEffectResult>;
-  sendInput(
-    input: AgentActivitySendInput,
-    options: EngineEffectOptions
-  ): Promise<unknown>;
   updateSessionSettings(
     input: {
       agentSessionId: string;
@@ -456,7 +448,6 @@ export interface AgentSessionEngine {
 }
 import type {
   PromptQueueIntent,
-  PromptQueueSendCommand,
   PromptQueueState
 } from "./promptQueue.types.ts";
 import type {
@@ -476,10 +467,6 @@ import type {
   SessionReconcileIntent,
   SessionReconcileState
 } from "./sessionReconcile.types.ts";
-import type {
-  SessionCommandsIntent,
-  SessionCommandsState
-} from "./sessionCommands.types.ts";
 import type { SessionMessagesState } from "./sessionMessages.types.ts";
 import type {
   AgentActivityComposerOptions,

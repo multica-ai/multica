@@ -422,21 +422,6 @@ test("bounded snapshots preserve page-loaded session entities omitted from the r
   assert.equal(state.sessionsById["session-1"]?.updatedAtUnixMs, 3);
 });
 
-test("send command result atomically upserts its scoped session and turn", () => {
-  const turn = activeTurn(4);
-  const result = reduce(createInitialSessionLifecycleState(), {
-    commandId: "send-1",
-    commandType: "queue/sendPrompt",
-    outcome: "succeeded",
-    type: "engine/commandResult",
-    value: { session: session(turn, 4), turn, turnId: turn.turnId }
-  });
-  assert.equal(result.state.sessionsById["session-1"]?.activeTurnId, "turn-1");
-  assert.deepEqual(
-    result.state.turnsById[canonicalTurnKey("session-1", "turn-1")],
-    turn
-  );
-});
 
 test("send command result rejects session and turn scope mismatch atomically", () => {
   const turn = { ...activeTurn(4), agentSessionId: "session-other" };

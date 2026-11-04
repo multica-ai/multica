@@ -1,5 +1,4 @@
 import {
-  selectEngineAvailableCommands,
   selectEngineTurnsForSession,
   type AgentActivityInteraction,
   type AgentActivityMessage,
@@ -151,17 +150,9 @@ export function useAgentGUIConversationDetail(
     : readAgentComposerDraftContent({
         drafts: input.draftByScopeKey
       });
-  const engineAvailableCommands = useEngineSelector(
-    input.sessionEngine,
-    (state) => selectEngineAvailableCommands(state, input.activeConversationId)
-  );
   const availableCommands = useMemo(
-    () =>
-      (engineAvailableCommands.length > 0
-        ? engineAvailableCommands
-        : (input.providerComposerOptions?.commands ?? [])
-      ).map((command) => ({ ...command })),
-    [engineAvailableCommands, input.providerComposerOptions?.commands]
+    () => (input.providerComposerOptions?.commands ?? []).map((command) => ({ ...command })),
+    [input.providerComposerOptions?.commands]
   );
   const availableSkills = useStableProviderSkillOptions(
     useMemo(

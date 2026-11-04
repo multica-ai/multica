@@ -10,6 +10,26 @@ import type {
   EngineTypedCommandPort
 } from "./types.ts";
 
+
+
+function executeAndWait(
+  commandPort: EngineTypedCommandPort,
+  command: EngineExternalCommand
+): Promise<EngineCommandResultIntent> {
+  return new Promise((resolve) => {
+    createEngineEffectExecutor({
+      clock: { nowUnixMs: () => 1234 },
+      commandPort,
+      onResult: resolve,
+      scheduler: {
+        schedule() {
+          return { cancel() {} };
+        }
+      }
+    }).execute(command);
+  });
+}
+
 test("projects shared commands onto typed lifecycle effects without host switches", async () => {
   const calls: Array<{
     commandId: string;
@@ -32,15 +52,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
         activation: { mode: "new", status: "attached" },
         session
       };
-    },
-    async sendInput(input, options) {
-      calls.push({
-        commandId: options.commandId,
-        input,
-        kind: "send",
-        origin: options.origin,
-        signal: options.signal
-      });
     },
     async updateSessionSettings(input, options) {
       calls.push({
@@ -89,19 +100,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     workspaceId: "workspace-1"
   });
   assert.equal(activationResult.resultContract, "activation-v1");
-  const sendResult = await executeAndWait(port, {
-    agentSessionId: "session-1",
-    capabilityRefs: [{ capability: "tutti", source: "slash_command" }],
-    clientSubmitId: "submit-send",
-    commandId: "send-1",
-    content: [{ text: "continue", type: "text" }],
-    correlationId: "submit-send",
-    displayPrompt: "Continue",
-    promptId: "prompt-1",
-    type: "queue/sendPrompt",
-    workspaceId: "workspace-1"
-  });
-  assert.equal(sendResult.resultContract, "opaque");
   await executeAndWait(port, {
     agentSessionId: "session-1",
     commandId: "settings-1",
@@ -116,7 +114,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     calls.map((call) => call.kind),
     [
       "activate",
-      "send",
       "settings",
     ]
   );
@@ -124,7 +121,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
     calls.map((call) => call.commandId),
     [
       "activate-1",
-      "send-1",
       "settings-1",
     ]
   );
@@ -155,14 +151,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
   });
   assert.deepEqual(calls[1]?.input, {
     agentSessionId: "session-1",
-    capabilityRefs: [{ capability: "tutti", source: "slash_command" }],
-    clientSubmitId: "submit-send",
-    content: [{ text: "continue", type: "text" }],
-    displayPrompt: "Continue",
-    workspaceId: "workspace-1"
-  });
-  assert.deepEqual(calls[2]?.input, {
-    agentSessionId: "session-1",
     commandId: "settings-1",
     correlationId: "settings-1",
     settings: { speed: "fast" },
@@ -171,50 +159,6 @@ test("projects shared commands onto typed lifecycle effects without host switche
   assert.ok(calls.every((call) => call.signal instanceof AbortSignal));
   assert.deepEqual(
     calls.map((call) => call.origin),
-    ["engine", "engine", "engine"]
+    ["engine", "engine"]
   );
 });
-
-test("rejects prompt settings preconditions that bypass the Engine state machine", async () => {
-  let executed = false;
-  const result = await executeAndWait(
-    createTestEngineCommandPort(async () => {
-      executed = true;
-    }),
-    {
-      agentSessionId: "session-1",
-      clientSubmitId: "submit-1",
-      commandId: "send-1",
-      content: [{ text: "continue", type: "text" }],
-      promptId: "prompt-1",
-      requiredSettingsPatch: { browserUse: true },
-      type: "queue/sendPrompt",
-      workspaceId: "workspace-1"
-    }
-  );
-
-  assert.equal(executed, false);
-  assert.equal(result.outcome, "failed");
-  assert.match(
-    result.errorMessage ?? "",
-    /settings preconditions must be resolved by the Engine/
-  );
-});
-
-function executeAndWait(
-  commandPort: EngineTypedCommandPort,
-  command: EngineExternalCommand
-): Promise<EngineCommandResultIntent> {
-  return new Promise((resolve) => {
-    createEngineEffectExecutor({
-      clock: { nowUnixMs: () => 1234 },
-      commandPort,
-      onResult: resolve,
-      scheduler: {
-        schedule() {
-          return { cancel() {} };
-        }
-      }
-    }).execute(command);
-  });
-}

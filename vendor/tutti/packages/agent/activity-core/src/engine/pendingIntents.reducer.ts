@@ -31,16 +31,6 @@ import {
   removeInactiveSession,
   unchanged
 } from "./pendingIntents.inactiveSessions.ts";
-import {
-  confirmFromMessages,
-  confirmFromSessions,
-  deleteSubmit,
-  expireSubmit,
-  removeSubmit,
-  requestSubmit,
-  settleSubmitCommand,
-  submitExpiryId
-} from "./pendingSubmit.reducer.ts";
 import type {
   EngineCommand,
   EngineCommandResultIntent,
@@ -72,11 +62,8 @@ export function pendingIntentsReducer(
     turnsById: Readonly<
       Record<string, import("../types.ts").AgentActivityTurn>
     >;
-    submitCancellationAccepted?: boolean;
     sendResultValidation?: SendInputResultValidation | null;
     settingsResultValidation?: ScopedSessionResultValidation | null;
-    submitRequestAccepted?: boolean;
-    submitDeliveryIsQueuePending?: boolean;
   } = {
     deletedSessionIds: {},
     turnsById: {}
@@ -100,31 +87,8 @@ export function pendingIntentsReducer(
       return requestUnactivation(state, intent);
     case "session/stopRequested":
       return stopPendingActivation(state, intent);
-    case "submit/requested":
-      if (context.submitRequestAccepted === false) return unchanged(state);
-      if (context.deletedSessionIds[intent.agentSessionId.trim()]) {
-        return unchanged(state);
-      }
-      return requestSubmit(state, intent);
-    case "submit/dismissed":
-      return removeSubmit(state, intent.clientSubmitId);
-    case "submit/canceled":
-      return context.submitCancellationAccepted === true
-        ? removeSubmit(state, intent.clientSubmitId)
-        : unchanged(state);
-    case "message/snapshotReceived":
-      return confirmFromMessages(state, intent.messages);
-    case "session/historyAuthoritativeSnapshotReceived": {
-      const confirmed = confirmFromMessages(state, intent.messages);
-      const reconciled = reconcilePendingIntentsFromAuthoritativeHistory(
-        confirmed.state,
-        intent
-      );
-      return {
-        commands: [...confirmed.commands, ...reconciled.commands],
-        state: reconciled.state
-      };
-    }
+    case "session/historyAuthoritativeSnapshotReceived":
+      return reconcilePendingIntentsFromAuthoritativeHistory(state, intent);
     case "session/snapshotReceived":
       return receiveSessionSnapshot(
         state,
@@ -140,26 +104,7 @@ export function pendingIntentsReducer(
         false,
         intent.observedAtUnixMs
       );
-    case "turn/projectionReceived":
-    case "turn/upserted":
-      return confirmFromSessions(state, context.turnsById);
     case "engine/commandResult":
-      if (intent.commandType === "queue/sendPrompt") {
-        const settled = settleSubmitCommand(
-          state,
-          intent,
-          context.sendResultValidation ?? null
-        );
-        if (intent.outcome !== "succeeded") return settled;
-        const confirmed = confirmFromSessions(settled.state, context.turnsById);
-        return {
-          commands: [...settled.commands, ...confirmed.commands],
-          ...(confirmed.followUpIntents?.length
-            ? { followUpIntents: confirmed.followUpIntents }
-            : {}),
-          state: confirmed.state
-        };
-      }
       return intent.commandType === "session/activate"
         ? settleActivationCommand(state, intent)
         : intent.commandType === "session/updateSettings"
@@ -172,11 +117,7 @@ export function pendingIntentsReducer(
     case "engine/intentExpired":
       return intent.expiryId.startsWith("activation:")
         ? expireActivation(state, intent.expiryId)
-        : expireSubmit(state, intent.expiryId, {
-            deliveryIsQueuePending:
-              context.submitDeliveryIsQueuePending === true,
-            dueAtUnixMs: intent.dueAtUnixMs
-          });
+        : unchanged(state);
     case "session/removed":
       return removeSessionIntents(state, intent.agentSessionId);
     default:
@@ -601,22 +542,15 @@ function removeSessionIntents(
   state: PendingIntentsState,
   agentSessionId: string
 ): EngineReducerResult<PendingIntentsState> {
-  const submitIds = Object.values(state.submitsByClientSubmitId)
-    .filter((record) => record.agentSessionId === agentSessionId.trim())
-    .map((record) => record.clientSubmitId);
   const activationIds = Object.values(state.activationsByRequestId)
     .filter((record) => record.agentSessionId === agentSessionId.trim())
     .map((record) => record.requestId);
   const wasInactive = state.inactiveSessionIds[agentSessionId.trim()] === true;
-  if (submitIds.length === 0 && activationIds.length === 0 && !wasInactive) {
+  if (activationIds.length === 0 && !wasInactive) {
     return unchanged(state);
   }
   return {
     commands: [
-      ...submitIds.map((id) => ({
-        expiryId: submitExpiryId(id),
-        type: "engine/cancelExpiry" as const
-      })),
       ...activationIds.map((id) => ({
         expiryId: activationExpiryId(id),
         type: "engine/cancelExpiry" as const
@@ -625,7 +559,7 @@ function removeSessionIntents(
     state: removeInactiveSession(
       activationIds.reduce(
         deleteActivation,
-        submitIds.reduce(deleteSubmit, state)
+        state
       ),
       agentSessionId
     )

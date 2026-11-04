@@ -52,7 +52,6 @@ import type {
  * the engine owns this timing once event wiring moves over in later slices.
  */
 export const ENGINE_INTENT_BATCH_DELAY_MS = 33;
-const SESSION_PROMPT_CONFIRMATION_TIMEOUT_MS = 120_000;
 
 export interface CreateAgentSessionEngineInput {
   batchDelayMs?: number;
@@ -251,72 +250,9 @@ export function createAgentSessionEngine({
     );
   }
 
-  function submitPrompt(
-    input: AgentSessionSubmitPromptInput
-  ): AgentSessionSubmitPromptResult {
-    const agentSessionId = input.agentSessionId.trim();
-    const clientSubmitId = input.clientSubmitId.trim();
-    const content = input.content.map((block) => ({ ...block }));
-    if (!agentSessionId || !clientSubmitId || content.length === 0) {
-      return { accepted: false, queued: false };
-    }
-    const requestedAtUnixMs = clock.nowUnixMs();
-    const displayPrompt = input.displayPrompt?.trim() || undefined;
-    const routing = input.routing ?? "auto";
-    // Stamp queue admission on the intent before observers record it. The GUI
-    // trace starts with queued:false; without this rewrite, Session Replay
-    // cassettes treat busy-queue submits as immediate sends and deadlock.
-    const queued =
-      routing !== "immediate" &&
-      routing !== "send_now" &&
-      selectEngineSubmitWouldBeVisibleInQueue(publicSnapshot, agentSessionId);
-    dispatch({
-      agentSessionId,
-      ...(input.capabilityRefs?.length
-        ? {
-            capabilityRefs: input.capabilityRefs.map((reference) => ({
-              ...reference
-            }))
-          }
-        : {}),
-      clientSubmitId,
-      content,
-      ...(displayPrompt ? { displayPrompt } : {}),
-      expiresAtUnixMs:
-        requestedAtUnixMs + SESSION_PROMPT_CONFIRMATION_TIMEOUT_MS,
-      ...(input.requiredSettingsPatch
-        ? { requiredSettingsPatch: { ...input.requiredSettingsPatch } }
-        : {}),
-      requestedAtUnixMs,
-      routing,
-      ...(input.targetTurnId?.trim()
-        ? { targetTurnId: input.targetTurnId.trim() }
-        : {}),
-      ...(input.runtimeContent
-        ? {
-            runtimeContent: input.runtimeContent.map((block) => ({
-              ...block
-            }))
-          }
-        : {}),
-      submitDiagnostics: {
-        ...(input.submitDiagnostics ?? {}),
-        queued
-      },
-      type: "submit/requested",
-      workspaceId: engineIdentity.workspaceId
-    });
-    const snapshot = publicSnapshot;
-    return {
-      accepted: selectPendingSubmitsForSession(snapshot, agentSessionId).some(
-        (record) => record.clientSubmitId === clientSubmitId
-      ),
-      queued: selectEngineHasVisibleQueuedSubmit(
-        snapshot,
-        agentSessionId,
-        clientSubmitId
-      )
-    };
+  // Sending belongs to the prompt service; a host presents it over this engine.
+  function submitPrompt(): AgentSessionSubmitPromptResult {
+    return { accepted: false, queued: false };
   }
 
   const engine: AgentSessionEngine = {

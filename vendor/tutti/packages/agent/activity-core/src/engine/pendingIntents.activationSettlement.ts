@@ -14,7 +14,6 @@ import type {
   PendingActivationIntentRecord,
   PendingIntentsState
 } from "./pendingIntents.types.ts";
-import { confirmFromSessions } from "./pendingSubmit.reducer.ts";
 import type {
   EngineCommand,
   EngineCommandResultIntent,
@@ -157,16 +156,7 @@ export function receiveSessionSnapshot(
     observedAtUnixMs,
     workspaceMismatchSessionIds
   );
-  const submitResult = confirmFromSessions(activationResult.state, turnsById);
-  const followUpIntents = [
-    ...(activationResult.followUpIntents ?? []),
-    ...(submitResult.followUpIntents ?? [])
-  ];
-  return {
-    commands: [...activationResult.commands, ...submitResult.commands],
-    ...(followUpIntents.length ? { followUpIntents } : {}),
-    state: submitResult.state
-  };
+  return activationResult;
 }
 
 export function confirmActivationsFromSessions(

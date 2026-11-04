@@ -170,12 +170,6 @@ export type {
   SessionRuntimeActivity,
   SessionLifecycleState
 } from "./engine/sessionLifecycle.types.ts";
-export { selectEngineAvailableCommands } from "./engine/sessionCommands.selectors.ts";
-export type {
-  AgentSessionAvailableCommand,
-  SessionCommandsIntent,
-  SessionCommandsState
-} from "./engine/sessionCommands.types.ts";
 export {
   selectEngineHasQueuedPrompts,
   selectEngineHasVisibleQueuedSubmit,

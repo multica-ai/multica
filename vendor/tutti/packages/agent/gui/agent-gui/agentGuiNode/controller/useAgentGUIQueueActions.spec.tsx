@@ -16,6 +16,7 @@ import { RichTextMentionServiceProvider } from "@tutti-os/ui-rich-text/editor";
 import { createRichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { RichTextTriggerProvider } from "@tutti-os/ui-rich-text/types";
 import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { EngineQueuedPrompt, PromptQueueRecord } from "@tutti-os/agent-activity-core";
 import { createTestEngineCommandPort } from "../../../shared/testing/createTestAgentSessionEngine";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import {
@@ -39,31 +40,18 @@ describe("useAgentGUIQueueActions", () => {
           resolveRead = resolve;
         })
     );
-    const sessionEngine = createAgentSessionEngine({
-      clock: { nowUnixMs: () => 1 },
-      commandPort: createTestEngineCommandPort({
-        execute: async () => undefined
-      }),
-      identity: { origin: "test", workspaceId: "workspace-1" },
-      scheduler: { schedule: () => ({ cancel() {} }) }
-    });
-    sessionEngine.dispatch({
-      agentSessionId: "session-1",
-      prompt: {
-        id: "queued-1",
-        content: [
-          {
-            type: "image",
-            mimeType: "image/png",
-            name: "image.png",
-            path: "/agent-prompt-assets/image.png"
-          }
-        ],
-        createdAtUnixMs: 1
-      },
-      type: "queue/enqueued",
-      workspaceId: "workspace-1"
-    });
+    const sessionEngine = createQueueTestEngine({
+    id: "queued-1",
+    content: [
+      {
+        type: "image",
+        mimeType: "image/png",
+        name: "image.png",
+        path: "/agent-prompt-assets/image.png"
+      }
+    ],
+    createdAtUnixMs: 1
+  });
 
     const rendered = renderHook(() => {
       const [drafts, setDrafts] = useState<Record<string, AgentComposerDraft>>(
@@ -177,17 +165,11 @@ describe("useAgentGUIQueueActions", () => {
       })
     );
     const mentionService = createRichTextMentionService({ providers });
-    const sessionEngine = createQueueTestEngine();
-    sessionEngine.dispatch({
-      agentSessionId: "session-1",
-      prompt: {
-        id: "queued-mentions",
-        content: [{ type: "text", text: prompt }],
-        createdAtUnixMs: 1
-      },
-      type: "queue/enqueued",
-      workspaceId: "workspace-1"
-    });
+    const sessionEngine = createQueueTestEngine({
+    id: "queued-mentions",
+    content: [{ type: "text", text: prompt }],
+    createdAtUnixMs: 1
+  });
     const onEditorChange = vi.fn();
     const rendered = render(
       <RichTextMentionServiceProvider service={mentionService}>
@@ -255,8 +237,9 @@ const queueLabels = {
   queuedPromptMoreActions: "More"
 };
 
-function createQueueTestEngine() {
-  return createAgentSessionEngine({
+/** An engine as the prompt service presents it: holding one queued prompt until it is removed. */
+function createQueueTestEngine(prompt: EngineQueuedPrompt) {
+  const engine = createAgentSessionEngine({
     clock: { nowUnixMs: () => 1 },
     commandPort: createTestEngineCommandPort({
       execute: async () => undefined
@@ -264,6 +247,24 @@ function createQueueTestEngine() {
     identity: { origin: "test", workspaceId: "workspace-1" },
     scheduler: { schedule: () => ({ cancel() {} }) }
   });
+  let prompts: readonly EngineQueuedPrompt[] = [prompt];
+  return {
+    ...engine,
+    dispatch(intent: Parameters<typeof engine.dispatch>[0]) {
+      if (intent.type === "queue/removed" || intent.type === "submit/canceled") prompts = [];
+      else engine.dispatch(intent);
+    },
+    getSnapshot() {
+      const state = engine.getSnapshot();
+      return {
+        ...state,
+        promptQueue: {
+          ...state.promptQueue,
+          recordsBySessionId: { "session-1": { prompts } as PromptQueueRecord }
+        }
+      };
+    }
+  };
 }
 
 function QueuedMentionEditHarness({
