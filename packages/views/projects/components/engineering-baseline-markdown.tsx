@@ -3,8 +3,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Node, Parent } from "unist";
-import type { Element, Root, Text } from "hast";
+import type { Element, Parent, Root, RootContent, Text } from "hast";
 import { ArrowRight } from "@multica/ui/icons";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
 import { cn } from "@multica/ui/lib/utils";
@@ -76,19 +75,19 @@ function createReferencePlugin(options: {
             seenConcepts,
           });
           if (!matches.length) continue;
-          const replacements: Node[] = [];
+          const replacements: RootContent[] = [];
           let cursor = 0;
           for (const match of matches) {
-            if (match.start > cursor) replacements.push({ type: "text", value: value.slice(cursor, match.start) } as unknown as Node);
+            if (match.start > cursor) replacements.push({ type: "text", value: value.slice(cursor, match.start) });
             replacements.push({
               type: "element",
               tagName: "baseline-reference",
               properties: { referenceId: referenceId(match.reference) },
               children: [{ type: "text", value: value.slice(match.start, match.end) }],
-            } as unknown as Node);
+            });
             cursor = match.end;
           }
-          if (cursor < value.length) replacements.push({ type: "text", value: value.slice(cursor) } as unknown as Node);
+          if (cursor < value.length) replacements.push({ type: "text", value: value.slice(cursor) });
           parent.children.splice(index, 1, ...replacements);
           index += replacements.length - 1;
         } else if (Array.isArray((node as Parent).children)) {
@@ -172,7 +171,7 @@ function BaselineReferenceLink({ reference, children }: { reference: BaselineRef
   const trigger = (
     <button
       type="button"
-      className={cn("inline rounded-[2px] p-0 text-left font-inherit underline decoration-dotted underline-offset-4 hover:text-foreground hover:decoration-solid", reference.kind !== "concept" && "font-mono text-[0.92em]", lens === "understand" && "text-inherit")}
+      className={cn("inline rounded-sm p-0 text-left font-inherit underline decoration-dotted underline-offset-4 hover:text-foreground hover:decoration-solid", reference.kind !== "concept" && "font-mono", lens === "understand" && "text-inherit")}
       onClick={() => onNavigate(reference)}
     >
       {children}

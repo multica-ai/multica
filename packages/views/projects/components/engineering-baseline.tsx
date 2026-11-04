@@ -341,7 +341,7 @@ export function EngineeringBaseline(props: EngineeringBaselineProps) {
                 type="button"
                 role="tab"
                 aria-selected={lens === value}
-                className={cn("rounded-[5px] px-3 py-1.5 text-caption", lens === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
+                className={cn("rounded-sm px-3 py-1.5 text-caption", lens === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
                 onClick={() => {
                   setLensPreference(value);
                   writeStorage(lensKey, value);
@@ -368,8 +368,8 @@ export function EngineeringBaseline(props: EngineeringBaselineProps) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-md border p-0.5" role="tablist" aria-label={t(($) => $.baseline.reviewModeLabel)}>
-                  <button type="button" role="tab" aria-selected={mode === "base"} className={cn("rounded-[5px] px-3 py-1 text-caption", mode === "base" ? "bg-foreground text-background" : "text-muted-foreground")} onClick={() => setMode("base")}>{t(($) => $.baseline.baseMode, { number: adoptedRevision?.revisionNumber ?? 0 })}</button>
-                  <button type="button" role="tab" aria-selected={mode === "compare"} className={cn("rounded-[5px] px-3 py-1 text-caption", mode === "compare" ? "bg-foreground text-background" : "text-muted-foreground")} onClick={() => setMode("compare")}>{t(($) => $.baseline.compareMode, { number: revision.revisionNumber })}</button>
+                  <button type="button" role="tab" aria-selected={mode === "base"} className={cn("rounded-sm px-3 py-1 text-caption", mode === "base" ? "bg-foreground text-background" : "text-muted-foreground")} onClick={() => setMode("base")}>{t(($) => $.baseline.baseMode, { number: adoptedRevision?.revisionNumber ?? 0 })}</button>
+                  <button type="button" role="tab" aria-selected={mode === "compare"} className={cn("rounded-sm px-3 py-1 text-caption", mode === "compare" ? "bg-foreground text-background" : "text-muted-foreground")} onClick={() => setMode("compare")}>{t(($) => $.baseline.compareMode, { number: revision.revisionNumber })}</button>
                 </div>
                 {mode === "compare" && changedSections.length ? (
                   <div className="flex items-center gap-1 text-caption">

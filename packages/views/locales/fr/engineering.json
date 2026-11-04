@@ -31,6 +31,8 @@
     "edit": "Modifier le nom et l’objectif",
     "moveEarlier": "Avancer l’étape",
     "moveLater": "Reculer l’étape",
+    "reorderHint": "Seules les étapes vides situées après l’étape actuelle peuvent être réordonnées.",
+    "leftover": "{{count}} restantes",
     "makeCurrent": "Définir comme étape actuelle",
     "completedCount": "{{closed}}/{{total}} terminées",
     "reviewAction": "Faire le bilan de l’étape {{stage}} et débloquer la suivante",
@@ -50,6 +52,8 @@
     "emptyTitle": "Rien ne demande votre attention pour le moment.",
     "loading": "Chargement du contexte récent",
     "blockedHint": "Une tâche bloquée attend une décision",
+    "openIssue": "Ouvrir {{identifier}}",
+    "noComment": "Aucune carte de décision ni explication pour le moment.",
     "baselinePending": "La révision v{{number}} de la référence doit être confirmée",
     "reviewPending": "Faire le bilan de l’étape {{stage}} et débloquer la suivante",
     "reviewHint": "Toutes les tâches sont terminées. Vérifiez le résultat avant de continuer."

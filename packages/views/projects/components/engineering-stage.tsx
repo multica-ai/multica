@@ -71,9 +71,11 @@ export function EngineeringStage({
   const current = roadmap.stages.find((stage) => stage.stage === currentStage) ?? selected;
   const stageTitle = (stage: EngineeringStageSummary | undefined) => stage?.title || t(($) => $.stage.default, { number: stage?.stage ?? currentStage });
   const earlierStages = roadmap.stages.filter((stage) => current && stage.stage < current.stage);
+  const maxConfiguredStage = Math.max(0, ...configuredStages.map((stage) => stage.stage));
   const allComplete = !!current && current.total === 0 && earlierStages.length > 0
-    && earlierStages.every((stage) => stage.total === stage.closed)
-    && roadmap.stages.at(-1)?.stage === current.stage;
+    && current.stage > maxConfiguredStage
+    && !configuredStages.some((stage) => stage.stage === current.stage)
+    && earlierStages.every((stage) => stage.total === stage.closed);
   const nextStage = Math.max(currentStage, ...roadmap.stages.map((stage) => stage.stage)) + 1;
   const currentTitle = stageTitle(current);
   const statusLabels = useMemo(() => ({
@@ -97,9 +99,15 @@ export function EngineeringStage({
   };
   const sortedConfiguredStages = [...configuredStages].sort((a, b) => a.stage - b.stage);
   const selectedConfigIndex = sortedConfiguredStages.findIndex((stage) => stage.stage === selected.stage);
+  const canMoveStage = (direction: -1 | 1) => {
+    const target = sortedConfiguredStages[selectedConfigIndex + direction];
+    const targetSummary = target ? roadmap.stages.find((stage) => stage.stage === target.stage) : undefined;
+    return selectedConfigIndex >= 0 && selected.stage > currentStage && selected.total === 0
+      && !!targetSummary && targetSummary.stage > currentStage && targetSummary.total === 0;
+  };
   const moveStage = async (direction: -1 | 1) => {
     const targetIndex = selectedConfigIndex + direction;
-    if (selectedConfigIndex < 0 || !sortedConfiguredStages[targetIndex]) return;
+    if (!canMoveStage(direction)) return;
     const selectedNumber = sortedConfiguredStages[selectedConfigIndex]!.stage;
     const targetNumber = sortedConfiguredStages[targetIndex]!.stage;
     const next = sortedConfiguredStages.map((stage) => ({
@@ -183,7 +191,10 @@ export function EngineeringStage({
                   {stage.status === "current" || stage.status === "review" ? <span className="absolute left-0 top-[-2px] h-0.5 bg-foreground" style={{ width: `${percent}%` }} /> : null}
                   <span className="block text-caption text-muted-foreground">{t(($) => $.stage.label, { number: stage.stage })}</span>
                   <span className={cn("mt-0.5 block truncate text-body", viewing ? "text-foreground underline underline-offset-4" : "text-muted-foreground")} title={stageTitle(stage)}>{stageTitle(stage)}</span>
-                  <span className="mt-1 block text-caption text-muted-foreground tabular-nums">{stage.closed}/{stage.total} · {statusLabels[stage.status]}</span>
+                  <span className="mt-1 block text-caption text-muted-foreground tabular-nums">
+                    {stage.closed}/{stage.total} · {statusLabels[stage.status]}
+                    {stage.status === "completed" && stage.total > stage.closed ? ` · ${t(($) => $.stage.leftover, { count: stage.total - stage.closed })}` : ""}
+                  </span>
                 </button>
               </li>
             );
@@ -211,9 +222,10 @@ export function EngineeringStage({
                 <span>{statusLabels[selected.status]}</span>
                 <span className="tabular-nums">{t(($) => $.stage.completedCount, { closed: selected.closed, total: selected.total })}</span>
                 {canDecide ? <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setEditing({ stage: selected.stage, title: selected.title, goal: selected.goal, isNew: false })}>{t(($) => $.stage.edit)}</Button> : null}
-                {canDecide && selectedConfigIndex >= 0 && sortedConfiguredStages.length > 1 ? <span className="inline-flex items-center gap-1">
-                  <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.stage.moveEarlier)} disabled={pending || selectedConfigIndex === 0} onClick={() => void moveStage(-1)}><ArrowUp aria-hidden="true" /></Button>
-                  <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.stage.moveLater)} disabled={pending || selectedConfigIndex === sortedConfiguredStages.length - 1} onClick={() => void moveStage(1)}><ArrowDown aria-hidden="true" /></Button>
+                {canDecide && selectedConfigIndex >= 0 && sortedConfiguredStages.length > 1 ? <span className="inline-flex flex-wrap items-center gap-1" data-reorder-hint={t(($) => $.stage.reorderHint)}>
+                  <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.stage.moveEarlier)} disabled={pending || selectedConfigIndex === 0 || !canMoveStage(-1)} onClick={() => void moveStage(-1)}><ArrowUp aria-hidden="true" /></Button>
+                  <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.stage.moveLater)} disabled={pending || selectedConfigIndex === sortedConfiguredStages.length - 1 || !canMoveStage(1)} onClick={() => void moveStage(1)}><ArrowDown aria-hidden="true" /></Button>
+                  <span className="ml-1">{t(($) => $.stage.reorderHint)}</span>
                 </span> : null}
                 {canDecide && selected.stage !== currentStage ? <Button variant="link" size="sm" className="h-auto p-0" disabled={pending} onClick={() => void onStageChange(selected.stage)}>{t(($) => $.stage.makeCurrent)}</Button> : null}
               </div>

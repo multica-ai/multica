@@ -129,6 +129,8 @@ describe("buildEngineeringRoadmap", () => {
     expect(roadmap.stages[1]).toMatchObject({ blocked: 1, inReview: 1, total: 2 });
     const review = buildEngineeringRoadmap([node("done-6", 6, "done", "done")], [], 6);
     expect(review.stages[0]?.status).toBe("review");
+    const emptyCurrent = buildEngineeringRoadmap([], [{ stage: 6, title: "Empty", goal: "" }], 6);
+    expect(emptyCurrent.stages[0]?.status).toBe("current");
   });
 
   it("drops historical children of closed parents without mixing them into outside work", () => {

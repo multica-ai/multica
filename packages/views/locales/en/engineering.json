@@ -31,6 +31,8 @@
     "edit": "Edit name and goal",
     "moveEarlier": "Move stage earlier",
     "moveLater": "Move stage later",
+    "reorderHint": "Only empty stages after the current stage can be reordered.",
+    "leftover": "Leftover {{count}}",
     "makeCurrent": "Set as current stage",
     "completedCount": "{{closed}}/{{total}} complete",
     "reviewAction": "Review Stage {{stage}} and unlock the next stage",
@@ -50,6 +52,8 @@
     "emptyTitle": "Nothing needs your attention right now.",
     "loading": "Loading the latest context",
     "blockedHint": "A blocked task is waiting for a decision",
+    "openIssue": "Open {{identifier}}",
+    "noComment": "No decision context is available yet.",
     "baselinePending": "Baseline revision v{{number}} needs confirmation",
     "reviewPending": "Review Stage {{stage}} and unlock the next stage",
     "reviewHint": "All tasks are complete. Check the outcome before moving on."

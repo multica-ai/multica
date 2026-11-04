@@ -31,6 +31,8 @@
     "edit": "名前と目標を編集",
     "moveEarlier": "ステージを前へ移動",
     "moveLater": "ステージを後へ移動",
+    "reorderHint": "現在のステージより後ろで、両側にタスクがないステージのみ並べ替えできます。",
+    "leftover": "残り {{count}}",
     "makeCurrent": "現在のステージに設定",
     "completedCount": "{{closed}}/{{total}} 完了",
     "reviewAction": "Stage {{stage}} を振り返り、次を解放",
@@ -50,6 +52,8 @@
     "emptyTitle": "今すぐ対応が必要な項目はありません。",
     "loading": "最新のコンテキストを読み込み中",
     "blockedHint": "ブロックされたタスクが決定を待っています",
+    "openIssue": "{{identifier}} を開く",
+    "noComment": "決定カードや説明コメントはまだありません。",
     "baselinePending": "基線改訂 v{{number}} の確認が必要です",
     "reviewPending": "Stage {{stage}} を振り返り、次を解放",
     "reviewHint": "すべてのタスクが完了しました。結果を確認して次へ進みましょう。"

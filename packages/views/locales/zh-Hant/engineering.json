@@ -31,6 +31,8 @@
     "edit": "改名稱與目標",
     "moveEarlier": "前移階段",
     "moveLater": "後移階段",
+    "reorderHint": "只有當前主攻階段之後、兩側都沒有任務的階段才能重排。",
+    "leftover": "遺留 {{count}}",
     "makeCurrent": "設為主攻階段",
     "completedCount": "{{closed}}/{{total}} 完成",
     "reviewAction": "復盤 Stage {{stage}}，解鎖下一階段",
@@ -50,6 +52,8 @@
     "emptyTitle": "眼下沒有要你處理的事，團隊正在繼續推進。",
     "loading": "正在載入最新上下文",
     "blockedHint": "阻塞任務正在等待拍板",
+    "openIssue": "開啟 {{identifier}}",
+    "noComment": "暫時沒有決策卡或講解評論。",
     "baselinePending": "基線修訂 v{{number}} 待確認",
     "reviewPending": "復盤 Stage {{stage}}，解鎖下一階段",
     "reviewHint": "任務已全部完成，確認結果後再往下走。"

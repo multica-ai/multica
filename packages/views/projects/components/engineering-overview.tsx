@@ -125,6 +125,7 @@ export function EngineeringOverview({ workspaceSlug, projectId }: EngineeringOve
 
   const chapterState = overview?.chapters.find((chapter) => chapter.chapter === selectedChapter);
   const [conflictRevision, setConflictRevision] = useState<BaselineRevision | null>(null);
+  const [decidedRevision, setDecidedRevision] = useState<BaselineRevision | null>(null);
   const deepLinkChapter = candidateQuery.data?.chapter ?? "overview";
   const showDeepLinkedRevision = !manualCandidateId && !!candidateId && selectedChapter === deepLinkChapter;
   const manualRevision = manualCandidateId
@@ -133,7 +134,7 @@ export function EngineeringOverview({ workspaceSlug, projectId }: EngineeringOve
   const queriedRevision: BaselineRevision | null = manualCandidateId
     ? manualRevision
     : showDeepLinkedRevision ? candidateQuery.data?.revision ?? null : chapterState?.candidate ?? null;
-  const revision = conflictRevision ?? queriedRevision;
+  const revision = conflictRevision ?? decidedRevision ?? queriedRevision;
   const currentCandidate = !conflictRevision && revision?.status === "candidate" && chapterState?.candidate?.id === revision.id
     && (manualCandidateId ? true : !showDeepLinkedRevision || candidateQuery.data?.current === true);
   const [decisionResult, setDecisionResult] = useState<BaselineDecision | null>(null);
@@ -142,6 +143,7 @@ export function EngineeringOverview({ workspaceSlug, projectId }: EngineeringOve
     setDecisionResult(null);
     setDecisionError(false);
     setConflictRevision(null);
+    setDecidedRevision(null);
   }, [candidateId, manualCandidateId, selectedChapter]);
 
   const historyQuery = useInfiniteQuery({
@@ -187,10 +189,12 @@ export function EngineeringOverview({ workspaceSlug, projectId }: EngineeringOve
     setDecisionError(false);
     setDecisionResult(null);
     setConflictRevision(null);
+    setDecidedRevision(null);
     const input = { projectId, revisions: [{ revisionId: target.id, expectedAdoptedRevisionId: target.baseRevisionId }] };
     try {
       const result = await (action === "adopt" ? adoptBaseline.mutateAsync(input) : rejectBaseline.mutateAsync(input));
       if (!result) throw new Error("Invalid decision response");
+      setDecidedRevision({ ...target, status: action === "adopt" ? "adopted" : "rejected" });
       setDecisionResult(result);
       toast.success(t(($) => action === "adopt" ? $.messages.adopted : $.messages.rejected));
     } catch {

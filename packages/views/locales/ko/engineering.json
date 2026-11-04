@@ -31,6 +31,8 @@
     "edit": "이름과 목표 편집",
     "moveEarlier": "단계를 앞으로 이동",
     "moveLater": "단계를 뒤로 이동",
+    "reorderHint": "현재 주력 단계 이후이며 양쪽 모두 작업이 없는 단계만 순서를 바꿀 수 있습니다.",
+    "leftover": "남은 작업 {{count}}",
     "makeCurrent": "현재 주력 단계로 설정",
     "completedCount": "{{closed}}/{{total}} 완료",
     "reviewAction": "Stage {{stage}} 회고 후 다음 단계 열기",
@@ -50,6 +52,8 @@
     "emptyTitle": "지금 확인이 필요한 항목이 없습니다.",
     "loading": "최신 맥락을 불러오는 중",
     "blockedHint": "막힌 작업이 결정을 기다리고 있습니다",
+    "openIssue": "{{identifier}} 열기",
+    "noComment": "아직 결정 카드나 설명 댓글이 없습니다.",
     "baselinePending": "기준 수정 v{{number}} 확인 필요",
     "reviewPending": "Stage {{stage}} 회고 후 다음 단계 열기",
     "reviewHint": "모든 작업이 완료되었습니다. 결과를 확인하고 다음으로 이동하세요."

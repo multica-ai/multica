@@ -14,7 +14,7 @@ import {
   type IssueGraphNode,
 } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import type { Agent } from "@multica/core/types";
+import type { Agent, Issue, TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { EngineeringOverview } from "./engineering-overview";
@@ -28,6 +28,7 @@ vi.mock("@multica/core/issues/dag/use-dag-data", () => ({
 }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: (type: string, id: string) => type === "agent" ? `Agent ${id}` : "Owner" }) }));
 vi.mock("../../issues/utils/status-label", () => ({ useStatusLabel: () => (status: string) => status }));
+vi.mock("../../rich-content", () => ({ RichContent: ({ content }: { content: string }) => <div data-testid="decision-rich-content">{content}</div> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 
 const WS = "11111111-1111-4111-8111-111111111111";
@@ -45,6 +46,8 @@ let chapters: ChapterState[];
 let histories: Record<BaselineChapter, BaselineRevision[]>;
 let graphNodes: IssueGraphNode[];
 let agents: Agent[];
+let decisionIssues: Issue[];
+let timelineEntries: TimelineEntry[];
 let decideProjectBaseline: ReturnType<typeof vi.fn>;
 let updateProjectEngineering: ReturnType<typeof vi.fn>;
 let queryClient: QueryClient;
@@ -124,6 +127,8 @@ beforeEach(() => {
   currentUserId = OWNER;
   graphNodes = [];
   agents = [];
+  decisionIssues = [];
+  timelineEntries = [];
   config = {
     projectId: PROJECT,
     workspaceId: WS,
@@ -170,8 +175,8 @@ beforeEach(() => {
       ...emptyHistory(),
       revisions: histories[chapter].slice(0, options.limit ?? 50),
     }),
-    listIssues: async () => ({ issues: [], total: 0 }),
-    listTimeline: async () => [],
+    listIssues: async () => ({ issues: decisionIssues, total: decisionIssues.length }),
+    listTimeline: async () => timelineEntries,
     decideProjectBaseline,
     updateProjectEngineering,
   } as unknown as ApiClient);
@@ -208,6 +213,27 @@ function renderOverview(search = "", currentLocale?: SupportedLocale) {
   return renderWithI18n(ui);
 }
 
+describe("EngineeringOverview waiting decisions", () => {
+  it("expands the selected decision card in place while retaining the issue link", async () => {
+    const user = userEvent.setup();
+    decisionIssues = [{ id: "issue-decision", identifier: "OL-316", title: "Refund policy", status: "blocked" } as Issue];
+    timelineEntries = [{
+      id: "decision-card",
+      type: "comment",
+      actor_type: "agent",
+      actor_id: "agent-1",
+      created_at: "2026-11-01T00:00:00Z",
+      content: "```html title=\"决策卡：退款方案\"\n只支持整单退款，影响 Stage 2。",
+      parent_id: null,
+    } as TimelineEntry];
+    renderOverview();
+
+    await user.click(await screen.findByRole("button", { name: /Refund policy/ }));
+    expect(await screen.findByTestId("decision-rich-content")).toHaveTextContent("只支持整单退款，影响 Stage 2");
+    expect(screen.getByRole("link", { name: "Open OL-316" })).toBeInTheDocument();
+  });
+});
+
 describe("EngineeringOverview roadmap", () => {
   it("renders dynamic stages beyond five and every task without truncation", async () => {
     config.currentStage = 7;
@@ -238,6 +264,26 @@ describe("EngineeringOverview roadmap", () => {
     expect(screen.getAllByText(/Task open-/).length).toBeGreaterThanOrEqual(6);
   });
 
+  it("expands every completed task without truncation", async () => {
+    const user = userEvent.setup();
+    graphNodes = Array.from({ length: 7 }, (_, index) => node(`done-${index}`, 1, { status: "done", category: "done" }));
+    renderOverview();
+
+    await user.click(await screen.findByRole("button", { name: "Show 7 completed tasks" }));
+    expect(document.querySelectorAll("[data-completed-tasks] > li")).toHaveLength(7);
+    for (let index = 0; index < 7; index += 1) expect(screen.getByText(`Task done-${index}`)).toBeInTheDocument();
+  });
+
+  it("expands every unstaged task outside the mainline without truncation", async () => {
+    const user = userEvent.setup();
+    graphNodes = Array.from({ length: 7 }, (_, index) => node(`outside-${index}`, null));
+    renderOverview();
+
+    await user.click(await screen.findByRole("button", { name: /Outside the mainline/ }));
+    expect(document.querySelectorAll("[data-outside-tasks] > li")).toHaveLength(7);
+    for (let index = 0; index < 7; index += 1) expect(screen.getByText(`Task outside-${index}`)).toBeInTheDocument();
+  });
+
   it("saves stage name and goal through the engineering mutation", async () => {
     const user = userEvent.setup();
     renderOverview();
@@ -255,20 +301,43 @@ describe("EngineeringOverview roadmap", () => {
     });
   });
 
-  it("reorders stage metadata through the same whole-table mutation", async () => {
+  it("reorders only empty future stages through the same whole-table mutation", async () => {
     const user = userEvent.setup();
     config.stages = [
-      { stage: 1, title: "Foundation", goal: "Contracts" },
+      { stage: 1, title: "Current", goal: "Contracts" },
       { stage: 2, title: "Delivery", goal: "Views" },
+      { stage: 3, title: "Acceptance", goal: "Launch" },
     ];
     renderOverview();
-    await user.click(await screen.findByRole("button", { name: "Move stage later" }));
-    expect(updateProjectEngineering).toHaveBeenCalledWith(WS, PROJECT, {
+    await screen.findByText("Delivery stages");
+    await user.click(document.querySelector('[data-stage-node="2"]')!);
+    await waitFor(() => expect(document.querySelector('[data-engineering-region="stage"]')).toHaveAttribute("data-stage", "2"));
+    expect(screen.getByRole("button", { name: "Move stage later" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Move stage later" }));
+    await waitFor(() => expect(updateProjectEngineering).toHaveBeenCalledWith(WS, PROJECT, {
       stages: [
-        { stage: 1, title: "Delivery", goal: "Views" },
-        { stage: 2, title: "Foundation", goal: "Contracts" },
+        { stage: 1, title: "Current", goal: "Contracts" },
+        { stage: 2, title: "Acceptance", goal: "Launch" },
+        { stage: 3, title: "Delivery", goal: "Views" },
       ],
-    });
+    }));
+  });
+
+  it("disables reordering when either side has tasks", async () => {
+    const user = userEvent.setup();
+    config.stages = [
+      { stage: 1, title: "Current", goal: "Contracts" },
+      { stage: 2, title: "Backend", goal: "Views" },
+      { stage: 3, title: "Acceptance", goal: "Launch" },
+    ];
+    graphNodes = [node("order-api", 2, { title: "Order API" })];
+    renderOverview();
+    await screen.findByText("Delivery stages");
+    await user.click(document.querySelector('[data-stage-node="2"]')!);
+
+    expect(screen.getByRole("button", { name: "Move stage later" })).toBeDisabled();
+    expect(screen.getByText("Only empty stages after the current stage can be reordered.")).toBeInTheDocument();
+    expect(updateProjectEngineering).not.toHaveBeenCalled();
   });
 
   it("adds a stage beyond the current maximum", async () => {
@@ -282,6 +351,37 @@ describe("EngineeringOverview roadmap", () => {
     expect(updateProjectEngineering).toHaveBeenCalledWith(WS, PROJECT, {
       stages: [{ stage: 6, title: "Six", goal: "" }, { stage: 7, title: "Seven", goal: "" }],
     });
+  });
+
+  it("does not announce completion for a configured empty current stage", async () => {
+    config.currentStage = 3;
+    config.stages = [
+      { stage: 1, title: "Foundation", goal: "" },
+      { stage: 2, title: "Backend", goal: "" },
+      { stage: 3, title: "Launch", goal: "Not started" },
+    ];
+    graphNodes = [
+      node("done-1", 1, { status: "done", category: "done" }),
+      node("done-2", 2, { status: "done", category: "done" }),
+    ];
+    renderOverview();
+
+    expect(await screen.findByText(/You are in Stage 3/)).toHaveTextContent("0/0");
+    expect(screen.queryByText(/All delivery stages are complete/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-stage-node="3"]')).toHaveAttribute("data-stage-status", "current");
+  });
+
+  it("shows the number of unfinished tasks left on a completed stage", async () => {
+    config.currentStage = 2;
+    config.stages = [{ stage: 1, title: "Backend", goal: "" }, { stage: 2, title: "Frontend", goal: "" }];
+    graphNodes = [
+      node("done", 1, { status: "done", category: "done" }),
+      node("open", 1),
+    ];
+    renderOverview();
+
+    expect(await screen.findByText("Delivery stages")).toBeInTheDocument();
+    expect(document.querySelector('[data-stage-node="1"]')).toHaveTextContent("Leftover 1");
   });
 
   it("offers stage review when all current tasks are closed", async () => {
@@ -348,6 +448,17 @@ describe("EngineeringOverview baseline navigation", () => {
     expect(screen.getByRole("tab", { name: "Project management" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Compare v2" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText(/Agent agent-1/)).toBeInTheDocument();
+  });
+
+  it("keeps the decided revision and decision result after adopting from the waiting list", async () => {
+    const user = userEvent.setup();
+    renderOverview();
+    await user.click(await screen.findByText("Baseline revision v2 needs confirmation"));
+    await user.click(await screen.findByRole("button", { name: "Adopt" }));
+
+    await waitFor(() => expect(document.querySelector("[data-baseline-revision-status]")).toHaveAttribute("data-baseline-revision-status", "adopted"));
+    expect(screen.queryByText("The requested revision was not found")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-open-issues]")).toBeInTheDocument();
   });
 
   it("opens a candidate deep link without adopting on navigation", async () => {

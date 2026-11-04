@@ -31,6 +31,8 @@
     "edit": "改名称与目标",
     "moveEarlier": "前移阶段",
     "moveLater": "后移阶段",
+    "reorderHint": "只有当前主攻阶段之后、两侧都没有任务的阶段才能重排。",
+    "leftover": "遗留 {{count}}",
     "makeCurrent": "设为主攻阶段",
     "completedCount": "{{closed}}/{{total}} 完成",
     "reviewAction": "复盘 Stage {{stage}}，解锁下一阶段",
@@ -50,6 +52,8 @@
     "emptyTitle": "眼下没有要你处理的事，团队正在继续推进。",
     "loading": "正在加载最新上下文",
     "blockedHint": "阻塞任务正在等待拍板",
+    "openIssue": "打开 {{identifier}}",
+    "noComment": "暂时没有决策卡或讲解评论。",
     "baselinePending": "基线修订 v{{number}} 待确认",
     "reviewPending": "复盘 Stage {{stage}}，解锁下一阶段",
     "reviewHint": "任务已全部完成，确认结果后再往下走。"
