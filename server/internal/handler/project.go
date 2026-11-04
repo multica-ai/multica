@@ -264,6 +264,13 @@ func (h *Handler) writeProjectWriteError(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	requester, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	if !ok {
+		return
+	}
+	userID := uuidToString(requester.UserID)
+
 	var req CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -271,11 +278,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
-		return
-	}
-	workspaceID := h.resolveWorkspaceID(r)
-	userID, ok := requireUserID(w, r)
-	if !ok {
 		return
 	}
 	status := req.Status
