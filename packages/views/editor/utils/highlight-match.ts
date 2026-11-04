@@ -15,7 +15,7 @@
  *     literal paragraphs, matching how the editor lexes it)
  */
 
-import { findFencedCodeRanges } from "@multica/ui/markdown/linkify";
+import { findCodeRanges } from "@multica/ui/markdown/linkify";
 
 export interface Range {
   start: number;
@@ -31,28 +31,12 @@ const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
 
 /**
  * Spans where `==` must NOT be interpreted as highlight syntax: fenced code,
- * inline code, and inline/display math. Mirrors the code-range scan in
- * @multica/ui/markdown's linkify so highlight and autolink skip the same
- * literal contexts. Earlier (block-level) ranges win so a `==`/backtick inside
- * a fenced block is not also counted as inline.
+ * inline code, and inline/display math. This is linkify's code-range scan, so
+ * highlight and autolink skip exactly the same literal contexts, including
+ * longer or tilde fences and inline code delimited by several backticks.
  */
 export function findLiteralRanges(text: string): Range[] {
-  // Fenced code uses linkify's scanner so longer outer fences, tilde fences and
-  // unclosed fences match the editor's serialized Markdown.
-  const ranges: Range[] = findFencedCodeRanges(text);
-  const add = (re: RegExp) => {
-    let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(text)) !== null) {
-      const start = m.index;
-      if (ranges.some((r) => start >= r.start && start < r.end)) continue;
-      ranges.push({ start, end: start + m[0].length });
-    }
-  };
-  add(/\$\$[\s\S]*?\$\$/g); // display math
-  add(/(?<!\$)\$(?!\$)[^$\n]+\$(?!\$)/g); // inline math
-  add(/(?<!`)`(?!`)[^`\n]+`(?!`)/g); // inline code
-  return ranges;
+  return findCodeRanges(text);
 }
 
 function isInside(pos: number, ranges: Range[]): boolean {

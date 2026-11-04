@@ -45,6 +45,17 @@ describe("highlightToHtml", () => {
     expect(highlightToHtml(md)).toBe(md);
   });
 
+  it("ignores == inside inline code delimited by several backticks", () => {
+    const md = "before ```a `b` ==keep==``` after";
+    expect(highlightToHtml(md)).toBe(md);
+  });
+
+  it("highlights after a quoted unclosed fence ends", () => {
+    expect(highlightToHtml("> ```\n> code\n\n==outside==")).toBe(
+      "> ```\n> code\n\n<mark>outside</mark>",
+    );
+  });
+
   it("ignores == inside inline math", () => {
     expect(highlightToHtml("$a ==b== c$")).toBe("$a ==b== c$");
   });
