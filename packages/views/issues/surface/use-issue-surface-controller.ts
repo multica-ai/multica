@@ -153,6 +153,10 @@ export interface IssueSurfaceController {
   /** First-load failure while the working filter needs issue membership. */
   isWorkingFilterError: boolean;
   retryWorkingFilter: () => void;
+  /** The viewer's subscriptions failed to load on a surface that filters by
+   *  them itself. */
+  isSubscribedFilterError: boolean;
+  retrySubscribedFilter: () => void;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -326,10 +330,14 @@ export function useIssueSurfaceController({
   const usesSubscribed =
     relationFilters.includes("subscribed") ||
     advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
-  const { data: subscribedIssueIds } = useQuery({
+  const subscribedIssueIdsQuery = useQuery({
     ...subscribedIssueIdsOptions(wsId),
     enabled: usesSubscribed,
   });
+  const subscribedIssueIds = subscribedIssueIdsQuery.data;
+  const subscribedIdsUnresolved = usesSubscribed && subscribedIssueIds === undefined;
+  const subscribedIdsPending = subscribedIdsUnresolved && !subscribedIssueIdsQuery.isError;
+  const subscribedIdsError = subscribedIdsUnresolved && subscribedIssueIdsQuery.isError;
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
     if (!userId || !agents) return undefined;
     if (usesSubscribed && !subscribedIssueIds) return undefined;
@@ -898,6 +906,8 @@ export function useIssueSurfaceController({
     labelFilters,
     relationFilters,
     relationContext,
+    subscribedIdsPending,
+    subscribedIdsError,
     dueDateFilters,
     advancedFilter,
     today,
@@ -1034,6 +1044,10 @@ export function useIssueSurfaceController({
     isWorkingFilterError: workingFilterError,
     retryWorkingFilter: () => {
       void workingAgentsProjection.refetch();
+    },
+    isSubscribedFilterError: data.isSubscribedFilterError,
+    retrySubscribedFilter: () => {
+      void subscribedIssueIdsQuery.refetch();
     },
     sort,
     actions,

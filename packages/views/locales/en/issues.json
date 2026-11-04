@@ -44,6 +44,10 @@
     "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
   },
+  "subscribed_filter_error": {
+    "title": "Couldn't load your subscriptions",
+    "hint": "Issues filtered by \"Subscribed by me\" can't be shown until they load."
+  },
   "source_context": {
     "create_action": "Create sub-issue from here",
     "preview_loading": "Loading captured source preview…",

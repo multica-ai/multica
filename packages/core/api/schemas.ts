@@ -2790,12 +2790,16 @@ export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: strin
 };
 
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
-// "subscribed" relation filter on client-filtered surfaces.
+// "subscribed" relation filter on client-filtered surfaces. A non-string entry
+// is dropped; a body without the list has no safe fallback — an empty set
+// would hide every row under the filter — so the client fails the request.
 export const SubscribedIssueIdsSchema = z
-  .object({ issue_ids: z.array(z.string()) })
+  .object({
+    issue_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
   .loose();
-
-export const EMPTY_SUBSCRIBED_ISSUE_IDS: { issue_ids: string[] } = { issue_ids: [] };
 
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay

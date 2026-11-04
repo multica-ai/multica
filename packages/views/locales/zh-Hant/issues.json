@@ -43,6 +43,10 @@
     "hint": "載入狀態後才能顯示任務。",
     "retry": "重試"
   },
+  "subscribed_filter_error": {
+    "title": "訂閱清單載入失敗",
+    "hint": "載入訂閱後才能顯示按「我訂閱的」篩選的任務。"
+  },
   "source_context": {
     "create_action": "從這條評論建立子任務",
     "preview_loading": "正在載入來源上下文預覽...",

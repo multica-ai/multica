@@ -160,6 +160,7 @@ describe("useIssueSurfaceController", () => {
   >;
   let listIssueTableRows: ReturnType<typeof vi.fn>;
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
+  let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -184,6 +185,7 @@ describe("useIssueSurfaceController", () => {
     });
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
+    listSubscribedIssueIds = vi.fn(() => never<string[]>());
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -198,6 +200,8 @@ describe("useIssueSurfaceController", () => {
       getAgentTaskSnapshot,
       getWorkspaceWorkingAgents,
       getChildIssueProgress: vi.fn(() => never()),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
     updateIssueMutate.mockClear();
@@ -1851,6 +1855,52 @@ describe("useIssueSurfaceController", () => {
       assignee_id: "agent-3",
     }),
   ];
+
+  describe("Gantt filtered by subscribed", () => {
+    const renderSubscribedGantt = () => {
+      mockGanttIssues(ganttFixture);
+      const store = getIssueSurfaceViewStore("project:p1");
+      act(() => {
+        store.getState().setViewMode("gantt");
+        store.getState().toggleRelationFilter("subscribed");
+      });
+      return renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+    };
+
+    it("holds loading until the subscriptions arrive, then draws only subscribed rows", async () => {
+      let finish!: (ids: string[]) => void;
+      listSubscribedIssueIds.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      const { result } = renderSubscribedGantt();
+
+      // The canvas rows are in; only the subscriptions are outstanding.
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      expect(listSubscribedIssueIds).toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.isSubscribedFilterError).toBe(false);
+
+      await act(async () => finish([]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues).toEqual([]);
+    });
+
+    it("offers a retry instead of unfiltered rows when the subscriptions fail", async () => {
+      listSubscribedIssueIds.mockRejectedValueOnce(new Error("offline"));
+      const { result } = renderSubscribedGantt();
+
+      await waitFor(() => expect(result.current.isSubscribedFilterError).toBe(true));
+      expect(result.current.isEmpty).toBe(false);
+
+      listSubscribedIssueIds.mockResolvedValue(["gantt-open"]);
+      act(() => result.current.retrySubscribedFilter());
+      await waitFor(() => expect(result.current.isSubscribedFilterError).toBe(false));
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]),
+      );
+    });
+  });
 
   it("still loads Gantt's canvas projection without the working filter and leaves its count unknown until ready", async () => {
     mockGanttIssues(ganttFixture);

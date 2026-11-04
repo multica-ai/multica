@@ -271,6 +271,8 @@ function IssueSurfaceContent({
           <FilterDependencyErrorState kind="status" onRetry={controller.retryStatusCatalog} />
         ) : controller.isWorkingFilterError ? (
           <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
+        ) : controller.isSubscribedFilterError ? (
+          <FilterDependencyErrorState kind="subscribed" onRetry={controller.retrySubscribedFilter} />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -397,7 +399,7 @@ function FilterDependencyErrorState({
   kind,
   onRetry,
 }: {
-  kind: "status" | "working";
+  kind: "status" | "working" | "subscribed";
   onRetry: () => void;
 }) {
   const { t } = useT("issues");
@@ -409,9 +411,17 @@ function FilterDependencyErrorState({
       title={
         kind === "working"
           ? t(($) => $.working_filter_error.title)
-          : t(($) => $.status_catalog_error.title)
+          : kind === "subscribed"
+            ? t(($) => $.subscribed_filter_error.title)
+            : t(($) => $.status_catalog_error.title)
       }
-      description={kind === "status" ? t(($) => $.status_catalog_error.hint) : undefined}
+      description={
+        kind === "status"
+          ? t(($) => $.status_catalog_error.hint)
+          : kind === "subscribed"
+            ? t(($) => $.subscribed_filter_error.hint)
+            : undefined
+      }
       actions={
         <Button variant="outline" size="sm" onClick={onRetry}>
           {t(($) => $.status_catalog_error.retry)}

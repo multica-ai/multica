@@ -418,7 +418,6 @@ import {
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
-  EMPTY_SUBSCRIBED_ISSUE_IDS,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2948,9 +2947,11 @@ export class ApiClient {
 
   async listSubscribedIssueIds(): Promise<string[]> {
     const raw = await this.fetch<unknown>("/api/issues/subscribed");
-    return parseWithFallback(raw, SubscribedIssueIdsSchema, EMPTY_SUBSCRIBED_ISSUE_IDS, {
+    const parsed = parseWithFallback<{ issue_ids: string[] } | null>(raw, SubscribedIssueIdsSchema, null, {
       endpoint: "GET /api/issues/subscribed",
-    }).issue_ids;
+    });
+    if (!parsed) throw new Error("GET /api/issues/subscribed returned a malformed body");
+    return parsed.issue_ids;
   }
 
   async markIssueRead(issueId: string): Promise<void> {
