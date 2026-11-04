@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, lazy, Suspense } from "react";
-import { SmilePlus } from "lucide-react";
+import { SmilePlus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { DeferredTooltip } from "./deferred-tooltip";

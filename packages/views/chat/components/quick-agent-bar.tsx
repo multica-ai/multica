@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { chatPinnedAgentsOptions } from "@multica/core/chat/queries";
 import { usePinChatAgent, useUnpinChatAgent } from "@multica/core/chat/mutations";

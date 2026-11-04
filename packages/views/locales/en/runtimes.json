@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
-    "learn_more": "Learn more →",
     "connect_remote": "Add a machine",
-    "search_placeholder": "Search…",
     "scope_mine": "Mine",
     "scope_all": "All",
     "live": "Live",
@@ -25,7 +23,7 @@
       "title": "Starting local runtime…",
       "hint": "Connecting to the workspace..."
     },
-    "add": "Add",
+    "add": "Add runtime",
     "add_menu": {
       "machines": "Machines",
       "this_computer": "This computer",
@@ -67,7 +65,7 @@
       "no_matches": "No machines or cloud services match"
     },
     "filters": {
-      "all": "All",
+      "all": "All runtimes",
       "online": "Online",
       "offline": "Offline"
     }
@@ -93,8 +91,7 @@
     "this_machine": "This device",
     "local_badge": "Local · this machine",
     "pending_custom_runtimes": "Pending custom runtimes",
-    "runtime_count_one": "{{count}} runtime",
-    "runtime_count_other": "{{count}} runtimes",
+    "daemon_title": "Daemon",
     "busy_count_one": "{{count}} busy",
     "busy_count_other": "{{count}} busy",
     "no_matches_title": "No machines",
@@ -162,14 +159,10 @@
     "fact_owner": "Owner",
     "fact_device": "Device",
     "fact_runtime": "Runtime",
-    "technical_details": "Technical details",
     "fact_daemon_cli": "Daemon CLI",
     "fact_daemon_id": "Daemon ID",
-    "serving_title": "Serving",
-    "serving_count_one": "{{count}} agent",
-    "serving_count_other": "{{count}} agents",
+    "usage_title": "Usage",
     "no_agents": "No agents are bound to this runtime yet.",
-    "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
     "visibility_label": {
@@ -539,7 +532,7 @@
     "no_data": "No usage data yet"
   },
   "qoder": {
-    "title": "QCA runtime",
+    "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
     "loading": "Loading…",
     "unavailable": "Server setup is required: configure MULTICA_VCS_SECRET_KEY.",
@@ -570,20 +563,20 @@
     "select_environment": "Select an environment",
     "no_environments": "No available environments. Create one in Qoder, then refresh.",
     "refresh_catalog": "Refresh list",
-    "agent": "QCA Agent",
-    "select_agent": "Select a QCA Agent",
-    "agent_hint": "Use the PAT saved in the remote runtime to link a QCA Agent. Manage its model, tools and skills in Qoder.",
-    "no_agents": "No available QCA Agents. Create one in Qoder, then refresh.",
-    "agent_unavailable": "The linked QCA Agent is unavailable. Select another agent.",
+    "agent": "Remote agent",
+    "select_agent": "Select an agent from Qoder Cloud Agents",
+    "agent_hint": "Use the saved Qoder PAT to link a remote agent. Manage its model, tools and skills in Qoder Cloud Agents.",
+    "no_agents": "No agents available. Create an agent in Qoder Cloud Agents, then refresh.",
+    "agent_unavailable": "The linked remote agent is unavailable. Select another agent.",
     "save_agent": "Save association",
-    "agent_saved": "QCA Agent association saved",
-    "agent_save_failed": "Could not save QCA Agent association",
+    "agent_saved": "Agent association with Qoder Cloud Agents saved",
+    "agent_save_failed": "Could not save agent association with Qoder Cloud Agents",
     "cloud_title": "Qoder Cloud Agents",
     "managed": "Managed service",
     "cloud_description": "Run agents in Qoder Cloud using a shared connection, without maintaining a local host.",
     "configure_credentials": "Configure credentials",
     "add_agent": "Add agent",
-    "add_agent_description": "Create a Multica agent linked to an existing QCA Agent. It will use the environment and credentials configured for Qoder Cloud.",
+    "add_agent_description": "Create a Multica agent linked to an existing agent in Qoder Cloud Agents. It will use the environment and credentials configured for Qoder Cloud.",
     "agent_name": "Agent name",
     "cancel": "Cancel",
     "shared_credentials_hint": "Credentials are shared within this workspace. PATs are encrypted and never displayed after saving.",

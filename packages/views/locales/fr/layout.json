@@ -11,7 +11,8 @@
     "usage": "Statistiques",
     "runtimes": "Runtimes",
     "skills": "Skills",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "views": "Vues"
   },
   "tab": {
     "issue": "Tâche",
@@ -25,6 +26,7 @@
     "runtime": "Runtime",
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
+    "my_agents": "Travail de mes agents",
     "unknown": "Page inconnue"
   },
   "help": {
@@ -57,16 +59,127 @@
     "invitation_decline": "Refuser",
     "log_out": "Se déconnecter",
     "new_issue": "Nouvelle tâche",
-    "new_issue_shortcut": "C",
     "pinned_label": "Épinglés",
-    "work_group": "Travail",
-    "ai_team_group": "Équipe IA",
     "show_more_pins": "Afficher {{count}} de plus…",
-    "show_fewer_pins": "Afficher moins",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "Rejoignez notre Discord",
-      "dismiss": "Ignorer"
+    "show_fewer_pins": "Afficher moins"
+  },
+  "spaces": {
+    "work": "Travail",
+    "team": "Équipe"
+  },
+  "rail": {
+    "label": "Navigation de l'application",
+    "sheet_description": "Changer d'espace et d'espace de travail.",
+    "inbox": "Boîte",
+    "work": "Travail",
+    "team": "Équipe",
+    "chat": "Chat",
+    "autopilots": "Auto",
+    "switch_workspace": "Changer d'espace de travail",
+    "invitation_from": "{{name}} vous a invité",
+    "open_in_new_window": "Ouvrir dans une nouvelle fenêtre",
+    "open_in_new_window_click": "Clic",
+    "open_in_other_window": "Déjà ouvert dans une autre fenêtre",
+    "in_other_window": "Autre fenêtre",
+    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "Travail de mes agents",
+      "all_issues": "Toutes les tâches",
+      "views": "Vues",
+      "new_project": "Nouveau projet",
+      "new_issue_in_project": "Nouvelle tâche dans {{name}}",
+      "all_projects_one": "Tous les projets ({{count}})",
+      "all_projects_other": "Tous les projets ({{count}})",
+      "project_issues": "Tâches de {{name}}",
+      "project_issues_empty": "Aucune tâche",
+      "project_issues_error": "Impossible de charger les tâches",
+      "project_issues_settings": "Tâches des projets",
+      "settings_status": "Statut",
+      "settings_assignee": "Responsable",
+      "assignee_anyone": "Tout le monde",
+      "assignee_me": "Moi",
+      "assignee_my_agents": "Mes agents",
+      "assignee_me_and_my_agents": "Moi et mes agents",
+      "reset": "Réinitialiser",
+      "load_more": "Afficher plus",
+      "show_less": "Afficher moins",
+      "projects_settings": "Affichage des projets",
+      "projects_ordering": "Tri",
+      "projects_order_manual": "Manuel",
+      "projects_order_name": "Nom",
+      "projects_order_updated": "Mis à jour récemment",
+      "projects_order_created": "Créés récemment",
+      "projects_show": "Afficher",
+      "projects_only_mine": "Seulement les projets que je dirige",
+      "projects_show_count": "Nombre de tâches ouvertes",
+      "new_view": "Nouvelle vue",
+      "all_views": "Toutes les vues",
+      "view_actions": "Actions pour {{name}}",
+      "view_copy_link": "Copier le lien",
+      "view_remove": "Retirer de la barre latérale",
+      "view_rename": "Renommer",
+      "view_duplicate": "Dupliquer",
+      "view_delete": "Supprimer la vue"
+    },
+    "team": {
+      "new_agent": "Nouvel agent",
+      "needs_attention": "À traiter",
+      "stuck_one": "{{count}} tâche attend un runtime hors ligne",
+      "stuck_other": "{{count}} tâches attendent un runtime hors ligne",
+      "working_now": "En cours",
+      "running_tasks_one": "{{count}} tâche en cours",
+      "running_tasks_other": "{{count}} tâches en cours",
+      "all_agents": "Tous les agents",
+      "my_agents": "Mes agents",
+      "squads_and_members": "Squads et membres",
+      "members_one": "{{count}} membre",
+      "members_other": "{{count}} membres",
+      "resources": "Ressources",
+      "runtimes_offline_one": "{{count}} hors ligne",
+      "runtimes_offline_other": "{{count}} hors ligne",
+      "invite_member": "Inviter un membre"
+    },
+    "autopilots": {
+      "all": "Toutes les automatisations",
+      "list": "Automatisations",
+      "templates": "À partir d’un modèle"
     }
+  },
+  "account": {
+    "trigger": "Compte",
+    "profile": "Profil",
+    "theme": "Thème",
+    "themes": {
+      "light": "Clair",
+      "dark": "Sombre",
+      "system": "Système"
+    },
+    "language": "Langue",
+    "shortcuts": "Raccourcis clavier"
+  },
+  "collection": {
+    "filter": "Filtrer",
+    "filter_count_one": "{{count}} filtre",
+    "filter_count_other": "{{count}} filtres",
+    "reset": "Réinitialiser",
+    "display": "Affichage",
+    "selected_one": "{{count}} sélectionné",
+    "selected_other": "{{count}} sélectionnés",
+    "clear_selection": "Effacer la sélection",
+    "select_all": "Tout sélectionner",
+    "select_row": "Sélectionner la ligne",
+    "row_actions": "Actions de la ligne",
+    "sort_by": "Trier par",
+    "direction_asc": "Croissant",
+    "direction_desc": "Décroissant",
+    "section_columns": "Colonnes",
+    "load_more": "Charger plus",
+    "loading_more": "Chargement…"
+  },
+  "object_page": {
+    "toggle_panel": "Afficher ou masquer le panneau de droite",
+    "properties": "Propriétés"
   }
 }

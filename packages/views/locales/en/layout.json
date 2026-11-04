@@ -11,7 +11,8 @@
     "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
-    "settings": "Settings"
+    "settings": "Settings",
+    "views": "Views"
   },
   "tab": {
     "issue": "Issue",
@@ -25,6 +26,7 @@
     "runtime": "Runtime",
     "attachment": "Attachment",
     "create_agent": "Create Agent",
+    "my_agents": "My agents' work",
     "unknown": "Unknown page"
   },
   "help": {
@@ -57,16 +59,127 @@
     "invitation_decline": "Decline",
     "log_out": "Log out",
     "new_issue": "New Issue",
-    "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
-    "work_group": "Work",
-    "ai_team_group": "AI Team",
     "show_more_pins": "Show {{count}} more…",
-    "show_fewer_pins": "Show fewer",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "Join our Discord",
-      "dismiss": "Dismiss"
+    "show_fewer_pins": "Show fewer"
+  },
+  "spaces": {
+    "work": "Work",
+    "team": "Team"
+  },
+  "rail": {
+    "label": "App navigation",
+    "sheet_description": "Switch spaces and workspaces.",
+    "inbox": "Inbox",
+    "work": "Work",
+    "team": "Team",
+    "chat": "Chat",
+    "autopilots": "Auto",
+    "switch_workspace": "Switch workspace",
+    "invitation_from": "{{name}} invited you",
+    "open_in_new_window": "Open in new window",
+    "open_in_new_window_click": "Click",
+    "open_in_other_window": "Already open in another window",
+    "in_other_window": "Other window",
+    "all_workspaces_open": "Every workspace is already open in a window"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "My agents' work",
+      "all_issues": "All issues",
+      "views": "Views",
+      "new_project": "New project",
+      "new_issue_in_project": "New issue in {{name}}",
+      "all_projects_one": "All {{count}} project",
+      "all_projects_other": "All {{count}} projects",
+      "project_issues": "Issues in {{name}}",
+      "project_issues_empty": "No issues",
+      "project_issues_error": "Couldn't load issues",
+      "project_issues_settings": "Issues in projects",
+      "settings_status": "Status",
+      "settings_assignee": "Assignee",
+      "assignee_anyone": "Anyone",
+      "assignee_me": "Me",
+      "assignee_my_agents": "My agents",
+      "assignee_me_and_my_agents": "Me and my agents",
+      "reset": "Reset",
+      "load_more": "Load more",
+      "show_less": "Show less",
+      "projects_settings": "Project display",
+      "projects_ordering": "Ordering",
+      "projects_order_manual": "Manual",
+      "projects_order_name": "Name",
+      "projects_order_updated": "Recently updated",
+      "projects_order_created": "Recently created",
+      "projects_show": "Show",
+      "projects_only_mine": "Only projects I lead",
+      "projects_show_count": "Open issue count",
+      "new_view": "New view",
+      "all_views": "All views",
+      "view_actions": "Actions for {{name}}",
+      "view_copy_link": "Copy link",
+      "view_remove": "Remove from sidebar",
+      "view_rename": "Rename",
+      "view_duplicate": "Duplicate",
+      "view_delete": "Delete view"
+    },
+    "team": {
+      "new_agent": "New agent",
+      "needs_attention": "Needs attention",
+      "stuck_one": "{{count}} task waiting on an offline runtime",
+      "stuck_other": "{{count}} tasks waiting on an offline runtime",
+      "working_now": "Working now",
+      "running_tasks_one": "{{count}} task running",
+      "running_tasks_other": "{{count}} tasks running",
+      "all_agents": "All agents",
+      "my_agents": "My agents",
+      "squads_and_members": "Squads & members",
+      "members_one": "{{count}} member",
+      "members_other": "{{count}} members",
+      "resources": "Resources",
+      "runtimes_offline_one": "{{count}} offline",
+      "runtimes_offline_other": "{{count}} offline",
+      "invite_member": "Invite member"
+    },
+    "autopilots": {
+      "all": "All autopilots",
+      "list": "Autopilots",
+      "templates": "From a template"
     }
+  },
+  "account": {
+    "trigger": "Account",
+    "profile": "Profile",
+    "theme": "Theme",
+    "themes": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": "Language",
+    "shortcuts": "Keyboard shortcuts"
+  },
+  "collection": {
+    "filter": "Filter",
+    "filter_count_one": "{{count}} filter",
+    "filter_count_other": "{{count}} filters",
+    "reset": "Reset",
+    "display": "Display settings",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "select_all": "Select all",
+    "select_row": "Select row",
+    "row_actions": "Row actions",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "load_more": "Load more",
+    "loading_more": "Loading…"
+  },
+  "object_page": {
+    "toggle_panel": "Toggle right sidebar",
+    "properties": "Properties"
   }
 }

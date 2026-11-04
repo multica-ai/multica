@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1558,7 +1559,7 @@ func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
 				chunks = append(chunks, text)
 				return true
 			}
-			c.onAgentMessage = func(text string) { completed = text }
+			c.onAgentMessage = func(text, _ string) { completed = text }
 
 			for _, delta := range tt.deltas {
 				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
@@ -1588,7 +1589,7 @@ func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t
 		return true
 	}
 	var authoritative string
-	c.onAgentMessage = func(text string) { authoritative = text }
+	c.onAgentMessage = func(text, _ string) { authoritative = text }
 
 	deltas := []string{"The ", "answer ", "is 42."}
 	completed := strings.Join(deltas, "")
@@ -1631,7 +1632,7 @@ func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing
 		return trySend(messages, Message{Type: MessageText, Content: text})
 	}
 	var completed string
-	c.onAgentMessage = func(text string) { completed = text }
+	c.onAgentMessage = func(text, _ string) { completed = text }
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hx"}}`)
 	// Fill the remaining slot after Hx was accepted. The mismatch path's first
@@ -1818,43 +1819,102 @@ func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
 // TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
 // deliverable. Codex used to concatenate every agent message, so a tool-using
 // run shipped its intermediate narration to Slack and Lark along with the answer
-// (GH #6006). The wiring mirrors executeOnce: onAgentMessage tracks the last
-// authoritative completed message, onFinalAnswer captures the phase-labelled one, and
-// codexDeliverableOutput picks between them.
+// (GH #6006). Later, an empty final_answer after a `commentary` message promoted
+// that commentary to Result.Output, which the server then posted as the run's
+// result comment. The wiring mirrors executeOnce: onAgentMessage
+// and onFinalAnswer feed a codexOutputSelection and codexDeliverableOutput picks
+// from it.
 func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	t.Parallel()
 
 	const (
 		rawNarration   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs."}}}`
 		rawFinal       = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause.","phase":"final_answer"}}}`
+		rawCommentary  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs.","phase":"commentary"}}}`
+		rawEmptyFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":"","phase":"final_answer"}}}`
+		rawBlankFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":" \n\t ","phase":"final_answer"}}}`
 		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
 		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
 
 	cases := []struct {
-		name     string
-		protocol string
-		lines    []string
-		want     string
+		name         string
+		protocol     string
+		lines        []string
+		want         string
+		wantStreamed []string
 	}{
 		{
-			name:     "raw protocol keeps only the labelled final answer",
-			protocol: "raw",
-			lines:    []string{rawNarration, rawFinal},
-			want:     wantDeliverabl,
+			name:         "raw protocol keeps only the labelled final answer",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
 		},
 		{
-			name:     "raw protocol without a final_answer falls back to the last message",
-			protocol: "raw",
-			lines:    []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
-			want:     wantDeliverabl,
+			name:         "raw protocol keeps the final answer after labelled commentary",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
 		},
 		{
-			name:     "legacy protocol carries no phase and falls back to the last message",
-			protocol: "legacy",
-			lines:    []string{legacyFirst, legacySecond},
-			want:     wantDeliverabl,
+			name:         "raw protocol without a final_answer falls back to the last message",
+			protocol:     "raw",
+			lines:        []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "legacy protocol carries no phase and falls back to the last message",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacySecond},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "empty final answer after commentary yields no output",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawEmptyFinal},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "whitespace-only final answer after commentary yields no output",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawBlankFinal},
+			want:         "",
+			wantStreamed: []string{narration, " \n\t "},
+		},
+		{
+			name:         "empty final answer after a phase-less message yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawEmptyFinal},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "commentary without a final answer is not the deliverable",
+			protocol:     "raw",
+			lines:        []string{rawCommentary},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "a later empty final answer does not erase an earlier one",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal, rawEmptyFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "a repeated final answer event keeps the same deliverable",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl, wantDeliverabl},
 		},
 	}
 
@@ -1865,29 +1925,50 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			c, _, _ := newTestCodexClient(t)
 			c.notificationProtocol = tc.protocol
 
-			var finalAnswer, lastAgentMessage string
+			var output codexOutputSelection
 			var streamed []string
 			c.onMessage = func(msg Message) {
 				if msg.Type == MessageText {
 					streamed = append(streamed, msg.Content)
 				}
 			}
-			c.onAgentMessage = func(text string) { lastAgentMessage = text }
-			c.onFinalAnswer = func(text string) { finalAnswer = text }
+			c.onAgentMessage = output.observeAgentMessage
+			c.onFinalAnswer = output.observeFinalAnswer
 
 			for _, line := range tc.lines {
 				c.handleLine(line)
 			}
 
-			if got := codexDeliverableOutput(finalAnswer, lastAgentMessage); got != tc.want {
+			if got := codexDeliverableOutput(output); got != tc.want {
 				t.Fatalf("Result.Output = %q, want %q", got, tc.want)
 			}
-			// Narrowing delivery must not narrow the transcript: both messages
-			// still stream to the timeline the Multica UI renders.
-			if len(streamed) != 2 || streamed[0] != "Let me check the logs." {
-				t.Fatalf("expected both agent messages streamed, got %q", streamed)
+			// Narrowing delivery must not narrow the transcript: every agent
+			// message still streams to the timeline the Multica UI renders.
+			if !reflect.DeepEqual(streamed, tc.wantStreamed) {
+				t.Fatalf("streamed agent messages = %q, want %q", streamed, tc.wantStreamed)
 			}
 		})
+	}
+}
+
+// An empty final_answer from another thread must not mark this turn as having
+// ended without a deliverable: the thread guard keeps it out of the selection.
+func TestCodexDeliverableOutputIgnoresForeignThreadEmptyFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+
+	var output codexOutputSelection
+	c.onAgentMessage = output.observeAgentMessage
+	c.onFinalAnswer = output.observeFinalAnswer
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","item":{"type":"agentMessage","id":"m1","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"","phase":"final_answer"}}}`)
+
+	if got := codexDeliverableOutput(output); got != "Main answer" {
+		t.Fatalf("Result.Output = %q, want the main thread's message", got)
 	}
 }
 
@@ -4320,6 +4401,51 @@ func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T)
 	}
 }
 
+// TestCodexExecuteEmptyFinalAnswerAfterCommentaryYieldsNoOutput replays the
+// reported event shape end to end: a `commentary` message, then a
+// `final_answer` item with empty text, then turn/completed. The run completes
+// with empty Result.Output so the server posts no comment built from narration,
+// while the commentary still reaches the transcript.
+func TestCodexExecuteEmptyFinalAnswerAfterCommentaryYieldsNoOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-empty-final"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-empty-final","turn":{"id":"turn-empty-final"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-empty-final","turnId":"turn-empty-final","item":{"type":"agentMessage","id":"msg-1","text":"Posted the report to the target issue.","phase":"commentary"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-empty-final","turnId":"turn-empty-final","item":{"type":"agentMessage","id":"msg-2","text":"","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-empty-final","turn":{"id":"turn-empty-final","status":"completed"}}}'`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "" {
+		t.Fatalf("Result.Output = %q, want empty: commentary must not become the deliverable", result.Output)
+	}
+	var transcript []string
+	for _, msg := range messages {
+		if msg.Type == MessageText {
+			transcript = append(transcript, msg.Content)
+		}
+	}
+	if strings.Join(transcript, "") != "Posted the report to the target issue." {
+		t.Fatalf("transcript text = %q, want the commentary preserved", transcript)
+	}
+}
+
 func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -4347,6 +4473,367 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 	if result.Output != "Done" {
 		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteRetriesTransientCapacityInSameSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	previousBackoffs := codexCapacityRetryBackoffs
+	codexCapacityRetryBackoffs = [5]time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
+	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`if [ -e "$DIR/live" ]; then echo overlap > "$DIR/overlap"; fi`+"\n"+
+		`echo $$ > "$DIR/live"`+"\n"+
+		`trap 'rm -f "$DIR/live"' EXIT`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
+		`pwd > "$DIR/cwd-$ATTEMPT"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"failed","error":{"message":"Selected model is at capacity. Please try a different model.","codexErrorInfo":"serverOverloaded"}}}}'`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+	cwd := t.TempDir()
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Cwd: cwd, Model: "gpt-6-sol", Timeout: 10 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" || result.Output != "Recovered" || result.SessionID != "thr-capacity" {
+		t.Fatalf("capacity retry result = %+v", result)
+	}
+	dir := filepath.Dir(fakePath)
+	if attempts, err := os.ReadFile(filepath.Join(dir, "attempts")); err != nil || strings.TrimSpace(string(attempts)) != "2" {
+		t.Fatalf("launch count = %q, err = %v; want 2", attempts, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "overlap")); !os.IsNotExist(err) {
+		t.Fatalf("Codex attempts overlapped: stat err=%v", err)
+	}
+	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), "thread/start") || !strings.Contains(string(first), "gpt-6-sol") ||
+		!strings.Contains(string(second), "thread/resume") || !strings.Contains(string(second), "thr-capacity") {
+		t.Fatalf("retry did not keep model and session: first=%s second=%s", first, second)
+	}
+	for i := 1; i <= 2; i++ {
+		got, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("cwd-%d", i)))
+		if err != nil || strings.TrimSpace(string(got)) != cwd {
+			t.Fatalf("attempt %d cwd = %q, err = %v; want %q", i, got, err, cwd)
+		}
+	}
+}
+
+func TestCodexCapacityRetryStopsAfterSuccessfulTurn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	previousBackoffs := codexCapacityRetryBackoffs
+	codexCapacityRetryBackoffs = [5]time.Duration{5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond}
+	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
+	for _, successLaunch := range []int{2, 3, 6} {
+		t.Run(fmt.Sprintf("success_on_launch_%d", successLaunch), func(t *testing.T) {
+			fakePath := writeFakeCodexAppServer(t, ""+
+				fmt.Sprintf("SUCCESS_LAUNCH=%d\n", successLaunch)+
+				`DIR="$(dirname "$0")"`+"\n"+
+				`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+				`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+				`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+				`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+				`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+				`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
+				`if [ "$ATTEMPT" -lt "$SUCCESS_LAUNCH" ]; then`+"\n"+
+				`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"usage":{"input_tokens":10,"output_tokens":1}}}}'`+"\n"+
+				`else`+"\n"+
+				`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"answer","text":"Recovered"}}}'`+"\n"+
+				`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity","status":"completed","usage":{"input_tokens":20,"output_tokens":2}}}}'`+"\n"+
+				`fi`+"\n")
+			result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 10 * time.Second})
+			if result.Status != "completed" || result.Output != "Recovered" {
+				t.Fatalf("success result = %+v", result)
+			}
+			attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+			if err != nil || strings.TrimSpace(string(attempts)) != strconv.Itoa(successLaunch) {
+				t.Fatalf("launches = %q, err=%v; want %d", attempts, err, successLaunch)
+			}
+			usage := result.Usage["gpt-6-sol"]
+			if usage.InputTokens != int64((successLaunch-1)*10+20) ||
+				usage.OutputTokens != int64((successLaunch-1)+2) {
+				t.Fatalf("merged usage on launch %d = %+v", successLaunch, usage)
+			}
+		})
+	}
+}
+
+func TestCodexExecuteCapacityRetryGuards(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	previousBackoffs := codexCapacityRetryBackoffs
+	codexCapacityRetryBackoffs = [5]time.Duration{10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
+	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
+	cases := []struct {
+		name         string
+		errorMessage string
+		errorInfo    string
+		toolStarted  bool
+		textStarted  bool
+		cleanupFails bool
+		noModel      bool
+		wantLaunches string
+	}{
+		{"capacity budget exhausted", "selected model unavailable", "serverOverloaded", false, false, false, false, "6"},
+		{"capacity text without code", "Selected model is at capacity. Please try a different model.", "", false, false, false, false, "1"},
+		{"unknown code", "Selected model is at capacity. Please try a different model.", "futureCode", false, false, false, false, "1"},
+		{"quota", "Selected model is at capacity. Please try a different model.", "usageLimitExceeded", false, false, false, false, "1"},
+		{"auth", "Selected model is at capacity. Please try a different model.", "unauthorized", false, false, false, false, "1"},
+		{"invalid model", "Selected model is at capacity. Please try a different model.", "badRequest", false, false, false, false, "1"},
+		{"permanent model rejection", "The selected model is no longer supported", "", false, false, false, false, "1"},
+		{"tool already started", "selected model unavailable", "serverOverloaded", true, false, false, false, "1"},
+		{"text already emitted", "selected model unavailable", "serverOverloaded", false, true, false, false, "1"},
+		{"process cleanup unconfirmed", "selected model unavailable", "serverOverloaded", false, false, true, false, "1"},
+		{"selected model not pinned", "selected model unavailable", "serverOverloaded", false, false, false, true, "1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.cleanupFails {
+				codexCleanupConfirmationOverride.Store(-1)
+				defer codexCleanupConfirmationOverride.Store(0)
+			}
+			turnCompleted, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "method": "turn/completed",
+				"params": map[string]any{
+					"threadId": "thr-capacity",
+					"turn": map[string]any{"id": "turn-capacity", "status": "failed",
+						"error": map[string]any{"message": tc.errorMessage, "codexErrorInfo": tc.errorInfo}},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			toolEvent := ""
+			if tc.toolStarted {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-capacity","item":{"type":"commandExecution","id":"tool-1","command":"touch changed"}}}'` + "\n"
+			}
+			if tc.textStarted {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-1","text":"partial"}}}'` + "\n"
+			}
+			fakePath := writeFakeCodexAppServer(t, ""+
+				`DIR="$(dirname "$0")"`+"\n"+
+				`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+				`echo $((ATTEMPT+1)) > "$DIR/attempts"`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+				`read line`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
+				toolEvent+
+				"echo '"+string(turnCompleted)+"'\n")
+			model := "gpt-6-sol"
+			if tc.noModel {
+				model = ""
+			}
+			result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 10 * time.Second, Model: model})
+			if result.Status != "failed" {
+				t.Fatalf("terminal result = %+v", result)
+			}
+			if tc.name == "capacity budget exhausted" {
+				if !strings.Contains(result.Error, tc.errorMessage) ||
+					!strings.Contains(result.Error, "capacity retry limit exhausted after 5 retries") {
+					t.Fatalf("exhaustion result = %+v", result)
+				}
+			} else if result.Error != tc.errorMessage {
+				t.Fatalf("terminal result = %+v", result)
+			}
+			attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+			if err != nil || strings.TrimSpace(string(attempts)) != tc.wantLaunches {
+				t.Fatalf("launch count = %q, err = %v; want %s", attempts, err, tc.wantLaunches)
+			}
+		})
+	}
+}
+
+func TestCodexCapacityRetrySchedule(t *testing.T) {
+	want := [5]time.Duration{time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+	if codexCapacityRetryBackoffs != want {
+		t.Fatalf("capacity schedule = %v, want %v", codexCapacityRetryBackoffs, want)
+	}
+	if codexCapacityRetryWindow != 30*time.Minute {
+		t.Fatalf("capacity recovery window = %s", codexCapacityRetryWindow)
+	}
+	var total time.Duration
+	for _, wait := range want {
+		total += wait
+	}
+	if total != 21*time.Minute {
+		t.Fatalf("five nominal waits total %s, want 21m", total)
+	}
+	for _, base := range want {
+		for i := 0; i < 100; i++ {
+			delay := codexCapacityRetryDelay(base)
+			if delay < base-base/10 || delay > base {
+				t.Fatalf("jittered delay %s outside [%s, %s]", delay, base-base/10, base)
+			}
+		}
+	}
+}
+
+func TestCodexStructuredErrorInfoCompletionWins(t *testing.T) {
+	t.Parallel()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"willRetry":false}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"quota","codexErrorInfo":"usageLimitExceeded"}}}}`)
+	if got := c.getTurnErrorInfo(); got != "usageLimitExceeded" {
+		t.Fatalf("terminal error info = %q, want quota", got)
+	}
+	c2, _, _ := newTestCodexClient(t)
+	c2.notificationProtocol = "raw"
+	c2.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-2"}}}`)
+	c2.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"willRetry":true}}`)
+	c2.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-2","status":"failed","error":{"message":"capacity text without code"}}}}`)
+	if got := c2.getTurnErrorInfo(); got != "" {
+		t.Fatalf("missing terminal code inherited transient notification: %q", got)
+	}
+}
+
+func TestCodexCapacityRetryRespectsRunTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	previousBackoffs := codexCapacityRetryBackoffs
+	codexCapacityRetryBackoffs = [5]time.Duration{200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond}
+	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`N=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`echo $((N+1)) > "$DIR/attempts"`+"\n"+
+		`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+		`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"}}}}'`+"\n")
+	result := executeFakeCodex(t, fakePath, ExecOptions{Model: "gpt-6-sol", Timeout: 100 * time.Millisecond})
+	if result.Status != "failed" || !strings.Contains(result.Error, "insufficient time") {
+		t.Fatalf("short timeout result = %+v", result)
+	}
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil || strings.TrimSpace(string(attempts)) != "1" {
+		t.Fatalf("short timeout launched %q attempts, err=%v; want 1", attempts, err)
+	}
+}
+
+func TestCodexCapacityRetryCancelDuringWait(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	previousBackoffs := codexCapacityRetryBackoffs
+	codexCapacityRetryBackoffs = [5]time.Duration{time.Second, time.Second, time.Second, time.Second, time.Second}
+	t.Cleanup(func() { codexCapacityRetryBackoffs = previousBackoffs })
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`N=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`echo $((N+1)) > "$DIR/attempts"`+"\n"+
+		`read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; read line; echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+		`read line; echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"busy","codexErrorInfo":"serverOverloaded"}}}}'`+"\n")
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Model: "gpt-6-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	deadline := time.After(2 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "attempts")); err == nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("first attempt did not start")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	// Let the first process exit and the backoff begin before cancelling.
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	select {
+	case result := <-session.Result:
+		if result.Status != "aborted" {
+			t.Fatalf("cancelled retry = %+v", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled retry did not return")
+	}
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil || strings.TrimSpace(string(attempts)) != "1" {
+		t.Fatalf("cancelled retry launched %q attempts, err=%v; want 1", attempts, err)
+	}
+}
+
+func TestCodexRetryCancellationBeforeTimerAndSpawn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitCodexRetry(ctx, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-cancelled retry wait = %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, `echo invoked > "$(dirname "$0")/invoked"`+"\n")
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = backend.(*codexBackend).executeOnce(ctx, "prompt", ExecOptions{Model: "gpt-6-sol"}, 2)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-cancelled executeOnce = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "invoked")); !os.IsNotExist(err) {
+		t.Fatalf("pre-cancelled retry spawned process: stat err=%v", err)
+	}
+}
+
+func TestMergeCodexAttemptUsage(t *testing.T) {
+	t.Parallel()
+	first := map[string]TokenUsage{"gpt-6-sol": {InputTokens: 10, CacheReadTokens: 3, CostUSDTicks: 7}}
+	second := map[string]TokenUsage{"gpt-6-sol": {OutputTokens: 5, CacheWriteTokens: 2, CostUSDTicks: 11}}
+	got := mergeCodexAttemptUsage(first, second)["gpt-6-sol"]
+	if got.InputTokens != 10 || got.OutputTokens != 5 ||
+		got.CacheReadTokens != 3 || got.CacheWriteTokens != 2 || got.CostUSDTicks != 18 {
+		t.Fatalf("merged retry usage = %+v", got)
 	}
 }
 

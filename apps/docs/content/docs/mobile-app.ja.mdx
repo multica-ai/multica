@@ -4,10 +4,11 @@ description: ソースコードから Multica を iPhone にインストール�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica の iOS クライアントはまだ App Store にありません。Mac で公開されているソースリポジトリから Release 版をビルドし、自分の iPhone にインストールできます。Android クライアントはまだ提供されていません。
 
-インストールしたアプリはデフォルトで Multica Cloud に接続し、既存のアカウントでそのままサインインできます。ワークスペース、タスク、コメント、実行履歴はすべてサーバー側に保存されるため、Web や Desktop から手動で同期する必要はありません。
+インストールしたアプリはデフォルトで Multica Cloud に接続し、既存のアカウントでそのままサインインできます。ワークスペース、タスク、コメント、実行履歴はすべてサーバー側に保存されるため、Web や Desktop から同期する必要はありません。
 
 ## 事前準備
 
@@ -23,6 +24,8 @@ Xcode や実機の開発環境がまだ設定されていない場合は、先�
 
 ## iPhone へのインストール
 
+<Steps>
+<Step>
 リポジトリをクローンして依存関係をインストールします:
 
 ```bash
@@ -30,16 +33,20 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 pnpm install
 ```
-
-続いてリポジトリのルートから実行します:
+</Step>
+<Step>
+リポジトリのルートから実行します:
 
 ```bash
 pnpm ios:mobile:device:prod:release
 ```
 
 これは Metro に依存しない Release 版をビルドし、接続中の iPhone にインストールします。初回ビルドは iOS の依存関係をダウンロードして React Native をコンパイルするため時間がかかりますが、以降は Xcode のキャッシュを再利用します。
-
-iPhone がアプリの起動をブロックする場合は、**設定 → 一般 → VPN とデバイス管理** で対応する開発者証明書を信頼してください。
+</Step>
+<Step>
+iPhone でアプリを開きます。起動がブロックされた場合は、**設定 → 一般 → VPN とデバイス管理** で対応する開発者証明書を信頼してください。
+</Step>
+</Steps>
 
 ## 無料署名の 7 日制限
 
@@ -72,16 +79,23 @@ pnpm ios:mobile:device:prod:release
 
 Release ビルドは API アドレスをアプリに埋め込みます。`apps/mobile/.env.production` は公開されている multica.ai のデフォルト値とともにコミットされているため、新しくクローンした状態でも本番ビルドができます。
 
-セルフホストインスタンスに接続するには、`apps/mobile/.env.production.example` を `apps/mobile/.env.production.local` としてコピーし、コピーを編集します:
+セルフホストインスタンスに接続するには:
+
+<Steps>
+<Step>
+`apps/mobile/.env.production.example` を `apps/mobile/.env.production.local` としてコピーし、コピーにアドレスを書きます:
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`.local` ファイルはコミット済みのデフォルトをキーごとに上書きし、gitignore されるため、個人の API アドレスがリポジトリに入ることはありません。`EXPO_PUBLIC_API_URL` は必須です。`EXPO_PUBLIC_WEB_URL` は "Copy link" や "Open on web" などの入口に使われます。コピーには両方を設定してください。書かなかったキーには multica.ai のデフォルト値が使われるため、これらの入口がセルフホストインスタンスではなく multica.ai を開きます。
-
-編集後にビルドコマンドを再実行します。iPhone がこの API アドレスに到達できる必要があります。LAN のアドレスを使う場合、`localhost` と書かないでください — iPhone 上では iPhone 自身を指します。
+`.local` ファイルはコミット済みのデフォルトをキーごとに上書きし、gitignore されるため、個人の API アドレスがリポジトリに入ることはありません。`EXPO_PUBLIC_API_URL` は必須です。`EXPO_PUBLIC_WEB_URL` は "Copy link" や "Open on web" などの入口に使われます。両方を設定してください。書かなかったキーには multica.ai のデフォルト値が使われるため、これらの入口がセルフホストインスタンスではなく multica.ai を開きます。
+</Step>
+<Step>
+ビルドコマンド `pnpm ios:mobile:device:prod:release` を再実行します。iPhone がこの API アドレスに到達できる必要があります。LAN のアドレスを使う場合は `localhost` と書かないでください。iPhone 上では iPhone 自身を指します。
+</Step>
+</Steps>
 
 <Callout type="warning">
 `.env.production` を直接編集すると、現在のチェックアウトの本番設定が変わります。個人の値は gitignore された `.env.production.local` に書いてください。

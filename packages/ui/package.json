@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "icons": "node icons/drawings/generate.mjs",
     "lint": "eslint .",
     "test": "vitest run"
   },
@@ -23,13 +24,10 @@
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
     "./lib/motion": "./lib/motion.ts",
+    "./icons": "./icons/index.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
-    "./styles/base.css": "./styles/base.css",
-    "./docs/button.md": "./docs/button.md",
-    "./docs/button.zh.md": "./docs/button.zh.md",
-    "./docs/dialog.md": "./docs/dialog.md",
-    "./docs/dialog.zh.md": "./docs/dialog.zh.md"
+    "./styles/base.css": "./styles/base.css"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -44,7 +42,6 @@
     "input-otp": "^1.4.2",
     "linkify-it": "^5.0.0",
     "katex": "catalog:",
-    "lucide-react": "catalog:",
     "next-themes": "^0.4.6",
     "react-day-picker": "^9.14.0",
     "react-markdown": "^10.1.0",

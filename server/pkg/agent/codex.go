@@ -118,6 +118,22 @@ var codexCleanupConfirmationOverride atomic.Int32
 // production never reassigns it.
 var codexCatalogRetryBackoff = 500 * time.Millisecond
 
+// Five waits total about 21 minutes. The recovery window leaves up to nine
+// minutes for resumed turns while bounding a persistent overload.
+var codexCapacityRetryBackoffs = [5]time.Duration{time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+
+const codexCapacityRetryWindow = 30 * time.Minute
+
+// Downward jitter avoids synchronizing agents after a provider overload while
+// keeping the first wait near one minute and the later waits near five.
+func codexCapacityRetryDelay(base time.Duration) time.Duration {
+	spread := base / 10
+	if spread <= 0 {
+		return base
+	}
+	return base - time.Duration(time.Now().UnixNano()%int64(spread))
+}
+
 func sanitizeCodexDiagnostic(value string) string {
 	return sanitizeAgentDiagnostic(value)
 }
@@ -951,8 +967,10 @@ func isCodexBareTomlKey(s string) bool {
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	firstSession, err := b.executeOnce(ctx, prompt, opts, 1)
+	runCtx, cancelRun := runContext(ctx, opts.Timeout)
+	firstSession, err := b.executeOnce(runCtx, prompt, opts, 1)
 	if err != nil {
+		cancelRun()
 		return nil, err
 	}
 	msgCh := make(chan Message, 256)
@@ -976,6 +994,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	go func() {
+		defer cancelRun()
+		retryCtx := runCtx
+		var cancelCapacity context.CancelFunc
 		defer func() {
 			sessionMu.Lock()
 			currentSession = nil
@@ -985,12 +1006,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(resCh)
 		session := firstSession
 		attemptOpts := opts
-		for attempt := 1; attempt <= 2; attempt++ {
+		var startupRetries, capacityRetries int
+		var priorUsage map[string]TokenUsage
+		var lastResult Result
+		for attempt := 1; ; attempt++ {
 			if attempt > 1 {
+				if err := retryCtx.Err(); err != nil {
+					resCh <- codexRetryInterruptedResult(lastResult, priorUsage, err)
+					return
+				}
 				var err error
-				session, err = b.executeOnce(ctx, prompt, attemptOpts, attempt)
+				session, err = b.executeOnce(retryCtx, prompt, attemptOpts, attempt)
 				if err != nil {
-					resCh <- Result{Status: "failed", Error: err.Error()}
+					if ctxErr := retryCtx.Err(); ctxErr != nil {
+						resCh <- codexRetryInterruptedResult(lastResult, priorUsage, ctxErr)
+					} else {
+						resCh <- Result{Status: "failed", Error: err.Error(), Usage: priorUsage}
+					}
 					return
 				}
 				sessionMu.Lock()
@@ -1029,18 +1061,27 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				resCh <- Result{Status: "failed", Error: "codex attempt closed without result"}
 				return
 			}
+			lastResult = result
 			retryReason := ""
 			switch {
-			case result.codexInitializeRetrySafe:
+			case result.codexInitializeRetrySafe && startupRetries < 1:
 				retryReason = "initialize"
-			case result.codexStartupRefreshRetrySafe:
+			case result.codexStartupRefreshRetrySafe && startupRetries < 1:
 				retryReason = "model_catalog_refresh"
+			case result.codexCapacityRetrySafe && capacityRetries < len(codexCapacityRetryBackoffs) && retryCtx.Err() == nil:
+				retryReason = "selected_model_capacity"
 			}
-			if retryReason == "" || attempt == 2 {
+			if retryReason == "" {
 				flushHeldPins()
+				result.Usage = mergeCodexAttemptUsage(priorUsage, result.Usage)
+				if result.codexCapacityRetrySafe && capacityRetries == len(codexCapacityRetryBackoffs) {
+					result.Error += fmt.Sprintf("; capacity retry limit exhausted after %d retries", capacityRetries)
+					b.cfg.Logger.Warn("codex capacity retry limit exhausted", "task_id", b.cfg.TaskID, "retries", capacityRetries)
+				}
 				resCh <- result
 				return
 			}
+			priorUsage = mergeCodexAttemptUsage(priorUsage, result.Usage)
 			// The model catalog refresh reaches the network, so give the
 			// transient failure a little more room than the local initialize
 			// handshake gets. Both stay well inside the task timeout, and
@@ -1062,13 +1103,32 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					attemptOpts.ResumeExpected = true
 				}
 			}
+			if retryReason == "selected_model_capacity" {
+				if cancelCapacity == nil {
+					retryCtx, cancelCapacity = context.WithTimeout(runCtx, codexCapacityRetryWindow)
+					defer cancelCapacity()
+				}
+				backoff = codexCapacityRetryDelay(codexCapacityRetryBackoffs[capacityRetries])
+				if deadline, ok := retryCtx.Deadline(); ok && time.Until(deadline) <= backoff {
+					flushHeldPins()
+					result.Usage = priorUsage
+					result.Error += "; capacity retry deadline has insufficient time for next wait"
+					resCh <- result
+					return
+				}
+				capacityRetries++
+				// This failed turn emitted no item or text, so the input can be
+				// resubmitted without replaying tools. Keep the thread and model.
+				attemptOpts.ResumeSessionID = result.SessionID
+				attemptOpts.ResumeExpected = true
+			} else {
+				startupRetries++
+			}
 			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
-			select {
-			case <-ctx.Done():
+			if err := waitCodexRetry(retryCtx, backoff); err != nil {
 				flushHeldPins()
-				resCh <- result
+				resCh <- codexRetryInterruptedResult(result, priorUsage, err)
 				return
-			case <-time.After(backoff):
 			}
 		}
 	}()
@@ -1076,7 +1136,59 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
 }
 
+func waitCodexRetry(ctx context.Context, delay time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+	// If cancellation and the timer fire together, cancellation wins.
+	return ctx.Err()
+}
+
+func codexRetryInterruptedResult(result Result, usage map[string]TokenUsage, err error) Result {
+	result.Usage = usage
+	if errors.Is(err, context.DeadlineExceeded) {
+		result.Status = "timeout"
+		result.Error += "; capacity retry deadline exceeded"
+	} else {
+		result.Status = "aborted"
+		result.Error = "execution cancelled during retry wait"
+	}
+	return result
+}
+
+func mergeCodexAttemptUsage(a, b map[string]TokenUsage) map[string]TokenUsage {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	merged := make(map[string]TokenUsage, len(a)+len(b))
+	for model, usage := range a {
+		merged[model] = usage
+	}
+	for model, usage := range b {
+		total := merged[model]
+		total.InputTokens += usage.InputTokens
+		total.OutputTokens += usage.OutputTokens
+		total.CacheReadTokens += usage.CacheReadTokens
+		total.CacheWriteTokens += usage.CacheWriteTokens
+		total.CostUSDTicks += usage.CostUSDTicks
+		merged[model] = total
+	}
+	return merged
+}
+
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "codex"
@@ -1242,13 +1354,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	var outputMu sync.Mutex
 	// Result.Output is "final user-facing output selected by the backend"
-	// (agent.go), so it holds the deliverable only. finalAnswer is the text the
-	// app-server labelled `phase: "final_answer"`; lastAgentMessage is the
-	// fallback for the legacy `agent_message` protocol, which carries no phase.
+	// (agent.go), so it holds the deliverable only. output tracks the text the
+	// app-server labelled `phase: "final_answer"` and, for the legacy
+	// `agent_message` protocol which carries no phase, the last agent message.
 	// Every agent message still flows to msgCh, so the transcript is unchanged —
 	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
-	var finalAnswer, lastAgentMessage string
+	var output codexOutputSelection
 	var semanticObserved atomic.Bool
+	var turnEffectsObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
 
@@ -1258,6 +1371,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	var c *codexClient
 	observeMessage := func(msg Message) {
+		if msg.Type != MessageStatus || msg.Status != "running" {
+			turnEffectsObserved.Store(true)
+		}
 		logCodexAgentMessage(b.cfg.Logger, msg)
 		activity := describeCodexSemanticActivity(msg)
 		if activity == "status:running" {
@@ -1310,20 +1426,23 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// preserving the reader's EOF and cancellation liveness.
 			return trySend(msgCh, msg)
 		},
-		onAgentMessage: func(text string) {
+		onAgentMessage: func(text, phase string) {
 			// Delta events make MessageText incremental. Keep Result.Output's
 			// legacy fallback authoritative by updating it from the completed
 			// agent-message snapshot, not whichever delta happened to arrive last.
 			outputMu.Lock()
-			lastAgentMessage = text
+			output.observeAgentMessage(text, phase)
 			outputMu.Unlock()
 		},
 		onFinalAnswer: func(text string) {
 			outputMu.Lock()
-			finalAnswer = text
+			output.observeFinalAnswer(text)
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
+			if strings.HasPrefix(description, "item/") {
+				turnEffectsObserved.Store(true)
+			}
 			semanticObserved.Store(true)
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
 			trySendString(semanticActivityCh, description)
@@ -1842,6 +1961,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			!firstTurnProgressObserved &&
 			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
 			cleanupConfirmed && codexInitializeRetrySupported()
+		capacityRetrySafe := finalStatus == "failed" && threadID != "" &&
+			strings.TrimSpace(opts.Model) != "" && c.getTurnErrorInfo() == "serverOverloaded" &&
+			!turnEffectsObserved.Load() && !guardianRateLimitTripped.Load() &&
+			processExitErr == nil && timeoutDiagnostic.Kind == codexTimeoutNone &&
+			cleanupConfirmed && codexInitializeRetrySupported() && runCtx.Err() == nil
 		if startupRefreshRetrySafe {
 			b.cfg.Logger.Warn("codex startup model catalog refresh failure is retry safe",
 				"pid", cmd.Process.Pid,
@@ -1898,7 +2022,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		outputMu.Lock()
-		finalOutput := codexDeliverableOutput(finalAnswer, lastAgentMessage)
+		finalOutput := codexDeliverableOutput(output)
 		outputMu.Unlock()
 
 		// Build usage map from accumulated codex usage.
@@ -1923,6 +2047,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			DurationMs:                   duration.Milliseconds(),
 			Usage:                        usageMap,
 			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
+			codexCapacityRetrySafe:       capacityRetrySafe,
 		}
 	}()
 
@@ -2320,17 +2445,50 @@ func trySendString(ch chan<- string, value string) {
 	}
 }
 
+// codexOutputSelection records what a turn produced that could become
+// Result.Output. The zero value is an empty selection.
+type codexOutputSelection struct {
+	// finalAnswer is the last non-blank message labelled `phase: "final_answer"`.
+	finalAnswer string
+	// finalAnswerObserved is set by any final_answer item, including one with
+	// empty or whitespace-only text: the app-server explicitly ended the turn
+	// without a deliverable, which is different from never labelling one.
+	finalAnswerObserved bool
+	lastAgentMessage    string
+	// lastAgentMessagePhase is the phase label of lastAgentMessage; empty for
+	// the legacy protocol and for app-servers that do not label phases.
+	lastAgentMessagePhase string
+}
+
+func (s *codexOutputSelection) observeAgentMessage(text, phase string) {
+	s.lastAgentMessage = text
+	s.lastAgentMessagePhase = phase
+}
+
+func (s *codexOutputSelection) observeFinalAnswer(text string) {
+	s.finalAnswerObserved = true
+	if strings.TrimSpace(text) != "" {
+		s.finalAnswer = text
+	}
+}
+
 // codexDeliverableOutput picks Result.Output from what the turn produced: the
 // message the app-server itself labelled `phase: "final_answer"`, or — for the
 // legacy `agent_message` protocol, which carries no phase — the most recent
 // agent message. Never every message joined: the intermediate ones narrate the
 // work between tool calls, which belongs to the transcript and not to a chat or
-// IM reply (GH #6006).
-func codexDeliverableOutput(finalAnswer, lastAgentMessage string) string {
-	if finalAnswer != "" {
-		return finalAnswer
+// IM reply (GH #6006). A message explicitly labelled with another phase (for
+// example `commentary`) is narration too, so an empty or missing final answer
+// after it yields empty output instead of promoting the narration to the
+// deliverable.
+func codexDeliverableOutput(s codexOutputSelection) string {
+	if s.finalAnswer != "" {
+		return s.finalAnswer
 	}
-	return lastAgentMessage
+	if s.finalAnswerObserved || s.lastAgentMessagePhase != "" {
+		return ""
+	}
+	return s.lastAgentMessage
 }
 
 func logCodexAgentMessage(logger *slog.Logger, msg Message) {
@@ -2394,9 +2552,10 @@ type codexClient struct {
 	// delivered prefix. Unit clients may leave this nil and use onMessage.
 	onAgentMessageChunk func(text string) bool
 	// onAgentMessage receives the authoritative completed text for one agent
-	// message. onAgentMessageChunk may deliver that text incrementally, so
+	// message and its phase label ("" when the protocol carries none).
+	// onAgentMessageChunk may deliver that text incrementally, so
 	// Result.Output fallbacks must use this callback rather than the last chunk.
-	onAgentMessage           func(text string)
+	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
@@ -2404,6 +2563,8 @@ type codexClient struct {
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
+	// It fires for an empty final answer too, so the caller can tell "ended
+	// without a deliverable" from "never labelled one".
 	// Both still reach onMessage: the transcript keeps the whole timeline, only
 	// Result.Output is narrowed to the deliverable (GH #6006).
 	onFinalAnswer func(text string)
@@ -2433,8 +2594,10 @@ type codexClient struct {
 	usageTotal    codexRawTokenUsage
 	usageTotalSet bool
 
-	turnErrorMu sync.Mutex
-	turnError   string // captured from turn/completed status=failed or terminal error notifications
+	turnErrorMu            sync.Mutex
+	turnError              string // captured from turn/completed status=failed or terminal error notifications
+	turnErrorInfo          string // structured v2 CodexErrorInfo; empty means absent or unsupported
+	turnErrorInfoCompleted bool   // turn/completed is authoritative over earlier error notifications
 }
 
 type codexAgentMessageStream struct {
@@ -2523,6 +2686,23 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+func (c *codexClient) setTurnErrorInfo(info string, completed bool) {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	if completed {
+		c.turnErrorInfo = info
+		c.turnErrorInfoCompleted = true
+	} else if !c.turnErrorInfoCompleted && c.turnErrorInfo == "" {
+		c.turnErrorInfo = info
+	}
+}
+
+func (c *codexClient) getTurnErrorInfo() string {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	return c.turnErrorInfo
 }
 
 // setThreadID publishes the thread ID resolved by thread/start or
@@ -3390,7 +3570,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, "")
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -3509,6 +3689,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				errMsg = "codex turn failed"
 			}
 			c.setTurnError(errMsg)
+			c.setTurnErrorInfo(extractNestedString(params, "turn", "error", "codexErrorInfo"), true)
 		}
 
 		// Extract usage from turn/completed if present (e.g. params.turn.usage).
@@ -3545,6 +3726,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			}
 			if !willRetry {
 				c.setTurnError(errMsg)
+				c.setTurnErrorInfo(extractNestedString(params, "error", "codexErrorInfo"), false)
 			}
 		}
 
@@ -3797,18 +3979,20 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
+		phase, _ := item["phase"].(string)
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, phase)
 		}
 		c.completeAgentMessage(itemID, text)
-		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {
 			// The gate exists so a subagent or a replayed history turn cannot
 			// end OUR turn early, and the thread guard at the top of this
 			// function already keeps foreign threads out. A final answer that
 			// arrives before we observed turn/started is still this thread's
-			// deliverable, and dropping it would fall back to narration.
-			if text != "" && c.onFinalAnswer != nil {
+			// deliverable, and dropping it would fall back to narration. An
+			// empty final answer is reported too: it means the turn ended
+			// without a deliverable, not that the last narration is one.
+			if c.onFinalAnswer != nil {
 				c.onFinalAnswer(text)
 			}
 			// Keep the stream open until turn/completed. A final answer is the

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ArrowRight, Ban, ChevronRight, XCircle } from "lucide-react";
+import { ArrowRight, Ban, ChevronRight, XCircle } from "@multica/ui/icons";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -852,15 +853,16 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
             tooltip and, whole and wrapped, at the top of the transcript. */}
         <RunTriggerLabel task={task} fallback={label}>
           {(text) => (
-            <span
-              title={text}
-              className={cn(
-                "min-w-0 flex-1 truncate text-label",
-                run.usage || run.active ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {text}
-            </span>
+            <TruncatedTooltip content={text}>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-label",
+                  run.usage || run.active ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {text}
+              </span>
+            </TruncatedTooltip>
           )}
         </RunTriggerLabel>
         <ArrowRight aria-hidden className={cn(COL.arrow, "size-3 text-faint-foreground")} />
@@ -1039,9 +1041,11 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
         {run.task.branch_name && (
           <>
             <dt className="text-muted-foreground">{t(($) => $.runs_timeline.detail_branch)}</dt>
-            <dd className="min-w-0 truncate font-mono text-micro" title={run.task.branch_name}>
-              {run.task.branch_name}
-            </dd>
+            <TruncatedTooltip content={run.task.branch_name}>
+              <dd className="min-w-0 truncate font-mono text-micro">
+                {run.task.branch_name}
+              </dd>
+            </TruncatedTooltip>
           </>
         )}
       </dl>

@@ -4,12 +4,14 @@ description: Installez le CLI Multica, connectez-vous et gérez les espaces de t
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 Le CLI Multica sert à la fois à connecter des runtimes locaux et à gérer, depuis le terminal, les espaces de travail, les tâches, les agents et les automatisations. Cette page présente les parcours courants ; les options prises en charge par la version installée sont toujours définies par le `--help` de chaque commande.
 
 ## Installation
 
-**macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
@@ -21,11 +23,17 @@ Si Homebrew est installé, vous pouvez aussi exécuter :
 brew install multica-ai/tap/multica
 ```
 
-**Windows PowerShell**
+</Tab>
+<Tab value="Windows">
+
+Dans PowerShell, exécutez :
 
 ```powershell
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
+
+</Tab>
+</Tabs>
 
 Vérifiez l'installation :
 
@@ -35,19 +43,26 @@ multica version
 
 ## Première connexion
 
-Se connecter à Multica Cloud :
+Choisissez le service auquel vous vous connectez :
+
+<Tabs items={["Multica Cloud", "Instance auto-hébergée"]}>
+<Tab value="Multica Cloud">
 
 ```bash
 multica setup
 ```
 
-Se connecter à une instance auto-hébergée :
+</Tab>
+<Tab value="Instance auto-hébergée">
 
 ```bash
 multica setup self-host \
   --server-url https://api.example.com \
   --app-url https://app.example.com
 ```
+
+</Tab>
+</Tabs>
 
 `setup` enregistre l'adresse du serveur, ouvre un navigateur pour finaliser la connexion et démarre le daemon. Une fois l'opération terminée, vérifiez :
 
@@ -110,12 +125,70 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-Afficher les messages d'une exécution, ou l'arrêter :
+Consulter, arrêter ou relancer une exécution :
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
+
+Ajouter un commentaire à une exécution encore en cours, au lieu de mettre une exécution de suivi en file d'attente (uniquement les exécutions qui acceptent des messages supplémentaires, et seulement pour un agent que votre commentaire pourrait démarrer) :
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
+```
+
+Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+
+### Chronologie
+
+`issue get` montre la tâche telle qu'elle est maintenant. `issue timeline` liste dans l'ordre les changements de statut, de priorité, d'assigné, de titre et de dates ainsi que les résultats des exécutions, entremêlés avec les commentaires. C'est la commande pour savoir « quand est-elle passée en in_review » ou « depuis combien de temps est-elle bloquée dans ce statut » :
+
+```bash
+multica issue timeline MUL-123 --action status_changed
+multica issue timeline MUL-123 --activity-only --output json
+multica issue timeline MUL-123 --since 2026-08-19T00:00:00Z
+```
+
+`--activity-only` retire les commentaires et garde tous les enregistrements d'activité ; `--action` ne renvoie que les actions indiquées, peut être répété et implique `--activity-only`. Le serveur limite l'historique qu'il lit ; si le résultat est tronqué, un avertissement s'affiche sur stderr, et il ne faut pas en déduire de durée.
+
+### Lire de longs fils de commentaires
+
+Sur une tâche très commentée, tout lire un par un coûte beaucoup de tokens à un agent. Parcourez d'abord les fils, puis ouvrez celui qui vous intéresse :
+
+```bash
+multica issue comment list MUL-123 --roots-only --summary --output json --compact
+multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json --compact
+```
+
+- `--roots-only` ne renvoie que les commentaires de premier niveau, chacun avec son nombre de réponses et l'heure de sa dernière activité.
+- `--summary` réduit chaque commentaire à un court aperçu.
+- `--compact` s'applique à la sortie JSON et retire les champs sans information (comme l'`issue_id` répété et les tableaux vides).
+- `--recent N` renvoie les N fils les plus récemment actifs avec toutes leurs réponses, ce qui peut être long.
+- Les fils résolus sont repliés par défaut sur le premier commentaire et la conclusion ; ajoutez `--full` pour le texte complet.
+
+Les listes peuvent aussi se limiter aux champs utiles : `multica issue list --output json --fields id,identifier,title,status`. Le filtrage a lieu dans la CLI : il réduit la sortie et le contexte, pas la requête.
+
+### Réveils
+
+Un réveil lance une exécution ordinaire d'un agent quand un événement se produit, qu'une condition devient vraie ou qu'une heure arrive. Les règles complètes figurent dans [Réveils de tâche](/issue-wakeups).
+
+```bash
+multica issue wakeup events
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --event comment.created --filter-actor-type member --filter-actor-id <user-id> \
+  --instruction "Quand ils répondent, mettre à jour le devis d'après leur réponse"
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --kind every --every 1h --expires-in 72h \
+  --instruction "Vérifier si le fournisseur a répondu"
+multica issue wakeup list MUL-123
+multica issue wakeup runs MUL-123 <wakeup-id>
+```
+
+Créer un réveil depuis un terminal en tant que membre demande `--agent-id` ; un agent qui en crée un pendant sa propre exécution se réveille lui-même par défaut.
 
 ## Agents et skills
 
@@ -141,6 +214,23 @@ multica skill import --url <skill-url> --on-conflict skip
 
 `overwrite` n'est autorisé que pour le créateur du skill et conserve l'ID d'origine ainsi que les liaisons avec les agents.
 
+Les variables d'environnement et la configuration MCP contiennent souvent des tokens. Une valeur tapée sur la ligne de commande reste dans l'historique du shell et dans la sortie de `ps` ; passez-les plutôt par les formes `-file` ou `-stdin` :
+
+```bash
+multica agent create --name "Assistant ops" --runtime-id <runtime-id> \
+  --custom-env-file ./agent-env.json \
+  --mcp-config-file ./mcp.json \
+  --custom-args '["--max-turns", "40"]'
+
+multica agent env set <agent-id> --custom-env-stdin < agent-env.json
+multica agent update <agent-id> --mcp-config-file ./mcp.json
+```
+
+- Les options `--custom-env` n'existent que sur `agent create`. Pour modifier les variables ensuite, utilisez `agent env set`, qui remplace l'ensemble ; les clés dont la valeur est `****` gardent leur valeur actuelle.
+- `agent update --mcp-config null` efface la configuration MCP.
+- `--custom-args` est un tableau JSON placé à la fin des arguments de lancement. Choisissez le modèle avec `--model` ; certains outils refusent un `--model` dans les arguments personnalisés.
+- `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte.
+
 ## Daemon et runtimes
 
 ```bash
@@ -156,15 +246,45 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+```bash
+multica daemon autostart enable
+multica runtime usage <runtime-id> --days 30
+multica runtime update <runtime-id> --target-version <version> --wait
+multica runtime profile create --display-name "Wrapper Claude interne" \
+  --command-name ccms --runtime-type claude
+```
+
+`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
+
 La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
 
 Consultez [Daemon et runtimes](/daemon-runtimes) pour son fonctionnement et les profils personnalisés.
+
+## Projets, espaces de travail et automatisations
+
+```bash
+multica project create --title "Campagne d'été" --lead "Lei Li" \
+  --repo https://github.com/acme/campaign-site
+multica project resource add <project-id> --type github_repo \
+  --url https://github.com/acme/brand-assets --default-branch-hint main
+
+multica workspace create --name "Opérations" --slug ops --issue-prefix OPS
+multica workspace update --context-stdin < team-context.md
+
+multica autopilot create --title "Rapport de ventes hebdomadaire" --agent "Assistant ops" \
+  --mode create_issue --issue-title-template "Rapport de ventes {{date}}"
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europe/Paris
+```
+
+- `--lead` prend le nom d'un membre ou d'un agent. `--default-branch-hint` indique seulement à l'agent la branche par défaut du dépôt ; il ne change pas de branche.
+- Le `--context` d'un espace de travail est fourni à tous ses agents. `--slug` ne peut plus être modifié après la création. `--issue-prefix` est mis en majuscules ; le changer renumérote toutes les tâches existantes, et les anciens identifiants cités ailleurs ne mènent plus nulle part.
+- `--issue-title-template` ne remplace que `{{date}}` (UTC, `YYYY-MM-DD`) et refuse tout autre `{{...}}`. Le `--timezone` d'un déclencheur planifié vaut UTC par défaut.
 
 ## Vue d'ensemble des commandes
 
 | Commande | Rôle |
 | --- | --- |
-| `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés et les exécutions |
+| `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés, les réveils, la chronologie et les exécutions |
 | `project` | Gérer les projets et leurs ressources |
 | `label`, `property` | Gérer les étiquettes et les propriétés personnalisées de l'espace de travail |
 | `agent`, `skill`, `squad` | Gérer les agents, les skills et les squads |
@@ -234,9 +354,9 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 
 | Commande | Sous-commande | Rôle | Options principales |
 | --- | --- | --- | --- |
-| `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
+| `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés), `--fields` (JSON uniquement ; champs à conserver, séparés par des virgules) |
 | | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
-| | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable) |
+| | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
 | | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start`, `--duplicate-of` |
 | | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Changer le statut | `--no-start`, `--duplicate-of` |
@@ -244,7 +364,9 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed` |
 | | `children <id>` | Lister les sous-tâches regroupées par étape | |
 | | `pull-requests <id>` | Lister les PR associées | |
-| | `comment list/add/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `list` : `--since`, `--thread`, `--tail` |
+| | `comment list/add/update/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `update` : `--expected-revision` (obligatoire), `--content` / `--content-stdin` / `--content-file` ; `list` : `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
+| | `timeline <id>` | Lister l'activité et les commentaires dans l'ordre chronologique | `--action` (répétable), `--activity-only`, `--since`, `--tail` |
+| | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | Gérer les réveils de tâche ; voir [Réveils de tâche](/issue-wakeups) | `create` / `update` : `--agent-id`, `--kind` (`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, conditions `--until-*`, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file` ; `checkin` : `--note` |
 | | `subscriber list/add/remove <issue-id>` | Gérer les abonnés | `--user`, `--user-id` (par défaut, l'utilisateur actuel) |
 | | `label list/add/remove <issue-id>` | Gérer les étiquettes d'une tâche | |
 | | `metadata list/get/set/delete <issue-id>` | Gérer les métadonnées clé-valeur au niveau de la tâche | |
@@ -252,25 +374,25 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `runs <issue-id>` | Afficher l'historique des exécutions | `--full-id` |
 | | `run-messages <task-id>` | Afficher les messages d'une exécution | `--since`, `--issue` |
 | | `usage <issue-id>` | Afficher la consommation de tokens agrégée | |
-| | `rerun <id>` | Remettre en file une exécution pour l'assigné actuel | |
+| | `rerun-task <run-id>` | Relancer une exécution précise avec son agent et son contexte de déclenchement d’origine | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Annuler une exécution en cours ou en file d'attente | `--issue` |
-| `project` | `list/get/create/update/delete` | Gérer les projets | |
+| `project` | `list/get/create/update/delete` | Gérer les projets | `create` : `--title` (obligatoire), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (répétable) |
 | | `status <id> <status>` | Changer le statut d'un projet | |
-| | `resource list/add/update/remove` | Gérer les ressources d'un projet | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` pour un répertoire local) |
+| | `resource list/add/update/remove` | Gérer les ressources d'un projet | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` pour un répertoire local) |
 | `label` | `list/get/create/update/delete` | Gérer les étiquettes de l'espace de travail | `list` : `--resource-type` (`issue` ou `skill`), `--full-id` ; `create` : `--name`, `--color`, `--resource-type` (`issue` ou `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Gérer les propriétés personnalisées de l'espace de travail | `create` : `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (répétable, types select uniquement) ; `list` : `--include-archived` ; le type ne peut plus être modifié après la création |
-| `agent` | `list/get/create/update/archive/restore` | Gérer les agents | `--name`, `--runtime-id` (obligatoire pour `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
+| `agent` | `list/get/create/update/archive/restore` | Gérer les agents | `--name`, `--runtime-id` (obligatoire pour `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` uniquement), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (ancienne forme), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copier dans un nouvel agent ; l'original reste intact | `--name` (par défaut, le nom d'origine suivi de ` (copy)`), `--runtime-id` (copier vers un autre runtime exige aussi `--model`), `--no-skills` ; la configuration secrète comme `custom_env`, `mcp_config` et `runtime_config` n'est pas copiée — fournissez-la à nouveau avec les mêmes options que pour `create` |
 | | `tasks <id>` | Afficher les exécutions d'un agent | |
 | | `avatar <id>` | Envoyer un avatar | |
-| | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaires et administrateurs uniquement) | |
+| | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
-| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--project`, `--subscriber` (répétable) |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
 | | `trigger <id>` | Déclencher une exécution manuellement | |
 | | `runs <id>` | Afficher l'historique des exécutions | |
-| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | |
-| `workspace` | `list/get/create/update/switch` | Gérer les espaces de travail ; `switch` définit l'espace de travail par défaut du profil actuel | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | `trigger-add` : `--kind` (`schedule` ou `webhook`), `--cron`, `--timezone` (UTC par défaut), `--label` |
+| `workspace` | `list/get/create/update/switch` | Gérer les espaces de travail ; `switch` définit l'espace de travail par défaut du profil actuel | `create` : `--name`, `--slug` (tous deux obligatoires), `--issue-prefix`, `--description`, `--context` / `--context-stdin` ; `update` modifie les mêmes champs, sauf le slug |
 | | `mcp list/add/update/remove` | Gérer la bibliothèque de serveurs MCP de l'espace de travail | Les écritures sont réservées aux propriétaires et administrateurs. Un serveur ajouté ici n'est assigné à aucun agent — attribuez-le à un agent avec `multica agent mcp add`. `list` n'affiche que les noms et les transports ; l'entrée enregistrée est en écriture seule et n'est jamais renvoyée. `--server-config-file` / `--server-config-stdin` gardent les jetons hors de l'historique du shell |
 | | `member list/invite <email>` | Consulter les membres, envoyer des invitations | `invite` : `--role` (member ou admin, member par défaut) |
 | `repo` | `list/add/remove/checkout` | Gérer les dépôts de l'espace de travail et les extraire localement | `--url` (répétable) ; `checkout` : `--ref` |
@@ -292,8 +414,9 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `stop` / `status` / `restart` | Arrêter, vérifier l'état, redémarrer (`restart` accepte les mêmes options que `start`) | |
 | | `logs` | Afficher les journaux du daemon | `--follow`, `--lines` |
 | | `disk-usage` | Afficher l'utilisation du disque local | `--by-workspace`, `--by-task`, `--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | Consulter et gérer les runtimes | `delete` : `--cascade` (dissocie les agents liés, préserve leurs données et annule leurs exécutions) |
-| | `profile list/create/update/delete` | Gérer les profils de runtime personnalisés | |
+| | `autostart enable/disable/status` | Enregistrer ou retirer le démarrage à l'ouverture de session pour le profil courant | `status` : `--output` |
+| `runtime` | `list/usage/activity/update/rename/delete` | Consulter et gérer les runtimes | `usage` : `--days` (90 par défaut, 365 au maximum) ; `update` : `--target-version` (obligatoire), `--wait` ; `delete` : `--cascade` (dissocie les agents liés, préserve leurs données et annule leurs exécutions) |
+| | `profile list/create/update/delete` | Gérer les profils de runtime personnalisés | `create` : `--display-name`, `--command-name` (tous deux obligatoires), `--runtime-type` (ou l'ancien `--protocol-family`), `--description` ; `update` : `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | Fixer le chemin d'un exécutable local (local uniquement, jamais envoyé au serveur) | |
 
 ### Additional
@@ -311,18 +434,9 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 
 ## Piloter Multica depuis un autre agent de codage
 
-Si l'essentiel de votre travail se passe déjà dans Codex, Claude Code ou Cursor, vous
-pouvez piloter Multica depuis ces outils au lieu de basculer vers un terminal. Le
-[skill Multica CLI](https://github.com/multica-ai/multica-cli) apprend à ces agents à
-utiliser les commandes de cette page en toute sécurité : lire les tâches et les fils de
-commentaires sans gaspiller de tokens, écrire les commentaires via un fichier, et gérer
-les effets de bord qu'entraînent les mentions, les changements de statut et les assignations.
+Si l'essentiel de votre travail se passe déjà dans Codex, Claude Code ou Cursor, vous pouvez piloter Multica depuis ces outils au lieu de basculer vers un terminal. Le [skill Multica CLI](https://github.com/multica-ai/multica-cli) apprend à ces agents à utiliser les commandes de cette page en toute sécurité : lire les tâches et les fils de commentaires sans gaspiller de tokens, écrire les commentaires via un fichier, et gérer les effets de bord qu'entraînent les mentions, les changements de statut et les assignations.
 
-Il passe entièrement par votre CLI authentifié et n'accorde aucun accès qui lui soit propre :
-les permissions proviennent toujours de votre connexion, du profil sélectionné et de
-l'espace de travail. Il nécessite le CLI v0.4.26 ou ultérieur. Le README du dépôt explique
-l'installation via la marketplace de plugins de Claude Code, l'installateur de skills de
-Codex, Cursor et tout autre outil qui charge des instructions Markdown.
+Il passe entièrement par votre CLI authentifié et n'accorde aucun accès qui lui soit propre : les permissions proviennent toujours de votre connexion, du profil sélectionné et de l'espace de travail. Il nécessite le CLI v0.4.26 ou ultérieur. Le README du dépôt explique l'installation via la marketplace de plugins de Claude Code, l'installateur de skills de Codex, Cursor et tout autre outil qui charge des instructions Markdown.
 
 ## Étapes suivantes
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Users } from "lucide-react";
+import { Bot, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AVATAR_SIZE_PX,

@@ -24,7 +24,7 @@ var ompSessionArgs = map[string]blockedArgMode{
 
 func buildOmpArgs(sessionPath, sessionDir string, opts ExecOptions, logger *slog.Logger) []string {
 	opts.CustomArgs = filterCustomArgs(opts.CustomArgs, ompSessionArgs, logger)
-	args := buildPiArgs(sessionPath, opts, logger)
+	args := buildPiArgsFor("omp", sessionPath, opts, logger)
 	if sessionDir != "" {
 		args = append(args, "--session-dir", sessionDir)
 	}

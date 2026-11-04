@@ -1321,12 +1321,39 @@ func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID 
 	if !branchUnavailable(out) {
 		return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 	}
+	// The fallback name can itself be taken — by this same task. The
+	// conversation fallback is deterministic (<branch>-<task key>) and the
+	// task-scoped one is only second-granular, so a task re-dispatched under
+	// the same id while the branch is still busy finds its own earlier
+	// fallback branch already there. Failing on it made every re-dispatch of
+	// that task fail the same way (GH #9198). Those branches may hold earlier
+	// attempts' partial work, so none is reused or reset: keep picking the
+	// next unused name, forked from the same base. Bounded so a git that keeps
+	// answering "already exists" for some other reason cannot loop forever.
 	alt := plan.altName(taskID)
-	if out, err := runGit(gitRoot, "worktree", "add", "-b", alt, worktreePath, plan.base); err != nil {
-		return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
+	stamp := time.Now().Unix()
+	for i := 0; i < maxFallbackBranchAttempts; i++ {
+		name := alt
+		switch {
+		case i == 1:
+			name = fmt.Sprintf("%s-%d", alt, stamp)
+		case i > 1:
+			name = fmt.Sprintf("%s-%d-%d", alt, stamp, i)
+		}
+		out, err = runGit(gitRoot, "worktree", "add", "-b", name, worktreePath, plan.base)
+		if err == nil {
+			return name, true, nil
+		}
+		if !branchUnavailable(out) {
+			break
+		}
 	}
-	return alt, true, nil
+	return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 }
+
+// maxFallbackBranchAttempts caps how many fallback names addLocalWorktree tries
+// once the planned branch is unavailable.
+const maxFallbackBranchAttempts = 16
 
 // branchUnavailable recognises git refusing a branch that another worktree
 // holds, or that already exists under a name we meant to create.

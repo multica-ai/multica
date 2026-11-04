@@ -80,7 +80,7 @@ export interface WakeupDraft {
   stage: number | null;
   prEvent: "checks_finished" | "merged" | "conflicts";
   otherIssue: { id: string; identifier: string } | null;
-  otherState: "done" | "ended" | "in_review";
+  otherState: "done" | "ended" | "in_review" | "blocked";
   maxFires: number;
   agentId: string;
   instruction: string;

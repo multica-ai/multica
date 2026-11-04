@@ -17,7 +17,7 @@ import {
   Monitor,
   Sparkles,
   UserMinus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ImageIcon } from "./shared";
 import { useLocale } from "../i18n";

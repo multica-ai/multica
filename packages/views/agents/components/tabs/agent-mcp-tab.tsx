@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Lock, Plug } from "lucide-react";
+import { AlertTriangle, Loader2, Lock, Plug } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Agent, ComposioToolkit } from "@multica/core/types";
 import { useUpdateAgentAllowlist } from "@multica/core/agents";

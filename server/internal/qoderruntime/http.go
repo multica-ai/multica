@@ -11,13 +11,20 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/httptransport"
 )
 
 type api struct {
 	base, token, workspace string
 	client                 *http.Client
 }
-type apiError struct{ Status int }
+type apiError struct {
+	Status int
+	// Code is the machine-readable "code" field of a 4xx JSON error body,
+	// when present. The rest of the body is never kept.
+	Code string
+}
 
 func (e *apiError) Error() string { return fmt.Sprintf("remote API returned HTTP %d", e.Status) }
 
@@ -32,7 +39,13 @@ func newAPI(base, token, workspace string) (*api, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("API token is required")
 	}
-	return &api{base: strings.TrimRight(base, "/"), token: token, workspace: workspace, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &api{
+		base: strings.TrimRight(base, "/"), token: token, workspace: workspace,
+		client: &http.Client{
+			Timeout: 30 * time.Second, Transport: httptransport.CloneDefault(),
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+	}, nil
 }
 
 // Errors deliberately omit remote bodies and URLs, which may echo credentials or task content.
@@ -64,7 +77,16 @@ func (a *api) call(ctx context.Context, method, path string, in, out any) error 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &apiError{resp.StatusCode}
+		e := &apiError{Status: resp.StatusCode}
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			var coded struct {
+				Code string `json:"code"`
+			}
+			if b, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10)); err == nil && json.Unmarshal(b, &coded) == nil {
+				e.Code = coded.Code
+			}
+		}
+		return e
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
 	if err != nil {
