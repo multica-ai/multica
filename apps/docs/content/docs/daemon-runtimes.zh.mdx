@@ -301,24 +301,36 @@ Qoder Cloud Agents 通过远端会话执行分配的任务。Multica 服务端�
 
 ## Claude Managed Agents 远端运行时
 
-Claude Managed Agents 通过独立桥接进程 `claude-managed-runtime`，在 Claude 托管的会话中执行分配的任务。桥接进程运行在能同时访问 Multica 和 Anthropic API 的服务器上，复用现有守护进程任务协议，为一个工作区注册一个运行时。
+Claude Managed Agents 在 Claude 托管的会话中执行分配的任务。Multica 服务端管理桥接进程，复用现有守护进程任务协议，无需用户启动本地守护进程。
 
 ### 准备工作
 
-- 工作区管理员的 Multica 个人访问令牌（PAT）和工作区 ID。
-- Anthropic API key（需属于拥有 Claude environment 和智能体的 Anthropic workspace）、一个已有的 environment，以及要使用的 Claude 智能体。模型、工具和 skill 在 Claude 智能体上配置。所有工具的权限策略都要设为 `always_allow`，因为桥接进程无法响应工具确认。
-- 智能体要用到的每个 GitHub 仓库，各准备一个桥接进程可读取的 token 文件。
+- 需要工作区管理员权限。每个工作区只有一个 Claude Managed Agents 连接。
+- 准备 Anthropic API key（需属于拥有 Claude environment 和智能体的 Anthropic workspace）、至少一个 environment，以及要使用的 Claude 智能体。模型、工具和 skill 在 Claude 智能体上配置，不在 Multica 中配置。所有工具的权限策略都要设为 `always_allow`，因为桥接进程无法响应工具确认。
+- 自托管部署需在服务端设置 `MULTICA_VCS_SECRET_KEY`：一个 base64 编码的 32 字节密钥，重启前后必须保持不变。未设置时无法连接 Claude Managed Agents。
 
-### 连接并添加智能体
+### 连接 Claude Managed Agents
 
-1. 用环境变量或 JSON 文件配置桥接进程，先运行 `claude-managed-runtime --check`，再启动它。运行时会出现在运行时页面。
-2. 在该运行时上创建智能体，把 `runtime_config` 设为 `{"claude_agent_id": "agent_..."}`（可选默认仓库），使用 `multica agent create --runtime-config` 或 API。智能体表单暂时还没有 Claude 智能体选择器。
+1. 在**运行时**页面点击**添加**，在**云服务**下选择 **Claude Managed Agents**。
+2. 将 key 粘贴到 **Anthropic API key**。**Environment** 列表会从 Anthropic 加载，选择其中一个。
+3. 可选：填写 **Vault IDs**（逗号分隔）。它们会挂载到每个会话，例如 GitHub MCP 凭据，让智能体可以创建 PR。
+4. 可选：在 **GitHub 仓库**中，为智能体可以推送的每个仓库添加仓库 URL 和 token。
+5. 可选：设置**并发运行数**和**运行超时**。
+6. 点击**连接**。Claude Managed Agents 会出现在运行时页面的云服务分组中，几秒内上线。
+
+### 添加智能体
+
+照常创建智能体并选择 **Claude Managed Agents** 运行时，然后在 **Claude 智能体**中选择要关联的 Claude 智能体。已有智能体可在其 Claude 智能体设置中修改关联的 Claude 智能体或默认仓库。多个 Multica 智能体可以共用同一个连接，各自关联不同的 Claude 智能体。
+
+连接凭据加密保存，在工作区内共享，保存后的密钥不会返回浏览器。管理员可以在 Claude Managed Agents 页面编辑连接；点击**暂停**停止下发新任务，凭据和智能体保留；点击**断开连接**删除已保存的凭据、移除该运行时并解绑其智能体。
 
 ### 运行方式
 
-同一任务的后续运行会在上一会话空闲时继续使用该 Claude 会话。智能体会被要求以任务标识命名并推送分支。如需同时创建 PR，请在 Claude 智能体上添加 GitHub MCP server，并挂载存有其凭据的 vault。首版只支持任务运行：聊天、快速创建、附件和本地目录都会被拒绝。
+超出并发上限的运行会排队等待。同一任务的后续运行会在上一会话空闲时继续使用该 Claude 会话。智能体会被要求以任务标识命名并推送分支。如需同时创建 PR，请在 Claude 智能体上添加 GitHub MCP server，并挂载存有其凭据的 vault。智能体可以设置默认仓库，在任务所属项目没有仓库时使用。首版只支持任务运行：聊天、快速创建、附件和本地目录都会被拒绝。
 
-配置与限制见 [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md)。
+### 独立桥接进程
+
+也可以自己在能同时访问 Multica 和 Anthropic API 的服务器上运行桥接进程 `claude-managed-runtime`。这需要工作区管理员的个人访问令牌（PAT），并为每个 GitHub 仓库准备一个 token 文件。在该运行时上创建智能体时，可以使用智能体表单，也可以使用 `multica agent create --runtime-config` 并传入 `{"claude_agent_id": "agent_..."}`。独立桥接进程在运行时页面中显示为一台机器。配置与限制见 [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md)。
 
 ## 运行时离线的排查
 

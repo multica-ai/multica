@@ -1102,3 +1102,37 @@ func TestPromptScopesChangesToTheMountedRepository(t *testing.T) {
 		t.Fatalf("mounted run not scoped to its repository:\n%s", h.prompt)
 	}
 }
+
+func TestCancelledTaskKeepsUnresolvedCreateUntilLookupRecovers(t *testing.T) {
+	h := setup(t)
+	h.lostCreates, h.lostCreatePersists = 1, true
+	if err := h.b.step(context.Background()); err == nil {
+		t.Fatal("expected ambiguous create to surface")
+	}
+	h.status = "cancelled"
+	h.listStatus = http.StatusServiceUnavailable
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.b.state.first() != nil || h.cancels != 0 {
+		t.Fatalf("cancelled run kept or session stopped early: cancels=%d", h.cancels)
+	}
+	// The bridge restarts and the provider recovers.
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j.Unresolved) != 1 || j.Unresolved[0].TaskID != "task-1" || j.Unresolved[0].AgentID != "agent_1" || j.Unresolved[0].CreateAttemptAt.IsZero() {
+		t.Fatalf("unresolved creation not persisted: %+v", j.Unresolved)
+	}
+	h.b.state = j
+	h.b.cleanup(context.Background())
+	if len(h.b.state.Unresolved) != 1 || h.cancels != 0 {
+		t.Fatalf("lookup outage dropped the creation: unresolved=%+v cancels=%d", h.b.state.Unresolved, h.cancels)
+	}
+	h.listStatus = 0
+	h.b.cleanup(context.Background())
+	if h.cancels != 1 || len(h.b.state.Unresolved) != 0 || len(h.b.state.Cleanup) != 0 {
+		t.Fatalf("session from the lost create not stopped: cancels=%d unresolved=%+v cleanup=%v", h.cancels, h.b.state.Unresolved, h.b.state.Cleanup)
+	}
+}

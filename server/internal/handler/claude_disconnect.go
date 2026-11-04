@@ -223,6 +223,9 @@ func (h *Handler) cleanupInactiveClaude(ctx context.Context) {
 	}
 }
 
+// claudeAnthropicURL is the API base journal cleanup cancels sessions against.
+var claudeAnthropicURL = claudemanagedruntime.DefaultAnthropicURL
+
 func (h *Handler) cleanupClaudeJournal(ctx context.Context, ws string) error {
 	cfg, _, _, _, err := h.readClaudeSettings(ctx, ws)
 	if err != nil {
@@ -241,18 +244,36 @@ func (h *Handler) cleanupClaudeJournal(ctx context.Context, ws string) error {
 	}
 	var state struct {
 		Runs []struct {
-			TaskID    string `json:"task_id"`
-			SessionID string `json:"session_id"`
+			TaskID          string    `json:"task_id"`
+			SessionID       string    `json:"session_id"`
+			AgentID         string    `json:"agent_id"`
+			CreateAttemptAt time.Time `json:"create_attempt_at"`
 		} `json:"runs"`
-		Cleanup []string `json:"cleanup"`
+		Cleanup    []string `json:"cleanup"`
+		Unresolved []struct {
+			TaskID          string    `json:"task_id"`
+			AgentID         string    `json:"agent_id"`
+			CreateAttemptAt time.Time `json:"create_attempt_at"`
+		} `json:"unresolved"`
 	}
 	if err = json.Unmarshal([]byte(raw), &state); err != nil {
 		return err
 	}
 	sessions := state.Cleanup
+	type unconfirmed struct {
+		taskID, agentID string
+		attemptAt       time.Time
+	}
+	var unconfirmedCreates []unconfirmed
+	for _, u := range state.Unresolved {
+		unconfirmedCreates = append(unconfirmedCreates, unconfirmed{u.TaskID, u.AgentID, u.CreateAttemptAt})
+	}
 	for _, run := range state.Runs {
 		if run.SessionID != "" {
 			sessions = append(sessions, run.SessionID)
+		} else if !run.CreateAttemptAt.IsZero() {
+			// The create may have succeeded before its response was lost.
+			unconfirmedCreates = append(unconfirmedCreates, unconfirmed{run.TaskID, run.AgentID, run.CreateAttemptAt})
 		}
 		id, err := util.ParseUUID(run.TaskID)
 		if err != nil {
@@ -262,8 +283,13 @@ func (h *Handler) cleanupClaudeJournal(ctx context.Context, ws string) error {
 			return err
 		}
 	}
+	for _, u := range unconfirmedCreates {
+		if err = claudemanagedruntime.CancelUnconfirmedSession(ctx, claudeAnthropicURL, cfg.AnthropicToken, ws, u.agentID, u.taskID, u.attemptAt); err != nil {
+			return fmt.Errorf("remote cleanup pending: %w", err)
+		}
+	}
 	for _, id := range sessions {
-		if err = claudemanagedruntime.CancelRemoteSession(ctx, claudemanagedruntime.DefaultAnthropicURL, cfg.AnthropicToken, id); err != nil {
+		if err = claudemanagedruntime.CancelRemoteSession(ctx, claudeAnthropicURL, cfg.AnthropicToken, id); err != nil {
 			return fmt.Errorf("remote cleanup pending: %w", err)
 		}
 	}

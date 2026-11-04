@@ -368,7 +368,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if r.Phase == "creating" {
 		// The provider may have created a session before the response was lost.
 		// Reattach to it; create again only once nothing carries this task's ID.
-		sessionID, err := b.findCreatedSession(ctx, r)
+		sessionID, err := b.findCreatedSession(ctx, r.AgentID, r.TaskID, r.CreateAttemptAt)
 		if err != nil {
 			if definitelyRejected(err) {
 				b.logPossibleSession(ctx, r, err)
@@ -526,10 +526,10 @@ const maxCreateLookupPages = 10
 // findCreatedSession returns the session an unconfirmed create made for r, or
 // "" when the agent has no session carrying r's task ID since the attempt
 // within maxCreateLookupPages.
-func (b *Bridge) findCreatedSession(ctx context.Context, r *run) (string, error) {
+func (b *Bridge) findCreatedSession(ctx context.Context, agentID, taskID string, attemptAt time.Time) (string, error) {
 	q := url.Values{
-		"agent_id":        {r.AgentID},
-		"created_at[gte]": {r.CreateAttemptAt.Add(-createClockSkew).UTC().Format(time.RFC3339)},
+		"agent_id":        {agentID},
+		"created_at[gte]": {attemptAt.Add(-createClockSkew).UTC().Format(time.RFC3339)},
 		"order":           {"desc"},
 		"limit":           {"100"},
 	}
@@ -545,7 +545,7 @@ func (b *Bridge) findCreatedSession(ctx context.Context, r *run) (string, error)
 			return "", err
 		}
 		for _, s := range page.Data {
-			if s.ID != "" && s.Metadata["multica_task_id"] == r.TaskID && s.Metadata["multica_workspace_id"] == b.cfg.WorkspaceID {
+			if s.ID != "" && s.Metadata["multica_task_id"] == taskID && s.Metadata["multica_workspace_id"] == b.cfg.WorkspaceID {
 				return s.ID, nil
 			}
 		}
@@ -556,7 +556,7 @@ func (b *Bridge) findCreatedSession(ctx context.Context, r *run) (string, error)
 	}
 	// Treat a truncated listing as not found, so the single retry or the
 	// unconfirmed-creation failure applies instead of retrying the lookup forever.
-	b.log.WarnContext(ctx, "Claude session lookup reached its page limit; treating the unconfirmed create as not found", "task_id", r.TaskID, "agent_id", r.AgentID, "pages", maxCreateLookupPages)
+	b.log.WarnContext(ctx, "Claude session lookup reached its page limit; treating the unconfirmed create as not found", "task_id", taskID, "agent_id", agentID, "pages", maxCreateLookupPages)
 	return "", nil
 }
 
@@ -768,15 +768,18 @@ func (b *Bridge) rejectWithCleanup(ctx context.Context, r *run, reason string) e
 
 // cleanupRemote queues r's remote session for cancellation. Without a session
 // ID, an unconfirmed create may still have made one, so the lookup runs
-// first; a failed lookup does not hold the run back.
+// first. A failed lookup does not hold the run back: the creation is recorded
+// as unresolved and retried until the lookup settles.
 // Persist compensating cancellation separately; a provider outage must not
 // block the next task or discard the remote session identity.
 func (b *Bridge) cleanupRemote(ctx context.Context, r *run) error {
 	sessionID := r.SessionID
 	if sessionID == "" && (r.Phase == "creating" || !r.CreateAttemptAt.IsZero()) {
-		found, err := b.findCreatedSession(ctx, r)
+		found, err := b.findCreatedSession(ctx, r.AgentID, r.TaskID, r.CreateAttemptAt)
 		if err != nil {
 			b.logPossibleSession(ctx, r, err)
+			b.queueUnresolved(unresolvedCreate{TaskID: r.TaskID, AgentID: r.AgentID, CreateAttemptAt: r.CreateAttemptAt})
+			return b.persist()
 		}
 		sessionID = found
 	}
@@ -788,6 +791,47 @@ func (b *Bridge) cleanupRemote(ctx context.Context, r *run) error {
 		b.cleanup(ctx)
 	}
 	return nil
+}
+
+func (b *Bridge) queueUnresolved(u unresolvedCreate) {
+	for _, existing := range b.state.Unresolved {
+		if existing.TaskID == u.TaskID {
+			return
+		}
+	}
+	b.state.Unresolved = append(b.state.Unresolved, u)
+}
+
+// resolveUnresolved retries the lookups of unresolved creations. A session it
+// finds moves to the cleanup queue; an entry leaves the list once the lookup
+// settles, either with no session or with a rejection that retrying cannot fix.
+func (b *Bridge) resolveUnresolved(ctx context.Context) {
+	if len(b.state.Unresolved) == 0 {
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var pending []unresolvedCreate
+	for _, u := range b.state.Unresolved {
+		if lookupCtx.Err() != nil {
+			pending = append(pending, u)
+			continue
+		}
+		found, err := b.findCreatedSession(lookupCtx, u.AgentID, u.TaskID, u.CreateAttemptAt)
+		switch {
+		case err == nil && found != "":
+			b.queueCleanup(found)
+		case err == nil:
+		case definitelyRejected(err):
+			b.log.WarnContext(ctx, "Claude session lookup was rejected; dropping the unresolved creation", "task_id", u.TaskID, "agent_id", u.AgentID, "error", err)
+		default:
+			pending = append(pending, u)
+		}
+	}
+	b.state.Unresolved = pending
+	if err := b.persist(); err != nil {
+		b.log.ErrorContext(ctx, "cannot persist unresolved session creations", "error", err)
+	}
 }
 
 func (b *Bridge) logPossibleSession(ctx context.Context, r *run, err error) {
@@ -861,6 +905,7 @@ func (b *Bridge) queueCleanup(id string) {
 	b.state.Cleanup = append(b.state.Cleanup, id)
 }
 func (b *Bridge) cleanup(ctx context.Context) {
+	b.resolveUnresolved(ctx)
 	if len(b.state.Cleanup) == 0 {
 		return
 	}
@@ -898,4 +943,19 @@ func CancelRemoteSession(ctx context.Context, baseURL, token, sessionID string) 
 	}
 	b := &Bridge{anthropic: api}
 	return b.cancelSession(ctx, sessionID)
+}
+
+// CancelUnconfirmedSession stops the session an unconfirmed create may have
+// made for a task. It succeeds when the lookup finds no session.
+func CancelUnconfirmedSession(ctx context.Context, baseURL, token, workspaceID, agentID, taskID string, attemptAt time.Time) error {
+	api, err := newAnthropicAPI(baseURL, token)
+	if err != nil {
+		return err
+	}
+	b := &Bridge{anthropic: api, cfg: Config{WorkspaceID: workspaceID}, log: slog.Default()}
+	id, err := b.findCreatedSession(ctx, agentID, taskID, attemptAt)
+	if err != nil || id == "" {
+		return err
+	}
+	return b.cancelSession(ctx, id)
 }

@@ -16,7 +16,19 @@ type journal struct {
 	Binding   string   `json:"binding"`
 	RuntimeID string   `json:"runtime_id"`
 	Cleanup   []string `json:"cleanup,omitempty"`
-	Runs      []*run   `json:"runs,omitempty"`
+	// Unresolved lists session creations whose lookup failed while their run
+	// was being cleaned up. They stay until the lookup settles, outside Runs
+	// so they take no execution capacity.
+	Unresolved []unresolvedCreate `json:"unresolved,omitempty"`
+	Runs       []*run             `json:"runs,omitempty"`
+}
+
+// unresolvedCreate identifies a session the provider may have created for a
+// task whose run has already ended.
+type unresolvedCreate struct {
+	TaskID          string    `json:"task_id"`
+	AgentID         string    `json:"agent_id"`
+	CreateAttemptAt time.Time `json:"create_attempt_at"`
 }
 type run struct {
 	// PriorSessionID is the session of this agent's previous run on the issue.

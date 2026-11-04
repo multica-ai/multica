@@ -1,8 +1,12 @@
 # Claude Managed Agents runtime bridge (Phase 1)
 
-This standalone service registers a `claude_managed` runtime in one Multica
-workspace. Bind a Multica agent to that runtime, link it to an existing Claude
-agent, and assign it an issue. The bridge reads issue context using the claim's
+The Multica server runs this bridge itself for a workspace that connects Claude
+Managed Agents from the Runtimes page (Add, then Claude Managed Agents), under
+the reserved daemon ID `claude-managed-<workspace id>`. Saved secrets stay
+encrypted with `MULTICA_VCS_SECRET_KEY`. This document covers the standalone
+deployment mode, where you run the same bridge yourself; it registers a
+`claude_managed` runtime in one Multica workspace. Bind a Multica agent to
+that runtime, link it to an existing Claude agent, and assign it an issue. The bridge reads issue context using the claim's
 task-scoped token, creates a Claude Managed Agents session in a configured
 environment, and reports messages and the final result back to Multica. No
 local coding-agent CLI, repository checkout, or shell execution is performed by
@@ -273,8 +277,8 @@ their history stays available.
 - Textual results and PR links are returned in the final summary, without
   parsing them into structured Multica branch fields. End of turn is execution
   completion, not proof that a pull request was created.
-- There is no server-managed mode or connection UI yet; this binary is the only
-  way to run the runtime.
+- A standalone bridge is listed as a machine on the Runtimes page; only the
+  server-managed bridge appears as a cloud service.
 
 The bridge uses the existing daemon registration protocol with
 `runtime_mode=cloud` and provider `claude_managed`.
