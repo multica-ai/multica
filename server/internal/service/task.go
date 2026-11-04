@@ -5086,9 +5086,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryDelay = retryDelayForAttempt(failureReason, parent.Attempt); retryEligible(failureReason, parent) && !sessionRolloutMissing &&
+		} else if retryDelay = retryDelayForAttempt(failureReason, parent.Attempt); retryEligible(failureReason, parent) &&
 			(failureReason != string(taskfailure.ReasonCodexServerOverloaded) ||
-				s.codexRetryReady(ctx, parent, selectedModel, time.Now(), retryDelay)) {
+				(!sessionRolloutMissing && s.codexRetryReady(ctx, parent, selectedModel, time.Now(), retryDelay))) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),

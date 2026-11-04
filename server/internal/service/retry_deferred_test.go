@@ -97,15 +97,17 @@ func TestCodexOverloadTaskRetryEndToEnd(t *testing.T) {
 
 func TestCodexOverloadRetryDisabledAndModelChange(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		max         int32
-		model       string
-		expired     bool
-		issueStatus string
+		name           string
+		max            int32
+		model          string
+		expired        bool
+		missingRollout bool
+		issueStatus    string
 	}{
 		{name: "max_attempts_1", max: 1, model: "gpt-6-sol"},
 		{name: "selected_model_changed", max: 2, model: "gpt-6-other"},
 		{name: "recovery_window_expired", max: 2, model: "gpt-6-sol", expired: true},
+		{name: "missing_rollout", max: 2, model: "gpt-6-sol", missingRollout: true},
 		{name: "issue_cancelled", max: 2, model: "gpt-6-sol", issueStatus: "cancelled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,7 +141,7 @@ func TestCodexOverloadRetryDisabledAndModelChange(t *testing.T) {
 				}
 			}
 			svc := NewTaskService(q, pool, nil, events.New())
-			if _, _, err := svc.FailTaskWithTransition(ctx, parentID, "busy", "codex-session", "", "", "agent_error.codex_server_overloaded", false, "", "", "gpt-6-sol"); err != nil {
+			if _, _, err := svc.FailTaskWithTransition(ctx, parentID, "busy", "codex-session", "", "", "agent_error.codex_server_overloaded", tc.missingRollout, "", "", "gpt-6-sol"); err != nil {
 				t.Fatal(err)
 			}
 			var count int
@@ -526,5 +528,45 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 				t.Errorf("child status = %q, want deferred=%v", childStatus, tc.wantDeferred)
 			}
 		})
+	}
+}
+
+func TestFailTaskProviderNetworkMissingRolloutStillRetries(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := NewTaskService(q, pool, nil, events.New())
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id=$1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id,runtime_id,issue_id,status,priority,attempt,max_attempts,session_id,work_dir)
+		VALUES ($1,$2,$3,'running',0,1,2,'stale-session','/tmp/provider-work') RETURNING id`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
+	})
+
+	failed, transitioned, err := svc.FailTaskWithTransition(ctx, parentID, "provider connection lost", "stale-session", "/tmp/provider-work", "", "agent_error.provider_network", true, "", "")
+	if err != nil || !transitioned || failed == nil || failed.Status != "failed" {
+		t.Fatalf("fail parent: task=%v transitioned=%v err=%v", failed, transitioned, err)
+	}
+	if failed.SessionID.Valid {
+		t.Fatalf("failed parent retained missing rollout session: %q", failed.SessionID.String)
+	}
+	var count int
+	var attempt, maxAttempts int32
+	var status string
+	var sessionID *string
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(max(attempt),0), coalesce(max(max_attempts),0), coalesce(max(status),''), max(session_id)
+		FROM agent_task_queue WHERE retry_of_task_id=$1`, parentID).Scan(&count, &attempt, &maxAttempts, &status, &sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || attempt != 2 || maxAttempts != 3 || status != "queued" || sessionID != nil {
+		t.Fatalf("retry child: count=%d attempt=%d/%d status=%q session=%v", count, attempt, maxAttempts, status, sessionID)
 	}
 }
