@@ -365,7 +365,9 @@ services:
       STORAGE_TYPE: local
       LOCAL_STORAGE_BASE_DIR: /data/files
       MAX_FILE_SIZE_MB: ${KNOWLEDGE_MAX_FILE_SIZE_MB:-50}
-      OLLAMA_BASE_URL: ${KNOWLEDGE_OLLAMA_URL:-http://host.docker.internal:11434}
+      # Defaults to the embedding endpoint, so WeKnora's Ollama and the embedding
+      # model point at the same host unless KNOWLEDGE_OLLAMA_URL says otherwise.
+      OLLAMA_BASE_URL: ${KNOWLEDGE_OLLAMA_URL:-${KNOWLEDGE_EMBEDDING_URL:-http://host.docker.internal:11434}}
       OLLAMA_OPTIONAL: "true"
       # WeKnora refuses model and import URLs that resolve to private
       # addresses unless the host is listed here. Setting this REPLACES
@@ -386,6 +388,9 @@ services:
       # service user must be bootstrapped as one (SELF_HOSTING.md, knowledge).
       WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL: ${KNOWLEDGE_SERVICE_EMAIL:-}
       WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
+      # Off, as in the working stack this repo was verified against: the service login
+      # is 8 to 32 letters and digits (see the runbook), without the complex-password rule.
+      WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED: "false"
     volumes:
       - knowledge-data-files:/data/files
       - knowledge-docreader-tmp:/tmp/docreader:ro
