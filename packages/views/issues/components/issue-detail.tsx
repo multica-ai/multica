@@ -1826,16 +1826,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return map;
   }, [timelineView.threadReplies]);
 
+  // Thread root of a deep-link target. A run that left no comment is addressed
+  // by its task id and sits in a slot inside the thread it answers, so it
+  // unfolds and scrolls with that thread exactly like a reply does.
+  const highlightRootId = useMemo(() => {
+    if (!highlightCommentId) return undefined;
+    const replyRoot = replyToRoot.get(highlightCommentId);
+    if (replyRoot) return replyRoot;
+    for (const [rootId, runs] of commentRuns) {
+      if (runs.some((run) => run.task.id === highlightCommentId)) return rootId;
+    }
+    return undefined;
+  }, [highlightCommentId, replyToRoot, commentRuns]);
+
   // Deep-link target index in the flat items array. For root comments this is
-  // a direct findIndex hit; for reply ids we look up the enclosing root.
+  // a direct findIndex hit; for replies and threaded runs we look up the
+  // enclosing root.
   const targetIdx = useMemo(() => {
     if (!highlightCommentId) return -1;
     const direct = items.findIndex((it) => it.id === highlightCommentId);
     if (direct >= 0) return direct;
-    const rootId = replyToRoot.get(highlightCommentId);
-    if (!rootId) return -1;
-    return items.findIndex((it) => it.id === rootId);
-  }, [items, highlightCommentId, replyToRoot]);
+    if (!highlightRootId) return -1;
+    return items.findIndex((it) => it.id === highlightRootId);
+  }, [items, highlightCommentId, highlightRootId]);
 
   // One entry per comment thread (folded resolved bars included), activity
   // groups skipped. Derived from the same flat `items` array Virtuoso renders
@@ -2267,9 +2280,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // virtualization), so every comment id is in the DOM by the time this
   // effect runs after commit.
   //
-  // For a reply inside a folded resolved thread, the reply is not in items
-  // (only the resolved-bar root is). Auto-expand the thread first; the
-  // effect re-runs once items re-flatten.
+  // For a reply or threaded run inside a folded resolved thread, the target
+  // is not in items (only the resolved-bar root is). Auto-expand the thread
+  // first; the effect re-runs once items re-flatten.
   //
   // `scrollContainerEl` is in deps because the component early-returns a
   // loading skeleton while the issue query is pending. The scroll-container
@@ -2294,7 +2307,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return;
     }
 
-    const rootId = replyToRoot.get(highlightCommentId);
+    const rootId = highlightRootId;
     if (rootId && rootId !== highlightCommentId) {
       // Root resolved → the whole thread is a folded bar.
       const rootItem = items[targetIdx];
@@ -2373,7 +2386,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       cancelAnimationFrame(rafId);
       clearTimeout(fade);
     };
-  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
+  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
