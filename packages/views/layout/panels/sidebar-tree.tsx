@@ -12,7 +12,7 @@ import { issueStatusCategory } from "@multica/core/issues";
 import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
-import { useIssueUnread } from "@multica/core/issues/unread";
+import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
@@ -409,6 +409,12 @@ function SidebarStatusPicker({
   );
 }
 
+/** An unread issue opens on what its run left instead of at the top. */
+export function unreadIssueHref(href: string, unread: IssueUnread | null): string {
+  const target = issueUnreadTarget(unread);
+  return target ? `${href}#comment-${target}` : href;
+}
+
 /** An agent result the viewer has not seen yet. It takes the avatar's place
  *  once the run ends, so the two never show together. */
 export function IssueUnreadDot({ unread }: { unread: IssueUnread }) {
@@ -470,7 +476,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           className="size-3"
         />
         <AppLink
-          href={href}
+          href={unreadIssueHref(href, unread)}
           newTabTitle={issue.title}
           aria-current={active ? "page" : undefined}
           onKeyDown={onKeyDown}
