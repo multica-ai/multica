@@ -106,8 +106,8 @@ describe("OfficeSeatBanner", () => {
     const onSeatAll = vi.fn();
     renderWithI18n(<OfficeSeatBanner count={3} pending={false} onSeatAll={onSeatAll} />);
 
-    expect(screen.getByText("3 squads have no room")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Seat all" }));
+    expect(screen.getByText("3 squads are outside the company")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add all to company" }));
 
     expect(onSeatAll).toHaveBeenCalled();
   });
@@ -115,6 +115,6 @@ describe("OfficeSeatBanner", () => {
   it("is disabled while seating", () => {
     renderWithI18n(<OfficeSeatBanner count={1} pending onSeatAll={() => {}} />);
 
-    expect((screen.getByRole("button", { name: "Seat all" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Add all to company" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

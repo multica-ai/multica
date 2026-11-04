@@ -80,6 +80,7 @@
   },
   "detail": {
     "assign_work": "指派工作",
+    "add_to_company": "加入公司",
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
     "not_found": "找不到該小隊",

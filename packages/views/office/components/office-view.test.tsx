@@ -353,19 +353,19 @@ describe("OfficeView", () => {
     expect(screen.getByRole("tab", { name: "Floor 2" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("offers the owner Seat all for squads without a room, and lists them in the tray", async () => {
+  it("offers the owner Add all to company for squads outside the company, and lists them in the tray", async () => {
     setup([], { squads: [...SQUADS, makeSquad("loose", "agent-4")] });
 
-    expect(await screen.findByText("1 squad has no room")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Seat all" })).toBeTruthy();
+    expect(await screen.findByText("1 squad is outside the company")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add all to company" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Not on a floor/ })).toBeTruthy();
   });
 
-  it("keeps Seat all for the owner or an admin", async () => {
+  it("keeps Add all to company for the owner or an admin", async () => {
     setup([], { squads: [...SQUADS, makeSquad("loose", "agent-4")], role: "member" });
 
     await screen.findByRole("button", { name: /Not on a floor/ });
-    expect(screen.queryByRole("button", { name: "Seat all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add all to company" })).toBeNull();
   });
 
   it("shows a first-run card, not an empty floor, while no squad is seated", async () => {

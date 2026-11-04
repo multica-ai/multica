@@ -80,6 +80,7 @@
   },
   "detail": {
     "assign_work": "Assign work",
+    "add_to_company": "Add to company",
     "copy_link": "Copy link",
     "link_copied": "Link copied",
     "not_found": "Squad not found",

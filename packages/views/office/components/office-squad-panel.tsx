@@ -26,6 +26,7 @@ import { OfficeCharterTab } from "./office-charter-tab";
 import { OfficeRoutines } from "./office-routines";
 import { OfficeSquadAttention } from "./office-squad-attention";
 import { OfficeSquadSeatMenu } from "./office-squad-seat-menu";
+import { useAddSquadToCompany } from "../lib/use-add-squad-to-company";
 
 const STATUS_KEYS = {
   working: "status_working",
@@ -90,6 +91,7 @@ function PanelBody({
   const { data: routines = [] } = useQuery(squadRoutinesOptions(wsId, squadId));
   const { data: autonomy } = useQuery(squadAutonomyOptions(wsId, squadId));
   const { data: floors = [] } = useQuery(officeFloorsOptions(wsId));
+  const { addSquad, pending: adding } = useAddSquadToCompany(floors, squads);
   const { t: tGovernance } = useT("governance");
   const isOfficeAdmin = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
@@ -115,7 +117,14 @@ function PanelBody({
       <header className="flex shrink-0 flex-col gap-1 border-b px-4 py-3 pr-12">
         <DialogTitle className="truncate text-heading">{squad?.name ?? ""}</DialogTitle>
         {squad?.description ? <p className="text-body text-muted-foreground">{squad.description}</p> : null}
-        {isOfficeAdmin && squad && floors.length > 0 ? (
+        {isOfficeAdmin && squad && !squad.floor_id ? (
+          <div className="pt-1">
+            <Button type="button" size="sm" disabled={adding} onClick={() => void addSquad(squad)}>
+              {t(($) => $.office.squad_add_to_company)}
+            </Button>
+          </div>
+        ) : null}
+        {isOfficeAdmin && squad && squad.floor_id && floors.length > 0 ? (
           <div className="pt-1">
             <OfficeSquadSeatMenu
               squad={squad}

@@ -80,6 +80,7 @@
   },
   "detail": {
     "assign_work": "Assigner du travail",
+    "add_to_company": "Ajouter à l'entreprise",
     "copy_link": "Copier le lien",
     "link_copied": "Lien copié",
     "not_found": "Squad introuvable",

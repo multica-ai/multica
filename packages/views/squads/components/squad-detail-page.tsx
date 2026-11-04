@@ -12,7 +12,9 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
-import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { officeFloorsOptions } from "@multica/core/office";
+import { useAddSquadToCompany } from "../../office/lib/use-add-squad-to-company";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import {
   OBJECT_PAGE_BODY,
@@ -149,6 +151,9 @@ export function SquadDetailPage() {
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const { data: allSquads = [] } = useQuery(squadListOptions(wsId));
+  const { data: floors = [] } = useQuery(officeFloorsOptions(wsId));
+  const { addSquad, pending: addingToCompany } = useAddSquadToCompany(floors, allSquads);
 
   const currentUser = useAuthStore((s) => s.user);
   const myRole = useMemo(() => {
@@ -286,6 +291,11 @@ export function SquadDetailPage() {
       }
       actions={
         <>
+          {canManage && !archived && !squad.floor_id && (
+            <Button size="sm" variant="outline" disabled={addingToCompany} onClick={() => void addSquad(squad)}>
+              {t(($) => $.detail.add_to_company)}
+            </Button>
+          )}
           {!archived && (
             <Button size="sm" onClick={assignWork}>
               <Plus className="size-3.5" />
