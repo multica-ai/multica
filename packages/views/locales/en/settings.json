@@ -338,6 +338,7 @@
   },
   "chat": {
     "floating_label": "Floating chat window",
+    "collapsed_execution_details_label": "Keep chat execution details collapsed",
     "floating_hint": "Show the floating chat button on every page."
   },
   "issue": {

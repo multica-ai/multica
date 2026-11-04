@@ -338,6 +338,7 @@
   },
   "chat": {
     "floating_label": "Fenêtre de discussion flottante",
+    "collapsed_execution_details_label": "Réduire les détails d’exécution du chat par défaut",
     "floating_hint": "Afficher le bouton de chat flottant sur chaque page."
   },
   "issue": {

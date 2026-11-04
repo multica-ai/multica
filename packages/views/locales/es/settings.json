@@ -320,6 +320,7 @@
   },
   "chat": {
     "floating_label": "Ventana de chat flotante",
+    "collapsed_execution_details_label": "Contraer los detalles de ejecución del chat por defecto",
     "floating_hint": "Muestra el botón de chat flotante en todas las páginas."
   },
   "issue": {

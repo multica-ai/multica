@@ -42,7 +42,7 @@ import type {
   ChatQuickAction,
   TaskMessagePayload,
 } from "@multica/core/types";
-import type { ChatTimelineItem } from "@multica/core/chat";
+import { useChatStore, type ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
 import { traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
@@ -1182,25 +1182,29 @@ function OuterProcessFold({
   stepCount?: number;
 }) {
   const { t } = useT("chat");
-  // Open while the task streams (so the user watches progress), collapsed once
-  // it settles. This used to fall out of a remount: the live TimelineView was
-  // torn down and the persisted one mounted closed. The row is now stable
-  // across that handoff (MUL-4922) — which is the point, it keeps Mermaid and
-  // HTML blocks alive — so the collapse has to be expressed directly.
-  const [open, setOpen] = useState(!!isStreaming);
+  const collapsedByDefault = useChatStore((s) => s.keepExecutionDetailsCollapsed);
+  // Preference changes affect untouched live folds. A manual choice belongs to
+  // this turn and survives streamed updates and subsequent preference changes.
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? (!!isStreaming && !collapsedByDefault);
   const wasStreaming = useRef(!!isStreaming);
   useEffect(() => {
-    if (wasStreaming.current && !isStreaming) setOpen(false);
+    // The stable live/settled row keeps answer diagrams mounted (MUL-4922),
+    // so retain the existing collapse-on-settle behavior without remounting it.
+    if (wasStreaming.current && !isStreaming) setManualOpen(false);
     wasStreaming.current = !!isStreaming;
   }, [isStreaming]);
   const displayedStepCount = stepCount ?? items.length;
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setManualOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
       </CollapsibleTrigger>
+      {!open && items.filter((item) => item.type === "error").map((item) => (
+        <ErrorRow key={item.seq} item={item} />
+      ))}
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>

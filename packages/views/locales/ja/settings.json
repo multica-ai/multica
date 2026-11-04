@@ -336,6 +336,7 @@
   },
   "chat": {
     "floating_label": "フローティングチャット",
+    "collapsed_execution_details_label": "チャットの実行詳細を既定で折りたたむ",
     "floating_hint": "すべてのページにフローティングチャットボタンを表示します。"
   },
   "issue": {
