@@ -30,6 +30,7 @@ import { createIssueStatusListStore } from "@multica/core/issue-statuses";
 import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
@@ -874,6 +875,24 @@ describe("IssueSurface — filtered empty state", () => {
     expect(store.getState().unreadFilter).toBe(true);
     await screen.findByText("filtered_empty.unread_title");
     expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
+  });
+
+  it("keeps the built-in Unread view's condition when a workspace switch reloads its state", async () => {
+    setCurrentWorkspace("acme", "ws-1");
+    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
+    render(unreadViewSurface());
+    await screen.findByText("filtered_empty.unread_title");
+
+    // The next workspace has no saved state for this view, so the reload
+    // resets the store to defaults, unread off.
+    await act(async () => {
+      setCurrentWorkspace("beta", "ws-1");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(store.getState().unreadFilter).toBe(true);
+    expect(screen.getByText("filtered_empty.unread_title")).toBeInTheDocument();
+    setCurrentWorkspace(null, null);
   });
 
   it("restores the built-in Unread view's condition from state saved without it", async () => {

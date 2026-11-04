@@ -141,14 +141,18 @@ export function IssueSurface({
       seedIssueSurfaceViewState(resolvedSurfaceKey, seedDefinition);
     }
     const viewStore = getIssueSurfaceViewStore(resolvedSurfaceKey);
-    // Seeding happens once per key, so state persisted before the condition
-    // was fixed would otherwise come back without it.
-    if (viewBaseline?.unread && !viewStore.getState().unreadFilter) {
-      viewStore.setState({ unreadFilter: true });
-    }
+    if (viewBaseline?.unread) keepUnreadFilter(viewStore);
     return viewStore;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed identity follows the key
   }, [resolvedSurfaceKey]);
+  // Seeding happens once per key, but the stored state can be replaced later:
+  // a workspace switch reloads it from that workspace's preferences, which may
+  // never have held the condition. Re-apply it whenever it goes missing.
+  useEffect(() => {
+    if (!viewBaseline?.unread) return;
+    keepUnreadFilter(store);
+    return store.subscribe(() => keepUnreadFilter(store));
+  }, [store, viewBaseline]);
 
   // Every change of this key tears down and remounts the ENTIRE surface
   // (providers, DnD, all columns/cards) — by design for data-window changes,
@@ -193,6 +197,10 @@ export function IssueSurface({
       </ViewBaselineProvider>
     </ViewStoreProvider>
   );
+}
+
+function keepUnreadFilter(store: StoreApi<IssueViewState>) {
+  if (!store.getState().unreadFilter) store.setState({ unreadFilter: true });
 }
 
 function IssueSurfaceContent({
