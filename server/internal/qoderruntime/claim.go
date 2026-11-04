@@ -14,6 +14,7 @@ type claimedTask struct {
 	ChatAttachments       []json.RawMessage `json:"chat_message_attachments,omitempty"`
 	ChatChannelType       string            `json:"chat_channel_type,omitempty"`
 	ChatType              string            `json:"chat_type,omitempty"`
+	ChatNoticeLocale      string            `json:"chat_notice_locale,omitempty"`
 	IsLeaderTask          bool              `json:"is_leader_task,omitempty"`
 	AuthToken             string            `json:"auth_token,omitempty"`
 	RemoteMCPConnections  []json.RawMessage `json:"remote_mcp_connections,omitempty"`

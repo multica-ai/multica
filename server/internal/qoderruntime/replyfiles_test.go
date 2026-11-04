@@ -42,7 +42,7 @@ func (h *harness) deliver(eventID, fileID, name, data string, size int, download
 // stepUntilDone steps the bridge until the run is reported, as the ticker would.
 func (h *harness) stepUntilDone(t *testing.T) {
 	t.Helper()
-	for i := 0; i < 10 && h.complete == nil && h.failure == nil; i++ {
+	for i := 0; i < 40 && h.complete == nil && h.failure == nil; i++ {
 		if err := h.b.step(context.Background()); err != nil {
 			t.Logf("step %d: %v", i, err)
 		}
@@ -386,6 +386,10 @@ func TestReplyFileNoticeSurvivesRestartAndCompletionRetry(t *testing.T) {
 		}
 		return upstream.RoundTrip(req)
 	})
+	// The poll that observes end_turn schedules the transfer for its own step.
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.b.step(context.Background()); err == nil {
 		t.Fatal("completion failure was not injected")
 	}
@@ -402,5 +406,126 @@ func TestReplyFileNoticeSurvivesRestartAndCompletionRetry(t *testing.T) {
 	output := fmt.Sprint(h.complete["output"])
 	if output != first["output"] || strings.Count(output, "Attachment delivery notice:") != 1 || !strings.Contains(output, "report.pdf") || len(h.replyUploads) != 0 {
 		t.Fatalf("notice changed after retry/restart: first=%v final=%v uploads=%v", first, h.complete, h.replyUploads)
+	}
+}
+
+func TestReplyFileTransferHasItsOwnGuardedStep(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	h.finish("end_turn")
+	guards, released, transferGuard := 0, 0, 0
+	h.b.cfg.BeforeStep = func(context.Context) (func(), error) {
+		guards++
+		return func() { released++ }, nil
+	}
+	upstream := h.b.qoder.client.Transport
+	h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/files/file_report" {
+			transferGuard = guards
+			if released != 1 {
+				t.Errorf("transfer started before the event poll released its guard: %d", released)
+			}
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 19*time.Second {
+				t.Errorf("transfer did not receive its full budget: %v %v", deadline, ok)
+			}
+		}
+		return upstream.RoundTrip(req)
+	})
+	if err := h.b.guardedStep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.replyUploads) != 0 {
+		t.Fatal("file transfer shared the event poll's time budget")
+	}
+	if err := h.b.guardedStep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if transferGuard != 2 || guards != 2 || released != 2 || len(h.replyUploads) != 1 || h.complete == nil {
+		t.Fatalf("guards=%d releases=%d transfer=%d uploads=%v completed=%v", guards, released, transferGuard, h.replyUploads, h.complete)
+	}
+}
+
+func TestReplyFileStepRechecksCancellation(t *testing.T) {
+	h := setup(t)
+	chatTask(h)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("evt_a1", "file_report", "report.pdf", "%PDF-1.7", 8, true)
+	h.finish("end_turn")
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.status = "cancelled"
+	upstream := h.b.qoder.client.Transport
+	h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.Path, "/files/") {
+			t.Error("cancelled run started a file transfer")
+		}
+		return upstream.RoundTrip(req)
+	})
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.replyUploads) != 0 || len(h.b.state.Runs) != 0 || h.cancelAcks != 1 {
+		t.Fatalf("cancelled file step: uploads=%v runs=%d acks=%d", h.replyUploads, len(h.b.state.Runs), h.cancelAcks)
+	}
+}
+
+func TestConcurrentReplyFilesUseSeparatePolls(t *testing.T) {
+	a, b := newTask("task-a", ""), newTask("task-b", "")
+	a.IssueID, b.IssueID = "", ""
+	a.ChatSessionID, b.ChatSessionID = "chat-a", "chat-b"
+	a.ChatMessage, b.ChatMessage = "Make a report", "Make another report"
+	h := setupMulti(t, 2, a, b)
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []string{"sess_new_1", "sess_new_2"} {
+		h.sessions[session] = append(h.sessions[session], map[string]any{"id": "artifact_" + session, "type": "agent.artifact_delivered", "file_id": "file_" + session, "original_filename": "report.txt", "size": 3})
+		h.finish(session)
+	}
+	upstreamQoder := h.b.qoder.client.Transport
+	h.b.qoder.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/files/"):
+			id, content := strings.CutSuffix(strings.TrimPrefix(req.URL.Path, "/files/"), "/content")
+			if content {
+				return replyResponse(req, 200, fmt.Sprintf(`{"url":%q}`, h.b.qoder.base+"/blob/"+id)), nil
+			}
+			return replyResponse(req, 200, fmt.Sprintf(`{"scope":{"id":%q}}`, strings.TrimPrefix(id, "file_"))), nil
+		case strings.HasPrefix(req.URL.Path, "/blob/"):
+			return replyResponse(req, 200, "abc"), nil
+		}
+		return upstreamQoder.RoundTrip(req)
+	})
+	upstreamMultica := h.b.multica.client.Transport
+	var uploaded []string
+	h.b.multica.client.Transport = replyTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/api/upload-file" {
+			if err := req.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatal(err)
+			}
+			defer req.MultipartForm.RemoveAll()
+			uploaded = append(uploaded, req.FormValue("task_id"))
+			return replyResponse(req, 200, `{"id":"attachment"}`), nil
+		}
+		return upstreamMultica.RoundTrip(req)
+	})
+	for poll, wantUploads := range []int{0, 1, 1, 2} {
+		if err := h.b.guardedStep(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(uploaded) != wantUploads {
+			t.Fatalf("poll %d: uploads=%v, want %d; normal polls and transfers must alternate", poll, uploaded, wantUploads)
+		}
+	}
+	if uploaded[0] == uploaded[1] || len(h.completed) != 2 {
+		t.Fatalf("concurrent file replies lost fairness: uploads=%v completed=%v", uploaded, h.completed)
 	}
 }

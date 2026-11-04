@@ -22,6 +22,7 @@ const (
 // replyFiles carries the files a chat agent delivers with DeliverArtifacts.
 // They are attached to the reply before the run completes.
 type replyFiles struct {
+	Locale    string          `json:"locale,omitempty"`
 	Delivered []deliveredFile `json:"delivered,omitempty"`
 	// Handled counts delivered files already attached or skipped, so a retry
 	// does not upload one twice.
@@ -175,11 +176,12 @@ func (f *replyFiles) output(text string) string {
 	if text != "" {
 		out.WriteString("\n\n")
 	}
-	out.WriteString("Attachment delivery notice:\n\n")
+	copy := replyFileCopyFor(f.Locale)
+	out.WriteString(copy.title + "\n\n")
 	for _, file := range f.Skipped {
 		// Names are data, not links, markup or additional lines in the notice.
 		name := strings.NewReplacer("\\", "\\\\", "`", "\\`", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "<", "\\<", ">", "\\>").Replace(strconv.Quote(file.Name))
-		fmt.Fprintf(&out, "- %s: %s.\n", name, file.Reason)
+		fmt.Fprintf(&out, "- %s: %s\n", name, copy.reason(file.Reason))
 	}
 	return strings.TrimSuffix(out.String(), "\n")
 }

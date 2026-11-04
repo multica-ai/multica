@@ -51,7 +51,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		}
 		p.WriteString("You are chatting with a user of a Multica workspace. Reply directly to their message; your final message is shown to them as your reply. This bridge does not expose a local Multica daemon.\n")
 		p.WriteString(chatAudience(t.ChatChannelType, t.ChatType))
-		r.Reply = &replyFiles{token: t.AuthToken}
+		r.Reply = &replyFiles{Locale: t.ChatNoticeLocale, token: t.AuthToken}
 		fmt.Fprintf(&p, "Multica attempts to attach files you deliver with DeliverArtifacts to your reply and adds a delivery notice if a transfer fails or cannot be confirmed. A file over %d MB is not attached; tell the user so instead of saying it was sent.\n", maxReplyFileBytes>>20)
 		if t.PriorSessionID != "" {
 			r.PriorSessionID = t.PriorSessionID
