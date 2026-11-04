@@ -13,7 +13,9 @@ import {
   pruneIssueSurfaceViewStates,
 } from "@multica/core/issues/stores/surface-view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import type { IssueRelationFilter } from "@multica/core/issues/stores/view-store";
 import type {
+  Agent,
   AgentTask,
   Issue,
   IssueStatus,
@@ -161,6 +163,7 @@ describe("useIssueSurfaceController", () => {
   let listIssueTableRows: ReturnType<typeof vi.fn>;
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
   let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
+  let listAgents: ReturnType<typeof vi.fn<() => Promise<Agent[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -186,6 +189,7 @@ describe("useIssueSurfaceController", () => {
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
     listSubscribedIssueIds = vi.fn(() => never<string[]>());
+    listAgents = vi.fn(() => Promise.resolve([] satisfies Agent[]));
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -200,7 +204,7 @@ describe("useIssueSurfaceController", () => {
       getAgentTaskSnapshot,
       getWorkspaceWorkingAgents,
       getChildIssueProgress: vi.fn(() => never()),
-      listAgents: vi.fn(() => Promise.resolve([])),
+      listAgents,
       listSubscribedIssueIds,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -1857,12 +1861,12 @@ describe("useIssueSurfaceController", () => {
   ];
 
   describe("Gantt filtered by subscribed", () => {
-    const renderSubscribedGantt = () => {
+    const renderSubscribedGantt = (relations: IssueRelationFilter[] = ["subscribed"]) => {
       mockGanttIssues(ganttFixture);
       const store = getIssueSurfaceViewStore("project:p1");
       act(() => {
         store.getState().setViewMode("gantt");
-        store.getState().toggleRelationFilter("subscribed");
+        for (const relation of relations) store.getState().toggleRelationFilter(relation);
       });
       return renderHook(
         () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
@@ -1879,7 +1883,7 @@ describe("useIssueSurfaceController", () => {
       await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
       expect(listSubscribedIssueIds).toHaveBeenCalled();
       expect(result.current.isLoading).toBe(true);
-      expect(result.current.isSubscribedFilterError).toBe(false);
+      expect(result.current.isRelationFilterError).toBe(false);
 
       await act(async () => finish([]));
       await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -1890,12 +1894,57 @@ describe("useIssueSurfaceController", () => {
       listSubscribedIssueIds.mockRejectedValueOnce(new Error("offline"));
       const { result } = renderSubscribedGantt();
 
-      await waitFor(() => expect(result.current.isSubscribedFilterError).toBe(true));
+      await waitFor(() => expect(result.current.isRelationFilterError).toBe(true));
       expect(result.current.isEmpty).toBe(false);
 
       listSubscribedIssueIds.mockResolvedValue(["gantt-open"]);
-      act(() => result.current.retrySubscribedFilter());
-      await waitFor(() => expect(result.current.isSubscribedFilterError).toBe(false));
+      act(() => result.current.retryRelationFilter());
+      await waitFor(() => expect(result.current.isRelationFilterError).toBe(false));
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]),
+      );
+    });
+
+    it.each([
+      { name: "never arrives", agents: () => never<Agent[]>() },
+      { name: "fails", agents: () => Promise.reject(new Error("offline")) },
+    ])("filters by subscriptions when the agent list $name", async ({ agents }) => {
+      listAgents.mockImplementation(agents);
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt();
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.isRelationFilterError).toBe(false);
+      expect(result.current.filteredGanttIssues).toEqual([]);
+    });
+
+    it("holds loading while the agents behind \"my agents\" load", async () => {
+      let finish!: (agents: Agent[]) => void;
+      listAgents.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt(["subscribed", "my_agents"]);
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      await waitFor(() => expect(listSubscribedIssueIds).toHaveBeenCalled());
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => finish([{ id: "agent-1", owner_id: "user-1" } as Agent]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]);
+    });
+
+    it("offers a retry when the agents behind \"my agents\" fail", async () => {
+      listAgents.mockRejectedValueOnce(new Error("offline"));
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt(["subscribed", "my_agents"]);
+
+      await waitFor(() => expect(result.current.isRelationFilterError).toBe(true));
+      expect(result.current.isEmpty).toBe(false);
+
+      listAgents.mockResolvedValue([{ id: "agent-1", owner_id: "user-1" } as Agent]);
+      act(() => result.current.retryRelationFilter());
+      await waitFor(() => expect(result.current.isRelationFilterError).toBe(false));
       await waitFor(() =>
         expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]),
       );

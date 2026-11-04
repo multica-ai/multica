@@ -103,8 +103,9 @@ export interface IssueFilterContext {
 
 export interface IssueRelationContext {
   userId: string;
-  /** Agents the viewer owns. */
-  myAgentIds: ReadonlySet<string>;
+  /** Agents the viewer owns. Loaded only while a filter tests "my_agents";
+   *  without it that relation is left to the server. */
+  myAgentIds?: ReadonlySet<string>;
   /** Issues the viewer subscribes to. Loaded only while a filter tests the
    *  relation; without it "subscribed" is left to the server. */
   subscribedIssueIds?: ReadonlySet<string>;
@@ -386,6 +387,7 @@ function issueMatchesRelation(
     case "created":
       return issue.creator_type === "member" && issue.creator_id === context.userId;
     case "my_agents":
+      if (!context.myAgentIds) return undefined;
       return (
         issue.assignee_type === "agent" &&
         !!issue.assignee_id &&

@@ -43,9 +43,9 @@
     "hint": "加载状态后才能显示任务。",
     "retry": "重试"
   },
-  "subscribed_filter_error": {
-    "title": "订阅列表加载失败",
-    "hint": "加载订阅后才能显示按“我订阅的”筛选的任务。"
+  "relation_filter_error": {
+    "title": "“与我的关系”筛选加载失败",
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",

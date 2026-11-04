@@ -97,9 +97,10 @@ export interface IssueSurfaceData {
   /** Re-runs the project list behind the project-status half of
    *  {@link isStatusCatalogError}. */
   retryProjectCatalog: () => void;
-  /** The viewer's subscriptions failed to load and this surface applies the
-   *  "subscribed" relation itself. */
-  isSubscribedFilterError: boolean;
+  /** The viewer's subscriptions or agents behind a "subscribed" /
+   *  "my_agents" relation failed to load and this surface applies the
+   *  relation itself. */
+  isRelationFilterError: boolean;
   /** The window's data is being revalidated while the previous snapshot is
    *  shown as a placeholder (sort/date change, or any grouped-board filter
    *  change). Drives the header's deferred refresh indicator — content stays
@@ -132,8 +133,8 @@ export function useIssueSurfaceData({
   labelFilters,
   relationFilters,
   relationContext,
-  subscribedIdsPending,
-  subscribedIdsError,
+  relationDepsPending,
+  relationDepsError,
   dueDateFilters,
   advancedFilter,
   today,
@@ -170,10 +171,10 @@ export function useIssueSurfaceData({
   labelFilters: string[];
   relationFilters: IssueRelationFilter[];
   relationContext: IssueRelationContext | undefined;
-  /** A filter uses "subscribed" and the viewer's subscriptions have not
-   *  loaded yet / failed to load. */
-  subscribedIdsPending: boolean;
-  subscribedIdsError: boolean;
+  /** A filter uses "subscribed" or "my_agents" and the data it reads (the
+   *  viewer's subscriptions / agents) has not loaded yet / failed to load. */
+  relationDepsPending: boolean;
+  relationDepsError: boolean;
   dueDateFilters: DueDateFilter[];
   /** The scoped, pruned rule tree. */
   advancedFilter: AdvancedFilterGroup | null;
@@ -231,10 +232,10 @@ export function useIssueSurfaceData({
     (usesGantt || !serverStatusBranches.enabled);
   const projectCatalogPending = usesClientProjectStatusFilter && projectsPending;
   const projectCatalogError = usesClientProjectStatusFilter && projectsError;
-  // Same contract for the viewer's subscriptions behind "subscribed".
+  // Same contract for the subscriptions / agents behind the relation filter.
   const usesClientRelationFilter = !usesTable && (usesGantt || !serverStatusBranches.enabled);
-  const subscribedFilterPending = usesClientRelationFilter && subscribedIdsPending;
-  const subscribedFilterError = usesClientRelationFilter && subscribedIdsError;
+  const relationFilterPending = usesClientRelationFilter && relationDepsPending;
+  const relationFilterError = usesClientRelationFilter && relationDepsError;
 
   const workingFilterContext = useMemo(
     () => ({ runningIssueIds: workingIssueIDs, projectStatusById, relation: relationContext, today }),
@@ -505,7 +506,7 @@ export function useIssueSurfaceData({
   const isLoading =
     statusFilterPending ||
     projectCatalogPending ||
-    subscribedFilterPending ||
+    relationFilterPending ||
     (serverGroupBranches.enabled
       ? serverGroupBranches.isLoading
       : usesGantt
@@ -552,7 +553,7 @@ export function useIssueSurfaceData({
       !isLoading &&
       !statusFilterError &&
       !projectCatalogError &&
-      !subscribedFilterError &&
+      !relationFilterError &&
       !usesGantt &&
       !usesTable &&
       (serverStatusBranches.enabled
@@ -566,6 +567,6 @@ export function useIssueSurfaceData({
     // either one. `retryStatusCatalog` refetches both.
     isStatusCatalogError: statusFilterError || projectCatalogError,
     retryProjectCatalog: refetchProjects,
-    isSubscribedFilterError: subscribedFilterError,
+    isRelationFilterError: relationFilterError,
   };
 }

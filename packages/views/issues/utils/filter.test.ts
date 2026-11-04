@@ -801,6 +801,17 @@ describe("relation filters", () => {
       ids({ relationFilters: ["assigned", "subscribed"], negatedFilters: ["relation"] }),
     ).toEqual(["2", "3", "4"]);
   });
+
+  it("answers subscribed without the viewer's agents, leaving only my_agents open", () => {
+    const subscriptionsOnly = { userId: "u-1", subscribedIssueIds: new Set(["3"]) };
+    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["subscribed"] })).toEqual(["3"]);
+    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["my_agents"] })).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ]);
+  });
 });
 
 describe("due date filters", () => {

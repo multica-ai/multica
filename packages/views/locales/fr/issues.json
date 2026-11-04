@@ -44,9 +44,9 @@
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",
     "retry": "Réessayer"
   },
-  "subscribed_filter_error": {
-    "title": "Impossible de charger vos abonnements",
-    "hint": "Les tickets filtrés par « Auxquels je suis abonné » s'affichent une fois les abonnements chargés."
+  "relation_filter_error": {
+    "title": "Impossible de charger le filtre « Lien avec moi »",
+    "hint": "Les tickets filtrés par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",

@@ -44,9 +44,9 @@
     "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
   },
-  "subscribed_filter_error": {
-    "title": "Couldn't load your subscriptions",
-    "hint": "Issues filtered by \"Subscribed by me\" can't be shown until they load."
+  "relation_filter_error": {
+    "title": "Couldn't load the \"Relation to me\" filter",
+    "hint": "Issues filtered by \"Subscribed by me\" or \"Assigned to my agents\" can't be shown until your subscriptions and agents load."
   },
   "source_context": {
     "create_action": "Create sub-issue from here",
