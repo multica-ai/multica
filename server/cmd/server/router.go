@@ -2418,6 +2418,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+					r.Get("/versions", h.ListSkillVersions)
+					r.Get("/versions/{version}", h.GetSkillVersion)
+					r.Post("/versions/{version}/restore", h.RestoreSkillVersion)
 				})
 			})
 
