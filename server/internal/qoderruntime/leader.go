@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // squadLeader holds what a squad-leader run needs to deliver its turn. The
@@ -102,6 +104,7 @@ func (b *Bridge) deliverLeader(ctx context.Context, r *run) error {
 		}
 		var posted struct {
 			TriggerOutcomes []struct {
+				TargetType string `json:"target_type"`
 				TargetID   string `json:"target_id"`
 				Status     string `json:"status"`
 				ReasonCode string `json:"reason_code"`
@@ -122,10 +125,20 @@ func (b *Bridge) deliverLeader(ctx context.Context, r *run) error {
 			}
 		} else {
 			l.Commented = true
+			// Use labels already visible in the delegation, without looking up
+			// names the task may not have permission to read.
+			labels := make(map[string]string)
+			for _, mention := range util.MentionRe.FindAllStringSubmatch(comment, -1) {
+				labels[mention[2]+":"+strings.ToLower(mention[3])] = strings.TrimSpace(mention[1])
+			}
 			var blocked []string
 			for _, target := range posted.TriggerOutcomes {
 				if target.Status == "blocked" {
-					blocked = append(blocked, fmt.Sprintf("%s (%s)", target.TargetID, target.ReasonCode))
+					label := target.TargetID
+					if name := labels[target.TargetType+":"+strings.ToLower(target.TargetID)]; name != "" {
+						label = fmt.Sprintf("%s [%s]", name, target.TargetID)
+					}
+					blocked = append(blocked, fmt.Sprintf("%s (%s)", label, target.ReasonCode))
 				}
 			}
 			if len(blocked) > 0 {

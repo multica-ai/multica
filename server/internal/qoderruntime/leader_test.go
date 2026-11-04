@@ -73,28 +73,35 @@ func TestSquadLeaderLostCommentResponseDoesNotRepost(t *testing.T) {
 }
 
 func TestSquadLeaderReportsBlockedDelegation(t *testing.T) {
-	for _, outcomes := range []string{
-		`[{"target_id":"bob","status":"blocked","reason_code":"invocation_not_allowed"}]`,
-		`[{"target_id":"alice","status":"queued"},{"target_id":"bob","status":"blocked","reason_code":"invocation_not_allowed"}]`,
+	const bobID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	const aliceID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	const reply = "OUTCOME: action\nREASON: API work\n[@Bob[API]](mention://agent/" + bobID + ") fix the handler."
+	for _, tc := range []struct {
+		name, reply, outcomes, wantTarget string
+	}{
+		{"agent", reply, `[{"target_type":"agent","target_id":"` + bobID + `","status":"blocked","reason_code":"invocation_not_allowed"}]`, "Bob[API] [" + bobID + "]"},
+		{"partial dispatch", reply, `[{"target_type":"agent","target_id":"` + aliceID + `","status":"queued"},{"target_type":"agent","target_id":"` + bobID + `","status":"blocked","reason_code":"invocation_not_allowed"}]`, "Bob[API] [" + bobID + "]"},
+		{"squad", reply + "\n[@Platform Squad](mention://squad/" + bobID + ") help.", `[{"target_type":"squad","target_id":"` + bobID + `","status":"blocked","reason_code":"invocation_not_allowed"}]`, "Platform Squad [" + bobID + "]"},
+		{"unknown label", reply, `[{"target_type":"agent","target_id":"` + aliceID + `","status":"blocked","reason_code":"invocation_not_allowed"}]`, aliceID},
 	} {
-		t.Run(outcomes, func(t *testing.T) {
-			h := pendingLeader(t, leaderDelegation)
+		t.Run(tc.name, func(t *testing.T) {
+			h := pendingLeader(t, tc.reply)
 			base := h.b.multica.client.Transport
 			h.b.multica.client.Transport = leaderTransport(func(r *http.Request) (*http.Response, error) {
 				resp, err := base.RoundTrip(r)
 				if err == nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
 					resp.Body.Close()
-					resp.Body = io.NopCloser(strings.NewReader(`{"trigger_outcomes":` + outcomes + `}`))
+					resp.Body = io.NopCloser(strings.NewReader(`{"trigger_outcomes":` + tc.outcomes + `}`))
 				}
 				return resp, err
 			})
 			if err := h.b.step(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if len(h.comments) != 1 || h.complete != nil || h.failure == nil || !strings.Contains(h.failure["error"].(string), "invocation_not_allowed") {
+			if len(h.comments) != 1 || h.complete != nil || h.failure == nil || !strings.Contains(h.failure["error"].(string), "invocation_not_allowed") || !strings.Contains(h.failure["error"].(string), tc.wantTarget) {
 				t.Fatalf("blocked delegation must fail visibly: comments=%v complete=%v failure=%v", h.comments, h.complete, h.failure)
 			}
-			if len(h.evaluations) != 1 || h.evaluations[0]["outcome"] != "failed" || !strings.Contains(h.evaluations[0]["reason"].(string), "bob") {
+			if len(h.evaluations) != 1 || h.evaluations[0]["outcome"] != "failed" || !strings.Contains(h.evaluations[0]["reason"].(string), tc.wantTarget) {
 				t.Fatalf("evaluation must identify the blocked target: %v", h.evaluations)
 			}
 		})
