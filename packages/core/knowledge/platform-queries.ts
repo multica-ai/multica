@@ -5,7 +5,16 @@ import { knowledgeKeys } from "./queries";
 export const knowledgePlatformKeys = {
   sources: (wsId: string) => [...knowledgeKeys.all(wsId), "sources"] as const,
   access: (wsId: string, key: string) => [...knowledgeKeys.all(wsId), "access", key] as const,
+  repoSync: (wsId: string) => [...knowledgeKeys.all(wsId), "repo-sync"] as const,
 };
+
+/** The repo-docs sync setting: owners and admins. */
+export function knowledgeRepoSyncOptions(wsId: string) {
+  return queryOptions({
+    queryKey: knowledgePlatformKeys.repoSync(wsId),
+    queryFn: () => api.getKnowledgeRepoSync(),
+  });
+}
 
 /** The Sources panel: owners and admins. Reads WeKnora through the server. */
 export function knowledgeSourcesOptions(wsId: string) {

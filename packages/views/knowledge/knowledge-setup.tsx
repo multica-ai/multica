@@ -5,17 +5,24 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { ExternalLink } from "@multica/ui/icons";
 import {
+  knowledgeRepoSyncOptions,
   knowledgeSourcesOptions,
   useRevealKnowledgeOwnerPassword,
+  useRunKnowledgeRepoSync,
+  useSaveKnowledgeRepoSync,
   useTestKnowledgeModels,
   useSetKnowledgeVisibility,
   useUpdateKnowledgeBaseSettings,
   type KnowledgeBase,
   type KnowledgeOwnerLogin,
+  type KnowledgeRepoSync,
+  type KnowledgeRepoSyncRequest,
   type KnowledgeSource,
 } from "@multica/core/knowledge";
 import { useT } from "../i18n";
@@ -36,6 +43,7 @@ export function KnowledgeSetupPanel({
   return (
     <div className="flex flex-col gap-8">
       <KnowledgeSourcesSection wsId={wsId} />
+      <KnowledgeRepoSyncSection wsId={wsId} />
       <KnowledgeBasesSection wsId={wsId} knowledgeBases={knowledgeBases} />
       <KnowledgeModelsSection />
       <KnowledgeOwnerLoginSection />
@@ -110,6 +118,136 @@ function KnowledgeSourcesSection({ wsId }: { wsId: string }) {
             {t(($) => $.sources.create)}
           </Button>
         </div>
+      ) : null}
+    </section>
+  );
+}
+
+function toRepoSyncRequest(setting: KnowledgeRepoSync): KnowledgeRepoSyncRequest {
+  return {
+    enabled: setting.enabled,
+    repo_url: setting.repo_url,
+    branch: setting.branch,
+    docs_path: setting.docs_path,
+    knowledge_base_key: setting.knowledge_base_key,
+  };
+}
+
+/**
+ * The repo-docs sync (plan 10.12): a repository's docs directory kept in a
+ * knowledge base. Saving does not clone; Sync now does, and so does the daily
+ * job while the setting is on.
+ */
+function KnowledgeRepoSyncSection({ wsId }: { wsId: string }) {
+  const { t } = useT("knowledge");
+  const setting = useQuery(knowledgeRepoSyncOptions(wsId));
+  const save = useSaveKnowledgeRepoSync(wsId);
+  const run = useRunKnowledgeRepoSync(wsId);
+  // The form holds local edits until saved; it starts from the server's setting.
+  const [draft, setDraft] = useState<KnowledgeRepoSyncRequest | null>(null);
+
+  if (setting.isPending) {
+    return null;
+  }
+  if (setting.isError || !setting.data) {
+    return (
+      <section className="flex flex-col gap-3">
+        <SectionHeading title={t(($) => $.repo.title)} />
+        <p className="text-sm text-destructive">{t(($) => $.repo.load_error)}</p>
+      </section>
+    );
+  }
+  const current = draft ?? toRepoSyncRequest(setting.data);
+  const edit = (patch: Partial<KnowledgeRepoSyncRequest>) => setDraft({ ...current, ...patch });
+  const fail = (error: Error) => toast.error(error.message || t(($) => $.repo.toast.failed));
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading title={t(($) => $.repo.title)} description={t(($) => $.repo.description)} />
+      <label className="flex items-center gap-2 text-sm">
+        <Switch
+          checked={current.enabled}
+          disabled={save.isPending}
+          aria-label={t(($) => $.repo.enabled)}
+          onCheckedChange={(checked) => edit({ enabled: checked })}
+        />
+        {t(($) => $.repo.enabled)}
+      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <Label htmlFor="repo-sync-url">{t(($) => $.repo.repo_url)}</Label>
+          <Input
+            id="repo-sync-url"
+            type="url"
+            value={current.repo_url}
+            placeholder="https://github.com/acme/app.git"
+            onChange={(e) => edit({ repo_url: e.target.value })}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="repo-sync-branch">{t(($) => $.repo.branch)}</Label>
+          <Input id="repo-sync-branch" value={current.branch} onChange={(e) => edit({ branch: e.target.value })} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="repo-sync-path">{t(($) => $.repo.docs_path)}</Label>
+          <Input id="repo-sync-path" value={current.docs_path} onChange={(e) => edit({ docs_path: e.target.value })} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="repo-sync-base">{t(($) => $.repo.base)}</Label>
+          <Input
+            id="repo-sync-base"
+            value={current.knowledge_base_key}
+            onChange={(e) => edit({ knowledge_base_key: e.target.value })}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={save.isPending || draft === null}
+          onClick={() => {
+            if (!draft) return;
+            save.mutate(draft, {
+              onError: fail,
+              onSuccess: () => {
+                setDraft(null);
+                toast.success(t(($) => $.repo.toast.saved));
+              },
+            });
+          }}
+        >
+          {t(($) => $.repo.save)}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={run.isPending || save.isPending || setting.data.repo_url === "" || draft !== null}
+          aria-busy={run.isPending}
+          onClick={() =>
+            run.mutate(undefined, {
+              onError: fail,
+              onSuccess: (result) => {
+                if (result.last_error) {
+                  toast.error(t(($) => $.repo.last_error));
+                } else {
+                  toast.success(t(($) => $.repo.toast.synced));
+                }
+              },
+            })
+          }
+        >
+          {run.isPending ? <Spinner /> : null}
+          {t(($) => $.repo.run)}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {setting.data.last_synced_at
+            ? t(($) => $.repo.last_sync, { when: new Date(setting.data.last_synced_at).toLocaleString() })
+            : t(($) => $.repo.never_synced)}
+        </span>
+      </div>
+      {setting.data.last_error ? (
+        <p className="whitespace-pre-line text-xs text-destructive">{setting.data.last_error}</p>
       ) : null}
     </section>
   );
