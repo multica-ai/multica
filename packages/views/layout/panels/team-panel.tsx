@@ -11,7 +11,6 @@ import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -19,6 +18,7 @@ import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
+import { buildRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
   PanelCount,
@@ -119,13 +119,12 @@ export function TeamPanel() {
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
-  const offlineRuntimes = useMemo(() => {
-    const now = Date.now();
-    return runtimes.filter((runtime) => {
-      const health = deriveRuntimeHealth(runtime, now);
-      return health === "offline" || health === "long_offline";
-    }).length;
-  }, [runtimes]);
+  const offlineMachines = useMemo(
+    () => buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
+      (machine) => machine.health === "offline" || machine.health === "long_offline",
+    ).length,
+    [runtimes],
+  );
 
   const mineCount = userId ? agents.filter((agent) => agent.owner_id === userId).length : 0;
   const myRole = members.find((member) => member.user_id === userId)?.role;
@@ -284,9 +283,9 @@ export function TeamPanel() {
               label={t(($) => $.nav.runtimes)}
               active={isPathWithin(pathname, p.runtimes())}
               trailing={
-                offlineRuntimes > 0 ? (
+                offlineMachines > 0 ? (
                   <span className="shrink-0 text-caption text-warning">
-                    {t(($) => $.panels.team.runtimes_offline, { count: offlineRuntimes })}
+                    {t(($) => $.panels.team.runtimes_offline, { count: offlineMachines })}
                   </span>
                 ) : undefined
               }
