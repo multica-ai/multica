@@ -192,3 +192,16 @@ SELECT COALESCE(f.name, '')::text AS floor_name
 FROM squad s
 LEFT JOIN office_floor f ON f.id = s.floor_id AND f.workspace_id = s.workspace_id
 WHERE s.id = sqlc.arg('squad_id')::uuid AND s.workspace_id = sqlc.arg('workspace_id')::uuid;
+
+-- name: GetInitiativeBudgetRequestAmount :one
+-- The amount of the initiative's budget_request document at a stage, when the
+-- document states one (spec 4.2). The newest linked document wins.
+SELECT kl.amount_micros FROM initiative_artifact ia
+JOIN knowledge_link kl ON kl.id = ia.knowledge_link_id AND kl.workspace_id = ia.workspace_id
+WHERE ia.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND ia.initiative_id = sqlc.arg('initiative_id')::uuid
+  AND ia.stage_key = sqlc.arg('stage_key')::text
+  AND ia.kind = 'budget_request'
+  AND kl.amount_micros IS NOT NULL
+ORDER BY kl.created_at DESC
+LIMIT 1;

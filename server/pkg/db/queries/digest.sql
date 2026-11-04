@@ -111,6 +111,32 @@ FROM task_usage_hourly
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND bucket_hour >= date_trunc('hour', sqlc.arg('since')::timestamptz);
 
+-- name: DigestFloorRuns :one
+-- A floor digest's runs: the runs of the floor's squads that finished since @since.
+-- Runs are attributed to a squad by agent_task_queue.squad_id.
+SELECT
+    count(*)::int AS runs,
+    count(*) FILTER (WHERE t.status = 'failed')::int AS failed_runs
+FROM agent_task_queue t
+WHERE t.squad_id = ANY(sqlc.arg('squad_ids')::uuid[])
+  AND t.status IN ('completed', 'failed')
+  AND t.completed_at >= sqlc.arg('since')::timestamptz;
+
+-- name: DigestFloorAgentsWithFailedRuns :many
+-- The agents with failed runs for the floor's squads since @since, worst first.
+-- total_count repeats on each row.
+SELECT a.id, a.name, count(*)::int AS failed_runs,
+       count(*) OVER ()::int AS total_count
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND t.squad_id = ANY(sqlc.arg('squad_ids')::uuid[])
+  AND t.status = 'failed'
+  AND t.completed_at >= sqlc.arg('since')::timestamptz
+GROUP BY a.id, a.name
+ORDER BY count(*) DESC, a.name, a.id
+LIMIT sqlc.arg('row_limit')::int;
+
 -- name: DigestOfflineRuntimes :many
 -- Offline runtimes, most recently seen first. total_count repeats on each row.
 SELECT id, COALESCE(NULLIF(custom_name, ''), name)::text AS name, provider,
@@ -190,3 +216,17 @@ SELECT c.squad_id,
     )::timestamptz AS last_activity_at
 FROM squad_charter c
 WHERE c.workspace_id = sqlc.arg('workspace_id')::uuid;
+
+-- name: DigestAutoPublished :many
+-- Automatic publishes (governance auto_publish entries) at or after @since,
+-- newest first (spec 3.3). The title comes from the document's link; a link
+-- since removed reads as an empty title. total_count repeats on each row.
+SELECT g.subject_id AS link_id, COALESCE(l.title, '')::text AS title, g.details, g.created_at,
+       count(*) OVER ()::int AS total_count
+FROM governance_event g
+LEFT JOIN knowledge_link l ON l.id = g.subject_id AND l.workspace_id = g.workspace_id
+WHERE g.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND g.kind = 'auto_publish'
+  AND g.created_at >= sqlc.arg('since')::timestamptz
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT sqlc.arg('row_limit')::int;

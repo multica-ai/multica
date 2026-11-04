@@ -18,7 +18,7 @@ INSERT INTO brief (
     created_by_agent_id, created_by_member_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-) RETURNING id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at
+) RETURNING id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at, scope_type, scope_id
 `
 
 type CreateBriefParams struct {
@@ -62,6 +62,8 @@ func (q *Queries) CreateBrief(ctx context.Context, arg CreateBriefParams) (Brief
 		&i.CreatedByAgentID,
 		&i.CreatedByMemberID,
 		&i.CreatedAt,
+		&i.ScopeType,
+		&i.ScopeID,
 	)
 	return i, err
 }
@@ -77,7 +79,7 @@ func (q *Queries) DeleteWorkspaceBriefs(ctx context.Context, workspaceID pgtype.
 }
 
 const getBriefInWorkspace = `-- name: GetBriefInWorkspace :one
-SELECT id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at FROM brief WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at, scope_type, scope_id FROM brief WHERE id = $1 AND workspace_id = $2
 `
 
 type GetBriefInWorkspaceParams struct {
@@ -100,13 +102,16 @@ func (q *Queries) GetBriefInWorkspace(ctx context.Context, arg GetBriefInWorkspa
 		&i.CreatedByAgentID,
 		&i.CreatedByMemberID,
 		&i.CreatedAt,
+		&i.ScopeType,
+		&i.ScopeID,
 	)
 	return i, err
 }
 
 const listBriefs = `-- name: ListBriefs :many
-SELECT id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at FROM brief
+SELECT id, workspace_id, kind, period_start, period_end, title, body, proposal_ids, created_by_agent_id, created_by_member_id, created_at, scope_type, scope_id FROM brief
 WHERE workspace_id = $1
+  AND scope_type = 'company'
   AND ($2::text IS NULL OR kind = $2::text)
 ORDER BY created_at DESC, id DESC
 LIMIT $3::int
@@ -118,7 +123,9 @@ type ListBriefsParams struct {
 	RowLimit    int32       `json:"row_limit"`
 }
 
-// Newest first. kind is an optional filter.
+// Newest first. kind is an optional filter. Only company briefs: a floor's
+// brief is read through ListFloorBriefsForFloor, so the boss's list is not
+// crowded by floor reports (spec 4.8).
 func (q *Queries) ListBriefs(ctx context.Context, arg ListBriefsParams) ([]Brief, error) {
 	rows, err := q.db.Query(ctx, listBriefs, arg.WorkspaceID, arg.Kind, arg.RowLimit)
 	if err != nil {
@@ -140,6 +147,8 @@ func (q *Queries) ListBriefs(ctx context.Context, arg ListBriefsParams) ([]Brief
 			&i.CreatedByAgentID,
 			&i.CreatedByMemberID,
 			&i.CreatedAt,
+			&i.ScopeType,
+			&i.ScopeID,
 		); err != nil {
 			return nil, err
 		}

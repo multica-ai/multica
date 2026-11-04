@@ -227,6 +227,33 @@ func (q *Queries) GetInitiativeArtifact(ctx context.Context, arg GetInitiativeAr
 	return i, err
 }
 
+const getInitiativeBudgetRequestAmount = `-- name: GetInitiativeBudgetRequestAmount :one
+SELECT kl.amount_micros FROM initiative_artifact ia
+JOIN knowledge_link kl ON kl.id = ia.knowledge_link_id AND kl.workspace_id = ia.workspace_id
+WHERE ia.workspace_id = $1::uuid
+  AND ia.initiative_id = $2::uuid
+  AND ia.stage_key = $3::text
+  AND ia.kind = 'budget_request'
+  AND kl.amount_micros IS NOT NULL
+ORDER BY kl.created_at DESC
+LIMIT 1
+`
+
+type GetInitiativeBudgetRequestAmountParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	InitiativeID pgtype.UUID `json:"initiative_id"`
+	StageKey     string      `json:"stage_key"`
+}
+
+// The amount of the initiative's budget_request document at a stage, when the
+// document states one (spec 4.2). The newest linked document wins.
+func (q *Queries) GetInitiativeBudgetRequestAmount(ctx context.Context, arg GetInitiativeBudgetRequestAmountParams) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, getInitiativeBudgetRequestAmount, arg.WorkspaceID, arg.InitiativeID, arg.StageKey)
+	var amount_micros pgtype.Int8
+	err := row.Scan(&amount_micros)
+	return amount_micros, err
+}
+
 const getInitiativeInWorkspace = `-- name: GetInitiativeInWorkspace :one
 SELECT id, workspace_id, pipeline_id, seq, title, thesis, stage_key, owner_squad_id, status, issue_id, build_project_id, source_proposal_id, sponsor_user_id, gate_days, stage_entered_at, shelved_at, operating_since, closed_at, closed_reason, created_at FROM initiative
 WHERE id = $1::uuid AND workspace_id = $2::uuid
@@ -411,7 +438,7 @@ func (q *Queries) ListActiveInitiatives(ctx context.Context, rowLimit int32) ([]
 }
 
 const listGateProposalsForInitiative = `-- name: ListGateProposalsForInitiative :many
-SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, p.kind, p.payload, p.decided_by_policy_id, p.estimated_cost_micros, p.reversed_at, p.reversal_note, p.tags, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.workspace_id = $1::uuid
@@ -463,6 +490,11 @@ func (q *Queries) ListGateProposalsForInitiative(ctx context.Context, arg ListGa
 			&i.Proposal.SnoozedUntil,
 			&i.Proposal.Kind,
 			&i.Proposal.Payload,
+			&i.Proposal.DecidedByPolicyID,
+			&i.Proposal.EstimatedCostMicros,
+			&i.Proposal.ReversedAt,
+			&i.Proposal.ReversalNote,
+			&i.Proposal.Tags,
 			&i.IssueTitle,
 			&i.IssueNumber,
 			&i.IssueStatus,

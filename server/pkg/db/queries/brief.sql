@@ -13,9 +13,12 @@ INSERT INTO brief (
 SELECT * FROM brief WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListBriefs :many
--- Newest first. kind is an optional filter.
+-- Newest first. kind is an optional filter. Only company briefs: a floor's
+-- brief is read through ListFloorBriefsForFloor, so the boss's list is not
+-- crowded by floor reports (spec 4.8).
 SELECT * FROM brief
 WHERE workspace_id = sqlc.arg('workspace_id')
+  AND scope_type = 'company'
   AND (sqlc.narg('kind')::text IS NULL OR kind = sqlc.narg('kind')::text)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('row_limit')::int;

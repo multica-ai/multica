@@ -64,6 +64,61 @@ func (q *Queries) DigestAgentsWithFailedRuns(ctx context.Context, arg DigestAgen
 	return items, nil
 }
 
+const digestAutoPublished = `-- name: DigestAutoPublished :many
+SELECT g.subject_id AS link_id, COALESCE(l.title, '')::text AS title, g.details, g.created_at,
+       count(*) OVER ()::int AS total_count
+FROM governance_event g
+LEFT JOIN knowledge_link l ON l.id = g.subject_id AND l.workspace_id = g.workspace_id
+WHERE g.workspace_id = $1::uuid
+  AND g.kind = 'auto_publish'
+  AND g.created_at >= $2::timestamptz
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT $3::int
+`
+
+type DigestAutoPublishedParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	RowLimit    int32              `json:"row_limit"`
+}
+
+type DigestAutoPublishedRow struct {
+	LinkID     pgtype.UUID        `json:"link_id"`
+	Title      string             `json:"title"`
+	Details    []byte             `json:"details"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	TotalCount int32              `json:"total_count"`
+}
+
+// Automatic publishes (governance auto_publish entries) at or after @since,
+// newest first (spec 3.3). The title comes from the document's link; a link
+// since removed reads as an empty title. total_count repeats on each row.
+func (q *Queries) DigestAutoPublished(ctx context.Context, arg DigestAutoPublishedParams) ([]DigestAutoPublishedRow, error) {
+	rows, err := q.db.Query(ctx, digestAutoPublished, arg.WorkspaceID, arg.Since, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DigestAutoPublishedRow{}
+	for rows.Next() {
+		var i DigestAutoPublishedRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.Title,
+			&i.Details,
+			&i.CreatedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const digestCharterActivity = `-- name: DigestCharterActivity :many
 SELECT c.squad_id,
     GREATEST(
@@ -109,6 +164,95 @@ func (q *Queries) DigestCharterActivity(ctx context.Context, workspaceID pgtype.
 		return nil, err
 	}
 	return items, nil
+}
+
+const digestFloorAgentsWithFailedRuns = `-- name: DigestFloorAgentsWithFailedRuns :many
+SELECT a.id, a.name, count(*)::int AS failed_runs,
+       count(*) OVER ()::int AS total_count
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = $1::uuid
+  AND t.squad_id = ANY($2::uuid[])
+  AND t.status = 'failed'
+  AND t.completed_at >= $3::timestamptz
+GROUP BY a.id, a.name
+ORDER BY count(*) DESC, a.name, a.id
+LIMIT $4::int
+`
+
+type DigestFloorAgentsWithFailedRunsParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SquadIds    []pgtype.UUID      `json:"squad_ids"`
+	Since       pgtype.Timestamptz `json:"since"`
+	RowLimit    int32              `json:"row_limit"`
+}
+
+type DigestFloorAgentsWithFailedRunsRow struct {
+	ID         pgtype.UUID `json:"id"`
+	Name       string      `json:"name"`
+	FailedRuns int32       `json:"failed_runs"`
+	TotalCount int32       `json:"total_count"`
+}
+
+// The agents with failed runs for the floor's squads since @since, worst first.
+// total_count repeats on each row.
+func (q *Queries) DigestFloorAgentsWithFailedRuns(ctx context.Context, arg DigestFloorAgentsWithFailedRunsParams) ([]DigestFloorAgentsWithFailedRunsRow, error) {
+	rows, err := q.db.Query(ctx, digestFloorAgentsWithFailedRuns,
+		arg.WorkspaceID,
+		arg.SquadIds,
+		arg.Since,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DigestFloorAgentsWithFailedRunsRow{}
+	for rows.Next() {
+		var i DigestFloorAgentsWithFailedRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.FailedRuns,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const digestFloorRuns = `-- name: DigestFloorRuns :one
+SELECT
+    count(*)::int AS runs,
+    count(*) FILTER (WHERE t.status = 'failed')::int AS failed_runs
+FROM agent_task_queue t
+WHERE t.squad_id = ANY($1::uuid[])
+  AND t.status IN ('completed', 'failed')
+  AND t.completed_at >= $2::timestamptz
+`
+
+type DigestFloorRunsParams struct {
+	SquadIds []pgtype.UUID      `json:"squad_ids"`
+	Since    pgtype.Timestamptz `json:"since"`
+}
+
+type DigestFloorRunsRow struct {
+	Runs       int32 `json:"runs"`
+	FailedRuns int32 `json:"failed_runs"`
+}
+
+// A floor digest's runs: the runs of the floor's squads that finished since @since.
+// Runs are attributed to a squad by agent_task_queue.squad_id.
+func (q *Queries) DigestFloorRuns(ctx context.Context, arg DigestFloorRunsParams) (DigestFloorRunsRow, error) {
+	row := q.db.QueryRow(ctx, digestFloorRuns, arg.SquadIds, arg.Since)
+	var i DigestFloorRunsRow
+	err := row.Scan(&i.Runs, &i.FailedRuns)
+	return i, err
 }
 
 const digestKnowledgePendingDrafts = `-- name: DigestKnowledgePendingDrafts :one
