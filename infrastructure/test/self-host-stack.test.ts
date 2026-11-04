@@ -219,6 +219,17 @@ describe('bootstrap', () => {
     expect(script).toContain('chmod 0600 "${APP_DIR}/.env"');
   });
 
+  it('takes the mail sender from Parameter Store alongside the key', () => {
+    // Resend rejects a From address on a domain the account has not verified,
+    // so the backend default of noreply@multica.ai sends nothing from a
+    // self-hosted deployment and leaves no code in the log either.
+    const script = userData(synth().template);
+    expect(script).toContain('read_param resend-api-key');
+    expect(script).toContain('read_param resend-from-email');
+    expect(script).toContain('RESEND_FROM_EMAIL=${resend_from_email}');
+    expect(script).toContain('onboarding@resend.dev');
+  });
+
   it('ships container stdout to CloudWatch, not just the bootstrap log', () => {
     // With no mail provider the backend prints the sign-in code to stdout.
     // Nothing else carries it off the instance, and the security group opens

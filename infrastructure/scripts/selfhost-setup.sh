@@ -41,6 +41,17 @@ case "${reply}" in
     if [ -n "${resend_key}" ]; then
       aws ssm put-parameter --region "${region}" --name "${PARAM_PREFIX}/resend-api-key" \
         --type SecureString --value "${resend_key}" --overwrite >/dev/null
+
+      # Resend rejects a From address on an unverified domain, so the
+      # backend's noreply@multica.ai default would send nothing at all.
+      echo "  From address. Must be on a domain verified at resend.com/domains."
+      echo "  Blank uses onboarding@resend.dev, which Resend delivers only to"
+      echo "  the address your Resend account was opened with."
+      read -rp "  From address (blank for onboarding@resend.dev): " resend_from
+      if [ -n "${resend_from}" ]; then
+        aws ssm put-parameter --region "${region}" --name "${PARAM_PREFIX}/resend-from-email" \
+          --type String --value "${resend_from}" --overwrite >/dev/null
+      fi
       echo "  stored"
     fi
     ;;

@@ -266,7 +266,7 @@ what a human supplies lives in Parameter Store.** The JWT secret and the
 database password are never read or typed by anyone, so the stack generates
 them — a first deploy needs nothing created by hand, and neither value passes
 through a shell history on its way in. The only human-supplied value is the
-optional `resend-api-key` parameter. The database password is retained when
+optional `resend-api-key` and `resend-from-email` parameters. The database password is retained when
 the stack is deleted, alongside the volume it opens.
 
 The allowlist argument is required. Port 443 is open to the internet, so
@@ -281,8 +281,18 @@ minutes. The stack's `Url` output is where to go.
 Multica authenticates with emailed verification codes.
 
 - With a Resend API key stored by `selfhost-setup.sh`, codes are emailed.
-- Without one, the backend prints each code to its own log:
+- Without one, the backend prints each code to its own log, which reaches
+  CloudWatch with the rest of the container output:
   `./scripts/selfhost-apply.sh --code`.
+
+Email needs a sender as well as a key. Resend refuses any From address on a
+domain the account has not verified, and the backend's default is
+`noreply@multica.ai` — a domain a self-hosted deployment does not own, so the
+key on its own sends nothing. Set `resend-from-email` to an address on a
+domain verified at resend.com/domains. Left unset, the bootstrap falls back to
+`onboarding@resend.dev`, which needs no domain setup but which Resend delivers
+only to the address the Resend account was opened with: enough to sign in as
+the owner, not enough to invite anyone.
 
 The guide's `MULTICA_DEV_VERIFICATION_CODE` shortcut is deliberately never set
 here — a fixed code on an internet-facing host means anyone who knows an email

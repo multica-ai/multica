@@ -129,13 +129,37 @@ jwt_secret="$(read_secret "${JWT_SECRET_ID}")"
 postgres_password="$(read_secret "${DB_PASSWORD_ID}")"
 
 # Email is genuinely optional: without it the backend prints each login code to
-# its own log, which scripts/selfhost-login-code.sh reads. get-parameters (not
+# its own log, which scripts/selfhost-apply.sh --code reads. get-parameters (not
 # get-parameter) reports a missing name instead of failing the call.
-resend_api_key="$(aws ssm get-parameters --region "${REGION}" \
-  --names "${PARAM_PREFIX}/resend-api-key" --with-decryption \
-  --query 'Parameters[0].Value' --output text)"
-if [ "${resend_api_key}" = "None" ]; then
-  resend_api_key=""
+read_param() {
+  value="$(aws ssm get-parameters --region "${REGION}" \
+    --names "${PARAM_PREFIX}/$1" --with-decryption \
+    --query 'Parameters[0].Value' --output text)"
+  if [ "${value}" = "None" ]; then
+    value=""
+  fi
+  printf '%s' "${value}"
+}
+
+resend_api_key="$(read_param resend-api-key)"
+resend_from_email="$(read_param resend-from-email)"
+
+# Resend refuses any From address on a domain the account has not verified,
+# and the backend's own default is noreply@multica.ai — a domain a self-hoster
+# does not own, so the key alone would send nothing and leave no code in the
+# log either. onboarding@resend.dev needs no domain setup, but Resend delivers
+# it only to the address the account was opened with: enough to sign in as the
+# owner, not enough to invite anyone.
+if [ -n "${resend_api_key}" ]; then
+  if [ -z "${resend_from_email}" ]; then
+    resend_from_email="onboarding@resend.dev"
+    log "No resend-from-email parameter; sending as ${resend_from_email}, which"
+    log "Resend delivers only to the address its account was opened with."
+    log "Verify a domain and set ${PARAM_PREFIX}/resend-from-email to invite others."
+  else
+    log "Sending login codes as ${resend_from_email}"
+  fi
+else
   log "No resend-api-key parameter; login codes will go to the backend log"
 fi
 
@@ -175,6 +199,7 @@ ALLOW_SIGNUP=true
 ALLOWED_EMAILS=${ALLOWED_EMAILS}
 DO_NOT_TRACK=${DO_NOT_TRACK_VALUE}
 RESEND_API_KEY=${resend_api_key}
+RESEND_FROM_EMAIL=${resend_from_email}
 ENVFILE
 chmod 0600 "${APP_DIR}/.env"
 umask 022
