@@ -56,7 +56,12 @@ func (c *httpAPIClient) ListNativeHistoryPage(ctx context.Context, creds Install
 	// Evict rejected tokens for the next independent read, without replaying
 	// this request or changing permission-refusal handling.
 	if decodeErr == nil && envelope.Code != nil && isTokenError(*envelope.Code) {
-		c.invalidateToken(creds.AppID)
+		// A delayed rejection must not evict another request's refreshed token.
+		c.mu.Lock()
+		if cached := c.tokens[creds.AppID]; cached != nil && cached.value == token {
+			delete(c.tokens, creds.AppID)
+		}
+		c.mu.Unlock()
 	}
 	// Only documented access refusals on successful/business-error responses
 	// establish unavailability. Unknown codes and 5xx remain read failures.

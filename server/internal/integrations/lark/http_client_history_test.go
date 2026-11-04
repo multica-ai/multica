@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -157,5 +159,67 @@ func TestNativeHistoryPermissionRefusalKeepsToken(t *testing.T) {
 	}
 	if calls != 2 || fake.tokenN.Load() != 1 {
 		t.Fatalf("permission refusal retried or invalidated valid token: calls=%d tokens=%d", calls, fake.tokenN.Load())
+	}
+}
+
+func TestNativeHistoryDelayedRejectionPreservesRefreshedToken(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("fresh", 7200)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	var calls atomic.Int32
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") == "Bearer stale" {
+			close(started)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"code": 99991663})
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer fresh" {
+			t.Error("unexpected authentication context")
+		}
+		writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []any{}}})
+	})
+	c := newTestClient(fake, time.Now)
+	creds := testCreds()
+	params := ListMessagesParams{ChatID: "oc_chat"}
+	c.tokens[creds.AppID] = &cachedToken{value: "stale", expiresAt: time.Now().Add(time.Hour)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := c.ListNativeHistoryPage(ctx, creds, params, ""); done <- err }()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("old request did not start")
+	}
+	// Another caller refreshes while the first request is still in flight.
+	c.InvalidateTokenCache(creds.AppID)
+	if _, err := c.ListNativeHistoryPage(ctx, creds, params, ""); err != nil {
+		t.Fatalf("refreshing read: %v", err)
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("old request unexpectedly succeeded")
+		}
+	case <-ctx.Done():
+		t.Fatal("old request did not complete")
+	}
+	if _, err := c.ListNativeHistoryPage(ctx, creds, params, ""); err != nil {
+		t.Fatalf("later read: %v", err)
+	}
+	if calls.Load() != 3 || fake.tokenN.Load() != 1 {
+		t.Fatalf("late rejection evicted fresh token: list=%d token=%d", calls.Load(), fake.tokenN.Load())
 	}
 }
