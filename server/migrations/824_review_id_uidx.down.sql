@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS review_id_uidx;

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS scorecard_id_uidx;

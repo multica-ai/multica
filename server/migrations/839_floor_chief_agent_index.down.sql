@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS floor_chief_agent_idx;

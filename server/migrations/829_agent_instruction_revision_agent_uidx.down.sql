@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_instruction_revision_agent_uidx;
