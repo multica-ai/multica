@@ -106,13 +106,13 @@ describe("ViewsSection", () => {
     expect(screen.getByRole("button", { name: "Views" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("opens again to name a new view inline", () => {
+  it("opens again to show a new view, named in the page header", () => {
     useSidebarTreeStore.setState({ viewsCollapsed: true });
     renderSection();
 
     fireEvent.click(screen.getByRole("button", { name: "New view" }));
     expect(useSidebarTreeStore.getState().viewsCollapsed).toBe(false);
-    expect(actions.create).toHaveBeenCalledWith(expect.objectContaining({ renameIn: "sidebar" }));
+    expect(actions.create).toHaveBeenCalledWith(expect.objectContaining({ renameIn: "header" }));
   });
 
   it("lets every view expand, built-in or saved, whatever its filters", () => {

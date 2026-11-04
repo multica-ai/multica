@@ -94,6 +94,10 @@ func deploymentLocale() Locale {
 	return DefaultLocale
 }
 
+// DeploymentLocale exposes the room/default notice language to bridges that
+// append their own system copy to a reply before it reaches this adapter.
+func DeploymentLocale() Locale { return deploymentLocale() }
+
 // resolveLocale maps a user's profile language onto a supported Locale. The
 // profile validates to en / zh-Hans / ko / ja (handler/auth.go), and there are
 // two packs: Chinese for zh*, English for everyone who chose anything else —

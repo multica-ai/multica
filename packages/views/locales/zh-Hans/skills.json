@@ -20,21 +20,12 @@
         "description": "你创建的 skill"
       }
     },
-    "empty": {
-      "title": "还没有 skill",
-      "description": "skill 是智能体可复用的做事方法。创建一个，或从运行时导入。"
-    },
     "no_matches": {
       "title": "无匹配",
       "with_query": "没有 skill 匹配 \"{{query}}\"{{filterSuffix}}。",
       "with_query_filter_suffix": "（在当前筛选下）",
       "filter_only": "当前筛选下没有匹配的 skill。",
       "try_different": " 换个关键词试试。"
-    },
-    "intro_banner": {
-      "title": "在工作区内共享。",
-      "body": "任何成员都可以创建 skill、从 URL 或本地文件夹导入、或从本地运行时复制——之后所有智能体都能用它。",
-      "highlight": "本地运行时里的 skill 在你复制过来之前是私有的。"
     },
     "list_error": {
       "title": "无法加载 skill",
@@ -135,6 +126,8 @@
     },
     "toast_saved": "已保存 skill",
     "toast_save_failed": "保存 skill 失败",
+    "toast_saved_version": "已保存为 v{{version}}",
+    "toast_view_history": "查看历史",
     "toast_deleted": "已删除 skill",
     "toast_delete_failed": "删除 skill 失败",
     "refresh": {
@@ -201,20 +194,51 @@
       "mode_edit": "编辑",
       "mode_raw": "纯文本"
     },
+    "versions": {
+      "list_aria": "skill 版本",
+      "version_label": "v{{version}}",
+      "current": "当前",
+      "unknown_author": "未知",
+      "empty": "还没有版本。这个 skill 下次被修改时，会先把当前内容记录为第一个版本。",
+      "load_failed": "版本加载失败。",
+      "restore": "恢复",
+      "toast_restored": "已恢复 v{{version}}",
+      "toast_restore_failed": "版本恢复失败",
+      "source": {
+        "baseline": "早期内容",
+        "create": "创建",
+        "update": "编辑",
+        "import": "导入",
+        "refresh": "从来源更新",
+        "restore": "恢复自 v{{version}}"
+      },
+      "dialog": {
+        "title": "恢复到 v{{version}}？",
+        "description": "v{{version}} 的内容会成为一个新版本，智能体从下一次运行起使用它。更新的版本仍保留在历史里。",
+        "unsaved_warning": "未保存的修改会被丢弃。",
+        "cancel": "取消",
+        "confirm": "恢复",
+        "restoring": "恢复中..."
+      }
+    },
     "sections": {
       "content": "内容",
       "files": "文件",
       "edit": "编辑",
       "open": "打开",
-      "add": "添加"
+      "add": "添加",
+      "history": "历史"
     },
     "menu": {
       "copy_link": "复制链接",
       "link_copied": "已复制链接",
-      "delete": "删除 skill"
+      "delete": "删除 skill",
+      "version_history": "版本历史"
     },
     "panel": {
-      "add_description": "添加描述"
+      "add_description": "添加描述",
+      "version": "版本",
+      "no_versions": "暂无版本"
     }
   },
   "create": {
@@ -356,5 +380,34 @@
     "markdown_placeholder": "输入 Markdown 内容...",
     "raw_placeholder": "文件内容...",
     "raw_aria": "{{path}} 的纯文本内容"
+  },
+  "intro": {
+    "title": "把团队的做事方法写成 skill",
+    "description": "Skill 是一份可复用的做事说明（SKILL.md）。在工作区里添加一次，分配给哪个智能体，它就会照着做。",
+    "slides": {
+      "methods": {
+        "title": "四种方式添加",
+        "description": "从空白的 SKILL.md 写起，或从本地文件夹、URL、运行时导入已有的 skill。"
+      },
+      "assign": {
+        "title": "分配给智能体",
+        "description": "一个 skill 可以给多个智能体用。改一处，所有用到它的智能体都会更新。"
+      },
+      "share": {
+        "title": "在工作区内共享",
+        "description": "本地运行时里的 skill 在你复制过来之前是私有的，复制后所有智能体都能用。"
+      }
+    },
+    "art": {
+      "skill_summary": "先跑测试，再看可访问性和性能。",
+      "add_to_agent": "分配给智能体",
+      "local_skills": "本地 skill",
+      "private": "私有",
+      "workspace_shared": "工作区",
+      "all_agents": "所有智能体可用",
+      "role_reviewer": "审查者",
+      "role_fullstack": "全栈",
+      "copy_to_workspace": "复制到工作区"
+    }
   }
 }

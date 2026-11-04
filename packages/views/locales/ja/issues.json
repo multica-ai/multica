@@ -38,10 +38,17 @@
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"
   },
+  "unread_filter_error": {
+    "title": "未読のタスクを読み込めませんでした"
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "ステータスを読み込むまでタスクを表示できません。",
     "retry": "再試行"
+  },
+  "relation_filter_error": {
+    "title": "「自分との関係」フィルターを読み込めませんでした",
+    "hint": "「自分が購読中」または「自分のエージェントが担当」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
   },
   "source_context": {
     "create_action": "このコメントからサブタスクを作成",
@@ -179,8 +186,11 @@
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
     "relation_my_agents": "自分のエージェントが担当",
+    "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
+    "section_read_state": "既読状態",
+    "read_state_unread": "未読",
     "operator_label": "条件",
     "operator_is": "一致",
     "operator_is_not": "除外",
@@ -533,7 +543,6 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
-    "restore_to_inbox_tooltip": "インボックスに戻す",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "quick_jump_label": "クイックナビゲーション",
@@ -759,6 +768,7 @@
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
+    "unread_title": "未読のタスクはありません",
     "clear_button": "フィルターを解除"
   },
   "agent_live": {
@@ -930,6 +940,7 @@
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
+    "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",
     "mark_unread": "未読にする",
     "copy_link": "リンクをコピー",
@@ -1726,7 +1737,8 @@
     "builtin": {
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク"
+      "all_issues": "すべてのタスク",
+      "unread": "未読"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",
@@ -1758,6 +1770,9 @@
     "save_as_new": "新しいビューとして保存",
     "save_as_new_hint": "「{{name}}」は変更されません",
     "save_as_view": "ビューとして保存",
+    "save_view": "ビューを保存",
+    "add_filter": "フィルターを追加",
+    "setup_hint": "このビューにはまだ条件がないため、すべてのタスクを表示しています",
     "set_by_view": "このビューで設定",
     "new_issue": "新規タスク",
     "unavailable": "このビューは利用できなくなりました",

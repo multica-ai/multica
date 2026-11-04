@@ -46,8 +46,6 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
-  MarkIssueInboxReadResultSchema,
-  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -81,32 +79,17 @@ import {
 import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
 
-describe("MarkIssueInboxReadResultSchema", () => {
-  const endpoint = { endpoint: "POST /api/inbox/issues/:id/read" };
-
-  it("keeps the server's count", () => {
-    expect(
-      parseWithFallback({ count: 3 }, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
-    ).toEqual({ count: 3 });
-  });
-
-  it("reports an unknown count for a malformed reply", () => {
-    for (const raw of [null, "<html>", { count: "3" }, {}]) {
-      expect(
-        parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
-      ).toEqual({ count: null });
-    }
-  });
-});
-
 describe("IssueUnreadPageSchema", () => {
   const endpoint = "GET /api/issues/unread";
 
-  it("defaults a missing agent_id and next_cursor to null", () => {
+  it("defaults missing run fields and next_cursor to null", () => {
     const parsed = parseWithFallback(
       {
         items: [
-          { issue_id: "i-1", outcome: "completed", agent_id: "a-1", created_at: "2026-01-01T00:00:00Z" },
+          {
+            issue_id: "i-1", outcome: "completed", agent_id: "a-1", task_id: "t-1", comment_id: "c-1",
+            created_at: "2026-01-01T00:00:00Z",
+          },
           { issue_id: "i-2", outcome: "manual", created_at: "2026-01-01T00:00:00Z", extra: true },
         ],
       },
@@ -114,9 +97,9 @@ describe("IssueUnreadPageSchema", () => {
       EMPTY_ISSUE_UNREAD_PAGE,
       { endpoint },
     );
-    expect(parsed.items.map((u) => [u.issue_id, u.agent_id])).toEqual([
-      ["i-1", "a-1"],
-      ["i-2", null],
+    expect(parsed.items.map((u) => [u.issue_id, u.agent_id, u.task_id, u.comment_id])).toEqual([
+      ["i-1", "a-1", "t-1", "c-1"],
+      ["i-2", null, null, null],
     ]);
     expect(parsed.next_cursor).toBeNull();
   });
@@ -1099,6 +1082,35 @@ describe("UserSchema timezone drift", () => {
       { endpoint: "GET /api/me" },
     );
     expect(parsed).toBe(EMPTY_USER);
+  });
+});
+
+describe("UserSchema whats_new_seen_version drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("leaves the field undefined when an older server omits it", () => {
+    const parsed = UserSchema.parse(base);
+    expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+
+  it("keeps null and string values distinct from absence", () => {
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: null }).whats_new_seen_version).toBe(null);
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: "0.7.2" }).whats_new_seen_version).toBe("0.7.2");
+  });
+
+  it("degrades a wrong-type value to undefined without discarding the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, whats_new_seen_version: 7 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.email).toBe("ada@example.com");
+    expect(parsed.whats_new_seen_version).toBeUndefined();
   });
 });
 

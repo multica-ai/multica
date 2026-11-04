@@ -13,6 +13,7 @@ const skillRef = vi.hoisted(() => ({ current: null as unknown }));
 const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const canEditRef = vi.hoisted(() => ({ current: true }));
+const versionsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const copyTextMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -28,6 +29,15 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: (wsId: string) => ({
     queryKey: ["members", wsId],
     queryFn: () => Promise.resolve(membersRef.current),
+  }),
+  skillVersionsOptions: (wsId: string, id: string) => ({
+    queryKey: ["skill-versions", wsId, id],
+    queryFn: () => Promise.resolve(versionsRef.current),
+  }),
+  skillVersionDetailOptions: (wsId: string, id: string, version: number | null) => ({
+    queryKey: ["skill-version", wsId, id, version],
+    queryFn: () => Promise.resolve(null),
+    enabled: false,
   }),
   selectSkillAssignments: () => new Map(),
   workspaceKeys: {
@@ -111,6 +121,7 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
 }));
 
 import { SkillDetailPage } from "./skill-detail-page";
+import { api } from "@multica/core/api";
 
 const LONG_DESCRIPTION =
   "Animation for product interfaces — when to animate and when not to. " +
@@ -191,6 +202,7 @@ beforeEach(() => {
     { user_id: "user-1", role: "member", name: "Ada Lovelace", avatar_url: null },
   ];
   canEditRef.current = true;
+  versionsRef.current = [];
 });
 
 describe("SkillDetailPage header", () => {
@@ -208,7 +220,7 @@ describe("SkillDetailPage header", () => {
     expect(screen.getByTestId("add-to-agent-dialog")).toBeInTheDocument();
   });
 
-  it("keeps copy link, update from source and delete in the ⋯ menu", async () => {
+  it("keeps copy link, version history, update from source and delete in the ⋯ menu", async () => {
     skillRef.current = {
       ...baseSkill,
       config: { origin: { type: "github", source_url: SOURCE_URL } },
@@ -217,7 +229,7 @@ describe("SkillDetailPage header", () => {
     const menu = await openMoreActions();
     expect(
       within(menu).getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["Copy link", "Update from source", "Delete skill"]);
+    ).toEqual(["Copy link", "Version history", "Update from source", "Delete skill"]);
   });
 
   it("copies the skill's shareable link", async () => {
@@ -241,7 +253,7 @@ describe("SkillDetailPage header", () => {
     const menu = await openMoreActions();
     expect(
       within(menu).getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["Copy link"]);
+    ).toEqual(["Copy link", "Version history"]);
   });
 });
 
@@ -340,6 +352,134 @@ describe("SkillDetailPage files view", () => {
     expect(
       await screen.findByRole("heading", { name: "Content", level: 2 }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("SkillDetailPage versions view", () => {
+  it("opens version history from the ⋯ menu", async () => {
+    const { push } = renderPage();
+    const menu = await openMoreActions();
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Version history" }));
+
+    expect(push).toHaveBeenCalledWith("/acme/skills/skill-1?view=versions");
+    expect(
+      await screen.findByText(/next change to this skill/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Content", level: 2 })).toBeNull();
+  });
+
+  it("restores the versions view from ?view=versions, with the skill as a breadcrumb link", async () => {
+    renderPage(new URLSearchParams("view=versions"));
+    expect(await screen.findByText(/next change to this skill/)).toBeInTheDocument();
+    const header = screen.getByRole("banner");
+    expect(
+      within(header).getByRole("link", { name: "aiforui-animations" }),
+    ).toHaveAttribute("href", "/acme/skills/skill-1");
+    expect(within(header).getByText("Version history")).toBeInTheDocument();
+  });
+});
+
+function versionSummary(version: number, source = "update") {
+  return {
+    id: `version-${version}`,
+    skill_id: "skill-1",
+    version,
+    name: "aiforui-animations",
+    source,
+    restored_from_version: null,
+    created_by: "user-1",
+    created_at: "2026-07-28T18:14:40Z",
+  };
+}
+
+describe("SkillDetailPage version entry points", () => {
+  it("shows the current version in the panel and beside SKILL.md", async () => {
+    versionsRef.current = [versionSummary(3), versionSummary(2), versionSummary(1, "create")];
+    renderPage();
+    expect(
+      await screen.findByRole("button", { name: "Version history: v3" }),
+    ).toBeInTheDocument();
+    expect(within(section("Content")).getByTestId("skill-version-chip")).toHaveTextContent("v3");
+  });
+
+  it("says a skill without history has no versions yet, and shows no chip", async () => {
+    renderPage();
+    expect(
+      await screen.findByRole("button", { name: "Version history: No versions yet" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("skill-version-chip")).toBeNull();
+  });
+
+  it("opens the history from the panel's Version and Updated rows", async () => {
+    versionsRef.current = [versionSummary(1, "create")];
+    const { push } = renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Version history: v1" }));
+    expect(push).toHaveBeenLastCalledWith("/acme/skills/skill-1?view=versions");
+    expect(await screen.findByText("Version history", { selector: "span" })).toBeInTheDocument();
+
+    push.mockClear();
+    const rows = screen.getAllByRole("button", { name: /^Version history: / });
+    expect(rows).toHaveLength(2);
+    await userEvent.click(rows[1]!);
+    expect(push).toHaveBeenLastCalledWith("/acme/skills/skill-1?view=versions");
+  });
+
+  it("offers Content › History to read-only viewers too", async () => {
+    canEditRef.current = false;
+    const { push } = renderPage();
+    await screen.findByRole("heading", { name: "Content", level: 2 });
+    await userEvent.click(within(section("Content")).getByRole("button", { name: "History" }));
+    expect(push).toHaveBeenCalledWith("/acme/skills/skill-1?view=versions");
+  });
+
+  it("names the version a save became, with a link to the history", async () => {
+    versionsRef.current = [versionSummary(1, "create")];
+    vi.mocked(api.updateSkill).mockImplementationOnce(async () => {
+      versionsRef.current = [versionSummary(2), versionSummary(1, "create")];
+      return { ...baseSkill, name: "renamed-skill", updated_at: "2026-07-29T10:00:00Z" };
+    });
+    const { push } = renderPage();
+    await screen.findByRole("button", { name: "Version history: v1" });
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "renamed-skill" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Saved as v2",
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "View history" }),
+        }),
+      ),
+    );
+    const options = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as {
+      action: { onClick: () => void };
+    };
+    options.action.onClick();
+    expect(push).toHaveBeenLastCalledWith("/acme/skills/skill-1?view=versions");
+  });
+
+  it("does not claim a new version when the save recorded none", async () => {
+    versionsRef.current = [versionSummary(2), versionSummary(1, "create")];
+    vi.mocked(api.updateSkill).mockImplementationOnce(async () => ({
+      ...baseSkill,
+      updated_at: "2026-07-29T10:00:00Z",
+    }));
+    renderPage();
+    await screen.findByRole("button", { name: "Version history: v2" });
+    fireEvent.change(await openDescription(), { target: { value: "changed" } });
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Skill saved",
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "View history" }),
+        }),
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalledWith(expect.stringMatching(/^Saved as/), expect.anything());
   });
 });
 

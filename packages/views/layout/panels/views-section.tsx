@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "zustand";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -24,13 +24,17 @@ import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
   builtinSidebarSource,
+  viewSidebarNeedsUnread,
   viewSidebarRequest,
   viewSidebarSource,
   type SidebarIssuesRequest,
 } from "@multica/core/issues/sidebar-list";
 import { todayDateOnly } from "@multica/core/issues/date";
+import { useIssueUnreadIds } from "@multica/core/issues/unread";
+import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import {
   myIssuesRelationFromScope,
@@ -46,9 +50,11 @@ import { issueViewSeedDefinition } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
 import { builtinViewItemId, type BuiltinViewKey, type SidebarViewItem } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
+import { UNREAD_VIEW, UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
+import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -94,6 +100,19 @@ export function ViewsSection({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setViewsCollapsed);
+  // The Unread view is not part of the starred order: it follows All issues,
+  // or closes the list when All issues is not starred.
+  const allIssuesIndex = items.findIndex((item) => item.id === builtinViewItemId("all_issues"));
+  const unreadAfter = allIssuesIndex === -1 ? items.length - 1 : allIssuesIndex;
+  const unreadRow = (
+    <UnreadViewRow
+      key={UNREAD_VIEW_ID}
+      wsId={wsId}
+      pathname={pathname}
+      plainRowsLit={plainRowsLit}
+      activeIssueId={activeIssueId}
+    />
+  );
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
@@ -118,13 +137,14 @@ export function ViewsSection({
           size="icon-xs"
           className="text-muted-foreground"
           onClick={() => {
-            // The new view is named inline in this list, so it has to be open.
+            // The new view lands in this list, so it has to be open. It is
+            // named in the page header, next to where its filters are set.
             setCollapsed(false);
             actions.create({
               scope: WORKSPACE_SCOPE,
               scopeVariant: null,
               definition: issueViewSeedDefinition({ query: {}, display: {} }),
-              renameIn: "sidebar",
+              renameIn: "header",
             });
           }}
         >
@@ -135,7 +155,8 @@ export function ViewsSection({
       <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
         <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
-            {items.map((item) => (
+            {unreadAfter === -1 && unreadRow}
+            {items.map((item, index) => [
               <SortableViewRow key={item.id} id={item.id}>
                 {(drag) =>
                   item.kind === "builtin" ? (
@@ -162,8 +183,9 @@ export function ViewsSection({
                     />
                   )
                 }
-              </SortableViewRow>
-            ))}
+              </SortableViewRow>,
+              index === unreadAfter && unreadRow,
+            ])}
           </PanelList>
         </SortableContext>
       </DndContext>
@@ -319,9 +341,10 @@ function BuiltinViewRow({
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const statusCatalog = useIssueStatuses(wsId);
   const { issueSettings } = useSidebarProjectPrefs(wsId);
-  const request = statusCatalog.isLoaded
-    ? builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses)
-    : undefined;
+  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
+  const request = catalogDependency.unresolved
+    ? undefined
+    : builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses);
   const prefetch = usePrefetch(wsId, source, request);
 
   return (
@@ -367,6 +390,8 @@ function BuiltinViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={catalogDependency.error}
+          onRetry={catalogDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
@@ -375,6 +400,98 @@ function BuiltinViewRow({
         />
       )}
     </>
+  );
+}
+
+/** The Unread row's key in the kept-rows store, apart from its issue list's. */
+const UNREAD_ROW_KEPT = "unread-row";
+
+/**
+ * Whether the open issue was unread when it opened. Opening it marks it
+ * read, so the unread list alone cannot tell; the kept-rows store remembers
+ * it across panel remounts until the issue is no longer the page.
+ */
+function useOpenedUnread(activeIssueId: string | null, unreadIds: readonly string[] | undefined): boolean {
+  const index = activeIssueId && unreadIds ? unreadIds.indexOf(activeIssueId) : -1;
+  const held = useSidebarKeptStore((s) => s.held[UNREAD_ROW_KEPT]);
+  useLayoutEffect(() => {
+    if (activeIssueId && index !== -1) useSidebarKeptStore.getState().hold(UNREAD_ROW_KEPT, activeIssueId, index);
+  }, [activeIssueId, index]);
+  return !!activeIssueId && (index !== -1 || held?.id === activeIssueId);
+}
+
+/**
+ * The built-in Unread view. It shows only while the viewer has unread
+ * issues, and stays while its page is open, or while an issue that was
+ * unread when it opened is open, so reading the last one does not pull the
+ * row (and that issue's place under it) out from under the reader.
+ */
+function UnreadViewRow({
+  wsId,
+  pathname,
+  plainRowsLit,
+  activeIssueId,
+}: {
+  wsId: string;
+  pathname: string;
+  plainRowsLit: boolean;
+  activeIssueId: string | null;
+}) {
+  const { t } = useT("layout");
+  const p = useWorkspacePaths();
+  const listId = useId();
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const target = issueViewTarget(wsId, UNREAD_VIEW, p);
+  const open = useActiveIssueViewStore(
+    (s) => pathname === target.path && s.active[target.containerKey] === UNREAD_VIEW_ID,
+  );
+  const setActive = useActiveIssueViewStore((s) => s.setActive);
+  const source = viewSidebarSource(UNREAD_VIEW_ID);
+  const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
+  const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
+  const unread = useIssueUnreadIds(wsId);
+  const unreadDependency = filterDependencyState(true, [unread]);
+  const count = unread.data?.length ?? 0;
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.data);
+  const prefetch = usePrefetch(wsId, source, request);
+  const readingUnread = useOpenedUnread(activeIssueId, unread.data);
+
+  if (count === 0 && !open && !readingUnread) return null;
+  const label = t(($) => $.panels.work.unread);
+  return (
+    <li>
+      <TreeRow
+        ref={linkRef}
+        href={target.href}
+        label={label}
+        icon={<UnreadViewIcon />}
+        active={plainRowsLit && open}
+        expanded={expanded}
+        onExpandedChange={(next) => setExpanded(source, next)}
+        listId={listId}
+        toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
+        onPrefetch={prefetch}
+        onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
+        trailing={<PanelCount value={count} className="font-medium text-brand" />}
+      />
+      {expanded && (
+        <SidebarIssueList
+          id={listId}
+          wsId={wsId}
+          source={source}
+          params={request}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
+          activeIssueId={activeIssueId}
+          onCollapse={() => {
+            setExpanded(source, false);
+            linkRef.current?.focus();
+          }}
+        />
+      )}
+    </li>
   );
 }
 
@@ -416,7 +533,12 @@ function SavedViewRow({
   const source = viewSidebarSource(view.id);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
-  const request = viewSidebarRequest(view, todayDateOnly());
+  const needsUnread = viewSidebarNeedsUnread(view);
+  const unread = useIssueUnreadIds(wsId, needsUnread);
+  const unreadDependency = filterDependencyState(needsUnread, [unread]);
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(view, todayDateOnly(), unread.data);
   const prefetch = usePrefetch(wsId, source, request);
   const canManage = actions.canManage(view);
 
@@ -496,6 +618,8 @@ function SavedViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
