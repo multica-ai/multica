@@ -37,7 +37,7 @@ describe("GlmQuotaCard", () => {
   it("shows the reset as a time in the viewer's timezone", async () => {
     renderWithI18n(
       <GlmQuotaCard
-        data={status([{ type: "TOKENS_LIMIT", used_percent: 30, resets_at: NOW_SEC + 2 * 3600 }])}
+        data={status([{ type: "TOKENS_LIMIT", window_minutes: 300, used_percent: 30, resets_at: NOW_SEC + 2 * 3600 }])}
         now={NOW}
       />,
     );
@@ -50,7 +50,7 @@ describe("GlmQuotaCard", () => {
   it("counts a window past its reset as refilled", async () => {
     renderWithI18n(
       <GlmQuotaCard
-        data={status([{ type: "TOKENS_LIMIT", used_percent: 95, usage: 100, remaining: 5, current_value: 95, resets_at: NOW_SEC - 60 }])}
+        data={status([{ type: "TOKENS_LIMIT", window_minutes: 300, used_percent: 95, usage: 100, remaining: 5, current_value: 95, resets_at: NOW_SEC - 60 }])}
         now={NOW}
       />,
     );
@@ -63,7 +63,7 @@ describe("GlmQuotaCard", () => {
   it("leaves out a reset time past the Date range", async () => {
     renderWithI18n(
       <GlmQuotaCard
-        data={status([{ type: "TOKENS_LIMIT", used_percent: 30, resets_at: 9_000_000_000_000 }])}
+        data={status([{ type: "TOKENS_LIMIT", window_minutes: 300, used_percent: 30, resets_at: 9_000_000_000_000 }])}
         now={NOW}
       />,
     );
@@ -83,4 +83,51 @@ describe("GlmQuotaCard", () => {
     expect(screen.getByText(`采集中断 · 最后更新 ${at(NOW_SEC - 3601, "zh-Hans")}`)).toBeInTheDocument();
     expect(chip("剩 84%")).toHaveClass("bg-muted");
   });
+});
+
+// OL-1205: two TOKENS_LIMIT windows (5h + weekly) must render distinct
+// labels — before the fix both hardcoded to "5-hour tokens".
+it("labels two TOKENS_LIMIT windows by their real period", () => {
+  renderWithI18n(
+    <GlmQuotaCard
+      data={status([
+        { type: "TOKENS_LIMIT", window_minutes: 300, used_percent: 30, resets_at: NOW_SEC + 3600 },
+        { type: "TOKENS_LIMIT", window_minutes: 10080, used_percent: 60, resets_at: NOW_SEC + 86400 },
+        { type: "TIME_LIMIT", used_percent: 16, resets_at: NOW_SEC + 10 * 86400 },
+      ])}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByText("5-hour tokens")).toBeInTheDocument();
+  expect(screen.getByText("Weekly tokens")).toBeInTheDocument();
+  expect(screen.getByText("Monthly tool credits")).toBeInTheDocument();
+  expect(screen.getAllByText("5-hour tokens")).toHaveLength(1);
+});
+
+// A window without a recognizable period falls back to the generic type
+// label instead of guessing "5-hour".
+it("labels an unlabeled TOKENS_LIMIT window generically", () => {
+  renderWithI18n(
+    <GlmQuotaCard
+      data={status([{ type: "TOKENS_LIMIT", used_percent: 40, resets_at: NOW_SEC + 3600 }])}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByText("Token window")).toBeInTheDocument();
+  expect(screen.queryByText("5-hour tokens")).not.toBeInTheDocument();
+});
+
+// Credit pools get the same period split.
+it("labels 5h and weekly CREDIT_LIMIT windows distinctly", () => {
+  renderWithI18n(
+    <GlmQuotaCard
+      data={status([
+        { type: "CREDIT_LIMIT", window_minutes: 300, usage: 100, remaining: 80 },
+        { type: "CREDIT_LIMIT", window_minutes: 10080, usage: 500, remaining: 400 },
+      ])}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByText("5-hour credits")).toBeInTheDocument();
+  expect(screen.getByText("Weekly credits")).toBeInTheDocument();
 });

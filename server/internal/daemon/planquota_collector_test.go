@@ -190,3 +190,61 @@ func TestHeartbeatExtrasFor_ClearMarkerReStamped(t *testing.T) {
 		t.Fatal("real snapshot left a clear marker behind")
 	}
 }
+
+// OL-1205 scenario 1: a task-reported snapshot must fan out to every
+// same-source runtime (same provider + profile_id) this daemon hosts across
+// all workspaces, so each workspace's row updates on its own heartbeat.
+func TestRecordTaskPlanQuota_FansOutToSameSourceRuntimes(t *testing.T) {
+	d := newQuotaLoopTestDaemon()
+	d.mu.Lock()
+	d.workspaces = map[string]*workspaceState{
+		"ws-a": {runtimeIDs: []string{"rt-claude-a"}},
+		"ws-b": {runtimeIDs: []string{"rt-claude-b", "rt-claude-other-profile"}},
+		"ws-c": {runtimeIDs: []string{"rt-codex", "rt-claude-c"}},
+	}
+	d.runtimeIndex = map[string]Runtime{
+		"rt-claude-a":             {ID: "rt-claude-a", Provider: "claude"},
+		"rt-claude-b":             {ID: "rt-claude-b", Provider: "claude"},
+		"rt-claude-c":             {ID: "rt-claude-c", Provider: "claude"},
+		"rt-claude-other-profile": {ID: "rt-claude-other-profile", Provider: "claude", ProfileID: "prof-1"},
+		"rt-codex":                {ID: "rt-codex", Provider: "codex"},
+	}
+	d.mu.Unlock()
+
+	quota := &protocol.RuntimePlanQuota{
+		Provider:   "claude",
+		Status:     protocol.PlanQuotaStatusOK,
+		ObservedAt: time.Now().Unix(),
+		Source:     protocol.PlanQuotaSourceDaemon,
+		Windows:    []protocol.RuntimePlanQuotaWindow{{Name: "5h"}},
+	}
+	d.recordTaskPlanQuota("rt-claude-b", quota)
+
+	for _, id := range []string{"rt-claude-a", "rt-claude-b", "rt-claude-c"} {
+		if _, ok := d.planQuotaCache.Load(id); !ok {
+			t.Errorf("same-source runtime %s did not receive the snapshot", id)
+		}
+	}
+	if _, ok := d.planQuotaCache.Load("rt-claude-other-profile"); ok {
+		t.Error("claude runtime with a different profile_id received the snapshot")
+	}
+	if _, ok := d.planQuotaCache.Load("rt-codex"); ok {
+		t.Error("codex runtime received a claude snapshot")
+	}
+}
+
+// The reporting runtime itself must be covered even when it no longer sits in
+// any workspace's runtime list (e.g. pruned mid-report).
+func TestRecordTaskPlanQuota_UnindexedReportingRuntimeStillCached(t *testing.T) {
+	d := newQuotaLoopTestDaemon()
+	quota := &protocol.RuntimePlanQuota{
+		Provider:   "claude",
+		Status:     protocol.PlanQuotaStatusOK,
+		ObservedAt: time.Now().Unix(),
+		Source:     protocol.PlanQuotaSourceDaemon,
+	}
+	d.recordTaskPlanQuota("rt-unknown", quota)
+	if _, ok := d.planQuotaCache.Load("rt-unknown"); !ok {
+		t.Fatal("reporting runtime without an index entry did not get the snapshot")
+	}
+}

@@ -34,7 +34,11 @@
   },
   "glm_title": "Solde du forfait GLM",
   "glm_window_tokens": "Jetons sur 5 heures",
+  "glm_window_tokens_weekly": "Jetons hebdomadaires",
+  "glm_window_tokens_generic": "Fenêtre de jetons",
   "glm_window_time": "Crédits d'outils mensuels",
-  "glm_window_credit": "Fenêtre de crédits",
+  "glm_window_credit": "Crédits sur 5 heures",
+  "glm_window_credit_weekly": "Crédits hebdomadaires",
+  "glm_window_credit_generic": "Fenêtre de crédits",
   "glm_window_fallback": "{{type}}"
 }

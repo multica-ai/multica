@@ -34,7 +34,11 @@
   },
   "glm_title": "GLM 플랜 잔여량",
   "glm_window_tokens": "5시간 토큰",
+  "glm_window_tokens_weekly": "주간 토큰",
+  "glm_window_tokens_generic": "토큰 윈도우",
   "glm_window_time": "월간 도구 크레딧",
-  "glm_window_credit": "크레딧 윈도우",
+  "glm_window_credit": "5시간 크레딧",
+  "glm_window_credit_weekly": "주간 크레딧",
+  "glm_window_credit_generic": "크레딧 윈도우",
   "glm_window_fallback": "{{type}}"
 }

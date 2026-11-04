@@ -28,8 +28,12 @@ import (
 //     usage=allowance, currentValue=used, remaining, percentage=used%,
 //     usageDetails per tool) and TOKENS_LIMIT (the 5-hour token window:
 //     percentage only).
-//   - Newer plans: CREDIT_LIMIT windows (5h + weekly credit pools).
-// All three are passed through as typed windows; the frontend labels them.
+//   - Newer plans: several TOKENS_LIMIT and/or CREDIT_LIMIT windows side by
+//     side (5-hour + weekly pools); the type alone no longer identifies the
+//     period. Each limit carries unit/number (3=hours, 5=months, 6=weeks);
+//     they are converted to window_minutes so the frontend can label each
+//     window by its real period.
+// All are passed through as typed windows; the frontend labels them.
 //
 // Every failure is fail-soft: a failed round keeps the previous snapshot
 // (the UI ages it out) and records last_error for the status endpoint.
@@ -47,12 +51,16 @@ const (
 // GlmQuotaWindow is one quota pool from the provider response. Pointer
 // fields keep "not reported" distinct from a real zero.
 type GlmQuotaWindow struct {
-	Type         string   `json:"type"`
-	UsedPercent  *float64 `json:"used_percent,omitempty"`
-	Usage        *float64 `json:"usage,omitempty"`
-	CurrentValue *float64 `json:"current_value,omitempty"`
-	Remaining    *float64 `json:"remaining,omitempty"`
-	ResetsAt     *int64   `json:"resets_at,omitempty"`
+	Type string `json:"type"`
+	// WindowMinutes is the window's period in minutes derived from the
+	// provider's unit/number pair (5h=300, weekly=10080); 0 when the pair
+	// is absent or unrecognized — callers fall back to the type label.
+	WindowMinutes int      `json:"window_minutes,omitempty"`
+	UsedPercent   *float64 `json:"used_percent,omitempty"`
+	Usage         *float64 `json:"usage,omitempty"`
+	CurrentValue  *float64 `json:"current_value,omitempty"`
+	Remaining     *float64 `json:"remaining,omitempty"`
+	ResetsAt      *int64   `json:"resets_at,omitempty"`
 }
 
 // GlmQuotaSnapshot is one successful poll result.
@@ -97,6 +105,41 @@ type glmQuotaRaw struct {
 	} `json:"data"`
 }
 
+// glmQuotaUnit* are the provider's time-unit codes in limits[].unit. The
+// period is unit × number, EXCEPT weeks: plans disagree on what number means
+// (1 or 7 have both been observed for the same weekly window), so a week is
+// classified by unit alone and pinned to 10080 minutes (OL-1205).
+const (
+	glmQuotaUnitHours  = 3.0
+	glmQuotaUnitMonths = 5.0
+	glmQuotaUnitWeeks  = 6.0
+)
+
+// glmQuotaWindowMinutes converts a limit's unit/number pair into the window's
+// period in minutes: unit=3 hours×number (5h window → 300), unit=6 → a fixed
+// week (10080), unit=5 → a month-like window with no fixed minute count. 0
+// means "no recognizable period" — the frontend falls back to the type label
+// instead of mislabeling the window.
+func glmQuotaWindowMinutes(unit, number *float64) int {
+	if unit == nil || *unit <= 0 {
+		return 0
+	}
+	switch *unit {
+	case glmQuotaUnitWeeks:
+		return 7 * 24 * 60
+	case glmQuotaUnitHours:
+		if number == nil || *number <= 0 {
+			return 0
+		}
+		return int(*number * 60)
+	case glmQuotaUnitMonths:
+		// TIME_LIMIT monthly pools: labeled by type, not by duration.
+		return 0
+	default:
+		return 0
+	}
+}
+
 // parseGlmQuotaBody converts one provider response body into a snapshot.
 // observedAt is injected so tests can pin time.
 func parseGlmQuotaBody(body []byte, observedAt time.Time) (*GlmQuotaSnapshot, error) {
@@ -113,6 +156,7 @@ func parseGlmQuotaBody(body []byte, observedAt time.Time) (*GlmQuotaSnapshot, er
 	for _, lim := range raw.Data.Limits {
 		w := GlmQuotaWindow{
 			Type:         lim.Type,
+			WindowMinutes: glmQuotaWindowMinutes(lim.Unit, lim.Number),
 			UsedPercent:  lim.Percentage,
 			Usage:        lim.Usage,
 			CurrentValue: lim.CurrentValue,

@@ -67,6 +67,19 @@ export function glmWorstFirst(
   );
 }
 
+// The window's period class derived from window_minutes (the provider's
+// unit/number converted server-side). Null when the provider sent no
+// recognizable period — such a window must fall back to the generic type
+// label, never to a specific one (two TOKENS_LIMIT windows can only be told
+// apart by it, OL-1205).
+export function glmWindowPeriod(
+  w: GlmQuotaWindow,
+): "five_hour" | "weekly" | null {
+  if (w.window_minutes === 300) return "five_hour";
+  if (w.window_minutes === 10080) return "weekly";
+  return null;
+}
+
 export function GlmQuotaCard({
   data,
   now,
@@ -110,13 +123,22 @@ export function GlmQuotaCard({
           const passed = glmWindowResetPassed(w, nowSec);
           const remaining = glmWindowRemainingPercent(w, nowSec);
           const tone = quotaTone(remaining);
+          const period = glmWindowPeriod(w);
           const label =
             w.type === "TOKENS_LIMIT"
-              ? t(($) => $.glm_window_tokens)
+              ? period === "weekly"
+                ? t(($) => $.glm_window_tokens_weekly)
+                : period === "five_hour"
+                  ? t(($) => $.glm_window_tokens)
+                  : t(($) => $.glm_window_tokens_generic)
               : w.type === "TIME_LIMIT"
                 ? t(($) => $.glm_window_time)
                 : w.type === "CREDIT_LIMIT"
-                  ? t(($) => $.glm_window_credit)
+                  ? period === "weekly"
+                    ? t(($) => $.glm_window_credit_weekly)
+                    : period === "five_hour"
+                      ? t(($) => $.glm_window_credit)
+                      : t(($) => $.glm_window_credit_generic)
                   : t(($) => $.glm_window_fallback, { type: w.type });
           const resetTime = w.resets_at != null ? formatTime(w.resets_at, now) : null;
           const reset =

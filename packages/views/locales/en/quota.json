@@ -34,7 +34,11 @@
   },
   "glm_title": "GLM plan balance",
   "glm_window_tokens": "5-hour tokens",
+  "glm_window_tokens_weekly": "Weekly tokens",
+  "glm_window_tokens_generic": "Token window",
   "glm_window_time": "Monthly tool credits",
-  "glm_window_credit": "Credit window",
+  "glm_window_credit": "5-hour credits",
+  "glm_window_credit_weekly": "Weekly credits",
+  "glm_window_credit_generic": "Credit window",
   "glm_window_fallback": "{{type}}"
 }

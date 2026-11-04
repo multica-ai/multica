@@ -34,7 +34,11 @@
   },
   "glm_title": "GLM プラン残量",
   "glm_window_tokens": "5時間トークン",
+  "glm_window_tokens_weekly": "週間トークン",
+  "glm_window_tokens_generic": "トークン枠",
   "glm_window_time": "月間ツールクレジット",
-  "glm_window_credit": "クレジット枠",
+  "glm_window_credit": "5時間クレジット",
+  "glm_window_credit_weekly": "週間クレジット",
+  "glm_window_credit_generic": "クレジット枠",
   "glm_window_fallback": "{{type}}"
 }

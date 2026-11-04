@@ -166,3 +166,53 @@ func TestGlmQuotaStatusJSONShape(t *testing.T) {
 		t.Fatalf("disabled payload = %s", b)
 	}
 }
+
+// Newer plans return several TOKENS_LIMIT/CREDIT_LIMIT windows whose real
+// period is only in unit/number (OL-1205): 3+5 → 5h, 6 → weekly regardless
+// of number (plans disagree: 1 and 7 both mean one week), 5 → monthly with
+// no minute count. The type must never imply the period.
+func TestParseGlmQuotaWindowPeriods(t *testing.T) {
+	body := `{"code":200,"success":true,"data":{"limits":[` +
+		`{"type":"TIME_LIMIT","unit":5,"number":1,"percentage":16,"nextResetTime":1790845772998},` +
+		`{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":1,"nextResetTime":1788808596818},` +
+		`{"type":"TOKENS_LIMIT","unit":6,"number":7,"percentage":18,"nextResetTime":1790000000000},` +
+		`{"type":"CREDIT_LIMIT","unit":6,"number":1,"percentage":40,"nextResetTime":1790100000000},` +
+		`{"type":"CREDIT_LIMIT","percentage":25}` +
+		`],"level":"max"}}`
+	snap, err := parseGlmQuotaBody([]byte(body), time.Unix(1, 0))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []int{0, 300, 10080, 10080, 0}
+	if len(snap.Windows) != len(want) {
+		t.Fatalf("windows = %d, want %d", len(snap.Windows), len(want))
+	}
+	for i, w := range snap.Windows {
+		if w.WindowMinutes != want[i] {
+			t.Errorf("window %d (%s unit-period) = %d minutes, want %d", i, w.Type, w.WindowMinutes, want[i])
+		}
+	}
+}
+
+func TestGlmQuotaWindowMinutes(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name         string
+		unit, number *float64
+		want         int
+	}{
+		{"nil unit", nil, f(5), 0},
+		{"hours x number", f(3), f(5), 300},
+		{"hours without number", f(3), nil, 0},
+		{"week number=7", f(6), f(7), 10080},
+		{"week number=1", f(6), f(1), 10080},
+		{"week without number", f(6), nil, 10080},
+		{"month", f(5), f(1), 0},
+		{"unknown unit", f(9), f(2), 0},
+	}
+	for _, c := range cases {
+		if got := glmQuotaWindowMinutes(c.unit, c.number); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}

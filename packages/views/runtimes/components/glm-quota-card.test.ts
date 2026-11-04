@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { GlmQuotaWindow } from "@multica/core/api";
 import {
+  glmWindowPeriod,
   glmWindowRemainingPercent,
   glmWindowResetPassed,
   glmWorstFirst,
@@ -49,5 +50,20 @@ describe("glmWorstFirst", () => {
       { type: "TIME_LIMIT", used_percent: 40, resets_at: NOW_SEC + 86400 },
     ];
     expect(glmWorstFirst(windows, NOW_SEC).map((w) => w.type)).toEqual(["TIME_LIMIT", "TOKENS_LIMIT"]);
+  });
+});
+
+describe("glmWindowPeriod", () => {
+  it("classifies 5h and weekly windows by window_minutes", () => {
+    expect(glmWindowPeriod({ type: "TOKENS_LIMIT", window_minutes: 300 })).toBe("five_hour");
+    expect(glmWindowPeriod({ type: "CREDIT_LIMIT", window_minutes: 10080 })).toBe("weekly");
+  });
+  it("returns null for unlabeled, monthly or odd periods", () => {
+    expect(glmWindowPeriod({ type: "TOKENS_LIMIT" })).toBeNull();
+    expect(glmWindowPeriod({ type: "TOKENS_LIMIT", window_minutes: 0 })).toBeNull();
+    // TIME_LIMIT monthly pools carry no minute count server-side.
+    expect(glmWindowPeriod({ type: "TIME_LIMIT" })).toBeNull();
+    // A non-5h hourly window must not be mislabeled as the 5h window.
+    expect(glmWindowPeriod({ type: "TOKENS_LIMIT", window_minutes: 60 })).toBeNull();
   });
 });

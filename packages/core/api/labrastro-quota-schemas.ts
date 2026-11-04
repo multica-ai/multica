@@ -4,8 +4,12 @@ import type { AgentRuntime } from "../types";
 // Account-level GLM (Zhipu) Coding Plan quota snapshot from the server-side
 // collector. Windows mirror the provider's limit entries (TOKENS_LIMIT 5h
 // token window, TIME_LIMIT monthly tool credits, CREDIT_LIMIT pools).
+// window_minutes is the window's real period (300 = 5h, 10080 = weekly)
+// derived from the provider's unit/number; absent on windows the provider
+// did not label — several windows of one type differ only by it.
 export const GlmQuotaWindowSchema = z.object({
   type: z.string(),
+  window_minutes: z.number().optional(),
   used_percent: z.number().optional(),
   usage: z.number().optional(),
   current_value: z.number().optional(),

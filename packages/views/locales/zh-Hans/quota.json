@@ -34,7 +34,11 @@
   },
   "glm_title": "GLM 套餐余量",
   "glm_window_tokens": "5 小时 token",
+  "glm_window_tokens_weekly": "周 token",
+  "glm_window_tokens_generic": "token 窗口",
   "glm_window_time": "月度工具积分",
-  "glm_window_credit": "积分窗",
+  "glm_window_credit": "5 小时积分",
+  "glm_window_credit_weekly": "周积分",
+  "glm_window_credit_generic": "积分窗",
   "glm_window_fallback": "{{type}}"
 }
