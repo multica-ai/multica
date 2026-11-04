@@ -4789,11 +4789,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
-					// Match the CLI's --content / --description behavior: agents that
-					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
-					// decoded into real newlines before the comment hits the DB. See
-					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
+					// An agent that emitted its whole answer as one escaped blob gets
+					// its literal `\n` decoded; formatted output is stored verbatim.
+					// See util.DecodeEscapedAgentOutput for the exact contract.
+					body := util.DecodeEscapedAgentOutput(payload.Output)
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),
@@ -4885,9 +4884,9 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// valid JSON; an empty Output is the only case this branch cares about.
 	var payload protocol.TaskCompletedPayload
 	_ = json.Unmarshal(result, &payload)
-	// Same unescape as the issue-comment path: literal `\n` from agent stdout
-	// becomes a real newline so the chat panel renders paragraph breaks.
-	body := util.UnescapeBackslashEscapes(payload.Output)
+	// Same decoding as the issue-comment path: an escaped blob gets its
+	// paragraph breaks back, while LaTeX and paths in formatted replies survive.
+	body := util.DecodeEscapedAgentOutput(payload.Output)
 	// Strip any in-band quick-actions footer from EVERY chat completion — the
 	// reserved syntax must never reach a stored transcript. This includes the
 	// agent-initiated intro turn (chat_input_task_id NULL), which previously
@@ -6740,9 +6739,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		// Exhaustion deliberately does not @mention the coordinator agent: doing
 		// so would enqueue a fourth recovery run and defeat the attempt bound.
 		// Instead, create one durable action-required inbox item for the human
-		// who originated (or is accountable for) the delegated work, routed by
-		// their agent-failure preference like every other task_failed. The
-		// system comment above explains the outcome either way.
+		// who originated (or is accountable for) the delegated work.
 		_, recipient := delegatedFailureRecoveryAttribution(target)
 		if recipient.Valid {
 			_, err = qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
@@ -6754,22 +6751,6 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			}
 			if err != nil {
 				return fmt.Errorf("validate delegated failure exhaustion recipient: %w", err)
-			}
-
-			var prefs map[string]string
-			pref, err := qtx.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
-				WorkspaceID: target.issue.WorkspaceID,
-				UserID:      recipient,
-			})
-			if err == nil {
-				_ = json.Unmarshal(pref.Preferences, &prefs)
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("load delegated failure exhaustion recipient preferences: %w", err)
-			}
-			actorType := pgtype.Text{String: "system", Valid: true}
-			section, routed := inbox.Route(prefs, "task_failed")
-			if !routed {
-				return nil
 			}
 
 			details, err := json.Marshal(map[string]any{
@@ -6791,10 +6772,9 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				IssueID:       target.issue.ID,
 				Title:         target.issue.Title,
 				Body:          pgtype.Text{String: exhaustedComment.Content, Valid: true},
-				ActorType:     actorType,
+				ActorType:     pgtype.Text{String: "system", Valid: true},
 				ActorID:       pgtype.UUID{},
 				Details:       details,
-				Section:       inbox.SectionText(section),
 			})
 			if err != nil {
 				return fmt.Errorf("create delegated failure exhaustion inbox item: %w", err)
@@ -6831,7 +6811,6 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"recipient_id":   util.UUIDToString(exhaustedInbox.RecipientID),
 				"type":           exhaustedInbox.Type,
 				"severity":       exhaustedInbox.Severity,
-				"section":        inbox.ItemSection(exhaustedInbox.Section, exhaustedInbox.Type),
 				"issue_id":       util.UUIDToPtr(exhaustedInbox.IssueID),
 				"title":          exhaustedInbox.Title,
 				"body":           util.TextToPtr(exhaustedInbox.Body),
@@ -8131,9 +8110,9 @@ func quickCreateFailureDetail(result []byte) string {
 	if err := json.Unmarshal(result, &payload); err != nil {
 		return ""
 	}
-	// Same unescape as the comment-fallback path: literal `\n` sequences from
-	// agent stdout become real newlines before the reason reaches the user.
-	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	// Same decoding as the comment-fallback path: an escaped blob's literal
+	// `\n` sequences become real newlines before the reason reaches the user.
+	body := strings.TrimSpace(util.DecodeEscapedAgentOutput(payload.Output))
 	if body == "" {
 		return ""
 	}
@@ -8378,7 +8357,6 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
-		"section":        inbox.ItemSection(item.Section, item.Type),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

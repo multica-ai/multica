@@ -205,4 +205,15 @@ describe("SkillsPage header", () => {
     await user.click(within(menu).getByRole("menuitem", { name: "Import from URL" }));
     expect(screen.getByTestId("create-dialog")).toHaveTextContent("url");
   });
+
+  it("introduces skills when there are none and adds the first one from the intro", async () => {
+    const user = userEvent.setup();
+    mocks.skills = [];
+    renderPage();
+
+    const intro = screen.getByRole("region", { name: "Turn how your team works into skills" });
+    await user.click(within(intro).getByRole("button", { name: "New skill" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Create manually" }));
+    expect(screen.getByTestId("create-dialog")).toHaveTextContent("manual");
+  });
 });

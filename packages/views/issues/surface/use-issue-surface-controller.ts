@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
@@ -20,9 +20,11 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
 import { statusFilterColumns, visibleStatusKeys } from "@multica/core/issues";
 import { dateOnlyToLocalDate, todayDateOnly } from "@multica/core/issues/date";
+import { useIssueUnreadIds } from "@multica/core/issues/unread";
 import {
   advancedFilterToTableQuery,
   advancedFilterUsesField,
+  advancedFilterUsesValue,
   FILTER_DIMENSION_TABLE_FIELD,
   statusColumnFilter,
   propertyIdOfField,
@@ -51,6 +53,7 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
 import { useShallow } from "zustand/react/shallow";
 import type { IssueFilters, IssueRelationContext } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -151,6 +154,13 @@ export interface IssueSurfaceController {
   /** First-load failure while the working filter needs issue membership. */
   isWorkingFilterError: boolean;
   retryWorkingFilter: () => void;
+  isUnreadFilterError: boolean;
+  retryUnreadFilter: () => void;
+  /** The viewer's subscriptions or agents behind a "subscribed" /
+   *  "my_agents" relation failed to load on a surface that filters by them
+   *  itself. */
+  isRelationFilterError: boolean;
+  retryRelationFilter: () => void;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -259,6 +269,7 @@ export function useIssueSurfaceController({
   const negatedFilters = useViewStore(useShallow(effectiveNegatedFilters));
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const unreadFilter = useViewStore((s) => s.unreadFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -317,19 +328,47 @@ export function useIssueSurfaceController({
     dueDateFilters.length > 0 || advancedFilterUsesField(advancedFilter, "dueDate");
   const today = usesDueDates ? todayDateOnly() : undefined;
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: agents } = useQuery({
+  // Each relation value reads only its own dependency, so a slow or failed
+  // agent list never switches off "subscribed" (and vice versa).
+  const usesMyAgents =
+    relationFilters.includes("my_agents") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "my_agents");
+  const usesSubscribed =
+    relationFilters.includes("subscribed") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
+  const agentsQuery = useQuery({
     ...agentListOptions(wsId),
-    enabled: relationFilters.length > 0 || advancedFilterUsesField(advancedFilter, "relation"),
+    enabled: usesMyAgents,
   });
+  const agents = agentsQuery.data;
+  const subscribedIssueIdsQuery = useQuery({
+    ...subscribedIssueIdsOptions(wsId),
+    enabled: usesSubscribed,
+  });
+  const subscribedIssueIds = subscribedIssueIdsQuery.data;
+  const agentsUnresolved = usesMyAgents && agents === undefined;
+  const subscribedIdsUnresolved = usesSubscribed && subscribedIssueIds === undefined;
+  const relationDepsError =
+    (agentsUnresolved && agentsQuery.isError) ||
+    (subscribedIdsUnresolved && subscribedIssueIdsQuery.isError);
+  const relationDepsPending =
+    !relationDepsError && (agentsUnresolved || subscribedIdsUnresolved);
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
-    if (!userId || !agents) return undefined;
+    if (!userId) return undefined;
     return {
       userId,
-      myAgentIds: new Set(
-        agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
-      ),
+      ...(usesMyAgents && agents
+        ? {
+            myAgentIds: new Set(
+              agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
+            ),
+          }
+        : {}),
+      ...(usesSubscribed && subscribedIssueIds
+        ? { subscribedIssueIds: new Set(subscribedIssueIds) }
+        : {}),
     };
-  }, [agents, userId]);
+  }, [agents, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -498,7 +537,8 @@ export function useIssueSurfaceController({
     advancedFilter !== null ||
     Object.keys(effectivePropertyFilters).length > 0 ||
     dateFilter != null ||
-    agentRunningFilter === true;
+    agentRunningFilter === true ||
+    unreadFilter === true;
 
   const workingAgentMineRelation =
     scope.type === "my"
@@ -526,6 +566,25 @@ export function useIssueSurfaceController({
     }
     return issueIDs;
   }, [workspaceWorkingAgents]);
+
+  // The unread filter matches the viewer's unread list. An issue read while
+  // the filter is on stays in the set, so it keeps its place on screen (and
+  // the query keeps its identity) until the filter turns off or the surface
+  // unmounts; a newly unread issue grows the set and refetches.
+  const unreadProjection = useIssueUnreadIds(wsId, unreadFilter);
+  const unreadIssueList = unreadProjection.ids;
+  const unreadFilterUnresolved = unreadFilter && unreadIssueList === undefined;
+  const unreadFilterError = unreadFilterUnresolved && unreadProjection.isError;
+  const keptUnreadRef = useRef<Set<string>>(new Set());
+  const unreadIssueIDs = useMemo<ReadonlySet<string>>(() => {
+    if (!unreadFilter) {
+      keptUnreadRef.current = new Set();
+      return keptUnreadRef.current;
+    }
+    for (const issueID of unreadIssueList ?? EMPTY_LIST) keptUnreadRef.current.add(issueID);
+    return new Set(keptUnreadRef.current);
+  }, [unreadFilter, unreadIssueList]);
+  const membershipUnresolved = workingFilterUnresolved || unreadFilterUnresolved;
 
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -612,6 +671,9 @@ export function useIssueSurfaceController({
         ...(agentRunningFilter && !workingFilterUnresolved
           ? { working_issue_ids: [...workingIssueIDs] }
           : {}),
+        ...(unreadFilter && !unreadFilterUnresolved
+          ? { unread_issue_ids: [...unreadIssueIDs].sort() }
+          : {}),
         include_sub_issues: showSubIssues,
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
@@ -641,6 +703,9 @@ export function useIssueSurfaceController({
     sort.sort_direction,
     statusFilters,
     today,
+    unreadFilter,
+    unreadFilterUnresolved,
+    unreadIssueIDs,
     viewIncludeNoProject,
     viewProjectFilters,
     workingFilterUnresolved,
@@ -689,7 +754,7 @@ export function useIssueSurfaceController({
     // every custom-property facet made a Table mount issue up to 47 SQL
     // statements and repeatedly scan the issue table after invalidation.
     enabled:
-      !workingFilterUnresolved && (
+      !membershipUnresolved && (
         usesServerStatusSurface ||
         ((usesTable || usesServerGroupSurface) && activeTableFacet !== null)
       ),
@@ -754,7 +819,7 @@ export function useIssueSurfaceController({
     facets: tableFacetsQuery.data,
     facetsPending: tableFacetsQuery.isPending,
     facetsFetching: tableFacetsQuery.isFetching,
-    enabled: usesServerStatusSurface && !statusFilterUnresolved && !workingFilterUnresolved,
+    enabled: usesServerStatusSurface && !statusFilterUnresolved && !membershipUnresolved,
   });
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
     if (effectiveViewMode === "swimlane") {
@@ -800,7 +865,7 @@ export function useIssueSurfaceController({
     observeEmptyBranches:
       effectiveViewMode === "swimlane" ||
       (effectiveViewMode === "board" && activeGroupingProperty !== null),
-    enabled: usesServerGroupSurface && !statusFilterUnresolved && !workingFilterUnresolved,
+    enabled: usesServerGroupSurface && !statusFilterUnresolved && !membershipUnresolved,
   });
 
   // Selection is only meaningful within the current membership window: batch
@@ -830,6 +895,7 @@ export function useIssueSurfaceController({
         negatedFilters,
         effectivePropertyFilters,
         agentRunningFilter,
+        unreadFilter,
         showSubIssues,
         dateParams,
         debouncedActiveSearch,
@@ -837,6 +903,7 @@ export function useIssueSurfaceController({
     [
       advancedTableFilter,
       agentRunningFilter,
+      unreadFilter,
       assigneeFilters,
       creatorFilters,
       dateParams,
@@ -878,6 +945,7 @@ export function useIssueSurfaceController({
     assigneeFilters,
     includeNoAssignee,
     agentRunningFilter,
+    unreadFilter,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
@@ -885,12 +953,15 @@ export function useIssueSurfaceController({
     labelFilters,
     relationFilters,
     relationContext,
+    relationDepsPending,
+    relationDepsError,
     dueDateFilters,
     advancedFilter,
     today,
     negatedFilters,
     propertyFilters: effectivePropertyFilters,
     workingIssueIDs,
+    unreadIssueIDs,
     showSubIssues,
     loadProjects:
       // The client-side project-status predicate (Gantt / swimlane extras)
@@ -993,7 +1064,8 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
-    isLoading: data.isLoading || workingFilterPending,
+    isLoading:
+      data.isLoading || workingFilterPending || (unreadFilterUnresolved && !unreadFilterError),
     workingAgents,
     hasActiveFilters,
     statusPagination: usesServerStatusSurface
@@ -1007,7 +1079,7 @@ export function useIssueSurfaceController({
     // debounced value as well to avoid a brief empty-screen flash while a
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
-      !workingFilterUnresolved &&
+      !membershipUnresolved &&
       data.isEmpty &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
@@ -1021,6 +1093,15 @@ export function useIssueSurfaceController({
     isWorkingFilterError: workingFilterError,
     retryWorkingFilter: () => {
       void workingAgentsProjection.refetch();
+    },
+    isUnreadFilterError: unreadFilterError,
+    retryUnreadFilter: () => {
+      void unreadProjection.refetch();
+    },
+    isRelationFilterError: data.isRelationFilterError,
+    retryRelationFilter: () => {
+      if (agentsQuery.isError) void agentsQuery.refetch();
+      if (subscribedIssueIdsQuery.isError) void subscribedIssueIdsQuery.refetch();
     },
     sort,
     actions,
