@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -1642,7 +1643,7 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), int(DefaultMaxPreviewSizeBytes)+1)
+	big := bytes.Repeat([]byte("a"), int(attachmentpreview.DefaultMaxSizeBytes)+1)
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
@@ -1669,6 +1670,8 @@ func TestGetAttachmentContent_ConfiguredLimit(t *testing.T) {
 		{"underreported body", 1024, 1025, 1, http.StatusRequestEntityTooLarge},
 		{"oversized metadata", 1024, 1, 1025, http.StatusRequestEntityTooLarge},
 		{"maximum exact", 16 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum exact", 32 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum over", 32 << 20, (16 << 20) + 1, 1, http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &mockStorage{}

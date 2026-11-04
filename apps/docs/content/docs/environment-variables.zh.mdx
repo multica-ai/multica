@@ -125,7 +125,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 文本和 HTML 在线预览的正文大小上限，最大 `16MiB`。支持正整数字节数或 `KB`/`KiB`、`MB`/`MiB`（均按二进制单位计算）。非法值回退到默认值，修改后需重启 API；不改变上传或下载限制。 |
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 文本和 HTML 在线预览的正文大小上限，最大 `16MiB`。支持正整数字节数或 `KB`/`KiB`、`MB`/`MiB`（均按二进制单位计算）。超过 `16MiB` 的有效值截断为 `16MiB`，非法值回退到默认值。调大上限可能拖慢浏览器预览，尤其是语法高亮和 Markdown 渲染。修改后需重启 API；不改变上传或下载限制。 |
 
 ### S3 或兼容存储
 

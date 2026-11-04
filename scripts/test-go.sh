@@ -41,9 +41,6 @@ done
 cd "$REPO_ROOT/server"
 
 if [ "$only" != agent ]; then
-  # Startup configuration parsing must run even when the cmd/server package's
-  # integration TestMain cannot reach PostgreSQL. Explicit files omit TestMain.
-  go "${go_test_args[@]}" ./cmd/server/preview_size.go ./cmd/server/preview_size_test.go
   packages=$(go list ./...)
   regular_packages=()
   for package in $packages; do

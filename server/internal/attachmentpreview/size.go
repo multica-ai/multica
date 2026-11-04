@@ -1,29 +1,33 @@
-package main
+package attachmentpreview
 
 import (
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
-
-	"github.com/multica-ai/multica/server/internal/handler"
 )
 
-func configuredMaxPreviewSize(raw string) int64 {
-	size, err := parseMaxPreviewSize(raw)
+const (
+	DefaultMaxSizeBytes int64 = 2 << 20
+	// Text previews buffer the complete body and render it in the browser.
+	MaxSizeBytes int64 = 16 << 20
+)
+
+func ConfiguredMaxSizeBytes(raw string) int64 {
+	size, err := parseMaxSizeBytes(raw)
 	if err != nil {
 		slog.Warn("invalid MULTICA_MAX_PREVIEW_SIZE, using 2 MiB default", "error", err)
-		return handler.DefaultMaxPreviewSizeBytes
+		return DefaultMaxSizeBytes
 	}
 	return size
 }
 
-// parseMaxPreviewSize accepts positive integer bytes, KB/KiB, or MB/MiB.
+// parseMaxSizeBytes accepts positive integer bytes, KB/KiB, or MB/MiB.
 // KB and MB use binary units, matching the existing attachment size limits.
-func parseMaxPreviewSize(raw string) (int64, error) {
+func parseMaxSizeBytes(raw string) (int64, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return handler.DefaultMaxPreviewSizeBytes, nil
+		return DefaultMaxSizeBytes, nil
 	}
 	i := 0
 	for i < len(value) && value[i] >= '0' && value[i] <= '9' {
@@ -43,9 +47,16 @@ func parseMaxPreviewSize(raw string) (int64, error) {
 	default:
 		return 0, fmt.Errorf("preview size must use bytes, KB/KiB, or MB/MiB")
 	}
-	// Divide before multiplying to reject overflow as well as oversized values.
-	if n > handler.MaxConfigurablePreviewSizeBytes/multiplier {
-		return 0, fmt.Errorf("preview size must not exceed 16 MiB")
+	// Clamp before multiplying so even extreme valid values cannot overflow.
+	if n > MaxSizeBytes/multiplier {
+		return MaxSizeBytes, nil
 	}
 	return n * multiplier, nil
+}
+
+func EffectiveMaxSizeBytes(size int64) int64 {
+	if size <= 0 {
+		return DefaultMaxSizeBytes
+	}
+	return min(size, MaxSizeBytes)
 }
