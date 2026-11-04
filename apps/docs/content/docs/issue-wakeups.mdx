@@ -144,6 +144,8 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Check
 - **Endings**: the CLI does not add a deadline for you. Use `--expires-in 72h` or `--expires-at <RFC3339 time>`; `--on-timeout wake` makes an event rule wake the agent once more at the deadline. `--max-fires N` (1–1000) caps how many runs a repeating rule starts.
 - **Where results go**: `--parent <comment-id>` keeps the woken run's reply in the original thread.
 
+Agent-created wakeups are limited to 8 consecutive self-continuation links on the same issue, including fresh one-shot timers. The next creation is refused with a request to escalate to a human. A member-created wakeup or a run triggered by a member action resets the chain. Event rules filtered with `--filter-actor-type member` are exempt so agents can still wait for a human reply.
+
 To manage existing rules:
 
 | Command | What it does |

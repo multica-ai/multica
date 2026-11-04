@@ -20,6 +20,7 @@ const (
 	wakeupDefaultMaxFires    = 20
 	wakeupChainLimit         = 32
 	wakeupLoopRepeats        = 2
+	wakeupSelfChainLimit     = 8
 	wakeupActivityCreated    = "wakeup_created"
 	wakeupActivityTriggered  = "wakeup_triggered"
 	wakeupActivityTimedOut   = "wakeup_timed_out"

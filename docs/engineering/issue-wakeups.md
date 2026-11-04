@@ -625,6 +625,17 @@ chain; "wake now" is exempt. Turning a rule back on clears the reason and
 restarts the count. `GET /api/issue-wakeup-paused` lists paused rules on open
 issues for board cues.
 
+Creating a wakeup from an agent run also enforces `wakeupSelfChainLimit=8`.
+The server walks the source run's `wakeup_id` back through each rule's
+`source_task_id` on the same issue, across distinct rules and all kinds,
+including fresh one-shot timers. A ninth consecutive agent-only link is
+refused with `ErrWakeupInput` (HTTP 400), asking the agent to escalate to a
+human. A member-created rule or a run triggered by a member action (including
+a comment or "wake now") resets this count; ordinary assignment and mention
+runs have no wakeup parent and start a new chain. Event rules filtered to
+`filter_actor_type=member` remain creatable so an agent can wait for a human
+reply. The walk is bounded by the limit and uses stored run trigger evidence.
+
 **Check-ins.** `POST /api/issues/{id}/wakeups/{wakeupID}/checkin` (`{ "note" }`,
 at most 500 characters) is accepted only from the running task the rule
 started, and only for every/cron rules. It stores `wakeup_checkin` in the

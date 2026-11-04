@@ -470,6 +470,11 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 	if err = s.authorize(ctx, q, issue.WorkspaceID, member, agent); err != nil {
 		return out, err
 	}
+	if !existingID.Valid && source.Valid && in.FilterActorType != "member" {
+		if err = guardWakeupSelfChain(ctx, q, issue, source); err != nil {
+			return out, err
+		}
+	}
 	filterAgent, err := wakeupUUID(in.FilterAgentID)
 	if err != nil {
 		return out, err
@@ -1287,8 +1292,9 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		if chain, loop, err = wakeupChain(ctx, q, w, receipts); err != nil {
 			return err
 		}
-		// Runaway protection covers event-driven rules; schedules are bounded
-		// by their own interval and deadline. A person's "wake now" is exempt.
+		// Per-rule runaway protection covers event-driven rules; creation
+		// also bounds agent-only chains across fresh rules of every kind.
+		// A person's "wake now" is exempt from these per-rule checks.
 		if !manual && w.Kind == "event" {
 			reason := ""
 			if loop {

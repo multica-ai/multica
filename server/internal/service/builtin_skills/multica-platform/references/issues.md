@@ -440,3 +440,10 @@ without a person in between, and with `rate` when it has already started 12 runs
 in the past hour. A paused rule stays off until someone turns it back on. Still
 avoid mutually triggering continuous comment subscriptions; when waiting for a
 person's reply, filter that member explicitly.
+
+Agent-created wakeups also have a limit of 8 consecutive self-continuation
+links on the same issue, even when each run creates a fresh one-shot timer.
+The server refuses the next creation and asks you to escalate to a human.
+A member-created wakeup or a run triggered by a member action resets the
+chain. Event wakeups with `filter_actor_type=member` are exempt so you can
+still wait for a person's reply.

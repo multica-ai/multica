@@ -144,6 +144,8 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "检�
 - **结束方式**：CLI 不会自动给等待加期限，用 `--expires-in 72h` 或 `--expires-at <RFC3339 时间>` 设结束时间；`--on-timeout wake` 让事件规则在超时时再唤醒一次。`--max-fires N`（1–1000）限制重复规则最多运行几次。
 - **结果放在哪**：`--parent <评论 ID>` 让唤醒后的回复留在原来的评论串里。
 
+同一任务上，智能体通过自己创建的唤醒连续接续运行，最多允许 8 次；每次新建一次性定时唤醒也受此限制。下一次创建会被拒绝，并提示请求人工介入。成员创建的唤醒或成员操作触发的运行会重置计数。用 `--filter-actor-type member` 过滤的事件规则不受此限制，智能体仍可等待人工回复。
+
 管理已有规则：
 
 | 命令 | 作用 |

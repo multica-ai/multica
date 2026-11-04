@@ -144,6 +144,8 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Véri
 - **Fin** : le CLI n'ajoute pas d'échéance à votre place. Utilisez `--expires-in 72h` ou `--expires-at <heure RFC3339>` ; `--on-timeout wake` fait qu'une règle d'événement réveille l'agent une dernière fois à l'échéance. `--max-fires N` (1–1000) limite le nombre d'exécutions d'une règle répétée.
 - **Où va la réponse** : `--parent <id-de-commentaire>` garde la réponse de l'exécution réveillée dans le fil d'origine.
 
+Les réveils créés par un agent sont limités à 8 maillons consécutifs de continuation sur la même tâche, même avec un nouveau réveil ponctuel à chaque exécution. La création suivante est refusée et demande de solliciter un humain. Un réveil créé par un membre ou une exécution déclenchée par une action d'un membre remet le compteur à zéro. Les règles d'événement filtrées avec `--filter-actor-type member` sont exemptées pour permettre d'attendre une réponse humaine.
+
 Pour gérer les règles existantes :
 
 | Commande | Rôle |
