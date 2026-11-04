@@ -1017,7 +1017,7 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		case err == nil:
 			out.ProjectID = uuidToString(project.ID)
 			out.Title = project.Title
-			out.Description = project.Description.String
+			out.Description = h.appendEngineeringProjectDescription(ctx, workspaceID, project.ID, project.Description.String)
 
 			rows, resErr := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{
 				ProjectID:   project.ID,
