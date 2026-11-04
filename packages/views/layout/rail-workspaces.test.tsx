@@ -4,19 +4,24 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { renderWithI18n } from "../test/i18n";
 import { RailWorkspaces } from "./rail-workspaces";
 
-type Ws = { id: string; name: string; slug: string; avatar_url: string | null };
+type Ws = { id: string; name: string; slug: string; avatar_url: string | null; pinned_at?: string | null };
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Ws[],
   invitations: [] as { id: string; workspace_id: string; workspace_name?: string; inviter_name?: string }[],
   summary: [] as { workspace_id: string; count: number }[],
   accept: vi.fn(),
+  setPinned: vi.fn(),
   decline: vi.fn(),
   invalidateQueries: vi.fn(),
   mutations: [] as Array<Record<string, unknown>>,
   workspaceCreationDisabled: false,
   openWorkspaceInNewWindow: undefined as undefined | Mock<(slug: string) => void>,
   workspacesInOtherWindows: undefined as undefined | (() => string[]),
+}));
+
+vi.mock("@multica/core/workspace/mutations", () => ({
+  useSetWorkspacePinned: () => ({ mutate: state.setPinned }),
 }));
 
 vi.mock("@multica/core/config", () => ({
@@ -95,6 +100,7 @@ beforeEach(() => {
   state.invitations = [];
   state.summary = [];
   state.mutations.length = 0;
+  state.setPinned.mockClear();
   state.workspaceCreationDisabled = false;
   state.openWorkspaceInNewWindow = undefined;
   state.workspacesInOtherWindows = undefined;
@@ -111,6 +117,42 @@ describe("RailWorkspaces", () => {
     expect(items.map((el) => el.textContent?.slice(1))).toEqual(["WS 2", "WS 3", "WS 4", "WS 5", "WS 6", "Active WS"]);
     expect(within(menu).getByRole("menuitem", { name: /Active WS$/ })).toHaveAttribute("aria-current", "page");
     expect(within(menu).getByRole("menuitem", { name: /WS 3$/ })).toHaveAttribute("href", "/ws3/issues");
+  });
+
+  it("marks pinned workspaces and offers a pin control without navigating", async () => {
+    state.workspaces = [{ ...ws(2), pinned_at: "2026-04-01T00:00:00Z" }, ws(1), ws(3)];
+    state.summary = [{ workspace_id: "ws-2", count: 1 }];
+    renderWithI18n(<RailWorkspaces />);
+    const menu = await openMenu();
+    const rows = within(menu).getAllByRole("menuitem").filter((item) => item.getAttribute("href")?.endsWith("/issues"));
+    expect(rows.map((item) => item.getAttribute("href"))).toEqual(["/ws2/issues", "/active/issues", "/ws3/issues"]);
+    const pinned = within(menu).getByRole("menuitem", { name: /WS 2/ });
+    expect(pinned.querySelector(".text-brand")).toBeInTheDocument();
+    const button = within(pinned).getByRole("button", { name: "Unpin workspace" });
+    fireEvent.mouseOver(pinned);
+    expect(fireEvent.click(button)).toBe(false);
+    expect(state.setPinned).toHaveBeenCalledWith({ workspaceId: "ws-2", pinned: false });
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: /WS 2/ })).toBeInTheDocument();
+    expect(within(menu).getAllByRole("button", { name: "Pin workspace" })).toHaveLength(2);
+  });
+
+  it("uses unread tone for pins and keeps the current check beside its pin", async () => {
+    state.workspaces = [{ ...ws(1), pinned_at: "2026-03-01T00:00:00Z" }, { ...ws(2), pinned_at: "2026-02-01T00:00:00Z" }, ws(3)];
+    state.summary = [{ workspace_id: "ws-3", count: 2 }];
+    renderWithI18n(<RailWorkspaces />);
+    const menu = await openMenu();
+    const current = within(menu).getByRole("menuitem", { name: /Active WS/ });
+    expect(current.querySelector(".icon-check")).toBeInTheDocument();
+    expect(current.querySelector(".icon-pin.fill-current.text-muted-foreground")).toBeInTheDocument();
+    const pinned = within(menu).getByRole("menuitem", { name: /WS 2/ });
+    expect(pinned.querySelector(".icon-pin.fill-current.text-muted-foreground")).toBeInTheDocument();
+    const unread = within(menu).getByRole("menuitem", { name: /WS 3/ });
+    expect(unread.querySelector(".bg-brand")).toBeInTheDocument();
+    const button = within(unread).getByRole("button", { name: "Pin workspace" });
+    expect(button).toHaveClass("text-brand");
+    expect(button.querySelector(".fill-current")).toBeNull();
+    fireEvent.mouseOver(unread);
+    expect(button).toHaveClass("group-hover/workspace:opacity-100");
   });
 
   it("dots the switcher while another workspace has unread inbox items", async () => {
@@ -194,7 +236,7 @@ describe("RailWorkspaces", () => {
       const shown = row(menu, /WS 2/);
       expect(within(shown).getByText("Other window")).toBeInTheDocument();
       expect(within(row(menu, /WS 3/)).queryByText("Other window")).toBeNull();
-      expect(within(shown).queryByRole("button")).toBeNull();
+      expect(within(shown).queryByRole("button", { name: "Open in new window" })).toBeNull();
       expect(within(row(menu, /WS 3/)).getByRole("button", { name: "Open in new window" })).toBeInTheDocument();
       fireEvent.click(shown, { shiftKey: true });
       expect(state.openWorkspaceInNewWindow).not.toHaveBeenCalled();
@@ -203,7 +245,7 @@ describe("RailWorkspaces", () => {
     it("offers no new window for the current workspace", async () => {
       renderWithI18n(<RailWorkspaces />);
       const menu = await openMenu();
-      expect(within(row(menu, /Active WS/)).queryByRole("button")).toBeNull();
+      expect(within(row(menu, /Active WS/)).queryByRole("button", { name: "Open in new window" })).toBeNull();
     });
 
     it("offers no new windows on web", async () => {

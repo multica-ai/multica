@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppWindow, ArrowBigUp, Check, Plus } from "@multica/ui/icons";
+import { AppWindow, ArrowBigUp, Check, Pin, Plus } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
@@ -17,6 +17,7 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { useSetWorkspacePinned } from "@multica/core/workspace/mutations";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   DropdownMenu,
@@ -91,6 +92,22 @@ function NewWindowButton({ onOpen }: { onOpen: () => void }) {
 
 // A text tag rather than a window glyph, so it never reads as the row
 // button that opens a new window.
+function PinButton({ pinned, unread, onToggle }: { pinned: boolean; unread: boolean; onToggle: () => void }) {
+  const { t } = useT("layout");
+  const label = pinned ? t(($) => $.rail.unpin_workspace) : t(($) => $.rail.pin_workspace);
+  return (
+    <TooltipHint label={label} side="right">
+      <button type="button" aria-label={label} tabIndex={0}
+        className={cn("absolute inset-0 flex items-center justify-center rounded-md opacity-0 group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 focus-visible:opacity-100 hover:bg-surface-selected", unread ? "text-brand" : "text-muted-foreground")}
+        onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggle(); }}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
+      >
+        <Pin className={cn("size-4", pinned && "fill-current")} />
+      </button>
+    </TooltipHint>
+  );
+}
+
 function OtherWindowMarker() {
   const { t } = useT("layout");
   return (
@@ -194,6 +211,7 @@ export function RailWorkspaces() {
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const actions = useInvitationActions(invitations);
+  const setPinned = useSetWorkspacePinned();
   const { openWorkspaceInNewWindow, workspacesInOtherWindows } = useNavigation();
   // Read when the menu opens: other windows switch workspaces independently.
   const [inOtherWindows, setInOtherWindows] = useState(EMPTY_SLUGS);
@@ -258,7 +276,15 @@ export function RailWorkspaces() {
               >
                 <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                 <span className="min-w-0 flex-1 truncate">{ws.name}</span>
-                {isCurrent ? <Check /> : unreadIds.has(ws.id) && <UnreadDot />}
+                {isCurrent && <Check />}
+                <span className="relative flex size-5 shrink-0 items-center justify-center">
+                  <span className="group-hover/workspace:opacity-0 group-data-highlighted/workspace:opacity-0">
+                    {ws.pinned_at ? (
+                      <Pin className={cn("size-4 fill-current", !isCurrent && unreadIds.has(ws.id) ? "text-brand" : "text-muted-foreground")} />
+                    ) : !isCurrent && unreadIds.has(ws.id) ? <UnreadDot /> : null}
+                  </span>
+                  <PinButton pinned={!!ws.pinned_at} unread={!isCurrent && unreadIds.has(ws.id)} onToggle={() => setPinned.mutate({ workspaceId: ws.id, pinned: !ws.pinned_at })} />
+                </span>
                 {inOtherWindow && <OtherWindowMarker />}
                 {openInNewWindow && <NewWindowButton onOpen={openInNewWindow} />}
               </DropdownMenuItem>
