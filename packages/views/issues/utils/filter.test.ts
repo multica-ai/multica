@@ -334,6 +334,33 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 
+  // --- Unread filter ---
+  it("keeps only unread issues when unreadFilter is on", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      unreadFilter: true,
+      unreadIssueIds: new Set(["1", "3"]),
+    });
+    expect(result.map((i) => i.id)).toEqual(["1", "3"]);
+  });
+
+  it("hides everything when unreadFilter is on and nothing is unread", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      unreadFilter: true,
+      unreadIssueIds: new Set(),
+    });
+    expect(result).toHaveLength(0);
+  });
+
+  it("ignores unreadIssueIds when unreadFilter is off", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      unreadIssueIds: new Set(["1"]),
+    });
+    expect(result).toHaveLength(4);
+  });
+
   it("applies workingOnly from activity context without treating queued issues as working", () => {
     const result = applyIssueFilters(
       issues,
