@@ -15,10 +15,6 @@
     "row_menu": "스쿼드 작업",
     "archive_action": "보관"
   },
-  "inspector": {
-    "details_section": "세부 정보",
-    "archive_button": "보관"
-  },
   "member_type": {
     "agent": "에이전트",
     "member": "멤버"
@@ -65,15 +61,8 @@
     "responsibility_placeholder": "이 스쿼드는 무엇을 담당하나요?",
     "save": "저장"
   },
-  "discard_changes_dialog": {
-    "title": "저장하지 않은 변경사항을 버릴까요?",
-    "description": "이 탭에 저장하지 않은 변경사항이 있습니다. 탭을 전환하면 변경사항이 사라집니다.",
-    "keep_editing": "계속 편집",
-    "discard_button": "버리기"
-  },
   "members_tab": {
     "section_title": "멤버",
-    "section_count_other": "이 스쿼드의 멤버 {{count}}명",
     "add_member_button": "멤버 추가",
     "create_agent_button": "에이전트 만들기",
     "leader_chip": "리더",
@@ -86,19 +75,29 @@
     "status_unstable": "불안정",
     "status_archived": "보관됨",
     "issue_status_blocked": "막힘",
-    "active_issue_more": "외 {{count}}개",
-    "last_active_label": "마지막 활동 {{time}}"
+    "active_issue_more": "외 {{count}}개"
   },
-  "detail_tabs": {
-    "members": "멤버",
-    "instructions": "지침"
+  "detail": {
+    "assign_work": "작업 할당",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다",
+    "not_found": "스쿼드를 찾을 수 없습니다",
+    "instructions": "지침",
+    "edit": "편집",
+    "cancel": "취소",
+    "recent_work": "최근 작업",
+    "recent_work_empty": "아직 이 스쿼드에 할당된 태스크가 없습니다.",
+    "member_menu": "{{name}} 작업",
+    "working_on": "작업 중:"
   },
   "details": {
     "leader": "리더",
     "members": "멤버",
     "created_by": "생성자",
     "created": "생성일",
-    "updated": "수정일"
+    "updated": "수정일",
+    "visibility": "공개 범위",
+    "visibility_workspace": "워크스페이스"
   },
   "toasts": {
     "member_added": "멤버를 추가했습니다",
@@ -128,17 +127,7 @@
   },
   "scope": {
     "mine": "내 스쿼드",
-    "all": "전체"
+    "all": "전체 스쿼드"
   },
-  "toolbar": {
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
-    "result_count_title": "일치하는 스쿼드 / 전체 스쿼드",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기"
-  }
+  "toolbar": {}
 }

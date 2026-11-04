@@ -20,11 +20,11 @@ Read the invariants below, then open the reference(s) your task actually needs
 | Open | When the task is about |
 |---|---|
 | `references/issues.md` | Issues: PR linking, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running, wakeups (events, conditions, timers, check-ins), charts vs attached files in a comment |
-| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
+| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; steering another agent's running turn (`comment add --steer`) |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
-| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt |
+| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt, reading or changing a workflow (`multica workflow`, `multica project workflow`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 

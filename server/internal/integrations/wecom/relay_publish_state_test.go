@@ -36,8 +36,10 @@ func TestRelayPublish_InboxWithNoHolderIsNoHolder(t *testing.T) {
 	t.Parallel()
 	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
 	// A handler that owns no socket at all.
+	// Keep the normal acceptance budget: this tests the verdict and fence,
+	// not scheduler latency on a loaded race runner.
 	router := inboxPublishRouter(t, relay, dedupe,
-		RelayConfig{AcceptanceWindow: 40 * time.Millisecond},
+		RelayConfig{},
 		&Outbound{senders: newSendersRegistry(), logger: slog.Default()})
 
 	instID := util.UUIDToString(mustTestUUID(t))

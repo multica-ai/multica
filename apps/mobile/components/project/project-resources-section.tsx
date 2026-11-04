@@ -34,7 +34,6 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
   const { data: resources, isLoading } = useQuery(
     projectResourcesOptions(wsId, projectId),
   );
-  const remove = useDeleteProjectResource(projectId);
 
   const onOpen = async (resource: ProjectResource) => {
     const url = getResourceUrl(resource);
@@ -43,21 +42,6 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
     if (canOpen) {
       await Linking.openURL(url);
     }
-  };
-
-  const onLongPress = (resource: ProjectResource) => {
-    Alert.alert(
-      t("resources.detach_title"),
-      describeResource(resource),
-      [
-        { text: t("common:actions.cancel"), style: "cancel" },
-        {
-          text: t("resources.detach"),
-          style: "destructive",
-          onPress: () => remove.mutate(resource.id),
-        },
-      ],
-    );
   };
 
   return (
@@ -86,7 +70,6 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
             key={resource.id}
             resource={resource}
             onPress={() => onOpen(resource)}
-            onLongPress={() => onLongPress(resource)}
           />
         ))
       )}
@@ -97,25 +80,46 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
 function ResourceRow({
   resource,
   onPress,
-  onLongPress,
 }: {
   resource: ProjectResource;
   onPress: () => void;
-  onLongPress: () => void;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useT("projects");
+  const remove = useDeleteProjectResource(resource.project_id);
+  const onLongPress = () => {
+    if (remove.isPending) return;
+    Alert.alert(
+      t("resources.detach_title"),
+      describeResource(resource),
+      [
+        { text: t("common:actions.cancel"), style: "cancel" },
+        {
+          text: t("resources.detach"),
+          style: "destructive",
+          onPress: () => remove.mutate(resource.id),
+        },
+      ],
+    );
+  };
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
+      disabled={remove.isPending}
+      accessibilityState={{ disabled: remove.isPending, busy: remove.isPending }}
       delayLongPress={400}
       className="flex-row items-center gap-3 px-4 py-2.5 active:bg-secondary border-t border-border"
     >
-      <Ionicons
-        name={iconFor(resource.resource_type)}
-        size={16}
-        color={THEME[colorScheme].mutedForeground}
-      />
+      {remove.isPending ? (
+        <ActivityIndicator size="small" />
+      ) : (
+        <Ionicons
+          name={iconFor(resource.resource_type)}
+          size={16}
+          color={THEME[colorScheme].mutedForeground}
+        />
+      )}
       <View className="flex-1">
         <Text className="text-sm text-foreground" numberOfLines={1}>
           {resource.label ?? describeResource(resource)}

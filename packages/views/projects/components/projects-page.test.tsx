@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
     sortField: "name",
     sortDirection: "asc",
     hiddenColumns: [] as string[],
-    filters: { statuses: [], priorities: [], leads: [] },
+    filters: { statuses: [] as string[], priorities: [] as string[], leads: [] as string[] },
     setViewMode: vi.fn(),
     toggleSort: vi.fn(),
     setSortField: vi.fn(),
@@ -102,69 +102,102 @@ vi.mock("@multica/core/modals", () => ({
   },
 }));
 
-vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
-  ),
-  DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => (
-    <>{render}</>
-  ),
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-  }) => (
-    <button type="button" onClick={onClick}>
-      {children}
-    </button>
-  ),
-  DropdownMenuCheckboxItem: ({
-    children,
-    onCheckedChange,
-  }: {
-    children: React.ReactNode;
-    onCheckedChange?: () => void;
-  }) => (
-    <button type="button" onClick={onCheckedChange}>
-      {children}
-    </button>
-  ),
-  DropdownMenuRadioGroup: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuRadioItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-  }) => (
-    <button type="button" onClick={onClick}>
-      {children}
-    </button>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuSub: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
-  ),
-  DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
-}));
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => {
+  const RadioGroupContext = React.createContext<((value: string) => void) | undefined>(
+    undefined,
+  );
+  return {
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => (
+      <>{children}</>
+    ),
+    DropdownMenuTrigger: ({
+      render,
+      children,
+    }: {
+      render: React.ReactNode;
+      children?: React.ReactNode;
+    }) =>
+      children && React.isValidElement(render) ? (
+        React.cloneElement(render, undefined, children)
+      ) : (
+        <>{render}</>
+      ),
+    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuItem: ({
+      children,
+      onClick,
+    }: {
+      children: React.ReactNode;
+      onClick?: () => void;
+    }) => (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
+    DropdownMenuCheckboxItem: ({
+      children,
+      onCheckedChange,
+    }: {
+      children: React.ReactNode;
+      onCheckedChange?: () => void;
+    }) => (
+      <button type="button" onClick={onCheckedChange}>
+        {children}
+      </button>
+    ),
+    DropdownMenuRadioGroup: ({
+      children,
+      onValueChange,
+    }: {
+      children: React.ReactNode;
+      onValueChange?: (value: string) => void;
+    }) => (
+      <RadioGroupContext.Provider value={onValueChange}>
+        <div>{children}</div>
+      </RadioGroupContext.Provider>
+    ),
+    DropdownMenuRadioItem: function RadioItem({
+      children,
+      onClick,
+      value,
+    }: {
+      children: React.ReactNode;
+      onClick?: () => void;
+      value: string;
+    }) {
+      const onValueChange = React.useContext(RadioGroupContext);
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            onClick?.();
+            onValueChange?.(value);
+          }}
+        >
+          {children}
+        </button>
+      );
+    },
+    DropdownMenuSeparator: () => <hr />,
+    DropdownMenuSub: ({ children }: { children: React.ReactNode }) => (
+      <>{children}</>
+    ),
+    DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => (
+      <button type="button">{children}</button>
+    ),
+  };
+});
 
 vi.mock("@multica/ui/components/ui/popover", () => ({
   Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -243,6 +276,8 @@ beforeEach(() => {
   mocks.createPin.mockClear();
   mocks.deletePin.mockClear();
   mocks.openModal.mockClear();
+  mocks.projectViewState.setViewMode.mockClear();
+  mocks.projectViewState.clearFilters.mockClear();
   mocks.projectViewState.viewMode = "compact";
   mocks.projectViewState.sortField = "name";
   mocks.projectViewState.sortDirection = "asc";
@@ -278,7 +313,7 @@ describe("ProjectsPage compact row navigation", () => {
     renderProjects(makeAdapter({ push }));
     const row = projectRow();
 
-    await user.click(within(row).getByRole("button", { pressed: false }));
+    await user.click(within(row).getByRole("checkbox", { name: "Select row" }));
     await user.click(within(row).getByRole("button", { name: "Project actions" }));
     await user.click(within(row).getAllByRole("button", { name: "In Progress" })[0]!);
     await user.click(within(row).getAllByRole("button", { name: "High" })[0]!);
@@ -340,5 +375,71 @@ describe("ProjectsPage compact row navigation", () => {
     }
     expect(push).not.toHaveBeenCalled();
     open.mockRestore();
+  });
+});
+
+describe("ProjectsPage header", () => {
+  const CLOSED: Project = {
+    ...PROJECT,
+    id: "project-2",
+    title: "Old Roadmap",
+    status: "completed",
+  };
+
+  it("titles the page with the scope and narrows rows from the scope menu", async () => {
+    const user = userEvent.setup();
+    mocks.projects = [PROJECT, CLOSED];
+    renderProjects();
+
+    expect(screen.getByRole("heading", { level: 1, name: "All projects" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Active projects/ })).toHaveTextContent("1");
+    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Active projects/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Active projects" })).toBeInTheDocument();
+    expect(screen.getByText(PROJECT.title)).toBeInTheDocument();
+    expect(screen.queryByText("Old Roadmap")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Closed projects/ }));
+    expect(screen.queryByText(PROJECT.title)).not.toBeInTheDocument();
+    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
+  });
+
+  it("has no search, and offers Reset only while a filter narrows the list", () => {
+    mocks.projects = [PROJECT, CLOSED];
+    renderProjects();
+
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("button", { name: /search/i })).not.toBeInTheDocument();
+    expect(within(header).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(header).queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+  });
+
+  it("names the active filter count on the filter control, and Reset clears the filters", async () => {
+    const user = userEvent.setup();
+    mocks.projectViewState.filters = { statuses: ["in_progress"], priorities: [], leads: [] };
+    renderProjects();
+
+    expect(screen.getByRole("button", { name: "1 filter" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(mocks.projectViewState.clearFilters).toHaveBeenCalled();
+  });
+
+  it("switches between table and cards from the display settings", async () => {
+    const user = userEvent.setup();
+    renderProjects();
+
+    expect(screen.getByRole("button", { name: "Display settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Table", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cards", pressed: false }));
+    expect(mocks.projectViewState.setViewMode).toHaveBeenCalledWith("comfortable");
+  });
+
+  it("creates a project from the header", async () => {
+    const user = userEvent.setup();
+    renderProjects();
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    expect(mocks.openModal).toHaveBeenCalledWith("create-project");
   });
 });

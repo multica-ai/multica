@@ -4,8 +4,9 @@ description: Create a Slack Bot for an agent and use it in DMs, channels, and th
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica uses your own Slack app. Once connected, team members can DM the Bot, @-mention it in a channel, use `/issue` to create issues, use `/new` to start a new Multica Chat, or use `/clear` to reset the current Chat's agent context.
+Multica uses your own Slack app. Once connected, team members can DM the Bot or @-mention it in a channel, and use `/issue` to create issues, `/new` to start a new Multica Chat, and `/clear` to reset the current Chat's agent context.
 
 One Slack app maps to one Multica agent. To connect several agents, create a separate app for each.
 
@@ -16,7 +17,12 @@ The connection must be completed by a workspace owner or admin, and ends with tw
 - a Bot User OAuth Token, starting with `xoxb-`;
 - an App-level Token, starting with `xapp-`.
 
-## 1. Create the Slack app from a manifest
+## Connect the Bot
+
+<Steps>
+<Step>
+
+### Create the Slack app from a manifest [#1-create-the-slack-app-from-a-manifest]
 
 Open [Slack API Apps](https://api.slack.com/apps), click **Create New App → From a manifest**, pick the Slack workspace, then paste the following under **YAML**:
 
@@ -72,7 +78,7 @@ settings:
 Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `/issue`, `/new`, or `/clear` may stop working.
 
 <Callout type="warning">
-Slack slash-command names are workspace-global. If another installed app already owns `/new` or `/clear`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form — `@Multica /new [message]` or `@Multica /clear [message]` — to bypass native slash-command interception.
+Slack slash-command names are workspace-global. If another installed app already owns `/new` or `/clear`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form `@Multica /new [message]` or `@Multica /clear [message]` to bypass native slash-command interception.
 </Callout>
 
 <Callout type="warning">
@@ -81,24 +87,28 @@ If this Slack app was installed before attachment support was available, add the
 
 The Bot connects out to Slack over Socket Mode, so no public Request URL or OAuth Redirect URL is needed.
 
-## 2. Get the two tokens
+</Step>
+<Step>
 
-### Bot token
+### Get the two tokens [#2-get-the-two-tokens]
+
+#### Bot token
 
 1. In the Slack app, open **Install App**.
 2. Click **Install to Workspace** and approve the permissions.
-3. Copy the **Bot User OAuth Token** — it starts with `xoxb-`.
+3. Copy the **Bot User OAuth Token**, which starts with `xoxb-`.
 
-
-### App-level token
+#### App-level token
 
 1. Open **Basic Information → App-Level Tokens**.
 2. Click **Generate Token and Scopes**.
 3. Add the `connections:write` scope.
 4. Generate and copy the token starting with `xapp-`.
 
+</Step>
+<Step>
 
-## 3. Connect it to an agent
+### Connect it to an agent [#3-connect-it-to-an-agent]
 
 1. In Multica, open **Agents** and select the agent to connect to Slack.
 2. Go to **Integrations** and click **Connect Slack**.
@@ -108,8 +118,11 @@ The Bot connects out to Slack over Socket Mode, so no public Request URL or OAut
 Multica verifies that the two tokens come from the same app. Once connected, the page shows **Connected to Slack**.
 
 <Callout type="warning">
-Both tokens are stored encrypted on the Multica server. Tokens are credentials — don't put them in issues, comments, or code repositories. An app already connected to another agent or workspace can't be reused directly; disconnect the original connection first.
+Both tokens are stored encrypted on the Multica server. Tokens are credentials: don't put them in issues, comments, or code repositories. An app already connected to another agent or workspace can't be reused directly; disconnect the original connection first.
 </Callout>
+
+</Step>
+</Steps>
 
 ## First use
 
@@ -123,7 +136,7 @@ Only members of the current Multica workspace can use the Bot.
 
 ### Direct messages
 
-Open the Bot from **Apps** in the Slack sidebar and message it directly — no @-mention needed.
+Open the Bot from **Apps** in the Slack sidebar and message it directly. No @-mention is needed.
 
 ### Channels and group chats
 
@@ -133,9 +146,9 @@ The Bot only responds to channel messages that explicitly @-mention it. When it 
 
 ### Send files
 
-Attach files to a DM, or to a channel message that @-mentions the Bot. They arrive as attachments on the same piece of work, so the agent reads them together with your request.
+Attach files to a DM, or to a channel message that @-mentions the Bot. They reach the agent as attachments and are handled together with the message.
 
-This needs the `files:read` scope — if the app was installed before attachment support existed, see the note in step 1. Each file must be 20 MiB or smaller, and one message carries at most 10. Files that are larger, still uploading, or hosted outside Slack (a Google Drive or Dropbox link, for example) are skipped; the message text still reaches the agent.
+This needs the `files:read` scope; if the app was installed before attachment support existed, see the note in step 1. Each file must be 20 MiB or smaller, and one message carries at most 10. Files that are larger, still uploading, or hosted outside Slack (a Google Drive or Dropbox link, for example) are skipped; the message text still reaches the agent.
 
 ### Create issues with `/issue`
 
@@ -149,7 +162,7 @@ This command needs no @-mention. Multica hands the description to the agent behi
 
 ### Start a new Chat with `/new`
 
-In a DM with the Bot, `/new` immediately creates a new, visible empty Chat. `/new <message>` creates the Chat and uses the message as its first turn. A bare `/new` displays as **New chat** until the first effective user message arrives; the title then follows the existing first-message title behavior.
+In a DM with the Bot, `/new` immediately creates a new, visible empty Chat. `/new <message>` creates the Chat and uses the message as its first turn. A Chat created by a bare `/new` displays as **New chat** until its first effective message arrives, and is then titled from that message.
 
 The previous Chat remains available and writable in Multica on the web, desktop, and mobile. Only subsequent messages from this Slack conversation are routed to the new Chat.
 

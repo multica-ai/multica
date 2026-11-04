@@ -146,7 +146,10 @@
     "title": "取消运行？",
     "message": "智能体会在当前步骤结束后停止。",
     "keep_running": "继续运行",
-    "cancel_task": "取消运行"
+    "cancel_task": "取消运行",
+    "waiting_for_connection": "等待网络连接...",
+    "stopping": "正在停止...",
+    "failed": "无法停止运行，请重试。"
   },
   "form": {
     "discard_title": "放弃修改？",
@@ -237,6 +240,25 @@
     "active": "进行中",
     "past": "历史",
     "title": "智能体运行",
+    "open_transcript": "打开{{summary}}的执行记录",
+    "transcript": {
+      "title": "执行记录",
+      "loading": "正在加载执行记录...",
+      "load_error": "无法加载此执行记录。",
+      "retry": "重试",
+      "missing": "此运行不可用或已不存在。",
+      "empty": "此运行没有保存执行记录。",
+      "thinking": "思考",
+      "tool_call": "工具调用",
+      "tool_output": "工具输出",
+      "output": "输出",
+      "error": "错误",
+      "unknown_tool": "未知工具",
+      "truncated": "此输出在保存时已截断。",
+      "diagnostics": "技术详情",
+      "show_full_output": "展开完整输出",
+      "show_less": "收起"
+    },
     "status": {
       "queued": "排队中",
       "deferred": "已延后",

@@ -358,6 +358,14 @@ type Handler struct {
 	// WecomCredentials unseals a wecom installation's smart-bot secret for the
 	// WebSocket subscribe frame. Nil disables the wecom integration.
 	WecomCredentials wecom.CredentialsResolver
+	// WecomInstall drives the scan-code install sessions (QR generate + poll).
+	// Nil unless MULTICA_WECOM_SECRET_KEY is set; Configured() is additionally
+	// false without a QR provider, in which case the endpoints return 503 but
+	// in-flight sessions still terminate cleanly.
+	WecomInstall *wecom.InstallService
+	// WecomInstallWorker drives those sessions. Built in cmd/server/router.go;
+	// main.go starts it as an independent worker.
+	WecomInstallWorker *wecom.InstallWorker
 	// WecomBindingTokens mints/redeems the user-binding tokens behind the
 	// "link your Multica account" prompt sent to first-time WeCom users
 	// (their aibot userid is a "T"-prefixed anonymized id with no relation
@@ -821,16 +829,19 @@ func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID
 	})
 }
 
-// publishChat is publish() plus a ChatSessionID hint so the realtime layer
-// can route the event to the per-chat-session scope.
+// publishChat is publish() plus the chat session routing hints. actorID must
+// be the session's creator: every chat endpoint gates on creator ownership
+// before publishing, and the realtime layer delivers the event to that user
+// only.
 func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
 	h.Bus.Publish(events.Event{
-		Type:          eventType,
-		WorkspaceID:   workspaceID,
-		ActorType:     actorType,
-		ActorID:       actorID,
-		ChatSessionID: chatSessionID,
-		Payload:       payload,
+		Type:               eventType,
+		WorkspaceID:        workspaceID,
+		ActorType:          actorType,
+		ActorID:            actorID,
+		ChatSessionID:      chatSessionID,
+		ChatSessionOwnerID: actorID,
+		Payload:            payload,
 	})
 }
 

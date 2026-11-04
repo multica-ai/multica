@@ -15,10 +15,6 @@
     "row_menu": "スカッドの操作",
     "archive_action": "アーカイブ"
   },
-  "inspector": {
-    "details_section": "詳細",
-    "archive_button": "アーカイブ"
-  },
   "member_type": {
     "agent": "エージェント",
     "member": "メンバー"
@@ -65,15 +61,8 @@
     "responsibility_placeholder": "このスクワッドの担当は何ですか？",
     "save": "保存"
   },
-  "discard_changes_dialog": {
-    "title": "保存していない変更を破棄しますか？",
-    "description": "このタブに保存していない変更があります。タブを切り替えると変更は破棄されます。",
-    "keep_editing": "編集を続ける",
-    "discard_button": "破棄"
-  },
   "members_tab": {
     "section_title": "メンバー",
-    "section_count_other": "このスクワッドのメンバー {{count}}名",
     "add_member_button": "メンバーを追加",
     "create_agent_button": "エージェントを作成",
     "leader_chip": "リーダー",
@@ -86,19 +75,29 @@
     "status_unstable": "不安定",
     "issue_status_blocked": "ブロック中",
     "active_issue_more": "他 {{count}}件",
-    "last_active_label": "最終アクティブ {{time}}",
     "status_archived": "アーカイブ済み"
   },
-  "detail_tabs": {
-    "members": "メンバー",
-    "instructions": "指示"
+  "detail": {
+    "assign_work": "作業を割り当て",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "not_found": "スクワッドが見つかりません",
+    "instructions": "指示",
+    "edit": "編集",
+    "cancel": "キャンセル",
+    "recent_work": "最近の作業",
+    "recent_work_empty": "このスクワッドに割り当てられたタスクはまだありません。",
+    "member_menu": "{{name}} の操作",
+    "working_on": "作業中:"
   },
   "details": {
     "leader": "リーダー",
     "members": "メンバー",
     "created_by": "作成者",
     "created": "作成日時",
-    "updated": "更新日時"
+    "updated": "更新日時",
+    "visibility": "公開範囲",
+    "visibility_workspace": "ワークスペース"
   },
   "toasts": {
     "member_added": "メンバーを追加しました",
@@ -127,18 +126,8 @@
     "placeholder": "例：必ず失敗するテストから始める。コミットは小さく独立させる。"
   },
   "scope": {
-    "mine": "自分",
-    "all": "すべて"
+    "mine": "自分のスクワッド",
+    "all": "すべてのスクワッド"
   },
-  "toolbar": {
-    "display": "表示",
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "列",
-    "result_count_title": "該当スカッド / すべてのスカッド",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターをクリア"
-  }
+  "toolbar": {}
 }

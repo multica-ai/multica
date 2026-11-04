@@ -39,7 +39,7 @@ store. Do not commit tokens to source control.
 | `MULTICA_TOKEN` | Multica workspace administrator PAT (standalone mode only) |
 | `MULTICA_WORKSPACE_ID` | Workspace UUID |
 | `QODER_CLOUD_BASE_URL` | Qoder managed API base, including its gateway prefix (for example `https://api.qoder.com/api/v1/cloud`) |
-| `QODER_CLOUD_TOKEN` | Qoder PAT with access to the configured agent/environment |
+| `QODER_CLOUD_TOKEN` | Qoder personal access token (PAT) with access to the configured agent/environment |
 | `QODER_CLOUD_ENVIRONMENT_ID` | Existing managed Qoder Environment ID |
 | `QODER_BRIDGE_STATE_DIR` | Dedicated persistent directory, writable by the service user |
 | `QODER_BRIDGE_NAME` | Optional display name; defaults to `Qoder Cloud Agents` |
@@ -100,10 +100,11 @@ GitHub integration links the pull request back to the issue.
   connections, at most 10) execute at once per bridge; further tasks stay
   queued in Multica. Deploy one instance per configuration with its dedicated
   persistent state volume; this is not an HA service.
-- A follow-up run on the same issue continues the agent's previous Qoder session
-  when that session is idle, uses the same Qoder agent and environment, and no
-  other run is using it. Otherwise a fresh session starts with the current issue
-  and triggering/coalesced comment context. Do not send additional messages
+- A follow-up run on the same issue, or the next turn in the same chat,
+  continues the agent's previous Qoder session when that session is idle, uses
+  the same Qoder agent and environment, and no other run is using it. Otherwise
+  a fresh session starts with the current issue and triggering/coalesced comment
+  context, or with the current chat message. Do not send additional messages
   directly to a bridge-owned session while its run is active.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
@@ -136,9 +137,9 @@ GitHub integration links the pull request back to the issue.
 
 ## Current boundaries
 
-This is an issue-execution PoC. Chat, squad coordination, local directories,
-attachments, arbitrary Git hosts, tag/commit checkout, full comment-history
-hydration, interactive tool approval, custom client-side tools, terminal access,
+This is a PoC for issue runs and chat turns. Squad coordination, local
+directories, attachments (on issues and chat messages), arbitrary Git hosts,
+tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
 file transfer and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
@@ -181,15 +182,15 @@ not used; Qoder is an in-process HTTP fixture.
 
 The runtime page presents a **Qoder Cloud** card with live status, associated
 agent count, **Configure credentials**, and **Add agent**. Credentials are grouped
-into QCA connection and GitHub repository sections; saved PATs remain hidden until
+into Qoder Cloud Agents connection and GitHub repository sections; saved PATs remain hidden until
 the administrator chooses **Update credentials**. The quick-add dialog creates a
-Multica agent linked to an existing QCA Agent and uses the configured environment.
+Multica agent linked to an existing agent in Qoder Cloud Agents and uses the configured environment.
 
 
 Workspace administrators can open **Runtimes → Add → Cloud services → Qoder Cloud Agents** to configure one
-managed QCA connection per workspace, load environments from the PAT and check environment access, bind GitHub
+managed Qoder Cloud Agents connection per workspace, load environments from the PAT and check environment access, bind GitHub
 repository tokens, and **Connect**. The Qoder Cloud Agents page can later **Pause** an idle runtime, resume it, or
-**Disconnect** it. The menu entry only appears when the server has `MULTICA_VCS_SECRET_KEY` set. The existing project
+**Disconnect** it. The menu entry remains visible without `MULTICA_VCS_SECRET_KEY`; opening it shows the required server setup instead of a connection form. The existing project
 resource picker selects the repository and starting branch. The managed form
 offers Qoder's official regions, `https://api.qoder.com/api/v1/cloud` (Global) and
 `https://api.qoder.com.cn/api/v1/cloud` (China); a PAT works only in the region
@@ -213,27 +214,27 @@ instances do not need shared local disks. Standalone journals remain local.
 Remote calls run outside database transactions under a bounded step lease;
 Save/Stop may return a retryable conflict while a step is synchronizing.
 Stop and configuration changes refuse active tasks; finish or cancel the tasks
-first. Stopping keeps QCA/repository credentials for a later Save and start, but revokes the internal daemon token. Do not run a
+first. Stopping keeps Qoder Cloud Agents/repository credentials for a later Save and start, but revokes the internal daemon token. Do not run a
 standalone bridge for the same connection alongside the managed service. When
 migrating, stop the standalone bridge at idle before saving the managed config.
 
-This does not add chat support, session continuation, or delivery validation:
-QCA's end-of-turn remains execution completion, not proof that a PR was created.
+This does not add delivery validation:
+The end of a turn in Qoder Cloud Agents remains execution completion, not proof that a PR was created.
 
 
 ### Agent associations
 
-A runtime holds the QCA connection and environment, not a fixed QCA Agent.
+A runtime holds the Qoder Cloud Agents connection and environment, not a fixed agent in Qoder Cloud Agents.
 After entering a PAT in the Web/Desktop runtime dialog, available environments
 load automatically; one available environment is selected automatically.
 Names are displayed instead of requiring copied IDs. Archived resources are excluded.
 
-In the Multica agent creation form, select the QCA Agent under execution settings.
+In the Multica agent creation form, select the agent in Qoder Cloud Agents under execution settings.
 For existing agents, use the runtime configuration tab. The association is stored
 in `agent.runtime_config.qoder_agent_id` and copied into each run journal before
-session creation. Several Multica agents can share a runtime with different QCA
-Agents. Configure QCA models, tools and skills in Qoder; the Multica page links
-existing QCA Agents rather than creating or editing those remote resources.
+session creation. Several Multica agents can share a runtime with different agents
+in Qoder Cloud Agents. Configure models, tools and skills in Qoder; the Multica page links
+existing agents in Qoder Cloud Agents rather than creating or editing those remote resources.
 
 The API exposes `POST /api/workspaces/{id}/qoder/environments` (admin-only,
 `{"qoder_token":"..."}`, blank reuses the saved PAT), and
@@ -250,13 +251,13 @@ bindings. Never move a journal with an active run.
 
 ### Updating an early development database
 
-The QCA migrations now use `573_qoder_connection` and
+The Qoder Cloud Agents migrations now use `573_qoder_connection` and
 `574_qoder_connection_workspace_index` after rebasing onto upstream main.
 If you ran an earlier draft with `564_qoder_connection` and
 `565_qoder_connection_workspace_index`, with `509_qoder_connection` and
 `510_qoder_connection_workspace_index`, with `479_qoder_connection` and
 `480_qoder_connection_workspace_index`, or with `451_qoder_connection` and
-`452_qoder_connection_workspace_index`, verify that the QCA table and its valid
+`452_qoder_connection_workspace_index`, verify that the Qoder Cloud Agents table and its valid
 unique index already exist, then rename only those two exact entries in
 `schema_migrations` to the new names before running migrations. Preserve the
 existing table, encrypted credentials, and journal. Do not mark upstream's
@@ -266,7 +267,7 @@ applied; the normal migration runner must still execute them.
 Migration 575 revokes the early PoC's user-wide internal PATs and pauses existing
 connections. Before upgrading, let old executions finish or cancel them while the
 old bridge is still running. After migration, save the connection once to issue a
-scoped daemon credential; QCA and repository secrets are preserved. The managed
+scoped daemon credential; Qoder Cloud Agents and repository secrets are preserved. The managed
 daemon identity changes once during this upgrade; select the new managed runtime
 for agents previously bound to the old PoC runtime. Old local
 managed journals are not imported: archive/remove their private directories only

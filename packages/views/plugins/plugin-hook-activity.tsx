@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { pluginInvocationsOptions } from "@multica/core/plugins";
 import type { PluginHook, PluginInvocation } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";

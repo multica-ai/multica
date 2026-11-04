@@ -1256,7 +1256,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return deleteWorkspaceTasks(ctx, qtx, requester.WorkspaceID) },
 		},
 		{
-			name: "delete QCA connection",
+			name: "delete Qoder Cloud Agents connection",
 			run: func() error {
 				if _, err := tx.Exec(ctx, `DELETE FROM daemon_token WHERE id IN (SELECT token_id FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1)`, requester.WorkspaceID); err != nil {
 					return err

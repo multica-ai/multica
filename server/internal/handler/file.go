@@ -1345,70 +1345,11 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 
 // isTextPreviewable is the whitelist for the text preview proxy.
 //
-// IMPORTANT — KEEP IN SYNC with the client-side mirror in
-// packages/views/editor/utils/preview.ts (TEXT_EXTENSIONS / TEXT_CONTENT_TYPES
-// / TEXT_BASENAMES + extensionToLanguage). If a type is allowed here but not
-// mapped client-side the user sees raw unhighlighted text; if mapped client-side
-// but rejected here the user sees a 415 fallback.
-//
-// TODO(follow-up): extract this list to a JSON single-source-of-truth and
-// generate the TS side, mirroring the reserved-slugs pattern (see
-// server/internal/handler/reserved_slugs.json + scripts/generate-reserved-slugs.mjs).
-// Drift severity here is low (worst case: Eye button visible but proxy 415s,
-// modal shows the unsupported fallback — still functional, just confusing),
-// so it ships as manual hand-sync for v1.
-//
-// We check both content_type and extension because http.DetectContentType
-// regularly returns "text/plain" for Markdown / source code, so a pure
-// content-type check would 415 those.
+// The Go handler embeds attachment_text_preview.json directly. The client
+// imports a generated representation of the same source, and CI rejects stale
+// generated output.
 func isTextPreviewable(contentType, filename string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	// Strip params (e.g. "text/plain; charset=utf-8")
-	if idx := strings.Index(ct, ";"); idx >= 0 {
-		ct = strings.TrimSpace(ct[:idx])
-	}
-	if strings.HasPrefix(ct, "text/") {
-		return true
-	}
-	switch ct {
-	case "application/json",
-		"application/x-ndjson",
-		"application/javascript",
-		"application/xml",
-		"application/x-yaml",
-		"application/yaml",
-		"application/toml",
-		"application/x-sh",
-		"application/x-httpd-php":
-		return true
-	}
-
-	ext := strings.ToLower(path.Ext(filename))
-	switch ext {
-	case ".md", ".markdown",
-		".txt", ".log",
-		".csv", ".tsv",
-		".html", ".htm",
-		".json", ".jsonl", ".ndjson", ".xml",
-		".yml", ".yaml", ".toml", ".ini", ".conf",
-		".sh", ".bash", ".zsh",
-		".py", ".rb", ".go", ".rs",
-		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-		".css", ".scss", ".sass", ".less",
-		".sql",
-		".java", ".kt", ".swift",
-		".c", ".cc", ".cpp", ".h", ".hpp",
-		".cs", ".php", ".lua", ".vim",
-		".dockerfile", ".makefile", ".gitignore":
-		return true
-	}
-	// Filenames without extension that match well-known build files.
-	base := strings.ToLower(path.Base(filename))
-	switch base {
-	case "dockerfile", "makefile", ".env":
-		return true
-	}
-	return false
+	return attachmentTextPreview.allows(contentType, filename)
 }
 
 // DeleteAttachment — DELETE /api/attachments/{id}

@@ -4,6 +4,8 @@ description: Link pull requests to Multica issues and watch development progress
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 Once GitHub is connected, Multica automatically links pull requests based on issue identifiers. Issue detail shows PR state, change size, CI results, and merge conflicts in place.
 
@@ -15,10 +17,20 @@ Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab insta
 
 A workspace owner or admin can complete the connection:
 
-1. Open **Settings → Code**.
-2. In the **GitHub** row, click **Connect GitHub**.
-3. In GitHub, pick the account or organization and authorize all repositories or a chosen subset.
-4. Return to Multica after the installation completes.
+<Steps>
+<Step>
+Open **Settings → Code**.
+</Step>
+<Step>
+In the **GitHub** row, click **Connect GitHub**.
+</Step>
+<Step>
+In GitHub, pick the account or organization and authorize all repositories or a chosen subset.
+</Step>
+<Step>
+Return to Multica after the installation completes.
+</Step>
+</Steps>
 
 The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
@@ -36,9 +48,7 @@ The **Pull requests & issues** section of **Settings → Code** has these settin
 | Co-authored-by | Adds `Co-authored-by: multica-agent <github@multica.ai>` to commits created by agents. |
 | Auto-link PRs | Links a PR to the issue whose identifier is in its branch name or title, or follows a closing keyword in its body. |
 | After PRs merge, move the issue to | What merging every PR linked to an issue does: move it to a status (`Done` by default) or leave it alone. See [When merged PRs move an issue](#when-merged-prs-move-an-issue). |
-| **PR card → CI & mergeability** | For each linked PR, Multica fetches an authenticated GitHub API snapshot and mirrors its **CI status** and **mergeability** onto the card (see **What the PR card shows** below). |
-
-
+| PR card → CI & mergeability | For each linked PR, Multica fetches a GitHub API snapshot as the App and shows its CI status and mergeability on the card. See [View PRs on an issue](#view-prs-on-an-issue). |
 
 **After PRs merge, move the issue to** applies to every code host, including [self-hosted Git hosting](/vcs-integration).
 
@@ -75,27 +85,29 @@ Once linked, PRs appear in the **Pull requests** block of issue detail. Each ent
 - repository, number, title, and author;
 - `Open`, `Draft`, `Merged`, or `Closed` state;
 - added and deleted lines and the number of changed files;
-- CI status: all passed (with a count), some failed (naming the failing checks), or some in progress; PRs with no checks configured don't show this item — "no checks" is never treated as passing;
+- CI status: all passed (with a count), some failed (naming the failing checks), or some in progress; PRs with no checks configured don't show this item, and "no checks" is never treated as passing;
 - mergeability: mergeable (only when GitHub reports a clean merge state), conflicting, blocked, or behind.
 
-CI status and mergeability come from snapshots Multica pulls from the GitHub API, and the two are independent; merged or closed PRs no longer show either. When GitHub is temporarily unavailable, the card keeps the last snapshot and marks it stale instead of going blank.
+CI status and mergeability come from snapshots Multica pulls from the GitHub API, and the two are independent; merged or closed PRs no longer show either. When GitHub is temporarily unavailable, the card keeps the last snapshot and marks it stale.
 
-Under the list, one line says what happens next — for example *Moves to Done when #19 merges*, or which PR closed without merging. There's no line when the workspace leaves status alone or the issue already has the target status.
+Under the list, one line says what happens next: for example *Moves to Done when #19 merges*, or which PR closed without merging. There's no line when the workspace leaves status alone or the issue already has the target status.
 
 Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hides this block; it doesn't disconnect anything.
 
 ## When merged PRs move an issue
 
-A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Code → After PRs merge, move the issue to**. Pick `Done` (the default for new workspaces), another started or done status — a custom one such as *Awaiting regression* works too — or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
+A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Code → After PRs merge, move the issue to**. Pick `Done` (the default for new workspaces), another started or done status (a custom one such as *Awaiting regression* works too), or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
 
 An issue moves to the chosen status when all of the following hold:
 
-1. every linked PR is `Merged` — an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
+1. every linked PR is `Merged`: an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
 2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
 
-How a PR was linked doesn't matter: the title, the branch name and a `Closes MUL-123` in the body all link it, and none of them changes what the merge does. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status from its **Pull requests** menu.
+<PrLinkDemo />
 
-The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back — the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
+How a PR was linked doesn't matter: the title, the branch name, and a `Closes MUL-123` in the body only link it. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status from its **Pull requests** menu.
+
+The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back; the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 
 The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified.
 
@@ -117,7 +129,10 @@ To revoke repository authorization on the GitHub side, uninstall the App or adju
 
 Multica Cloud doesn't need this section. Self-hosting requires creating your own GitHub App first.
 
-### 1. Create a GitHub App
+<Steps>
+<Step>
+
+### Create a GitHub App [#1-create-a-github-app]
 
 Create the App under GitHub's **Developer settings → GitHub Apps** and fill in:
 
@@ -149,7 +164,10 @@ PR snapshots use the Pull requests, Checks, and Commit statuses REST APIs. Conte
 This is the **Webhook secret**, not the OAuth Client secret. If the two sides have different webhook secrets, GitHub deliveries return `401 invalid signature`.
 </Callout>
 
-### 2. Set environment variables
+</Step>
+<Step>
+
+### Set environment variables [#2-set-environment-variables]
 
 Take the slug from the App's public URL. For example, the slug of `https://github.com/apps/multica-acme` is `multica-acme`.
 
@@ -161,16 +179,19 @@ FRONTEND_ORIGIN=https://multica.example.com
 
 If either `GITHUB_APP_SLUG` or `GITHUB_WEBHOOK_SECRET` is missing, the connect button is disabled and the webhook endpoint refuses to process events.
 
-The next two variables are required for the PR card to show CI status and mergeability — Multica uses them to authenticate as the App and pull snapshots:
+For the PR card to show CI status and mergeability, also set the next two variables. Multica uses them to authenticate as the App and pull snapshots:
 
 ```dotenv
 GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without them the integration degrades gracefully: PRs still mirror, issues still auto-link and move on merge — the PR card just shows no CI or merge state.
+Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, PRs still mirror and issues still auto-link and change status on merge; the PR card just shows no CI or merge state.
 
-### 3. Update the database and connect
+</Step>
+<Step>
+
+### Update the database and connect [#3-update-the-database-and-connect]
 
 When upgrading an existing deployment, run the regular database migrations first:
 
@@ -179,6 +200,9 @@ make migrate-up
 ```
 
 Restart the API server, then complete the connection in **Settings → Code**.
+
+</Step>
+</Steps>
 
 ## Troubleshooting
 

@@ -250,9 +250,9 @@ afterEach(() => {
 
 describe("AgentTranscriptDialog", () => {
   it.each([
-    { type: "text", label: "Agent", icon: ".lucide-bot" },
-    { type: "thinking", label: "Thinking", icon: ".lucide-brain" },
-    { type: "error", label: "Error", icon: ".lucide-circle-alert" },
+    { type: "text", label: "Agent", icon: ".icon-bot" },
+    { type: "thinking", label: "Thinking", icon: ".icon-brain" },
+    { type: "error", label: "Error", icon: ".icon-circle-alert" },
   ] as const)("labels a $type step correctly when opened from the timeline", ({ type, label, icon }) => {
     renderDialog([
       { seq: 1, type, content: "Final delivered reply", created_at: baseTask.started_at! },
@@ -438,10 +438,10 @@ describe("AgentTranscriptDialog", () => {
     ]);
 
     const agentFacet = screen.getByRole("menuitemcheckbox", { name: "Agent" });
-    expect(agentFacet.querySelector(".lucide-bot")).not.toBeNull();
+    expect(agentFacet.querySelector(".icon-bot")).not.toBeNull();
 
     const proseRow = screen.getByTestId("rich-content").closest(".group");
-    expect(proseRow?.querySelector(".lucide-bot")).not.toBeNull();
+    expect(proseRow?.querySelector(".icon-bot")).not.toBeNull();
   });
 
   it("names a tool facet the way its rows do, keeping the prefix in the key", () => {

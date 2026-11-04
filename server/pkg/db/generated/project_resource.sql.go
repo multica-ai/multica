@@ -155,6 +155,37 @@ func (q *Queries) GetProjectResourceInWorkspace(ctx context.Context, arg GetProj
 	return i, err
 }
 
+const getProjectResourceInWorkspaceForUpdate = `-- name: GetProjectResourceInWorkspaceForUpdate :one
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type GetProjectResourceInWorkspaceForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Same row as GetProjectResourceInWorkspace, but takes a row lock held until
+// the caller's transaction ends, serializing the read-decide-write flow in
+// UpdateProjectResource against competing partial updates (#9238).
+func (q *Queries) GetProjectResourceInWorkspaceForUpdate(ctx context.Context, arg GetProjectResourceInWorkspaceForUpdateParams) (ProjectResource, error) {
+	row := q.db.QueryRow(ctx, getProjectResourceInWorkspaceForUpdate, arg.ID, arg.WorkspaceID)
+	var i ProjectResource
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.ResourceType,
+		&i.ResourceRef,
+		&i.Label,
+		&i.Position,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const listProjectResources = `-- name: ListProjectResources :many
 SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
 WHERE project_id = $1
