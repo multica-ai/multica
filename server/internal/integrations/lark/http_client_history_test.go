@@ -95,3 +95,67 @@ func TestNativeHistoryChatContainerMixedRoots(t *testing.T) {
 		t.Fatalf("page=%+v err=%v calls=%d", page, err, calls)
 	}
 }
+
+func TestNativeHistoryRejectedTokenEvictedForNextRead(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			fake := newLarkFake(t)
+			fake.mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+				n := fake.tokenN.Add(1)
+				token := "stale"
+				if n > 1 {
+					token = "fresh"
+				}
+				writeJSON(w, map[string]any{"code": 0, "tenant_access_token": token, "expire": 7200})
+			})
+			calls := 0
+			fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Header.Get("Authorization") == "Bearer stale" {
+					w.WriteHeader(status)
+					writeJSON(w, map[string]any{"code": 99991663, "msg": "private token rejection"})
+					return
+				}
+				if r.Header.Get("Authorization") != "Bearer fresh" {
+					t.Error("unexpected authentication context")
+				}
+				writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []any{}}})
+			})
+			c := newTestClient(fake, time.Now)
+			// A different installation's app cache must remain untouched.
+			c.tokens["other-app"] = &cachedToken{value: "other-token", expiresAt: time.Now().Add(time.Hour)}
+			_, err := c.ListNativeHistoryPage(context.Background(), testCreds(), ListMessagesParams{ChatID: "oc_chat"}, "")
+			if err == nil || strings.Contains(err.Error(), "private token rejection") || calls != 1 || fake.tokenN.Load() != 1 {
+				t.Fatalf("first read retried or exposed detail: calls=%d tokens=%d err=%v", calls, fake.tokenN.Load(), err)
+			}
+			_, err = c.ListNativeHistoryPage(context.Background(), testCreds(), ListMessagesParams{ChatID: "oc_chat"}, "")
+			if err != nil || calls != 2 || fake.tokenN.Load() != 2 {
+				t.Fatalf("independent read did not refresh: calls=%d tokens=%d err=%v", calls, fake.tokenN.Load(), err)
+			}
+			if got := c.tokens["other-app"]; got == nil || got.value != "other-token" {
+				t.Error("other app's cache changed")
+			}
+		})
+	}
+}
+
+func TestNativeHistoryPermissionRefusalKeepsToken(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("valid", 7200)
+	calls := 0
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"code": 230027, "msg": "private permission detail"})
+	})
+	c := newTestClient(fake, time.Now)
+	for i := 0; i < 2; i++ {
+		_, err := c.ListNativeHistoryPage(context.Background(), testCreds(), ListMessagesParams{ChatID: "oc_chat"}, "")
+		if !errors.Is(err, ErrNativeHistoryUnavailable) {
+			t.Fatalf("permission refusal lost: %v", err)
+		}
+	}
+	if calls != 2 || fake.tokenN.Load() != 1 {
+		t.Fatalf("permission refusal retried or invalidated valid token: calls=%d tokens=%d", calls, fake.tokenN.Load())
+	}
+}

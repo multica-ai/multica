@@ -53,6 +53,11 @@ func (c *httpAPIClient) ListNativeHistoryPage(ctx context.Context, creds Install
 		} `json:"data"`
 	}
 	decodeErr := json.Unmarshal(body, &envelope)
+	// Evict rejected tokens for the next independent read, without replaying
+	// this request or changing permission-refusal handling.
+	if decodeErr == nil && envelope.Code != nil && isTokenError(*envelope.Code) {
+		c.invalidateToken(creds.AppID)
+	}
 	// Only documented access refusals on successful/business-error responses
 	// establish unavailability. Unknown codes and 5xx remain read failures.
 	if decodeErr == nil && envelope.Code != nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == 400 || resp.StatusCode == 403) && nativeHistoryAccessRefused(*envelope.Code) {

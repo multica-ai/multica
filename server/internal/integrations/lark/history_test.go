@@ -161,3 +161,42 @@ func TestNativeHistoryLinearMixedTopicRoots(t *testing.T) {
 		t.Fatalf("cross-chat root accepted: %+v %v", p, err)
 	}
 }
+
+func TestNativeHistoryMentionsAreMessageLocal(t *testing.T) {
+	alice := nativeMessage("alice", "1000")
+	alice.Content = `{"text":"@_user_1 owns API"}`
+	alice.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_alice", Name: "Alice"}}
+	bob := nativeMessage("bob", "2000")
+	bob.Content = `{"text":"@_user_1 owns UI"}`
+	bob.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_bob", Name: "Bob"}}
+	post := nativeMessage("post", "3000")
+	post.MessageType = "post"
+	post.Content = `{"content":[[{"tag":"at","user_id":"@_user_1","user_name":"ReviewBot"},{"tag":"text","text":"owns review"}]]}`
+	post.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_bot", Name: "ReviewBot"}}
+	unknown := nativeMessage("unknown", "4000")
+	unknown.Content = `{"text":"@_user_1 is unknown"}`
+	f := &nativePages{pages: []NativeHistoryPage{{Messages: []LarkMessage{unknown, post, bob, alice}}}}
+	p, _, err := readNativeWindow(context.Background(), f, InstallationCredentials{}, nativeHistoryTarget{chatID: "oc_chat", threadID: "omt_topic", trigger: "unknown", start: "alice"}, 10)
+	if err != nil || len(p.Messages) != 4 {
+		t.Fatalf("page=%+v err=%v", p, err)
+	}
+	for i, want := range []string{"@Alice owns API", "@Bob owns UI", "@ReviewBot owns review", "@_user_1 is unknown"} {
+		if p.Messages[i].Text != want {
+			t.Errorf("row %d=%q want %q", i, p.Messages[i].Text, want)
+		}
+	}
+	if f.calls != 1 {
+		t.Errorf("unexpected identity lookup/read: %d", f.calls)
+	}
+}
+
+func TestNativeHistoryMentionExpansionHonorsTextBudget(t *testing.T) {
+	m := nativeMessage("trigger", "1000")
+	m.Content = `{"text":"@_user_1 @_user_1"}`
+	m.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_large", Name: strings.Repeat("x", 13<<10)}}
+	f := &nativePages{pages: []NativeHistoryPage{{Messages: []LarkMessage{m}}}}
+	p, note, err := readNativeWindow(context.Background(), f, InstallationCredentials{}, nativeHistoryTarget{chatID: "oc_chat", threadID: "omt_topic", trigger: "trigger", start: "trigger"}, 10)
+	if err != nil || len(p.Messages) != 0 || !strings.Contains(note, "Partial result") {
+		t.Fatalf("expanded message bypassed budget: page=%+v note=%q err=%v", p, note, err)
+	}
+}

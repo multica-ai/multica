@@ -231,6 +231,7 @@ func readNativeWindow(ctx context.Context, client nativeHistoryClient, creds Ins
 		if body == "" {
 			continue
 		}
+		body = resolveMentions(body, restMentionsToEvent(m.Mentions), "", "")
 		if len(out) >= limit || textBytes+len(body) > maxText {
 			limited = true
 			continue
