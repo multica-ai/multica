@@ -37,8 +37,7 @@ func sourceMetadata(ctx context.Context, client sourceClient, channelID, threadI
 		if err == nil {
 			source.Permalink = link
 		}
-		var limited *slack.RateLimitedError
-		if errors.As(err, &limited) || ctx.Err() != nil {
+		if !canContinueSourceMetadata(err) || ctx.Err() != nil {
 			return protocol.SafeSlackSource(source)
 		}
 	}
@@ -47,6 +46,23 @@ func sourceMetadata(ctx context.Context, client sourceClient, channelID, threadI
 		source.ChannelName = info.Name
 	}
 	return protocol.SafeSlackSource(source)
+}
+
+// Only known API permission or missing-message responses allow another optional
+// request. The SDK can return status or parsing errors for HTTP 429 depending on
+// Retry-After, so unknown errors (including transport failures) must stop here.
+func canContinueSourceMetadata(err error) bool {
+	if err == nil {
+		return true
+	}
+	var apiError slack.SlackErrorResponse
+	if errors.As(err, &apiError) {
+		switch apiError.Err {
+		case "missing_scope", "access_denied", "message_not_found", "channel_not_found":
+			return true
+		}
+	}
+	return false
 }
 
 // TaskSource uses only the immutable delivery for this task, including on a

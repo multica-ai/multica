@@ -36,6 +36,13 @@ func TestThreadSourceOptionalFailuresPreserveHistory(t *testing.T) {
 		{name: "link private", linkError: "access_denied", wantName: true, wantInfoCalls: 1},
 		{name: "link missing scope", linkError: "missing_scope", wantName: true, wantInfoCalls: 1},
 		{name: "link rate limited", linkError: "429", wantInfoCalls: 0},
+		{name: "link rate limited without header", linkError: "429-no-header", wantInfoCalls: 0},
+		{name: "link rate limited invalid header", linkError: "429-invalid-header", wantInfoCalls: 0},
+		{name: "link API rate limited", linkError: "ratelimited", wantInfoCalls: 0},
+		{name: "link malformed response", linkError: "malformed-json", wantInfoCalls: 0},
+		{name: "link server failure", linkError: "http500", wantInfoCalls: 0},
+		{name: "link unknown API failure", linkError: "unknown_synthetic_error", wantInfoCalls: 0},
+		{name: "link transport failure", linkError: "transport", wantInfoCalls: 0},
 		{name: "name rate limited", nameError: "429", wantLink: true, wantInfoCalls: 1},
 		{name: "link timeout", linkTimeout: true, wantInfoCalls: 0},
 		{name: "name timeout", nameTimeout: true, wantLink: true, wantInfoCalls: 1},
@@ -68,8 +75,28 @@ func TestThreadSourceOptionalFailuresPreserveHistory(t *testing.T) {
 					}
 					return
 				}
-				if failure == "429" {
-					w.Header().Set("Retry-After", "60")
+				if failure == "transport" {
+					// A truncated response body fails after headers, avoiding
+					// net/http's automatic retry of a reused idle connection.
+					w.Header().Set("Content-Length", "100")
+					w.Write([]byte(`{"ok":true`))
+					return
+				}
+				if failure == "malformed-json" {
+					w.Write([]byte(`not-json`))
+					return
+				}
+				if failure == "http500" {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				if strings.HasPrefix(failure, "429") {
+					if failure == "429" {
+						w.Header().Set("Retry-After", "60")
+					}
+					if failure == "429-invalid-header" {
+						w.Header().Set("Retry-After", "invalid")
+					}
 					w.WriteHeader(http.StatusTooManyRequests)
 					return
 				}
@@ -105,11 +132,12 @@ func TestThreadSourceOptionalFailuresPreserveHistory(t *testing.T) {
 			if (page.Permalink != "") != tc.wantLink || (page.ChannelName != "") != tc.wantName {
 				t.Errorf("optional values: %+v", page)
 			}
+			t.Logf("link=%d info=%d history_messages=%d channel_id=%s", linkCalls.Load(), infoCalls.Load(), len(page.Messages), page.ChannelID)
 			if linkCalls.Load() != 1 || infoCalls.Load() != tc.wantInfoCalls {
 				t.Errorf("unexpected calls: link=%d info=%d", linkCalls.Load(), infoCalls.Load())
 			}
 			encoded, _ := json.Marshal(page)
-			for _, secret := range []string{"synthetic-bot-token", "synthetic-raw-secret", "missing_scope", "access_denied", "message_not_found"} {
+			for _, secret := range []string{"synthetic-bot-token", "synthetic-raw-secret", "missing_scope", "access_denied", "message_not_found", "ratelimited", "unknown_synthetic_error"} {
 				if strings.Contains(string(encoded)+logs.String(), secret) {
 					t.Errorf("metadata leaked %q", secret)
 				}
