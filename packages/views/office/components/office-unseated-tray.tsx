@@ -1,30 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
 import { ChevronDown, ChevronRight } from "@multica/ui/icons";
-import { ApiError } from "@multica/core/api";
-import {
-  freeSlots,
-  parseOfficeSeatConflict,
-  useSetOfficeSeats,
-  type OfficeFloor,
-} from "@multica/core/office";
+import type { OfficeFloor } from "@multica/core/office";
 import type { Agent, Squad } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { OfficeHomeSquadMenu } from "./office-home-squad-menu";
+import { OfficeSquadSeatMenu } from "./office-squad-seat-menu";
 
 const CHIP =
   "h-6 max-w-48 rounded-full border bg-background px-2.5 text-caption hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
@@ -120,51 +105,21 @@ function SquadChip({
   canSeat: boolean;
 }) {
   const { t } = useT("issues");
-  const setSeats = useSetOfficeSeats();
-
-  const seat = (floorId: string, slot: number) =>
-    setSeats.mutate([{ squad_id: squad.id, floor_id: floorId, slot }], {
-      onSuccess: () => toast.success(t(($) => $.office.seat_done, { name: squad.name })),
-      onError: (error) => {
-        const holder = error instanceof ApiError ? parseOfficeSeatConflict(error.body) : null;
-        toast.error(
-          holder
-            ? t(($) => $.office.seat_taken, { name: holder.squad_name })
-            : t(($) => $.office.seat_failed),
-        );
-      },
-    });
 
   const label = <span className="truncate">{squad.name}</span>;
   if (!canSeat) {
     return <span className={cn(CHIP, "inline-flex items-center")}>{label}</span>;
   }
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button type="button" variant="ghost" className={CHIP} aria-label={t(($) => $.office.unseated_squad, { name: squad.name })} />
-        }
-      >
-        {label}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-48">
-        {floors.map((floor) => {
-          const slots = freeSlots(floor.id, allSquads);
-          return (
-            <DropdownMenuSub key={floor.id}>
-              <DropdownMenuSubTrigger disabled={slots.length === 0}>{floor.name}</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                {slots.map((slot) => (
-                  <DropdownMenuItem key={slot} onClick={() => seat(floor.id, slot)}>
-                    {t(($) => $.office.seat_room, { n: slot + 1 })}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <OfficeSquadSeatMenu
+      squad={squad}
+      floors={floors}
+      allSquads={allSquads}
+      trigger={
+        <Button type="button" variant="ghost" className={CHIP} aria-label={t(($) => $.office.unseated_squad, { name: squad.name })} />
+      }
+    >
+      {label}
+    </OfficeSquadSeatMenu>
   );
 }

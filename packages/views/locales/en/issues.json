@@ -1878,6 +1878,7 @@
     "seat_all_skipped_one": "Floor limit reached; {{count}} squad not seated",
     "seat_all_skipped_other": "Floor limit reached; {{count}} squads not seated",
     "seat_room": "Room {{n}}",
+    "squad_move": "Move to floor",
     "seat_done": "{{name}} now has a room",
     "seat_taken": "That room is taken by {{name}}",
     "seat_failed": "Couldn't seat the squad",

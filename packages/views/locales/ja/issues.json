@@ -1806,6 +1806,7 @@
     "seat_all_done_other": "{{count}}個のスクワッドを配置しました",
     "seat_all_skipped_other": "フロア数の上限に達したため、{{count}}個のスクワッドは未配置です",
     "seat_room": "部屋{{n}}",
+    "squad_move": "フロアに移動",
     "seat_done": "{{name}}に部屋を割り当てました",
     "seat_taken": "その部屋は{{name}}が使用中です",
     "seat_failed": "スクワッドを配置できませんでした",

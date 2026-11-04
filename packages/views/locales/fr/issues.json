@@ -1878,6 +1878,7 @@
     "seat_all_skipped_one": "Limite d'étages atteinte ; {{count}} squad non placé",
     "seat_all_skipped_other": "Limite d'étages atteinte ; {{count}} squads non placés",
     "seat_room": "Salle {{n}}",
+    "squad_move": "Déplacer vers un étage",
     "seat_done": "{{name}} a maintenant une salle",
     "seat_taken": "Cette salle est prise par {{name}}",
     "seat_failed": "Impossible de placer le squad",

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  officeFloorsOptions,
   officeSquadMembersOptions,
   proposalListOptions,
   squadRoutinesOptions,
@@ -14,6 +15,7 @@ import { agentListOptions, squadListOptions, squadMemberStatusOptions } from "@m
 import { useWorkspaceId } from "@multica/core/hooks";
 import { autonomyLevelName, squadAutonomyOptions } from "@multica/core/governance";
 import type { SquadMemberStatus } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -23,6 +25,7 @@ import { useOfficeAdmin } from "../lib/use-office-admin";
 import { OfficeCharterTab } from "./office-charter-tab";
 import { OfficeRoutines } from "./office-routines";
 import { OfficeSquadAttention } from "./office-squad-attention";
+import { OfficeSquadSeatMenu } from "./office-squad-seat-menu";
 
 const STATUS_KEYS = {
   working: "status_working",
@@ -86,6 +89,7 @@ function PanelBody({
   const { data: proposals = [] } = useQuery(proposalListOptions(wsId, { state: "pending", squad_id: squadId }));
   const { data: routines = [] } = useQuery(squadRoutinesOptions(wsId, squadId));
   const { data: autonomy } = useQuery(squadAutonomyOptions(wsId, squadId));
+  const { data: floors = [] } = useQuery(officeFloorsOptions(wsId));
   const { t: tGovernance } = useT("governance");
   const isOfficeAdmin = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
@@ -111,6 +115,18 @@ function PanelBody({
       <header className="flex shrink-0 flex-col gap-1 border-b px-4 py-3 pr-12">
         <DialogTitle className="truncate text-heading">{squad?.name ?? ""}</DialogTitle>
         {squad?.description ? <p className="text-body text-muted-foreground">{squad.description}</p> : null}
+        {isOfficeAdmin && squad && floors.length > 0 ? (
+          <div className="pt-1">
+            <OfficeSquadSeatMenu
+              squad={squad}
+              floors={floors}
+              allSquads={squads}
+              trigger={<Button type="button" variant="outline" size="sm" />}
+            >
+              {t(($) => $.office.squad_move)}
+            </OfficeSquadSeatMenu>
+          </div>
+        ) : null}
       </header>
       <div className="shrink-0 border-b px-4 py-2">
         <TabsList>
