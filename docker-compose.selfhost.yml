@@ -280,7 +280,10 @@ services:
     networks:
       - knowledge
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weknora -d weknora"]
+      # Over TCP: on the first start the image's init server listens only on the
+      # Unix socket, so a socket check reports healthy before the real server
+      # accepts connections, and knowledge-app would crash on connection refused.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U weknora -d weknora"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -365,7 +368,9 @@ services:
       STORAGE_TYPE: local
       LOCAL_STORAGE_BASE_DIR: /data/files
       MAX_FILE_SIZE_MB: ${KNOWLEDGE_MAX_FILE_SIZE_MB:-50}
-      OLLAMA_BASE_URL: ${KNOWLEDGE_OLLAMA_URL:-http://host.docker.internal:11434}
+      # Defaults to the embedding endpoint, so WeKnora's Ollama and the embedding
+      # model point at the same host unless KNOWLEDGE_OLLAMA_URL says otherwise.
+      OLLAMA_BASE_URL: ${KNOWLEDGE_OLLAMA_URL:-${KNOWLEDGE_EMBEDDING_URL:-http://host.docker.internal:11434}}
       OLLAMA_OPTIONAL: "true"
       # WeKnora refuses model and import URLs that resolve to private
       # addresses unless the host is listed here. Setting this REPLACES
@@ -386,6 +391,9 @@ services:
       # service user must be bootstrapped as one (SELF_HOSTING.md, knowledge).
       WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL: ${KNOWLEDGE_SERVICE_EMAIL:-}
       WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
+      # Off, as in the working stack this repo was verified against: the service login
+      # is 8 to 32 letters and digits (see the runbook), without the complex-password rule.
+      WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED: "false"
     volumes:
       - knowledge-data-files:/data/files
       - knowledge-docreader-tmp:/tmp/docreader:ro
@@ -399,7 +407,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      # The first start runs migrations and takes about a minute before /health
+      # answers. A shorter period marks the container unhealthy and fails make dev-full.
+      start_period: 180s
     restart: unless-stopped
 
   knowledge-ui:
