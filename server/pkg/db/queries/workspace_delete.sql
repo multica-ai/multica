@@ -691,6 +691,9 @@ deleted_runtimes AS (
 ),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
+),
+deleted_project_members AS (
+    DELETE FROM project_member WHERE project_member.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 

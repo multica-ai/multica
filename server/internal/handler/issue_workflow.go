@@ -906,6 +906,9 @@ func (h *Handler) loadProjectForWorkflowWrite(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "project not found")
 		return db.Project{}, db.Member{}, "", false
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
+		return db.Project{}, db.Member{}, "", false
+	}
 	if !canManageProjectWorkflow(member, project) {
 		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change this project's workflow")
 		return db.Project{}, db.Member{}, "", false
@@ -1389,6 +1392,9 @@ func (h *Handler) PreviewWorkflowHandoff(w http.ResponseWriter, r *http.Request)
 		}
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if !h.requireProjectVisible(w, r, uuidToString(issue.WorkspaceID), projectID, http.StatusNotFound, "project not found") {
 			return
 		}
 		params.ProjectID = projectID
