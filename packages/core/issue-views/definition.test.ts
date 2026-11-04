@@ -125,3 +125,30 @@ describe("agent running in a saved view", () => {
     expect(isIssueViewModified(legacy, store.getState()).filters).toBe(false);
   });
 });
+
+describe("unread in a saved view", () => {
+  const view = { query: { unreadFilter: true }, display: {} };
+
+  it("saves the filter and opens with it on, unmodified", () => {
+    const store = liveStateFor(view);
+    expect(store.getState().unreadFilter).toBe(true);
+    expect(issueViewDefinitionFromState(store.getState()).query).toMatchObject({
+      unreadFilter: true,
+    });
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(false);
+  });
+
+  it("reports turning it off as a modified filter", () => {
+    const store = liveStateFor(view);
+    store.getState().toggleUnreadFilter();
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(true);
+    expect([...modifiedFilterDimensions(view, store.getState())]).toEqual(["unread"]);
+  });
+
+  it("treats a view saved before the filter existed as off", () => {
+    const legacy = { query: { statusFilters: ["todo"] }, display: {} };
+    const store = liveStateFor(legacy);
+    expect(store.getState().unreadFilter).toBe(false);
+    expect(isIssueViewModified(legacy, store.getState()).filters).toBe(false);
+  });
+});

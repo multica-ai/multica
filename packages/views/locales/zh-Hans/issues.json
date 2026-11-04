@@ -38,10 +38,17 @@
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
   },
+  "unread_filter_error": {
+    "title": "无法加载未读任务"
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "加载状态后才能显示任务。",
     "retry": "重试"
+  },
+  "relation_filter_error": {
+    "title": "“与我的关系”筛选加载失败",
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",
@@ -179,8 +186,11 @@
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "分配给我的智能体的",
+    "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "section_read_state": "阅读状态",
+    "read_state_unread": "未读",
     "operator_label": "关系",
     "operator_is": "是",
     "operator_is_not": "不是",
@@ -754,6 +764,7 @@
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",
+    "unread_title": "没有未读任务",
     "clear_button": "清除筛选"
   },
   "agent_live": {
@@ -1722,7 +1733,8 @@
     "builtin": {
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
-      "all_issues": "全部任务"
+      "all_issues": "全部任务",
+      "unread": "未读"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

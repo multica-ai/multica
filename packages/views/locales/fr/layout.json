@@ -110,6 +110,7 @@
     "work": {
       "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
+      "unread": "Non lues",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",
@@ -118,6 +119,7 @@
       "project_issues": "Tâches de {{name}}",
       "project_issues_empty": "Aucune tâche",
       "project_issues_error": "Impossible de charger les tâches",
+      "project_issues_retry": "Réessayer",
       "project_issues_settings": "Tâches des projets",
       "settings_status": "Statut",
       "settings_assignee": "Responsable",

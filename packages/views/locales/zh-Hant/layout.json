@@ -109,6 +109,7 @@
     "work": {
       "my_agents": "我的 AI 代理在做",
       "all_issues": "全部任務",
+      "unread": "未讀",
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",
@@ -116,6 +117,7 @@
       "project_issues": "{{name}} 的任務",
       "project_issues_empty": "沒有任務",
       "project_issues_error": "無法載入任務",
+      "project_issues_retry": "重試",
       "project_issues_settings": "專案中的任務",
       "settings_status": "狀態",
       "settings_assignee": "負責人",

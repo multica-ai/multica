@@ -38,10 +38,17 @@
   "working_filter_error": {
     "title": "無法載入 AI 代理正在處理的任務"
   },
+  "unread_filter_error": {
+    "title": "無法載入未讀任務"
+  },
   "status_catalog_error": {
     "title": "狀態列表載入失敗",
     "hint": "載入狀態後才能顯示任務。",
     "retry": "重試"
+  },
+  "relation_filter_error": {
+    "title": "「與我的關係」篩選載入失敗",
+    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「分配給我的 AI 代理的」篩選的任務。"
   },
   "source_context": {
     "create_action": "從這條評論建立子任務",
@@ -179,8 +186,11 @@
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
+    "section_read_state": "閱讀狀態",
+    "read_state_unread": "未讀",
     "operator_label": "關係",
     "operator_is": "是",
     "operator_is_not": "不是",
@@ -754,6 +764,7 @@
   },
   "filtered_empty": {
     "title": "沒有符合篩選條件的任務",
+    "unread_title": "沒有未讀任務",
     "clear_button": "清除篩選"
   },
   "agent_live": {
@@ -1722,7 +1733,8 @@
     "builtin": {
       "my_issues": "我的任務",
       "my_agents": "我的 AI 代理在做",
-      "all_issues": "全部任務"
+      "all_issues": "全部任務",
+      "unread": "未讀"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",

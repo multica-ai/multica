@@ -5,6 +5,7 @@ import { configStore } from "@multica/core/config";
 import { Command, Globe, Terminal } from "@multica/ui/icons";
 import type { User } from "@multica/core/types";
 import enLayout from "../locales/en/layout.json";
+import { HelpLauncher } from "../layout/help-launcher";
 import { useSearchStore } from "../search/search-store";
 import type { WhatsNewRelease } from "./releases";
 import { useWhatsNewSessionStore } from "./session-store";
@@ -125,7 +126,19 @@ function renderLauncher() {
 }
 
 const trigger = () => screen.getByRole("button", { name: "What's new" });
+const railTrigger = () => screen.queryByRole("button", { name: "What's new" });
 const dot = () => document.querySelector('[data-slot="whats-new-dot"]');
+
+function openFromHelpMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "Help" }));
+  act(() => {
+    vi.runAllTimers();
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "What's new" }));
+  act(() => {
+    vi.runAllTimers();
+  });
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -205,13 +218,63 @@ describe("WhatsNewLauncher", () => {
 
   it("stays quiet against a server that cannot record dismissals", () => {
     signIn({});
+    render(
+      <>
+        <WhatsNewLauncher />
+        <HelpLauncher />
+      </>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(AUTO_OPEN_DELAY_MS);
+    });
+
+    expect(railTrigger()).not.toBeInTheDocument();
+    expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
+
+    openFromHelpMenu();
+    expect(screen.getByRole("heading", { name: "What's new" })).toBeInTheDocument();
+    expect(mocks.markWhatsNewSeen).not.toHaveBeenCalled();
+  });
+
+  it("leaves the rail once the update is acknowledged", () => {
+    signIn({ whats_new_seen_version: "0.1.0" });
     renderLauncher();
 
-    expect(dot()).not.toBeInTheDocument();
-    expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(railTrigger()).not.toBeInTheDocument();
+  });
+
+  it("keeps the rail button while the panel opened from it is up", () => {
+    signIn({ whats_new_seen_version: "0.2.0" });
+    render(<WhatsNewLauncher />);
 
     fireEvent.click(trigger());
     expect(screen.getByRole("heading", { name: "What's new" })).toBeInTheDocument();
+    expect(railTrigger()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(railTrigger()).not.toBeInTheDocument();
+  });
+
+  it("opens the history from the Help menu once everything is read", () => {
+    signIn({ whats_new_seen_version: "0.3.0" });
+    render(
+      <>
+        <WhatsNewLauncher />
+        <HelpLauncher />
+      </>,
+    );
+    expect(railTrigger()).not.toBeInTheDocument();
+
+    openFromHelpMenu();
+    expect(screen.getByRole("heading", { name: "What's new" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "v0.3.0" })).not.toHaveTextContent("New");
     expect(mocks.markWhatsNewSeen).not.toHaveBeenCalled();
   });
 

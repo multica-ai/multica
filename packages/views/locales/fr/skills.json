@@ -134,6 +134,8 @@
     },
     "toast_saved": "Skill enregistré",
     "toast_save_failed": "Échec de l'enregistrement du skill",
+    "toast_saved_version": "Enregistré en v{{version}}",
+    "toast_view_history": "Voir l'historique",
     "toast_deleted": "Skill supprimé",
     "toast_delete_failed": "Échec de la suppression du skill",
     "refresh": {
@@ -203,20 +205,51 @@
       "mode_edit": "Modifier",
       "mode_raw": "Texte brut"
     },
+    "versions": {
+      "list_aria": "Versions du skill",
+      "version_label": "v{{version}}",
+      "current": "Actuelle",
+      "unknown_author": "Inconnu",
+      "empty": "Aucune version pour l'instant. À la prochaine modification de ce skill, son contenu actuel sera enregistré comme première version.",
+      "load_failed": "Impossible de charger les versions.",
+      "restore": "Restaurer",
+      "toast_restored": "v{{version}} restaurée",
+      "toast_restore_failed": "Impossible de restaurer la version",
+      "source": {
+        "baseline": "Contenu antérieur",
+        "create": "Création",
+        "update": "Modification",
+        "import": "Import",
+        "refresh": "Mis à jour depuis la source",
+        "restore": "Restaurée depuis v{{version}}"
+      },
+      "dialog": {
+        "title": "Restaurer v{{version}} ?",
+        "description": "Le contenu de v{{version}} devient une nouvelle version. Les agents l'utilisent dès leur prochaine exécution. Les versions plus récentes restent dans l'historique.",
+        "unsaved_warning": "Vos modifications non enregistrées seront perdues.",
+        "cancel": "Annuler",
+        "confirm": "Restaurer",
+        "restoring": "Restauration..."
+      }
+    },
     "sections": {
       "content": "Contenu",
       "files": "Fichiers",
       "edit": "Modifier",
       "open": "Ouvrir",
-      "add": "Ajouter"
+      "add": "Ajouter",
+      "history": "Historique"
     },
     "menu": {
       "copy_link": "Copier le lien",
       "link_copied": "Lien copié",
-      "delete": "Supprimer le skill"
+      "delete": "Supprimer le skill",
+      "version_history": "Historique des versions"
     },
     "panel": {
-      "add_description": "Ajouter une description"
+      "add_description": "Ajouter une description",
+      "version": "Version",
+      "no_versions": "Aucune version"
     }
   },
   "create": {

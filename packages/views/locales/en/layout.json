@@ -110,6 +110,7 @@
     "work": {
       "my_agents": "My agents' work",
       "all_issues": "All issues",
+      "unread": "Unread",
       "views": "Views",
       "new_project": "New project",
       "new_issue_in_project": "New issue in {{name}}",
@@ -118,6 +119,7 @@
       "project_issues": "Issues in {{name}}",
       "project_issues_empty": "No issues",
       "project_issues_error": "Couldn't load issues",
+      "project_issues_retry": "Retry",
       "project_issues_settings": "Issues in projects",
       "settings_status": "Status",
       "settings_assignee": "Assignee",

@@ -49,6 +49,7 @@
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
     "./issues/run-steering": "./issues/run-steering.ts",
     "./issues/unread": "./issues/unread.ts",
+    "./issues/subscribed": "./issues/subscribed.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/sidebar-list": "./issues/sidebar-list.ts",
@@ -125,6 +126,7 @@
     "./issue-views/preferences": "./issue-views/preferences.ts",
     "./issue-views/sidebar-views": "./issue-views/sidebar-views.ts",
     "./issue-views/view-target": "./issue-views/view-target.ts",
+    "./issue-views/unread-view": "./issue-views/unread-view.ts",
     "./issue-views/definition": "./issue-views/definition.ts",
     "./issue-views/rename-store": "./issue-views/rename-store.ts",
     "./billing": "./billing/index.ts",
@@ -197,6 +199,7 @@
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
+    "@multica/vitest-setup": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@typescript/native": "catalog:",

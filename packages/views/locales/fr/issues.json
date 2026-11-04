@@ -39,10 +39,17 @@
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
   },
+  "unread_filter_error": {
+    "title": "Impossible de charger vos tâches non lues"
+  },
   "status_catalog_error": {
     "title": "Impossible de charger la liste des états",
     "hint": "Les tâches ne peuvent pas s’afficher tant que les statuts ne sont pas chargés.",
     "retry": "Réessayer"
+  },
+  "relation_filter_error": {
+    "title": "Impossible de charger le filtre « Lien avec moi »",
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
@@ -181,8 +188,11 @@
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Assignés à mes agents",
+    "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "section_read_state": "État de lecture",
+    "read_state_unread": "Non lu",
     "operator_label": "Condition",
     "operator_is": "est",
     "operator_is_not": "n'est pas",
@@ -783,6 +793,7 @@
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",
+    "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
   "agent_live": {
@@ -1790,7 +1801,8 @@
     "builtin": {
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches"
+      "all_issues": "Toutes les tâches",
+      "unread": "Non lues"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",
