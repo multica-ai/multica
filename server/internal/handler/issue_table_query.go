@@ -434,6 +434,7 @@ func issueTableRelationPredicate(relation string, userRef string) string {
      WHERE isub.issue_id  = i.id
        AND isub.user_type = 'member'
        AND isub.user_id   = %s::uuid
+       AND isub.unsubscribed_at IS NULL
   )`, userRef)
 	default: // my_agents
 		return fmt.Sprintf(`(i.assignee_type = 'agent' AND i.assignee_id IN (

@@ -783,7 +783,15 @@ describe("relation filters", () => {
     ).toEqual(["1", "2", "3", "4"]);
   });
 
-  it("leaves subscribed to the server, either way round", () => {
+  it("matches subscribed against the viewer's subscriptions", () => {
+    const withSubscriptions = { ...relationContext, subscribedIssueIds: new Set(["2", "3"]) };
+    expect(ids({ relationContext: withSubscriptions, relationFilters: ["subscribed"] })).toEqual(["2", "3"]);
+    expect(
+      ids({ relationContext: withSubscriptions, relationFilters: ["subscribed"], negatedFilters: ["relation"] }),
+    ).toEqual(["1", "4"]);
+  });
+
+  it("leaves subscribed to the server without the subscriptions, either way round", () => {
     expect(ids({ relationFilters: ["subscribed"] })).toEqual(["1", "2", "3", "4"]);
     expect(ids({ relationFilters: ["subscribed"], negatedFilters: ["relation"] })).toEqual(["1", "2", "3", "4"]);
   });
@@ -861,12 +869,29 @@ describe("advanced filter", () => {
     expect(ids(tree, { relationContext: { userId: "u-1", myAgentIds: new Set(["a-1"]) } })).toEqual(["2", "3"]);
   });
 
-  it("drops subscribed and keeps the rest of 'subscribed, not mine'", () => {
-    const tree = createFilterGroup("all", [
+  describe("subscribed", () => {
+    const viewer = { userId: "u-1", myAgentIds: new Set(["a-1"]) };
+    const subscribedNotMine = createFilterGroup("all", [
       createFilterCondition("relation", ["subscribed"]),
       createFilterCondition("relation", ["assigned", "my_agents"], true),
     ]);
-    expect(ids(tree, { relationContext: { userId: "u-1", myAgentIds: new Set(["a-1"]) } })).toEqual(["3", "4"]);
+    const subscribedOrUrgent = createFilterGroup("any", [
+      createFilterCondition("relation", ["subscribed"]),
+      createFilterCondition("priority", ["urgent"]),
+    ]);
+    const relationContext = { ...viewer, subscribedIssueIds: new Set(["2", "3"]) };
+
+    it("answers 'subscribed, not mine' with the viewer's subscriptions", () => {
+      expect(ids(subscribedNotMine, { relationContext })).toEqual(["3"]);
+    });
+
+    it("keeps subscribed issues an OR sibling does not match", () => {
+      expect(ids(subscribedOrUrgent, { relationContext })).toEqual(["2", "3", "4"]);
+    });
+
+    it("drops out without the subscriptions", () => {
+      expect(ids(subscribedNotMine, { relationContext: viewer })).toEqual(["3", "4"]);
+    });
   });
 
   it("is ANDed with the simple filters", () => {

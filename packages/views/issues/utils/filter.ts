@@ -105,6 +105,9 @@ export interface IssueRelationContext {
   userId: string;
   /** Agents the viewer owns. */
   myAgentIds: ReadonlySet<string>;
+  /** Issues the viewer subscribes to. Loaded only while a filter tests the
+   *  relation; without it "subscribed" is left to the server. */
+  subscribedIssueIds?: ReadonlySet<string>;
 }
 
 /**
@@ -354,11 +357,8 @@ export function applyIssueFilters(
   });
 }
 
-/**
- * OR across relations, or undefined when no listed relation matches and one
- * of them cannot be answered here. Subscriptions are never loaded with the
- * issues, so "subscribed" is left to the server that fetched the rows.
- */
+/** OR across relations, or undefined when no listed relation matches and one
+ *  of them cannot be answered with this context. */
 function issueMatchesRelations(
   issue: Issue,
   relations: readonly IssueRelationFilter[],
@@ -380,7 +380,7 @@ function issueMatchesRelation(
 ): boolean | undefined {
   switch (relation) {
     case "subscribed":
-      return undefined;
+      return context.subscribedIssueIds?.has(issue.id);
     case "assigned":
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":

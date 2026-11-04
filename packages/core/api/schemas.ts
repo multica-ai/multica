@@ -2789,6 +2789,14 @@ export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: strin
   next_cursor: null,
 };
 
+// The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
+// "subscribed" relation filter on client-filtered surfaces.
+export const SubscribedIssueIdsSchema = z
+  .object({ issue_ids: z.array(z.string()) })
+  .loose();
+
+export const EMPTY_SUBSCRIBED_ISSUE_IDS: { issue_ids: string[] } = { issue_ids: [] };
+
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still

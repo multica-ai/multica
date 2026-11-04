@@ -417,6 +417,8 @@ import {
   EMPTY_INBOX_UNREAD_SUMMARY,
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
+  SubscribedIssueIdsSchema,
+  EMPTY_SUBSCRIBED_ISSUE_IDS,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2942,6 +2944,13 @@ export class ApiClient {
       cursor = page.next_cursor === cursor ? null : page.next_cursor;
     } while (cursor);
     return items;
+  }
+
+  async listSubscribedIssueIds(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/issues/subscribed");
+    return parseWithFallback(raw, SubscribedIssueIdsSchema, EMPTY_SUBSCRIBED_ISSUE_IDS, {
+      endpoint: "GET /api/issues/subscribed",
+    }).issue_ids;
   }
 
   async markIssueRead(issueId: string): Promise<void> {

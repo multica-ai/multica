@@ -564,6 +564,20 @@ export function advancedFilterUsesField(
   );
 }
 
+/** Whether a (pruned) tree tests this value of a dimension anywhere. */
+export function advancedFilterUsesValue(
+  group: AdvancedFilterGroup | null | undefined,
+  field: NegatableFilterDimension,
+  value: string,
+): boolean {
+  if (!group) return false;
+  return group.children.some((child) =>
+    child.type === "group"
+      ? advancedFilterUsesValue(child, field, value)
+      : child.field === field && (child.values as readonly unknown[]).includes(value),
+  );
+}
+
 /** The table-query form of a tree, or undefined when it constrains nothing. */
 export function advancedFilterToTableQuery(
   group: AdvancedFilterGroup | null | undefined,

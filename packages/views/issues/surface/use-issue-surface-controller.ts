@@ -23,6 +23,7 @@ import { dateOnlyToLocalDate, todayDateOnly } from "@multica/core/issues/date";
 import {
   advancedFilterToTableQuery,
   advancedFilterUsesField,
+  advancedFilterUsesValue,
   FILTER_DIMENSION_TABLE_FIELD,
   statusColumnFilter,
   propertyIdOfField,
@@ -51,6 +52,7 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
 import { useShallow } from "zustand/react/shallow";
 import type { IssueFilters, IssueRelationContext } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -321,15 +323,26 @@ export function useIssueSurfaceController({
     ...agentListOptions(wsId),
     enabled: relationFilters.length > 0 || advancedFilterUsesField(advancedFilter, "relation"),
   });
+  const usesSubscribed =
+    relationFilters.includes("subscribed") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
+  const { data: subscribedIssueIds } = useQuery({
+    ...subscribedIssueIdsOptions(wsId),
+    enabled: usesSubscribed,
+  });
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
     if (!userId || !agents) return undefined;
+    if (usesSubscribed && !subscribedIssueIds) return undefined;
     return {
       userId,
       myAgentIds: new Set(
         agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
       ),
+      ...(usesSubscribed && subscribedIssueIds
+        ? { subscribedIssueIds: new Set(subscribedIssueIds) }
+        : {}),
     };
-  }, [agents, userId]);
+  }, [agents, subscribedIssueIds, userId, usesSubscribed]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";

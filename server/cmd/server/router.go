@@ -2094,6 +2094,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The caller's issues with an agent result they have not seen
 				// yet; backs the sidebar's unread dot.
 				r.Get("/unread", h.ListIssueUnread)
+				// The caller's subscribed issue ids; backs the "subscribed"
+				// relation filter on client-filtered surfaces.
+				r.Get("/subscribed", h.ListSubscribedIssueIDs)
 				r.Get("/", h.ListIssues)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.
