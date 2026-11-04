@@ -1097,6 +1097,9 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 	if parsed, err := url.Parse(rawURL); err == nil && registryHostAllowed(parsed.Host) &&
 		parsed.Hostname() != "clawhub.ai" && parsed.Hostname() != "www.clawhub.ai" {
 		customRegistry = true
+		if endpoint, ok := registryEndpoint(parsed.Host); ok && endpoint != nil {
+			parsed = endpoint
+		}
 		httpClient = registryHTTPClient(httpClient, parsed)
 		apiBase = registryAPIBase(ctx, httpClient, parsed)
 	}

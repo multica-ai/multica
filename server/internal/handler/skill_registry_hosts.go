@@ -11,16 +11,30 @@ import (
 	"strings"
 )
 
-// Registry hosts are operator-controlled, exact host[:port] entries, never URL prefixes.
-func registryHostAllowed(host string) bool {
-	host = strings.ToLower(host)
+// Registry hosts are operator-controlled exact host[:port] entries, optionally
+// mapped to an API origin. An invalid override is not an allowlist entry.
+func registryEndpoint(host string) (*url.URL, bool) {
 	for _, entry := range strings.Split(os.Getenv("MULTICA_SKILL_REGISTRY_HOSTS"), ",") {
-		candidate := strings.ToLower(strings.TrimSpace(entry))
-		if candidate != "" && candidate == host {
-			return true
+		fields := strings.SplitN(strings.TrimSpace(entry), "=", 2)
+		if !strings.EqualFold(strings.TrimSpace(fields[0]), host) || strings.TrimSpace(fields[0]) == "" {
+			continue
 		}
+		if len(fields) == 1 {
+			return nil, true
+		}
+		endpoint, err := url.Parse(strings.TrimSpace(fields[1]))
+		if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.User != nil ||
+			(endpoint.Path != "" && endpoint.Path != "/") || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+			return nil, false
+		}
+		return endpoint, true
 	}
-	return false
+	return nil, false
+}
+
+func registryHostAllowed(host string) bool {
+	_, ok := registryEndpoint(host)
+	return ok
 }
 
 // Confine discovery and archive redirects to the configured registry origin.

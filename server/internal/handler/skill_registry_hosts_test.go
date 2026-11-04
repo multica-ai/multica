@@ -116,6 +116,38 @@ func TestRegistryHostImportAndRefresh(t *testing.T) {
 	}
 }
 
+func TestRegistryEndpointOverrideImportAndRefresh(t *testing.T) {
+	for _, mode := range []string{"files", "listing", "file"} {
+		t.Run(mode, func(t *testing.T) {
+			srv, calls := registryFixture(t, mode)
+			defer srv.Close()
+			raw := "https://registry.example.com/space/example/skill"
+			t.Setenv("MULTICA_SKILL_REGISTRY_HOSTS", "registry.example.com="+srv.URL)
+			source, normalized, err := detectImportSource(raw)
+			if err != nil || source != sourceClawHub || normalized != raw {
+				t.Fatalf("detect: %v %q %v", source, normalized, err)
+			}
+			imported, err := fetchFromClawHub(context.Background(), srv.Client(), raw)
+			if err != nil || imported.origin["slug"] != "example--skill" || imported.origin["source_url"] != raw {
+				t.Fatalf("import: %#v %v", imported, err)
+			}
+			refreshed, err := fetchImportedSkillFromOrigin(context.Background(), srv.Client(), skillOriginRef{Type: "clawhub", SourceURL: raw})
+			if err != nil || refreshed.origin["source_url"] != raw || *calls != 2 {
+				t.Fatalf("refresh: %#v %v calls=%d", refreshed, err, *calls)
+			}
+		})
+	}
+}
+
+func TestRegistryEndpointValidation(t *testing.T) {
+	for _, endpoint := range []string{"http://registry.example.com/path", "http://user@registry.example.com", "file:///tmp/skill", "http://registry.example.com?x=1"} {
+		t.Setenv("MULTICA_SKILL_REGISTRY_HOSTS", "registry.example.com="+endpoint)
+		if registryHostAllowed("registry.example.com") {
+			t.Fatalf("accepted invalid endpoint %q", endpoint)
+		}
+	}
+}
+
 func TestRegistryDiscoveryFallbackAndRedirect(t *testing.T) {
 	t.Setenv("MULTICA_SKILL_REGISTRY_HOSTS", "registry.example.com")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
