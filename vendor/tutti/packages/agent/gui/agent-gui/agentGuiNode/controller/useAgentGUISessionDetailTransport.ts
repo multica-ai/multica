@@ -1,4 +1,5 @@
 import {
+  type AgentActivityMessage,
   type AgentSessionFamilySnapshot,
   type AgentSessionEngine
 } from "@tutti-os/agent-activity-core";
@@ -16,6 +17,8 @@ import {
 } from "./agentGuiController.reporting";
 import { useAgentConversationMessagePaging } from "./useAgentConversationMessagePaging";
 import { useModelValue } from "../../../shared/engine/useEngineSelector";
+
+const NO_MESSAGES: readonly AgentActivityMessage[] = [];
 
 export function useAgentGUISessionDetailTransport(input: {
   activeConversationId: string | null;
@@ -49,7 +52,7 @@ export function useAgentGUISessionDetailTransport(input: {
   );
   const { transcript } = agentActivityRuntime;
   const activeMessages = useModelValue(
-    () => (activeConversationId ? transcript.messages(activeConversationId) : []),
+    () => (activeConversationId ? transcript.messages(activeConversationId) : NO_MESSAGES),
     [activeConversationId, transcript]
   );
   const projectedSessionMessagesById = useAgentActivitySessionMessages([
