@@ -322,16 +322,16 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
-  // The list takes the space panel's width, so its divider lines up with the
-  // panel's when switching spaces.
-  it("sizes the desktop list with the shared panel width", () => {
+  // Inbox rows need more room than the nav's labels, so the list is sized by
+  // the list width rather than the space panel's.
+  it("sizes the desktop list with the list column width", () => {
     reset();
     layout.width = DESKTOP;
 
     const { container } = render(<InboxPage />);
 
     expect(container.querySelector("[data-slot='list-column']")).toHaveClass(
-      "w-(--sidebar-width)",
+      "w-[min(var(--list-column-width),40vw)]",
     );
   });
 
