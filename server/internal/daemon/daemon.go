@@ -8688,6 +8688,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the daemon cannot record either (#9404).
 	if env.LocalWorktree != nil {
 		promptOptions = append(promptOptions, WithWorktreeBranch(env.LocalWorktree.Branch, env.LocalWorktree.BaseCommit))
+		// The branch block's rule for uncommitted files has one exception,
+		// decided by the same predicate Finalize uses (#9788 review).
+		if env.LocalWorktree.CommitsAllLeftovers() {
+			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
+		}
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
