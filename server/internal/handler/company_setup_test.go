@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -237,6 +238,23 @@ func TestCompanySetup_WeeklyReviewStartsPaused(t *testing.T) {
 	}
 	if !out.AutopilotWeeklyPaused {
 		t.Fatalf("readiness autopilot_weekly_paused = false after setup")
+	}
+}
+
+func TestCompanySetup_PausedDailyBriefStillCountsAsSetUp(t *testing.T) {
+	e := newSetupEnv(t)
+	e.post(t, "", setupBody()).Want(http.StatusOK)
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE autopilot SET status = 'paused' WHERE workspace_id = $1 AND title = $2`,
+		e.WorkspaceID, service.DailyBriefTitle); err != nil {
+		t.Fatalf("pause daily brief: %v", err)
+	}
+
+	var out CompanySetupReadinessResponse
+	e.get(t, "").Want(http.StatusOK).JSON(&out)
+	if !out.AutopilotDaily || !out.Ready {
+		t.Fatalf("readiness with a paused daily brief = %+v, want autopilot_daily and ready", out)
 	}
 }
 

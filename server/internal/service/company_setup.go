@@ -452,7 +452,8 @@ func (s *CompanySetupService) Readiness(ctx context.Context, workspaceID pgtype.
 			if ap.AssigneeType != "agent" || ap.AssigneeID != secretaryID || ap.ExecutionMode != "run_only" {
 				continue
 			}
-			if ap.Title == DailyBriefTitle && ap.Status == "active" {
+			// A paused daily brief is a choice the owner made, so it counts as set up.
+			if ap.Title == DailyBriefTitle && (ap.Status == "active" || ap.Status == "paused") {
 				out.AutopilotDaily = true
 			}
 			if ap.Title == WeeklyReviewTitle && ap.Status == "paused" {
