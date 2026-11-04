@@ -774,6 +774,8 @@
     "cancel_task_aria": "取消執行",
     "retry_task_tooltip": "重試執行",
     "retry_task_aria": "重試執行",
+    "retry_fresh_task_tooltip": "在新會話中重試 — 使用新會話與新工作目錄，舊目錄中未提交的變更不會保留",
+    "retry_fresh_task_aria": "在新會話中重試",
     "retry_failed": "重試執行失敗",
     "retry_blocked": "未重試——你沒有該 AI 代理的使用權限",
     "transcript_tooltip": "檢視記錄",

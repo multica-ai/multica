@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCcw } from "@multica/ui/icons";
+import { Loader2, RefreshCw, RotateCcw } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import type { AgentTask } from "@multica/core/types";
@@ -17,13 +17,25 @@ export function canRetryRun(task: AgentTask): boolean {
   return task.status === "failed" || task.status === "cancelled";
 }
 
+const iconButtonClass =
+  "flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50";
+
 // Re-runs one specific past run. Shared by the execution log's rows and the
 // Runs dialog so a failed run retries the same way wherever it is listed.
+//
+// Two variants side by side: the plain retry continues the source run's session
+// and working directory, and "Retry in a new session" discards both. Whether the
+// prior conversation is still worth carrying is the user's judgement, not the
+// server's, so the fresh start is offered as an explicit choice rather than
+// decided by a size threshold. Runs whose failure already poisoned the session
+// (`agent_error.context_overflow`, `codex_resume_oversized`) skip the old session
+// on either variant, so the choice only matters for runs that finished or were
+// cancelled without a resume-unsafe failure.
 export function RetryRunButton({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const [retrying, setRetrying] = useState(false);
 
-  const handleRetry = async () => {
+  const handleRetry = async (fresh: boolean) => {
     if (retrying) return;
     setRetrying(true);
     try {
@@ -31,7 +43,12 @@ export function RetryRunButton({ task, issueId }: { task: AgentTask; issueId: st
       // endpoint would fall back to the issue's current assignee and the wrong
       // agent would fire on rows whose agent has since been displaced
       // (reassignment, squad worker, or a one-off @-mention agent).
-      await api.rerunIssue(issueId, task.id);
+      // The options object is passed only for the fresh variant: continuing is
+      // the server's default, so the plain retry stays the same two-argument
+      // call every existing caller makes.
+      await (fresh
+        ? api.rerunIssue(issueId, task.id, { fresh: true })
+        : api.rerunIssue(issueId, task.id));
     } catch (e) {
       // A rerun is re-gated on the operator's invoke permission (MUL-4525): a
       // structured 403 means the agent can't be triggered, not a transient
@@ -52,25 +69,50 @@ export function RetryRunButton({ task, issueId }: { task: AgentTask; issueId: st
   };
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            onClick={handleRetry}
-            disabled={retrying}
-            aria-label={t(($) => $.execution_log.retry_task_aria)}
-          />
-        }
-        className="flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {retrying ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <RotateCcw className="h-3.5 w-3.5" />
-        )}
-      </TooltipTrigger>
-      <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={() => handleRetry(false)}
+              disabled={retrying}
+              aria-label={t(($) => $.execution_log.retry_task_aria)}
+            />
+          }
+          className={iconButtonClass}
+        >
+          {retrying ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={() => handleRetry(true)}
+              disabled={retrying}
+              aria-label={t(($) => $.execution_log.retry_fresh_task_aria)}
+            />
+          }
+          className={iconButtonClass}
+        >
+          {retrying ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
+        </TooltipTrigger>
+        {/* `fresh` resets the working directory too, so uncommitted changes in
+            the old one do not carry over. Say so — a user who assumed otherwise
+            would lose work they could not recover. */}
+        <TooltipContent>{t(($) => $.execution_log.retry_fresh_task_tooltip)}</TooltipContent>
+      </Tooltip>
+    </>
   );
 }
