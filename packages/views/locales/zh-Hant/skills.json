@@ -20,21 +20,12 @@
         "description": "你建立的 skill"
       }
     },
-    "empty": {
-      "title": "還沒有 skill",
-      "description": "建立或匯入一個 skill。"
-    },
     "no_matches": {
       "title": "無匹配",
       "with_query": "沒有 skill 匹配 \"{{query}}\"{{filterSuffix}}。",
       "with_query_filter_suffix": "（在當前篩選下）",
       "filter_only": "當前篩選下沒有匹配的 skill。",
       "try_different": " 換個關鍵詞試試。"
-    },
-    "intro_banner": {
-      "title": "在工作區內共享。",
-      "body": "任何成員都可以建立 skill、從 URL 或本地資料夾匯入、或從本地執行時複製——之後所有 AI 代理都能用它。",
-      "highlight": "本地執行時裡的 skill 在你複製過來之前是私有的。"
     },
     "list_error": {
       "title": "無法載入 skill",
@@ -356,5 +347,34 @@
     "markdown_placeholder": "輸入 Markdown 內容...",
     "raw_placeholder": "檔案內容...",
     "raw_aria": "{{path}} 的純文字內容"
+  },
+  "intro": {
+    "title": "把團隊的做事方法寫成 skill",
+    "description": "Skill 是一份可重複使用的做事說明（SKILL.md）。在工作區裡新增一次，分配給哪個 AI 代理，它就會照著做。",
+    "slides": {
+      "methods": {
+        "title": "四種方式新增",
+        "description": "從空白的 SKILL.md 寫起，或從本地資料夾、URL、執行時匯入已有的 skill。"
+      },
+      "assign": {
+        "title": "分配給 AI 代理",
+        "description": "一個 skill 可以給多個 AI 代理使用。改一處，所有用到它的 AI 代理都會更新。"
+      },
+      "share": {
+        "title": "在工作區內共享",
+        "description": "本地執行時裡的 skill 在你複製過來之前是私有的，複製後所有 AI 代理都能使用。"
+      }
+    },
+    "art": {
+      "skill_summary": "先跑測試，再看無障礙和效能。",
+      "add_to_agent": "分配給 AI 代理",
+      "local_skills": "本地 skill",
+      "private": "私有",
+      "workspace_shared": "工作區",
+      "all_agents": "所有 AI 代理可用",
+      "role_reviewer": "審查者",
+      "role_fullstack": "全端",
+      "copy_to_workspace": "複製到工作區"
+    }
   }
 }

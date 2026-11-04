@@ -23,14 +23,17 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { CollectionPageState } from "../../layout/collection-page";
 import {
   Bot,
   ChevronDown,
   Crown,
+  FileQuestion,
   Globe,
   Link2,
+  ListTodo,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -40,7 +43,7 @@ import {
   UserPlus,
   Users,
 } from "@multica/ui/icons";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -237,8 +240,28 @@ export function SquadDetailPage() {
   if (!squad) {
     if (squadError) {
       return (
-        <ObjectPage layoutId={layoutId} segments={segments} leaf={null}>
-          <CollectionPageState icon={Users} title={t(($) => $.detail.not_found)} />
+        <ObjectPage
+          layoutId={layoutId}
+          segments={segments}
+          leaf={
+            <span className="truncate text-muted-foreground">
+              {t(($) => $.detail.not_found)}
+            </span>
+          }
+        >
+          <CollectionPageState
+            icon={FileQuestion}
+            title={t(($) => $.detail.not_found)}
+            description={t(($) => $.detail.not_found_description)}
+            actions={
+              <AppLink
+                href={p.squads()}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                {t(($) => $.detail.back_to_list)}
+              </AppLink>
+            }
+          />
         </ObjectPage>
       );
     }
@@ -684,7 +707,21 @@ function SquadMembersSection({
             );
           })}
         </ObjectSectionCard>
-      ) : null}
+      ) : (
+        <ObjectSectionEmpty
+          icon={Users}
+          title={t(($) => $.members_tab.empty_title)}
+          description={t(($) => $.members_tab.empty_description)}
+          action={
+            canManage ? (
+              <Button type="button" variant="outline" size="sm" onClick={onAddMemberClick}>
+                <Plus aria-hidden="true" />
+                {t(($) => $.members_tab.add_member_button)}
+              </Button>
+            ) : null
+          }
+        />
+      )}
     </ObjectSection>
   );
 }
@@ -830,7 +867,7 @@ function SquadRecentWorkSection({
           ))}
         </ObjectSectionCard>
       ) : (
-        <p className="text-caption text-muted-foreground">{t(($) => $.detail.recent_work_empty)}</p>
+        <ObjectSectionEmpty icon={ListTodo} description={t(($) => $.detail.recent_work_empty)} />
       )}
     </ObjectSection>
   );

@@ -181,6 +181,8 @@
     "filter_count_other": "{{count}} 個篩選",
     "reset": "重設",
     "clear_search": "清除搜尋",
+    "clear_filters": "清除篩選",
+    "clear_filters_and_search": "清除篩選和搜尋",
     "display": "顯示設定",
     "selected_other": "已選 {{count}} 項",
     "clear_selection": "清除選擇",
@@ -197,5 +199,14 @@
   "object_page": {
     "toggle_panel": "切換右側邊欄",
     "properties": "屬性"
+  },
+  "feature_intro": {
+    "read_docs": "閱讀文件",
+    "carousel": "輪播",
+    "slide": "卡片",
+    "slide_position": "第 {{current}} 張，共 {{total}} 張",
+    "go_to_slide": "前往第 {{index}} 張",
+    "previous": "上一張",
+    "next": "下一張"
   }
 }

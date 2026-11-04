@@ -4,12 +4,6 @@
     "title": "已处理全部通知",
     "body": "通知和智能体更新会显示在这里。"
   },
-  "sections": {
-    "action": "需要处理",
-    "activity": "动态",
-    "activity_empty": "暂无动态",
-    "activity_empty_body": "你的任务上的状态变更和智能体回复会显示在这里。"
-  },
   "actions": {
     "mark_read": "标记已读",
     "mark_unread": "标记未读",

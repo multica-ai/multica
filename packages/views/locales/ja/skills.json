@@ -20,21 +20,12 @@
         "description": "あなたが作成したスキル"
       }
     },
-    "empty": {
-      "title": "まだスキルがありません",
-      "description": "skill を作成またはインポートします。"
-    },
     "no_matches": {
       "title": "一致なし",
       "with_query": "「{{query}}」に一致するスキルがありません{{filterSuffix}}。",
       "with_query_filter_suffix": "（このフィルター内）",
       "filter_only": "このフィルターに一致するスキルがありません。",
       "try_different": " 別の検索語を試してください。"
-    },
-    "intro_banner": {
-      "title": "ワークスペースと共有されます。",
-      "body": "誰でもスキルを作成したり、URL やローカルフォルダからインポートしたり、ローカルランタイムからコピーしたりでき、すべてのエージェントが使用できます。",
-      "highlight": "ローカルランタイムのスキルは、ここにコピーするまで非公開のままです。"
     },
     "list_error": {
       "title": "スキルを読み込めませんでした",
@@ -356,5 +347,34 @@
     "markdown_placeholder": "Markdown の内容を記述...",
     "raw_placeholder": "ファイルの内容...",
     "raw_aria": "{{path}} のプレーンテキスト"
+  },
+  "intro": {
+    "title": "チームの仕事のやり方をスキルにする",
+    "description": "スキルは再利用できる作業手順書（SKILL.md）です。ワークスペースに一度追加してエージェントに割り当てれば、エージェントはそれに従って作業します。",
+    "slides": {
+      "methods": {
+        "title": "4 つの追加方法",
+        "description": "空の SKILL.md から書き始めるか、ローカルフォルダ、URL、ランタイムから既存のスキルを取り込めます。"
+      },
+      "assign": {
+        "title": "エージェントに割り当て",
+        "description": "一つのスキルを複数のエージェントで使えます。一か所を直せば、使っているすべてのエージェントに反映されます。"
+      },
+      "share": {
+        "title": "ワークスペースで共有",
+        "description": "ローカルランタイムのスキルは、ここにコピーするまで非公開です。コピーすればどのエージェントでも使えます。"
+      }
+    },
+    "art": {
+      "skill_summary": "まずテストを実行し、次にアクセシビリティとパフォーマンスを確認する。",
+      "add_to_agent": "エージェントに追加",
+      "local_skills": "ローカルのスキル",
+      "private": "非公開",
+      "workspace_shared": "ワークスペース",
+      "all_agents": "どのエージェントでも使用可",
+      "role_reviewer": "レビュー担当",
+      "role_fullstack": "フルスタック",
+      "copy_to_workspace": "ワークスペースにコピー"
+    }
   }
 }

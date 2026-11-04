@@ -329,6 +329,7 @@ describe("SquadDetailPage", () => {
     seed(undefined, { "squads/sq-1": { data: undefined, isError: true } });
     renderPage();
     expect(screen.getByRole("link", { name: "Squads" })).toBeInTheDocument();
-    expect(screen.getByText("Squad not found")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Squad not found" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All squads" })).toBeInTheDocument();
   });
 });

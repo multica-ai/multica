@@ -983,7 +983,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   return (
     <div ref={motionRef} data-run-slot-id={run.task.id}
       data-run-comment-id={!reply ? run.task.id : undefined}
-      id={!standalone && slotEntry ? `comment-${slotEntry.id}` : undefined}
+      id={!standalone ? `comment-${slotEntry?.id ?? run.task.id}` : undefined}
       className={cn("transition-colors duration-700", standalone ? !reply && "rounded-xl border" : "border-t border-border/50", !reply && "py-1.5",
         highlighted ? highlightedCommentBackgroundClass : standalone && !reply && "bg-card")}>
       {commentProps && reply ? standalone ? (
