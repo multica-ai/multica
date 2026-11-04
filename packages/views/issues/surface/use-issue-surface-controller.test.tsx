@@ -7,12 +7,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { workspaceWorkingAgentsKeys } from "@multica/core/agents/queries";
+import { issueUnreadKeys } from "@multica/core/issues/unread";
 import {
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
 } from "@multica/core/issues/stores/surface-view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import type { IssueRelationFilter } from "@multica/core/issues/stores/view-store";
 import type {
+  Agent,
   AgentTask,
   Issue,
   IssueStatus,
@@ -59,6 +63,11 @@ const openModal = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -153,7 +162,10 @@ describe("useIssueSurfaceController", () => {
     typeof vi.fn<() => Promise<WorkspaceWorkingAgent[]>>
   >;
   let listIssueTableRows: ReturnType<typeof vi.fn>;
+  let listIssueUnread: ReturnType<typeof vi.fn>;
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
+  let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
+  let listAgents: ReturnType<typeof vi.fn<() => Promise<Agent[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -178,6 +190,9 @@ describe("useIssueSurfaceController", () => {
     });
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
+    listIssueUnread = vi.fn(() => Promise.resolve([]));
+    listSubscribedIssueIds = vi.fn(() => never<string[]>());
+    listAgents = vi.fn(() => Promise.resolve([] satisfies Agent[]));
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -191,7 +206,10 @@ describe("useIssueSurfaceController", () => {
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
       getWorkspaceWorkingAgents,
+      listIssueUnread,
       getChildIssueProgress: vi.fn(() => never()),
+      listAgents,
+      listSubscribedIssueIds,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
     updateIssueMutate.mockClear();
@@ -277,6 +295,53 @@ describe("useIssueSurfaceController", () => {
         }),
       }),
     );
+  });
+
+  it("sends relations and negated dimensions, and excludes negated status columns", async () => {
+    const store = getIssueSurfaceViewStore("workspace");
+    store.getState().toggleStatusFilter("done");
+    store.getState().setFilterNegated("status", true);
+    store.getState().toggleRelationFilter("assigned");
+    store.getState().toggleRelationFilter("my_agents");
+    // "Is not" with nothing selected never reaches the server.
+    store.getState().setFilterNegated("label", true);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+    expect(result.current.tableQuerySpec.filters).toMatchObject({
+      statuses: ["done"],
+      relations: ["assigned", "my_agents"],
+      negate: ["statuses"],
+    });
+    expect(result.current.visibleStatuses).not.toContain("done");
+    expect(result.current.visibleStatuses).toContain("todo");
+  });
+
+  it("ignores a persisted relation filter on a surface already scoped to me", async () => {
+    const store = getIssueSurfaceViewStore("my:user-1:assigned");
+    store.getState().toggleRelationFilter("created");
+    store.getState().setFilterNegated("relation", true);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "my", relation: "assigned", userId: "user-1" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "my:user-1:assigned") },
+    );
+
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
+    expect(result.current.tableQuerySpec.filters.relations).toBeUndefined();
+    expect(result.current.tableQuerySpec.filters.negate).toBeUndefined();
   });
 
   // Off by default: an untouched surface sends no project-status key at all.
@@ -1059,7 +1124,9 @@ describe("useIssueSurfaceController", () => {
         undefined,
       ),
     );
-    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([]);
+    await waitFor(() =>
+      expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([]),
+    );
   });
 
   it.each(["board", "list", "swimlane"] as const)(
@@ -1272,7 +1339,7 @@ describe("useIssueSurfaceController", () => {
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
     expect(result.current.visibleStatuses).not.toContain("cancelled");
-    expect(result.current.hiddenStatuses).toContain("cancelled");
+    expect(result.current.columnStatuses).toContain("cancelled");
   });
 
   it("keeps cancelled issues out of the default visible surface", async () => {
@@ -1322,9 +1389,64 @@ describe("useIssueSurfaceController", () => {
     // is a normal status the filter can exclude, not an unlockable bucket.
     expect(result.current.visibleStatuses).toEqual(["todo"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
-    // cancelled participates in show/hide like the rest — hidden here because
-    // the active filter excludes it.
-    expect(result.current.hiddenStatuses).toContain("cancelled");
+    // cancelled participates in show/hide like the rest: the filter hides it
+    // without dropping it from the columns Display offers.
+    expect(result.current.columnStatuses).toContain("cancelled");
+  });
+
+  it("keeps an explicitly selected hidden status column after switching to advanced", async () => {
+    mockListByStatus({
+      cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
+    });
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().toggleStatusFilter("cancelled");
+    const { result } = renderHook(
+      () => useIssueSurfaceController({
+        scope: { type: "project", projectId: "p1" },
+        modes: ["list"],
+      }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.visibleStatuses).toEqual(["cancelled"]);
+    expect(result.current.issues.map((issue) => issue.id)).toEqual(["cancelled-1"]);
+    act(() => store.getState().enterAdvancedFilter());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.tableQuerySpec.filters.advanced).toEqual({
+      match: "all", children: [{ field: "statuses", values: ["cancelled"] }],
+    });
+    expect(result.current.visibleStatuses).toContain("cancelled");
+    expect(result.current.issues.map((issue) => issue.id)).toEqual(["cancelled-1"]);
+  });
+
+  it("keeps server branch totals for the statuses a negated filter leaves", async () => {
+    const store = getIssueSurfaceViewStore("workspace");
+    store.getState().toggleStatusFilter("done");
+    store.getState().setFilterNegated("status", true);
+    listIssueTableRows.mockImplementation(async (request) => ({
+      query_fingerprint: "review",
+      group_key: request.group_key,
+      parent_id: null,
+      total: 120,
+      branch_total: request.group_key === "status:todo" ? 120 : 0,
+      rows: request.group_key === "status:todo"
+        ? Array.from({ length: 50 }, (_, index) => ({
+            issue: makeIssue({ id: `todo-${index}`, status: "todo" }), direct_child_count: 0,
+          }))
+        : [],
+      next_cursor: request.group_key === "status:todo" ? "more" : null,
+    }));
+    listIssueTableFacets.mockResolvedValue({
+      query_fingerprint: "review", total: 120,
+      facets: [{ kind: "status", values: [{ key: "todo", count: 120 }, { key: "done", count: 10 }] }],
+    });
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "workspace" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc, "workspace") },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.statusPagination?.todo.loaded).toBe(50);
+    expect(result.current.statusPagination?.todo.total).toBe(120);
   });
 
   it("treats a cancelled-only filter like any other narrowing status filter", async () => {
@@ -1547,7 +1669,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.workingAgents).toEqual([]));
   });
 
-  it("requests issue working agents so chat/autopilot work stays out of scope", async () => {
+  it.each(["table", "list", "board", "swimlane"] as const)("loads only the scoped working facet on an unfiltered %s surface", async (mode) => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
     });
@@ -1555,15 +1677,191 @@ describe("useIssueSurfaceController", () => {
       () =>
         useIssueSurfaceController({
           scope: { type: "project", projectId: "p1" },
-          modes: ["list"],
+          modes: [mode],
         }),
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() => expect(result.current.workingAgents).toEqual([]));
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
+    expect(getWorkspaceWorkingAgents).not.toHaveBeenCalled();
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("waits for working membership on activation and after cache removal, and reuses resolved membership", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    let finish!: (agents: WorkspaceWorkingAgent[]) => void;
+    getWorkspaceWorkingAgents.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const store = getIssueSurfaceViewStore("project:p1");
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    listIssueTableRows.mockClear();
+    listIssueTableFacets.mockClear();
+    act(() => store.getState().toggleAgentRunningFilter());
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isEmpty).toBe(false);
+    expect(result.current.filterDependencyError).toBeNull();
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    expect(submenuFacetCalls(listIssueTableFacets)).toHaveLength(0);
+    await act(async () => finish([makeWorkingAgent("agent-1", ["todo-1"])]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual(["todo-1"]);
+    expect(listIssueTableRows).toHaveBeenCalledWith(expect.objectContaining({
+      query: expect.objectContaining({ filters: expect.objectContaining({ working_issue_ids: ["todo-1"] }) }),
+    }));
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
+    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.getState().toggleAgentRunningFilter());
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledTimes(1);
+    expect(result.current.isLoading).toBe(false);
+
+    act(() => store.getState().toggleAgentRunningFilter());
+    listIssueTableRows.mockClear();
+    act(() => {
+      qc.removeQueries({ queryKey: workspaceWorkingAgentsKeys.all("ws-1") });
+      store.getState().toggleAgentRunningFilter();
+    });
+    await waitFor(() => expect(getWorkspaceWorkingAgents).toHaveBeenCalledTimes(2));
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+
+    // An authoritative empty response must still become an explicit empty
+    // filter; omitting it after resolution would fetch unfiltered rows.
+    await act(async () => finish([]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([]);
+    expect(listIssueTableRows).toHaveBeenCalledWith(expect.objectContaining({
+      query: expect.objectContaining({ filters: expect.objectContaining({ working_issue_ids: [] }) }),
+    }));
+  });
+
+  it("keeps Table loading until working membership resolves, and lets the filter be disabled while pending", async () => {
+    getWorkspaceWorkingAgents.mockImplementation(() => never());
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().toggleAgentRunningFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["table"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.workingAgents).toEqual([]));
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isEmpty).toBe(false);
+    act(() => store.getState().toggleAgentRunningFilter());
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+  });
+
+  it("offers a retry when the working filter cannot load its initial membership", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    getWorkspaceWorkingAgents.mockRejectedValueOnce(new Error("offline"));
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().toggleAgentRunningFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("working"));
+    expect(result.current.isEmpty).toBe(false);
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"])]);
+    act(() => result.current.filterDependencyError!.retry());
+    await waitFor(() => expect(result.current.issues.map((issue) => issue.id)).toEqual(["todo-1"]));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.filterDependencyError).toBeNull();
+  });
+
+  const unreadMark = (issueId: string) => ({
+    issue_id: issueId,
+    outcome: "manual",
+    agent_id: null,
+    created_at: "2026-01-01T00:00:00Z",
+  });
+
+  it("holds loading while the unread list loads, then filters by it", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    let finish!: (marks: ReturnType<typeof unreadMark>[]) => void;
+    listIssueUnread.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().toggleUnreadFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    // Only the unread list is outstanding, so it alone holds the loading state.
+    await waitFor(() =>
+      expect(qc.getQueryState(["issue-statuses", "ws-1", "list"])?.status).toBe("success"),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(listIssueUnread).toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isEmpty).toBe(false);
+    expect(result.current.filterDependencyError).toBeNull();
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toBeUndefined();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+
+    await act(async () => finish([unreadMark("todo-1")]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(listIssueTableRows).toHaveBeenCalledWith(expect.objectContaining({
+      query: expect.objectContaining({ filters: expect.objectContaining({ unread_issue_ids: ["todo-1"] }) }),
+    }));
+  });
+
+  it("offers a retry when the unread filter cannot load the unread list", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    listIssueUnread.mockRejectedValueOnce(new Error("offline"));
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().toggleUnreadFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("unread"));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isEmpty).toBe(false);
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toBeUndefined();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    listIssueUnread.mockResolvedValue([unreadMark("todo-1")]);
+    act(() => result.current.filterDependencyError!.retry());
+    await waitFor(() => expect(result.current.issues.map((issue) => issue.id)).toEqual(["todo-1"]));
+    expect(result.current.filterDependencyError).toBeNull();
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["todo-1"]);
+  });
+
+  it("keeps issues read under the unread filter until the filter turns off", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    listIssueUnread.mockResolvedValue([unreadMark("b"), unreadMark("a")]);
+    const store = getIssueSurfaceViewStore("project:p1");
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    act(() => store.getState().toggleUnreadFilter());
+    await waitFor(() => expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["a", "b"]));
+
+    await act(async () => {
+      qc.setQueryData(issueUnreadKeys.all("ws-1"), [unreadMark("b")]);
+      // Query observers notify on a timer; let the read reach the hook.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["a", "b"]);
+
+    act(() => qc.setQueryData(issueUnreadKeys.all("ws-1"), [unreadMark("b"), unreadMark("c")]));
+    await waitFor(() =>
+      expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["a", "b", "c"]),
+    );
+
+    act(() => store.getState().toggleUnreadFilter());
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toBeUndefined();
+    act(() => store.getState().toggleUnreadFilter());
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["b", "c"]);
   });
 
   it("keeps swimlane chrome bounded while descriptors retain hidden-status counts", async () => {
@@ -1653,6 +1951,113 @@ describe("useIssueSurfaceController", () => {
       assignee_id: "agent-3",
     }),
   ];
+
+  describe("Gantt filtered by subscribed", () => {
+    const renderSubscribedGantt = (relations: IssueRelationFilter[] = ["subscribed"]) => {
+      mockGanttIssues(ganttFixture);
+      const store = getIssueSurfaceViewStore("project:p1");
+      act(() => {
+        store.getState().setViewMode("gantt");
+        for (const relation of relations) store.getState().toggleRelationFilter(relation);
+      });
+      return renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+    };
+
+    it("holds loading until the subscriptions arrive, then draws only subscribed rows", async () => {
+      let finish!: (ids: string[]) => void;
+      listSubscribedIssueIds.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      const { result } = renderSubscribedGantt();
+
+      // The canvas rows are in; only the subscriptions are outstanding.
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      expect(listSubscribedIssueIds).toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.filterDependencyError).toBeNull();
+
+      await act(async () => finish([]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues).toEqual([]);
+    });
+
+    it("offers a retry instead of unfiltered rows when the subscriptions fail", async () => {
+      listSubscribedIssueIds.mockRejectedValueOnce(new Error("offline"));
+      const { result } = renderSubscribedGantt();
+
+      await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("relation"));
+      expect(result.current.isEmpty).toBe(false);
+
+      listSubscribedIssueIds.mockResolvedValue(["gantt-open"]);
+      act(() => result.current.filterDependencyError!.retry());
+      await waitFor(() => expect(result.current.filterDependencyError).toBeNull());
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]),
+      );
+    });
+
+    it.each([
+      { name: "never arrives", agents: () => never<Agent[]>() },
+      { name: "fails", agents: () => Promise.reject(new Error("offline")) },
+    ])("filters by subscriptions when the agent list $name", async ({ agents }) => {
+      listAgents.mockImplementation(agents);
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt();
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filterDependencyError).toBeNull();
+      expect(result.current.filteredGanttIssues).toEqual([]);
+    });
+
+    it("holds loading while the agents behind \"my agents\" load", async () => {
+      let finish!: (agents: Agent[]) => void;
+      listAgents.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt(["subscribed", "my_agents"]);
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(ganttFixture.length));
+      await waitFor(() => expect(listSubscribedIssueIds).toHaveBeenCalled());
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => finish([{ id: "agent-1", owner_id: "user-1" } as Agent]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]);
+    });
+
+    it("offers a retry when the agents behind \"my agents\" fail", async () => {
+      listAgents.mockRejectedValueOnce(new Error("offline"));
+      listSubscribedIssueIds.mockResolvedValue([]);
+      const { result } = renderSubscribedGantt(["subscribed", "my_agents"]);
+
+      await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("relation"));
+      expect(result.current.isEmpty).toBe(false);
+
+      listAgents.mockResolvedValue([{ id: "agent-1", owner_id: "user-1" } as Agent]);
+      act(() => result.current.filterDependencyError!.retry());
+      await waitFor(() => expect(result.current.filterDependencyError).toBeNull());
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]),
+      );
+    });
+  });
+
+  it("still loads Gantt's canvas projection without the working filter and leaves its count unknown until ready", async () => {
+    mockGanttIssues(ganttFixture);
+    let finish!: (agents: WorkspaceWorkingAgent[]) => void;
+    getWorkspaceWorkingAgents.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
+    expect(result.current.workingAgents).toBeUndefined();
+    await act(async () => finish([makeWorkingAgent("agent-1", ["gantt-open"])]));
+    await waitFor(() => expect(result.current.workingAgents).toEqual([{ id: "agent-1", running_task_count: 1 }]));
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+  });
 
   it("filters Gantt by running-task issue ids rather than issue assignees", async () => {
     mockGanttIssues(ganttFixture);

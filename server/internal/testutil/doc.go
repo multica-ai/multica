@@ -1,7 +1,5 @@
-// Package testutil holds the fixtures the server's DB-backed tests build
-// their scenarios from: row builders that insert a fixture row and delete it
-// again when the test ends, and HTTP helpers that run one handler and assert
-// on what it wrote.
+// Package testutil holds shared server test infrastructure: DB fixture
+// builders, HTTP assertions, and process-environment isolation helpers.
 //
 // It exists because the cost of changing shared behaviour was scaling with
 // the number of test files. Before this package `internal/handler` alone held

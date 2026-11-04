@@ -1,21 +1,9 @@
 /**
- * Long-press handler for a comment bubble. Exposes `onLongPress` (drives a
- * native iOS ActionSheetIOS) and `isPressed` (drives the caller's highlight
- * ring while the sheet is on screen).
+ * Native long-press actions for a comment bubble, with a pressed highlight
+ * while the sheet is visible. Reply targets the inline composer.
  *
- * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall step
- * 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom layout, zero
- * animation, zero overflow math, zero new deps.
- *
- * Item set (conditional, mirrors web's comment context menu):
- *   Reply (stub) · React… (opens nested sheet) · Copy · Select Text ·
- *   Copy Link · Resolve/Unresolve Thread (root only) · Delete (own only) ·
- *   Cancel
- *
- * The nested React… sheet (5 quick emojis + More reactions… + Cancel) is
- * fired from INSIDE the outer sheet's completion callback rather than
- * inline, because iOS will refuse to present a second ActionSheet while the
- * first is still dismissing — the callback runs after dismissal completes.
+ * Present nested reaction sheets from the outer sheet's completion callback;
+ * iOS cannot present the next ActionSheet while the first is dismissing.
  */
 import { useCallback, useState } from "react";
 import { ActionSheetIOS, Alert } from "react-native";

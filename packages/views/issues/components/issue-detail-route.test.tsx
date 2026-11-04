@@ -6,6 +6,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
+import { IssueDetail } from "./issue-detail";
 import {
   IssueDetailRoute,
   parseCommentHighlightHash,
@@ -123,6 +124,7 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
   // failed — an unbounded request loop that never reached "not found".
   // Retry is off so any count above 1 can only be a remount refetch.
   it("settles on not-found without looping requests", async () => {
+    expect(vi.isMockFunction(IssueDetail)).toBe(false);
     replace.mockClear();
     push.mockClear();
     const getIssue = vi.fn().mockRejectedValue(new Error("issue not found"));

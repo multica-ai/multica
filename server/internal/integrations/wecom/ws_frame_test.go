@@ -196,14 +196,32 @@ func TestQuotedContext(t *testing.T) {
 		}
 	})
 
-	t.Run("a quoted attachment shows the same placeholder a sent one does", func(t *testing.T) {
+	// The marker a QUOTED attachment renders carries a word where the sender's
+	// own "[Image]" carries nothing, and that is the change this file makes to
+	// what #7980 established. It is not cosmetic: the bytes behind a quoted
+	// picture are now fetched, so its marker is the one that has to be joined
+	// to an entry in the attachment list, and only a marker with room in it can
+	// be rewritten to name one. The sender's own marker is untouched — see the
+	// case below it.
+	t.Run("a quoted attachment renders a marker that can be named", func(t *testing.T) {
 		t.Parallel()
 		var q quotedMessage
 		q.MsgType = "image"
 		q.Image = mediaBody{URL: "https://example.invalid/i", AESKey: "k"}
 		mc := aibotMsgCallback{MsgType: "text", Quote: q}
-		if got, want := mc.quotedContext(), "> [Quote] [Image]"; got != want {
+		if got, want := mc.quotedContext(), "> [Quote] [Image: unavailable]"; got != want {
 			t.Errorf("quotedContext() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("the sender's own attachment keeps the bare placeholder", func(t *testing.T) {
+		t.Parallel()
+		mc := aibotMsgCallback{MsgType: "image"}
+		mc.Image = mediaBody{URL: "https://example.invalid/own", AESKey: "k"}
+		body, ok := mc.ownText()
+		if !ok || body != "[Image]" {
+			t.Errorf("ownText() = %q,%v, want \"[Image]\" — changing this would change what "+
+				"every wecom message body already stored says", body, ok)
 		}
 	})
 
@@ -217,7 +235,7 @@ func TestQuotedContext(t *testing.T) {
 		shot := mixedItem{MsgType: "image", Image: mediaBody{URL: "https://example.invalid/i", AESKey: "k"}}
 		q.Mixed.MsgItem = []mixedItem{words, shot}
 		mc := aibotMsgCallback{MsgType: "text", Quote: q}
-		if got, want := mc.quotedContext(), "> [Quote] 看这个\n> [Image]"; got != want {
+		if got, want := mc.quotedContext(), "> [Quote] 看这个\n> [Image: unavailable]"; got != want {
 			t.Errorf("quotedContext() = %q, want %q", got, want)
 		}
 	})

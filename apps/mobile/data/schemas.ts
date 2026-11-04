@@ -238,9 +238,7 @@ export const EMPTY_LIST_PROJECT_RESOURCES_RESPONSE: ListProjectResourcesResponse
   total: 0,
 };
 
-// =====================================================
 // Chat (sessions / messages / pending task)
-// =====================================================
 // Lenient on every field that's purely informational (status enum, timestamps,
 // agent/creator ids). `.loose()` so server-added fields pass through. The two
 // fields mobile keys behaviour on — `id` and `chat_session_id` — are required.
@@ -338,34 +336,33 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
 // error). Mirrors web's TaskMessagePayload type and the WS `task:message`
 // payload so the mobile cache shape stays interchangeable with web's.
 export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object({
-  task_id: z.string(),
-  issue_id: z.string().default(""),
-  chat_session_id: z.string().optional(),
-  seq: z.number().default(0),
+  call_id: z.string().optional().catch(undefined),
+  task_id: z.string().default("").catch(""),
+  issue_id: z.string().default("").catch(""),
+  chat_session_id: z.string().optional().catch(undefined),
+  seq: z.number().default(0).catch(0),
   // Enum drift defense: unknown server-side types fall back to "text" so
   // the row still renders (as a plain markdown chunk) instead of crashing
   // the timeline. Matches root CLAUDE.md "Enum drift downgrades, not crashes".
   type: z
     .enum(["text", "thinking", "tool_use", "tool_result", "error"])
     .catch("text"),
-  tool: z.string().optional(),
-  content: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
-  output: z.string().optional(),
+  tool: z.string().optional().catch(undefined),
+  content: z.string().optional().catch(undefined),
+  input: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  output: z.string().optional().catch(undefined),
   // Optional with no default: absent means no daemon measured this record's
   // completeness, which is not the same as measured-and-complete. `.catch`
   // keeps a malformed value from failing the row and emptying the transcript.
   output_truncated: z.boolean().optional().catch(undefined),
-  created_at: z.string().optional(),
+  created_at: z.string().optional().catch(undefined),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
 
 export const EMPTY_TASK_MESSAGE_LIST: TaskMessagePayload[] = [];
 
-// =====================================================
 // Search (issues + projects)
-// =====================================================
 // Mirrors SearchIssueResult / SearchProjectResult in packages/core/types/api.ts.
 // Web does not currently route search responses through parseWithFallback, so
 // the schemas live mobile-side. Promote to core when web adopts the same
@@ -401,9 +398,7 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
 };
 
-// =====================================================
 // Agent tasks (per-issue runs, active + history)
-// =====================================================
 // Mirrors AgentTask in packages/core/types/agent.ts. Backend handlers:
 //   GET  /api/issues/{id}/active-task → { tasks: AgentTask[] } (may be empty)
 //   GET  /api/issues/{id}/task-runs   → AgentTask[]
@@ -419,7 +414,16 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
   status: z
-    .enum(["queued", "dispatched", "running", "completed", "failed", "cancelled"])
+    .enum([
+      "queued",
+      "deferred",
+      "dispatched",
+      "waiting_local_directory",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+    ])
     .catch("queued"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),
@@ -473,9 +477,7 @@ export interface ActiveTasksResponse {
 export const EMPTY_AGENT_TASK_LIST: AgentTask[] = [];
 export const EMPTY_ACTIVE_TASKS_RESPONSE: ActiveTasksResponse = { tasks: [] };
 
-// =====================================================
 // User / Workspace / Inbox / Member / Agent
-// =====================================================
 // Mobile reads these on every cold start (auth → workspaces → inbox → members
 // → agents form the boot sequence). A schema drift in any of them used to
 // cascade — getMe failure flushed the user, listWorkspaces failure landed the
@@ -494,7 +496,6 @@ export const UserSchema: z.ZodType<User> = z.object({
   avatar_url: z.string().nullable().default(null),
   onboarded_at: z.string().nullable().default(null),
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
-  starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
@@ -512,7 +513,6 @@ export const EMPTY_USER: User = {
   avatar_url: null,
   onboarded_at: null,
   onboarding_questionnaire: {},
-  starter_content_state: null,
   language: null,
   profile_description: "",
   timezone: null,

@@ -1,7 +1,7 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { RefreshCw } from "@multica/ui/icons";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../i18n";
 
@@ -37,11 +37,11 @@ export function ModelSearchHeader({
         onChange={(event) => onChange(event.target.value)}
         className={compact ? "h-7 min-w-0 flex-1 text-caption" : "h-8 min-w-0 flex-1"}
       />
-      <Button
+      <IconButton
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={refreshLabel}
+        label={refreshLabel}
         onClick={onRefresh}
         disabled={refreshDisabled || refreshing}
       >
@@ -51,7 +51,7 @@ export function ModelSearchHeader({
           }
           aria-hidden="true"
         />
-      </Button>
+      </IconButton>
     </div>
   );
 }

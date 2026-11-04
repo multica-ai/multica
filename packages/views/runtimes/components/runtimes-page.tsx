@@ -1,29 +1,52 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ChevronRight,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import {
+  Check,
   Cloud,
+  Download,
+  Laptop,
   Loader2,
-  Monitor,
   Plus,
   Server,
-} from "lucide-react";
+  SquareTerminal,
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberNeedsMikaSetup, useBootstrapMika } from "@multica/core/onboarding";
+import {
+  memberNeedsMikaSetup,
+  useBootstrapMika,
+} from "@multica/core/onboarding";
 import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
-import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
+import {
+  useRequiredWorkspaceSlug,
+  useWorkspacePaths,
+} from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
-import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import {
+  runtimeListOptions,
+  runtimeKeys,
+} from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
-import { agentListOptions } from "@multica/core/workspace/queries";
-import type { AgentRuntime } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import type { QoderConnection } from "@multica/core/runtimes/qoder";
+import { Badge } from "@multica/ui/components/ui/badge";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -32,31 +55,52 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
   MikaRuntimeChoice,
   type MikaRuntimeSelection,
 } from "./mika-runtime-choice";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
+  CollectionCreateButton,
+  CollectionNoMatches,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
-  CollectionPageState,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
-import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
-import { cn } from "@multica/ui/lib/utils";
-import { AppLink, useNavigation } from "../../navigation";
 import {
-  getMikaOnboarding,
-  pickContentLang,
-} from "../../onboarding/templates";
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  CollectionTag,
+  type CollectionColumn,
+  type CollectionGroup,
+} from "../../layout/collection-list";
+import { cn } from "@multica/ui/lib/utils";
+import { useNavigation } from "../../navigation";
+import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
+import { qoderOptions } from "@multica/core/runtimes/qoder";
+import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
+import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
-import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
+import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
+import { RuntimesIntro } from "./runtimes-intro";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
 import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
-import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
+import {
+  HealthIcon,
+  ProviderIconStack,
+  machineIcon,
+  useHealthLabel,
+} from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
-import { daemonRuntimesDocsHref } from "./runtime-docs";
 
 export interface RuntimesPageProps {
   /** Desktop-only daemon id used to identify this device. */
@@ -71,6 +115,29 @@ export interface RuntimesPageProps {
   cloudRuntimeEnabled?: boolean;
 }
 
+type StatusFilter = "all" | "online" | "offline";
+const STATUS_FILTERS: StatusFilter[] = ["all", "online", "offline"];
+
+const COMING_SOON_SERVICES = [
+  { provider: "cursor", name: "Cursor Cloud Agents", vendor: "Cursor" },
+  { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
+];
+
+type RuntimeRow =
+  | { kind: "machine"; id: string; machine: RuntimeMachine; agentCount: number }
+  | { kind: "qoder"; id: string; connection: QoderConnection; agentCount: number }
+  | { kind: "coming-soon"; id: string; provider: string; name: string; vendor: string }
+  | {
+      kind: "action";
+      id: string;
+      icon: typeof Server;
+      title: string;
+      description: string;
+      action: ReactNode;
+    };
+
+type QoderStatus = "stopped" | "online" | "error" | "offline" | "starting";
+
 function useNowTick(intervalMs = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -80,6 +147,30 @@ function useNowTick(intervalMs = 30_000): number {
   return now;
 }
 
+function qoderIsOnline(connection: QoderConnection): boolean {
+  return (
+    connection.configured &&
+    connection.enabled &&
+    connection.status === "online"
+  );
+}
+
+function qoderStatus(connection: QoderConnection): QoderStatus {
+  if (!connection.enabled) return "stopped";
+  if (connection.status === "online") return "online";
+  if (connection.status === "error") return "error";
+  if (connection.status === "offline") return "offline";
+  return "starting";
+}
+
+const QODER_DOT: Record<QoderStatus, string> = {
+  online: "bg-success",
+  error: "bg-destructive",
+  starting: "bg-warning",
+  offline: "bg-muted-foreground/40",
+  stopped: "bg-muted-foreground/40",
+};
+
 export function RuntimesPage({
   localDaemonId,
   localMachineName,
@@ -87,12 +178,18 @@ export function RuntimesPage({
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
+  const { t } = useT("runtimes");
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const paths = useWorkspacePaths();
+  const { data: qoderConnection, isLoading: qoderLoading } = useQuery(qoderOptions(wsId));
+  const navigation = useNavigation();
+  const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
@@ -103,6 +200,7 @@ export function RuntimesPage({
   const { data: agents = [], isLoading: agentsLoading } = useQuery(
     agentListOptions(wsId),
   );
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   // The Mika entrypoint is per member, not per workspace: the agent alone does
   // not say whether *this* member's conversation was ever opened and kicked
@@ -120,6 +218,14 @@ export function RuntimesPage({
     () => buildWorkloadIndex(agents, snapshot),
     [agents, snapshot],
   );
+  const agentCountByRuntime = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const agent of agents) {
+      if (!agent.runtime_id) continue;
+      counts.set(agent.runtime_id, (counts.get(agent.runtime_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [agents]);
   const now = useNowTick();
   const machines = useMemo(
     () =>
@@ -153,60 +259,311 @@ export function RuntimesPage({
     });
   }, [machines, runtimeProfiles]);
 
-  if (isAuthLoading || runtimesLoading || profilesLoading) {
-    return <RuntimesPageSkeleton />;
-  }
+  // The header, toolbar and column headers render through loading; only the
+  // rows wait, so nothing above them moves when the list lands.
+  const listLoading = isAuthLoading || runtimesLoading || profilesLoading;
 
-  const showEmpty =
-    machines.length === 0 &&
-    orphanProfileRuntimes.length === 0 &&
-    !bootstrapping &&
-    hasLocalMachine !== true;
+  const isDesktop = hasLocalMachine === true;
+  const qoder = qoderConnection ?? null;
+  const qoderHref = paths.runtimeDetail(QODER_RUNTIME_LOCATOR);
+  // Qoder's runtime registers like a machine, but it is listed once, as a
+  // cloud service — never as a machine, even when this server cannot run
+  // Qoder and the cloud row is hidden.
+  const machineList = machines.filter(
+    (machine) =>
+      !(
+        machine.runtimes.length > 0 &&
+        machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud")
+      ),
+  );
+  const qoderAgentCount = agents.filter((agent) =>
+    runtimes.some(
+      (runtime) =>
+        runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
+    ),
+  ).length;
+  const localMachine = machineList.find((machine) => machine.isCurrent);
+
+  const filtering = statusFilter !== "all";
+  const matchesStatus = (online: boolean) =>
+    statusFilter === "all" || (statusFilter === "online") === online;
+
+  const visibleMachines = machineList.filter((machine) =>
+    matchesStatus(machine.health === "online"),
+  );
+  const qoderConfigured = qoder?.configured === true;
+  const showQoderRow =
+    qoder !== null &&
+    (statusFilter === "all" ||
+      (qoderConfigured && matchesStatus(qoderIsOnline(qoder))));
+  const visibleComingSoon = statusFilter === "all" ? COMING_SOON_SERVICES : [];
+  const showThisComputerRow =
+    !filtering && !isDesktop && machineList.length === 0;
+  const showAddMachineRow = !filtering && machineList.length === 0;
+  const showIntro =
+    !listLoading &&
+    !qoderLoading &&
+    !filtering &&
+    !isDesktop &&
+    machineList.length === 0 &&
+    !qoderConfigured &&
+    orphanProfileRuntimes.length === 0;
+  const nothingMatches =
+    filtering &&
+    visibleMachines.length === 0 &&
+    !showQoderRow &&
+    visibleComingSoon.length === 0;
+
+  const configuredCloudCount = qoderConfigured ? 1 : 0;
+  const totalCount = machineList.length + configuredCloudCount;
+  const onlineCount =
+    machineList.filter((machine) => machine.health === "online").length +
+    (qoder && qoderIsOnline(qoder) ? 1 : 0);
+  const statusCounts: Record<StatusFilter, number> = {
+    all: totalCount,
+    online: onlineCount,
+    offline: totalCount - onlineCount,
+  };
+
+  const scopeLabels: Record<StatusFilter, string> = {
+    all: t(($) => $.page.filters.all),
+    online: t(($) => $.page.filters.online),
+    offline: t(($) => $.page.filters.offline),
+  };
+
+  const openQoder = () =>
+    qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
+  const addMenuProps = {
+    isDesktop,
+    localMachineName: localMachineName ?? localMachine?.title ?? null,
+    qoder,
+    cloudRuntimeEnabled,
+    onAddMachine: () => setShowConnectDialog(true),
+    onQoder: openQoder,
+    onCloudRuntime: () => setShowCloudRuntimeDialog(true),
+  };
+
+  const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.page.columns.name),
+        cell: (row) => (
+          <RuntimeNameCell
+            row={row}
+            currentUserId={currentUserId ?? null}
+            members={members}
+            onConnectQoder={() => setQoderDialogOpen(true)}
+          />
+        ),
+      },
+      {
+        key: "harness",
+        header: t(($) => $.page.columns.harness),
+        width: 112,
+        cell: (row) =>
+          row.kind === "machine" ? (
+            <ProviderIconStack providers={row.machine.providerNames} />
+          ) : row.kind === "qoder" ? (
+            <CollectionEmptyValue />
+          ) : null,
+      },
+      {
+        key: "agents",
+        header: t(($) => $.page.columns.agents),
+        width: 56,
+        align: "end",
+        className: "tabular-nums",
+        cell: (row) =>
+          row.kind === "machine" || (row.kind === "qoder" && row.connection.configured)
+            ? row.agentCount
+            : row.kind === "qoder"
+              ? <CollectionEmptyValue />
+              : null,
+      },
+      {
+        key: "workload",
+        header: t(($) => $.page.columns.workload),
+        width: 112,
+        cell: (row) => <RuntimeWorkloadCell row={row} />,
+      },
+      {
+        key: "status",
+        header: t(($) => $.page.columns.status),
+        width: 136,
+        core: true,
+        cell: (row) => <RuntimeStatusCell row={row} bootstrapping={bootstrapping} />,
+      },
+    ],
+    [t, currentUserId, members, bootstrapping],
+  );
+
+  const machineRows: RuntimeRow[] = visibleMachines.map((machine) => ({
+    kind: "machine",
+    id: machine.id,
+    machine,
+    agentCount: machine.runtimes.reduce(
+      (sum, runtime) => sum + (agentCountByRuntime.get(runtime.id) ?? 0),
+      0,
+    ),
+  }));
+  if (showThisComputerRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:this-computer",
+      icon: Laptop,
+      title: t(($) => $.page.rows.this_computer_title),
+      description: t(($) => $.page.rows.this_computer_hint),
+      action: (
+        <a
+          href="/download"
+          target="_blank"
+          rel="noreferrer"
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+        >
+          <Download aria-hidden="true" className="size-3.5" />
+          {t(($) => $.page.rows.download_desktop)}
+        </a>
+      ),
+    });
+  }
+  if (showAddMachineRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:add-machine",
+      icon: SquareTerminal,
+      title: t(($) => $.page.rows.add_machine_title),
+      description: t(($) => $.page.rows.add_machine_hint),
+      action: (
+        <Button variant="outline" size="xs" onClick={() => setShowConnectDialog(true)}>
+          {t(($) => $.page.rows.view_commands)}
+        </Button>
+      ),
+    });
+  }
+  const cloudRows: RuntimeRow[] = [];
+  if (showQoderRow && qoder) {
+    cloudRows.push({
+      kind: "qoder",
+      id: "qoder",
+      connection: qoder,
+      agentCount: qoderAgentCount,
+    });
+  }
+  for (const service of visibleComingSoon) {
+    cloudRows.push({ kind: "coming-soon", id: `soon:${service.provider}`, ...service });
+  }
+  const groups: CollectionGroup<RuntimeRow>[] = nothingMatches
+    ? []
+    : [
+        {
+          key: "machines",
+          label: t(($) => $.page.groups.machines.title),
+          count: machineList.length,
+          rows: machineRows,
+        },
+        {
+          key: "cloud",
+          label: t(($) => $.page.groups.cloud.title),
+          count: configuredCloudCount,
+          rows: cloudRows,
+        },
+      ];
+  const rowHref = (row: RuntimeRow) =>
+    row.kind === "machine"
+      ? paths.runtimeDetail(row.machine.id)
+      : row.kind === "qoder" && row.connection.configured
+        ? qoderHref
+        : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeaderBar
-        totalCount={machines.length}
-        onConnectRemote={() => setShowConnectDialog(true)}
-        cloudRuntimeEnabled={cloudRuntimeEnabled}
-        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
+      <CollectionPageHeader
+        icon={Server}
+        title={scopeLabels[statusFilter]}
+        menu={
+          <CollectionScopeItems
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((filter) => ({
+              value: filter,
+              label: scopeLabels[filter],
+              count: statusCounts[filter],
+            }))}
+          />
+        }
+        actions={<AddRuntimeMenu {...addMenuProps} />}
       />
 
-      {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
-        </div>
+      {showIntro ? (
+        <RuntimesIntro
+          cloudRuntimeEnabled={cloudRuntimeEnabled}
+          action={
+            <AddRuntimeMenu
+              {...addMenuProps}
+              align="start"
+              trigger={
+                <Button>
+                  <Plus aria-hidden="true" />
+                  {t(($) => $.page.add)}
+                </Button>
+              }
+            />
+          }
+        />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-col py-4 sm:py-6")}>
+          <CollectionList
+            embedded
+            pageShortcuts
+            label={scopeLabels[statusFilter]}
+            columns={columns}
+            groups={groups}
+            loading={listLoading}
+            getRowId={(row) => row.id}
+            getRowHref={rowHref}
+            getRowTitle={(row) =>
+              row.kind === "machine"
+                ? row.machine.title
+                : row.kind === "qoder"
+                  ? t(($) => $.qoder.cloud_title)
+                  : undefined
+            }
+            empty={
+              <CollectionNoMatches
+                title={t(($) => $.page.rows.no_matches)}
+                onReset={() => setStatusFilter("all")}
+                hasFilters={filtering}
+              />
+            }
+          />
+          <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
             {!agentsLoading &&
               !chatSessionsLoading &&
               memberNeedsMikaSetup(agents, chatSessions) &&
-              runtimes.length > 0 && (
-              <MikaSetupCard
-                workspaceId={wsId}
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                currentUserId={currentUserId ?? null}
-              />
-            )}
-            {(machines.length > 0 || bootstrapping) && (
-              <MachineList
-                machines={machines}
-                bootstrapping={bootstrapping}
-              />
-            )}
+              runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
+                <MikaSetupCard
+                  workspaceId={wsId}
+                  runtimes={runtimes.filter(
+                    (runtime) => runtime.provider !== "qoder_cloud",
+                  )}
+                  runtimesLoading={runtimesLoading}
+                  currentUserId={currentUserId ?? null}
+                />
+              )}
             {orphanProfileRuntimes.length > 0 && (
               <OrphanRuntimeProfiles
                 runtimes={orphanProfileRuntimes}
                 now={now}
-                hasMachines={machines.length > 0}
               />
             )}
           </div>
         </div>
       )}
 
+      {qoderDialogOpen && (
+        <RemoteRuntimeDialog onClose={() => setQoderDialogOpen(false)} />
+      )}
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
@@ -215,6 +572,334 @@ export function RuntimesPage({
       )}
     </div>
   );
+}
+
+function AddRuntimeMenu({
+  isDesktop,
+  localMachineName,
+  qoder,
+  cloudRuntimeEnabled,
+  onAddMachine,
+  onQoder,
+  onCloudRuntime,
+  trigger,
+  align = "end",
+}: {
+  isDesktop: boolean;
+  localMachineName: string | null;
+  qoder: QoderConnection | null;
+  cloudRuntimeEnabled: boolean;
+  onAddMachine: () => void;
+  onQoder: () => void;
+  onCloudRuntime: () => void;
+  trigger?: ReactElement;
+  align?: "start" | "end";
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={trigger ?? <CollectionCreateButton label={t(($) => $.page.add)} />}
+      />
+      <DropdownMenuContent align={align} className="w-80">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t(($) => $.page.add_menu.machines)}</DropdownMenuLabel>
+          {isDesktop ? (
+            <AddMenuItem
+              icon={<Laptop className="size-4 text-muted-foreground" />}
+              title={t(($) => $.page.add_menu.this_computer)}
+              description={
+                localMachineName
+                  ? t(($) => $.page.add_menu.this_computer_connected, {
+                      name: localMachineName,
+                    })
+                  : undefined
+              }
+              trailing={<Check className="size-4 text-muted-foreground" />}
+              disabled
+            />
+          ) : (
+            <AddMenuItem
+              icon={<Laptop className="size-4 text-muted-foreground" />}
+              title={t(($) => $.page.add_menu.this_computer)}
+              description={t(($) => $.page.add_menu.this_computer_download)}
+              render={<a href="/download" target="_blank" rel="noreferrer" />}
+            />
+          )}
+          <AddMenuItem
+            icon={<SquareTerminal className="size-4 text-muted-foreground" />}
+            title={t(($) => $.page.add_menu.other_machine)}
+            description={t(($) => $.page.add_menu.other_machine_hint)}
+            onClick={onAddMachine}
+          />
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t(($) => $.page.add_menu.cloud_services)}</DropdownMenuLabel>
+          {qoder && (
+            <AddMenuItem
+              icon={<ProviderLogo provider="qoder_cloud" className="size-4" />}
+              title={t(($) => $.qoder.cloud_title)}
+              description={
+                qoder.configured
+                  ? t(($) => $.page.add_menu.qoder_manage_hint)
+                  : t(($) => $.page.rows.provided_by, { vendor: "Qoder" })
+              }
+              trailing={
+                qoder.configured ? (
+                  <Check className="size-4 text-muted-foreground" />
+                ) : undefined
+              }
+              onClick={onQoder}
+            />
+          )}
+          {cloudRuntimeEnabled && (
+            <AddMenuItem
+              icon={<Cloud className="size-4 text-muted-foreground" />}
+              title={t(($) => $.cloud_runtime.action)}
+              description={t(($) => $.page.add_menu.cloud_runtime_hint)}
+              onClick={onCloudRuntime}
+            />
+          )}
+          {COMING_SOON_SERVICES.map((service) => (
+            <AddMenuItem
+              key={service.provider}
+              icon={<ProviderLogo provider={service.provider} className="size-4" />}
+              title={service.name}
+              description={t(($) => $.page.rows.provided_by, {
+                vendor: service.vendor,
+              })}
+              trailing={
+                <Badge variant="secondary" className="shrink-0">
+                  {t(($) => $.page.groups.cloud.coming_soon)}
+                </Badge>
+              }
+              disabled
+            />
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function AddMenuItem({
+  icon,
+  title,
+  description,
+  trailing,
+  ...props
+}: {
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  trailing?: ReactNode;
+} & Omit<React.ComponentProps<typeof DropdownMenuItem>, "children" | "title">) {
+  return (
+    <DropdownMenuItem className="gap-2.5 px-2 py-1.5" {...props}>
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-body font-medium">{title}</span>
+        {description && (
+          <span className="truncate text-caption text-muted-foreground">
+            {description}
+          </span>
+        )}
+      </span>
+      {trailing}
+    </DropdownMenuItem>
+  );
+}
+
+function RuntimeNameCell({
+  row,
+  currentUserId,
+  members,
+  onConnectQoder,
+}: {
+  row: RuntimeRow;
+  currentUserId: string | null;
+  members: MemberWithUser[];
+  onConnectQoder: () => void;
+}) {
+  const { t } = useT("runtimes");
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      const Icon = machineIcon(machine);
+      const ownerId = machine.runtimes[0]?.owner_id ?? null;
+      const owner =
+        ownerId && ownerId === currentUserId
+          ? t(($) => $.page.rows.owner_you)
+          : (members.find((member) => member.user_id === ownerId)?.name ?? null);
+      const description =
+        [machine.deviceSummary, owner].filter(Boolean).join(" · ") ||
+        (machine.section === "cloud"
+          ? t(($) => $.machine.metrics.cloud_worker)
+          : t(($) => $.machine.metrics.local_daemon));
+      return (
+        <CollectionNameCell
+          icon={<Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+          title={machine.title}
+          badges={
+            machine.isCurrent ? (
+              <CollectionTag>{t(($) => $.machine.this_machine)}</CollectionTag>
+            ) : undefined
+          }
+          description={description}
+        />
+      );
+    }
+    case "qoder": {
+      const { connection } = row;
+      const byQoder = t(($) => $.page.rows.provided_by, { vendor: "Qoder" });
+      const error =
+        connection.configured &&
+        qoderStatus(connection) === "error" &&
+        connection.lastError;
+      return (
+        <CollectionNameCell
+          icon={<ProviderLogo provider="qoder_cloud" className="size-4 shrink-0" />}
+          title={t(($) => $.qoder.cloud_title)}
+          description={error || byQoder}
+          trailing={
+            connection.configured ? undefined : (
+              <Button variant="outline" size="xs" onClick={onConnectQoder}>
+                {t(($) => $.page.rows.connect)}
+              </Button>
+            )
+          }
+        />
+      );
+    }
+    case "coming-soon":
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="shrink-0 opacity-60">
+              <ProviderLogo provider={row.provider} className="size-4" />
+            </span>
+          }
+          title={row.name}
+          description={t(($) => $.page.rows.provided_by, { vendor: row.vendor })}
+          muted
+        />
+      );
+    case "action": {
+      const Icon = row.icon;
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-sm border border-dashed text-muted-foreground">
+              <Icon aria-hidden="true" className="size-3" />
+            </span>
+          }
+          title={row.title}
+          description={row.description}
+          trailing={<span className="shrink-0">{row.action}</span>}
+        />
+      );
+    }
+  }
+}
+
+function WorkloadText({
+  running,
+  queued,
+}: {
+  running: number;
+  queued: number;
+}) {
+  const { t } = useT("runtimes");
+  if (running + queued === 0) return <>{t(($) => $.machine.metrics.workload_idle)}</>;
+  return (
+    <span className="truncate tabular-nums text-foreground">
+      {t(($) => $.machine.metrics.workload_hint, { running, queued })}
+    </span>
+  );
+}
+
+function RuntimeWorkloadCell({ row }: { row: RuntimeRow }) {
+  if (row.kind === "machine") {
+    return row.machine.health === "online" ? (
+      <WorkloadText running={row.machine.runningCount} queued={row.machine.queuedCount} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  if (row.kind === "qoder") {
+    return row.connection.configured && qoderStatus(row.connection) === "online" ? (
+      <WorkloadText running={row.connection.activeRuns} queued={row.connection.queuedRuns} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  return null;
+}
+
+function RuntimeStatusCell({
+  row,
+  bootstrapping,
+}: {
+  row: RuntimeRow;
+  bootstrapping?: boolean;
+}) {
+  const { t } = useT("runtimes");
+  const healthLabel = useHealthLabel();
+  const timeAgo = useTimeAgo();
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      if (machine.isCurrent && bootstrapping && machine.runtimes.length === 0) {
+        return (
+          <>
+            <Loader2 aria-hidden="true" className="size-3 shrink-0 animate-spin" />
+            <span className="truncate">{t(($) => $.page.bootstrapping.title)}</span>
+          </>
+        );
+      }
+      const online = machine.health === "online";
+      return (
+        <>
+          <HealthIcon health={machine.health} />
+          <span className={cn("truncate", online && "text-foreground")}>
+            {healthLabel(machine.health)}
+            {!online && machine.lastSeenAt ? ` · ${timeAgo(machine.lastSeenAt)}` : ""}
+          </span>
+        </>
+      );
+    }
+    case "qoder": {
+      if (!row.connection.configured) {
+        return (
+          <Badge variant="secondary" className="bg-warning/10 text-warning">
+            {t(($) => $.page.rows.not_connected)}
+          </Badge>
+        );
+      }
+      const status = qoderStatus(row.connection);
+      return (
+        <>
+          <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", QODER_DOT[status])} />
+          <span
+            className={cn(
+              "truncate",
+              status === "online" && "text-foreground",
+              status === "error" && "text-destructive",
+            )}
+          >
+            {t(($) => $.qoder[status])}
+          </span>
+        </>
+      );
+    }
+    case "coming-soon":
+      return <Badge variant="secondary">{t(($) => $.page.groups.cloud.coming_soon)}</Badge>;
+    case "action":
+      return null;
+  }
 }
 
 /**
@@ -282,7 +967,7 @@ function MikaSetupCard({
 
   return (
     <>
-      <div className="mb-6 flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
         <span
           role="img"
           aria-label={t(($) => $.mika_setup.title)}
@@ -345,15 +1030,13 @@ function MikaSetupCard({
 function OrphanRuntimeProfiles({
   runtimes,
   now,
-  hasMachines,
 }: {
   runtimes: ReturnType<typeof pendingRuntimeFromProfile>[];
   now: number;
-  hasMachines: boolean;
 }) {
   const { t } = useT("runtimes");
   return (
-    <section className={hasMachines ? "mt-6" : undefined}>
+    <section>
       <div className="mb-3">
         <h2 className="text-body font-semibold">
           {t(($) => $.profiles.unassigned_title)}
@@ -362,232 +1045,8 @@ function OrphanRuntimeProfiles({
           {t(($) => $.profiles.unassigned_description)}
         </p>
       </div>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <RuntimeList runtimes={runtimes} now={now} />
-      </div>
+      <RuntimeList runtimes={runtimes} now={now} />
     </section>
-  );
-}
-
-function PageHeaderBar({
-  totalCount,
-  onConnectRemote,
-  cloudRuntimeEnabled,
-  onOpenCloudRuntime,
-}: {
-  totalCount: number;
-  onConnectRemote: () => void;
-  cloudRuntimeEnabled: boolean;
-  onOpenCloudRuntime: () => void;
-}) {
-  const { t, i18n } = useT("runtimes");
-  return (
-    <CollectionPageHeader
-      icon={Server}
-      title={t(($) => $.page.title)}
-      count={totalCount}
-      description={t(($) => $.page.tagline)}
-      learnMore={{
-        href: daemonRuntimesDocsHref(i18n.language),
-        label: t(($) => $.page.learn_more),
-      }}
-      actions={
-        <>
-          {cloudRuntimeEnabled && (
-            <CollectionPageHeaderAction
-              icon={Cloud}
-              label={t(($) => $.cloud_runtime.action)}
-              onClick={onOpenCloudRuntime}
-            />
-          )}
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.connect_remote)}
-            onClick={onConnectRemote}
-          />
-        </>
-      }
-    />
-  );
-}
-
-function MachineList({
-  machines,
-  bootstrapping,
-}: {
-  machines: RuntimeMachine[];
-  bootstrapping?: boolean;
-}) {
-  const { t } = useT("runtimes");
-  if (machines.length === 0) {
-    return (
-      <CollectionPageState
-        icon={Server}
-        title={
-          bootstrapping
-            ? t(($) => $.page.bootstrapping.title)
-            : t(($) => $.page.empty.title)
-        }
-        description={
-          bootstrapping
-            ? t(($) => $.page.bootstrapping.hint)
-            : t(($) => $.page.empty.hint)
-        }
-      />
-    );
-  }
-
-  return (
-    <div className="overflow-hidden rounded-lg border bg-card">
-      <div className="divide-y">
-        {machines.map((machine) => (
-          <MachineRow key={machine.id} machine={machine} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MachineRow({ machine }: { machine: RuntimeMachine }) {
-  const { t } = useT("runtimes");
-  const healthLabel = useHealthLabel();
-  const timeAgo = useTimeAgo();
-  const paths = useWorkspacePaths();
-  const Icon = machine.section === "cloud" ? Cloud : Monitor;
-  const locator = machine.id;
-  const busyCount = machine.runningCount + machine.queuedCount;
-  const body = (
-    <>
-      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-background">
-        <Icon aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
-        <HealthDot
-          health={machine.health}
-          className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
-        />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-body font-medium">
-          {machine.title}
-        </span>
-        <span className="mt-1 flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
-          <span className="truncate">
-            {machine.subtitle ??
-              (machine.section === "cloud"
-                ? t(($) => $.machine.metrics.cloud_worker)
-                : t(($) => $.machine.metrics.local_daemon))}
-          </span>
-          {machine.isCurrent && (
-            <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-              {t(($) => $.machine.this_machine)}
-            </span>
-          )}
-        </span>
-      </span>
-
-      <span className="hidden w-36 shrink-0 items-center gap-1.5 text-caption md:flex">
-        <HealthIcon health={machine.health} />
-        <span>{healthLabel(machine.health)}</span>
-      </span>
-      <span className="hidden w-40 shrink-0 flex-col gap-1 lg:flex">
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.machine.runtime_count, {
-            count: machine.runtimes.length,
-          })}
-        </span>
-        <ProviderIconStack providers={machine.providerNames} />
-      </span>
-      <span className="hidden w-36 shrink-0 text-caption text-muted-foreground xl:block">
-        {busyCount > 0
-          ? t(($) => $.machine.metrics.workload_hint, {
-              running: machine.runningCount,
-              queued: machine.queuedCount,
-            })
-          : t(($) => $.machine.metrics.workload_idle)}
-      </span>
-      <span className="hidden w-28 shrink-0 text-right text-caption text-muted-foreground lg:block">
-        {machine.lastSeenAt ? timeAgo(machine.lastSeenAt) : "—"}
-      </span>
-      {locator && (
-        <ChevronRight
-          aria-hidden="true"
-          className="h-4 w-4 shrink-0 text-faint-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
-        />
-      )}
-    </>
-  );
-
-  return (
-    <AppLink
-      href={paths.runtimeDetail(locator)}
-      className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-    >
-      {body}
-    </AppLink>
-  );
-}
-
-function ProviderIconStack({ providers }: { providers: string[] }) {
-  const visible = providers.slice(0, 4);
-  const extra = providers.length - visible.length;
-  if (visible.length === 0) return null;
-  return (
-    <span className="flex min-w-0 items-center -space-x-1">
-      {visible.map((provider) => (
-        <span
-          key={provider}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
-        >
-          <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
-        </span>
-      ))}
-      {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
-          +{extra}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
-  const { t } = useT("runtimes");
-  return (
-    <CollectionPageState
-      icon={Server}
-      title={t(($) => $.page.empty.title)}
-      description={t(($) => $.page.empty.hint)}
-      actions={
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus aria-hidden="true" className="size-3" />
-          {t(($) => $.page.connect_remote)}
-        </Button>
-      }
-    />
-  );
-}
-
-function RuntimesPageSkeleton() {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader>
-        <Skeleton className="h-4 w-24" />
-      </PageHeader>
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
-        <div className="overflow-hidden rounded-lg border">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0">
-              <Skeleton className="h-10 w-10 rounded-lg" />
-              <div className="flex-1">
-                <Skeleton className="h-4 w-44" />
-                <Skeleton className="mt-2 h-3 w-28" />
-              </div>
-              <Skeleton className="hidden h-4 w-24 md:block" />
-              <Skeleton className="hidden h-4 w-28 lg:block" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 

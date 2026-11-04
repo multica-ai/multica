@@ -14,6 +14,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -47,6 +48,12 @@ type mediaConn struct {
 	// measurement would report the harness rather than the code.
 	chunkArrived chan struct{}
 	chunkRelease chan struct{}
+
+	// onWrite, when set, is called with the cmd of every frame once it has
+	// been recorded, before its verdict goes back. It lets a test act at an
+	// exact point in a send — revoke between a refused first attempt and the
+	// retry — without a sleep standing in for the ordering.
+	onWrite func(cmd string)
 }
 
 func newMediaConn() *mediaConn {
@@ -90,7 +97,11 @@ func (c *mediaConn) WriteMessage(_ int, data []byte) error {
 		body = json.RawMessage(`{"media_id":"` + c.mediaID + `"}`)
 	}
 	arrived, release := c.chunkArrived, c.chunkRelease
+	onWrite := c.onWrite
 	c.mu.Unlock()
+	if onWrite != nil {
+		onWrite(env.Cmd)
+	}
 
 	if s == nil {
 		return nil // no verdict comes back
@@ -450,5 +461,286 @@ func TestOutboundMediaValidate_RejectsUnsendableMedia(t *testing.T) {
 	}
 	if err := (outboundMedia{Kind: mediaTypeFile, Filename: "  "}).validate(); err == nil {
 		t.Error("media with no filename was accepted — the name is the only format hint WeCom gets")
+	}
+}
+
+// ---- the write guard: asked at the write, not before the wait ----
+//
+// withWriteGuard puts a permission question in the context; writeCtx asks it
+// with the writer in hand. These tests are about WHERE it is asked. A guard
+// asked before a wait is a verdict about an earlier moment, and each test
+// below holds one of the waits open, changes the answer while a frame sits in
+// it, and counts what reached the socket.
+
+// errTestWithdrawn is what a guard answers once the person has taken the
+// connection back.
+var errTestWithdrawn = errors.New("wecom test: the installation was withdrawn")
+
+// guardUnless answers errTestWithdrawn once revoked is set.
+func guardUnless(revoked *atomic.Bool) func(context.Context) error {
+	return func(context.Context) error {
+		if revoked.Load() {
+			return errTestWithdrawn
+		}
+		return nil
+	}
+}
+
+// settle gives a goroutine that is about to park in a wait the time to get
+// there. Not an ordering the assertions rest on — a goroutine that is late
+// reaches the same guard after the same change — only what makes the test
+// aim at the wait it names.
+func settle() { time.Sleep(100 * time.Millisecond) }
+
+func frameCount(c *mediaConn) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.frames)
+}
+
+// The ordering itself, asserted directly: the guard runs while the writer is
+// held, and a frame it refuses leaves nothing on the socket.
+func TestWriteGuard_RunsWithTheWriterInHandAndAStoppedFrameIsNotWritten(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+
+	var asked atomic.Int32
+	ctx := withWriteGuard(context.Background(), func(context.Context) error {
+		asked.Add(1)
+		if sender.tryLockWriter() {
+			sender.unlockWriter()
+			t.Error("the guard ran without the writer: a wait could still sit between the verdict and the socket")
+		}
+		return errTestWithdrawn
+	})
+
+	_, err := sender.request(ctx, cmdSendMsg, map[string]any{"chatid": "C"})
+	if !errors.Is(err, errTestWithdrawn) {
+		t.Fatalf("request = %v, want the guard's refusal", err)
+	}
+	if !errors.Is(err, errNotAttempted) {
+		t.Errorf("request = %v: a frame stopped before the socket must say so, or the classifiers read it as unknown", err)
+	}
+	if asked.Load() != 1 {
+		t.Errorf("guard asked %d times, want 1", asked.Load())
+	}
+	if n := frameCount(conn); n != 0 {
+		t.Errorf("%d frames on the wire, want 0", n)
+	}
+}
+
+// Scenario 1 of the review, first stage: the writer is held, the frame queues
+// for it, permission goes while it waits, the writer frees. The verdict taken
+// before the wait said yes; the one taken after it says no, and only that one
+// is about the moment of the write.
+func TestUploadMedia_AWithdrawalWhileQueuedForTheWriterWritesNothing(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+	var revoked atomic.Bool
+
+	if err := sender.lockWriter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.uploadMedia(withWriteGuard(context.Background(), guardUnless(&revoked)), outboundMedia{
+			Kind: mediaTypeFile, Filename: "a.bin", Data: []byte("D"),
+		})
+		done <- err
+	}()
+	settle()
+	revoked.Store(true)
+	sender.unlockWriter()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, errTestWithdrawn) {
+			t.Fatalf("uploadMedia = %v, want the withdrawal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("uploadMedia never returned")
+	}
+	if n := frameCount(conn); n != 0 {
+		t.Errorf("%d frames reached the socket after the withdrawal, want 0", n)
+	}
+}
+
+// A caller whose context ends while its frame queues for the writer writes
+// nothing — and says it wrote nothing. Before, the wait ran on
+// context.Background(): the frame went out after its caller had given up and
+// the caller was told the outcome was unknown.
+func TestRequest_ACallerThatGivesUpWhileQueuedForTheWriterWritesNothing(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+
+	if err := sender.lockWriter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.request(ctx, cmdSendMsg, map[string]any{"chatid": "C"})
+		done <- err
+	}()
+	settle()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errNotAttempted) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("request = %v, want errNotAttempted wrapping the cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("request kept waiting for the writer after its caller gave up")
+	}
+	sender.unlockWriter()
+	settle()
+	if n := frameCount(conn); n != 0 {
+		t.Errorf("%d frames on the wire from a caller that had given up, want 0", n)
+	}
+}
+
+// What did NOT change: write() has no context and waits for the writer however
+// long it takes — the ping, the handshake and the pong depend on that.
+func TestWrite_WithoutAContextStillWaitsForTheWriter(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+
+	if err := sender.lockWriter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- sender.write(map[string]any{"cmd": cmdPing, "headers": frameHeaders{ReqID: "P"}}) }()
+	select {
+	case err := <-done:
+		t.Fatalf("write returned %v while the writer was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	sender.unlockWriter()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("write = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("write never got the writer")
+	}
+	if n := frameCount(conn); n != 1 {
+		t.Errorf("%d frames, want the 1 ping", n)
+	}
+}
+
+// Five chunks run three at a time, so the fourth and fifth have to wait for a
+// slot. A withdrawal landing in that wait stops them.
+func TestUploadMediaChunks_AWithdrawalDuringTheSlotWaitStopsTheNextChunk(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	arrived, release := conn.holdChunks()
+	sender := conn.newSender()
+	var revoked atomic.Bool
+
+	data := make([]byte, mediaChunkBytes*4+1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.uploadMedia(withWriteGuard(context.Background(), guardUnless(&revoked)), outboundMedia{
+			Kind: mediaTypeFile, Filename: "big.bin", Data: data,
+		})
+		done <- err
+	}()
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-arrived:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d chunks reached the socket, want 3 in flight", i)
+		}
+	}
+	select {
+	case <-arrived:
+		t.Fatal("a fourth chunk went out with three unanswered")
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	revoked.Store(true)
+	release()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, errTestWithdrawn) {
+			t.Fatalf("uploadMedia = %v, want the withdrawal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("uploadMedia never finished")
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaChunk)); n != 3 {
+		t.Errorf("chunk frames = %d, want 3 — a chunk went on the wire after the withdrawal", n)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaFinish)); n != 0 {
+		t.Errorf("finish frames = %d, want 0 — a stopped upload must not be sealed", n)
+	}
+}
+
+// The file message queues for the chat's turn behind another message. A
+// withdrawal during that wait stops it; the chat lock is the second of the
+// waits a verdict taken ahead of sendMedia could not see.
+func TestSendMedia_AWithdrawalWhileQueuedForTheChatWritesNothing(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+	var revoked atomic.Bool
+
+	releaseChat, err := sender.chats.acquire(context.Background(), "CHAT_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- sender.sendMedia(withWriteGuard(context.Background(), guardUnless(&revoked)),
+			"CHAT_1", chatTypeSingleInt, mediaSend{Kind: mediaTypeFile, MediaID: "M"})
+	}()
+	settle()
+	revoked.Store(true)
+	releaseChat()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, errTestWithdrawn) {
+			t.Fatalf("sendMedia = %v, want the withdrawal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("sendMedia never returned")
+	}
+	if n := frameCount(conn); n != 0 {
+		t.Errorf("%d frames reached the socket after the withdrawal, want 0", n)
+	}
+}
+
+// The third wait: a throttled push sleeps before its one retry. Permission goes
+// during the sleep; the retry is a new frame and is asked again.
+func TestSendMedia_AWithdrawalDuringTheThrottleBackoffSendsNoSecondFrame(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	sender := conn.newSender()
+	sender.retryBackoff = 20 * time.Millisecond
+	conn.refuse[cmdSendMsg] = errCodeAPIConcurrencyLimit
+	var revoked atomic.Bool
+	// The first attempt has already passed its guard when its frame is
+	// recorded; the person withdraws while its refusal is on the way back.
+	conn.onWrite = func(cmd string) {
+		if cmd == cmdSendMsg {
+			revoked.Store(true)
+		}
+	}
+
+	err := sender.sendMedia(withWriteGuard(context.Background(), guardUnless(&revoked)),
+		"CHAT_1", chatTypeSingleInt, mediaSend{Kind: mediaTypeFile, MediaID: "M"})
+	if !errors.Is(err, errTestWithdrawn) {
+		t.Fatalf("sendMedia = %v, want the withdrawal", err)
+	}
+	if n := len(conn.cmdFrames(cmdSendMsg)); n != 1 {
+		t.Errorf("send frames = %d, want 1 — the retry was written after the withdrawal", n)
 	}
 }

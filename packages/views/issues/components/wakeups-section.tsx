@@ -1,8 +1,10 @@
 "use client";
 
+import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clock3, ChevronRight, GitPullRequest, Link2, ListChecks, CircleDot, Play } from "lucide-react";
+import { Bell, Clock3, ChevronRight, GitPullRequest, Link2, ListChecks, CircleDot, Play } from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   issueSystemWakeupsOptions,
@@ -182,20 +184,20 @@ function WakeupRow({
           render={
             <button
               type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-1.5 text-left text-caption hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
-          <span className="flex min-h-8 min-w-0 items-start gap-2 py-1 pl-2 pr-1">
+          <span className="flex min-h-7 min-w-0 items-center gap-2 pl-2 pr-1">
             <Icon
               className="mt-px size-3.5 shrink-0 text-muted-foreground"
               aria-hidden="true"
             />
-            <span className="line-clamp-2 min-w-0 break-words font-medium">
+            <span className="line-clamp-2 min-w-0 break-words">
               {text.trigger(wakeup)}
             </span>
           </span>
-          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2">
+          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2 text-caption">
             <span className="block text-muted-foreground">
               {text.summary(wakeup, closed)}
             </span>
@@ -347,6 +349,7 @@ function WakeupRow({
       </Popover>
       <div className="z-10 col-start-2 row-start-1 self-start">
         <WakeupControl
+          size="sm"
           wakeup={wakeup}
           task={task}
           pending={pending}
@@ -375,16 +378,18 @@ export function WakeupsSection({
   const [historyOpen, setHistoryOpen] = useState(false);
   const {
     data = [],
-    isError,
+    isError: wakeupsError,
     refetch,
   } = useQuery(issueWakeupsOptions(workspaceId, issueId));
   const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
-  const { data: systemRules = [] } = useQuery(issueSystemWakeupsOptions(workspaceId, issueId));
+  const { data: systemRules = [], isError: systemRulesError, refetch: refetchSystemRules } = useQuery(issueSystemWakeupsOptions(workspaceId, issueId));
+  const isError = wakeupsError === true || systemRulesError === true;
+  const hasContent = data.length > 0 || (!closed && systemRules.length > 0) || isError;
   const text = useWakeupText();
   const disable = useDisableIssueWakeup(workspaceId, issueId);
   const enable = useEnableIssueWakeup(workspaceId, issueId);
   // Open issues always show the section so people can add a wakeup.
-  if (closed && !data.length && !isError) return null;
+  if (closed && !hasContent) return null;
   const current = data.filter((w) => isCurrentWakeup(w, wakeupRun(w, tasks)));
   const history = data.filter((w) => !isCurrentWakeup(w, wakeupRun(w, tasks)));
   const row = (wakeup: IssueWakeup) => (
@@ -418,40 +423,26 @@ export function WakeupsSection({
   );
   return (
     <section>
-      <div className="mb-1 flex items-center gap-1">
-        <button
-          type="button"
-          id={`issue-wakeups-${issueId}`}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="flex min-h-9 flex-1 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          {t(($) => $.wakeups.title)}{" "}
-          <span className="text-muted-foreground tabular-nums">
-            {current.length + systemRules.length}
-          </span>
-          <ChevronRight
-            className={`size-3 text-muted-foreground ${open ? "rotate-90" : ""}`}
-            aria-hidden="true"
-          />
-        </button>
-        {!closed && (
-          <WakeupCreate workspaceId={workspaceId} issueId={issueId} defaultAgentId={defaultAgentId} />
-        )}
-      </div>
-      {open && (
-        <div>
+      <IssueSidebarSectionHeader
+        id={`issue-wakeups-${issueId}`}
+        title={t(($) => $.wakeups.title)} open={open} onOpenChange={setOpen}
+        count={current.length + (!closed ? systemRules.length : 0)}
+        collapsible={hasContent}
+        actions={!closed ? <WakeupCreate workspaceId={workspaceId} issueId={issueId} defaultAgentId={defaultAgentId} /> : undefined}
+      />
+      {open && hasContent && (
+        <div className="px-2">
           {isError && (
             <button
               type="button"
-              className="px-2 text-caption text-muted-foreground hover:text-foreground"
-              onClick={() => void refetch()}
+              className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => { void refetch(); void refetchSystemRules(); }}
             >
               {t(($) => $.wakeups.retry)}
             </button>
           )}
           {closed && (
-            <p className="px-2 text-caption text-muted-foreground">
+            <p className="px-2 text-label text-muted-foreground">
               {t(($) => $.wakeups.closed_hint)}
             </p>
           )}
@@ -466,7 +457,7 @@ export function WakeupsSection({
                 type="button"
                 aria-expanded={historyOpen}
                 onClick={() => setHistoryOpen(!historyOpen)}
-                className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-label text-muted-foreground hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <ChevronRight
                   className={`size-3 ${historyOpen ? "rotate-90" : ""}`}

@@ -102,8 +102,7 @@ type claimedChatChannel struct {
 func claimChatChannelFields(t *testing.T, runtimeID string) claimedChatChannel {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "claim-channel-type")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 
 	testHandler.ClaimTaskByRuntime(w, req)

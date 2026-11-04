@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Download } from "lucide-react";
+import { ArrowRight, Download } from "@multica/ui/icons";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
@@ -78,9 +78,7 @@ export function DownloadHero({
   );
 }
 
-// ------------------------------------------------------------
 // Content resolver — maps (detect, assets) → CTA props
-// ------------------------------------------------------------
 
 interface HeroContent {
   title: string;
@@ -207,9 +205,7 @@ export function resolveContent(
   };
 }
 
-// ------------------------------------------------------------
 // Pieces
-// ------------------------------------------------------------
 
 function PrimaryCta({
   href,

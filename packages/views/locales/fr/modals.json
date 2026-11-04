@@ -19,6 +19,16 @@
     "toast_deleted": "Tâche supprimée",
     "toast_delete_failed": "Échec de la suppression de la tâche"
   },
+  "rename_issue": {
+    "title": "Renommer la tâche",
+    "placeholder": "Titre de la tâche",
+    "input_aria_label": "Renommer {{identifier}}",
+    "submit": "Enregistrer",
+    "saving": "Enregistrement...",
+    "title_required": "Saisissez un titre",
+    "toast_renamed": "Tâche renommée",
+    "toast_failed": "Échec du renommage de la tâche"
+  },
   "feedback": {
     "title": "Faire un retour",
     "placeholder": "Parlez-nous de votre expérience, des bugs rencontrés ou des fonctionnalités que vous aimeriez voir…",
@@ -50,6 +60,12 @@
     "description": "Recherchez une tâche à ajouter comme sous-tâche",
     "toast_failed": "Échec de l'ajout de la sous-tâche",
     "toast_success": "{{identifier}} ajoutée comme sous-tâche"
+  },
+  "add_project_issue": {
+    "title": "Ajouter une tâche existante",
+    "description": "Recherchez une tâche à déplacer dans ce projet",
+    "toast_success": "{{identifier}} a été déplacée dans le projet",
+    "toast_failed": "Impossible de déplacer la tâche"
   },
   "run_confirm": {
     "title_assign": "Confirmer l'assignation ?",
@@ -242,6 +258,7 @@
       "sent_label": "Envoyé",
       "sent_count": "{{count}} envoyé",
       "version_blocked_tooltip": "Le CLI du daemon doit être ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents ne peut pas lire les pièces jointes. Retirez-les ou choisissez un autre agent.",
       "toast_sent": "Envoyé à l'agent — vous recevrez une notification dans votre boîte de réception une fois terminé",
       "error_agent_unavailable_fallback": "L'agent est indisponible. Choisissez-en un autre.",
       "error_daemon_version": "Le CLI du daemon de cet agent ({{current}}) est inférieur au minimum requis {{min}}. Mettez le daemon à jour pour utiliser la création avec un agent.",

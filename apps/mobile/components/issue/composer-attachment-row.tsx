@@ -121,9 +121,7 @@ export function ComposerAttachmentRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Mention chip — small capsule, no tap (only × removes).
-// ---------------------------------------------------------------------------
 
 function MentionChipView({
   mention,
@@ -166,9 +164,7 @@ function MentionChipView({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Attachment chip — image / file capsule with status overlay.
-// ---------------------------------------------------------------------------
 
 interface AttachmentChipProps {
   item: ComposerAttachmentItem;

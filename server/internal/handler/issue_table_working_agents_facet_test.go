@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
-	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // workingAgentsFacetCounts posts one facets request and returns the
@@ -16,25 +19,180 @@ func workingAgentsFacetCounts(
 ) map[string]int64 {
 	t.Helper()
 
-	recorder := httptest.NewRecorder()
-	testHandler.ListIssueTableFacets(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("facets status = %d: %s", recorder.Code, recorder.Body.String())
-	}
 	var response issueTableFacetsResponse
-	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
-		t.Fatalf("decode facets: %v", err)
-	}
+	testutil.Call(t, testHandler.ListIssueTableFacets, request).Want(http.StatusOK).JSON(&response)
 	counts := map[string]int64{}
 	for _, facet := range response.Facets {
 		if facet.Kind != "working_agents" {
 			continue
+		}
+		if facet.Values == nil {
+			t.Fatal("working-agents values must be an array, including when empty")
 		}
 		for _, value := range facet.Values {
 			counts[value.Key] = value.Count
 		}
 	}
 	return counts
+}
+
+func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
+	projectID := dbfx.Project(t, "working facet eligibility")
+	issueID := dbfx.Issue(t, "working facet issue", testutil.Cols{"project_id": projectID})
+	agentID := dbfx.Agent(t, "working facet active", "")
+	archivedID := dbfx.Agent(t, "working facet archived", "", testutil.Cols{"archived_at": testutil.Raw("now()")})
+	systemID := dbfx.Agent(t, "working facet system", "", testutil.Cols{"kind": "system"})
+	foreignWorkspaceID := dbfx.Workspace(t, "working facet foreign", fmt.Sprintf("working-facet-%d", time.Now().UnixNano()))
+	foreignAgentID := dbfx.Agent(t, "working facet foreign", "", testutil.Cols{"workspace_id": foreignWorkspaceID})
+	// Deliberately cross-link both sides: task agents and issues must each be
+	// bounded to the request workspace, even if their other ids match.
+	foreignIssueID := dbfx.Issue(t, "working facet foreign issue", testutil.Cols{
+		"workspace_id": foreignWorkspaceID, "project_id": projectID,
+	})
+	chatID := dbfx.ChatSession(t, agentID)
+	autopilotID := insertListTestAutopilot(t, agentID, "working-facet-autopilot")
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID, "source": "manual", "status": "running",
+	})
+
+	// Two tasks on the same issue are two runs, not one distinct issue.
+	for range 2 {
+		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	}
+	for _, excludedID := range []string{archivedID, systemID, foreignAgentID} {
+		dbfx.Task(t, excludedID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	}
+	for _, status := range []string{"queued", "dispatched", "completed", "failed", "cancelled"} {
+		statusIssueID := dbfx.Issue(t, "working facet "+status, testutil.Cols{"project_id": projectID})
+		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": statusIssueID, "status": status})
+	}
+	for _, cols := range []testutil.Cols{
+		{"issue_id": issueID, "chat_session_id": chatID},
+		{"issue_id": issueID, "autopilot_run_id": runID},
+		{"issue_id": issueID, "chat_session_id": chatID, "autopilot_run_id": runID},
+		{"issue_id": foreignIssueID},
+		{}, // Quick-create work has no issue yet.
+	} {
+		cols["status"] = "running"
+		cols["runtime_id"] = testRuntimeID
+		dbfx.Task(t, agentID, cols)
+	}
+	for _, scope := range []map[string]any{
+		{"kind": "project", "project_id": projectID},
+		{"kind": "workspace"},
+	} {
+		counts := workingAgentsFacetCounts(t, workingAgentsFacetRequest(scope, nil))
+		if !maps.Equal(counts, map[string]int64{agentID: 2}) {
+			t.Errorf("scope %v: counts = %v, want only active agent with 2 issue runs", scope, counts)
+		}
+	}
+
+	// The final running -> completed transition must be visible on the next
+	// request, without changing query identity or waiting for a cache TTL.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed' WHERE agent_id = $1`, agentID)
+	counts := workingAgentsFacetCounts(t, workingAgentsFacetRequest(map[string]any{"kind": "workspace"}, nil))
+	if len(counts) != 0 {
+		t.Errorf("after completion: counts = %v, want empty", counts)
+	}
+}
+
+func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
+	memberID := dbfx.User(t, "working facet member", "working-facet-member@multica.test")
+	dbfx.Member(t, testWorkspaceID, memberID, "member")
+	issueID := dbfx.Issue(t, "working facet visibility")
+	privateID := dbfx.Agent(t, "working facet private", "")
+	ownedID := dbfx.Agent(t, "working facet member-owned", "", testutil.Cols{"owner_id": memberID})
+	workspaceID := dbfx.Agent(t, "working facet workspace", "", testutil.Cols{"permission_mode": "public_to"})
+	allowedID := dbfx.Agent(t, "working facet allow-listed", "", testutil.Cols{"permission_mode": "public_to"})
+	deniedID := dbfx.Agent(t, "working facet other allow-list", "", testutil.Cols{"permission_mode": "public_to"})
+	for _, target := range []struct{ agentID, kind, id string }{
+		{workspaceID, "workspace", testWorkspaceID},
+		{allowedID, "member", memberID},
+		{deniedID, "member", testUserID},
+	} {
+		dbfx.Insert(t, "agent_invocation_target", testutil.Cols{
+			"agent_id": target.agentID, "target_type": target.kind, "target_id": target.id,
+		})
+	}
+	all := map[string]int64{}
+	for _, id := range []string{privateID, ownedID, workspaceID, allowedID, deniedID} {
+		dbfx.Task(t, id, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+		all[id] = 1
+	}
+	for _, tc := range []struct {
+		name    string
+		userID  string
+		asAgent bool
+		want    map[string]int64
+	}{
+		{"member", memberID, false, map[string]int64{ownedID: 1, workspaceID: 1, allowedID: 1}},
+		{"workspace owner", testUserID, false, all},
+		{"agent actor", memberID, true, all},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := workingAgentsFacetRequest(map[string]any{"kind": "workspace"}, nil)
+			req.Header.Set("X-User-ID", tc.userID)
+			if tc.asAgent {
+				// Emulate the trusted identity stamped by task-token middleware.
+				req.Header.Set("X-Actor-Source", "task_token")
+				req.Header.Set("X-Agent-ID", ownedID)
+			}
+			if got := workingAgentsFacetCounts(t, req); !maps.Equal(got, tc.want) {
+				t.Errorf("counts = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIssueTableWorkingAgentsFacetMyRelations(t *testing.T) {
+	otherID := dbfx.User(t, "working facet other member", "working-facet-other@multica.test")
+	dbfx.Member(t, testWorkspaceID, otherID, "admin")
+	agentID := dbfx.Agent(t, "working facet my agent", "")
+	for _, cols := range []testutil.Cols{
+		{"creator_id": otherID, "assignee_type": "member", "assignee_id": testUserID},
+		{"creator_id": testUserID},
+		{"creator_id": otherID, "assignee_type": "agent", "assignee_id": agentID},
+		{"creator_id": otherID, "assignee_type": "member", "assignee_id": otherID},
+	} {
+		issueID := dbfx.Issue(t, "working facet my relation", cols)
+		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	}
+	for _, tc := range []struct {
+		userID   string
+		relation string
+		want     int64
+	}{
+		{testUserID, "assigned", 1}, {testUserID, "created", 1},
+		{testUserID, "involved", 1}, {testUserID, "any", 3}, {testUserID, "", 3},
+		{otherID, "assigned", 1}, {otherID, "created", 3},
+		{otherID, "involved", 0}, {otherID, "any", 3},
+	} {
+		req := workingAgentsFacetRequest(map[string]any{"kind": "my", "relation": tc.relation}, nil)
+		req.Header.Set("X-User-ID", tc.userID)
+		got := workingAgentsFacetCounts(t, req)
+		want := map[string]int64{}
+		if tc.want > 0 {
+			want[agentID] = tc.want
+		}
+		if !maps.Equal(got, want) {
+			t.Errorf("user %s relation %q: counts = %v, want %v", tc.userID, tc.relation, got, want)
+		}
+	}
+}
+
+func TestIssueTableWorkingAgentsFacetNoActiveAgents(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "working facet empty", fmt.Sprintf("working-facet-empty-%d", time.Now().UnixNano()))
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	agentID := dbfx.Agent(t, "working facet only archived", "", testutil.Cols{
+		"workspace_id": workspaceID, "archived_at": testutil.Raw("now()"),
+	})
+	issueID := dbfx.Issue(t, "working facet archived issue", testutil.Cols{"workspace_id": workspaceID})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	req := workingAgentsFacetRequest(map[string]any{"kind": "workspace"}, nil)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	if got := workingAgentsFacetCounts(t, req); len(got) != 0 {
+		t.Errorf("counts = %v, want empty for workspace with only archived agents", got)
+	}
 }
 
 func workingAgentsFacetRequest(scope, filters map[string]any) *http.Request {

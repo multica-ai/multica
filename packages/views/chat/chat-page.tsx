@@ -1,17 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
-import { ArrowLeft, MessageSquare } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Bot, MessageSquare, Plus } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
+import { getCurrentSlug } from "@multica/core/platform";
 import { useChatStore } from "@multica/core/chat";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
@@ -19,7 +15,11 @@ import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-acti
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, ChatSession } from "@multica/core/types";
-import { PageHeader } from "../layout/page-header";
+import { CollectionPageState } from "../layout/collection-page";
+import { CollapsedNavTrigger, PageHeader } from "../layout/page-header";
+import { PanelHeader } from "../layout/panel-nav";
+import { useListColumnCollapsed } from "../layout/app-shell-context";
+import { ListColumn } from "../layout/list-column";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
@@ -35,6 +35,7 @@ import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
+import { useRegisterCommandBarContext } from "../search/register-context";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -57,11 +58,19 @@ import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
  */
 export function ChatPage() {
   const { t } = useT("chat");
-  const { searchParams, replace } = useNavigation();
+  const { pathname, searchParams, push, replace } = useNavigation();
+  const workspaceSlug = useRequiredWorkspaceSlug();
   const wsPaths = useWorkspacePaths();
+  // App Router can retain this page after navigation. Once the URL belongs
+  // to another route, this instance must stop reconciling shared chat state.
+  // Also check the live workspace mirror in each effect: the incoming layout
+  // can rehydrate the store before this page observes the destination URL.
+  const isCurrentChatRoute = pathname === wsPaths.chat();
   const isCompact = useIsCompact();
 
-  const c = useChatController({ isActive: true });
+  const c = useChatController({
+    isActive: isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
+  });
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
   );
@@ -100,26 +109,26 @@ export function ChatPage() {
 
   // URL → store: deep link, refresh, notification click, back/forward.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     if (urlSession !== useChatStore.getState().activeSessionId) {
       c.setActiveSession(urlSession);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to URL only
-  }, [urlSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile URL/route changes, not store updates
+  }, [isCurrentChatRoute, workspaceSlug, urlSession]);
 
   // store → URL: thread selection, "new chat", and sessions created by sending.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     const live = useChatStore.getState().activeSessionId;
     const current = searchParams.get("session") || null;
     if (live !== current) {
       const base = wsPaths.chat();
       replace(live ? `${base}?session=${live}` : base);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to store only
-  }, [c.activeSessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile store/route changes, not URL updates
+  }, [isCurrentChatRoute, workspaceSlug, c.activeSessionId]);
 
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_chat_layout",
-  });
+  const listCollapsed = useListColumnCollapsed();
 
   // `?agent=` intent bookkeeping. The ref holds the param value already
   // consumed (or superseded) so the effect below fires at most once per deep
@@ -176,6 +185,29 @@ export function ChatPage() {
     if (!c.currentSession || projectId !== null) setComposingNew(true);
   };
 
+  // The command bar calls the page's own handlers so archiving or re-scoping
+  // from it moves the pane exactly like the header controls do.
+  const commandBarHandlersRef = useRef({ handleArchive, changeProjectContext });
+  useEffect(() => {
+    commandBarHandlersRef.current = { handleArchive, changeProjectContext };
+  });
+  const commandBarSession = c.currentSession ?? null;
+  useRegisterCommandBarContext(
+    useMemo(
+      () =>
+        commandBarSession
+          ? {
+              kind: "chat",
+              session: commandBarSession,
+              archive: (session: ChatSession) => commandBarHandlersRef.current.handleArchive(session),
+              changeProject: (projectId: string | null) =>
+                commandBarHandlersRef.current.changeProjectContext(projectId),
+            }
+          : null,
+      [commandBarSession],
+    ),
+  );
+
   // URL → new chat: `?agent=<id>` is the deep link used by "DM" entry points
   // (e.g. the agent detail page) to land on a fresh compose bound to that
   // agent. The permission-filtered agent list loads async, so the intent is
@@ -187,6 +219,7 @@ export function ChatPage() {
   // that surfaces the agent cannot start a chat without a fresh click. While
   // the queries are still loading the intent simply stays pending.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     if (!urlAgent) {
       consumedAgentIntent.current = null;
       return;
@@ -205,7 +238,7 @@ export function ChatPage() {
       replace(wsPaths.chat());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
-  }, [urlAgent, c.availableAgents, c.agentsSettled]);
+  }, [isCurrentChatRoute, workspaceSlug, urlAgent, c.availableAgents, c.agentsSettled]);
 
   const newChatButton = (
     <NewChatButton
@@ -217,14 +250,13 @@ export function ChatPage() {
   );
 
   const listHeader = (
-    <PageHeader>
-      <h1 className="flex-1 text-body font-semibold">{t(($) => $.page.title)}</h1>
+    <PanelHeader as="h1" title={t(($) => $.page.title)} leading={<CollapsedNavTrigger />}>
       {newChatButton}
-    </PageHeader>
+    </PanelHeader>
   );
 
   const listBody = (
-    <div className="px-2 py-1">
+    <div className="min-h-0 flex-1 px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
         agents={c.agents}
@@ -234,6 +266,28 @@ export function ChatPage() {
       />
     </div>
   );
+
+  const compactConversation = isCompact && (!!c.activeSessionId || composingNew);
+  // Nothing to talk to and nothing to reread: the composer would only be a
+  // disabled box, so the page explains the prerequisite instead.
+  const noAgentPage = c.noAgent && c.sessions.length === 0;
+  const noAgentState = (
+    <CollectionPageState
+      icon={Bot}
+      title={t(($) => $.page.no_agent_title)}
+      description={t(($) => $.page.no_agent_description)}
+      actions={
+        <Button size="sm" onClick={() => push(wsPaths.newAgent())}>
+          <Plus aria-hidden="true" />
+          {t(($) => $.page.no_agent_action)}
+        </Button>
+      }
+    />
+  );
+  const backToList = () => {
+    c.setActiveSession(null);
+    setComposingNew(false);
+  };
 
   // The conversation pane: message list / skeleton / empty above a persistent
   // banner + input. Identical composition to the floating window's body, so a
@@ -246,6 +300,20 @@ export function ChatPage() {
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
         <ChatSessionHeader
+          leading={
+            compactConversation ? (
+              <IconButton
+                label={t(($) => $.page.title)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+                onClick={backToList}
+              >
+                <ArrowLeft />
+              </IconButton>
+            ) : listCollapsed ? (
+              <CollapsedNavTrigger />
+            ) : undefined
+          }
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
@@ -286,7 +354,7 @@ export function ChatPage() {
         <EmptyState
           agent={c.activeAgent}
           hasSessions={c.sessions.length > 0}
-          onPickPrompt={c.prefillConversationStarter}
+          onPickPrompt={c.sendConversationStarter}
           customizeHref={c.customizeConversationStartersHref}
         />
       )}
@@ -349,23 +417,24 @@ export function ChatPage() {
 
   // -- Compact: list / conversation toggle -----------------------------------
   if (isCompact) {
-    if (c.activeSessionId || composingNew) {
+    if (compactConversation) {
+      // An open session carries the way back in its own header; a new chat
+      // has no session header yet, so it gets a bar of its own.
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                c.setActiveSession(null);
-                setComposingNew(false);
-              }}
-              className="gap-1.5 text-muted-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t(($) => $.page.title)}
-            </Button>
-          </div>
+          {!c.currentSession && (
+            <div className="flex h-12 shrink-0 items-center border-b px-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={backToList}
+                className="gap-1.5 text-muted-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t(($) => $.page.title)}
+              </Button>
+            </div>
+          )}
           {conversation}
         </div>
       );
@@ -373,48 +442,39 @@ export function ChatPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+        {noAgentPage ? (
+          noAgentState
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
+        )}
       </div>
     );
   }
 
-  // -- Desktop: resizable two-panel. The conversation pane appears only once
+  // -- Desktop: list column + conversation. The conversation pane appears only once
   // there is a chat target — an open thread or a new chat whose agent was just
   // picked via ⊕. With nothing selected there is no agent, so we show a neutral
   // prompt instead of an orphaned compose box. -------------------------------
   const hasTarget = !!c.activeSessionId || composingNew;
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel
-        id="list"
-        defaultSize={260}
-        minSize={240}
-        maxSize={480}
-        groupResizeBehavior="preserve-pixel-size"
-      >
-        <div className="flex flex-col border-r h-full">
-          {listHeader}
-          <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
-        </div>
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel id="detail" minSize="40%">
-        <div className="flex flex-col min-h-0 h-full">
-          {hasTarget ? (
-            conversation
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 text-faint-foreground" />
-              <p className="text-body">{t(($) => $.page.select_prompt)}</p>
-            </div>
-          )}
-        </div>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <div className="flex min-h-0 flex-1">
+      <ListColumn collapsed={listCollapsed} width="list">
+        {listHeader}
+        <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
+      </ListColumn>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {listCollapsed && !c.currentSession && <PageHeader>{newChatButton}</PageHeader>}
+        {hasTarget ? (
+          conversation
+        ) : noAgentPage ? (
+          noAgentState
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+            <MessageSquare className="h-10 w-10 text-faint-foreground" />
+            <p className="text-body">{t(($) => $.page.select_prompt)}</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

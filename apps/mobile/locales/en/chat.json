@@ -120,6 +120,7 @@
     "runtime_cli_timeout": "Local runtime CLI timed out",
     "environment_prepare_failed": "Couldn't prepare the execution environment",
     "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
+    "runtime_access_revoked": "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
     "invalid_task_identity": "Run identity mismatch",
     "agent_error_provider_auth_or_access": "Provider auth failed",
     "agent_error_provider_quota_limit": "Provider quota exhausted",

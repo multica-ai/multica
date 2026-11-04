@@ -152,16 +152,8 @@ type RerunIssueRequest struct {
 	TaskID string `json:"task_id,omitempty"`
 }
 
-// RerunIssue manually re-enqueues an agent run for the issue. By default it
-// targets the issue's current assignee (agent or squad leader); if the
-// request body carries task_id, the rerun targets the agent that ran that
-// specific past task instead. The new task is flagged force_fresh_session=true:
-// the daemon claim handler skips the (agent_id, issue_id) session-resume
-// lookup so the agent starts a clean session. A user clicking rerun has just
-// judged the prior output bad — replaying the same conversation would replay
-// the same poisoned state. (Automatic retry, by contrast, intentionally
-// inherits the session — that path handles infrastructure failures, not bad
-// output.)
+// RerunIssue preserves the issue-scoped API used by installed clients. A
+// task_id repeats that run; an empty body targets the current assignee.
 func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -187,7 +179,50 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		sourceTaskID = parsed
 	}
+	h.rerunIssue(w, r, issue, sourceTaskID, false)
+}
 
+// RerunTaskByUser repeats an issue-linked run without requiring its issue ID.
+func (h *Handler) RerunTaskByUser(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	if !ok {
+		return
+	}
+	taskID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "taskId"), "task id")
+	if !ok {
+		return
+	}
+	source, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID: taskID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if !source.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "only issue-linked runs can be rerun with this endpoint")
+		return
+	}
+	issue, ok := h.loadIssueForUser(w, r, uuidToString(source.IssueID))
+	if !ok {
+		return
+	}
+	var req struct {
+		Fresh bool `json:"fresh"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	h.rerunIssue(w, r, issue, source.ID, req.Fresh)
+}
+
+func (h *Handler) rerunIssue(w http.ResponseWriter, r *http.Request, issue db.Issue, sourceTaskID pgtype.UUID, fresh bool) {
 	// A manual rerun is a direct human action: attribute the new run to the
 	// rerunning member (MUL-4302 §5). Resolve the actor the same way assign/promote
 	// does; an agent A2A actor is not a human and threads an invalid actor.
@@ -208,7 +243,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, fresh, canInvoke)
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
@@ -221,7 +256,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	// source is ineligible. It falls through to the 400 below with the
 	// sentinel's own sentence, like the sibling "does not belong to this issue".
 	if err != nil {
-		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
+		slog.Warn("issue rerun failed", "issue_id", uuidToString(issue.ID), "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -13,7 +13,7 @@
  */
 
 import { useCallback, type ReactNode, type RefObject } from "react";
-import { Frame, Maximize, Minus, Plus } from "lucide-react";
+import { Frame, Maximize, Minus, Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,

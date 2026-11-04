@@ -4,6 +4,7 @@ description: Organize related issues with projects and give them a shared goal, 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProjectDemo } from "@/components/demos/project-demo";
 
 Projects organize work that takes multiple [issues](/issues) to finish — a product launch, a migration, or a feature delivered in stages.
 
@@ -20,8 +21,7 @@ Work that a single issue can describe does not need a project. Projects fit a gr
 | **Start and target dates** | The project's planned time range. |
 | **Issues and progress** | The work in the project and how much of it is finished. |
 | **Resources** | Linked GitHub repositories or local directories on specific computers. |
-
-![Project detail: issues grouped by status, progress, and the project description](/images/docs/project-detail.webp)
+| **Workflow** | The steps its issues follow and who takes over at each step. |
 
 ## Projects and issues
 
@@ -30,14 +30,18 @@ A project can contain any number of issues; an issue belongs to at most one proj
 Project progress is computed automatically from linked issues:
 
 ```text
-progress = issues in done or cancelled ÷ all issues in the project
+progress = issues whose status is in the done or closed category ÷ all issues in the project
 ```
 
-`cancelled` means that work has been closed out of the project's scope, so it counts toward progress. Project status and issue status are independent: finishing every issue does not automatically set the project to `completed`, and changing the project's status does not bulk-change its issues.
+Among the built-in statuses that means `done` and `cancelled`; custom statuses in those two categories count as well. `cancelled` means that work has been closed out of the project's scope, so it counts toward progress.
+
+Project status and issue status are independent: finishing every issue does not set the project to `completed`, and changing the project's status does not bulk-change its issues.
+
+<ProjectDemo />
 
 ## Project description and execution context
 
-When an agent runs an issue inside a project, the project's name and description are added to that run's context. The description is the place for information every related issue needs: the goal, technical boundaries, delivery conventions. Requirements that apply to only one issue belong in that issue.
+When an agent runs an issue inside a project, the project's name and description are added to that run's context. Put what every related run needs to know in the description — the goal, technical boundaries, delivery conventions — and keep requirements for a single issue in that issue.
 
 ## Add resources
 
@@ -48,9 +52,13 @@ Project resources tell agents which code and working directories to use:
 
 See [Project resources](/project-resources) for how to choose and for the safety boundaries.
 
+## Choose a workflow
+
+Choose the project’s **Workflow** to set its board columns and who takes over at each step. For example, development can go to one agent, review to another, and acceptance to a team member. Projects without another choice use **Default**: every status is available and nothing is handed off automatically. See [Workflows](/workflows) for setup and switching an existing project.
+
 ## Project lead
 
-The lead can be a member or an agent, and marks who coordinates the project. It is not a permission setting: it does not auto-assign the project's issues, and making an agent the lead does not automatically run it. Starting a run still takes an issue assignment, an @mention, or an automation trigger.
+The lead can be a member or an agent; a member who is the lead can also switch the project’s workflow. Making someone the lead does not assign issues to them or start any work. To hand a step to the lead, set that step's handler to **Project lead** in the workflow.
 
 ## Pin to the sidebar
 

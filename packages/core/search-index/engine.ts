@@ -140,10 +140,10 @@ function isTerminal(issue: Pick<SearchIndexIssue, "status" | "status_category">)
   return category === "done" || category === "closed";
 }
 
-/** Server parseQueryNumber: "MUL-123" or a bare "123". */
+/** Server parseQueryNumber: "MUL-123", "V2-12", or a bare "123". */
 function parseQueryNumber(query: string): number | null {
   const q = query.trim();
-  const match = /^[a-z]+-(\d+)$/i.exec(q) ?? /^(\d+)$/.exec(q);
+  const match = /^[a-z][a-z0-9]*-(\d+)$/i.exec(q) ?? /^(\d+)$/.exec(q);
   if (!match) return null;
   const n = Number.parseInt(match[1]!, 10);
   return Number.isInteger(n) && n > 0 ? n : null;

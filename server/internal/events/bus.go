@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// ChannelReactionTarget retains the non-secret cleanup anchor when a transaction
+// deletes the delivery row. It is internal bus metadata, never a client payload.
+type ChannelReactionTarget struct {
+	ChannelType    string
+	InstallationID string
+	MessageID      string
+}
+
 // Event represents a domain event published by handlers or services.
 type Event struct {
 	Type        string // e.g. "issue:created", "inbox:new"
@@ -17,8 +25,21 @@ type Event struct {
 	// event to a more specific scope than `workspace:{WorkspaceID}`. When set
 	// these tell the listener which Redis stream / Hub room to publish on
 	// without re-deserializing Payload. See MUL-1138 phase 1.
-	TaskID        string
-	ChatSessionID string
+	TaskID                string
+	ChatSessionID         string
+	ChannelReactionTarget *ChannelReactionTarget `json:"-"`
+
+	// ChatSessionOwnerID is the creator of the chat session the event belongs
+	// to. A chat session is creator-private, so the realtime layer delivers
+	// chat events and chat-task transcript events only to this user, and drops
+	// them when it is empty rather than falling back to workspace fanout.
+	ChatSessionOwnerID string
+
+	// MemberPrivateUserID marks an event as private to one member of
+	// WorkspaceID, such as their own preferences or a private saved view. The
+	// realtime layer delivers it only to that user's connections bound to
+	// WorkspaceID.
+	MemberPrivateUserID string
 }
 
 // Handler is a function that processes an event.

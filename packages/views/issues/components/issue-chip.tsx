@@ -62,7 +62,8 @@ export function IssueChip({
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
 
-  // Fallback fetch for issues outside the first page of the list (e.g. Done).
+  // Fallback fetch for issues outside the list's first page (the first
+  // ISSUE_PAGE_SIZE issues across all categories).
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
     enabled: !listIssue,
