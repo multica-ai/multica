@@ -57,7 +57,6 @@ import type {
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
-  MarkIssueInboxReadResult,
   IssueUnread,
   Label,
   MemberWithUser,
@@ -2766,13 +2765,6 @@ export const InboxUnreadSummarySchema = z.array(
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
-// Rows marked read by `POST /api/inbox/issues/{id}/read`. On a malformed body
-// the count is unknown (null), and callers refresh rather than trust it.
-
-export const MarkIssueInboxReadResultSchema = z.object({ count: z.number() }).loose();
-
-export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = { count: null };
-
 // The viewer's unread issues (`/api/issues/unread` GET), behind the sidebar's
 // unread dot. `outcome` stays a string so a future kind still lights the dot;
 // on malformed JSON parseWithFallback returns the empty list, which hides it.
@@ -2785,6 +2777,8 @@ export const IssueUnreadPageSchema = z
           issue_id: z.string(),
           outcome: z.string(),
           agent_id: z.string().nullish().transform((v) => v ?? null),
+          task_id: z.string().nullish().transform((v) => v ?? null),
+          comment_id: z.string().nullish().transform((v) => v ?? null),
           created_at: z.string(),
         })
         .loose(),
@@ -2822,9 +2816,6 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
-      // An unknown section from a newer server drops to undefined, which
-      // inboxItemSection reads as "action" so nothing is hidden from unread.
-      section: z.enum(["action", "activity"]).optional().catch(undefined),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
@@ -3824,7 +3815,7 @@ export const WakeupConditionSchema = z.union([
   z.object({ type: z.literal("issue_field"), field: z.literal("label"), label_id: z.string() }),
   z.object({ type: z.literal("issue_field"), field: z.literal("property"), property_id: z.string(), value: z.unknown() }),
   z.object({ type: z.literal("children_done"), stage: z.number().int().nullish() }),
-  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged", "conflicts", "reviewed", "approved", "changes_requested"]) }),
+  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged", "conflicts"]) }),
   z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review", "blocked"]), identifier: z.string().optional() }),
 ]);
 

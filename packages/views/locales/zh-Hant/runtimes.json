@@ -714,5 +714,29 @@
     "default_repository_hint": "任務所屬專案未綁定儲存庫時使用。",
     "default_branch": "分支",
     "default_branch_placeholder": "main"
+  },
+  "intro": {
+    "title": "給 AI 代理一臺做事的電腦",
+    "description": "執行時是 AI 代理真正執行任務的地方：你的電腦、一臺伺服器，或者雲端服務。",
+    "slides": {
+      "local": {
+        "title": "這臺電腦，自動連接",
+        "description": "下載桌面端並登入，這臺電腦上的 Claude Code、Codex 等會自動出現。"
+      },
+      "remote": {
+        "title": "其他機器，兩條命令",
+        "description": "在伺服器或另一臺電腦上裝好 CLI，執行 multica setup 就連上了。"
+      },
+      "cloud": {
+        "title": "或者用雲端節點",
+        "description": "不想自己管機器？建立一臺 Multica 託管的雲節點。"
+      }
+    },
+    "art": {
+      "this_computer": "這臺電腦 · 桌面端",
+      "detected": "自動識別到的 harness",
+      "run_there": "在那臺機器上執行",
+      "connected": "{{name}} 已連接到 Multica"
+    }
   }
 }

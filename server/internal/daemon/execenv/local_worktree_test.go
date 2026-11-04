@@ -2346,9 +2346,9 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	}
 	// The proofs Finalize makes all hang off state that crosses as JSON —
 	// createdBranch among them, without which a read-only turn keeps its branch.
-	if !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch {
-		t.Fatalf("state lost crossing the helper boundary: tracksState=%v userState=%q owner=%+v createdBranch=%v",
-			wt.tracksState, wt.userState, wt.owner, wt.createdBranch)
+	if !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch || wt.taskID != turnOneTask {
+		t.Fatalf("state lost crossing the helper boundary: tracksState=%v userState=%q owner=%+v createdBranch=%v taskID=%q",
+			wt.tracksState, wt.userState, wt.owner, wt.createdBranch, wt.taskID)
 	}
 
 	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "work from turn one\n")

@@ -123,6 +123,24 @@ duplicate issue stops the operation before any position write. This protects
 against truncated or repeated pages, but does not promise a snapshot across
 concurrent edits. There is no CLI bulk-export or `--all` mode.
 
+### Saved views
+
+When a request names a saved view ("the Bugs view", a view link), read it
+with `view issues` instead of rebuilding its filters from `issue list` flags:
+the server applies every condition the view saves — "is not", the advanced
+condition tree, relative due dates, project status — which `issue list`
+cannot express.
+
+```bash
+multica view list --output json
+multica view issues "Bugs" --output json --fields identifier,title,status
+```
+
+`<view>` is an ID, ID prefix, or exact name. Pages hold at most 100 issues;
+while `has_more` is true, pass `next_cursor` to `--cursor`. Views and their
+"me" conditions resolve against the runtime owner, so a member's private view
+is only visible when that member owns the runtime.
+
 ## Custom properties: typed workflow state
 
 Workspaces may define custom issue properties (Severity, Environment, QA
@@ -376,7 +394,6 @@ multica issue wakeup create <issue> --until-status in_review --instruction-file 
 multica issue wakeup create <issue> --until-pr checks --expires-in 2h --on-timeout wake --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-pr merged --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-pr conflicts --mode continuous --instruction-file ./instruction.md
-multica issue wakeup create <issue> --until-pr reviewed --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-children-done --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-children-done --stage 2 --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue-state done --instruction-file ./instruction.md
@@ -384,7 +401,6 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 
 - `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
 - `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. `--until-pr conflicts` — an open linked GitHub pull request has merge conflicts on its current head, for example after another PR merged into its base; with `--mode continuous` it fires again each time a resolved conflict comes back or a new head is still conflicting. With several linked pull requests, any one satisfies it. These conditions inspect only PRs linked directly to this issue; they do not inherit a parent issue's PRs. Checks and conflicts also require server-side GitHub snapshots; conflicts are not detected on Forgejo, Gitea or GitLab pull requests. A missing link or snapshot is recorded in the rule's `last_error` and retried automatically rather than rejecting the rule.
-- `--until-pr reviewed|approved|changes_requested` — a new human approval or request for changes on a directly linked GitHub PR; excludes bots, the PR author, and comment-only reviews. Requires snapshots. Existing reviews are ignored when registering or re-enabling; pushing a commit does not replay a review.
 - `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages in `references/sub-issues.md`; do not add this condition for the same wake.
 - `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), `in_review`, or `blocked`.
 - The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
@@ -402,7 +418,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 
 Read current state with issue get, comment list, and run inspection before
 judging business completion. Wait for a linked pull request with `--until-pr`
-(`checks`, `merged`, `conflicts`, or `reviewed`) rather than polling it from a timer. There is no separate
+(`checks`, `merged` or `conflicts`) rather than polling it from a timer. There is no separate
 CI event; when the woken run needs check details or logs, use the existing
 GitHub tools. A failed run does not imply its business goal is complete.
 Automatic retry chains are not followed by event filters; subscribe to a new run

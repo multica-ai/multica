@@ -152,14 +152,14 @@ Permissions de dépôt (Repository permissions) :
 | Pull requests | Read-only |
 | Checks | Read-only ; sert à afficher le statut CI |
 | Commit statuses | Read-only ; sert à agréger la CI basée sur les statuts hérités (legacy statuses) |
+| Actions | Facultatif, Read-only ; permet au statut CI d'ignorer une exécution annulée remplacée par une exécution plus récente du même workflow sur le même commit |
 
 Abonnez-vous à ces événements :
 
 - **Pull request** ;
-- **Pull request review**, pour les réveils liés aux revues ;
 - **Check suite**, **Check run** et **Status**, qui déclenchent l'actualisation de la CI et de la possibilité de fusion.
 
-Les instantanés de PR utilisent les API REST Pull requests, Checks et Commit statuses. La permission Contents n'est pas nécessaire.
+Les instantanés de PR utilisent les API REST Pull requests, Checks et Commit statuses. La permission Contents n'est pas nécessaire. Avec la permission facultative Actions, Multica lit aussi les exécutions de workflow du commit. Sans elle, une exécution annulée compte toujours comme un échec, même après la réussite d'une exécution plus récente du même workflow.
 
 <Callout type="warning">
 Il s'agit du **Webhook secret**, et non du Client secret OAuth. Si les deux côtés n'ont pas le même secret de webhook, les livraisons GitHub renvoient `401 invalid signature`.

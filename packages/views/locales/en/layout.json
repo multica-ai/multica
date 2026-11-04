@@ -184,5 +184,14 @@
   "object_page": {
     "toggle_panel": "Toggle right sidebar",
     "properties": "Properties"
+  },
+  "feature_intro": {
+    "read_docs": "Read the docs",
+    "carousel": "carousel",
+    "slide": "slide",
+    "slide_position": "{{current}} of {{total}}",
+    "go_to_slide": "Go to slide {{index}}",
+    "previous": "Previous",
+    "next": "Next"
   }
 }

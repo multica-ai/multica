@@ -46,8 +46,6 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
-  MarkIssueInboxReadResultSchema,
-  UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -81,32 +79,17 @@ import {
 import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
 
-describe("MarkIssueInboxReadResultSchema", () => {
-  const endpoint = { endpoint: "POST /api/inbox/issues/:id/read" };
-
-  it("keeps the server's count", () => {
-    expect(
-      parseWithFallback({ count: 3 }, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
-    ).toEqual({ count: 3 });
-  });
-
-  it("reports an unknown count for a malformed reply", () => {
-    for (const raw of [null, "<html>", { count: "3" }, {}]) {
-      expect(
-        parseWithFallback(raw, MarkIssueInboxReadResultSchema, UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT, endpoint),
-      ).toEqual({ count: null });
-    }
-  });
-});
-
 describe("IssueUnreadPageSchema", () => {
   const endpoint = "GET /api/issues/unread";
 
-  it("defaults a missing agent_id and next_cursor to null", () => {
+  it("defaults missing run fields and next_cursor to null", () => {
     const parsed = parseWithFallback(
       {
         items: [
-          { issue_id: "i-1", outcome: "completed", agent_id: "a-1", created_at: "2026-01-01T00:00:00Z" },
+          {
+            issue_id: "i-1", outcome: "completed", agent_id: "a-1", task_id: "t-1", comment_id: "c-1",
+            created_at: "2026-01-01T00:00:00Z",
+          },
           { issue_id: "i-2", outcome: "manual", created_at: "2026-01-01T00:00:00Z", extra: true },
         ],
       },
@@ -114,9 +97,9 @@ describe("IssueUnreadPageSchema", () => {
       EMPTY_ISSUE_UNREAD_PAGE,
       { endpoint },
     );
-    expect(parsed.items.map((u) => [u.issue_id, u.agent_id])).toEqual([
-      ["i-1", "a-1"],
-      ["i-2", null],
+    expect(parsed.items.map((u) => [u.issue_id, u.agent_id, u.task_id, u.comment_id])).toEqual([
+      ["i-1", "a-1", "t-1", "c-1"],
+      ["i-2", null, null, null],
     ]);
     expect(parsed.next_cursor).toBeNull();
   });

@@ -177,5 +177,14 @@
   "object_page": {
     "toggle_panel": "切换右侧边栏",
     "properties": "属性"
+  },
+  "feature_intro": {
+    "read_docs": "阅读文档",
+    "carousel": "轮播",
+    "slide": "卡片",
+    "slide_position": "第 {{current}} 张，共 {{total}} 张",
+    "go_to_slide": "转到第 {{index}} 张",
+    "previous": "上一张",
+    "next": "下一张"
   }
 }

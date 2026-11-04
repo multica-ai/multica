@@ -735,5 +735,29 @@
     "default_repository_hint": "Used when the issue's project has no repository.",
     "default_branch": "Branch",
     "default_branch_placeholder": "main"
+  },
+  "intro": {
+    "title": "Give your agents a computer to work on",
+    "description": "A runtime is where agents actually run their work: your computer, a server, or a cloud service.",
+    "slides": {
+      "local": {
+        "title": "This computer connects itself",
+        "description": "Download the desktop app and sign in. Claude Code, Codex and the other CLIs on this computer show up on their own."
+      },
+      "remote": {
+        "title": "Another machine, two commands",
+        "description": "Install the CLI on a server or another computer, then run multica setup to connect it."
+      },
+      "cloud": {
+        "title": "Or use a cloud node",
+        "description": "Rather not manage machines? Create a cloud node hosted by Multica."
+      }
+    },
+    "art": {
+      "this_computer": "This computer · Desktop",
+      "detected": "Detected harnesses",
+      "run_there": "Run on that machine",
+      "connected": "{{name}} connected to Multica"
+    }
   }
 }

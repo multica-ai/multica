@@ -459,9 +459,6 @@ function ConditionParams({
             { value: "checks_finished", label: t(($) => $.wakeups.create.pr_checks) },
             { value: "merged", label: t(($) => $.wakeups.create.pr_merged) },
             { value: "conflicts", label: t(($) => $.wakeups.create.pr_conflicts) },
-            { value: "reviewed", label: t(($) => $.wakeups.create.pr_reviewed) },
-            { value: "approved", label: t(($) => $.wakeups.create.pr_approved) },
-            { value: "changes_requested", label: t(($) => $.wakeups.create.pr_changes_requested) },
           ]}
           onChange={(prEvent) => update({ prEvent: prEvent as WakeupDraft["prEvent"] })}
         />
