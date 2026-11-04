@@ -25,6 +25,17 @@ const snapshots = () => ({ read: async () => null, write: async () => {} });
 const newStore = (t: LocalV2Transport, snapshots: never | null = null) => new ConversationService(t, scope, { deviceId: "local", snapshots, onGeneration: vi.fn(), onUsed: vi.fn() });
 
 describe("ConversationService", () => {
+  it("pages through a list longer than one response, whose scope_seq is already the latest", async () => {
+    const { t } = transport([
+      { scope_seq: 9, summaries: [summary("a", 1), summary("b", 2)], has_more: true },
+      { scope_seq: 9, summaries: [summary("c", 9)], has_more: false },
+    ]);
+    const client = newStore(t);
+    await client.loadSummaries();
+    expect(vi.mocked(t.request).mock.calls[1]?.join(" ")).toContain("/sessions?after_scope_seq=2");
+    expect(client.list.summaries.map((item) => item.conversation_id).sort()).toEqual(["a", "b", "c"]);
+  });
+
   it("loads every summary page, then follows the scope stream", async () => {
     const { t, sent } = transport([
       { scope_seq: 2, summaries: [summary("a", 1), summary("b", 2)], has_more: true },
