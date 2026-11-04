@@ -659,7 +659,7 @@ export function clientErrorMessage(err: unknown): string | undefined {
 }
 
 // Thrown by getAttachmentTextContent when the server refuses to inline a
-// file because it exceeds the 2 MB cap. UI maps to a "too large, please
+// file because it exceeds the server-configured preview limit. UI maps to a "too large, please
 // download" affordance with the Download CTA still available.
 export class PreviewTooLargeError extends Error {
   constructor() {

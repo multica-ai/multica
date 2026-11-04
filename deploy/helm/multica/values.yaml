@@ -170,6 +170,8 @@ backend:
     s3Region: us-west-2
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
+    # Text/HTML preview size only; maximum 16 MiB.
+    maxPreviewSize: 2MiB
     localUploadBaseUrl: http://api.multica.dev.lan
   resources:
     requests:

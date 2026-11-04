@@ -123,6 +123,10 @@ Pour l'ordre exact d'évaluation des listes d'autorisation, consultez [Connexion
 
 Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 
+| Variable | Défaut | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Taille maximale du contenu des aperçus texte et HTML, plafonnée à `16MiB`. Accepte un entier positif en octets ou `KB`/`KiB`, `MB`/`MiB` (unités binaires). Une valeur invalide utilise la valeur par défaut. Redémarrer l’API après modification. Les limites de téléversement et de téléchargement restent inchangées. |
+
 ### S3 ou stockage compatible
 
 | Variable | Valeur par défaut | Description |

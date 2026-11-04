@@ -43,6 +43,7 @@ esac
 FAKE
 chmod 755 "$BIN_DIR/go"
 
+preview_call='test -race ./cmd/server/preview_size.go ./cmd/server/preview_size_test.go'
 regular_call='test -race github.com/multica-ai/multica/server github.com/multica-ai/multica/server/internal/daemon'
 agent_call='test -race -p 2 -parallel 2 ./pkg/agent/...'
 
@@ -85,11 +86,13 @@ expect_usage_failure() {
 }
 
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race
-expect_calls "--race" "$regular_call
+expect_calls "--race" "$preview_call
+$regular_call
 $agent_call"
 
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race --only regular
-expect_calls "--only regular" "$regular_call"
+expect_calls "--only regular" "$preview_call
+$regular_call"
 
 # Option order must not matter: CI spells it one way, humans another.
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --only agent --race
