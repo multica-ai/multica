@@ -167,6 +167,23 @@ describe("useMarkIssueInboxRead", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all(WORKSPACE_ID) });
   });
 
+  it("refreshes when the response did not say how many rows changed", async () => {
+    setApiInstance({
+      markIssueInboxRead: vi.fn(async () => ({ count: null })),
+    } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() }),
+    );
+  });
+
   it("leaves the caches alone when the issue had nothing unread", async () => {
     setApiInstance({
       markIssueInboxRead: vi.fn(async () => ({ count: 0 })),

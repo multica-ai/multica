@@ -2794,6 +2794,16 @@ export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: strin
   next_cursor: null,
 };
 
+// Reading one issue's notifications (`/api/inbox/issues/{id}/read` POST).
+// `count` is how many rows the write read; the client refreshes its inbox
+// caches only when it is above zero. A body without a usable count cannot say
+// that nothing changed, so the client treats it as unknown and refreshes.
+export const IssueInboxReadSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+  })
+  .loose();
+
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
 // "subscribed" relation filter on client-filtered surfaces. A non-string entry
 // is dropped; a body without the list has no safe fallback — an empty set

@@ -16,9 +16,13 @@ const foreground = vi.hoisted(() => ({ value: true }));
 vi.mock("../../common/use-app-foreground", () => ({ useAppForeground: () => foreground.value }));
 
 const wsHandlers = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
+const reconnectHandlers = vi.hoisted(() => ({ current: null as (() => void) | null }));
 vi.mock("@multica/core/realtime", () => ({
   useWSEvent: (event: string, handler: (payload: unknown) => void) => {
     wsHandlers.set(event, handler);
+  },
+  useWSReconnect: (callback: () => void) => {
+    reconnectHandlers.current = callback;
   },
 }));
 
@@ -28,6 +32,10 @@ function notification(issueId: string | null): { item: Partial<InboxItem> } {
 
 function deliver(payload: unknown) {
   act(() => wsHandlers.get("inbox:new")?.(payload));
+}
+
+function reconnect() {
+  act(() => reconnectHandlers.current?.());
 }
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
@@ -48,6 +56,7 @@ beforeEach(() => {
   client = createQueryClient();
   foreground.value = true;
   wsHandlers.clear();
+  reconnectHandlers.current = null;
   vi.mocked(api.markIssueInboxRead).mockResolvedValue({ count: 1 });
   vi.mocked(api.getInboxUnreadSummary).mockResolvedValue([]);
 });
@@ -131,6 +140,45 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
     rerender();
     await settle();
     expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads again after a reconnect, once the refreshed count shows unread", async () => {
+    // An inbox:new sent while the socket was down is never replayed. Realtime
+    // sync refetches the unread summary on reconnect; the write follows it.
+    setUnreadSummary(1);
+
+    renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+    await settle();
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+    act(() => setUnreadSummary(0));
+
+    reconnect();
+    await settle();
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+
+    act(() => setUnreadSummary(1));
+    await settle();
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads after a reconnect that happened in the background, once the app is in front", async () => {
+    setUnreadSummary(1);
+
+    const { rerender } = renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+    await settle();
+    act(() => setUnreadSummary(0));
+
+    foreground.value = false;
+    rerender();
+    reconnect();
+    act(() => setUnreadSummary(1));
+    await settle();
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+
+    foreground.value = true;
+    rerender();
+    await settle();
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
   });
 
   it("does nothing where the host reads the inbox itself", async () => {

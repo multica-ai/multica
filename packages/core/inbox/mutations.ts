@@ -54,15 +54,16 @@ export function useMarkInboxRead() {
  *
  * Not optimistic. Outside the inbox the list is usually not loaded, and only
  * the server knows which of the issue's rows are unread. The caches refresh
- * only when it reports rows changed, so opening an issue with nothing unread
- * costs no inbox refetch.
+ * unless the server reports that no row changed, so opening an issue with
+ * nothing unread costs no inbox refetch. A response without a count is treated
+ * as a change: skipping the refresh then could leave the badge stale.
  */
 export function useMarkIssueInboxRead(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (issueId: string) => api.markIssueInboxRead(issueId),
     onSuccess: (result) => {
-      if ((result?.count ?? 0) > 0) refreshInboxAfterWrite(qc, wsId);
+      if (result.count !== 0) refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

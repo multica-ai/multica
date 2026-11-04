@@ -418,6 +418,7 @@ import {
   IssueUnreadPageSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
+  IssueInboxReadSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -3064,9 +3065,17 @@ export class ApiClient {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
   }
 
-  /** Reads every unread notification the caller has on one issue. */
-  async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
-    return this.fetch(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+  /**
+   * Reads every unread notification the caller has on one issue. `count` is
+   * how many rows the server read, or `null` when the response did not say:
+   * the write itself succeeded, so callers must not read `null` as "nothing
+   * changed".
+   */
+  async markIssueInboxRead(issueId: string): Promise<{ count: number | null }> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+    return parseWithFallback<{ count: number | null }>(raw, IssueInboxReadSchema, { count: null }, {
+      endpoint: "POST /api/inbox/issues/{id}/read",
+    });
   }
 
   async archiveAllInbox(): Promise<{ count: number }> {
