@@ -225,6 +225,39 @@ wait_for_url() {
   ok "$label answers at $url"
 }
 
+# JSON string body for a value from the env file. Quotes and backslashes are escaped.
+json_string() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# Registers the WeKnora login that Multica signs in as. WeKnora answers 201 for a new user
+# and 400 "user with this email already exists" for one that is already there. A new
+# user becomes a system administrator only when knowledge-app starts (the bootstrap reads
+# WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL then), so a new user is followed by one restart.
+register_knowledge_service_user() {
+  local url email password body status reply
+  url=$(env_value "$ENV_FILE" KNOWLEDGE_URL)
+  email=$(env_value "$ENV_FILE" KNOWLEDGE_SERVICE_EMAIL)
+  password=$(env_value "$ENV_FILE" KNOWLEDGE_SERVICE_PASSWORD)
+  body="{\"username\":\"multica-service\",\"email\":\"$(json_string "$email")\",\"password\":\"$(json_string "$password")\"}"
+  reply=$(mktemp)
+  status=$(curl -s -m 30 -o "$reply" -w '%{http_code}' -X POST "$url/api/v1/auth/register" \
+    -H 'Content-Type: application/json' -d "$body" || echo 000)
+  if [ "$status" = "201" ] || [ "$status" = "200" ]; then
+    rm -f "$reply"
+    ok "WeKnora service user created: $email"
+    info "Restarting knowledge-app once so WeKnora makes the service user a system administrator"
+    compose restart knowledge-app >/dev/null
+    wait_for_url "WeKnora" "$url/health" || fail "WeKnora is not healthy after the restart. Logs: $(compose_cli_hint) logs --tail 100 knowledge-app"
+  elif grep -q "already exists" "$reply"; then
+    rm -f "$reply"
+    ok "WeKnora service user already exists: $email"
+  else
+    echo "! Could not register the WeKnora service user (HTTP $status). Knowledge will say the service account was rejected. Check KNOWLEDGE_SERVICE_EMAIL and KNOWLEDGE_SERVICE_PASSWORD, then run make dev-full again." >&2
+    rm -f "$reply"
+  fi
+}
+
 start_knowledge() {
   local url
   url=$(env_value "$ENV_FILE" KNOWLEDGE_URL)
@@ -232,6 +265,7 @@ start_knowledge() {
   info "The first start pulls the pinned WeKnora images, which can take several minutes."
   compose up -d "${KNOWLEDGE_SERVICES[@]}"
   wait_for_url "WeKnora" "$url/health" || fail "WeKnora is not healthy. Logs: $(compose_cli_hint) logs --tail 100 knowledge-app. Troubleshooting: $GUIDE#troubleshooting"
+  register_knowledge_service_user
 }
 
 # The command a person types by hand. Compose needs JWT_SECRET to parse the file; the

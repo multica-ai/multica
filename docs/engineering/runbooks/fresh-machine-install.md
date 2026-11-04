@@ -77,7 +77,7 @@ Ctrl-C stops Multica. The daemon and WeKnora keep running. The summary shows the
 that stop them.
 
 `make dev-full` does not create the Multica account, the first workspace, or the CLI login.
-Those are browser steps, described below. It also does not register the WeKnora service user.
+Those are browser steps, described below.
 
 ## Environment variables
 
@@ -223,14 +223,10 @@ registers the workspaces it can see. `make daemon` is safe to run again. Stop it
 
 ## First run in the UI
 
-**Register the WeKnora service user once.** Multica signs in as this user to create one
-WeKnora workspace for each Multica workspace. Use the values from your env file:
-
-```bash
-curl -X POST http://localhost:8090/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"<service username>","email":"<KNOWLEDGE_SERVICE_EMAIL>","password":"<KNOWLEDGE_SERVICE_PASSWORD>"}'
-```
+`make dev-full` registers the WeKnora service user once, from `KNOWLEDGE_SERVICE_EMAIL` and
+`KNOWLEDGE_SERVICE_PASSWORD`. Multica signs in as this user to create one WeKnora workspace for
+each Multica workspace. The username is `multica-service`. A run that finds the user already
+there leaves it alone.
 
 Then, in the web app at `http://localhost:3000`:
 
@@ -249,8 +245,10 @@ Then, in the web app at `http://localhost:3000`:
 
 **The service user is a WeKnora system administrator.** WeKnora creates owner logins only
 for a system administrator. `docker-compose.selfhost.yml` passes `KNOWLEDGE_SERVICE_EMAIL`
-to `knowledge-app` as `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`, so set it before the first
-start of `knowledge-app`.
+to `knowledge-app` as `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`. WeKnora promotes that user only
+when `knowledge-app` starts, and only if the user already exists. So `make dev-full` restarts
+`knowledge-app` once after it creates the service user. If you register the user by hand, restart
+`knowledge-app` after you do.
 
 ## Verification checklist
 
@@ -292,10 +290,10 @@ A WeKnora stack started from another compose project keeps its own settings. Cha
 in that project.
 
 **Enabling knowledge returns 502 "rejected Multica's service account".** The WeKnora login in
-`KNOWLEDGE_SERVICE_EMAIL` and `KNOWLEDGE_SERVICE_PASSWORD` does not exist, has a different
-password, or is not a system administrator (see the known gap in
-[First run in the UI](#first-run-in-the-ui)). The API log line `enable knowledge failed`
-carries the underlying error.
+`KNOWLEDGE_SERVICE_EMAIL` and `KNOWLEDGE_SERVICE_PASSWORD` does not exist or has a different
+password. `make dev-full` prints a warning when it cannot register the user; it does not
+create the user when the email is taken with another password. The API log line
+`enable knowledge failed` carries the underlying error.
 
 **Enabling knowledge returns 503 "the knowledge service is offline".** WeKnora's health route
 does not answer. Check `curl -fsS http://localhost:8090/health` and the logs of
