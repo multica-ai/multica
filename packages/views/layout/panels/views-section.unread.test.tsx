@@ -6,7 +6,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { viewSidebarSource } from "@multica/core/issues/sidebar-list";
+import { builtinSidebarSource, viewSidebarSource } from "@multica/core/issues/sidebar-list";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
@@ -47,10 +47,6 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/issue-statuses/hooks", async () => {
-  const { buildIssueStatusCatalog } = await import("@multica/core/issue-statuses/queries");
-  return { useIssueStatuses: () => buildIssueStatusCatalog([]) };
-});
 
 const adapter: NavigationAdapter = {
   push: vi.fn(),
@@ -74,6 +70,7 @@ const UNREAD_VIEW = {
 
 let listIssueUnread: ReturnType<typeof vi.fn>;
 let listIssueTableRows: ReturnType<typeof vi.fn>;
+let listIssueStatuses: ReturnType<typeof vi.fn>;
 
 function renderSection({ activeIssueId = null }: { activeIssueId?: string | null } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -104,9 +101,11 @@ beforeEach(() => {
     group_key: null,
     parent_id: null,
   }));
+  listIssueStatuses = vi.fn(async () => ({ statuses: [], categories: [], total: 0 }));
   setApiInstance({
     listIssueUnread,
     listIssueTableRows,
+    listIssueStatuses,
     listIssueViews: vi.fn(async () => []),
     getIssueViewPreference: vi.fn(() => new Promise(() => {})),
   } as unknown as ApiClient);
@@ -117,6 +116,27 @@ beforeEach(() => {
 });
 
 describe("ViewsSection saved view with the unread filter", () => {
+  it("holds its placeholder while the unread list loads, then lists the view's issues", async () => {
+    let finish!: (marks: unknown[]) => void;
+    listIssueUnread.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderSection();
+
+    await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
+    expect(screen.queryByText("No issues")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+
+    finish([{ issue_id: "issue-1", outcome: "manual", agent_id: null, created_at: "2026-01-01T00:00:00Z" }]);
+    await screen.findByText("No issues");
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          filters: expect.objectContaining({ unread_issue_ids: ["issue-1"] }),
+        }),
+      }),
+    );
+  });
+
   it("offers a retry when the unread list fails, then lists the view's issues", async () => {
     listIssueUnread.mockRejectedValueOnce(new Error("offline"));
     renderSection();
@@ -143,6 +163,21 @@ describe("ViewsSection saved view with the unread filter", () => {
     );
   });
 });
+
+const TODO_STATUS = {
+  id: "s-todo",
+  workspace_id: "ws-1",
+  key: "todo",
+  name: "Todo",
+  description: "",
+  category: "unstarted",
+  color: "",
+  is_system: true,
+  position: 0,
+  archived_at: null,
+  created_at: "",
+  updated_at: "",
+};
 
 const mark = (issueId: string) => ({
   issue_id: issueId,
@@ -207,5 +242,30 @@ describe("ViewsSection built-in Unread view", () => {
     await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
     await screen.findByRole("link", { name: "All issues" });
     expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull();
+  });
+});
+
+describe("ViewsSection built-in All issues view", () => {
+  beforeEach(() => {
+    listIssueUnread.mockResolvedValue([]);
+    actions.sidebar.items = [{ id: "builtin:all_issues", kind: "builtin", key: "all_issues" }];
+    useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [builtinSidebarSource("all_issues")] });
+  });
+
+  it("offers a retry when the status catalog fails, then lists its issues", async () => {
+    listIssueStatuses.mockRejectedValueOnce(new Error("offline"));
+    renderSection();
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByText("Couldn't load issues")).toBeInTheDocument();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+
+    listIssueStatuses.mockResolvedValue({ statuses: [TODO_STATUS], categories: [], total: 1 });
+    fireEvent.click(retry);
+
+    await screen.findByText("No issues");
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.objectContaining({ scope: { kind: "workspace" } }) }),
+    );
   });
 });
