@@ -148,8 +148,10 @@ function renderPanel(
     issueUnreadOptions("ws-1").queryKey,
     unreadIssueIds.map((issue_id) => ({
       issue_id,
-      outcome: "completed",
+      outcome: "completed" as const,
       agent_id: null,
+      task_id: null,
+      comment_id: null,
       created_at: "2026-01-01T00:00:00Z",
     })),
   );
