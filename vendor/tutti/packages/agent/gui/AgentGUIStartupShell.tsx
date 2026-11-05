@@ -1,5 +1,8 @@
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { Spinner } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+export const AgentGUIStartupShell = observer(AgentGUIStartupShellRender);
 
 const conversationSkeletonRowSizes = [
   "long",
@@ -13,9 +16,13 @@ export interface AgentGUIStartupShellProps {
   loadingLabel: string;
 }
 
-export function AgentGUIStartupShell({
+function AgentGUIStartupShellRender({
   loadingLabel
 }: AgentGUIStartupShellProps): ReactNode {
+  const styleProp1 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () => ({ gridTemplateColumns: "52px 280px minmax(0, 1fr)" }),
+    []
+  );
   return (
     <div
       aria-busy="true"
@@ -23,12 +30,7 @@ export function AgentGUIStartupShell({
       data-agent-gui-startup-shell="body"
     >
       <div className="agent-gui-node__body">
-        <div
-          className="agent-gui-node__layout"
-          style={{
-            gridTemplateColumns: "52px 280px minmax(0, 1fr)"
-          }}
-        >
+        <div className="agent-gui-node__layout" style={styleProp1}>
           <aside className="flex h-full min-h-0 flex-col items-center gap-3 overflow-hidden bg-[var(--background-session-sidepanel)] px-2 pt-12">
             {[0, 1, 2].map((index) => (
               <span

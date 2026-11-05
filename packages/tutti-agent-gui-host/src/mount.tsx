@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/inter/wght-italic.css";
@@ -6,28 +7,32 @@ import "@fontsource-variable/source-serif-4/wght-italic.css";
 import { AgentGUIStartupShell } from "@tutti-os/agent-gui/startup-shell";
 import { Button } from "@tutti-os/ui-system/components";
 import {
-Component,
-Profiler,
-useEffect,
-useState,
-type ErrorInfo,
-type ReactNode
+  Component,
+  Profiler,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode
 } from "react";
 import {
-AGENT_GUI_ROOT_CLASS,
-applyAgentGuiAppearance,
-syncAgentGuiDocument
+  AGENT_GUI_ROOT_CLASS,
+  applyAgentGuiAppearance,
+  syncAgentGuiDocument
 } from "./agent-gui-appearance";
 import "./agent-gui.generated.css";
 import { AgentGuiApplication } from "./application";
 import type {
-AgentGuiHostServices,
-AgentGuiInitSnapshot,
-LocalConversationSource
+  AgentGuiHostServices,
+  AgentGuiInitSnapshot,
+  LocalConversationSource
 } from "./protocol";
 import { createMulticaAgentGuiRuntime } from "./runtime";
+import { observer } from "mobx-react-lite";
+import { observer as observeClass } from "mobx-react";
+const ErrorView = observer(ErrorViewRender);
+export const AgentGuiMount = observer(AgentGuiMountRender);
 
-function ErrorView({
+function ErrorViewRender({
   error,
   chinese,
   onRetry
@@ -74,8 +79,9 @@ class AgentGuiErrorBoundary extends Component<
     );
   }
 }
+observeClass(AgentGuiErrorBoundary);
 
-function Rendered({
+const Rendered = observer(function Rendered({
   onRendered,
   children
 }: {
@@ -86,7 +92,7 @@ function Rendered({
     onRendered?.();
   }, [onRendered]);
   return children;
-}
+});
 
 type Handle = ReturnType<typeof createMulticaAgentGuiRuntime>;
 
@@ -98,7 +104,7 @@ export interface AgentGuiMountProps {
 }
 
 /** One GUI instance. Its runtime lives exactly as long as this component. */
-export default function AgentGuiMount({
+function AgentGuiMountRender({
   client,
   initial,
   localConversations,
@@ -145,40 +151,44 @@ export default function AgentGuiMount({
   }, [initial]);
 
   const retry = () => setAttempt((value) => value + 1);
+  const retryCallback = usePersistCallback(retry);
+  const refProp1 = usePersistCallback<
+    Extract<
+      NonNullable<React.ComponentProps<"div">["ref"]>,
+      (...args: never[]) => unknown
+    >
+  >((element) => {
+    setRoot(element);
+    if (element && !element.dataset.theme)
+      applyAgentGuiAppearance(element, initial);
+  });
   return (
     <div
-      ref={(element) => {
-        setRoot(element);
-        if (element && !element.dataset.theme)
-          applyAgentGuiAppearance(element, initial);
-      }}
+      ref={refProp1}
       className={AGENT_GUI_ROOT_CLASS}
       data-testid="agent-gui-root"
     >
       {state.error ? (
         <Rendered onRendered={onRendered}>
-          <ErrorView error={state.error} chinese={chinese} onRetry={retry} />
+          <ErrorView
+            error={state.error}
+            chinese={chinese}
+            onRetry={retryCallback}
+          />
         </Rendered>
       ) : state.handle && root ? (
         <Rendered onRendered={onRendered}>
           <AgentGuiErrorBoundary
             key={attempt}
             chinese={chinese}
-            onRetry={retry}
+            onRetry={retryCallback}
           >
-            <Profiler
-              id="agent-gui"
-              onRender={(_id, _phase, actualDuration) =>
-                state.handle?.rendered(actualDuration)
-              }
-            >
-              <AgentGuiApplication
-                client={client}
-                initial={initial}
-                handle={state.handle}
-                root={root}
-              />
-            </Profiler>
+            <ProfilerBinding1
+              state={state}
+              client={client}
+              initial={initial}
+              root={root}
+            />
           </AgentGuiErrorBoundary>
         </Rendered>
       ) : (
@@ -187,3 +197,33 @@ export default function AgentGuiMount({
     </div>
   );
 }
+
+export default AgentGuiMount;
+
+const ProfilerBinding1 = observer(function ProfilerBinding1({
+  state,
+  client,
+  initial,
+  root
+}: ProfilerBinding1Props) {
+  const onRenderProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Profiler>["onRender"]>
+  >((_id, _phase, actualDuration) => state.handle?.rendered(actualDuration));
+  return (
+    <Profiler id="agent-gui" onRender={onRenderProp2}>
+      <AgentGuiApplication
+        client={client}
+        initial={initial}
+        handle={state.handle!}
+        root={root}
+      />
+    </Profiler>
+  );
+});
+
+type ProfilerBinding1Props = {
+  state: { handle: Handle | null; error: Error | null };
+  client: NonNullable<AgentGuiMountProps>["client"];
+  initial: NonNullable<AgentGuiMountProps>["initial"];
+  root: HTMLDivElement;
+};

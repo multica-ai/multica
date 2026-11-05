@@ -1,9 +1,11 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const WriteLinedIcon = observer(WriteLinedIconRender);
 
 /**
  * Lined write glyph (24x24 viewBox). Fill uses `currentColor`.
  */
-export function WriteLinedIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+function WriteLinedIconRender(props: SVGProps<SVGSVGElement>): JSX.Element {
   "use memo";
   return (
     <svg

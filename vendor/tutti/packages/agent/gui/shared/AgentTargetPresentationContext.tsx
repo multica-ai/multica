@@ -1,5 +1,9 @@
 import { createContext, useContext, type JSX, type ReactNode } from "react";
 import type { AgentMessageMarkdownAgentTarget } from "./agentTargetPresentation";
+import { observer } from "mobx-react-lite";
+export const AgentTargetPresentationProvider = observer(
+  AgentTargetPresentationProviderRender
+);
 
 export {
   resolveAgentTargetPresentation,
@@ -14,7 +18,7 @@ const AgentTargetPresentationContext =
     EMPTY_AGENT_TARGETS
   );
 
-export function AgentTargetPresentationProvider({
+function AgentTargetPresentationProviderRender({
   agentTargets,
   children
 }: {

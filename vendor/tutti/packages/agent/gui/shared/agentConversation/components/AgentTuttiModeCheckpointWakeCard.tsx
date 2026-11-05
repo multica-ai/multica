@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useState, type JSX } from "react";
 import {
   AlertCircle,
@@ -10,12 +12,16 @@ import {
 import { translate } from "../../../i18n/index";
 import { CollapsibleReveal } from "./CollapsibleReveal";
 import type { AgentTuttiModeCheckpointWakeVM } from "../contracts/agentMessageRowVM";
+import { observer } from "mobx-react-lite";
+export const AgentTuttiModeCheckpointWakeCard = observer(
+  AgentTuttiModeCheckpointWakeCardRender
+);
 
 // Friendly, collapsed summary for a daemon checkpoint-wake prompt. The agent
 // still receives the full prompt verbatim; here the user sees a compact card
 // keyed off the checkpoint kind and Issue, with an expand affordance that
 // reveals the complete injected text.
-export function AgentTuttiModeCheckpointWakeCard({
+function AgentTuttiModeCheckpointWakeCardRender({
   checkpointWake,
   fullText
 }: {
@@ -54,20 +60,11 @@ export function AgentTuttiModeCheckpointWakeCard({
           {title}
         </span>
         {hasBody ? (
-          <button
-            type="button"
-            data-testid="agent-tutti-checkpoint-wake-toggle"
-            className="inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[12px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--transparency-hover)] hover:text-[var(--text-secondary)]"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {toggleLabel}
-            {expanded ? (
-              <ChevronUp size={14} strokeWidth={2} aria-hidden="true" />
-            ) : (
-              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-            )}
-          </button>
+          <ButtonBinding1
+            expanded={expanded}
+            setExpanded={setExpanded}
+            toggleLabel={toggleLabel}
+          />
         ) : null}
       </div>
       {issueLabel ? (
@@ -115,3 +112,47 @@ function checkpointWakeIcon(kind: string): LucideIcon {
       return ListChecks;
   }
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  expanded,
+  setExpanded,
+  toggleLabel,
+  ...slotProps
+}: {
+  expanded: boolean;
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  toggleLabel: string;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    expanded: boolean;
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    toggleLabel: string;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        data-testid="agent-tutti-checkpoint-wake-toggle"
+        className="inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[12px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--transparency-hover)] hover:text-[var(--text-secondary)]"
+        aria-expanded={expanded}
+        onClick={onClickProp1}
+      >
+        {toggleLabel}
+        {expanded ? (
+          <ChevronUp size={14} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+        )}
+      </button>
+    </Slot.Root>
+  );
+});

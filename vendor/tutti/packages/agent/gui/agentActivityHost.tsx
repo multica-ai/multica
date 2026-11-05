@@ -14,6 +14,10 @@ import {
   type AgentHostInputApi,
   type AgentHostRuntimeApi
 } from "./host/agentHostApi";
+import { observer } from "mobx-react-lite";
+export const AgentGUIActivityHostProvider = observer(
+  AgentGUIActivityHostProviderRender
+);
 
 const AgentActivityHostContext = createContext<AgentHostRuntimeApi | null>(
   null
@@ -26,7 +30,7 @@ export interface AgentGUIActivityHostProviderProps extends PropsWithChildren {
   agentHostApi?: AgentHostInputApi | null;
 }
 
-export function AgentGUIActivityHostProvider({
+function AgentGUIActivityHostProviderRender({
   agentActivityRuntime,
   agentHostApi,
   children

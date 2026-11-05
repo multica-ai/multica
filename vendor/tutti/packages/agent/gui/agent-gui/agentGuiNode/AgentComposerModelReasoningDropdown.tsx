@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Fragment,
   cloneElement,
@@ -34,8 +36,17 @@ import {
 import { useComposerModelChoiceHistory } from "./controller/useComposerModelChoiceHistory";
 import { translate } from "../../i18n/index";
 import styles from "./AgentGUINode.styles";
+import { observer } from "mobx-react-lite";
+export const ComposerOptionInfoTooltip = observer(
+  ComposerOptionInfoTooltipRender
+);
+export const AgentModelReasoningDropdown = observer(
+  AgentModelReasoningDropdownRender
+);
+const ComposerMenuOptionItems = observer(ComposerMenuOptionItemsRender);
+const ComposerModelOptionTooltip = observer(ComposerModelOptionTooltipRender);
 
-export function ComposerOptionInfoTooltip({
+function ComposerOptionInfoTooltipRender({
   description,
   tooltipsEnabled = true
 }: {
@@ -46,13 +57,14 @@ export function ComposerOptionInfoTooltip({
     event.preventDefault();
     event.stopPropagation();
   };
+  const stopSelectCallback = usePersistCallback(stopSelect);
 
   const trigger = (
     <span
       className="pointer-events-none inline-flex shrink-0 cursor-help text-[var(--agent-gui-text-tertiary)] opacity-0 transition-opacity group-hover/composer-option:pointer-events-auto group-hover/composer-option:opacity-100 group-data-[highlighted]/composer-option:pointer-events-auto group-data-[highlighted]/composer-option:opacity-100"
       data-agent-composer-option-info-trigger="true"
-      onClick={stopSelect}
-      onPointerDown={stopSelect}
+      onClick={stopSelectCallback}
+      onPointerDown={stopSelectCallback}
     >
       <RoomsHintIcon aria-hidden className="size-3" />
     </span>
@@ -72,33 +84,14 @@ export function ComposerOptionInfoTooltip({
   );
 }
 
-export function AgentModelReasoningDropdown({
+function AgentModelReasoningDropdownRender({
   composerSettings,
   disabled = false,
   labels,
   modelHistoryTargetId,
   onRetryComposerOptions,
   onSettingsChange
-}: {
-  composerSettings: AgentGUIComposerSettingsVM;
-  disabled?: boolean;
-  labels: AgentComposerSettingsMenuLabels;
-  /**
-   * Optional test/embedding override. Omission uses the controller-projected
-   * exact target; explicit null disables model history.
-   */
-  modelHistoryTargetId?: string | null;
-  onRetryComposerOptions?: (options?: {
-    force?: boolean;
-    section?: "core" | "capabilities" | "connectors";
-    waitForFreshModelCatalog?: boolean;
-  }) => void;
-  onSettingsChange: (patch: {
-    model?: string;
-    reasoningEffort?: string;
-    speed?: string;
-  }) => void;
-}): React.JSX.Element {
+}: AgentModelReasoningDropdownProps): React.JSX.Element {
   "use memo";
   const [menuOpen, setMenuOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState("");
@@ -127,6 +120,7 @@ export function AgentModelReasoningDropdown({
     }
     setMenuOpen(open);
   };
+  const handleMenuOpenChangeCallback = usePersistCallback(handleMenuOpenChange);
   const menu = buildComposerModelMenuModel(composerSettings, labels, {
     favoriteModelIds,
     recentModelIds,
@@ -156,10 +150,12 @@ export function AgentModelReasoningDropdown({
     onSettingsChange(patch);
     setMenuOpen(false);
   };
+  const applySettingsChangeCallback = usePersistCallback(applySettingsChange);
   const applyModelSelection = (value: string): void => {
     modelHistory.recordRecentModel(value);
     applySettingsChange({ model: value });
   };
+  const applyModelSelectionCallback = usePersistCallback(applyModelSelection);
   const handleToggleFavoriteModel = (value: string): void => {
     modelHistory.toggleFavoriteModel(value);
   };
@@ -174,6 +170,9 @@ export function AgentModelReasoningDropdown({
     menu.model.options.length === 0 &&
     menu.model.favoriteOptions.length === 0 &&
     menu.model.recentOptions.length === 0;
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => onRetryComposerOptions?.());
   const trigger = (
     <button
       type="button"
@@ -197,9 +196,7 @@ export function AgentModelReasoningDropdown({
       }
       disabled={triggerDisabled}
       onClick={
-        composerOptionsError && !retryDisabled
-          ? () => onRetryComposerOptions?.()
-          : undefined
+        composerOptionsError && !retryDisabled ? onClickProp1 : undefined
       }
       data-agent-model-reasoning-trigger="true"
       data-agent-composer-options-state={
@@ -278,7 +275,7 @@ export function AgentModelReasoningDropdown({
   }
 
   return (
-    <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
+    <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChangeCallback}>
       {isModelLoading ? (
         // The trigger is disabled while loading, so pointer events never reach
         // it. Target the tooltip at a focusable wrapper span (Radix's pattern
@@ -327,23 +324,10 @@ export function AgentModelReasoningDropdown({
               ) : null}
             </DropdownMenuLabel>
             {menu.model.searchEnabled ? (
-              <div
-                className="px-2 pb-1.5"
-                // Keep typing local to the input: Radix menu typeahead and
-                // arrow-key focus handling must not steal these key events.
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                <input
-                  type="text"
-                  value={modelSearchQuery}
-                  data-agent-model-search-input="true"
-                  placeholder={translate(
-                    "agentHost.agentGui.composerModelSearchPlaceholder"
-                  )}
-                  className="box-border h-7 w-full min-w-0 rounded-[6px] border border-[var(--line-2)] bg-transparent px-2 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--agent-gui-text-tertiary)] focus:border-[var(--tutti-purple)]"
-                  onChange={(event) => setModelSearchQuery(event.target.value)}
-                />
-              </div>
+              <DivBinding1
+                modelSearchQuery={modelSearchQuery}
+                setModelSearchQuery={setModelSearchQuery}
+              />
             ) : null}
             {menu.model.favoriteOptions.length > 0 ? (
               <>
@@ -360,7 +344,7 @@ export function AgentModelReasoningDropdown({
                   tooltipsEnabled
                   favoriteValues={favoriteValueSet}
                   onToggleFavorite={toggleFavoriteModel}
-                  onSelect={applyModelSelection}
+                  onSelect={applyModelSelectionCallback}
                 />
               </>
             ) : null}
@@ -379,7 +363,7 @@ export function AgentModelReasoningDropdown({
                   tooltipsEnabled
                   favoriteValues={favoriteValueSet}
                   onToggleFavorite={toggleFavoriteModel}
-                  onSelect={applyModelSelection}
+                  onSelect={applyModelSelectionCallback}
                 />
               </>
             ) : null}
@@ -403,7 +387,7 @@ export function AgentModelReasoningDropdown({
                     tooltipsEnabled
                     favoriteValues={favoriteValueSet}
                     onToggleFavorite={toggleFavoriteModel}
-                    onSelect={applyModelSelection}
+                    onSelect={applyModelSelectionCallback}
                   />
                 </Fragment>
               ))
@@ -415,7 +399,7 @@ export function AgentModelReasoningDropdown({
                 tooltipsEnabled
                 favoriteValues={favoriteValueSet}
                 onToggleFavorite={toggleFavoriteModel}
-                onSelect={applyModelSelection}
+                onSelect={applyModelSelectionCallback}
               />
             )}
             {menu.model.searchEnabled &&
@@ -450,13 +434,9 @@ export function AgentModelReasoningDropdown({
               className={cn(styles.composerMenuContent, "min-w-[132px]")}
               data-agent-composer-settings-layout="model-submenu"
             >
-              <ComposerMenuOptionItems
-                options={menu.reasoning.options}
-                selectedValue={menu.reasoning.selectedValue}
-                tooltipsEnabled
-                onSelect={(value) =>
-                  applySettingsChange({ reasoningEffort: value })
-                }
+              <ComposerMenuOptionItemsBinding2
+                menu={menu}
+                applySettingsChange={applySettingsChangeCallback}
               />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
@@ -478,12 +458,9 @@ export function AgentModelReasoningDropdown({
               className={cn(styles.composerMenuContent, "w-[200px]")}
               data-agent-composer-settings-layout="model-submenu"
             >
-              <ComposerMenuOptionItems
-                options={menu.speed.options}
-                selectedValue={menu.speed.selectedValue}
-                descriptionPresentation="inline"
-                tooltipsEnabled
-                onSelect={(value) => applySettingsChange({ speed: value })}
+              <ComposerMenuOptionItemsBinding3
+                menu={menu}
+                applySettingsChange={applySettingsChangeCallback}
               />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
@@ -508,7 +485,7 @@ export function AgentModelReasoningDropdown({
 // directly because runtime evidence showed submenu items can receive
 // pointerdown while Radix onSelect never fires in this embedded menu. onSelect
 // remains for keyboard activation and normal Radix paths.
-function ComposerMenuOptionItems({
+function ComposerMenuOptionItemsRender({
   options,
   selectedValue,
   descriptionPresentation = "none",
@@ -516,16 +493,7 @@ function ComposerMenuOptionItems({
   favoriteValues,
   onToggleFavorite,
   onSelect
-}: {
-  options: ComposerMenuOption[];
-  selectedValue: string;
-  descriptionPresentation?: "inline" | "model-tooltip" | "none" | "tooltip";
-  tooltipsEnabled?: boolean;
-  /** Values currently favorited; enables the per-option star toggle. */
-  favoriteValues?: ReadonlySet<string>;
-  onToggleFavorite?: (value: string) => void;
-  onSelect: (value: string) => void;
-}): React.JSX.Element {
+}: ComposerMenuOptionItemsProps): React.JSX.Element {
   return (
     <>
       {options.map((option) => {
@@ -537,134 +505,24 @@ function ComposerMenuOptionItems({
           descriptionPresentation === "tooltip" && hasDescription;
         const isFavorite = favoriteValues?.has(option.value) ?? false;
         const favoriteToggle = onToggleFavorite ? (
-          <button
-            type="button"
-            data-agent-model-favorite-toggle="true"
-            data-favorited={isFavorite ? "true" : "false"}
-            aria-label={translate(
-              isFavorite
-                ? "agentHost.agentGui.composerModelFavoriteRemove"
-                : "agentHost.agentGui.composerModelFavoriteAdd"
-            )}
-            className={cn(
-              "ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] text-[var(--agent-gui-text-tertiary)] transition-opacity hover:text-[var(--text-secondary)]",
-              isFavorite
-                ? "text-[var(--tutti-purple)] opacity-100 hover:text-[var(--tutti-purple)]"
-                : "opacity-0 group-hover/composer-option:opacity-100 group-data-[highlighted]/composer-option:opacity-100"
-            )}
-            // Pointer activation is applied on pointerup because embedded
-            // Radix menu controls do not reliably receive a compatibility
-            // click. The parent row ignores this control below.
-            onPointerUp={(event) => {
-              const shouldToggle = event.button === 0 && !event.ctrlKey;
-              if (shouldToggle) {
-                event.stopPropagation();
-                onToggleFavorite(option.value);
-              }
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const isKeyboardActivation = event.detail === 0;
-              if (isKeyboardActivation) {
-                onToggleFavorite(option.value);
-              }
-            }}
-          >
-            <Star
-              aria-hidden
-              className="size-3.5"
-              fill={isFavorite ? "currentColor" : "none"}
-              strokeWidth={2}
-            />
-          </button>
+          <ButtonBinding4
+            isFavorite={isFavorite}
+            onToggleFavorite={onToggleFavorite}
+            option={option}
+          />
         ) : null;
         const item = (
-          <DropdownMenuItem
+          <DropdownMenuItemBinding5
             key={option.value}
-            className={cn(
-              styles.composerMenuItem,
-              "group/composer-option",
-              showModelTooltip &&
-                "min-h-[40px] max-w-full items-center px-3 py-2",
-              showInlineDescription && "items-start"
-            )}
-            data-agent-model-option={showModelTooltip ? "true" : undefined}
-            data-testid="agent-gui-model-option"
-            data-agent-model-selected={
-              option.value === selectedValue ? "true" : "false"
-            }
-            data-agent-model-value={option.value}
-            onPointerDown={(event) => {
-              if (
-                event.target instanceof Element &&
-                event.target.closest(
-                  '[data-agent-model-favorite-toggle="true"]'
-                )
-              ) {
-                return;
-              }
-              if (event.button === 0 && !event.ctrlKey) {
-                event.preventDefault();
-                onSelect(option.value);
-              }
-            }}
-            onSelect={() => {
-              onSelect(option.value);
-            }}
-          >
-            {showModelTooltip ? (
-              <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-                <span className="min-w-0 truncate leading-[1.15]">
-                  {option.label}
-                </span>
-                {option.summary && option.summary.length > 0 ? (
-                  <span className="flex min-w-0 shrink-0 items-baseline gap-1.5 overflow-hidden text-[var(--agent-gui-text-tertiary)]">
-                    {option.summary.map((summary) => (
-                      <span
-                        key={summary}
-                        className="max-w-[64px] truncate leading-[1.15]"
-                      >
-                        {summary}
-                      </span>
-                    ))}
-                  </span>
-                ) : null}
-              </span>
-            ) : (
-              <span
-                className={cn(
-                  "flex min-w-0 flex-1 flex-col",
-                  showInlineDescription ? "gap-0.5" : "gap-0"
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="min-w-0 truncate leading-[1.15]">
-                    {option.label}
-                  </span>
-                  {showTooltipDescription && option.description ? (
-                    <ComposerOptionInfoTooltip
-                      description={option.description}
-                      tooltipsEnabled={tooltipsEnabled}
-                    />
-                  ) : null}
-                </span>
-                {showInlineDescription && option.description ? (
-                  <span className="whitespace-normal text-[11px] leading-[1.2] text-[var(--text-tertiary)]">
-                    {option.description}
-                  </span>
-                ) : null}
-              </span>
-            )}
-            {favoriteToggle}
-            <CheckIcon
-              aria-hidden
-              className={cn(
-                "ml-2 size-3.5 shrink-0 text-[var(--tutti-purple)]",
-                option.value !== selectedValue && "invisible"
-              )}
-            />
-          </DropdownMenuItem>
+            option={option}
+            showModelTooltip={showModelTooltip}
+            showInlineDescription={showInlineDescription}
+            selectedValue={selectedValue}
+            onSelect={onSelect}
+            showTooltipDescription={showTooltipDescription}
+            tooltipsEnabled={tooltipsEnabled}
+            favoriteToggle={favoriteToggle}
+          />
         );
         return showModelTooltip ? (
           <ComposerModelOptionTooltip
@@ -682,7 +540,7 @@ function ComposerMenuOptionItems({
   );
 }
 
-function ComposerModelOptionTooltip({
+function ComposerModelOptionTooltipRender({
   children,
   option,
   tooltipsEnabled = true
@@ -738,3 +596,377 @@ function ComposerModelOptionTooltip({
     </Tooltip>
   );
 }
+
+const InputBinding1 = observer(function InputBinding1({
+  modelSearchQuery,
+  setModelSearchQuery,
+  ...slotProps
+}: InputBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof InputBinding1Props>) {
+  const onChangeProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"input">["onChange"]>
+  >((event) => setModelSearchQuery(event.target.value));
+  return (
+    <Slot.Root {...slotProps}>
+      <input
+        type="text"
+        value={modelSearchQuery}
+        data-agent-model-search-input="true"
+        placeholder={translate(
+          "agentHost.agentGui.composerModelSearchPlaceholder"
+        )}
+        className="box-border h-7 w-full min-w-0 rounded-[6px] border border-[var(--line-2)] bg-transparent px-2 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--agent-gui-text-tertiary)] focus:border-[var(--tutti-purple)]"
+        onChange={onChangeProp1}
+      />
+    </Slot.Root>
+  );
+});
+
+const ComposerMenuOptionItemsBinding2 = observer(
+  function ComposerMenuOptionItemsBinding2({
+    menu,
+    applySettingsChange
+  }: {
+    menu: import("./model/composerSettingsMenuModel").ComposerModelMenuModel;
+    applySettingsChange: (patch: {
+      model?: string;
+      reasoningEffort?: string;
+      speed?: string;
+    }) => void;
+  }) {
+    const onSelectProp2 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ComposerMenuOptionItems>["onSelect"]
+      >
+    >((value) => applySettingsChange({ reasoningEffort: value }));
+    return (
+      <ComposerMenuOptionItems
+        options={menu.reasoning.options}
+        selectedValue={menu.reasoning.selectedValue}
+        tooltipsEnabled
+        onSelect={onSelectProp2}
+      />
+    );
+  }
+);
+
+const ComposerMenuOptionItemsBinding3 = observer(
+  function ComposerMenuOptionItemsBinding3({
+    menu,
+    applySettingsChange
+  }: {
+    menu: import("./model/composerSettingsMenuModel").ComposerModelMenuModel;
+    applySettingsChange: (patch: {
+      model?: string;
+      reasoningEffort?: string;
+      speed?: string;
+    }) => void;
+  }) {
+    const onSelectProp3 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ComposerMenuOptionItems>["onSelect"]
+      >
+    >((value) => applySettingsChange({ speed: value }));
+    return (
+      <ComposerMenuOptionItems
+        options={menu.speed.options}
+        selectedValue={menu.speed.selectedValue}
+        descriptionPresentation="inline"
+        tooltipsEnabled
+        onSelect={onSelectProp3}
+      />
+    );
+  }
+);
+
+const ButtonBinding4 = observer(function ButtonBinding4({
+  isFavorite,
+  onToggleFavorite,
+  option,
+  ...slotProps
+}: {
+  isFavorite: boolean;
+  onToggleFavorite: (value: string) => void;
+  option: ComposerMenuOption;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    isFavorite: boolean;
+    onToggleFavorite: (value: string) => void;
+    option: ComposerMenuOption;
+  }
+>) {
+  const onPointerUpProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onPointerUp"]>
+  >((event) => {
+    const shouldToggle = event.button === 0 && !event.ctrlKey;
+    if (shouldToggle) {
+      event.stopPropagation();
+      onToggleFavorite(option.value);
+    }
+  });
+  const onClickProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isKeyboardActivation = event.detail === 0;
+    if (isKeyboardActivation) {
+      onToggleFavorite(option.value);
+    }
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        data-agent-model-favorite-toggle="true"
+        data-favorited={isFavorite ? "true" : "false"}
+        aria-label={translate(
+          isFavorite
+            ? "agentHost.agentGui.composerModelFavoriteRemove"
+            : "agentHost.agentGui.composerModelFavoriteAdd"
+        )}
+        className={cn(
+          "ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] text-[var(--agent-gui-text-tertiary)] transition-opacity hover:text-[var(--text-secondary)]",
+          isFavorite
+            ? "text-[var(--tutti-purple)] opacity-100 hover:text-[var(--tutti-purple)]"
+            : "opacity-0 group-hover/composer-option:opacity-100 group-data-[highlighted]/composer-option:opacity-100"
+        )}
+        // Pointer activation is applied on pointerup because embedded
+        // Radix menu controls do not reliably receive a compatibility
+        // click. The parent row ignores this control below.
+        onPointerUp={onPointerUpProp4}
+        onClick={onClickProp5}
+      >
+        <Star
+          aria-hidden
+          className="size-3.5"
+          fill={isFavorite ? "currentColor" : "none"}
+          strokeWidth={2}
+        />
+      </button>
+    </Slot.Root>
+  );
+});
+
+const DropdownMenuItemBinding5 = observer(function DropdownMenuItemBinding5({
+  option,
+  showModelTooltip,
+  showInlineDescription,
+  selectedValue,
+  onSelect,
+  showTooltipDescription,
+  tooltipsEnabled,
+  favoriteToggle,
+  ...slotProps
+}: {
+  option: ComposerMenuOption;
+  showModelTooltip: boolean;
+  showInlineDescription: boolean;
+  selectedValue: NonNullable<ComposerMenuOptionItemsProps>["selectedValue"];
+  onSelect: NonNullable<ComposerMenuOptionItemsProps>["onSelect"];
+  showTooltipDescription: boolean;
+  tooltipsEnabled: boolean;
+  favoriteToggle: import("react").JSX.Element | null;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    option: ComposerMenuOption;
+    showModelTooltip: boolean;
+    showInlineDescription: boolean;
+    selectedValue: NonNullable<ComposerMenuOptionItemsProps>["selectedValue"];
+    onSelect: NonNullable<ComposerMenuOptionItemsProps>["onSelect"];
+    showTooltipDescription: boolean;
+    tooltipsEnabled: boolean;
+    favoriteToggle: import("react").JSX.Element | null;
+  }
+>) {
+  const onPointerDownProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onPointerDown"]>
+  >((event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[data-agent-model-favorite-toggle="true"]')
+    ) {
+      return;
+    }
+    if (event.button === 0 && !event.ctrlKey) {
+      event.preventDefault();
+      onSelect(option.value);
+    }
+  });
+  const onSelectProp7 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(() => {
+    onSelect(option.value);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <DropdownMenuItem
+        key={option.value}
+        className={cn(
+          styles.composerMenuItem,
+          "group/composer-option",
+          showModelTooltip && "min-h-[40px] max-w-full items-center px-3 py-2",
+          showInlineDescription && "items-start"
+        )}
+        data-agent-model-option={showModelTooltip ? "true" : undefined}
+        data-testid="agent-gui-model-option"
+        data-agent-model-selected={
+          option.value === selectedValue ? "true" : "false"
+        }
+        data-agent-model-value={option.value}
+        onPointerDown={onPointerDownProp6}
+        onSelect={onSelectProp7}
+      >
+        {showModelTooltip ? (
+          <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
+            <span className="min-w-0 truncate leading-[1.15]">
+              {option.label}
+            </span>
+            {option.summary && option.summary.length > 0 ? (
+              <span className="flex min-w-0 shrink-0 items-baseline gap-1.5 overflow-hidden text-[var(--agent-gui-text-tertiary)]">
+                {option.summary.map((summary) => (
+                  <span
+                    key={summary}
+                    className="max-w-[64px] truncate leading-[1.15]"
+                  >
+                    {summary}
+                  </span>
+                ))}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span
+            className={cn(
+              "flex min-w-0 flex-1 flex-col",
+              showInlineDescription ? "gap-0.5" : "gap-0"
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate leading-[1.15]">
+                {option.label}
+              </span>
+              {showTooltipDescription && option.description ? (
+                <ComposerOptionInfoTooltip
+                  description={option.description}
+                  tooltipsEnabled={tooltipsEnabled}
+                />
+              ) : null}
+            </span>
+            {showInlineDescription && option.description ? (
+              <span className="whitespace-normal text-[11px] leading-[1.2] text-[var(--text-tertiary)]">
+                {option.description}
+              </span>
+            ) : null}
+          </span>
+        )}
+        {favoriteToggle}
+        <CheckIcon
+          aria-hidden
+          className={cn(
+            "ml-2 size-3.5 shrink-0 text-[var(--tutti-purple)]",
+            option.value !== selectedValue && "invisible"
+          )}
+        />
+      </DropdownMenuItem>
+    </Slot.Root>
+  );
+});
+
+const DivBinding1 = observer(function DivBinding1({
+  modelSearchQuery,
+  setModelSearchQuery,
+  ...slotProps
+}: {
+  modelSearchQuery: string;
+  setModelSearchQuery: import("react").Dispatch<
+    import("react").SetStateAction<string>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    modelSearchQuery: string;
+    setModelSearchQuery: import("react").Dispatch<
+      import("react").SetStateAction<string>
+    >;
+  }
+>) {
+  const onKeyDownProp8 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onKeyDown"]>
+  >((event) => event.stopPropagation());
+  return (
+    <Slot.Root {...slotProps}>
+      <div
+        className="px-2 pb-1.5"
+        // Keep typing local to the input: Radix menu typeahead and
+        // arrow-key focus handling must not steal these key events.
+        onKeyDown={onKeyDownProp8}
+      >
+        <InputBinding1
+          modelSearchQuery={modelSearchQuery}
+          setModelSearchQuery={setModelSearchQuery}
+        />
+      </div>
+    </Slot.Root>
+  );
+});
+
+type AgentModelReasoningDropdownProps = {
+  composerSettings: AgentGUIComposerSettingsVM;
+  disabled?: boolean;
+  labels: AgentComposerSettingsMenuLabels;
+  /**
+   * Optional test/embedding override. Omission uses the controller-projected
+   * exact target; explicit null disables model history.
+   */
+  modelHistoryTargetId?: string | null;
+  onRetryComposerOptions?: (options?: {
+    force?: boolean;
+    section?: "core" | "capabilities" | "connectors";
+    waitForFreshModelCatalog?: boolean;
+  }) => void;
+  onSettingsChange: (patch: {
+    model?: string;
+    reasoningEffort?: string;
+    speed?: string;
+  }) => void;
+};
+
+type ComposerMenuOptionItemsProps = {
+  options: ComposerMenuOption[];
+  selectedValue: string;
+  descriptionPresentation?: "inline" | "model-tooltip" | "none" | "tooltip";
+  tooltipsEnabled?: boolean;
+  /** Values currently favorited; enables the per-option star toggle. */
+  favoriteValues?: ReadonlySet<string>;
+  onToggleFavorite?: (value: string) => void;
+  onSelect: (value: string) => void;
+};
+
+type InputBinding1Props = {
+  modelSearchQuery: NonNullable<{
+    modelSearchQuery: string;
+    setModelSearchQuery: import("react").Dispatch<
+      import("react").SetStateAction<string>
+    >;
+  }>["modelSearchQuery"];
+  setModelSearchQuery: NonNullable<{
+    modelSearchQuery: string;
+    setModelSearchQuery: import("react").Dispatch<
+      import("react").SetStateAction<string>
+    >;
+  }>["setModelSearchQuery"];
+};
+
+type DropdownMenuItemBinding5Props = {
+  option: ComposerMenuOption;
+  showModelTooltip: boolean;
+  showInlineDescription: boolean;
+  selectedValue: string;
+  onSelect: (value: string) => void;
+  showTooltipDescription: boolean;
+  tooltipsEnabled: boolean;
+  favoriteToggle: import("react").JSX.Element | null;
+};

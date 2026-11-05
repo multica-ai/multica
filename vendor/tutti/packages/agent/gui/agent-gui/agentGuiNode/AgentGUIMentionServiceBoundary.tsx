@@ -7,8 +7,12 @@ import type { RichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { AgentGUIObservationGapSource } from "../../types";
 import { AgentObservationGapSourceProvider } from "../../shared/agentConversation/AgentObservationGapContext";
 import { composeAgentGUIMentionService } from "./composeAgentGUIMentionService";
+import { observer } from "mobx-react-lite";
+export const AgentGUIMentionServiceBoundary = observer(
+  AgentGUIMentionServiceBoundaryRender
+);
 
-export function AgentGUIMentionServiceBoundary({
+function AgentGUIMentionServiceBoundaryRender({
   children,
   observationGapSource,
   service

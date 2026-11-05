@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Button } from "@tutti-os/ui-system/components";
 import { ChevronDownIcon } from "@tutti-os/ui-system/icons";
 import { observer } from "mobx-react-lite";
@@ -13,6 +15,7 @@ import {
 } from "./agentTurnWorkSectionModel";
 import { CollapsibleReveal } from "./CollapsibleReveal";
 import { useElapsedSeconds } from "./useElapsedSeconds";
+const AgentTurnDurationLabel = observer(AgentTurnDurationLabelRender);
 
 interface AgentTurnWorkSectionProps {
   model: AgentTurnWorkSectionModel;
@@ -78,6 +81,9 @@ export const AgentTurnWorkSection = observer(function AgentTurnWorkSection({
     },
     [collapsibleSectionCount, onDisclosureMotionChange, turnKey]
   );
+  const startDisclosureMotionCallback = usePersistCallback(
+    startDisclosureMotion
+  );
   const handleRevealTransitionEnd = useCallback(() => {
     if (!disclosureMotionActiveRef.current) {
       return;
@@ -87,6 +93,9 @@ export const AgentTurnWorkSection = observer(function AgentTurnWorkSection({
       finishDisclosureMotion();
     }
   }, [finishDisclosureMotion]);
+  const handleRevealTransitionEndCallback = usePersistCallback(
+    handleRevealTransitionEnd
+  );
 
   return (
     <div className="grid min-w-0" data-agent-turn-work-section={turnKey}>
@@ -107,32 +116,14 @@ export const AgentTurnWorkSection = observer(function AgentTurnWorkSection({
         data-agent-turn-work-header={turnKey}
       >
         {model.collapseEligible ? (
-          <Button
-            type="button"
-            variant="chrome"
-            size="xs"
-            className="-ml-2 gap-0.5 px-2 text-[12px] font-normal"
-            aria-label={toggleLabel}
-            aria-expanded={expanded}
-            title={toggleLabel}
-            onClick={(event) => {
-              startDisclosureMotion(
-                event.currentTarget.closest<HTMLElement>(
-                  "[data-agent-turn-work-header]"
-                )
-              );
-              disclosureStore.setExpandedOverride(disclosureKey, !expanded);
-            }}
-          >
-            <AgentTurnDurationLabel timing={model.timing} />
-            <ChevronDownIcon
-              aria-hidden="true"
-              data-icon="inline-end"
-              className={`transition-transform duration-150 ${
-                expanded ? "rotate-0" : "-rotate-90"
-              }`}
-            />
-          </Button>
+          <ButtonBinding1
+            toggleLabel={toggleLabel}
+            expanded={expanded}
+            startDisclosureMotion={startDisclosureMotionCallback}
+            disclosureStore={disclosureStore}
+            disclosureKey={disclosureKey}
+            model={model}
+          />
         ) : (
           <AgentTurnDurationLabel timing={model.timing} />
         )}
@@ -156,7 +147,7 @@ export const AgentTurnWorkSection = observer(function AgentTurnWorkSection({
             key={`work:${firstRow?.renderKey ?? firstRow?.row.id ?? sectionIndex}`}
             expanded={expanded}
             innerClassName="grid gap-4 pt-4"
-            onHeightTransitionEnd={handleRevealTransitionEnd}
+            onHeightTransitionEnd={handleRevealTransitionEndCallback}
           >
             {content}
           </CollapsibleReveal>
@@ -176,7 +167,7 @@ function renderRows(
   );
 }
 
-function AgentTurnDurationLabel({
+function AgentTurnDurationLabelRender({
   timing
 }: {
   timing: AgentTurnTiming;
@@ -266,3 +257,55 @@ function translateSettledDuration(
     seconds: duration.seconds
   });
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  toggleLabel,
+  expanded,
+  startDisclosureMotion,
+  disclosureStore,
+  disclosureKey,
+  model,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >((event) => {
+    startDisclosureMotion(
+      event.currentTarget.closest<HTMLElement>("[data-agent-turn-work-header]")
+    );
+    disclosureStore.setExpandedOverride(disclosureKey, !expanded);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="chrome"
+        size="xs"
+        className="-ml-2 gap-0.5 px-2 text-[12px] font-normal"
+        aria-label={toggleLabel}
+        aria-expanded={expanded}
+        title={toggleLabel}
+        onClick={onClickProp1}
+      >
+        <AgentTurnDurationLabel timing={model.timing} />
+        <ChevronDownIcon
+          aria-hidden="true"
+          data-icon="inline-end"
+          className={`transition-transform duration-150 ${
+            expanded ? "rotate-0" : "-rotate-90"
+          }`}
+        />
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  toggleLabel: string;
+  expanded: boolean;
+  startDisclosureMotion: (anchorElement: HTMLElement | null) => void;
+  disclosureStore: NonNullable<AgentTurnWorkSectionProps>["disclosureStore"];
+  disclosureKey: string;
+  model: NonNullable<AgentTurnWorkSectionProps>["model"];
+};

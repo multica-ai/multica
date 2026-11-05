@@ -1,4 +1,7 @@
+import { useMemo } from "react";
 import { Avatar } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+export const AgentGUIOwnerAvatar = observer(AgentGUIOwnerAvatarRender);
 
 interface AgentGUIOwnerAvatarProps {
   className: string;
@@ -7,7 +10,7 @@ interface AgentGUIOwnerAvatarProps {
   label?: string | null;
 }
 
-export function AgentGUIOwnerAvatar({
+function AgentGUIOwnerAvatarRender({
   className,
   iconUrl,
   imageClassName,
@@ -15,6 +18,9 @@ export function AgentGUIOwnerAvatar({
 }: AgentGUIOwnerAvatarProps): React.JSX.Element {
   const ownerLabel = label?.trim() || "?";
 
+  const styleProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof Avatar>["style"]>
+  >(() => ({ height: "100%", width: "100%" }), []);
   return (
     <span
       aria-hidden="true"
@@ -27,7 +33,7 @@ export function AgentGUIOwnerAvatar({
         label={ownerLabel}
         size="md"
         src={iconUrl}
-        style={{ height: "100%", width: "100%" }}
+        style={styleProp1}
       />
     </span>
   );

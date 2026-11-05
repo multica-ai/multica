@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import { memo, useCallback, type JSX, type ReactNode } from "react";
 import type { AgentGUIProviderSkillOption } from "../../../agent-gui/agentGuiNode/model/agentGuiNodeTypes";
@@ -42,7 +43,7 @@ export interface AgentTranscriptItemViewProps {
   footerAction?: ReactNode;
 }
 
-export const AgentTranscriptItemContent = memo(
+export const AgentTranscriptItemContent = observer(
   function AgentTranscriptItemContent({
     workspaceRoot,
     basePath,
@@ -80,6 +81,7 @@ export const AgentTranscriptItemContent = memo(
       },
       [basePath, onLinkAction, workspaceRoot]
     );
+    const handleLinkClickCallback = usePersistCallback(handleLinkClick);
     switch (row.kind) {
       case "generated-image":
         return <AgentGeneratedImageRow row={row} />;
@@ -111,7 +113,7 @@ export const AgentTranscriptItemContent = memo(
             row={row}
             label={labels.toolCallsLabel}
             thinkingLabel={labels.thinkingLabel}
-            onLinkClick={handleLinkClick}
+            onLinkClick={handleLinkClickCallback}
             showRawTimelineJson={showRawTimelineJson}
             rawTimelineJsonLabel={labels.rawTimelineJson}
             expanded={row.grouped ? toolGroupExpanded : undefined}

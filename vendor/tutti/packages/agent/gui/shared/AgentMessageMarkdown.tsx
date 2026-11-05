@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   type AnchorHTMLAttributes,
   type ComponentPropsWithoutRef,
@@ -73,7 +75,17 @@ import { MarkdownMedia } from "./AgentMessageMarkdownMedia";
 import { MarkdownPre } from "@multica/tutti-agent-gui-host/html-preview-pre";
 import { remarkLiteralAutolinkBoundary } from "./remarkLiteralAutolinkBoundary";
 import { cachedMarkdownParser } from "./cachedMarkdownParser";
-import { ResourceMarkdownLink, remarkMessageResourceLinks } from "@multica/tutti-agent-gui-host/resource-link";
+import {
+  ResourceMarkdownLink,
+  remarkMessageResourceLinks
+} from "@multica/tutti-agent-gui-host/resource-link";
+import { observer } from "mobx-react-lite";
+export const AgentMessageMarkdown = observer(AgentMessageMarkdownRender);
+const StreamingMarkdownBlocks = observer(StreamingMarkdownBlocksRender);
+const MarkdownLink = observer(MarkdownLinkRender);
+const WorkspaceFileMentionLink = observer(WorkspaceFileMentionLinkRender);
+const MentionLink = observer(MentionLinkRender);
+
 export { resetCachedMarkdownImagesForTests } from "./AgentMessageMarkdownMedia";
 export type { StreamingMarkdownBlock } from "./agentMessageMarkdownRuntime";
 export { splitStreamingMarkdownBlocks } from "./agentMessageMarkdownRuntime";
@@ -179,7 +191,7 @@ type ReactMarkdownRemarkPlugins = NonNullable<
   ComponentPropsWithoutRef<typeof ReactMarkdown>["remarkPlugins"]
 >;
 
-export function AgentMessageMarkdown({
+function AgentMessageMarkdownRender({
   content,
   documentCacheKey,
   onLinkClick,
@@ -278,6 +290,7 @@ export function AgentMessageMarkdown({
     },
     [basePath, onLinkAction, onLinkClick, workspaceLinkSource, workspaceRoot]
   );
+  const handleLinkClickCallback = usePersistCallback(handleLinkClick);
   const handleAnchorClickCapture = useCallback(
     (event: MouseEvent<HTMLElement>): void => {
       const href = resolveMarkdownAnchorHref(event.target);
@@ -290,10 +303,25 @@ export function AgentMessageMarkdown({
     },
     [handleLinkClick]
   );
+  const handleAnchorClickCaptureCallback = usePersistCallback(
+    handleAnchorClickCapture
+  );
   const markdownComponents = useMemo(
     () => ({
       a: (props: MarkdownDomProps<"a">) => (
-        <ResourceMarkdownLink href={props.href} fallback={<MarkdownLink {...props} onLinkClick={handleLinkClick} workspaceAppIcons={workspaceAppIcons} agentTargets={effectiveAgentTargets} />}>{props.children}</ResourceMarkdownLink>
+        <ResourceMarkdownLink
+          href={props.href}
+          fallback={
+            <MarkdownLink
+              {...props}
+              onLinkClick={handleLinkClickCallback}
+              workspaceAppIcons={workspaceAppIcons}
+              agentTargets={effectiveAgentTargets}
+            />
+          }
+        >
+          {props.children}
+        </ResourceMarkdownLink>
       ),
       code: (props: MarkdownDomProps<"code">) => <MarkdownCode {...props} />,
       img: (props: MarkdownDomProps<"img">) => (
@@ -363,7 +391,7 @@ export function AgentMessageMarkdown({
         data-workspace-agent-markdown="true"
         data-agent-mention-only={isMentionOnly ? "true" : undefined}
         data-collapsed={isCollapsed ? "true" : "false"}
-        onClickCapture={handleAnchorClickCapture}
+        onClickCapture={handleAnchorClickCaptureCallback}
       >
         {streaming ? (
           <StreamingMarkdownBlocks
@@ -371,33 +399,24 @@ export function AgentMessageMarkdown({
             components={markdownComponents}
           />
         ) : (
-          <ReactMarkdown
-            remarkPlugins={settledRemarkPlugins}
-            rehypePlugins={[
-              normalizeWindowsMarkdownMediaPaths,
-              [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]
-            ]}
-            urlTransform={markdownUrlTransform}
-            components={markdownComponents}
-          >
-            {normalizedContent}
-          </ReactMarkdown>
+          <ReactMarkdownBinding1
+            settledRemarkPlugins={settledRemarkPlugins}
+            markdownComponents={markdownComponents}
+            normalizedContent={normalizedContent}
+          />
         )}
       </ContainerTag>
       {shouldCollapse && !isExpanded ? (
-        <button
-          type="button"
-          className="m-0 border-0 bg-transparent p-0 text-[11px] leading-[1.4] font-semibold text-[var(--tutti-purple)] hover:underline focus-visible:underline focus-visible:outline-none"
-          onClick={() => setIsExpanded(true)}
-        >
-          {resolvedExpandLabel}
-        </button>
+        <ButtonBinding2
+          setIsExpanded={setIsExpanded}
+          resolvedExpandLabel={resolvedExpandLabel}
+        />
       ) : null}
     </ContainerTag>
   );
 }
 
-function StreamingMarkdownBlocks({
+function StreamingMarkdownBlocksRender({
   content,
   components
 }: {
@@ -421,20 +440,41 @@ function StreamingMarkdownBlocks({
   );
 }
 
-const MemoizedMarkdownBlock = memo(function MemoizedMarkdownBlock({
+const MemoizedMarkdownBlock = observer(function MemoizedMarkdownBlock({
   content,
   components
 }: {
   content: string;
   components: ReactMarkdownComponents;
 }): JSX.Element {
+  const remarkPluginsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>
+  >(
+    () => [
+      remarkGfm,
+      remarkLiteralAutolinkBoundary,
+      remarkMessageResourceLinks
+    ],
+    [remarkGfm, remarkLiteralAutolinkBoundary, remarkMessageResourceLinks]
+  );
+
+  const rehypePluginsProp2 = useMemo<
+    NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>
+  >(
+    () => [
+      normalizeWindowsMarkdownMediaPaths,
+      [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]
+    ],
+    [
+      normalizeWindowsMarkdownMediaPaths,
+      rehypeSanitize,
+      MARKDOWN_SANITIZE_SCHEMA
+    ]
+  );
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkLiteralAutolinkBoundary, remarkMessageResourceLinks]}
-      rehypePlugins={[
-        normalizeWindowsMarkdownMediaPaths,
-        [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]
-      ]}
+      remarkPlugins={remarkPluginsProp1}
+      rehypePlugins={rehypePluginsProp2}
       urlTransform={markdownUrlTransform}
       components={components}
     >
@@ -443,7 +483,7 @@ const MemoizedMarkdownBlock = memo(function MemoizedMarkdownBlock({
   );
 });
 
-function MarkdownLink({
+function MarkdownLinkRender({
   node: _node,
   onClick: _onClick,
   onLinkClick,
@@ -507,20 +547,10 @@ function MarkdownLink({
 
   return (
     <MarkdownLinkContext.Provider value={true}>
-      <a
-        {...props}
-        data-agent-link-href={targetHref}
-        role="link"
-        tabIndex={0}
-        onClick={(event) => {
-          activateMarkdownLink(event, targetHref, onLinkClick);
-        }}
-        onPointerDown={(event) => {
-          activateMarkdownLinkFromPointer(event, targetHref, onLinkClick);
-        }}
-        onKeyDown={(event) => {
-          activateMarkdownLinkFromKey(event, targetHref, onLinkClick);
-        }}
+      <ABinding3
+        props={props}
+        targetHref={targetHref}
+        onLinkClick={onLinkClick}
       />
     </MarkdownLinkContext.Provider>
   );
@@ -633,7 +663,7 @@ function parseWorkspaceFileMentionLink(
   };
 }
 
-function WorkspaceFileMentionLink({
+function WorkspaceFileMentionLinkRender({
   onClick: _onClick,
   onLinkClick,
   href: _href,
@@ -645,6 +675,21 @@ function WorkspaceFileMentionLink({
   onLinkClick?: (href: string) => void;
 }): JSX.Element {
   "use memo";
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onClick"]>
+  >((event) => {
+    activateMarkdownLink(event, mention.href, onLinkClick);
+  });
+  const onPointerDownProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onPointerDown"]>
+  >((event) => {
+    activateMarkdownLinkFromPointer(event, mention.href, onLinkClick);
+  });
+  const onKeyDownProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onKeyDown"]>
+  >((event) => {
+    activateMarkdownLinkFromKey(event, mention.href, onLinkClick);
+  });
   return (
     <a
       {...props}
@@ -661,15 +706,9 @@ function WorkspaceFileMentionLink({
       aria-label={mention.label}
       role="link"
       tabIndex={0}
-      onClick={(event) => {
-        activateMarkdownLink(event, mention.href, onLinkClick);
-      }}
-      onPointerDown={(event) => {
-        activateMarkdownLinkFromPointer(event, mention.href, onLinkClick);
-      }}
-      onKeyDown={(event) => {
-        activateMarkdownLinkFromKey(event, mention.href, onLinkClick);
-      }}
+      onClick={onClickProp3}
+      onPointerDown={onPointerDownProp4}
+      onKeyDown={onKeyDownProp5}
     >
       <span className="tsh-agent-object-token__icon" aria-hidden="true" />
       <span className="tsh-agent-object-token__main">{mention.label}</span>
@@ -677,7 +716,7 @@ function WorkspaceFileMentionLink({
   );
 }
 
-function MentionLink({
+function MentionLinkRender({
   agentTargets,
   onClick: _onClick,
   onLinkClick,
@@ -735,6 +774,43 @@ function MentionLink({
           : "app";
   const usesSessionIcon = mention.kind === "session";
 
+  const onClickProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onClick"]>
+  >((event) => {
+    activateMarkdownLink(event, href, onLinkClick);
+  });
+  const onPointerDownProp7 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onPointerDown"]>
+  >((event) => {
+    activateMarkdownLinkFromPointer(event, href, onLinkClick);
+  });
+  const onKeyDownProp8 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onKeyDown"]>
+  >((event) => {
+    activateMarkdownLinkFromKey(event, href, onLinkClick);
+  });
+  const iconContainerPropsProp9Value1 = usesSessionIcon ? undefined : "true";
+  const iconContainerPropsProp9Value2 = usesSessionIcon ? "true" : undefined;
+  const iconContainerPropsProp9Value3 = usesSessionIcon ? undefined : "true";
+  const iconContainerPropsProp9 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["iconContainerProps"]>
+  >(
+    () => ({
+      className: "h-4 w-4",
+      "data-agent-mention-app-icon": iconContainerPropsProp9Value1,
+      "data-agent-mention-session-icon": iconContainerPropsProp9Value2,
+      "data-workspace-app-icon": iconContainerPropsProp9Value3
+    }),
+    [
+      iconContainerPropsProp9Value1,
+      iconContainerPropsProp9Value2,
+      iconContainerPropsProp9Value3
+    ]
+  );
+
+  const fallbackIconPropsProp10 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["fallbackIconProps"]>
+  >(() => ({ "data-agent-mention-fallback-icon": "true" }), []);
   return (
     <a
       {...props}
@@ -751,30 +827,15 @@ function MentionLink({
       aria-label={label}
       role="link"
       tabIndex={0}
-      onClick={(event) => {
-        activateMarkdownLink(event, href, onLinkClick);
-      }}
-      onPointerDown={(event) => {
-        activateMarkdownLinkFromPointer(event, href, onLinkClick);
-      }}
-      onKeyDown={(event) => {
-        activateMarkdownLinkFromKey(event, href, onLinkClick);
-      }}
+      onClick={onClickProp6}
+      onPointerDown={onPointerDownProp7}
+      onKeyDown={onKeyDownProp8}
     >
       <MentionPill
         className="top-0 max-w-full"
         iconUrl={iconUrl}
-        iconContainerProps={{
-          className: "h-4 w-4",
-          "data-agent-mention-app-icon": usesSessionIcon ? undefined : "true",
-          "data-agent-mention-session-icon": usesSessionIcon
-            ? "true"
-            : undefined,
-          "data-workspace-app-icon": usesSessionIcon ? undefined : "true"
-        }}
-        fallbackIconProps={{
-          "data-agent-mention-fallback-icon": "true"
-        }}
+        iconContainerProps={iconContainerPropsProp9}
+        fallbackIconProps={fallbackIconPropsProp10}
         kind={pillKind}
         label={<span className="tsh-agent-object-token__main">{label}</span>}
         removable={false}
@@ -784,3 +845,138 @@ function MentionLink({
     </a>
   );
 }
+
+const ReactMarkdownBinding1 = observer(function ReactMarkdownBinding1({
+  settledRemarkPlugins,
+  markdownComponents,
+  normalizedContent
+}: ReactMarkdownBinding1Props) {
+  const rehypePluginsProp11 = useMemo<
+    NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>
+  >(
+    () => [
+      normalizeWindowsMarkdownMediaPaths,
+      [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]
+    ],
+    [
+      normalizeWindowsMarkdownMediaPaths,
+      rehypeSanitize,
+      MARKDOWN_SANITIZE_SCHEMA
+    ]
+  );
+  return (
+    <ReactMarkdown
+      remarkPlugins={settledRemarkPlugins}
+      rehypePlugins={rehypePluginsProp11}
+      urlTransform={markdownUrlTransform}
+      components={markdownComponents}
+    >
+      {normalizedContent}
+    </ReactMarkdown>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  setIsExpanded,
+  resolvedExpandLabel,
+  ...slotProps
+}: {
+  setIsExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  resolvedExpandLabel: string;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setIsExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    resolvedExpandLabel: string;
+  }
+>) {
+  const onClickProp12 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setIsExpanded(true));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="m-0 border-0 bg-transparent p-0 text-[11px] leading-[1.4] font-semibold text-[var(--tutti-purple)] hover:underline focus-visible:underline focus-visible:outline-none"
+        onClick={onClickProp12}
+      >
+        {resolvedExpandLabel}
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ABinding3 = observer(function ABinding3({
+  props,
+  targetHref,
+  onLinkClick,
+  ...slotProps
+}: ABinding3Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ABinding3Props>) {
+  const onClickProp13 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onClick"]>
+  >((event) => {
+    activateMarkdownLink(event, targetHref, onLinkClick);
+  });
+  const onPointerDownProp14 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onPointerDown"]>
+  >((event) => {
+    activateMarkdownLinkFromPointer(event, targetHref, onLinkClick);
+  });
+  const onKeyDownProp15 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onKeyDown"]>
+  >((event) => {
+    activateMarkdownLinkFromKey(event, targetHref, onLinkClick);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <a
+        {...props}
+        data-agent-link-href={targetHref}
+        role="link"
+        tabIndex={0}
+        onClick={onClickProp13}
+        onPointerDown={onPointerDownProp14}
+        onKeyDown={onKeyDownProp15}
+      />
+    </Slot.Root>
+  );
+});
+
+type ReactMarkdownBinding1Props = {
+  settledRemarkPlugins: NonNullable<
+    React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]
+  >;
+  markdownComponents: NonNullable<
+    React.ComponentProps<typeof ReactMarkdown>["components"]
+  >;
+  normalizedContent: string;
+};
+
+type ABinding3Props = {
+  props: Omit<
+    MarkdownDomProps<"a"> & {
+      onLinkClick?: (href: string) => void;
+      workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+      agentTargets?: readonly AgentMessageMarkdownAgentTarget[];
+    },
+    | "node"
+    | "onClick"
+    | "onLinkClick"
+    | "workspaceAppIcons"
+    | "agentTargets"
+    | "href"
+  >;
+  targetHref: string;
+  onLinkClick: NonNullable<
+    MarkdownDomProps<"a"> & {
+      onLinkClick?: (href: string) => void;
+      workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+      agentTargets?: readonly AgentMessageMarkdownAgentTarget[];
+    }
+  >["onLinkClick"];
+};

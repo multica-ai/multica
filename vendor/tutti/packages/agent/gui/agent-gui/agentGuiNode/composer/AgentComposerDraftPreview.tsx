@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useState, type CSSProperties } from "react";
 import { Spinner } from "@tutti-os/ui-system";
 import { ImageIcon, X } from "lucide-react";
@@ -11,8 +13,13 @@ import {
   DRAFT_IMAGE_PREVIEW_MIN_RATIO,
   DRAFT_IMAGE_PREVIEW_MIN_WIDTH_PX
 } from "./AgentComposerChrome";
+import { observer } from "mobx-react-lite";
+export const AgentComposerDraftImagePreview = observer(
+  AgentComposerDraftImagePreviewRender
+);
+export const SendFilledIcon = observer(SendFilledIconRender);
 
-export function AgentComposerDraftImagePreview({
+function AgentComposerDraftImagePreviewRender({
   image,
   removeLabel,
   onRemove
@@ -31,11 +38,18 @@ export function AgentComposerDraftImagePreview({
       )
     )
   );
-  const previewStyle = {
-    aspectRatio: String(aspectRatio),
-    width: `${previewWidth}px`
-  } satisfies CSSProperties;
+  const previewStyle = useMemo(
+    () =>
+      ({
+        aspectRatio: String(aspectRatio),
+        width: `${previewWidth}px`
+      }) satisfies CSSProperties,
+    [aspectRatio, previewWidth]
+  );
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => onRemove(image.id));
   return (
     <div
       className={cn(
@@ -51,26 +65,7 @@ export function AgentComposerDraftImagePreview({
       style={previewStyle}
     >
       {image.previewUrl ? (
-        <ZoomableImage
-          src={image.previewUrl}
-          alt={image.name}
-          className="size-full object-contain"
-          draggable={false}
-          downloadName={image.name || "image.png"}
-          onLoad={(event) => {
-            const element = event.currentTarget;
-            const width = element.naturalWidth;
-            const height = element.naturalHeight;
-            if (width <= 0 || height <= 0) {
-              return;
-            }
-            const nextRatio = Math.min(
-              DRAFT_IMAGE_PREVIEW_MAX_RATIO,
-              Math.max(DRAFT_IMAGE_PREVIEW_MIN_RATIO, width / height)
-            );
-            setAspectRatio(nextRatio);
-          }}
-        />
+        <ZoomableImageBinding1 image={image} setAspectRatio={setAspectRatio} />
       ) : (
         <div
           className="grid size-full place-items-center text-[var(--text-tertiary)]"
@@ -98,7 +93,7 @@ export function AgentComposerDraftImagePreview({
         className="absolute right-1 top-1 z-[2] inline-flex size-5 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--text-primary)_16%,transparent)] bg-[color-mix(in_srgb,var(--background-fronted)_88%,transparent)] text-[var(--text-primary)] opacity-90 shadow-sm transition hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)]"
         aria-label={removeLabel}
         title={removeLabel}
-        onClick={() => onRemove(image.id)}
+        onClick={onClickProp1}
       >
         <X size={12} strokeWidth={2.4} aria-hidden />
       </button>
@@ -106,7 +101,7 @@ export function AgentComposerDraftImagePreview({
   );
 }
 
-export function SendFilledIcon(): React.JSX.Element {
+function SendFilledIconRender(): React.JSX.Element {
   "use memo";
   return (
     <svg
@@ -123,3 +118,45 @@ export function SendFilledIcon(): React.JSX.Element {
     </svg>
   );
 }
+
+const ZoomableImageBinding1 = observer(function ZoomableImageBinding1({
+  image,
+  setAspectRatio
+}: ZoomableImageBinding1Props) {
+  const onLoadProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof ZoomableImage>["onLoad"]>
+  >((event) => {
+    const element = event.currentTarget;
+    const width = element.naturalWidth;
+    const height = element.naturalHeight;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+    const nextRatio = Math.min(
+      DRAFT_IMAGE_PREVIEW_MAX_RATIO,
+      Math.max(DRAFT_IMAGE_PREVIEW_MIN_RATIO, width / height)
+    );
+    setAspectRatio(nextRatio);
+  });
+  return (
+    <ZoomableImage
+      src={image.previewUrl}
+      alt={image.name}
+      className="size-full object-contain"
+      draggable={false}
+      downloadName={image.name || "image.png"}
+      onLoad={onLoadProp2}
+    />
+  );
+});
+
+type ZoomableImageBinding1Props = {
+  image: NonNullable<{
+    image: AgentComposerDraftImage;
+    removeLabel: string;
+    onRemove: (id: string) => void;
+  }>["image"];
+  setAspectRatio: import("react").Dispatch<
+    import("react").SetStateAction<number>
+  >;
+};

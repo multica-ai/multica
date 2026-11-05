@@ -1,37 +1,42 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { localReasoningLevels } from "@multica/core/local-conversation/protocol";
 import type { RuntimeModelsResult } from "@multica/core/types";
 import type { AgentGUIProps } from "@tutti-os/agent-gui/agent-gui";
 import {
-Button,
-DropdownMenu,
-DropdownMenuContent,
-DropdownMenuItem,
-DropdownMenuLabel,
-DropdownMenuRadioGroup,
-DropdownMenuRadioItem,
-DropdownMenuSeparator,
-DropdownMenuSub,
-DropdownMenuSubContent,
-DropdownMenuSubTrigger,
-DropdownMenuTrigger
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger
 } from "@tutti-os/ui-system/components";
 import { ChevronDownIcon } from "@tutti-os/ui-system/icons";
 import {
-useEffect,
-useId,
-useRef,
-useState,
-useSyncExternalStore
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore
 } from "react";
 import type { AgentComposerProps } from "../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/AgentComposer";
 import { PermissionPicker } from "./permission-picker";
 import type {
-AgentGuiExecutionTarget,
-AgentGuiHostServices,
-AgentGuiInitSnapshot
+  AgentGuiExecutionTarget,
+  AgentGuiHostServices,
+  AgentGuiInitSnapshot
 } from "./protocol";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
 import { UsageIndicator } from "./usage-indicator";
+import { observer } from "mobx-react-lite";
+export const ComposerFooterControls = observer(ComposerFooterControlsRender);
 
 export type ProviderDraft = AgentComposerProps["draftContent"];
 type FooterContext = Parameters<
@@ -72,7 +77,7 @@ interface Props {
   onReadyForFocus(sequence: number): void;
 }
 
-export function ComposerFooterControls({
+function ComposerFooterControlsRender({
   context,
   client,
   handle,
@@ -215,52 +220,58 @@ export function ComposerFooterControls({
     onCancelTargetSwitch
   ]);
   const unavailable = !agent?.canInvoke || !agent.runtimeBound;
-  const labels = chinese
-    ? {
-        model: "模型",
-        agent: snapshot.local ? "本机运行器" : "智能体",
-        default: "默认",
-        loading: "正在加载模型…",
-        retry: "重试",
-        refresh: "刷新模型",
-        failed: "模型目录加载失败",
-        empty: "没有可用模型",
-        unsupported: "此运行时不支持选择模型",
-        unknown: "当前配置，未列入目录",
-        running: "运行或提交期间无法切换",
-        switch: snapshot.local
-          ? "切换运行器会保留当前输入。"
-          : "切换智能体会新建会话，原草稿保留在原会话。",
-        runtime: snapshot.local ? "未在本机安装" : "未绑定运行时",
-        denied: "无调用权限",
-        defaultModel: "默认模型",
-        modelScope: "用于当前会话的运行器；@ 智能体使用其自身配置。",
-        online: snapshot.local ? "已安装" : "在线",
-        offline: "离线 · 发送后等待连接"
-      }
-    : {
-        model: "Model",
-        agent: snapshot.local ? "Local provider" : "Agent",
-        default: "Default",
-        loading: "Loading models…",
-        retry: "Retry",
-        refresh: "Refresh models",
-        failed: "Could not load model catalog",
-        empty: "No models available",
-        unsupported: "This runtime does not support model selection",
-        unknown: "Configured; absent from catalog",
-        running: "Wait for the run or submission to finish",
-        switch: snapshot.local
-          ? "Your current input is kept when switching providers."
-          : "Switching agents starts a new conversation. The original draft stays in its conversation.",
-        runtime: snapshot.local ? "Not installed locally" : "No runtime bound",
-        denied: "Invocation not allowed",
-        defaultModel: "Default model",
-        modelScope:
-          "Applies to this conversation's provider. Mentioned agents use their own configuration.",
-        online: snapshot.local ? "Installed" : "Online",
-        offline: "Offline · sends wait for connection"
-      };
+  const labels = useMemo(
+    () =>
+      chinese
+        ? {
+            model: "模型",
+            agent: snapshot.local ? "本机运行器" : "智能体",
+            default: "默认",
+            loading: "正在加载模型…",
+            retry: "重试",
+            refresh: "刷新模型",
+            failed: "模型目录加载失败",
+            empty: "没有可用模型",
+            unsupported: "此运行时不支持选择模型",
+            unknown: "当前配置，未列入目录",
+            running: "运行或提交期间无法切换",
+            switch: snapshot.local
+              ? "切换运行器会保留当前输入。"
+              : "切换智能体会新建会话，原草稿保留在原会话。",
+            runtime: snapshot.local ? "未在本机安装" : "未绑定运行时",
+            denied: "无调用权限",
+            defaultModel: "默认模型",
+            modelScope: "用于当前会话的运行器；@ 智能体使用其自身配置。",
+            online: snapshot.local ? "已安装" : "在线",
+            offline: "离线 · 发送后等待连接"
+          }
+        : {
+            model: "Model",
+            agent: snapshot.local ? "Local provider" : "Agent",
+            default: "Default",
+            loading: "Loading models…",
+            retry: "Retry",
+            refresh: "Refresh models",
+            failed: "Could not load model catalog",
+            empty: "No models available",
+            unsupported: "This runtime does not support model selection",
+            unknown: "Configured; absent from catalog",
+            running: "Wait for the run or submission to finish",
+            switch: snapshot.local
+              ? "Your current input is kept when switching providers."
+              : "Switching agents starts a new conversation. The original draft stays in its conversation.",
+            runtime: snapshot.local
+              ? "Not installed locally"
+              : "No runtime bound",
+            denied: "Invocation not allowed",
+            defaultModel: "Default model",
+            modelScope:
+              "Applies to this conversation's provider. Mentioned agents use their own configuration.",
+            online: snapshot.local ? "Installed" : "Online",
+            offline: "Offline · sends wait for connection"
+          },
+    [chinese, snapshot]
+  );
 
   useEffect(() => {
     request.current++;
@@ -295,6 +306,7 @@ export function ComposerFooterControls({
       if (request.current === sequence) setLoading(false);
     }
   };
+  const loadCallback = usePersistCallback(load);
   const changeModel = async (value: string) => {
     if (!agentId || busy || saving || unavailable) return;
     setSaving(true);
@@ -333,6 +345,7 @@ export function ComposerFooterControls({
       setSaving(false);
     }
   };
+  const changeEffortCallback = usePersistCallback(changeEffort);
   const configured = selected ?? agent?.model ?? null;
   const known = catalog?.models.find((entry) => entry.id === configured);
   const defaultModel =
@@ -353,12 +366,45 @@ export function ComposerFooterControls({
           ultra: "超高"
         }[value] ?? fallback)
       : fallback;
+  const effortLabelCallback = usePersistCallback(effortLabel);
   const currentLabel = selected
     ? known?.label || selected
     : defaultModel
       ? `${labels.default} · ${defaultModel}`
       : labels.defaultModel;
 
+  const onOpenChangeProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenu>["onOpenChange"]>
+  >((open) => {
+    if (open && !catalog && !loading) void load();
+  });
+  const onValueChangeProp2 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof DropdownMenuRadioGroup>["onValueChange"]
+    >
+  >((value) => {
+    void changeModel(value);
+  });
+  const onValueChangeProp3 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof DropdownMenuRadioGroup>["onValueChange"]
+    >
+  >((id) => {
+    if (id === agentId || busy || saving) return;
+    const target = targets.find((entry) => entry.id === id);
+    if (target?.canInvoke && target.runtimeBound) {
+      if (sessionId)
+        onLeaveSession(
+          target,
+          sessionId,
+          snapshot.local ? context.draftContent : undefined,
+          snapshot.local
+            ? context.composerSettings?.selectedProjectPath
+            : undefined
+        );
+      else onSelectAgent(target);
+    }
+  });
   return (
     <div className="multica-composer-footer-controls">
       {uploadCount > 0 && (
@@ -396,11 +442,7 @@ export function ComposerFooterControls({
           }
         />
       )}
-      <DropdownMenu
-        onOpenChange={(open) => {
-          if (open && !catalog && !loading) void load();
-        }}
-      >
+      <DropdownMenu onOpenChange={onOpenChangeProp1}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -435,9 +477,7 @@ export function ComposerFooterControls({
           <div className="multica-model-picker-list">
             <DropdownMenuRadioGroup
               value={selected ?? ""}
-              onValueChange={(value) => {
-                void changeModel(value);
-              }}
+              onValueChange={onValueChangeProp2}
             >
               <DropdownMenuRadioItem value="" disabled={busy || saving}>
                 {labels.default}
@@ -513,26 +553,15 @@ export function ComposerFooterControls({
                     <DropdownMenuLabel>
                       {chinese ? "思考强度" : "Thinking effort"}
                     </DropdownMenuLabel>
-                    <DropdownMenuRadioGroup
-                      value={selectedEffort ?? ""}
-                      onValueChange={(value) => {
-                        void changeEffort(value);
-                      }}
-                    >
-                      <DropdownMenuRadioItem value="" disabled={busy || saving}>
-                        {labels.default}
-                      </DropdownMenuRadioItem>
-                      {levels.map((level) => (
-                        <DropdownMenuRadioItem
-                          key={level.value}
-                          value={level.value}
-                          disabled={busy || saving}
-                          title={level.description}
-                        >
-                          {effortLabel(level.value, level.label)}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
+                    <DropdownMenuRadioGroupBinding1
+                      selectedEffort={selectedEffort}
+                      changeEffort={changeEffortCallback}
+                      busy={busy}
+                      saving={saving}
+                      labels={labels}
+                      levels={levels}
+                      effortLabel={effortLabelCallback}
+                    />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               ) : (
@@ -551,15 +580,13 @@ export function ComposerFooterControls({
           {(!snapshot.local || error) && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={loading || busy}
-                onSelect={(event) => {
-                  event.preventDefault();
-                  void load(true);
-                }}
-              >
-                {error ? labels.retry : labels.refresh}
-              </DropdownMenuItem>
+              <DropdownMenuItemBinding2
+                loading={loading}
+                busy={busy}
+                load={loadCallback}
+                error={error}
+                labels={labels}
+              />
             </>
           )}
           {!snapshot.local && (
@@ -603,22 +630,7 @@ export function ComposerFooterControls({
           <DropdownMenuLabel>{labels.agent}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={agentId ?? ""}
-            onValueChange={(id) => {
-              if (id === agentId || busy || saving) return;
-              const target = targets.find((entry) => entry.id === id);
-              if (target?.canInvoke && target.runtimeBound) {
-                if (sessionId)
-                  onLeaveSession(
-                    target,
-                    sessionId,
-                    snapshot.local ? context.draftContent : undefined,
-                    snapshot.local
-                      ? context.composerSettings?.selectedProjectPath
-                      : undefined
-                  );
-                else onSelectAgent(target);
-              }
-            }}
+            onValueChange={onValueChangeProp3}
           >
             {targets.map((target) => {
               const reason = !target.runtimeBound
@@ -652,3 +664,135 @@ export function ComposerFooterControls({
     </div>
   );
 }
+
+const DropdownMenuRadioGroupBinding1 = observer(
+  function DropdownMenuRadioGroupBinding1({
+    selectedEffort,
+    changeEffort,
+    busy,
+    saving,
+    labels,
+    levels,
+    effortLabel
+  }: DropdownMenuRadioGroupBinding1Props) {
+    const onValueChangeProp4 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof DropdownMenuRadioGroup>["onValueChange"]
+      >
+    >((value) => {
+      void changeEffort(value);
+    });
+    return (
+      <DropdownMenuRadioGroup
+        value={selectedEffort ?? ""}
+        onValueChange={onValueChangeProp4}
+      >
+        <DropdownMenuRadioItem value="" disabled={busy || saving}>
+          {labels.default}
+        </DropdownMenuRadioItem>
+        {levels.map((level) => (
+          <DropdownMenuRadioItem
+            key={level.value}
+            value={level.value}
+            disabled={busy || saving}
+            title={level.description}
+          >
+            {effortLabel(level.value, level.label)}
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+    );
+  }
+);
+
+const DropdownMenuItemBinding2 = observer(function DropdownMenuItemBinding2({
+  loading,
+  busy,
+  load,
+  error,
+  labels,
+  ...slotProps
+}: DropdownMenuItemBinding2Props &
+  Omit<
+    React.ComponentProps<typeof Slot.Root>,
+    keyof DropdownMenuItemBinding2Props
+  >) {
+  const onSelectProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >((event) => {
+    event.preventDefault();
+    void load(true);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <DropdownMenuItem disabled={loading || busy} onSelect={onSelectProp5}>
+        {error ? labels.retry : labels.refresh}
+      </DropdownMenuItem>
+    </Slot.Root>
+  );
+});
+
+type DropdownMenuRadioGroupBinding1Props = {
+  selectedEffort:
+    | "none"
+    | "max"
+    | "high"
+    | "low"
+    | "minimal"
+    | "medium"
+    | "xhigh"
+    | "ultra"
+    | null;
+  changeEffort: (value: string) => Promise<void>;
+  busy: boolean;
+  saving: boolean;
+  labels: {
+    model: string;
+    agent: string;
+    default: string;
+    loading: string;
+    retry: string;
+    refresh: string;
+    failed: string;
+    empty: string;
+    unsupported: string;
+    unknown: string;
+    running: string;
+    switch: string;
+    runtime: string;
+    denied: string;
+    defaultModel: string;
+    modelScope: string;
+    online: string;
+    offline: string;
+  };
+  levels: import("../../core/types/agent").RuntimeModelThinkingLevel[];
+  effortLabel: (value: string, fallback: string) => string;
+};
+
+type DropdownMenuItemBinding2Props = {
+  loading: boolean;
+  busy: boolean;
+  load: (force?: boolean) => Promise<void>;
+  error: string | null;
+  labels: {
+    model: string;
+    agent: string;
+    default: string;
+    loading: string;
+    retry: string;
+    refresh: string;
+    failed: string;
+    empty: string;
+    unsupported: string;
+    unknown: string;
+    running: string;
+    switch: string;
+    runtime: string;
+    denied: string;
+    defaultModel: string;
+    modelScope: string;
+    online: string;
+    offline: string;
+  };
+};

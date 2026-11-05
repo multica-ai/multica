@@ -15,11 +15,24 @@
  */
 import type { JSX, SVGProps } from "react";
 import type { ToolActivityKind } from "./workspaceAgentToolCallLabels";
+import { observer } from "mobx-react-lite";
+const IconProductDoc = observer(IconProductDocRender);
+const IconBuild = observer(IconBuildRender);
+const IconBrush = observer(IconBrushRender);
+const IconNetwork = observer(IconNetworkRender);
+const IconCapability = observer(IconCapabilityRender);
+const IconTask = observer(IconTaskRender);
+const IconThinking = observer(IconThinkingRender);
+const IconWebScrape = observer(IconWebScrapeRender);
+const IconChat = observer(IconChatRender);
+const IconImageGeneration = observer(IconImageGenerationRender);
+export const ToolActivityKindIcon = observer(ToolActivityKindIconRender);
+export const ToolNameIcon = observer(ToolNameIconRender);
 
 type GlyphProps = SVGProps<SVGSVGElement>;
 
 /** Property 1=产品文档 */
-function IconProductDoc(props: GlyphProps): JSX.Element {
+function IconProductDocRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -38,7 +51,7 @@ function IconProductDoc(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=构建 */
-function IconBuild(props: GlyphProps): JSX.Element {
+function IconBuildRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -57,7 +70,7 @@ function IconBuild(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=画笔 */
-function IconBrush(props: GlyphProps): JSX.Element {
+function IconBrushRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -76,7 +89,7 @@ function IconBrush(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=联网 */
-function IconNetwork(props: GlyphProps): JSX.Element {
+function IconNetworkRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -95,7 +108,7 @@ function IconNetwork(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=能力 */
-function IconCapability(props: GlyphProps): JSX.Element {
+function IconCapabilityRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -114,7 +127,7 @@ function IconCapability(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=任务 */
-function IconTask(props: GlyphProps): JSX.Element {
+function IconTaskRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -133,7 +146,7 @@ function IconTask(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=思考 */
-function IconThinking(props: GlyphProps): JSX.Element {
+function IconThinkingRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -152,7 +165,7 @@ function IconThinking(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=网站内容抓取 */
-function IconWebScrape(props: GlyphProps): JSX.Element {
+function IconWebScrapeRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -171,7 +184,7 @@ function IconWebScrape(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=chat */
-function IconChat(props: GlyphProps): JSX.Element {
+function IconChatRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -190,7 +203,7 @@ function IconChat(props: GlyphProps): JSX.Element {
 }
 
 /** Property 1=图片生成 */
-function IconImageGeneration(props: GlyphProps): JSX.Element {
+function IconImageGenerationRender(props: GlyphProps): JSX.Element {
   "use memo";
   return (
     <svg
@@ -234,7 +247,7 @@ const TOOL_ACTIVITY_KIND_ICONS: Record<
   notification: IconChat
 };
 
-export function ToolActivityKindIcon({
+function ToolActivityKindIconRender({
   kind,
   ...props
 }: { kind: ToolActivityKind | null } & GlyphProps): JSX.Element {
@@ -243,7 +256,7 @@ export function ToolActivityKindIcon({
   return <Icon {...props} />;
 }
 
-export function ToolNameIcon({
+function ToolNameIconRender({
   toolName,
   ...props
 }: { toolName: string | null } & GlyphProps): JSX.Element {

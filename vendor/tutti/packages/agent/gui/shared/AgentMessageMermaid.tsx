@@ -1,3 +1,6 @@
+import { useSyncExternalStore } from "react";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Component,
   type CSSProperties,
@@ -16,6 +19,13 @@ import { Button, CopyIcon, RestoreIcon } from "@tutti-os/ui-system";
 import { RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
 import { useTranslation } from "../i18n/index";
 import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
+import { observer } from "mobx-react-lite";
+import { observer as observeClass } from "mobx-react";
+export const AgentMessageMermaid = observer(AgentMessageMermaidRender);
+const MermaidFailure = observer(MermaidFailureRender);
+const MermaidPlaceholder = observer(MermaidPlaceholderRender);
+const MermaidSvg = observer(MermaidSvgRender);
+const MermaidViewer = observer(MermaidViewerRender);
 
 const MERMAID_MAX_TEXT_SIZE = 50_000;
 const MERMAID_MAX_EDGES = 500;
@@ -51,7 +61,7 @@ const RESET_VIEW_TRANSFORM: MermaidViewTransform = {
   zoom: 1
 };
 
-export function AgentMessageMermaid({
+function AgentMessageMermaidRender({
   source,
   streaming
 }: {
@@ -169,6 +179,21 @@ class MermaidRenderLifecycle extends Component<
     this.setState({ isViewerOpen: true });
   };
 
+  private readonly handlePreviewKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>
+  ): void => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    this.openViewer();
+  };
+
+  private readonly handleCopyClick = (
+    event: React.MouseEvent<HTMLButtonElement>
+  ): void => {
+    event.stopPropagation();
+    this.copySource();
+  };
+
   render(): JSX.Element {
     const {
       copyLabel,
@@ -218,13 +243,7 @@ class MermaidRenderLifecycle extends Component<
               role="button"
               tabIndex={0}
               onClick={this.openViewer}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") {
-                  return;
-                }
-                event.preventDefault();
-                this.openViewer();
-              }}
+              onKeyDown={this.handlePreviewKeyDown}
             >
               <MermaidSvg svg={rendered.svg} />
             </div>
@@ -239,10 +258,7 @@ class MermaidRenderLifecycle extends Component<
             aria-label={copyLabel}
             className="agent-markdown-mermaid__copy"
             title={copyLabel}
-            onClick={(event) => {
-              event.stopPropagation();
-              this.copySource();
-            }}
+            onClick={this.handleCopyClick}
           >
             <CopyIcon aria-hidden="true" className="size-3.5" />
           </button>
@@ -257,8 +273,9 @@ class MermaidRenderLifecycle extends Component<
     );
   }
 }
+observeClass(MermaidRenderLifecycle);
 
-function MermaidFailure({
+function MermaidFailureRender({
   copyLabel,
   label,
   onCopySource
@@ -289,7 +306,7 @@ function MermaidFailure({
   );
 }
 
-function MermaidPlaceholder({ label }: { label: string }): JSX.Element {
+function MermaidPlaceholderRender({ label }: { label: string }): JSX.Element {
   return (
     <div
       aria-label={label}
@@ -311,13 +328,16 @@ function MermaidPlaceholder({ label }: { label: string }): JSX.Element {
   );
 }
 
-function MermaidSvg({ svg }: { svg: string }): JSX.Element {
+function MermaidSvgRender({ svg }: { svg: string }): JSX.Element {
+  const dangerouslySetInnerHTMLProp1 = useMemo<
+    NonNullable<React.ComponentProps<"div">["dangerouslySetInnerHTML"]>
+  >(() => ({ __html: svg }), [svg]);
   return (
     <div
       className="agent-markdown-mermaid__svg"
       data-testid="agent-mermaid-svg"
       // Mermaid runs in strict mode and sanitizes its generated SVG.
-      dangerouslySetInnerHTML={{ __html: svg }}
+      dangerouslySetInnerHTML={dangerouslySetInnerHTMLProp1}
     />
   );
 }
@@ -389,8 +409,9 @@ class MermaidViewerLifecycle extends Component<{
     return this.props.children;
   }
 }
+observeClass(MermaidViewerLifecycle);
 
-function MermaidViewer({
+function MermaidViewerRender({
   onClose,
   svg
 }: {
@@ -415,6 +436,9 @@ function MermaidViewer({
     cancelAnimationFrame(viewAnimationFrameRef.current);
     viewAnimationFrameRef.current = null;
   }, []);
+  const cancelPendingViewCommitCallback = usePersistCallback(
+    cancelPendingViewCommit
+  );
 
   const scheduleViewCommit = useCallback((): void => {
     if (viewAnimationFrameRef.current !== null) {
@@ -443,11 +467,13 @@ function MermaidViewer({
     dragRef.current = null;
     setIsDragging(false);
   };
+  const stopDraggingCallback = usePersistCallback(stopDragging);
 
   const releaseSpace = (): void => {
     setIsSpacePressed(false);
     stopDragging();
   };
+  const releaseSpaceCallback = usePersistCallback(releaseSpace);
 
   const zoomAt = (factor: number, clientX?: number, clientY?: number): void => {
     const current = viewRef.current;
@@ -486,6 +512,7 @@ function MermaidViewer({
       event.clientY
     );
   };
+  const handleWheelCallback = usePersistCallback(handleWheel);
 
   const handlePointerDown = (
     event: ReactPointerEvent<HTMLDivElement>
@@ -505,6 +532,7 @@ function MermaidViewer({
     };
     setIsDragging(true);
   };
+  const handlePointerDownCallback = usePersistCallback(handlePointerDown);
 
   const handlePointerMove = (
     event: ReactPointerEvent<HTMLDivElement>
@@ -527,19 +555,46 @@ function MermaidViewer({
     );
     scheduleViewCommit();
   };
+  const handlePointerMoveCallback = usePersistCallback(handlePointerMove);
 
-  const transformStyle: CSSProperties = {
-    transform: `translate3d(${formatTransformNumber(view.x)}px, ${formatTransformNumber(view.y)}px, 0) scale(${formatTransformNumber(view.zoom)})`
-  };
+  const transformStyleTransformValue1 = `translate3d(${formatTransformNumber(view.x)}px, ${formatTransformNumber(view.y)}px, 0) scale(${formatTransformNumber(view.zoom)})`;
+  const transformStyle: CSSProperties = useMemo<CSSProperties>(
+    () => ({ transform: transformStyleTransformValue1 }),
+    [transformStyleTransformValue1]
+  );
 
+  const onSpaceDownProp2 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof MermaidViewerLifecycle>["onSpaceDown"]
+    >
+  >(() => setIsSpacePressed(true));
+  const onBlurCaptureProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onBlurCapture"]>
+  >((event) => {
+    if (event.relatedTarget instanceof Node) {
+      if (event.currentTarget.contains(event.relatedTarget)) {
+        return;
+      }
+    }
+    releaseSpace();
+  });
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => zoomByStep(-MERMAID_VIEWER_ZOOM_STEP));
+  const onClickProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => commitViewImmediately(RESET_VIEW_TRANSFORM));
+  const onClickProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => zoomByStep(MERMAID_VIEWER_ZOOM_STEP));
   return (
     <MermaidViewerLifecycle
       focusTargetRef={rootRef}
       onEscape={onClose}
-      onSpaceDown={() => setIsSpacePressed(true)}
-      onSpaceUp={releaseSpace}
-      onUnmount={cancelPendingViewCommit}
-      onWheel={handleWheel}
+      onSpaceDown={onSpaceDownProp2}
+      onSpaceUp={releaseSpaceCallback}
+      onUnmount={cancelPendingViewCommitCallback}
+      onWheel={handleWheelCallback}
       wheelTargetRef={rootRef}
     >
       <div
@@ -551,14 +606,7 @@ function MermaidViewer({
         data-agent-mermaid-space-pressed={isSpacePressed ? "true" : undefined}
         role="dialog"
         tabIndex={-1}
-        onBlurCapture={(event) => {
-          if (event.relatedTarget instanceof Node) {
-            if (event.currentTarget.contains(event.relatedTarget)) {
-              return;
-            }
-          }
-          releaseSpace();
-        }}
+        onBlurCapture={onBlurCaptureProp3}
       >
         <div className="agent-mermaid-viewer__backdrop" />
         <div
@@ -566,10 +614,10 @@ function MermaidViewer({
           className="agent-mermaid-viewer__stage"
           data-testid="agent-mermaid-viewer-stage"
           tabIndex={-1}
-          onPointerCancel={stopDragging}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={stopDragging}
+          onPointerCancel={stopDraggingCallback}
+          onPointerDown={handlePointerDownCallback}
+          onPointerMove={handlePointerMoveCallback}
+          onPointerUp={stopDraggingCallback}
         >
           <div
             className="agent-mermaid-viewer__canvas"
@@ -588,7 +636,7 @@ function MermaidViewer({
             aria-label={t("agentHost.agentGui.mermaidZoomOut")}
             disabled={view.zoom <= MERMAID_VIEWER_ZOOM_MIN}
             title={t("agentHost.agentGui.mermaidZoomOut")}
-            onClick={() => zoomByStep(-MERMAID_VIEWER_ZOOM_STEP)}
+            onClick={onClickProp4}
           >
             <ZoomOutIcon aria-hidden="true" className="size-4" />
           </button>
@@ -604,7 +652,7 @@ function MermaidViewer({
             type="button"
             aria-label={t("agentHost.agentGui.mermaidResetZoom")}
             title={t("agentHost.agentGui.mermaidResetZoom")}
-            onClick={() => commitViewImmediately(RESET_VIEW_TRANSFORM)}
+            onClick={onClickProp5}
           >
             <RotateCcwIcon aria-hidden="true" className="size-4" />
           </button>
@@ -613,7 +661,7 @@ function MermaidViewer({
             aria-label={t("agentHost.agentGui.mermaidZoomIn")}
             disabled={view.zoom >= MERMAID_VIEWER_ZOOM_MAX}
             title={t("agentHost.agentGui.mermaidZoomIn")}
-            onClick={() => zoomByStep(MERMAID_VIEWER_ZOOM_STEP)}
+            onClick={onClickProp6}
           >
             <ZoomInIcon aria-hidden="true" className="size-4" />
           </button>
@@ -636,7 +684,32 @@ function MermaidViewer({
 }
 
 function useMermaidTheme(): MermaidTheme {
-  return resolveMermaidTheme();
+  return useSyncExternalStore(
+    subscribeMermaidTheme,
+    resolveMermaidTheme,
+    defaultMermaidTheme
+  );
+}
+
+function defaultMermaidTheme(): MermaidTheme {
+  return "default";
+}
+
+function subscribeMermaidTheme(changed: () => void): () => void {
+  const observer = new MutationObserver(changed);
+  observer.observe(getPortalContainer(), {
+    attributes: true,
+    attributeFilter: ["data-theme"]
+  });
+  const media =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+  media?.addEventListener?.("change", changed);
+  return () => {
+    observer.disconnect();
+    media?.removeEventListener?.("change", changed);
+  };
 }
 
 function resolveMermaidTheme(): MermaidTheme {

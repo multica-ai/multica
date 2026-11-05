@@ -1,5 +1,10 @@
 import { createContext, useContext, type ReactNode } from "react";
-import { localV2Transport, type DirectLocalV2Transport } from "./local-v2-transport";
+import {
+  localV2Transport,
+  type DirectLocalV2Transport
+} from "./local-v2-transport";
+import { observer } from "mobx-react-lite";
+export const LocalDeviceProvider = observer(LocalDeviceProviderRender);
 
 /**
  * The device whose conversations a page shows: this one, or another device
@@ -15,8 +20,18 @@ export interface LocalDevice {
 
 const LocalDeviceContext = createContext<LocalDevice | null>(null);
 
-export function LocalDeviceProvider({ device, children }: { device: LocalDevice; children: ReactNode }) {
-  return <LocalDeviceContext.Provider value={device}>{children}</LocalDeviceContext.Provider>;
+function LocalDeviceProviderRender({
+  device,
+  children
+}: {
+  device: LocalDevice;
+  children: ReactNode;
+}) {
+  return (
+    <LocalDeviceContext.Provider value={device}>
+      {children}
+    </LocalDeviceContext.Provider>
+  );
 }
 
 let thisDevice: LocalDevice | undefined;
@@ -26,6 +41,7 @@ export function useLocalDevice(): LocalDevice {
   const device = useContext(LocalDeviceContext);
   if (device) return device;
   const transport = localV2Transport();
-  if (thisDevice?.transport !== transport) thisDevice = { id: "local", name: "", transport };
+  if (thisDevice?.transport !== transport)
+    thisDevice = { id: "local", name: "", transport };
   return thisDevice;
 }

@@ -1,16 +1,22 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import type {
-LocalProviderUsage,
-LocalUsageWindow
+  LocalProviderUsage,
+  LocalUsageWindow
 } from "@multica/core/local-conversation/protocol";
 import {
-Button,
-Popover,
-PopoverContent,
-PopoverTrigger
+  Button,
+  Popover,
+  PopoverContent,
+  PopoverTrigger
 } from "@tutti-os/ui-system/components";
-import { MinimizeIcon,RefreshIcon } from "@tutti-os/ui-system/icons";
-import { useCallback,useEffect,useRef,useState } from "react";
-import type { AgentGuiHostServices,LocalConversationSource } from "./protocol";
+import { MinimizeIcon, RefreshIcon } from "@tutti-os/ui-system/icons";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgentGuiHostServices, LocalConversationSource } from "./protocol";
+import { observer } from "mobx-react-lite";
+const Meter = observer(MeterRender);
+const UsageRing = observer(UsageRingRender);
+export const UsageIndicator = observer(UsageIndicatorRender);
 
 export function remainingPercent(
   window: LocalUsageWindow,
@@ -35,7 +41,11 @@ export function contextPercent(
 function formatContextTokens(value: number): string {
   return value < 1000 ? String(value) : `${Math.round(value / 100) / 10}k`;
 }
-function Meter({ value, label }: { value: number; label: string }) {
+function MeterRender({ value, label }: { value: number; label: string }) {
+  const styleProp1Value1 = `${value}%`;
+  const styleProp1 = useMemo<
+    NonNullable<React.ComponentProps<"span">["style"]>
+  >(() => ({ width: styleProp1Value1 }), [styleProp1Value1]);
   return (
     <div
       className="multica-usage-meter"
@@ -45,11 +55,11 @@ function Meter({ value, label }: { value: number; label: string }) {
       aria-valuemin={0}
       aria-valuemax={100}
     >
-      <span style={{ width: `${value}%` }} />
+      <span style={styleProp1} />
     </div>
   );
 }
-function UsageRing({ value }: { value: number | null }) {
+function UsageRingRender({ value }: { value: number | null }) {
   return (
     <svg
       className="multica-usage-ring"
@@ -89,7 +99,7 @@ interface Compaction {
   sessionId: string;
   turnId: string;
 }
-export function UsageIndicator({
+function UsageIndicatorRender({
   client,
   localConversations,
   agentId,
@@ -333,15 +343,33 @@ export function UsageIndicator({
       : data?.context.usedTokens != null
         ? `${labels.contextChip} ${formatContextTokens(data.context.usedTokens)}`
         : labels.usage;
+  const onOpenChangeProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Popover>["onOpenChange"]>
+  >((value) => {
+    hostDismissed.current = false;
+    setOpen(value);
+    if (value) void load();
+  });
+  const onCloseAutoFocusProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof PopoverContent>["onCloseAutoFocus"]>
+  >((event) => {
+    if (hostDismissed.current) {
+      event.preventDefault();
+      hostDismissed.current = false;
+    }
+  });
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    void compact();
+  });
+  const onClickProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    void load(true);
+  });
   return (
-    <Popover
-      open={open}
-      onOpenChange={(value) => {
-        hostDismissed.current = false;
-        setOpen(value);
-        if (value) void load();
-      }}
-    >
+    <Popover open={open} onOpenChange={onOpenChangeProp2}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -365,12 +393,7 @@ export function UsageIndicator({
         align="end"
         side="top"
         aria-label={labels.usage}
-        onCloseAutoFocus={(event) => {
-          if (hostDismissed.current) {
-            event.preventDefault();
-            hostDismissed.current = false;
-          }
-        }}
+        onCloseAutoFocus={onCloseAutoFocusProp3}
       >
         <div className="multica-usage-heading">
           <strong>{labels.usage}</strong>
@@ -388,9 +411,7 @@ export function UsageIndicator({
                     ? labels.compactBusy
                     : labels.compact
               }
-              onClick={() => {
-                void compact();
-              }}
+              onClick={onClickProp4}
             >
               <MinimizeIcon aria-hidden="true" />
               {compacting ? labels.compacting : labels.compact}
@@ -400,9 +421,7 @@ export function UsageIndicator({
               size="icon-sm"
               aria-label={labels.refresh}
               disabled={loading}
-              onClick={() => {
-                void load(true);
-              }}
+              onClick={onClickProp5}
             >
               <RefreshIcon aria-hidden="true" />
             </Button>

@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { createWorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
 import type { WorkspaceFileReference } from "@tutti-os/workspace-file-reference/contracts";
 import { createWorkspaceUserProjectI18nRuntime } from "@tutti-os/workspace-user-project/i18n";
@@ -186,6 +187,7 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
     },
     [onLinkAction]
   );
+  const handleLinkActionCallback = usePersistCallback(handleLinkAction);
   const handleAgentProviderLogin = useCallback(
     (provider?: string | null) => {
       const resolvedProvider = normalizeAgentGUIProviderIdentity(provider);
@@ -195,6 +197,9 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
     },
     [onAgentProviderLogin, state.provider]
   );
+  const handleAgentProviderLoginCallback = usePersistCallback(
+    handleAgentProviderLogin
+  );
   const handleWorkspaceFileReferencesAdded = useCallback(
     (references: readonly WorkspaceFileReference[]) => {
       onWorkspaceFileReferencesAdded?.({
@@ -203,6 +208,9 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
       });
     },
     [onWorkspaceFileReferencesAdded, state.provider]
+  );
+  const handleWorkspaceFileReferencesAddedCallback = usePersistCallback(
+    handleWorkspaceFileReferencesAdded
   );
   const handleDataChange = useCallback(
     (updater: (current: AgentGUINodeData) => AgentGUINodeData) => {
@@ -352,12 +360,23 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
       onHostAgentConfigMenuOpen?.(agentConfigMenuContext);
     }
   };
+  const handleAgentConfigMenuOpenCallback = usePersistCallback(
+    handleAgentConfigMenuOpen
+  );
   const agentConfigAccountContent = agentConfigMenuContext
     ? (renderAgentConfigAccount?.(agentConfigMenuContext) ?? null)
     : null;
   const agentConfigSystemActionsContent =
     renderAgentConfigSystemActions?.({ presentation: "menu" }) ?? null;
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof CanvasNodeGhostIconButton>["onClick"]
+    >
+  >((event) => {
+    event.stopPropagation();
+    handleConversationRailToggle();
+  });
   return (
     <AgentGUIMentionServiceBoundary
       service={mentionService}
@@ -404,10 +423,7 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
               data-agent-gui-conversation-rail-auto-collapsed={
                 isConversationRailAutoCollapsed ? "true" : "false"
               }
-              onClick={(event) => {
-                event.stopPropagation();
-                handleConversationRailToggle();
-              }}
+              onClick={onClickProp1}
             >
               <CanvasNodePanelLinedIcon
                 width={18}
@@ -437,7 +453,7 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
             }).isCollapsed;
 
           return (
-            <AgentGUINodeView
+            <AgentGUINodeViewBinding1
               shell={shell}
               rail={rail}
               detail={detail}
@@ -449,42 +465,32 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
               hiddenMentionFilterIds={hiddenMentionFilterIds}
               renderAgentTargetInfo={renderAgentTargetInfo}
               renderSidebarFooter={renderSidebarFooter}
-              actions={viewActions}
+              viewActions={viewActions}
               isActive={isActive}
               isVisible={isVisible}
               onEngagementEvent={onEngagementEvent}
               composerFocusRequestSequence={composerFocusRequestSequence}
               workbenchCommandBridge={workbenchCommandBridge}
               slashStatusLimits={slashStatusLimits}
-              slashStatusLimitsLoading={controllerRailStatus?.loading ?? false}
+              controllerRailStatus={controllerRailStatus}
               slashStatusLimitsUnavailable={slashStatusLimitsUnavailable}
               slashStatusOverride={slashStatusOverride}
-              railConfigProvider={railStatusProvider}
-              railSlashStatusLimits={controllerRailStatus?.limits ?? []}
-              slashStatusUsageCapturedAtUnixMs={
-                controllerRailStatus?.capturedAtUnixMs ?? null
-              }
-              slashStatusUsageDidFail={controllerRailStatus?.didFail ?? false}
-              slashStatusUsageErrorMessage={
-                controllerRailStatus?.errorMessage ?? null
-              }
-              slashStatusUsageAttempted={
-                controllerRailStatus?.attempted ?? false
-              }
-              slashStatusLimitsResolvedEmpty={
-                controllerRailStatus?.resolvedEmpty ?? false
-              }
+              railStatusProvider={railStatusProvider}
               agentConfigAccountContent={agentConfigAccountContent}
               agentConfigSystemActionsContent={agentConfigSystemActionsContent}
-              providerAuthAccountLabels={effectiveProviderAuthAccountLabels}
-              onAgentConfigMenuClose={handleAgentConfigMenuClose}
-              onAgentConfigMenuOpen={handleAgentConfigMenuOpen}
-              onAgentUsageRefresh={handleAgentUsageRefresh}
+              effectiveProviderAuthAccountLabels={
+                effectiveProviderAuthAccountLabels
+              }
+              handleAgentConfigMenuClose={handleAgentConfigMenuClose}
+              handleAgentConfigMenuOpenCallback={
+                handleAgentConfigMenuOpenCallback
+              }
+              handleAgentUsageRefresh={handleAgentUsageRefresh}
               accountUsageRefreshInline={accountUsageRefreshInline}
-              onSlashStatusOpen={handleSlashStatusOpen}
-              onSlashStatusClose={handleSlashStatusClose}
-              onSlashStatusRefresh={handleSlashStatusRefresh}
-              onLinkAction={handleLinkAction}
+              handleSlashStatusOpen={handleSlashStatusOpen}
+              handleSlashStatusClose={handleSlashStatusClose}
+              handleSlashStatusRefresh={handleSlashStatusRefresh}
+              handleLinkActionCallback={handleLinkActionCallback}
               onHandoffConversation={onHandoffConversation}
               showHandoffTargetOwnershipLabels={
                 showHandoffTargetOwnershipLabels
@@ -492,17 +498,16 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
               capabilityMenuState={capabilityMenuState}
               capabilityControlsReadOnly={capabilityControlsReadOnly}
               onCapabilitySettingsRequest={onCapabilitySettingsRequest}
-              onAgentProviderLogin={
-                onAgentProviderLogin ? handleAgentProviderLogin : undefined
-              }
+              onAgentProviderLogin={onAgentProviderLogin}
+              handleAgentProviderLogin={handleAgentProviderLoginCallback}
               onAgentEnvPanelOpen={onAgentEnvPanelOpen}
-              conversationRailCollapsed={isRenderedConversationRailCollapsed}
-              detailMinWidthPx={AGENT_GUI_DETAIL_MIN_WIDTH_PX}
-              uiLanguage={locale}
-              onWorkspaceFileReferencesAdded={
-                onWorkspaceFileReferencesAdded
-                  ? handleWorkspaceFileReferencesAdded
-                  : undefined
+              isRenderedConversationRailCollapsed={
+                isRenderedConversationRailCollapsed
+              }
+              locale={locale}
+              onWorkspaceFileReferencesAdded={onWorkspaceFileReferencesAdded}
+              handleWorkspaceFileReferencesAdded={
+                handleWorkspaceFileReferencesAddedCallback
               }
               resolveExternalPromptEntries={resolveExternalPromptEntries}
               prepareExternalPromptFiles={prepareExternalPromptFiles}
@@ -510,7 +515,7 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
               promptAssetLimit={promptAssetLimit}
               labels={labels}
               workspaceUserProjectI18n={workspaceUserProjectI18n}
-              workspaceFileManagerCopy={workspaceFileManagerI18n}
+              workspaceFileManagerI18n={workspaceFileManagerI18n}
               workspaceFileReferenceAdapter={workspaceFileReferenceAdapter}
               onOpenConversationWindow={onOpenConversationWindow}
               onRequestGitBranches={onRequestGitBranches}
@@ -519,7 +524,7 @@ export const AgentGUIFrame = observer(function AgentGUIFrame({
                 projectDirectorySourceAggregator
               }
               referenceSourceAggregator={referenceSourceAggregator}
-              resolveReferenceContentErrorAction={
+              resolveWorkspaceReferenceContentErrorAction={
                 resolveWorkspaceReferenceContentErrorAction
               }
               resolveWorkspaceReferenceEntryIconUrl={
@@ -589,3 +594,526 @@ function resolveAgentConfigMenuContext(
     ...(target.ownership ? { ownership: target.ownership } : {})
   };
 }
+
+const AgentGUINodeViewBinding1 = observer(function AgentGUINodeViewBinding1({
+  shell,
+  rail,
+  detail,
+  composer,
+  interaction,
+  readiness,
+  operations,
+  mentionAgentTargets,
+  hiddenMentionFilterIds,
+  renderAgentTargetInfo,
+  renderSidebarFooter,
+  viewActions,
+  isActive,
+  isVisible,
+  onEngagementEvent,
+  composerFocusRequestSequence,
+  workbenchCommandBridge,
+  slashStatusLimits,
+  controllerRailStatus,
+  slashStatusLimitsUnavailable,
+  slashStatusOverride,
+  railStatusProvider,
+  agentConfigAccountContent,
+  agentConfigSystemActionsContent,
+  effectiveProviderAuthAccountLabels,
+  handleAgentConfigMenuClose,
+  handleAgentConfigMenuOpenCallback,
+  handleAgentUsageRefresh,
+  accountUsageRefreshInline,
+  handleSlashStatusOpen,
+  handleSlashStatusClose,
+  handleSlashStatusRefresh,
+  handleLinkActionCallback,
+  onHandoffConversation,
+  showHandoffTargetOwnershipLabels,
+  capabilityMenuState,
+  capabilityControlsReadOnly,
+  onCapabilitySettingsRequest,
+  onAgentProviderLogin,
+  handleAgentProviderLogin,
+  onAgentEnvPanelOpen,
+  isRenderedConversationRailCollapsed,
+  locale,
+  onWorkspaceFileReferencesAdded,
+  handleWorkspaceFileReferencesAdded,
+  resolveExternalPromptEntries,
+  prepareExternalPromptFiles,
+  resolvePastedPath,
+  promptAssetLimit,
+  labels,
+  workspaceUserProjectI18n,
+  workspaceFileManagerI18n,
+  workspaceFileReferenceAdapter,
+  onOpenConversationWindow,
+  onRequestGitBranches,
+  selectProjectDirectory,
+  projectDirectorySourceAggregator,
+  referenceSourceAggregator,
+  resolveWorkspaceReferenceContentErrorAction,
+  resolveWorkspaceReferenceEntryIconUrl,
+  resolveMentionReferenceTarget,
+  resolveWorkspaceReferenceInitialTarget,
+  workspaceFileReferenceCopy,
+  workspaceAppIcons,
+  referenceProvenanceFilters,
+  sessionInputHistoryEnabled,
+  sessionWorktreeEnabled,
+  sessionLaunchModesByProjectSectionKey,
+  onSessionLaunchModePreferenceChange,
+  renderProjectDirectoryPickerHeaderActions,
+  projectSelectOptions,
+  renderReferencePickerSidebarActions,
+  renderComposerFooterAccessory,
+  composerEmptySubmit
+}: AgentGUINodeViewBinding1Props) {
+  const railSlashStatusLimitsProp1 = useMemo<
+    NonNullable<
+      React.ComponentProps<typeof AgentGUINodeView>["railSlashStatusLimits"]
+    >
+  >(() => [], []);
+  return (
+    <AgentGUINodeView
+      shell={shell}
+      rail={rail}
+      detail={detail}
+      composer={composer}
+      interaction={interaction}
+      readiness={readiness}
+      operations={operations}
+      mentionAgentTargets={mentionAgentTargets}
+      hiddenMentionFilterIds={hiddenMentionFilterIds}
+      renderAgentTargetInfo={renderAgentTargetInfo}
+      renderSidebarFooter={renderSidebarFooter}
+      actions={viewActions}
+      isActive={isActive}
+      isVisible={isVisible}
+      onEngagementEvent={onEngagementEvent}
+      composerFocusRequestSequence={composerFocusRequestSequence}
+      workbenchCommandBridge={workbenchCommandBridge}
+      slashStatusLimits={slashStatusLimits}
+      slashStatusLimitsLoading={controllerRailStatus?.loading ?? false}
+      slashStatusLimitsUnavailable={slashStatusLimitsUnavailable}
+      slashStatusOverride={slashStatusOverride}
+      railConfigProvider={railStatusProvider}
+      railSlashStatusLimits={
+        controllerRailStatus?.limits ?? railSlashStatusLimitsProp1
+      }
+      slashStatusUsageCapturedAtUnixMs={
+        controllerRailStatus?.capturedAtUnixMs ?? null
+      }
+      slashStatusUsageDidFail={controllerRailStatus?.didFail ?? false}
+      slashStatusUsageErrorMessage={controllerRailStatus?.errorMessage ?? null}
+      slashStatusUsageAttempted={controllerRailStatus?.attempted ?? false}
+      slashStatusLimitsResolvedEmpty={
+        controllerRailStatus?.resolvedEmpty ?? false
+      }
+      agentConfigAccountContent={agentConfigAccountContent}
+      agentConfigSystemActionsContent={agentConfigSystemActionsContent}
+      providerAuthAccountLabels={effectiveProviderAuthAccountLabels}
+      onAgentConfigMenuClose={handleAgentConfigMenuClose}
+      onAgentConfigMenuOpen={handleAgentConfigMenuOpenCallback}
+      onAgentUsageRefresh={handleAgentUsageRefresh}
+      accountUsageRefreshInline={accountUsageRefreshInline}
+      onSlashStatusOpen={handleSlashStatusOpen}
+      onSlashStatusClose={handleSlashStatusClose}
+      onSlashStatusRefresh={handleSlashStatusRefresh}
+      onLinkAction={handleLinkActionCallback}
+      onHandoffConversation={onHandoffConversation}
+      showHandoffTargetOwnershipLabels={showHandoffTargetOwnershipLabels}
+      capabilityMenuState={capabilityMenuState}
+      capabilityControlsReadOnly={capabilityControlsReadOnly}
+      onCapabilitySettingsRequest={onCapabilitySettingsRequest}
+      onAgentProviderLogin={
+        onAgentProviderLogin ? handleAgentProviderLogin : undefined
+      }
+      onAgentEnvPanelOpen={onAgentEnvPanelOpen}
+      conversationRailCollapsed={isRenderedConversationRailCollapsed}
+      detailMinWidthPx={AGENT_GUI_DETAIL_MIN_WIDTH_PX}
+      uiLanguage={locale}
+      onWorkspaceFileReferencesAdded={
+        onWorkspaceFileReferencesAdded
+          ? handleWorkspaceFileReferencesAdded
+          : undefined
+      }
+      resolveExternalPromptEntries={resolveExternalPromptEntries}
+      prepareExternalPromptFiles={prepareExternalPromptFiles}
+      resolvePastedPath={resolvePastedPath}
+      promptAssetLimit={promptAssetLimit}
+      labels={labels}
+      workspaceUserProjectI18n={workspaceUserProjectI18n}
+      workspaceFileManagerCopy={workspaceFileManagerI18n}
+      workspaceFileReferenceAdapter={workspaceFileReferenceAdapter}
+      onOpenConversationWindow={onOpenConversationWindow}
+      onRequestGitBranches={onRequestGitBranches}
+      selectProjectDirectory={selectProjectDirectory}
+      projectDirectorySourceAggregator={projectDirectorySourceAggregator}
+      referenceSourceAggregator={referenceSourceAggregator}
+      resolveReferenceContentErrorAction={
+        resolveWorkspaceReferenceContentErrorAction
+      }
+      resolveWorkspaceReferenceEntryIconUrl={
+        resolveWorkspaceReferenceEntryIconUrl
+      }
+      resolveMentionReferenceTarget={resolveMentionReferenceTarget}
+      resolveWorkspaceReferenceInitialTarget={
+        resolveWorkspaceReferenceInitialTarget
+      }
+      workspaceFileReferenceCopy={workspaceFileReferenceCopy}
+      workspaceAppIcons={workspaceAppIcons}
+      referenceProvenanceFilters={referenceProvenanceFilters}
+      sessionInputHistoryEnabled={sessionInputHistoryEnabled}
+      sessionWorktreeEnabled={sessionWorktreeEnabled}
+      sessionLaunchModesByProjectSectionKey={
+        sessionLaunchModesByProjectSectionKey
+      }
+      onSessionLaunchModePreferenceChange={onSessionLaunchModePreferenceChange}
+      renderProjectDirectoryPickerHeaderActions={
+        renderProjectDirectoryPickerHeaderActions
+      }
+      projectSelectOptions={projectSelectOptions}
+      renderReferencePickerSidebarActions={renderReferencePickerSidebarActions}
+      renderComposerFooterAccessory={renderComposerFooterAccessory}
+      composerEmptySubmit={composerEmptySubmit}
+    />
+  );
+});
+
+type AgentGUINodeViewBinding1Props = {
+  shell: import("./model/agentGuiNodeTypes").AgentGUIShellViewModel;
+  rail: import("../../state/RailPresentationState").RailPresentationState;
+  detail: import("../../state/ConversationDetailState").ConversationDetailState;
+  composer: {
+    state: import("../../state/ComposerFeatureState").ComposerFeatureState;
+    draftContent: import("./model/agentGuiNodeTypes").AgentComposerDraftContent;
+    draftPrompt: string;
+  };
+  interaction: import("../../state/SessionPresentationState").SessionPresentationState;
+  readiness: import("../../state/SessionPresentationState").SessionPresentationState;
+  operations: {
+    isDeletingConversation: boolean;
+    isUserProjectMutationPending: boolean;
+    pendingDeleteConversation:
+      | import("./model/agentGuiConversationTypes").AgentGUIConversationSummary
+      | null;
+    pendingDeleteProjectConversations:
+      | import("./model/agentGuiNodeTypes").AgentGUIProjectConversationDeleteTarget
+      | null;
+  };
+  mentionAgentTargets: readonly AgentGUIAgentTarget[] | undefined;
+  hiddenMentionFilterIds: readonly string[] | undefined;
+  renderAgentTargetInfo:
+    | import("../../types").AgentGUIAgentTargetInfoRenderer
+    | undefined;
+  renderSidebarFooter:
+    | ((
+        ctx: import("./AgentGUINodeView.publicTypes").AgentGUISidebarFooterContext
+      ) => import("react").ReactNode)
+    | undefined;
+  viewActions: {
+    createConversation: (
+      options?: { projectPath?: string | null; source?: string } | undefined
+    ) => void;
+    updateConversationFilter: (
+      filter: import("./model/agentGuiNodeTypes").AgentGUIRailViewModel["conversationFilter"]
+    ) => void;
+    selectConversationFilterTarget: (input: {
+      provider: import("../../types").AgentGUIProvider;
+      agentTargetId: string;
+    }) => void;
+    selectConversation: (agentSessionId: string) => void;
+    submitPrompt: (
+      content: import("../../shared/contracts/dto/agentSession").AgentPromptContentBlock[],
+      displayPrompt?: string,
+      options?: Parameters<
+        import("./AgentComposer").AgentComposerProps["onSubmit"]
+      >[2]
+    ) => void;
+    submitGuidancePrompt: (
+      content: import("../../shared/contracts/dto/agentSession").AgentPromptContentBlock[],
+      displayPrompt?: string,
+      options?: Parameters<
+        import("./AgentComposer").AgentComposerProps["onSubmit"]
+      >[2]
+    ) => void;
+    loadOlderConversationMessages: () => void;
+    showPromptImagesUnsupported: () => void;
+    submitApprovalOption: (
+      input: import("../../shared/agentConversation/contracts/agentConversationVM").AgentInteractionResponseInput
+    ) => boolean;
+    submitInteractivePrompt: (
+      input: import("../../shared/agentConversation/contracts/agentConversationVM").AgentInteractionResponseInput
+    ) => boolean;
+    interruptCurrentTurn: (noRunningResponseMessage: string) => void;
+    updateDraftContent: (
+      draftContent: import("./model/agentGuiNodeTypes").AgentComposerDraft,
+      sourceScopeKey?: string
+    ) => void;
+    updateSelectedProjectPath?: import("./AgentComposer").AgentComposerProps["onProjectPathChange"];
+    updateComposerSettings: (settings: {
+      model?: string | null;
+      reasoningEffort?: string | null;
+      planMode?: boolean;
+      permissionMode?: string;
+    }) => void;
+    retryComposerOptions: NonNullable<
+      import("./AgentComposer").AgentComposerProps["onRetryComposerOptions"]
+    >;
+    updatePlanIssueBudgetPreset: (
+      preset: import("../../shared/agentConversation/planImplementationPresentation").PlanIssueBudgetPreset
+    ) => void;
+    selectHomeComposerAgentTarget: (input: {
+      provider: import("../../types").AgentGUIProvider;
+      agentTargetId?: string | null;
+    }) => void;
+    sendQueuedPromptNext: (queuedPromptId: string) => void;
+    removeQueuedPrompt: (queuedPromptId: string) => void;
+    editQueuedPrompt: (queuedPromptId: string) => void;
+    retryActivation: () => void;
+    continueInNewConversation: () => void;
+    toggleConversationPinned: (agentSessionId: string, pinned: boolean) => void;
+    renameConversation: (
+      agentSessionId: string,
+      title: string
+    ) => Promise<void>;
+    forkConversationThroughTurn: (
+      agentSessionId: string,
+      turnId: string
+    ) => Promise<void>;
+    openForkSourceConversation: (agentSessionId: string) => Promise<void>;
+    removeProject: (path: string) => Promise<boolean>;
+    toggleProjectPinned: (projectId: string, pinned: boolean) => Promise<void>;
+    requestDeleteConversation: (agentSessionId: string) => void;
+    cancelDeleteConversation: () => void;
+    confirmDeleteConversation: () => void;
+  };
+  isActive: boolean;
+  isVisible: boolean;
+  onEngagementEvent:
+    | import("./engagement/agentGUIEngagement.types").AgentGUIEngagementEventSink
+    | undefined;
+  composerFocusRequestSequence: number | null;
+  workbenchCommandBridge:
+    | import("../../workbench/commands").AgentGuiWorkbenchCommandBridge
+    | null;
+  slashStatusLimits: import("./AgentComposer").AgentComposerSlashStatusLimit[];
+  controllerRailStatus: {
+    accountLabel: string | null;
+    limits: import("./AgentComposer").AgentComposerSlashStatusLimit[];
+    loading: boolean;
+    capturedAtUnixMs: number | null;
+    didFail: boolean;
+    errorMessage: string | null;
+    attempted: boolean;
+    resolvedEmpty: boolean;
+  } | null;
+  slashStatusLimitsUnavailable: boolean;
+  slashStatusOverride:
+    | import("./AgentComposer").AgentComposerSlashStatus
+    | null;
+  railStatusProvider: string | null;
+  agentConfigAccountContent:
+    | string
+    | number
+    | bigint
+    | boolean
+    | import("react").ReactElement<
+        unknown,
+        string | import("react").JSXElementConstructor<any>
+      >
+    | Iterable<import("react").ReactNode>
+    | Promise<
+        | string
+        | number
+        | bigint
+        | boolean
+        | import("react").ReactPortal
+        | import("react").ReactElement<
+            unknown,
+            string | import("react").JSXElementConstructor<any>
+          >
+        | Iterable<import("react").ReactNode>
+        | null
+        | undefined
+      >
+    | null;
+  agentConfigSystemActionsContent:
+    | string
+    | number
+    | bigint
+    | boolean
+    | import("react").ReactElement<
+        unknown,
+        string | import("react").JSXElementConstructor<any>
+      >
+    | Iterable<import("react").ReactNode>
+    | Promise<
+        | string
+        | number
+        | bigint
+        | boolean
+        | import("react").ReactPortal
+        | import("react").ReactElement<
+            unknown,
+            string | import("react").JSXElementConstructor<any>
+          >
+        | Iterable<import("react").ReactNode>
+        | null
+        | undefined
+      >
+    | null;
+  effectiveProviderAuthAccountLabels:
+    | Partial<Record<string, string>>
+    | undefined;
+  handleAgentConfigMenuClose: () => void;
+  handleAgentConfigMenuOpenCallback: () => void;
+  handleAgentUsageRefresh: (() => void) | undefined;
+  accountUsageRefreshInline: boolean;
+  handleSlashStatusOpen: () => void;
+  handleSlashStatusClose: () => void;
+  handleSlashStatusRefresh: (() => void) | undefined;
+  handleLinkActionCallback: (action: WorkspaceLinkAction) => void;
+  onHandoffConversation:
+    | ((input: {
+        agentTargetId?: string | null;
+        draftPrompt: string;
+        provider: import("../../types").AgentGUIProvider;
+        sourceAgentSessionId: string;
+        userProjectPath?: string | null;
+      }) => void | Promise<void>)
+    | undefined;
+  showHandoffTargetOwnershipLabels: boolean;
+  capabilityMenuState:
+    | import("./AgentComposer").AgentComposerCapabilityMenuState
+    | undefined;
+  capabilityControlsReadOnly: boolean;
+  onCapabilitySettingsRequest:
+    | ((
+        capability: import("./AgentComposer").AgentComposerCapabilitySettingsTarget
+      ) => void | Promise<void>)
+    | undefined;
+  onAgentProviderLogin:
+    | ((provider: import("../../types").AgentGUIProvider) => void)
+    | undefined;
+  handleAgentProviderLogin: (provider?: string | null) => void;
+  onAgentEnvPanelOpen:
+    | ((
+        input?: import("../../shared/agentEnv/agentEnvPanelActions").OpenAgentEnvPanelInput
+      ) => void)
+    | undefined;
+  isRenderedConversationRailCollapsed: boolean;
+  locale: import("../../i18n/runtime").AgentGuiI18nLocale;
+  onWorkspaceFileReferencesAdded:
+    | ((input: {
+        provider: import("../../types").AgentGUIProvider;
+        references: readonly WorkspaceFileReference[];
+      }) => void | Promise<void>)
+    | undefined;
+  handleWorkspaceFileReferencesAdded: (
+    references: readonly WorkspaceFileReference[]
+  ) => void;
+  resolveExternalPromptEntries:
+    | import("./model/agentExternalPromptEntries").AgentExternalPromptEntryResolver
+    | null;
+  prepareExternalPromptFiles:
+    | import("./model/agentExternalPromptFiles").AgentExternalPromptFilePreparer
+    | null;
+  resolvePastedPath:
+    | ((text: string) => Promise<WorkspaceFileReference | null>)
+    | null;
+  promptAssetLimit: number | null;
+  labels: import("./AgentGUINodeView.publicTypes").AgentGUIViewLabels;
+  workspaceUserProjectI18n: import("../../../../workspace/user-project/src/i18n/workspaceUserProjectI18n").WorkspaceUserProjectI18nRuntime;
+  workspaceFileManagerI18n:
+    | import("../../../../workspace/file-manager/src/index").WorkspaceFileManagerI18nRuntime
+    | null;
+  workspaceFileReferenceAdapter:
+    | import("../../../../workspace/file-reference/src/contracts/index").WorkspaceFileReferenceAdapter
+    | null;
+  onOpenConversationWindow: ((agentSessionId: string) => void) | undefined;
+  onRequestGitBranches:
+    | import("./AgentComposer").AgentComposerGitBranchLoader
+    | null;
+  selectProjectDirectory: (() => Promise<{ path: string } | null>) | undefined;
+  projectDirectorySourceAggregator:
+    | import("../../../../workspace/file-reference/src/core/referenceSourceAggregator").ReferenceSourceAggregator
+    | null;
+  referenceSourceAggregator:
+    | import("../../../../workspace/file-reference/src/core/referenceSourceAggregator").ReferenceSourceAggregator
+    | null;
+  resolveWorkspaceReferenceContentErrorAction:
+    | ((
+        error: Error
+      ) =>
+        | import("../../../../workspace/file-reference/src/ui/index").ReferenceSourceContentErrorAction
+        | null)
+    | undefined;
+  resolveWorkspaceReferenceEntryIconUrl:
+    | ((
+        entry: import("../../../../workspace/file-manager/src/index").WorkspaceFileEntry
+      ) => Promise<string | null | undefined>)
+    | undefined;
+  resolveMentionReferenceTarget:
+    | import("./AgentGUINodeView.publicTypes").AgentMentionReferenceTargetResolver
+    | null;
+  resolveWorkspaceReferenceInitialTarget:
+    | import("./AgentGUINodeView.publicTypes").AgentWorkspaceReferenceInitialTargetResolver
+    | null;
+  workspaceFileReferenceCopy: import("../../../../workspace/file-reference/src/contracts/index").WorkspaceFileReferenceCopy;
+  workspaceAppIcons:
+    | readonly import("../../shared/AgentMessageMarkdown").AgentMessageMarkdownWorkspaceAppIcon[]
+    | undefined;
+  referenceProvenanceFilters:
+    | import("./AgentComposer").AgentComposerReferenceProvenanceFilters
+    | null;
+  sessionInputHistoryEnabled: boolean;
+  sessionWorktreeEnabled: boolean;
+  sessionLaunchModesByProjectSectionKey:
+    | Readonly<
+        Record<
+          string,
+          import("./model/agentSessionLaunchMode").AgentGUISessionLaunchMode
+        >
+      >
+    | undefined;
+  onSessionLaunchModePreferenceChange:
+    | ((input: {
+        mode: import("./model/agentSessionLaunchMode").AgentGUISessionLaunchMode;
+        projectSectionKey: string;
+      }) => void | Promise<void>)
+    | undefined;
+  renderProjectDirectoryPickerHeaderActions:
+    | ((context: {
+        refresh: () => void;
+        selectTarget: (
+          target: import("../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceLocateTarget
+        ) => Promise<boolean>;
+        selectTargets: (
+          targets: readonly import("../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceLocateTarget[]
+        ) => Promise<number>;
+      }) => import("react").ReactNode)
+    | undefined;
+  projectSelectOptions:
+    | import("./AgentComposerProjectMenu").AgentProjectDropdownOptions
+    | undefined;
+  renderReferencePickerSidebarActions:
+    | ((
+        context: Parameters<
+          NonNullable<
+            import("../../../../workspace/file-reference/src/ui/index").ReferenceSourcePickerProps["renderSidebarActions"]
+          >
+        >[0] & { purpose: "directory" | "reference" }
+      ) => import("react").ReactNode)
+    | undefined;
+  renderComposerFooterAccessory:
+    | import("./AgentGUINodeView").AgentGUIComposerFooterAccessoryRenderer
+    | undefined;
+  composerEmptySubmit:
+    | import("./AgentGUINodeView").AgentGUIComposerEmptySubmit
+    | null
+    | undefined;
+};

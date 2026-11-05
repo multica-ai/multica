@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { canonicalInteractionKey } from "@tutti-os/agent-activity-core";
 import {
   Tooltip,
@@ -100,6 +101,7 @@ export const AgentInteractivePromptSurface = observer(
         requestId: prompt.requestId
       });
     };
+    const submitPromptCallback = usePersistCallback(submitPrompt);
     const isComposerAnswerableAskUser =
       prompt.kind === "ask-user" &&
       Boolean(prompt.agentSessionId?.trim()) &&
@@ -120,7 +122,7 @@ export const AgentInteractivePromptSurface = observer(
           keyboardShortcuts={keyboardShortcuts}
           isSubmitting={isSubmitting}
           isInteractionDisabled={isInteractionDisabled}
-          onSubmit={submitPrompt}
+          onSubmit={submitPromptCallback}
           labels={labels}
         />
       );
@@ -133,7 +135,7 @@ export const AgentInteractivePromptSurface = observer(
           edgeGlow={edgeGlow}
           isSubmitting={isSubmitting}
           isInteractionDisabled={isInteractionDisabled}
-          onSubmit={submitPrompt}
+          onSubmit={submitPromptCallback}
           labels={labels}
         />
       );
@@ -146,7 +148,7 @@ export const AgentInteractivePromptSurface = observer(
           edgeGlow={edgeGlow}
           isSubmitting={isSubmitting}
           isInteractionDisabled={isInteractionDisabled}
-          onSubmit={submitPrompt}
+          onSubmit={submitPromptCallback}
           labels={labels}
         />
       );
@@ -165,7 +167,7 @@ export const AgentInteractivePromptSurface = observer(
           edgeGlow={edgeGlow}
           isSubmitting={isSubmitting}
           isInteractionDisabled={isInteractionDisabled}
-          onSubmit={submitPrompt}
+          onSubmit={submitPromptCallback}
           labels={labels}
         />
       );

@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { ConnectorPaletteItem } from "@tutti-os/connector-renderer/ui";
 import { Spinner } from "@tutti-os/ui-system";
 import {
@@ -225,104 +228,23 @@ export const AgentSlashCommandPalette = observer(
                 ? capabilityLoadingNode
                 : null}
               {groupHeader}
-              <div
-                ref={isHighlighted ? highlightedOptionRef : null}
-                className={cn(
-                  paletteStyles.option,
-                  isHighlighted && "bg-[var(--transparency-block)]",
-                  isDisabled &&
-                    "cursor-not-allowed text-[var(--agent-gui-text-tertiary)] opacity-60 hover:bg-transparent active:bg-transparent"
-                )}
-                role="option"
-                aria-selected={isHighlighted}
-                aria-disabled={isDisabled || undefined}
-                data-testid={
-                  entry.type === "command"
-                    ? `agent-gui-composer-slash-command-${entry.command.name}`
-                    : undefined
-                }
-                data-highlighted={isHighlighted ? "" : undefined}
-                onMouseEnter={() => onHighlightChange(index)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  if (isDisabled) {
-                    return;
-                  }
-                  if (entry.type === "command") {
-                    onSelect(entry.command);
-                    return;
-                  }
-                  if (entry.type === "capability") {
-                    if (entry.selectAction === "settings") {
-                      onSelectCapabilitySettings?.(entry.capability);
-                      return;
-                    }
-                    onSelectCapability(entry.capability);
-                    return;
-                  }
-                  onSelectSkill(entry.skill);
-                }}
-              >
-                {connectorItem && entry.type === "skill" ? (
-                  <ConnectorPaletteItem
-                    item={connectorItem}
-                    labels={{
-                      connected: connectorConnectedLabel,
-                      notConnected: connectorNotConnectedLabel,
-                      unsupported: connectorUnsupportedLabel
-                    }}
-                    onSetup={() => onSelectSkill(entry.skill)}
-                  />
-                ) : (
-                  <>
-                    {entryIcon ? (
-                      <span aria-hidden="true" className={paletteStyles.icon}>
-                        {entryIcon}
-                      </span>
-                    ) : null}
-                    <span className={paletteStyles.copy}>
-                      <span className={paletteStyles.name}>
-                        <span className={paletteStyles.primaryName}>
-                          {entry.type === "command"
-                            ? (entry.primaryLabel ?? entry.label)
-                            : entry.label}
-                        </span>
-                        {entry.type === "command" && entry.secondaryLabel ? (
-                          <span className={paletteStyles.secondaryName}>
-                            {entry.secondaryLabel}
-                          </span>
-                        ) : null}
-                      </span>
-                      {entry.description ? (
-                        <span className={paletteStyles.descriptionText}>
-                          {descriptionWithoutTerminalPeriod(entry.description)}
-                        </span>
-                      ) : null}
-                    </span>
-                  </>
-                )}
-                {entry.type === "capability" &&
-                entry.settingsLabel &&
-                onSelectCapabilitySettings ? (
-                  <button
-                    aria-label={entry.settingsAriaLabel ?? entry.settingsLabel}
-                    className={paletteStyles.settingsButton}
-                    disabled={isDisabled}
-                    title={entry.settingsAriaLabel ?? entry.settingsLabel}
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelectCapabilitySettings(entry.capability);
-                    }}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                  >
-                    {entry.settingsLabel}
-                  </button>
-                ) : null}
-              </div>
+              <DivBinding1
+                isHighlighted={isHighlighted}
+                highlightedOptionRef={highlightedOptionRef}
+                isDisabled={isDisabled}
+                entry={entry}
+                onHighlightChange={onHighlightChange}
+                index={index}
+                onSelect={onSelect}
+                onSelectCapabilitySettings={onSelectCapabilitySettings}
+                onSelectCapability={onSelectCapability}
+                onSelectSkill={onSelectSkill}
+                connectorItem={connectorItem}
+                connectorConnectedLabel={connectorConnectedLabel}
+                connectorNotConnectedLabel={connectorNotConnectedLabel}
+                connectorUnsupportedLabel={connectorUnsupportedLabel}
+                entryIcon={entryIcon}
+              />
             </Fragment>
           );
         })}
@@ -386,14 +308,7 @@ function entryGroupType(
 
 function labelForEntryGroupType(
   groupType: AgentSlashPaletteEntryGroup,
-  labels: {
-    commandsGroupLabel: string;
-    capabilitiesGroupLabel: string;
-    skillsGroupLabel: string;
-    pluginsGroupLabel: string;
-    connectorsGroupLabel: string;
-    mcpGroupLabel: string;
-  }
+  labels: labelForEntryGroupTypeProps
 ): string {
   switch (groupType) {
     case "command":
@@ -445,3 +360,254 @@ function slashPaletteEntryIcon(entry: AgentSlashPaletteEntry): ReactNode {
       return null;
   }
 }
+
+const ConnectorPaletteItemBinding1 = observer(
+  function ConnectorPaletteItemBinding1({
+    connectorItem,
+    connectorConnectedLabel,
+    connectorNotConnectedLabel,
+    connectorUnsupportedLabel,
+    onSelectSkill,
+    entry
+  }: ConnectorPaletteItemBinding1Props) {
+    const labelsProp1 = useMemo<
+      NonNullable<React.ComponentProps<typeof ConnectorPaletteItem>["labels"]>
+    >(
+      () => ({
+        connected: connectorConnectedLabel,
+        notConnected: connectorNotConnectedLabel,
+        unsupported: connectorUnsupportedLabel
+      }),
+      [
+        connectorConnectedLabel,
+        connectorNotConnectedLabel,
+        connectorUnsupportedLabel
+      ]
+    );
+    const onSetupProp2 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof ConnectorPaletteItem>["onSetup"]>
+    >(() => onSelectSkill(entry.skill));
+    return (
+      <ConnectorPaletteItem
+        item={connectorItem}
+        labels={labelsProp1}
+        onSetup={onSetupProp2}
+      />
+    );
+  }
+);
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  entry,
+  isDisabled,
+  onSelectCapabilitySettings,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >((event) => {
+    event.stopPropagation();
+    onSelectCapabilitySettings(entry.capability);
+  });
+  const onMouseDownProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onMouseDown"]>
+  >((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        aria-label={entry.settingsAriaLabel ?? entry.settingsLabel}
+        className={paletteStyles.settingsButton}
+        disabled={isDisabled}
+        title={entry.settingsAriaLabel ?? entry.settingsLabel}
+        type="button"
+        onClick={onClickProp3}
+        onMouseDown={onMouseDownProp4}
+      >
+        {entry.settingsLabel}
+      </button>
+    </Slot.Root>
+  );
+});
+
+const DivBinding1 = observer(function DivBinding1({
+  isHighlighted,
+  highlightedOptionRef,
+  isDisabled,
+  entry,
+  onHighlightChange,
+  index,
+  onSelect,
+  onSelectCapabilitySettings,
+  onSelectCapability,
+  onSelectSkill,
+  connectorItem,
+  connectorConnectedLabel,
+  connectorNotConnectedLabel,
+  connectorUnsupportedLabel,
+  entryIcon,
+  ...slotProps
+}: DivBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof DivBinding1Props>) {
+  const onMouseEnterProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onMouseEnter"]>
+  >(() => onHighlightChange(index));
+  const onMouseDownProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onMouseDown"]>
+  >((event) => event.preventDefault());
+  const onClickProp7 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onClick"]>
+  >(() => {
+    if (isDisabled) {
+      return;
+    }
+    if (entry.type === "command") {
+      onSelect(entry.command);
+      return;
+    }
+    if (entry.type === "capability") {
+      if (entry.selectAction === "settings") {
+        onSelectCapabilitySettings?.(entry.capability);
+        return;
+      }
+      onSelectCapability(entry.capability);
+      return;
+    }
+    onSelectSkill(entry.skill);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <div
+        ref={isHighlighted ? highlightedOptionRef : null}
+        className={cn(
+          paletteStyles.option,
+          isHighlighted && "bg-[var(--transparency-block)]",
+          isDisabled &&
+            "cursor-not-allowed text-[var(--agent-gui-text-tertiary)] opacity-60 hover:bg-transparent active:bg-transparent"
+        )}
+        role="option"
+        aria-selected={isHighlighted}
+        aria-disabled={isDisabled || undefined}
+        data-testid={
+          entry.type === "command"
+            ? `agent-gui-composer-slash-command-${entry.command.name}`
+            : undefined
+        }
+        data-highlighted={isHighlighted ? "" : undefined}
+        onMouseEnter={onMouseEnterProp5}
+        onMouseDown={onMouseDownProp6}
+        onClick={onClickProp7}
+      >
+        {connectorItem && entry.type === "skill" ? (
+          <ConnectorPaletteItemBinding1
+            connectorItem={connectorItem}
+            connectorConnectedLabel={connectorConnectedLabel}
+            connectorNotConnectedLabel={connectorNotConnectedLabel}
+            connectorUnsupportedLabel={connectorUnsupportedLabel}
+            onSelectSkill={onSelectSkill}
+            entry={entry}
+          />
+        ) : (
+          <>
+            {entryIcon ? (
+              <span aria-hidden="true" className={paletteStyles.icon}>
+                {entryIcon}
+              </span>
+            ) : null}
+            <span className={paletteStyles.copy}>
+              <span className={paletteStyles.name}>
+                <span className={paletteStyles.primaryName}>
+                  {entry.type === "command"
+                    ? (entry.primaryLabel ?? entry.label)
+                    : entry.label}
+                </span>
+                {entry.type === "command" && entry.secondaryLabel ? (
+                  <span className={paletteStyles.secondaryName}>
+                    {entry.secondaryLabel}
+                  </span>
+                ) : null}
+              </span>
+              {entry.description ? (
+                <span className={paletteStyles.descriptionText}>
+                  {descriptionWithoutTerminalPeriod(entry.description)}
+                </span>
+              ) : null}
+            </span>
+          </>
+        )}
+        {entry.type === "capability" &&
+        entry.settingsLabel &&
+        onSelectCapabilitySettings ? (
+          <ButtonBinding2
+            entry={entry}
+            isDisabled={isDisabled}
+            onSelectCapabilitySettings={onSelectCapabilitySettings}
+          />
+        ) : null}
+      </div>
+    </Slot.Root>
+  );
+});
+
+type labelForEntryGroupTypeProps = {
+  commandsGroupLabel: string;
+  capabilitiesGroupLabel: string;
+  skillsGroupLabel: string;
+  pluginsGroupLabel: string;
+  connectorsGroupLabel: string;
+  mcpGroupLabel: string;
+};
+
+type ConnectorPaletteItemBinding1Props = {
+  connectorItem: import("../../../../connector/renderer/src/ui/index").ConnectorPaletteItemModel;
+  connectorConnectedLabel: string;
+  connectorNotConnectedLabel: string;
+  connectorUnsupportedLabel: string;
+  onSelectSkill: (skill: AgentGUIProviderSkillOption) => void;
+  entry: {
+    type: "skill";
+    key: string;
+    label: string;
+    description?: string;
+    skill: AgentGUIProviderSkillOption;
+  };
+};
+
+type ButtonBinding2Props = {
+  entry: {
+    type: "capability";
+    key: string;
+    label: string;
+    description?: string;
+    settingsAriaLabel?: string;
+    settingsLabel?: string;
+    disabled?: boolean;
+    selectAction?: "capability" | "settings";
+    capability: AgentSlashCommandCapability;
+  };
+  isDisabled: boolean;
+  onSelectCapabilitySettings: (capability: AgentSlashCommandCapability) => void;
+};
+
+type DivBinding1Props = {
+  isHighlighted: boolean;
+  highlightedOptionRef: import("react").RefObject<HTMLDivElement | null>;
+  isDisabled: boolean;
+  entry: AgentSlashPaletteEntry;
+  onHighlightChange: NonNullable<AgentSlashCommandPaletteProps>["onHighlightChange"];
+  index: number;
+  onSelect: NonNullable<AgentSlashCommandPaletteProps>["onSelect"];
+  onSelectCapabilitySettings: NonNullable<AgentSlashCommandPaletteProps>["onSelectCapabilitySettings"];
+  onSelectCapability: NonNullable<AgentSlashCommandPaletteProps>["onSelectCapability"];
+  onSelectSkill: NonNullable<AgentSlashCommandPaletteProps>["onSelectSkill"];
+  connectorItem:
+    | import("../../../../connector/renderer/src/ui/index").ConnectorPaletteItemModel
+    | null;
+  connectorConnectedLabel: NonNullable<AgentSlashCommandPaletteProps>["connectorConnectedLabel"];
+  connectorNotConnectedLabel: NonNullable<AgentSlashCommandPaletteProps>["connectorNotConnectedLabel"];
+  connectorUnsupportedLabel: NonNullable<AgentSlashCommandPaletteProps>["connectorUnsupportedLabel"];
+  entryIcon: ReactNode;
+};

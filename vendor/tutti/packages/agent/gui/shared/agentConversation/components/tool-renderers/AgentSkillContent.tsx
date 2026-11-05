@@ -6,8 +6,10 @@ import {
 } from "./agentToolContentShared";
 import { ToolMarkdownBlock } from "./agentToolContentShared";
 import { getSkillRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentSkillContent = observer(AgentSkillContentRender);
 
-export function AgentSkillContent({
+function AgentSkillContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

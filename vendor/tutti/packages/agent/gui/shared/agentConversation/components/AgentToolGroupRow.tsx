@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { memo, useState, type JSX } from "react";
@@ -13,6 +15,7 @@ import { AgentThinkingDisclosure } from "./AgentThinkingDisclosure";
 import { AgentToolCallCard } from "./AgentToolCallCard";
 import { CollapsibleReveal } from "./CollapsibleReveal";
 import { RawTimelineJsonDisclosure } from "./RawTimelineJsonDisclosure";
+const ToolGroupLabel = observer(ToolGroupLabelRender);
 
 interface AgentToolGroupRowProps {
   row: AgentToolGroupRowVM;
@@ -26,116 +29,96 @@ interface AgentToolGroupRowProps {
   rawTimelineJsonLabel?: string;
 }
 
-export const AgentToolGroupRow = memo(
-  observer(function AgentToolGroupRow({
-    row,
-    label,
-    thinkingLabel,
-    onLinkClick,
-    expanded,
-    expansionKey,
-    onExpandedChange,
-    showRawTimelineJson = false,
-    rawTimelineJsonLabel = ""
-  }: AgentToolGroupRowProps): JSX.Element {
-    "use memo";
-    const [localExpanded, setLocalExpanded] = useState(false);
-    const hasDetail = row.entries.length > 0;
-    const isExpanded = hasDetail && (expanded ?? localExpanded);
-    const setNextExpanded = (nextExpanded: boolean) => {
-      if (expanded === undefined) {
-        setLocalExpanded(nextExpanded);
-      }
-      if (expansionKey) {
-        onExpandedChange?.(expansionKey, nextExpanded);
-      }
-    };
-    const groupLabel = label(row.calls.length);
-    const singleCall = row.calls[0];
-    if (!row.grouped && singleCall) {
-      return renderToolCard(
-        singleCall,
-        onLinkClick,
-        showRawTimelineJson,
-        rawTimelineJsonLabel
-      );
+export const AgentToolGroupRow = observer(function AgentToolGroupRow({
+  row,
+  label,
+  thinkingLabel,
+  onLinkClick,
+  expanded,
+  expansionKey,
+  onExpandedChange,
+  showRawTimelineJson = false,
+  rawTimelineJsonLabel = ""
+}: AgentToolGroupRowProps): JSX.Element {
+  "use memo";
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const hasDetail = row.entries.length > 0;
+  const isExpanded = hasDetail && (expanded ?? localExpanded);
+  const setNextExpanded = (nextExpanded: boolean) => {
+    if (expanded === undefined) {
+      setLocalExpanded(nextExpanded);
     }
-
-    return (
-      <div
-        className="workspace-agents-status-panel__detail-tool-section"
-        data-tool-group-expanded={isExpanded ? "true" : undefined}
-      >
-        {hasDetail ? (
-          <button
-            type="button"
-            className="workspace-agents-status-panel__detail-tool-count"
-            aria-expanded={isExpanded}
-            aria-label={groupLabel}
-            onClick={() => setNextExpanded(!isExpanded)}
-          >
-            <ToolGroupLabel label={groupLabel} />
-            {isExpanded ? (
-              <ChevronDown
-                size={12}
-                strokeWidth={2.2}
-                aria-hidden="true"
-                className="workspace-agents-status-panel__detail-tool-count-chevron"
-              />
-            ) : (
-              <ChevronRight
-                size={12}
-                strokeWidth={2.2}
-                aria-hidden="true"
-                className="workspace-agents-status-panel__detail-tool-count-chevron"
-              />
-            )}
-          </button>
-        ) : (
-          <div className="workspace-agents-status-panel__detail-tool-count">
-            <ToolGroupLabel label={groupLabel} />
-          </div>
-        )}
-        {hasDetail ? (
-          <CollapsibleReveal expanded={isExpanded}>
-            <div className="workspace-agents-status-panel__detail-tool-list">
-              {row.entries.map((entry) =>
-                entry.kind === "thinking" ? (
-                  <div
-                    key={entry.thinking.id}
-                    className="workspace-agents-status-panel__detail-tool-list-item workspace-agents-status-panel__detail-tool-row"
-                  >
-                    <AgentThinkingDisclosure
-                      thinking={entry.thinking}
-                      label={thinkingLabel}
-                      onLinkClick={onLinkClick}
-                      showRawTimelineJson={showRawTimelineJson}
-                      rawTimelineJsonLabel={rawTimelineJsonLabel}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    key={entry.call.id}
-                    className="workspace-agents-status-panel__detail-tool-list-item"
-                  >
-                    {renderToolCard(
-                      entry.call,
-                      onLinkClick,
-                      showRawTimelineJson,
-                      rawTimelineJsonLabel
-                    )}
-                  </div>
-                )
-              )}
-            </div>
-          </CollapsibleReveal>
-        ) : null}
-      </div>
+    if (expansionKey) {
+      onExpandedChange?.(expansionKey, nextExpanded);
+    }
+  };
+  const setNextExpandedCallback = usePersistCallback(setNextExpanded);
+  const groupLabel = label(row.calls.length);
+  const singleCall = row.calls[0];
+  if (!row.grouped && singleCall) {
+    return renderToolCard(
+      singleCall,
+      onLinkClick,
+      showRawTimelineJson,
+      rawTimelineJsonLabel
     );
-  })
-);
+  }
 
-function ToolGroupLabel({ label }: { label: string }): JSX.Element {
+  return (
+    <div
+      className="workspace-agents-status-panel__detail-tool-section"
+      data-tool-group-expanded={isExpanded ? "true" : undefined}
+    >
+      {hasDetail ? (
+        <ButtonBinding1
+          isExpanded={isExpanded}
+          groupLabel={groupLabel}
+          setNextExpanded={setNextExpandedCallback}
+        />
+      ) : (
+        <div className="workspace-agents-status-panel__detail-tool-count">
+          <ToolGroupLabel label={groupLabel} />
+        </div>
+      )}
+      {hasDetail ? (
+        <CollapsibleReveal expanded={isExpanded}>
+          <div className="workspace-agents-status-panel__detail-tool-list">
+            {row.entries.map((entry) =>
+              entry.kind === "thinking" ? (
+                <div
+                  key={entry.thinking.id}
+                  className="workspace-agents-status-panel__detail-tool-list-item workspace-agents-status-panel__detail-tool-row"
+                >
+                  <AgentThinkingDisclosure
+                    thinking={entry.thinking}
+                    label={thinkingLabel}
+                    onLinkClick={onLinkClick}
+                    showRawTimelineJson={showRawTimelineJson}
+                    rawTimelineJsonLabel={rawTimelineJsonLabel}
+                  />
+                </div>
+              ) : (
+                <div
+                  key={entry.call.id}
+                  className="workspace-agents-status-panel__detail-tool-list-item"
+                >
+                  {renderToolCard(
+                    entry.call,
+                    onLinkClick,
+                    showRawTimelineJson,
+                    rawTimelineJsonLabel
+                  )}
+                </div>
+              )
+            )}
+          </div>
+        </CollapsibleReveal>
+      ) : null}
+    </div>
+  );
+});
+
+function ToolGroupLabelRender({ label }: { label: string }): JSX.Element {
   "use memo";
   return (
     <>
@@ -201,3 +184,53 @@ function renderToolCard(
     </>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  isExpanded,
+  groupLabel,
+  setNextExpanded,
+  ...slotProps
+}: {
+  isExpanded: boolean;
+  groupLabel: string;
+  setNextExpanded: (nextExpanded: boolean) => void;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    isExpanded: boolean;
+    groupLabel: string;
+    setNextExpanded: (nextExpanded: boolean) => void;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setNextExpanded(!isExpanded));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="workspace-agents-status-panel__detail-tool-count"
+        aria-expanded={isExpanded}
+        aria-label={groupLabel}
+        onClick={onClickProp1}
+      >
+        <ToolGroupLabel label={groupLabel} />
+        {isExpanded ? (
+          <ChevronDown
+            size={12}
+            strokeWidth={2.2}
+            aria-hidden="true"
+            className="workspace-agents-status-panel__detail-tool-count-chevron"
+          />
+        ) : (
+          <ChevronRight
+            size={12}
+            strokeWidth={2.2}
+            aria-hidden="true"
+            className="workspace-agents-status-panel__detail-tool-count-chevron"
+          />
+        )}
+      </button>
+    </Slot.Root>
+  );
+});

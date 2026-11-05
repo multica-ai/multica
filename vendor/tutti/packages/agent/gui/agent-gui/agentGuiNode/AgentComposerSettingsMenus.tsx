@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Fragment, useEffect, useState } from "react";
 import { prepareWorkspaceUserProjectSelection } from "@tutti-os/workspace-user-project/core";
 import { useAgentHostApi } from "../../agentActivityHost";
@@ -27,6 +28,10 @@ import { acknowledgeCodexFullAccessWarning } from "./view/agentFullAccessWarning
 import type { AgentComposerSettingsMenuLabels } from "./model/composerSettingsMenuModel";
 import styles from "./AgentGUINode.styles";
 import { ComposerOptionInfoTooltip } from "./AgentComposerModelReasoningDropdown";
+import { observer } from "mobx-react-lite";
+export const AgentPermissionModeDropdown = observer(
+  AgentPermissionModeDropdownRender
+);
 
 export type { AgentComposerSettingsMenuLabels } from "./model/composerSettingsMenuModel";
 
@@ -36,7 +41,7 @@ export {
   type AgentProjectPathChangeMetadata
 } from "./AgentComposerProjectMenu";
 export { AgentModelReasoningDropdown } from "./AgentComposerModelReasoningDropdown";
-export function AgentPermissionModeDropdown({
+function AgentPermissionModeDropdownRender({
   composerSettings,
   disabled = false,
   disabledTooltip,
@@ -44,21 +49,7 @@ export function AgentPermissionModeDropdown({
   provider,
   labels,
   onSettingsChange
-}: {
-  composerSettings: AgentGUIComposerSettingsVM;
-  disabled?: boolean;
-  disabledTooltip?: string;
-  onLinkAction?: (action: WorkspaceLinkAction) => void;
-  provider: string;
-  labels: Pick<
-    AgentComposerSettingsMenuLabels,
-    "permissionLabel" | "loadingOptions"
-  >;
-  onSettingsChange: (patch: {
-    permissionModeId?: string | null;
-    planMode?: boolean;
-  }) => void;
-}): React.JSX.Element {
+}: AgentPermissionModeDropdownProps): React.JSX.Element {
   "use memo";
   const [isSelectOpen, setIsSelectOpen] = useState(false);
   const [pendingFullAccessModeId, setPendingFullAccessModeId] = useState<
@@ -125,6 +116,9 @@ export function AgentPermissionModeDropdown({
     }
     commitPermissionModeId(permissionModeId);
   };
+  const applyPermissionModeIdCallback = usePersistCallback(
+    applyPermissionModeId
+  );
   const selectTrigger = (
     <SelectTrigger
       className={cn(
@@ -143,6 +137,28 @@ export function AgentPermissionModeDropdown({
     </SelectTrigger>
   );
 
+  const onConfirmProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentFullAccessWarningDialog>["onConfirm"]
+    >
+  >(() => {
+    if (!pendingFullAccessModeId) {
+      return;
+    }
+    const permissionModeId = pendingFullAccessModeId;
+    setPendingFullAccessModeId(null);
+    acknowledgeCodexFullAccessWarning();
+    commitPermissionModeId(permissionModeId);
+  });
+  const onOpenChangeProp2 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentFullAccessWarningDialog>["onOpenChange"]
+    >
+  >((open) => {
+    if (!open) {
+      setPendingFullAccessModeId(null);
+    }
+  });
   return (
     <Fragment>
       <Select
@@ -150,7 +166,7 @@ export function AgentPermissionModeDropdown({
         value={selectedValue ?? ""}
         disabled={selectDisabled}
         onOpenChange={setIsSelectOpen}
-        onValueChange={applyPermissionModeId}
+        onValueChange={applyPermissionModeIdCallback}
       >
         {selectDisabledTooltip ? (
           // Disabled controls do not receive pointer events. Target the tooltip
@@ -204,21 +220,9 @@ export function AgentPermissionModeDropdown({
         ) : null}
       </Select>
       <AgentFullAccessWarningDialog
-        onConfirm={() => {
-          if (!pendingFullAccessModeId) {
-            return;
-          }
-          const permissionModeId = pendingFullAccessModeId;
-          setPendingFullAccessModeId(null);
-          acknowledgeCodexFullAccessWarning();
-          commitPermissionModeId(permissionModeId);
-        }}
+        onConfirm={onConfirmProp1}
         onLinkAction={onLinkAction}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingFullAccessModeId(null);
-          }
-        }}
+        onOpenChange={onOpenChangeProp2}
         open={pendingFullAccessModeId !== null}
       />
     </Fragment>
@@ -246,56 +250,58 @@ function permissionOptionsWithSelectedValue(
   ];
 }
 
-export function AgentProjectMissingStatusProbe({
-  composerSettings,
-  onProjectMissingChange
-}: {
-  composerSettings: Pick<
-    AgentGUIComposerSettingsVM,
-    "selectedProjectPath" | "projectLocked"
-  >;
-  onProjectMissingChange: (isMissing: boolean) => void;
-}): null {
-  "use memo";
-  const agentHostApi = useAgentHostApi();
-  const selectedPath = composerSettings.selectedProjectPath?.trim() ?? "";
+export const AgentProjectMissingStatusProbe = observer(
+  function AgentProjectMissingStatusProbe({
+    composerSettings,
+    onProjectMissingChange
+  }: {
+    composerSettings: Pick<
+      AgentGUIComposerSettingsVM,
+      "selectedProjectPath" | "projectLocked"
+    >;
+    onProjectMissingChange: (isMissing: boolean) => void;
+  }): null {
+    "use memo";
+    const agentHostApi = useAgentHostApi();
+    const selectedPath = composerSettings.selectedProjectPath?.trim() ?? "";
 
-  useEffect(() => {
-    let canceled = false;
-    const userProjects = agentHostApi.userProjects;
-    if (!userProjects || !composerSettings.projectLocked || !selectedPath) {
-      onProjectMissingChange(false);
+    useEffect(() => {
+      let canceled = false;
+      const userProjects = agentHostApi.userProjects;
+      if (!userProjects || !composerSettings.projectLocked || !selectedPath) {
+        onProjectMissingChange(false);
+        return () => {
+          canceled = true;
+        };
+      }
+      void prepareWorkspaceUserProjectSelection(userProjects, {
+        projectLocked: true,
+        selectedPath
+      }).then(
+        (prepared) => {
+          if (!canceled) {
+            onProjectMissingChange(prepared.isSelectedPathMissing);
+          }
+        },
+        () => {
+          if (!canceled) {
+            onProjectMissingChange(false);
+          }
+        }
+      );
       return () => {
         canceled = true;
       };
-    }
-    void prepareWorkspaceUserProjectSelection(userProjects, {
-      projectLocked: true,
+    }, [
+      agentHostApi.userProjects,
+      composerSettings.projectLocked,
+      onProjectMissingChange,
       selectedPath
-    }).then(
-      (prepared) => {
-        if (!canceled) {
-          onProjectMissingChange(prepared.isSelectedPathMissing);
-        }
-      },
-      () => {
-        if (!canceled) {
-          onProjectMissingChange(false);
-        }
-      }
-    );
-    return () => {
-      canceled = true;
-    };
-  }, [
-    agentHostApi.userProjects,
-    composerSettings.projectLocked,
-    onProjectMissingChange,
-    selectedPath
-  ]);
+    ]);
 
-  return null;
-}
+    return null;
+  }
+);
 
 function resolvePermissionModeTriggerTone(
   value: string | null | undefined
@@ -324,3 +330,19 @@ function normalizePermissionModeValue(
   const normalized = value?.trim().toLowerCase().replace(/\s+/g, "-");
   return normalized || undefined;
 }
+
+type AgentPermissionModeDropdownProps = {
+  composerSettings: AgentGUIComposerSettingsVM;
+  disabled?: boolean;
+  disabledTooltip?: string;
+  onLinkAction?: (action: WorkspaceLinkAction) => void;
+  provider: string;
+  labels: Pick<
+    AgentComposerSettingsMenuLabels,
+    "permissionLabel" | "loadingOptions"
+  >;
+  onSettingsChange: (patch: {
+    permissionModeId?: string | null;
+    planMode?: boolean;
+  }) => void;
+};

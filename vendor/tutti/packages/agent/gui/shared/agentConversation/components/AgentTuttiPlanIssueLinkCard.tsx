@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { JSX } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { translate } from "../../../i18n/index";
@@ -7,27 +8,38 @@ import {
   type AgentMessageMarkdownWorkspaceAppIcon
 } from "../../AgentMessageMarkdown";
 import type { AgentTuttiPlanIssueLinkVM } from "../contracts/agentMessageRowVM";
+import { observer } from "mobx-react-lite";
+export const AgentTuttiPlanIssueLinkCard = observer(
+  AgentTuttiPlanIssueLinkCardRender
+);
 
 // Friendly, non-error rendering for the daemon's durable plan→Issue reverse
 // link (messageId "plan-issue:<issueID>"): a compact "Issue created from this
 // plan" row with the workspace-issue mention rendered through the standard
 // markdown mention-chip pipeline, so clicking it opens the Issue exactly like
 // any other issue mention.
-export function AgentTuttiPlanIssueLinkCard({
+function AgentTuttiPlanIssueLinkCardRender({
   planIssueLink,
   workspaceRoot,
   basePath,
   onLinkAction,
   workspaceAppIcons
-}: {
-  planIssueLink: AgentTuttiPlanIssueLinkVM;
-  workspaceRoot: string | null;
-  basePath: string;
-  onLinkAction?: (action: WorkspaceLinkAction) => void;
-  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
-}): JSX.Element {
+}: AgentTuttiPlanIssueLinkCardProps): JSX.Element {
   "use memo";
   const title = translate("agentHost.agentGui.tuttiModePlanIssueLinkCreated");
+
+  const workspaceLinkContextProp1 = useMemo<
+    NonNullable<
+      React.ComponentProps<typeof AgentMessageMarkdown>["workspaceLinkContext"]
+    >
+  >(
+    () => ({
+      workspaceRoot: workspaceRoot,
+      basePath: basePath,
+      source: "agent-markdown"
+    }),
+    [workspaceRoot, basePath]
+  );
   return (
     <section
       data-testid="agent-tutti-plan-issue-link-card"
@@ -49,11 +61,7 @@ export function AgentTuttiPlanIssueLinkCard({
             inline
             content={planIssueLink.mentionMarkdown}
             onLinkAction={onLinkAction}
-            workspaceLinkContext={{
-              workspaceRoot,
-              basePath,
-              source: "agent-markdown"
-            }}
+            workspaceLinkContext={workspaceLinkContextProp1}
             workspaceAppIcons={workspaceAppIcons}
           />
         </span>
@@ -61,3 +69,11 @@ export function AgentTuttiPlanIssueLinkCard({
     </section>
   );
 }
+
+type AgentTuttiPlanIssueLinkCardProps = {
+  planIssueLink: AgentTuttiPlanIssueLinkVM;
+  workspaceRoot: string | null;
+  basePath: string;
+  onLinkAction?: (action: WorkspaceLinkAction) => void;
+  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+};

@@ -1,6 +1,9 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import type { JSX, KeyboardEvent } from "react";
 import { Button } from "@tutti-os/ui-system";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { observer } from "mobx-react-lite";
+export const AgentUserMessageEditor = observer(AgentUserMessageEditorRender);
 
 export interface AgentUserMessageEditRetryControl {
   pending: boolean;
@@ -15,7 +18,7 @@ export interface AgentUserMessageEditRetryControl {
   }) => boolean | Promise<boolean>;
 }
 
-export function AgentUserMessageEditor({
+function AgentUserMessageEditorRender({
   value,
   pending,
   labels,
@@ -23,16 +26,14 @@ export function AgentUserMessageEditor({
   onCancel,
   onSubmit,
   onKeyDown
-}: {
-  value: string;
-  pending: boolean;
-  labels: AgentUserMessageEditRetryControl["labels"];
-  onChange: (value: string) => void;
-  onCancel: () => void;
-  onSubmit: () => Promise<void>;
-  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-}): JSX.Element {
+}: AgentUserMessageEditorProps): JSX.Element {
   "use memo";
+  const onChangeProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"textarea">["onChange"]>
+  >((event) => onChange(event.currentTarget.value));
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => void onSubmit());
   return (
     <div
       className={`workspace-agents-status-panel__detail-user-message ${styles.userMessageBubble} ${styles.userMessageEditor}`}
@@ -44,7 +45,7 @@ export function AgentUserMessageEditor({
         value={value}
         disabled={pending}
         aria-label={labels.edit}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        onChange={onChangeProp1}
         onKeyDown={onKeyDown}
       />
       <div className={styles.userMessageEditorActions}>
@@ -64,7 +65,7 @@ export function AgentUserMessageEditor({
           size="sm"
           type="button"
           variant="default"
-          onClick={() => void onSubmit()}
+          onClick={onClickProp2}
         >
           {labels.submit}
         </Button>
@@ -72,3 +73,13 @@ export function AgentUserMessageEditor({
     </div>
   );
 }
+
+type AgentUserMessageEditorProps = {
+  value: string;
+  pending: boolean;
+  labels: AgentUserMessageEditRetryControl["labels"];
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onSubmit: () => Promise<void>;
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+};

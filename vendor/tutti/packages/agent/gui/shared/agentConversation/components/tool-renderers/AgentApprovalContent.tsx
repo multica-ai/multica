@@ -16,8 +16,10 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { formatToolDetails } from "../interactivePromptPresentation";
+import { observer } from "mobx-react-lite";
+export const AgentApprovalContent = observer(AgentApprovalContentRender);
 
-export function AgentApprovalContent({
+function AgentApprovalContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

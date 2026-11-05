@@ -1,4 +1,6 @@
 import type { JSX } from "react";
+import { observer } from "mobx-react-lite";
+export const AgentPathTailLabel = observer(AgentPathTailLabelRender);
 
 interface AgentPathTailLabelProps {
   path?: string | null;
@@ -6,7 +8,7 @@ interface AgentPathTailLabelProps {
   className?: string;
 }
 
-export function AgentPathTailLabel({
+function AgentPathTailLabelRender({
   path,
   fallback,
   className

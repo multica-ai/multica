@@ -10,8 +10,10 @@ import {
   getToolFallbackText,
   getWebFetchRenderData
 } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentWebFetchContent = observer(AgentWebFetchContentRender);
 
-export function AgentWebFetchContent({
+function AgentWebFetchContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

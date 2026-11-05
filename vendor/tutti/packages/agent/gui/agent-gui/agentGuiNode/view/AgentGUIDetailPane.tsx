@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useIsSidePane } from "@multica/tutti-agent-gui-host/side-entry";
 import { observer } from "mobx-react-lite";
 import { useCallback, useMemo, useRef } from "react";
@@ -206,6 +207,9 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
     },
     [updateDraftContent, composer.draftContent]
   );
+  const handleSelectHomeSuggestionCallback = usePersistCallback(
+    handleSelectHomeSuggestion
+  );
   const handleHomeSuggestionAction = useCallback(
     (action: AgentHomeSuggestionAction) => {
       if (action === "import-session") {
@@ -215,6 +219,9 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
       }
     },
     []
+  );
+  const handleHomeSuggestionActionCallback = usePersistCallback(
+    handleHomeSuggestionAction
   );
   const submitPrompt = useStableEventCallback(actions.submitPrompt);
   const submitGuidancePrompt = useStableEventCallback(
@@ -593,8 +600,8 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
             : (labels.homeSuggestions ?? EMPTY_HOME_SUGGESTIONS)
         }
         suggestionsCloseLabel={labels.homeSuggestionsClose}
-        onSelectSuggestion={handleSelectHomeSuggestion}
-        onSelectSuggestionAction={handleHomeSuggestionAction}
+        onSelectSuggestion={handleSelectHomeSuggestionCallback}
+        onSelectSuggestionAction={handleHomeSuggestionActionCallback}
       />
     ) : null;
   const forkedFrom = conversationDetail?.session.forkedFrom ?? null;

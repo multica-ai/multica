@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useEffect, useRef, useState } from "react";
 import type { JSX, SVGProps } from "react";
 import { GridBottomLinedIcon } from "../../../app/renderer/components/icons/GridBottomLinedIcon";
@@ -19,6 +21,8 @@ import {
 } from "../../shared/canvasNodeChromeIcons";
 import { useDesktopStore } from "../store";
 import type { DesktopSize, WindowQuickLayoutTarget } from "../types";
+import { observer } from "mobx-react-lite";
+export const WindowLayoutMenuButton = observer(WindowLayoutMenuButtonRender);
 
 const QUICK_LAYOUT_OPTIONS: Array<{
   target: WindowQuickLayoutTarget;
@@ -56,7 +60,7 @@ interface WindowLayoutMenuButtonProps {
   "data-window-header"?: string;
 }
 
-export function WindowLayoutMenuButton({
+function WindowLayoutMenuButtonRender({
   windowId,
   desktopSize,
   className,
@@ -90,6 +94,7 @@ export function WindowLayoutMenuButton({
     applyQuickLayout(windowId, target, desktopSize);
     setOpen(false);
   };
+  const applyLayoutCallback = usePersistCallback(applyLayout);
 
   const clearHoverOpenTimeout = () => {
     if (hoverOpenTimeoutRef.current !== null) {
@@ -97,6 +102,9 @@ export function WindowLayoutMenuButton({
       hoverOpenTimeoutRef.current = null;
     }
   };
+  const clearHoverOpenTimeoutCallback = usePersistCallback(
+    clearHoverOpenTimeout
+  );
 
   const scheduleHoverOpen = () => {
     if (open || hoverOpenTimeoutRef.current !== null) {
@@ -107,6 +115,7 @@ export function WindowLayoutMenuButton({
       setOpen(true);
     }, WINDOW_LAYOUT_MENU_HOVER_OPEN_DELAY_MS);
   };
+  const scheduleHoverOpenCallback = usePersistCallback(scheduleHoverOpen);
 
   const toggleFullscreen = () => {
     if (isFullscreen) {
@@ -116,19 +125,20 @@ export function WindowLayoutMenuButton({
     }
     setOpen(false);
   };
+  const toggleFullscreenCallback = usePersistCallback(toggleFullscreen);
 
   useEffect(() => clearHoverOpenTimeout, []);
 
+  const onOpenChangeProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenu>["onOpenChange"]>
+  >((nextOpen) => {
+    if (!nextOpen) {
+      clearHoverOpenTimeout();
+    }
+    setOpen(nextOpen);
+  });
   return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) {
-          clearHoverOpenTimeout();
-        }
-        setOpen(nextOpen);
-      }}
-    >
+    <DropdownMenu open={open} onOpenChange={onOpenChangeProp1}>
       <DropdownMenuTrigger asChild>
         <CanvasNodeGhostIconButton
           className={className}
@@ -138,8 +148,8 @@ export function WindowLayoutMenuButton({
           data-testid="window-layout-menu-trigger"
           aria-label={t("workspaceWindowLayout.trigger")}
           title={t("workspaceWindowLayout.trigger")}
-          onPointerEnter={scheduleHoverOpen}
-          onPointerLeave={clearHoverOpenTimeout}
+          onPointerEnter={scheduleHoverOpenCallback}
+          onPointerLeave={clearHoverOpenTimeoutCallback}
         >
           <CanvasNodeLayoutLinedIcon
             width={18}
@@ -164,18 +174,13 @@ export function WindowLayoutMenuButton({
             {QUICK_LAYOUT_OPTIONS.map((option) => {
               const Icon = option.icon;
               return (
-                <Button
+                <ButtonBinding1
                   key={option.target}
-                  type="button"
-                  variant="ghost"
-                  size="iconClose"
-                  aria-label={t(option.labelKey)}
-                  title={t(option.labelKey)}
-                  data-testid={`window-layout-menu-quick-layout-${option.target}`}
-                  onClick={() => applyLayout(option.target)}
-                >
-                  <Icon width={16} height={16} aria-hidden="true" />
-                </Button>
+                  option={option}
+                  t={t}
+                  applyLayout={applyLayoutCallback}
+                  Icon={Icon}
+                />
               );
             })}
           </div>
@@ -187,7 +192,7 @@ export function WindowLayoutMenuButton({
             type="button"
             aria-label={t(fullscreenLabelKey)}
             title={t(fullscreenLabelKey)}
-            onClick={toggleFullscreen}
+            onClick={toggleFullscreenCallback}
           >
             <FullscreenIcon
               width={16}
@@ -204,3 +209,43 @@ export function WindowLayoutMenuButton({
     </DropdownMenu>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  option,
+  t,
+  applyLayout,
+  Icon,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => applyLayout(option.target));
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        key={option.target}
+        type="button"
+        variant="ghost"
+        size="iconClose"
+        aria-label={t(option.labelKey)}
+        title={t(option.labelKey)}
+        data-testid={`window-layout-menu-quick-layout-${option.target}`}
+        onClick={onClickProp2}
+      >
+        <Icon width={16} height={16} aria-hidden="true" />
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  option: {
+    target: WindowQuickLayoutTarget;
+    icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+    labelKey: string;
+  };
+  t: import("../../../i18n/runtime").TranslateFn;
+  applyLayout: (target: WindowQuickLayoutTarget) => void;
+  Icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+};

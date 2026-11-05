@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Button,
   Tooltip,
@@ -13,6 +15,9 @@ import { approvalOptionDisplayLabel } from "../../shared/agentConversation/appro
 import type { AgentInteractionResponseInput } from "../../shared/agentConversation/contracts/agentConversationVM";
 import styles from "./AgentGUIChrome.styles";
 import type { AgentGUISessionChrome } from "./model/agentGuiNodeTypes";
+const LoadingEllipsis = observer(LoadingEllipsisRender);
+export const AgentChromeNotice = observer(AgentChromeNoticeRender);
+const DisabledApprovalActions = observer(DisabledApprovalActionsRender);
 
 interface AgentChromeNoticeProps {
   tone: "warning" | "danger" | "muted";
@@ -59,7 +64,7 @@ function splitTrailingEllipsis(message: string): {
   };
 }
 
-function LoadingEllipsis(): JSX.Element {
+function LoadingEllipsisRender(): JSX.Element {
   "use memo";
   return (
     <span className="tsh-inline-loading-ellipsis" aria-hidden="true">
@@ -70,7 +75,7 @@ function LoadingEllipsis(): JSX.Element {
   );
 }
 
-export function AgentChromeNotice({
+function AgentChromeNoticeRender({
   tone,
   title,
   description,
@@ -169,14 +174,7 @@ export const AgentSessionChrome = observer(function AgentSessionChrome({
             </div>
             <div className={styles.chromeInlineActions}>
               {onAuthLogin ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onAuthLogin()}
-                >
-                  {labels.authLogin ?? labels.retryActivation}
-                </Button>
+                <ButtonBinding1 onAuthLogin={onAuthLogin} labels={labels} />
               ) : null}
             </div>
           </div>
@@ -190,30 +188,14 @@ export const AgentSessionChrome = observer(function AgentSessionChrome({
           <DisabledApprovalActions reason={approvalDisabledReason}>
             <div className={styles.chromeActions}>
               {chrome.approval.options.map((option) => (
-                <button
+                <ButtonBinding2
                   key={option.id}
-                  type="button"
-                  className={
-                    approvalDisabledReason?.trim()
-                      ? "pointer-events-none"
-                      : undefined
-                  }
-                  disabled={isRespondingApproval}
-                  onClick={() =>
-                    onSubmitApprovalOption({
-                      ...(chrome.approval?.agentSessionId
-                        ? { agentSessionId: chrome.approval.agentSessionId }
-                        : {}),
-                      optionId: option.id,
-                      requestId: chrome.approval?.requestId ?? "",
-                      ...(chrome.approval?.turnId
-                        ? { turnId: chrome.approval.turnId }
-                        : {})
-                    })
-                  }
-                >
-                  {approvalOptionDisplayLabel(option)}
-                </button>
+                  option={option}
+                  approvalDisabledReason={approvalDisabledReason}
+                  isRespondingApproval={isRespondingApproval}
+                  onSubmitApprovalOption={onSubmitApprovalOption}
+                  chrome={chrome}
+                />
               ))}
             </div>
           </DisabledApprovalActions>
@@ -300,26 +282,16 @@ export const AgentSessionChrome = observer(function AgentSessionChrome({
               {/* followupAction is required on this variant, so the kind
                   check alone guarantees the continue action. */}
               {visibleRecovery.kind === "resume-unavailable" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={styles.chromeSuccessGhostButton}
-                  onClick={() => onContinueInNewConversation()}
-                >
-                  {labels.continueInNewConversation}
-                </Button>
+                <ButtonBinding3
+                  onContinueInNewConversation={onContinueInNewConversation}
+                  labels={labels}
+                />
               ) : visibleRecovery.kind === "failed" &&
                 visibleRecovery.canRetry !== false ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={styles.chromeDangerGhostButton}
-                  onClick={() => onRetryActivation()}
-                >
-                  {labels.retryActivation}
-                </Button>
+                <ButtonBinding4
+                  onRetryActivation={onRetryActivation}
+                  labels={labels}
+                />
               ) : null}
             </div>
           </div>
@@ -329,7 +301,7 @@ export const AgentSessionChrome = observer(function AgentSessionChrome({
   );
 });
 
-function DisabledApprovalActions({
+function DisabledApprovalActionsRender({
   children,
   reason
 }: {
@@ -371,3 +343,141 @@ function DisabledApprovalActions({
     </TooltipProvider>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  onAuthLogin,
+  labels,
+  ...slotProps
+}: {
+  onAuthLogin: () => void;
+  labels: NonNullable<AgentSessionChromeProps>["labels"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    onAuthLogin: () => void;
+    labels: NonNullable<AgentSessionChromeProps>["labels"];
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => onAuthLogin());
+  return (
+    <Slot.Root {...slotProps}>
+      <Button type="button" variant="ghost" size="sm" onClick={onClickProp1}>
+        {labels.authLogin ?? labels.retryActivation}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  option,
+  approvalDisabledReason,
+  isRespondingApproval,
+  onSubmitApprovalOption,
+  chrome,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() =>
+    onSubmitApprovalOption({
+      ...(chrome.approval?.agentSessionId
+        ? { agentSessionId: chrome.approval.agentSessionId }
+        : {}),
+      optionId: option.id,
+      requestId: chrome.approval?.requestId ?? "",
+      ...(chrome.approval?.turnId ? { turnId: chrome.approval.turnId } : {})
+    })
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={option.id}
+        type="button"
+        className={
+          approvalDisabledReason?.trim() ? "pointer-events-none" : undefined
+        }
+        disabled={isRespondingApproval}
+        onClick={onClickProp2}
+      >
+        {approvalOptionDisplayLabel(option)}
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding3 = observer(function ButtonBinding3({
+  onContinueInNewConversation,
+  labels,
+  ...slotProps
+}: {
+  onContinueInNewConversation: NonNullable<AgentSessionChromeProps>["onContinueInNewConversation"];
+  labels: NonNullable<AgentSessionChromeProps>["labels"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    onContinueInNewConversation: NonNullable<AgentSessionChromeProps>["onContinueInNewConversation"];
+    labels: NonNullable<AgentSessionChromeProps>["labels"];
+  }
+>) {
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => onContinueInNewConversation());
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={styles.chromeSuccessGhostButton}
+        onClick={onClickProp3}
+      >
+        {labels.continueInNewConversation}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding4 = observer(function ButtonBinding4({
+  onRetryActivation,
+  labels,
+  ...slotProps
+}: {
+  onRetryActivation: NonNullable<AgentSessionChromeProps>["onRetryActivation"];
+  labels: NonNullable<AgentSessionChromeProps>["labels"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    onRetryActivation: NonNullable<AgentSessionChromeProps>["onRetryActivation"];
+    labels: NonNullable<AgentSessionChromeProps>["labels"];
+  }
+>) {
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => onRetryActivation());
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={styles.chromeDangerGhostButton}
+        onClick={onClickProp4}
+      >
+        {labels.retryActivation}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding2Props = {
+  option: import("../../shared/agentConversation/contracts/agentApprovalItemVM").AgentApprovalOptionVM;
+  approvalDisabledReason: string | null;
+  isRespondingApproval: NonNullable<
+    NonNullable<AgentSessionChromeProps>["source"]
+  >["isRespondingApproval"];
+  onSubmitApprovalOption: NonNullable<AgentSessionChromeProps>["onSubmitApprovalOption"];
+  chrome: AgentGUISessionChrome;
+};

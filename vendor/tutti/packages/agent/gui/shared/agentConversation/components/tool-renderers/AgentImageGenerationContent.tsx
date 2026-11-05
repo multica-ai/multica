@@ -3,8 +3,12 @@ import { translate } from "../../../../i18n/index";
 import type { AgentToolRendererProps } from "./agentToolContentShared";
 import { ToolMarkdownBlock, ToolSection } from "./agentToolContentShared";
 import { getImageGenerationRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentImageGenerationContent = observer(
+  AgentImageGenerationContentRender
+);
 
-export function AgentImageGenerationContent({
+function AgentImageGenerationContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

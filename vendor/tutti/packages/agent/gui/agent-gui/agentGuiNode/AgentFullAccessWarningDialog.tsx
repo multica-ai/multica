@@ -1,12 +1,18 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { FolderOpen, Globe2, Terminal, TriangleAlert } from "lucide-react";
 import { ConfirmationDialog } from "@tutti-os/ui-system";
 import { useTranslation } from "../../i18n/index";
 import type { WorkspaceLinkAction } from "../../actions/workspaceLinkActions";
+import { observer } from "mobx-react-lite";
+export const AgentFullAccessWarningDialog = observer(
+  AgentFullAccessWarningDialogRender
+);
+const FullAccessCapabilityRow = observer(FullAccessCapabilityRowRender);
 
 export const CODEX_FULL_ACCESS_SAFETY_URL =
   "https://deploymentsafety.openai.com/gpt-5-6";
 
-export function AgentFullAccessWarningDialog({
+function AgentFullAccessWarningDialogRender({
   onConfirm,
   onLinkAction,
   onOpenChange,
@@ -19,6 +25,20 @@ export function AgentFullAccessWarningDialog({
 }): React.JSX.Element {
   const { t } = useTranslation();
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"a">["onClick"]>
+  >((event) => {
+    onOpenChange(false);
+    if (!onLinkAction) {
+      return;
+    }
+    event.preventDefault();
+    onLinkAction({
+      source: "agent-full-access-warning",
+      type: "open-url",
+      url: CODEX_FULL_ACCESS_SAFETY_URL
+    });
+  });
   return (
     <ConfirmationDialog
       cancelLabel={t("agentHost.agentGui.fullAccessWarning.cancel")}
@@ -70,18 +90,7 @@ export function AgentFullAccessWarningDialog({
           href={CODEX_FULL_ACCESS_SAFETY_URL}
           rel="noreferrer"
           target="_blank"
-          onClick={(event) => {
-            onOpenChange(false);
-            if (!onLinkAction) {
-              return;
-            }
-            event.preventDefault();
-            onLinkAction({
-              source: "agent-full-access-warning",
-              type: "open-url",
-              url: CODEX_FULL_ACCESS_SAFETY_URL
-            });
-          }}
+          onClick={onClickProp1}
         >
           {t("agentHost.agentGui.fullAccessWarning.learnMore")}
         </a>
@@ -90,7 +99,7 @@ export function AgentFullAccessWarningDialog({
   );
 }
 
-function FullAccessCapabilityRow({
+function FullAccessCapabilityRowRender({
   description,
   icon,
   last = false,

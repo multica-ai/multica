@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { menuItemClassName } from "@tutti-os/ui-system";
 import { observer } from "mobx-react-lite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -61,12 +63,7 @@ export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
   onRequestGitBranches,
   onSubmitReview,
   onClose
-}: {
-  labels: AgentReviewPickerLabels;
-  onRequestGitBranches?: (() => Promise<AgentReviewPickerGitBranches>) | null;
-  onSubmitReview: (command: string) => void;
-  onClose: () => void;
-}): React.JSX.Element {
+}: AgentReviewPickerPanelProps): React.JSX.Element {
   const [stage, setStage] = useState<ReviewStage>("root");
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -268,7 +265,14 @@ export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
     },
     [entries, safeHighlightedIndex, stage, query, onClose, goBackToRoot]
   );
+  const handleKeyDownCallback = usePersistCallback(handleKeyDown);
 
+  const onChangeProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"input">["onChange"]>
+  >((event) => {
+    setQuery(event.target.value);
+    setHighlightedIndex(0);
+  });
   return (
     <section
       className={reviewMenuStyles.panel}
@@ -283,11 +287,8 @@ export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
         value={query}
         placeholder={searchPlaceholder}
         aria-label={searchPlaceholder}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          setHighlightedIndex(0);
-        }}
-        onKeyDown={handleKeyDown}
+        onChange={onChangeProp1}
+        onKeyDown={handleKeyDownCallback}
       />
       <div
         className={reviewMenuStyles.list}
@@ -300,35 +301,14 @@ export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
           entries.map((entry, index) => {
             const isHighlighted = index === safeHighlightedIndex;
             return (
-              <button
+              <ButtonBinding1
                 key={entry.key}
-                ref={isHighlighted ? highlightedOptionRef : null}
-                type="button"
-                className={cn(
-                  reviewMenuStyles.option,
-                  isHighlighted && "bg-[var(--transparency-block)]"
-                )}
-                role="option"
-                aria-selected={isHighlighted}
-                data-highlighted={isHighlighted ? "" : undefined}
-                disabled={entry.disabled}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  if (!entry.disabled) {
-                    entry.onSelect();
-                  }
-                }}
-              >
-                <span className={reviewMenuStyles.copy}>
-                  <span className={reviewMenuStyles.name}>{entry.label}</span>
-                  {entry.description ? (
-                    <span className={reviewMenuStyles.description}>
-                      {entry.description}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
+                entry={entry}
+                isHighlighted={isHighlighted}
+                highlightedOptionRef={highlightedOptionRef}
+                setHighlightedIndex={setHighlightedIndex}
+                index={index}
+              />
             );
           })
         )}
@@ -336,3 +316,73 @@ export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
     </section>
   );
 });
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  entry,
+  isHighlighted,
+  highlightedOptionRef,
+  setHighlightedIndex,
+  index,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onMouseEnterProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onMouseEnter"]>
+  >(() => setHighlightedIndex(index));
+  const onMouseDownProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onMouseDown"]>
+  >((event) => event.preventDefault());
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => {
+    if (!entry.disabled) {
+      entry.onSelect();
+    }
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={entry.key}
+        ref={isHighlighted ? highlightedOptionRef : null}
+        type="button"
+        className={cn(
+          reviewMenuStyles.option,
+          isHighlighted && "bg-[var(--transparency-block)]"
+        )}
+        role="option"
+        aria-selected={isHighlighted}
+        data-highlighted={isHighlighted ? "" : undefined}
+        disabled={entry.disabled}
+        onMouseEnter={onMouseEnterProp2}
+        onMouseDown={onMouseDownProp3}
+        onClick={onClickProp4}
+      >
+        <span className={reviewMenuStyles.copy}>
+          <span className={reviewMenuStyles.name}>{entry.label}</span>
+          {entry.description ? (
+            <span className={reviewMenuStyles.description}>
+              {entry.description}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+type AgentReviewPickerPanelProps = {
+  labels: AgentReviewPickerLabels;
+  onRequestGitBranches?: (() => Promise<AgentReviewPickerGitBranches>) | null;
+  onSubmitReview: (command: string) => void;
+  onClose: () => void;
+};
+
+type ButtonBinding1Props = {
+  entry: ReviewMenuEntry;
+  isHighlighted: boolean;
+  highlightedOptionRef: import("react").RefObject<HTMLButtonElement | null>;
+  setHighlightedIndex: import("react").Dispatch<
+    import("react").SetStateAction<number>
+  >;
+  index: number;
+};

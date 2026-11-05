@@ -6,10 +6,10 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { AgentPathTailLabel } from "./AgentPathTailLabel";
+import { observer } from "mobx-react-lite";
+export const AgentReadContent = observer(AgentReadContentRender);
 
-export function AgentReadContent({
-  call
-}: AgentToolRendererProps): JSX.Element {
+function AgentReadContentRender({ call }: AgentToolRendererProps): JSX.Element {
   "use memo";
   const path =
     stringValue(call.input?.path) ??

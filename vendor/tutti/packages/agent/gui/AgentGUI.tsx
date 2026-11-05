@@ -18,6 +18,7 @@ import type {
   AgentGUIAgentDirectorySnapshot,
   AgentGUIHomeSuggestionId
 } from "./types";
+import { observer } from "mobx-react-lite";
 
 export type { ReferenceProvenanceCatalog as AgentGUIReferenceProvenanceFilterCatalog } from "@tutti-os/workspace-file-reference/contracts";
 export type { AgentGUIHomeSuggestionId } from "./types";
@@ -59,7 +60,7 @@ export interface AgentGUIProps
   renderSlots: AgentGUIPublicRenderSlots;
 }
 
-export const AgentGUI = memo(function AgentGUI({
+export const AgentGUI = observer(function AgentGUI({
   agentActivityRuntime,
   agentHostApi,
   agentDirectory,

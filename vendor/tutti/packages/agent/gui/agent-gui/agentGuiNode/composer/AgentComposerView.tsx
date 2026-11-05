@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import { pickComposerFiles } from "@multica/tutti-agent-gui-host/composer-file-picker";
 import {
   Popover,
@@ -96,7 +98,14 @@ export const AgentComposerView = observer(function AgentComposerView(
   } = input.props;
   const draftImages = agentComposerDraftImages(draftContent);
   const draftQuotes = agentComposerDraftQuotes(draftContent);
-  const draftConnectors = agentComposerDraftConnectors(draftContent);
+  const draftConnectors = useMemo(
+    () => agentComposerDraftConnectors(draftContent),
+    [draftContent]
+  );
+  const selectedConnectorKeys = useMemo(
+    () => draftConnectors.map((connector) => connector.connectorKey),
+    [draftConnectors]
+  );
   const slashStatusAgentSessionId = slashStatus?.agentSessionId ?? null;
   const draftPrompt = agentComposerDraftPrompt(draftContent);
   const { availableCapabilities, slashPaletteEntries, slashQuery } =
@@ -191,18 +200,14 @@ export const AgentComposerView = observer(function AgentComposerView(
     !isHeroLayout && input.props.showProjectSelectorInFooter === true;
   const projectSelectorNode =
     showHeroProjectSelector || showProjectSelectorInFooter ? (
-      <AgentProjectDropdown
+      <AgentProjectDropdownBinding1
         composerSettings={composerSettings}
-        i18n={workspaceUserProjectI18n}
-        labels={{
-          projectLocked: labels.projectLocked,
-          projectMissingDescription: labels.projectMissingDescription
-        }}
+        workspaceUserProjectI18n={workspaceUserProjectI18n}
+        labels={labels}
         selectProjectDirectory={selectProjectDirectory}
-        options={projectSelectOptions}
+        projectSelectOptions={projectSelectOptions}
         userProjectApi={userProjectApi}
-        onDismissAutoFocus={input.onDismissProjectMenuAutoFocus}
-        onProjectMissingChange={input.setIsSelectedProjectMissing}
+        input={input}
         onProjectPathChange={onProjectPathChange}
       />
     ) : null;
@@ -211,15 +216,7 @@ export const AgentComposerView = observer(function AgentComposerView(
     input.props.labels.sessionLaunchModeLabel &&
     input.props.labels.sessionLaunchModeLocal &&
     input.props.labels.sessionLaunchModeWorktree ? (
-      <AgentSessionLaunchModeSelect
-        labels={{
-          launchMode: input.props.labels.sessionLaunchModeLabel,
-          local: input.props.labels.sessionLaunchModeLocal,
-          worktree: input.props.labels.sessionLaunchModeWorktree
-        }}
-        mode={input.sessionWorktreeLaunch.mode}
-        onModeChange={input.sessionWorktreeLaunch.onModeChange}
-      />
+      <AgentSessionLaunchModeSelectBinding2 input={input} />
     ) : null;
   const projectControlsNode =
     projectSelectorNode || sessionLaunchModeNode ? (
@@ -229,6 +226,138 @@ export const AgentComposerView = observer(function AgentComposerView(
       </div>
     ) : null;
 
+  const labelsProp1Value1 = labels.queuedLabel;
+  const labelsProp1Value2 = labels.queuePausedByUserLabel;
+  const labelsProp1Value3 = labels.sendQueuedPromptNext;
+  const labelsProp1Value4 = labels.editQueuedPrompt;
+  const labelsProp1Value5 = labels.deleteQueuedPrompt;
+  const labelsProp1Value6 = labels.queuedPromptMoreActions;
+  const labelsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentQueuedPromptPanel>["labels"]>
+  >(
+    () => ({
+      queuedLabel: labelsProp1Value1,
+      queuePausedByUserLabel: labelsProp1Value2,
+      sendQueuedPromptNext: labelsProp1Value3,
+      editQueuedPrompt: labelsProp1Value4,
+      deleteQueuedPrompt: labelsProp1Value5,
+      queuedPromptMoreActions: labelsProp1Value6
+    }),
+    [
+      labelsProp1Value1,
+      labelsProp1Value2,
+      labelsProp1Value3,
+      labelsProp1Value4,
+      labelsProp1Value5,
+      labelsProp1Value6
+    ]
+  );
+  const onFocusProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof AgentRichTextEditor>["onFocus"]>
+  >((method) => engagement?.focused(method));
+  const onUserContentChangeProp3 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentRichTextEditor>["onUserContentChange"]
+    >
+  >((nextPrompt) => {
+    if (
+      agentComposerDraftHasContent(
+        updateAgentComposerDraft(draftContent, {
+          prompt: nextPrompt
+        })
+      )
+    ) {
+      engagement?.contentEntered({
+        contentType: "text",
+        hadPrefill: agentComposerDraftHasContent(draftContent)
+      });
+    }
+  });
+  const onSubmitGuidanceProp4 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentRichTextEditor>["onSubmitGuidance"]
+    >
+  >(() => submitCurrentPrompt({ guidance: true }));
+  const labelsProp5Value1 = labels.slashStatusTitle;
+  const labelsProp5Value2 = labels.slashStatusSession;
+  const labelsProp5Value3 = labels.slashStatusBaseUrl;
+  const labelsProp5Value4 = labels.slashStatusContext;
+  const labelsProp5Value5 = labels.slashStatusLimits;
+  const labelsProp5Value6 = labels.slashStatusClose;
+  const labelsProp5Value7 = labels.slashStatusContextValue;
+  const labelsProp5Value8 = labels.slashStatusContextUnavailable;
+  const labelsProp5Value9 = labels.slashStatusLimitsUnavailable;
+  const labelsProp5Value10 = labels.slashStatusEmptyValue;
+  const labelsProp5Value11 = labels.slashStatusUsageJustUpdated;
+  const labelsProp5Value12 = labels.slashStatusUsageMinutesAgo;
+  const labelsProp5Value13 = labels.slashStatusUsageHoursAgo;
+  const labelsProp5Value14 = labels.slashStatusUsageUpdating;
+  const labelsProp5Value15 = labels.slashStatusUsageRefreshFailed;
+  const labelsProp5Value16 = labels.slashStatusUsageRefreshAria;
+  const labelsProp5 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentSlashStatusPanel>["labels"]>
+  >(
+    () => ({
+      slashStatusTitle: labelsProp5Value1,
+      slashStatusSession: labelsProp5Value2,
+      slashStatusBaseUrl: labelsProp5Value3,
+      slashStatusContext: labelsProp5Value4,
+      slashStatusLimits: labelsProp5Value5,
+      slashStatusClose: labelsProp5Value6,
+      slashStatusContextValue: labelsProp5Value7,
+      slashStatusContextUnavailable: labelsProp5Value8,
+      slashStatusLimitsUnavailable: labelsProp5Value9,
+      slashStatusEmptyValue: labelsProp5Value10,
+      slashStatusUsageJustUpdated: labelsProp5Value11,
+      slashStatusUsageMinutesAgo: labelsProp5Value12,
+      slashStatusUsageHoursAgo: labelsProp5Value13,
+      slashStatusUsageUpdating: labelsProp5Value14,
+      slashStatusUsageRefreshFailed: labelsProp5Value15,
+      slashStatusUsageRefreshAria: labelsProp5Value16
+    }),
+    [
+      labelsProp5Value1,
+      labelsProp5Value2,
+      labelsProp5Value3,
+      labelsProp5Value4,
+      labelsProp5Value5,
+      labelsProp5Value6,
+      labelsProp5Value7,
+      labelsProp5Value8,
+      labelsProp5Value9,
+      labelsProp5Value10,
+      labelsProp5Value11,
+      labelsProp5Value12,
+      labelsProp5Value13,
+      labelsProp5Value14,
+      labelsProp5Value15,
+      labelsProp5Value16
+    ]
+  );
+  const onWorkspaceReferencePickerProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof ComposerFooter>["onWorkspaceReferencePicker"]
+    >
+  >(async () => {
+    try {
+      const files = await pickComposerFiles();
+      const images = files.filter((file) =>
+        supportedPromptImageMimeType(file.type)
+      );
+      const regularFiles = files.filter(
+        (file) => !supportedPromptImageMimeType(file.type)
+      );
+      if (images.length)
+        handlePastedImages(await readAgentRichTextPromptImages(images));
+      if (regularFiles.length) input.addExternalPromptEntries(regularFiles);
+    } catch {
+      filePickerHost?.toast?.error(
+        document.documentElement.lang.startsWith("zh")
+          ? "无法读取所选文件，请重新选择"
+          : "Could not read the selected files. Please select them again."
+      );
+    }
+  });
   return (
     <form
       ref={input.composerRef}
@@ -252,48 +381,22 @@ export const AgentComposerView = observer(function AgentComposerView(
           className={styles.composerFloatingPrompt}
           data-testid="agent-gui-composer-floating-prompt"
         >
-          <AgentInteractivePromptSurface
-            prompt={visibleActivePrompt}
-            conversationReturn={labels.conversationReturn}
-            embedded={true}
-            edgeGlow={true}
-            keyboardShortcuts={activePromptKeyboardShortcutsEnabled}
-            isSubmitting={isSubmittingPrompt}
-            isInteractionDisabled={Boolean(activePromptDisabledReason)}
-            interactionDisabledReason={activePromptDisabledReason}
-            onSubmit={submitInteractivePromptAndDismiss}
-            labels={{
-              approvalLead: labels.approvalLead,
-              fileChangeApprovalLead: labels.fileChangeApprovalLead,
-              planLead: labels.planLead,
-              planModes: labels.planModes,
-              stayInPlan: labels.stayInPlan,
-              sendFeedback: labels.sendFeedback,
-              feedbackPlaceholder: labels.feedbackPlaceholder,
-              previousQuestion: labels.previousQuestion,
-              nextQuestion: labels.nextQuestion,
-              submitAnswers: labels.submitAnswers,
-              answerPlaceholder: labels.answerPlaceholder,
-              waitingForAnswer: labels.waitingForAnswer,
-              planImplementationLead: labels.planImplementationLead,
-              planImplementationConfirm: labels.planImplementationConfirm,
-              planImplementationFeedbackPlaceholder:
-                labels.planImplementationFeedbackPlaceholder,
-              planImplementationSend: labels.planImplementationSend,
-              planImplementationSkip: labels.planImplementationSkip
-            }}
+          <AgentInteractivePromptSurfaceBinding3
+            visibleActivePrompt={visibleActivePrompt}
+            labels={labels}
+            activePromptKeyboardShortcutsEnabled={
+              activePromptKeyboardShortcutsEnabled
+            }
+            isSubmittingPrompt={isSubmittingPrompt}
+            activePromptDisabledReason={activePromptDisabledReason}
+            submitInteractivePromptAndDismiss={
+              submitInteractivePromptAndDismiss
+            }
           />
         </div>
       ) : null}
       <AgentQueuedPromptPanel
-        labels={{
-          queuedLabel: labels.queuedLabel,
-          queuePausedByUserLabel: labels.queuePausedByUserLabel,
-          sendQueuedPromptNext: labels.sendQueuedPromptNext,
-          editQueuedPrompt: labels.editQueuedPrompt,
-          deleteQueuedPrompt: labels.deleteQueuedPrompt,
-          queuedPromptMoreActions: labels.queuedPromptMoreActions
-        }}
+        labels={labelsProp1}
         onSendQueuedPromptNext={onSendQueuedPromptNext}
         onRemoveQueuedPrompt={onRemoveQueuedPrompt}
         onEditQueuedPrompt={onEditQueuedPrompt}
@@ -399,25 +502,10 @@ export const AgentComposerView = observer(function AgentComposerView(
                     onContentLayoutInvalidated={
                       input.layout.invalidateComposerMeasurement
                     }
-                    onFocus={(method) => engagement?.focused(method)}
-                    onUserContentChange={(nextPrompt) => {
-                      if (
-                        agentComposerDraftHasContent(
-                          updateAgentComposerDraft(draftContent, {
-                            prompt: nextPrompt
-                          })
-                        )
-                      ) {
-                        engagement?.contentEntered({
-                          contentType: "text",
-                          hadPrefill: agentComposerDraftHasContent(draftContent)
-                        });
-                      }
-                    }}
+                    onFocus={onFocusProp2}
+                    onUserContentChange={onUserContentChangeProp3}
                     onSubmit={submitCurrentPrompt}
-                    onSubmitGuidance={() =>
-                      submitCurrentPrompt({ guidance: true })
-                    }
+                    onSubmitGuidance={onSubmitGuidanceProp4}
                     availableSkills={availableSkills}
                     availableCapabilities={availableCapabilities}
                     removeMentionLabel={labels.removeMention}
@@ -461,48 +549,22 @@ export const AgentComposerView = observer(function AgentComposerView(
                     )}
                     style={mentionPaletteStyle}
                   >
-                    <AgentFileMentionPalette
-                      state={input.mentionSearchState}
-                      highlightedKey={input.mentionHighlightedKey}
-                      label={labels.fileMentionPalette}
-                      loadingLabel={labels.fileMentionLoading}
-                      emptyLabel={labels.fileMentionEmpty}
-                      errorLabel={labels.fileMentionError}
-                      tabHintLabel={labels.fileMentionTabHint}
-                      maxHeightPx={mentionPaletteHeightPx}
-                      shouldCenterHighlightedItem={
-                        input.shouldCenterMentionHighlight
+                    <AgentFileMentionPaletteBinding4
+                      input={input}
+                      labels={labels}
+                      mentionPaletteHeightPx={mentionPaletteHeightPx}
+                      handleMentionHighlightChange={
+                        handleMentionHighlightChange
                       }
-                      onHighlightChange={handleMentionHighlightChange}
-                      onSelectItem={selectFileMention}
-                      onSelectCategory={(filter) =>
-                        input.mentionControllerRef.current?.setFilter(filter)
-                      }
-                      onSelectFilter={(filter) =>
-                        input.mentionControllerRef.current?.setFilter(filter)
-                      }
-                      onExpandGroup={(groupId) =>
-                        input.mentionControllerRef.current?.expandGroup(groupId)
-                      }
-                      onNavigateHierarchy={undefined}
-                      onNavigateIntoItem={navigateIntoFileMentionItem}
-                      onOpenReferences={
+                      selectFileMention={selectFileMention}
+                      navigateIntoFileMentionItem={navigateIntoFileMentionItem}
+                      onRequestWorkspaceReferences={
                         onRequestWorkspaceReferences
-                          ? handleOpenReferencesForEntity
-                          : undefined
                       }
-                      provenanceFilterControl={
-                        referenceProvenanceFilters ? (
-                          <AgentReferenceProvenanceFilterControl
-                            filter={
-                              referenceProvenanceFilters.byFilter[
-                                input.mentionSearchState
-                                  .filter as AgentMentionFilterId
-                              ]
-                            }
-                          />
-                        ) : undefined
+                      handleOpenReferencesForEntity={
+                        handleOpenReferencesForEntity
                       }
+                      referenceProvenanceFilters={referenceProvenanceFilters}
                     />
                   </div>,
                   mentionPaletteFrame.portalTarget
@@ -570,29 +632,7 @@ export const AgentComposerView = observer(function AgentComposerView(
             >
               <AgentSlashStatusPanel
                 status={slashStatus}
-                labels={{
-                  slashStatusTitle: labels.slashStatusTitle,
-                  slashStatusSession: labels.slashStatusSession,
-                  slashStatusBaseUrl: labels.slashStatusBaseUrl,
-                  slashStatusContext: labels.slashStatusContext,
-                  slashStatusLimits: labels.slashStatusLimits,
-                  slashStatusClose: labels.slashStatusClose,
-                  slashStatusContextValue: labels.slashStatusContextValue,
-                  slashStatusContextUnavailable:
-                    labels.slashStatusContextUnavailable,
-                  slashStatusLimitsUnavailable:
-                    labels.slashStatusLimitsUnavailable,
-                  slashStatusEmptyValue: labels.slashStatusEmptyValue,
-                  slashStatusUsageJustUpdated:
-                    labels.slashStatusUsageJustUpdated,
-                  slashStatusUsageMinutesAgo: labels.slashStatusUsageMinutesAgo,
-                  slashStatusUsageHoursAgo: labels.slashStatusUsageHoursAgo,
-                  slashStatusUsageUpdating: labels.slashStatusUsageUpdating,
-                  slashStatusUsageRefreshFailed:
-                    labels.slashStatusUsageRefreshFailed,
-                  slashStatusUsageRefreshAria:
-                    labels.slashStatusUsageRefreshAria
-                }}
+                labels={labelsProp5}
                 onClose={closeSlashStatusPanel}
                 onRefresh={onSlashStatusRefresh}
               />
@@ -679,9 +719,7 @@ export const AgentComposerView = observer(function AgentComposerView(
             onProviderSelect={onProviderSelect}
             onLinkAction={onLinkAction}
             availableSkills={availableSkills}
-            selectedConnectorKeys={draftConnectors.map(
-              (connector) => connector.connectorKey
-            )}
+            selectedConnectorKeys={selectedConnectorKeys}
             onConnectorSelected={setDraftConnectorSelected}
             onRetryComposerOptions={input.props.onRetryComposerOptions}
             onCapabilitySettingsRequest={
@@ -690,29 +728,7 @@ export const AgentComposerView = observer(function AgentComposerView(
             onRequestWorkspaceReferences={onRequestWorkspaceReferences}
             onWorkspaceReferencePicker={
               input.externalPromptEntriesSupported
-                ? async () => {
-                    try {
-                      const files = await pickComposerFiles();
-                      const images = files.filter((file) =>
-                        supportedPromptImageMimeType(file.type)
-                      );
-                      const regularFiles = files.filter(
-                        (file) => !supportedPromptImageMimeType(file.type)
-                      );
-                      if (images.length)
-                        handlePastedImages(
-                          await readAgentRichTextPromptImages(images)
-                        );
-                      if (regularFiles.length)
-                        input.addExternalPromptEntries(regularFiles);
-                    } catch {
-                      filePickerHost?.toast?.error(
-                        document.documentElement.lang.startsWith("zh")
-                          ? "无法读取所选文件，请重新选择"
-                          : "Could not read the selected files. Please select them again."
-                      );
-                    }
-                  }
+                ? onWorkspaceReferencePickerProp1
                 : handleWorkspaceReferencePicker
             }
             onMentionPaletteButton={handleMentionPaletteButton}
@@ -758,3 +774,288 @@ export const AgentComposerView = observer(function AgentComposerView(
     </form>
   );
 });
+
+const AgentProjectDropdownBinding1 = observer(
+  function AgentProjectDropdownBinding1({
+    composerSettings,
+    workspaceUserProjectI18n,
+    labels,
+    selectProjectDirectory,
+    projectSelectOptions,
+    userProjectApi,
+    input,
+    onProjectPathChange
+  }: AgentProjectDropdownBinding1Props) {
+    const labelsProp6Value1 = labels.projectLocked;
+    const labelsProp6Value2 = labels.projectMissingDescription;
+    const labelsProp6 = useMemo<
+      NonNullable<React.ComponentProps<typeof AgentProjectDropdown>["labels"]>
+    >(
+      () => ({
+        projectLocked: labelsProp6Value1,
+        projectMissingDescription: labelsProp6Value2
+      }),
+      [labelsProp6Value1, labelsProp6Value2]
+    );
+    return (
+      <AgentProjectDropdown
+        composerSettings={composerSettings}
+        i18n={workspaceUserProjectI18n}
+        labels={labelsProp6}
+        selectProjectDirectory={selectProjectDirectory}
+        options={projectSelectOptions}
+        userProjectApi={userProjectApi}
+        onDismissAutoFocus={input.onDismissProjectMenuAutoFocus}
+        onProjectMissingChange={input.setIsSelectedProjectMissing}
+        onProjectPathChange={onProjectPathChange}
+      />
+    );
+  }
+);
+
+const AgentSessionLaunchModeSelectBinding2 = observer(
+  function AgentSessionLaunchModeSelectBinding2({
+    input
+  }: {
+    input: AgentComposerViewProps;
+  }) {
+    const labelsProp7Value1 = input.props.labels.sessionLaunchModeLabel!;
+    const labelsProp7Value2 = input.props.labels.sessionLaunchModeLocal!;
+    const labelsProp7Value3 = input.props.labels.sessionLaunchModeWorktree!;
+    const labelsProp7 = useMemo<
+      NonNullable<
+        React.ComponentProps<typeof AgentSessionLaunchModeSelect>["labels"]
+      >
+    >(
+      () => ({
+        launchMode: labelsProp7Value1,
+        local: labelsProp7Value2,
+        worktree: labelsProp7Value3
+      }),
+      [labelsProp7Value1, labelsProp7Value2, labelsProp7Value3]
+    );
+    return (
+      <AgentSessionLaunchModeSelect
+        labels={labelsProp7}
+        mode={input.sessionWorktreeLaunch.mode}
+        onModeChange={input.sessionWorktreeLaunch.onModeChange}
+      />
+    );
+  }
+);
+
+const AgentInteractivePromptSurfaceBinding3 = observer(
+  function AgentInteractivePromptSurfaceBinding3({
+    visibleActivePrompt,
+    labels,
+    activePromptKeyboardShortcutsEnabled,
+    isSubmittingPrompt,
+    activePromptDisabledReason,
+    submitInteractivePromptAndDismiss
+  }: AgentInteractivePromptSurfaceBinding3Props) {
+    const labelsProp8Value1 = labels.approvalLead;
+    const labelsProp8Value2 = labels.fileChangeApprovalLead;
+    const labelsProp8Value3 = labels.planLead;
+    const labelsProp8Value4 = labels.planModes;
+    const labelsProp8Value5 = labels.stayInPlan;
+    const labelsProp8Value6 = labels.sendFeedback;
+    const labelsProp8Value7 = labels.feedbackPlaceholder;
+    const labelsProp8Value8 = labels.previousQuestion;
+    const labelsProp8Value9 = labels.nextQuestion;
+    const labelsProp8Value10 = labels.submitAnswers;
+    const labelsProp8Value11 = labels.answerPlaceholder;
+    const labelsProp8Value12 = labels.waitingForAnswer;
+    const labelsProp8Value13 = labels.planImplementationLead;
+    const labelsProp8Value14 = labels.planImplementationConfirm;
+    const labelsProp8Value15 = labels.planImplementationFeedbackPlaceholder;
+    const labelsProp8Value16 = labels.planImplementationSend;
+    const labelsProp8Value17 = labels.planImplementationSkip;
+    const labelsProp8 = useMemo<
+      NonNullable<
+        React.ComponentProps<typeof AgentInteractivePromptSurface>["labels"]
+      >
+    >(
+      () => ({
+        approvalLead: labelsProp8Value1,
+        fileChangeApprovalLead: labelsProp8Value2,
+        planLead: labelsProp8Value3,
+        planModes: labelsProp8Value4,
+        stayInPlan: labelsProp8Value5,
+        sendFeedback: labelsProp8Value6,
+        feedbackPlaceholder: labelsProp8Value7,
+        previousQuestion: labelsProp8Value8,
+        nextQuestion: labelsProp8Value9,
+        submitAnswers: labelsProp8Value10,
+        answerPlaceholder: labelsProp8Value11,
+        waitingForAnswer: labelsProp8Value12,
+        planImplementationLead: labelsProp8Value13,
+        planImplementationConfirm: labelsProp8Value14,
+        planImplementationFeedbackPlaceholder: labelsProp8Value15,
+        planImplementationSend: labelsProp8Value16,
+        planImplementationSkip: labelsProp8Value17
+      }),
+      [
+        labelsProp8Value1,
+        labelsProp8Value2,
+        labelsProp8Value3,
+        labelsProp8Value4,
+        labelsProp8Value5,
+        labelsProp8Value6,
+        labelsProp8Value7,
+        labelsProp8Value8,
+        labelsProp8Value9,
+        labelsProp8Value10,
+        labelsProp8Value11,
+        labelsProp8Value12,
+        labelsProp8Value13,
+        labelsProp8Value14,
+        labelsProp8Value15,
+        labelsProp8Value16,
+        labelsProp8Value17
+      ]
+    );
+    return (
+      <AgentInteractivePromptSurface
+        prompt={visibleActivePrompt}
+        conversationReturn={labels.conversationReturn}
+        embedded={true}
+        edgeGlow={true}
+        keyboardShortcuts={activePromptKeyboardShortcutsEnabled}
+        isSubmitting={isSubmittingPrompt}
+        isInteractionDisabled={Boolean(activePromptDisabledReason)}
+        interactionDisabledReason={activePromptDisabledReason}
+        onSubmit={submitInteractivePromptAndDismiss}
+        labels={labelsProp8}
+      />
+    );
+  }
+);
+
+const AgentFileMentionPaletteBinding4 = observer(
+  function AgentFileMentionPaletteBinding4({
+    input,
+    labels,
+    mentionPaletteHeightPx,
+    handleMentionHighlightChange,
+    selectFileMention,
+    navigateIntoFileMentionItem,
+    onRequestWorkspaceReferences,
+    handleOpenReferencesForEntity,
+    referenceProvenanceFilters
+  }: AgentFileMentionPaletteBinding4Props) {
+    const onSelectCategoryProp9 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof AgentFileMentionPalette>["onSelectCategory"]
+      >
+    >((filter) => input.mentionControllerRef.current?.setFilter(filter));
+    const onSelectFilterProp10 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof AgentFileMentionPalette>["onSelectFilter"]
+      >
+    >((filter) => input.mentionControllerRef.current?.setFilter(filter));
+    const onExpandGroupProp11 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof AgentFileMentionPalette>["onExpandGroup"]
+      >
+    >((groupId) => input.mentionControllerRef.current?.expandGroup(groupId));
+    return (
+      <AgentFileMentionPalette
+        state={input.mentionSearchState}
+        highlightedKey={input.mentionHighlightedKey}
+        label={labels.fileMentionPalette}
+        loadingLabel={labels.fileMentionLoading}
+        emptyLabel={labels.fileMentionEmpty}
+        errorLabel={labels.fileMentionError}
+        tabHintLabel={labels.fileMentionTabHint}
+        maxHeightPx={mentionPaletteHeightPx}
+        shouldCenterHighlightedItem={input.shouldCenterMentionHighlight}
+        onHighlightChange={handleMentionHighlightChange}
+        onSelectItem={selectFileMention}
+        onSelectCategory={onSelectCategoryProp9}
+        onSelectFilter={onSelectFilterProp10}
+        onExpandGroup={onExpandGroupProp11}
+        onNavigateHierarchy={undefined}
+        onNavigateIntoItem={navigateIntoFileMentionItem}
+        onOpenReferences={
+          onRequestWorkspaceReferences
+            ? handleOpenReferencesForEntity
+            : undefined
+        }
+        provenanceFilterControl={
+          referenceProvenanceFilters ? (
+            <AgentReferenceProvenanceFilterControl
+              filter={
+                referenceProvenanceFilters.byFilter[
+                  input.mentionSearchState.filter as AgentMentionFilterId
+                ]
+              }
+            />
+          ) : undefined
+        }
+      />
+    );
+  }
+);
+
+type AgentProjectDropdownBinding1Props = {
+  composerSettings: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["composerSettings"];
+  workspaceUserProjectI18n: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["workspaceUserProjectI18n"];
+  labels: NonNullable<NonNullable<AgentComposerViewProps>["props"]>["labels"];
+  selectProjectDirectory: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["selectProjectDirectory"];
+  projectSelectOptions: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["projectSelectOptions"];
+  userProjectApi: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["userProjectApi"];
+  input: AgentComposerViewProps;
+  onProjectPathChange: (
+    path: string | null,
+    metadata?: import("../AgentComposerProjectMenu").AgentProjectPathChangeMetadata
+  ) => void;
+};
+
+type AgentInteractivePromptSurfaceBinding3Props = {
+  visibleActivePrompt: import("../../../shared/agentConversation/contracts/agentConversationVM").AgentConversationPromptVM;
+  labels: NonNullable<NonNullable<AgentComposerViewProps>["props"]>["labels"];
+  activePromptKeyboardShortcutsEnabled: boolean;
+  isSubmittingPrompt: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["isSubmittingPrompt"];
+  activePromptDisabledReason: string | null;
+  submitInteractivePromptAndDismiss: NonNullable<
+    NonNullable<AgentComposerViewProps>["presentation"]
+  >["submitInteractivePromptAndDismiss"];
+};
+
+type AgentFileMentionPaletteBinding4Props = {
+  input: AgentComposerViewProps;
+  labels: NonNullable<NonNullable<AgentComposerViewProps>["props"]>["labels"];
+  mentionPaletteHeightPx: NonNullable<
+    NonNullable<AgentComposerViewProps>["mentionFrame"]
+  >["mentionPaletteHeightPx"];
+  handleMentionHighlightChange: NonNullable<
+    NonNullable<AgentComposerViewProps>["mentionActions"]
+  >["handleMentionHighlightChange"];
+  selectFileMention: NonNullable<
+    NonNullable<AgentComposerViewProps>["mentionActions"]
+  >["selectFileMention"];
+  navigateIntoFileMentionItem: NonNullable<
+    NonNullable<AgentComposerViewProps>["mentionActions"]
+  >["navigateIntoFileMentionItem"];
+  onRequestWorkspaceReferences: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["onRequestWorkspaceReferences"];
+  handleOpenReferencesForEntity: NonNullable<
+    NonNullable<AgentComposerViewProps>["attachments"]
+  >["handleOpenReferencesForEntity"];
+  referenceProvenanceFilters: NonNullable<
+    NonNullable<AgentComposerViewProps>["props"]
+  >["referenceProvenanceFilters"];
+};

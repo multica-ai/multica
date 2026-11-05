@@ -1,9 +1,13 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useMemo, useState, type JSX } from "react";
 import { AgentToolScrollArea } from "../AgentToolScrollArea";
+import { observer } from "mobx-react-lite";
+export const AgentTerminalBlock = observer(AgentTerminalBlockRender);
 
 const MAX_OUTPUT_LINES = 200;
 
-export function AgentTerminalBlock({
+function AgentTerminalBlockRender({
   command,
   stdout,
   stderr,
@@ -34,15 +38,11 @@ export function AgentTerminalBlock({
   const hasOutput = Boolean(visibleOutput);
   const disclosureButton =
     outputLines.length > MAX_OUTPUT_LINES ? (
-      <button
-        type="button"
-        className="mt-2 flex w-fit items-center border-0 bg-transparent p-0 text-left text-[11px] font-medium text-[var(--tutti-purple)] transition-colors hover:underline focus-visible:underline focus-visible:outline-none"
-        onClick={() => setExpanded((value) => !value)}
-      >
-        {expanded
-          ? "Collapse output"
-          : `Show full output (${outputLines.length} lines)`}
-      </button>
+      <ButtonBinding1
+        setExpanded={setExpanded}
+        expanded={expanded}
+        outputLines={outputLines}
+      />
     ) : null;
 
   return (
@@ -83,3 +83,42 @@ export function AgentTerminalBlock({
     </div>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  setExpanded,
+  expanded,
+  outputLines,
+  ...slotProps
+}: {
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  expanded: boolean;
+  outputLines: string[];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    expanded: boolean;
+    outputLines: string[];
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="mt-2 flex w-fit items-center border-0 bg-transparent p-0 text-left text-[11px] font-medium text-[var(--tutti-purple)] transition-colors hover:underline focus-visible:underline focus-visible:outline-none"
+        onClick={onClickProp1}
+      >
+        {expanded
+          ? "Collapse output"
+          : `Show full output (${outputLines.length} lines)`}
+      </button>
+    </Slot.Root>
+  );
+});

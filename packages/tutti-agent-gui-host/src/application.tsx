@@ -1,34 +1,37 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { MAX_FILE_SIZE } from "@multica/core/constants/upload";
-import { AgentGUI,type AgentGUIProps } from "@tutti-os/agent-gui/agent-gui";
+import { AgentGUI, type AgentGUIProps } from "@tutti-os/agent-gui/agent-gui";
 import { resolveProviderIconAsset } from "@tutti-os/agent-gui/provider-icons";
 import { resolveAgentGUIProviderIdentity } from "@tutti-os/agent-gui/provider-identity";
 import {
-useEffect,
-useId,
-useMemo,
-useRef,
-useState,
-useSyncExternalStore
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
 } from "react";
 import genericAgentIcon from "../../../vendor/tutti/packages/agent/gui/app/renderer/assets/icons/agents/agent-colorful.png";
 import { dispatchAgentGuiWorkbenchCommand } from "../../../vendor/tutti/packages/agent/gui/workbench/commands";
 import {
-applyAgentGuiAppearance,
-syncAgentGuiDocument
+  applyAgentGuiAppearance,
+  syncAgentGuiDocument
 } from "./agent-gui-appearance";
 import { ComposerDraftProvider } from "./composer-drafts";
 import {
-ComposerFooterControls,
-type ProviderDraft
+  ComposerFooterControls,
+  type ProviderDraft
 } from "./composer-footer-controls";
 import { createMulticaContextMentions } from "./context-mentions";
 import { createAgentGuiHostApi } from "./host-api";
 import { InvokedAgentsProvider } from "./invoked-agent-reply";
-import type { AgentGuiHostServices,AgentGuiInitSnapshot } from "./protocol";
+import type { AgentGuiHostServices, AgentGuiInitSnapshot } from "./protocol";
 import { executionTargets } from "./protocol";
 import { ResourceLinkProvider } from "./resource-link";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
 import { SideEntryProvider } from "./side-entry";
+import { observer } from "mobx-react-lite";
+export const AgentGuiApplication = observer(AgentGuiApplicationRender);
 
 type RuntimeHandle = ReturnType<typeof createMulticaAgentGuiRuntime>;
 type NodeState = AgentGUIProps["state"];
@@ -59,7 +62,7 @@ function initialNodeState(
   };
 }
 
-export function AgentGuiApplication({
+function AgentGuiApplicationRender({
   client,
   initial,
   handle,
@@ -401,6 +404,194 @@ export function AgentGuiApplication({
     [handle]
   );
 
+  const scopeProp1Value1 = initial.workspaceId;
+  const scopeProp1Value2 = initial.workspaceSlug;
+  const scopeProp1Value3 = snapshot.appOrigin;
+  const scopeProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof ResourceLinkProvider>["scope"]>
+  >(
+    () => ({
+      workspaceId: scopeProp1Value1,
+      workspaceSlug: scopeProp1Value2,
+      appOrigin: scopeProp1Value3
+    }),
+    [scopeProp1Value1, scopeProp1Value2, scopeProp1Value3]
+  );
+  const identityProp2Value1 = snapshot.workspaceId;
+  const identityProp2Value2 = snapshot.userId;
+  const identityProp2 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["identity"]>
+  >(
+    () => ({
+      nodeId: instanceId,
+      workspaceId: identityProp2Value1,
+      currentUserId: identityProp2Value2,
+      title: "Agent GUI"
+    }),
+    [instanceId, identityProp2Value1, identityProp2Value2]
+  );
+
+  const workspaceProp3 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["workspace"]>
+  >(
+    () => ({
+      path: "",
+      agentSettings: { avoidGroupingEdits: false },
+      prepareExternalPromptFiles: prepareFiles
+    }),
+    [prepareFiles]
+  );
+  const frameProp4Value1 = snapshot.hostActive ?? true;
+  const frameProp4Value2 = snapshot.hostVisible ?? true;
+  const frameProp4 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["frame"]>
+  >(
+    () => ({
+      position: { x: 0, y: 0 },
+      ...size,
+      desktopSize: size,
+      isActive: frameProp4Value1,
+      isVisible: frameProp4Value2,
+      embedded: true
+    }),
+    [size, size, frameProp4Value1, frameProp4Value2]
+  );
+  const runtimeRequestsProp5Value1 = appends[0] ?? null;
+  const runtimeRequestsProp5 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["runtimeRequests"]>
+  >(
+    () => ({
+      composerAppend: runtimeRequestsProp5Value1,
+      composerFocusSequence: composerFocusSequence,
+      workbench: { instanceId: instanceId }
+    }),
+    [runtimeRequestsProp5Value1, composerFocusSequence, instanceId]
+  );
+
+  const disabledProp6 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["disabled"]>
+  >(() => ["meet-tutti", "import-session"], []);
+
+  const hostCapabilitiesProp7 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["hostCapabilities"]>
+  >(
+    () => ({
+      hiddenMentionFilterIds: HIDDEN_MENTION_FILTER_IDS,
+      mentionService: mentionService,
+      sessionWorktreeEnabled: false,
+      capabilityControlsReadOnly: true,
+      capabilityMenuState: {
+        connectors: { enabled: false },
+        computerUse: { presentationSupported: false }
+      }
+    }),
+    [HIDDEN_MENTION_FILTER_IDS, mentionService]
+  );
+  const hostActionsProp8Value1 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUI>["hostActions"]
+      >["onClose"]
+    >
+  >(() => undefined);
+  const hostActionsProp8Value2 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUI>["hostActions"]
+      >["onResize"]
+    >
+  >(() => undefined);
+  const hostActionsProp8Value3 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUI>["hostActions"]
+      >["onShowMessage"]
+    >
+  >((message, tone) => {
+    void client.hostApi.showMessage({ message, tone });
+  });
+  const hostActionsProp8Value4 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUI>["hostActions"]
+      >["onComposerAppendHandled"]
+    >
+  >((sequence) => {
+    const restoreRequestId = appendRestoreIds.current.get(sequence);
+    appendRestoreIds.current.delete(sequence);
+    appliedAppends.current.add(sequence);
+    setAppends((current) =>
+      current.filter((request) => request.sequence !== sequence)
+    );
+    void client.hostApi.promptApplied({
+      sequence,
+      restoreRequestId
+    });
+  });
+  const hostActionsProp8 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["hostActions"]>
+  >(
+    () => ({
+      onClose: hostActionsProp8Value1,
+      onResize: hostActionsProp8Value2,
+      onUpdateNode: setNode,
+      onShowMessage: hostActionsProp8Value3,
+      onComposerAppendHandled: hostActionsProp8Value4
+    }),
+    [
+      hostActionsProp8Value1,
+      hostActionsProp8Value2,
+      setNode,
+      hostActionsProp8Value3,
+      hostActionsProp8Value4
+    ]
+  );
+  const renderSlotsProp9Value1 = useMemo<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUI>["renderSlots"]
+      >["composerFooterAccessory"]
+    >
+  >(
+    () => (context) => (
+      <ComposerFooterControlsBinding1
+        context={context}
+        client={client}
+        handle={handle}
+        workspace={workspace}
+        snapshot={snapshot}
+        setComposerFocusSequence={setComposerFocusSequence}
+        pendingNewConversation={pendingNewConversation}
+        setPendingNewConversation={setPendingNewConversation}
+        instanceId={instanceId}
+        pendingTarget={pendingTarget}
+        setPendingTarget={setPendingTarget}
+        setNode={setNode}
+      />
+    ),
+    [
+      client,
+      handle,
+      workspace,
+      snapshot,
+      setComposerFocusSequence,
+      pendingNewConversation,
+      setPendingNewConversation,
+      instanceId,
+      pendingTarget,
+      setPendingTarget,
+      setNode
+    ]
+  );
+  const renderSlotsProp9 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentGUI>["renderSlots"]>
+  >(
+    () => ({
+      composerEmptySubmit: composerEmptySubmit,
+      composerFooterAccessory: renderSlotsProp9Value1
+    }),
+    [composerEmptySubmit, renderSlotsProp9Value1]
+  );
   return (
     <ComposerDraftProvider
       initial={initial}
@@ -409,11 +600,7 @@ export function AgentGuiApplication({
       <InvokedAgentsProvider value={workspace.agents}>
         <ResourceLinkProvider
           client={client}
-          scope={{
-            workspaceId: initial.workspaceId,
-            workspaceSlug: initial.workspaceSlug,
-            appOrigin: snapshot.appOrigin
-          }}
+          scope={scopeProp1}
           agents={workspace.agents}
         >
           <SideEntryProvider
@@ -430,123 +617,20 @@ export function AgentGuiApplication({
             chinese={snapshot.locale === "zh-CN"}
           >
             <AgentGUI
-              identity={{
-                nodeId: instanceId,
-                workspaceId: snapshot.workspaceId,
-                currentUserId: snapshot.userId,
-                title: "Agent GUI"
-              }}
-              workspace={{
-                path: "",
-                agentSettings: { avoidGroupingEdits: false },
-                prepareExternalPromptFiles: prepareFiles
-              }}
-              frame={{
-                position: { x: 0, y: 0 },
-                ...size,
-                desktopSize: size,
-                isActive: snapshot.hostActive ?? true,
-                isVisible: snapshot.hostVisible ?? true,
-                embedded: true
-              }}
+              identity={identityProp2}
+              workspace={workspaceProp3}
+              frame={frameProp4}
               state={node}
-              runtimeRequests={{
-                composerAppend: appends[0] ?? null,
-                composerFocusSequence,
-                workbench: { instanceId }
-              }}
+              runtimeRequests={runtimeRequestsProp5}
               agentDirectory={agentDirectory}
               mentionAgentDirectory={mentionAgentDirectory}
               agentActivityRuntime={handle.runtime}
               agentHostApi={hostApi}
               locale={snapshot.locale}
-              disabled={["meet-tutti", "import-session"]}
-              hostCapabilities={{
-                hiddenMentionFilterIds: HIDDEN_MENTION_FILTER_IDS,
-                mentionService,
-                sessionWorktreeEnabled: false,
-                capabilityControlsReadOnly: true,
-                capabilityMenuState: {
-                  connectors: { enabled: false },
-                  computerUse: { presentationSupported: false }
-                }
-              }}
-              hostActions={{
-                onClose: () => undefined,
-                onResize: () => undefined,
-                onUpdateNode: setNode,
-                onShowMessage: (message, tone) => {
-                  void client.hostApi.showMessage({ message, tone });
-                },
-                onComposerAppendHandled: (sequence) => {
-                  const restoreRequestId =
-                    appendRestoreIds.current.get(sequence);
-                  appendRestoreIds.current.delete(sequence);
-                  appliedAppends.current.add(sequence);
-                  setAppends((current) =>
-                    current.filter((request) => request.sequence !== sequence)
-                  );
-                  void client.hostApi.promptApplied({
-                    sequence,
-                    restoreRequestId
-                  });
-                }
-              }}
-              renderSlots={{
-                composerEmptySubmit,
-                composerFooterAccessory: (context) => (
-                  <ComposerFooterControls
-                    context={context}
-                    client={client}
-                    handle={handle}
-                    targets={executionTargets(workspace)}
-                    snapshot={snapshot}
-                    onReadyForFocus={setComposerFocusSequence}
-                    newConversationRequest={pendingNewConversation}
-                    onNewConversationApplied={() =>
-                      setPendingNewConversation(undefined)
-                    }
-                    onOpenNewConversation={() =>
-                      dispatchAgentGuiWorkbenchCommand({
-                        type: "new-conversation",
-                        instanceId
-                      })
-                    }
-                    pendingTarget={pendingTarget}
-                    onCancelTargetSwitch={() => setPendingTarget(null)}
-                    onLeaveSession={(
-                      target,
-                      fromSession,
-                      draft,
-                      projectPath
-                    ) => {
-                      setPendingTarget({
-                        target,
-                        fromSession,
-                        draft,
-                        projectPath
-                      });
-                      setNode((current) => ({
-                        ...current,
-                        lastActiveAgentSessionId: null
-                      }));
-                    }}
-                    onSelectAgent={(target) => {
-                      setPendingTarget(null);
-                      setNode((current) =>
-                        current.agentTargetId === target.id
-                          ? current
-                          : {
-                              ...current,
-                              provider: target.provider,
-                              agentTargetId: target.id,
-                              lastActiveAgentSessionId: null
-                            }
-                      );
-                    }}
-                  />
-                )
-              }}
+              disabled={disabledProp6}
+              hostCapabilities={hostCapabilitiesProp7}
+              hostActions={hostActionsProp8}
+              renderSlots={renderSlotsProp9}
             />
           </SideEntryProvider>
         </ResourceLinkProvider>
@@ -554,3 +638,150 @@ export function AgentGuiApplication({
     </ComposerDraftProvider>
   );
 }
+
+const ComposerFooterControlsBinding1 = observer(
+  function ComposerFooterControlsBinding1({
+    context,
+    client,
+    handle,
+    workspace,
+    snapshot,
+    setComposerFocusSequence,
+    pendingNewConversation,
+    setPendingNewConversation,
+    instanceId,
+    pendingTarget,
+    setPendingTarget,
+    setNode
+  }: ComposerFooterControlsBinding1Props) {
+    const executionTargetOptions = useMemo(
+      () => executionTargets(workspace),
+      [workspace]
+    );
+    const onNewConversationAppliedProp10 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<
+          typeof ComposerFooterControls
+        >["onNewConversationApplied"]
+      >
+    >(() => setPendingNewConversation(undefined));
+    const onOpenNewConversationProp11 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<
+          typeof ComposerFooterControls
+        >["onOpenNewConversation"]
+      >
+    >(() =>
+      dispatchAgentGuiWorkbenchCommand({
+        type: "new-conversation",
+        instanceId
+      })
+    );
+    const onCancelTargetSwitchProp12 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<
+          typeof ComposerFooterControls
+        >["onCancelTargetSwitch"]
+      >
+    >(() => setPendingTarget(null));
+    const onLeaveSessionProp13 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ComposerFooterControls>["onLeaveSession"]
+      >
+    >((target, fromSession, draft, projectPath) => {
+      setPendingTarget({
+        target,
+        fromSession,
+        draft,
+        projectPath
+      });
+      setNode((current) => ({
+        ...current,
+        lastActiveAgentSessionId: null
+      }));
+    });
+    const onSelectAgentProp14 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ComposerFooterControls>["onSelectAgent"]
+      >
+    >((target) => {
+      setPendingTarget(null);
+      setNode((current) =>
+        current.agentTargetId === target.id
+          ? current
+          : {
+              ...current,
+              provider: target.provider,
+              agentTargetId: target.id,
+              lastActiveAgentSessionId: null
+            }
+      );
+    });
+    return (
+      <ComposerFooterControls
+        context={context}
+        client={client}
+        handle={handle}
+        targets={executionTargetOptions}
+        snapshot={snapshot}
+        onReadyForFocus={setComposerFocusSequence}
+        newConversationRequest={pendingNewConversation}
+        onNewConversationApplied={onNewConversationAppliedProp10}
+        onOpenNewConversation={onOpenNewConversationProp11}
+        pendingTarget={pendingTarget}
+        onCancelTargetSwitch={onCancelTargetSwitchProp12}
+        onLeaveSession={onLeaveSessionProp13}
+        onSelectAgent={onSelectAgentProp14}
+      />
+    );
+  }
+);
+
+type ComposerFooterControlsBinding1Props = {
+  context: import("../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/AgentGUINodeView").AgentGUIComposerFooterAccessoryContext;
+  client: NonNullable<{
+    client: AgentGuiHostServices;
+    initial: AgentGuiInitSnapshot;
+    handle: RuntimeHandle;
+    root: HTMLElement;
+  }>["client"];
+  handle: NonNullable<{
+    client: AgentGuiHostServices;
+    initial: AgentGuiInitSnapshot;
+    handle: RuntimeHandle;
+    root: HTMLElement;
+  }>["handle"];
+  workspace: import("./protocol").AgentGuiWorkspaceState;
+  snapshot: AgentGuiInitSnapshot;
+  setComposerFocusSequence: import("react").Dispatch<
+    import("react").SetStateAction<number | null>
+  >;
+  pendingNewConversation:
+    | import("./protocol").AgentGuiNewConversationRequest
+    | undefined;
+  setPendingNewConversation: import("react").Dispatch<
+    import("react").SetStateAction<
+      import("./protocol").AgentGuiNewConversationRequest | undefined
+    >
+  >;
+  instanceId: string;
+  pendingTarget: {
+    target: ReturnType<typeof executionTargets>[number];
+    fromSession: string;
+    draft?: ProviderDraft;
+    projectPath?: string | null;
+  } | null;
+  setPendingTarget: import("react").Dispatch<
+    import("react").SetStateAction<{
+      target: ReturnType<typeof executionTargets>[number];
+      fromSession: string;
+      draft?: ProviderDraft;
+      projectPath?: string | null;
+    } | null>
+  >;
+  setNode: import("react").Dispatch<
+    import("react").SetStateAction<
+      import("../../../vendor/tutti/packages/agent/gui/types").AgentGUINodeData
+    >
+  >;
+};

@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import { InvokedAgentReply } from "@multica/tutti-agent-gui-host/invoked-agent-reply";
 import { toast } from "@tutti-os/ui-system";
 import { observer } from "mobx-react-lite";
@@ -43,6 +45,7 @@ import {
 } from "./AgentVisibleErrorMessage";
 import { RawTimelineJsonDisclosure } from "./RawTimelineJsonDisclosure";
 import { useAgentUserMessageEditRetry } from "./useAgentUserMessageEditRetry";
+const AgentPlanCardMessage = observer(AgentPlanCardMessageRender);
 
 const DEFAULT_TOOL_CALLS_LABEL = (count: number): string =>
   `${count} tool calls`;
@@ -141,6 +144,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
     },
     [agentHostApi, basePath, onLinkAction, workspaceRoot]
   );
+  const handleLinkClickCallback = usePersistCallback(handleLinkClick);
   const handleExternalLinkClick = useCallback(
     (href: string): void => {
       const action = resolveAgentConversationLinkAction({
@@ -154,6 +158,9 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
       }
     },
     [basePath, onLinkAction, workspaceRoot]
+  );
+  const handleExternalLinkClickCallback = usePersistCallback(
+    handleExternalLinkClick
   );
   const handleCopyMessageText = useCallback(
     async (text: string): Promise<boolean> => {
@@ -181,13 +188,16 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
     },
     [agentHostApi]
   );
+  const handleCopyMessageTextCallback = usePersistCallback(
+    handleCopyMessageText
+  );
   const thinkingContent = !isUser
     ? row.thinking.map((thinking) => (
         <AgentThinkingDisclosure
           key={thinking.id}
           thinking={thinking}
           label={thinkingLabel}
-          onLinkClick={handleLinkClick}
+          onLinkClick={handleLinkClickCallback}
           showRawTimelineJson={showRawTimelineJson}
           rawTimelineJsonLabel={rawTimelineJsonLabel}
         />
@@ -202,12 +212,32 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
             row={toolRow}
             label={toolCallsLabel}
             thinkingLabel={thinkingLabel}
-            onLinkClick={handleLinkClick}
+            onLinkClick={handleLinkClickCallback}
             showRawTimelineJson={showRawTimelineJson}
             rawTimelineJsonLabel={rawTimelineJsonLabel}
           />
         ))
       : null;
+
+  const handleStartEditCallback = usePersistCallback(handleStartEdit);
+  const editActionAvailable = !isEditing && Boolean(editRetry);
+  const messageEditLabel = editRetry?.labels.edit;
+  const messageEditAction = useMemo(
+    () =>
+      editActionAvailable
+        ? {
+            disabled: editPending,
+            label: messageEditLabel!,
+            onClick: handleStartEditCallback
+          }
+        : null,
+    [
+      editActionAvailable,
+      editPending,
+      messageEditLabel,
+      handleStartEditCallback
+    ]
+  );
 
   const messageContent = row.messages.map((message, messageIndex) => {
     const messageFooterAction =
@@ -248,7 +278,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           documentCacheKey={message.id}
           className={`workspace-agents-status-panel__detail-user-message ${styles.userMessageBubble}`}
           editorClassName="text-[inherit]"
-          onLinkClick={handleLinkClick}
+          onLinkClick={handleLinkClickCallback}
           availableSkills={availableSkills}
           workspaceAppIcons={workspaceAppIcons}
         />
@@ -265,13 +295,13 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
         <AgentVisibleErrorMessage
           message={message}
           onAuthLogin={onAuthLogin}
-          onExternalLink={handleExternalLinkClick}
+          onExternalLink={handleExternalLinkClickCallback}
         />
       ) : recoveredError ? (
         <AgentVisibleErrorMessage
           message={recoveredError}
           onAuthLogin={onAuthLogin}
-          onExternalLink={handleExternalLinkClick}
+          onExternalLink={handleExternalLinkClickCallback}
         />
       ) : message.systemNotice ? (
         <AgentSystemNoticeMessage message={message} />
@@ -292,23 +322,13 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           workspaceAppIcons={workspaceAppIcons}
         />
       ) : (
-        <AgentMessageMarkdown
-          content={message.body}
-          documentCacheKey={message.id}
-          className={styles.assistantMarkdown}
+        <AgentMessageMarkdownBinding1
+          message={message}
           onLinkAction={onLinkAction}
-          workspaceLinkContext={{
-            workspaceRoot,
-            basePath,
-            source: "agent-markdown"
-          }}
+          workspaceRoot={workspaceRoot}
+          basePath={basePath}
           workspaceAppIcons={workspaceAppIcons}
-          enableImageZoom
-          streaming={
-            isActiveTurn ||
-            message.statusKind === "working" ||
-            message.statusKind === "waiting"
-          }
+          isActiveTurn={isActiveTurn}
         />
       );
     const editor =
@@ -338,14 +358,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           {renderedContent}
         </InvokedAgentReply>
       );
-    const editAction =
-      isEditTarget && !isEditing && editRetry
-        ? {
-            disabled: editPending,
-            label: editRetry.labels.edit,
-            onClick: handleStartEdit
-          }
-        : null;
+    const editAction = isEditTarget ? messageEditAction : null;
 
     if (rawTimelineJson) {
       return (
@@ -355,7 +368,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           editAction={editAction}
           occurredAtUnixMs={message.occurredAtUnixMs}
           speaker={row.speaker}
-          onCopyMessageText={handleCopyMessageText}
+          onCopyMessageText={handleCopyMessageTextCallback}
           footerAction={messageFooterAction}
         >
           {content}
@@ -373,7 +386,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           editAction={editAction}
           occurredAtUnixMs={message.occurredAtUnixMs}
           speaker={row.speaker}
-          onCopyMessageText={handleCopyMessageText}
+          onCopyMessageText={handleCopyMessageTextCallback}
           footerAction={messageFooterAction}
         >
           {content}
@@ -389,7 +402,7 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
           editAction={null}
           occurredAtUnixMs={message.occurredAtUnixMs}
           speaker={row.speaker}
-          onCopyMessageText={handleCopyMessageText}
+          onCopyMessageText={handleCopyMessageTextCallback}
           footerAction={messageFooterAction}
         >
           {content}
@@ -445,34 +458,96 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
 
 // Codex plan-mode proposals render as a framed card (mirrors the codex TUI
 // treating the plan item as a distinct artifact rather than chat text).
-function AgentPlanCardMessage({
+function AgentPlanCardMessageRender({
   message,
   workspaceRoot,
   basePath,
   onLinkAction,
   workspaceAppIcons
-}: {
-  message: AgentMessageContentVM;
-  workspaceRoot: string | null;
-  basePath: string;
-  onLinkAction?: (action: WorkspaceLinkAction) => void;
-  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
-}): JSX.Element {
+}: AgentPlanCardMessageProps): JSX.Element {
   "use memo";
+
+  const workspaceLinkContextProp1 = useMemo<
+    NonNullable<
+      React.ComponentProps<typeof AgentMessageMarkdown>["workspaceLinkContext"]
+    >
+  >(
+    () => ({
+      workspaceRoot: workspaceRoot,
+      basePath: basePath,
+      source: "agent-markdown"
+    }),
+    [workspaceRoot, basePath]
+  );
   return (
     <AgentPlanCard copyText={message.body}>
       <AgentMessageMarkdown
         content={message.body}
         className={styles.assistantMarkdown}
         onLinkAction={onLinkAction}
-        workspaceLinkContext={{
-          workspaceRoot,
-          basePath,
-          source: "agent-markdown"
-        }}
+        workspaceLinkContext={workspaceLinkContextProp1}
         workspaceAppIcons={workspaceAppIcons}
         enableImageZoom
       />
     </AgentPlanCard>
   );
 }
+
+const AgentMessageMarkdownBinding1 = observer(
+  function AgentMessageMarkdownBinding1({
+    message,
+    onLinkAction,
+    workspaceRoot,
+    basePath,
+    workspaceAppIcons,
+    isActiveTurn
+  }: AgentMessageMarkdownBinding1Props) {
+    const workspaceLinkContextProp2 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof AgentMessageMarkdown
+        >["workspaceLinkContext"]
+      >
+    >(
+      () => ({
+        workspaceRoot: workspaceRoot,
+        basePath: basePath,
+        source: "agent-markdown"
+      }),
+      [workspaceRoot, basePath]
+    );
+    return (
+      <AgentMessageMarkdown
+        content={message.body}
+        documentCacheKey={message.id}
+        className={styles.assistantMarkdown}
+        onLinkAction={onLinkAction}
+        workspaceLinkContext={workspaceLinkContextProp2}
+        workspaceAppIcons={workspaceAppIcons}
+        enableImageZoom
+        streaming={
+          isActiveTurn ||
+          message.statusKind === "working" ||
+          message.statusKind === "waiting"
+        }
+      />
+    );
+  }
+);
+
+type AgentPlanCardMessageProps = {
+  message: AgentMessageContentVM;
+  workspaceRoot: string | null;
+  basePath: string;
+  onLinkAction?: (action: WorkspaceLinkAction) => void;
+  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+};
+
+type AgentMessageMarkdownBinding1Props = {
+  message: AgentMessageContentVM;
+  onLinkAction: NonNullable<AgentMessageBlockProps>["onLinkAction"];
+  workspaceRoot: NonNullable<AgentMessageBlockProps>["workspaceRoot"];
+  basePath: NonNullable<AgentMessageBlockProps>["basePath"];
+  workspaceAppIcons: NonNullable<AgentMessageBlockProps>["workspaceAppIcons"];
+  isActiveTurn: boolean;
+};

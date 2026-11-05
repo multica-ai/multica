@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import { Button } from "../../../app/renderer/components/ui/button";
@@ -131,27 +133,14 @@ export const AgentVisibleErrorMessage = observer(
           </div>
           {(externalAction?.url && onExternalLink) ||
           (actionKey && focus && openAgentEnvPanel) ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="shrink-0"
-              onClick={() => {
-                if (externalAction?.url) {
-                  onExternalLink?.(externalAction.url);
-                  return;
-                }
-                if (focus && openAgentEnvPanel) {
-                  openAgentEnvPanel({
-                    provider: error?.provider ?? null,
-                    focus
-                  });
-                }
-              }}
-            >
-              {externalAction?.label ||
-                (actionKey ? translate(actionKey) : null)}
-            </Button>
+            <ButtonBinding1
+              externalAction={externalAction}
+              onExternalLink={onExternalLink}
+              focus={focus}
+              openAgentEnvPanel={openAgentEnvPanel}
+              error={error}
+              actionKey={actionKey}
+            />
           ) : null}
         </div>
       </section>
@@ -212,3 +201,65 @@ function visibleErrorHint(
     }
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  externalAction,
+  onExternalLink,
+  focus,
+  openAgentEnvPanel,
+  error,
+  actionKey,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    if (externalAction?.url) {
+      onExternalLink?.(externalAction.url);
+      return;
+    }
+    if (focus && openAgentEnvPanel) {
+      openAgentEnvPanel({
+        provider: error?.provider ?? null,
+        focus
+      });
+    }
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="shrink-0"
+        onClick={onClickProp1}
+      >
+        {externalAction?.label || (actionKey ? translate(actionKey) : null)}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  externalAction: { label: string; url: string } | null;
+  onExternalLink: NonNullable<{
+    message: AgentMessageContentVM;
+    onAuthLogin?: (provider?: string | null) => void;
+    onExternalLink?: (href: string) => void;
+  }>["onExternalLink"];
+  focus:
+    | import("../../agentEnv/agentEnvPanelActions").AgentEnvPanelFocus
+    | null;
+  openAgentEnvPanel:
+    | import("../../agentEnv/agentEnvPanelActions").OpenAgentEnvPanelAction
+    | null;
+  error: NonNullable<
+    NonNullable<{
+      message: AgentMessageContentVM;
+      onAuthLogin?: (provider?: string | null) => void;
+      onExternalLink?: (href: string) => void;
+    }>["message"]
+  >["visibleError"];
+  actionKey: string | null;
+};

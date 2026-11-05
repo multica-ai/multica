@@ -22,6 +22,10 @@ import type { AgentComposerDraft } from "./agent-gui/agentGuiNode/model/agentGui
 import type { AgentHostAgentSessionComposerSettings } from "./shared/contracts/dto";
 import type { ConversationRowsModel } from "./state/ConversationRowsModel";
 import type { AgentConversationServices } from "./state/conversation-services";
+import { observer } from "mobx-react-lite";
+export const ConversationServicesProvider = observer(
+  ConversationServicesProviderRender
+);
 
 export type AgentActivitySessionMessages = Readonly<
   Record<string, readonly AgentActivityMessage[]>
@@ -427,7 +431,7 @@ export interface ConversationServicesProviderProps extends PropsWithChildren {
   runtime?: ConversationServices | null;
 }
 
-export function ConversationServicesProvider({
+function ConversationServicesProviderRender({
   children,
   runtime
 }: ConversationServicesProviderProps): JSX.Element {

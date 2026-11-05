@@ -1,10 +1,12 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const CloseLinedIcon = observer(CloseLinedIconRender);
 
 /**
  * Lined dismiss (24x24 viewBox). Fill uses `currentColor` for panel / chrome close buttons.
  * Source asset: `assets/icons/close-lined.svg`.
  */
-export function CloseLinedIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+function CloseLinedIconRender(props: SVGProps<SVGSVGElement>): JSX.Element {
   "use memo";
   return (
     <svg

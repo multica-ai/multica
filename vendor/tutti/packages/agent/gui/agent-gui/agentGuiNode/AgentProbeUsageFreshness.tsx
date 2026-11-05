@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { DropdownMenuItem } from "@tutti-os/ui-system";
 import { RefreshCw } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -57,17 +58,7 @@ export const AgentProbeUsageFreshness = observer(
     disabled = false,
     presentation = "button",
     testId
-  }: {
-    ariaDescribedBy?: string;
-    capturedAtUnixMs: number | null;
-    isLoading: boolean;
-    didFail: boolean;
-    onRefresh: () => void;
-    labels: AgentProbeUsageFreshnessLabels;
-    disabled?: boolean;
-    presentation?: "button" | "menu-item";
-    testId?: string;
-  }): React.JSX.Element {
+  }: AgentProbeUsageFreshnessProps): React.JSX.Element {
     const [nowMs, setNowMs] = useState(() => Date.now());
     // Bumped on every click. A refresh can be a no-op (served from the
     // main-process throttle cache within its TTL) and never flip `isLoading`, so
@@ -81,6 +72,7 @@ export const AgentProbeUsageFreshness = observer(
       setClickSpinNonce((nonce) => nonce + 1);
       onRefresh();
     };
+    const handleClickCallback = usePersistCallback(handleClick);
 
     useEffect(() => {
       if (!showRelativeTime) {
@@ -125,6 +117,12 @@ export const AgentProbeUsageFreshness = observer(
       </>
     );
 
+    const onSelectProp1 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+    >((event) => {
+      event.preventDefault();
+      handleClick();
+    });
     if (presentation === "menu-item") {
       return (
         <DropdownMenuItem
@@ -135,10 +133,7 @@ export const AgentProbeUsageFreshness = observer(
           data-state={isLoading ? "loading" : didFail ? "failed" : "idle"}
           data-testid={testId}
           disabled={isLoading || disabled}
-          onSelect={(event) => {
-            event.preventDefault();
-            handleClick();
-          }}
+          onSelect={onSelectProp1}
           title={labels.refreshAria}
         >
           {content}
@@ -153,7 +148,7 @@ export const AgentProbeUsageFreshness = observer(
         data-testid={testId}
         data-state={isLoading ? "loading" : didFail ? "failed" : "idle"}
         className={`nodrag inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-[5px] px-1 py-0.5 text-[11px] leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] disabled:cursor-default disabled:opacity-70 [-webkit-app-region:no-drag] ${stateClassName}`}
-        onClick={handleClick}
+        onClick={handleClickCallback}
         disabled={isLoading || disabled}
         aria-label={labels.refreshAria}
         aria-busy={isLoading}
@@ -164,3 +159,15 @@ export const AgentProbeUsageFreshness = observer(
     );
   }
 );
+
+type AgentProbeUsageFreshnessProps = {
+  ariaDescribedBy?: string;
+  capturedAtUnixMs: number | null;
+  isLoading: boolean;
+  didFail: boolean;
+  onRefresh: () => void;
+  labels: AgentProbeUsageFreshnessLabels;
+  disabled?: boolean;
+  presentation?: "button" | "menu-item";
+  testId?: string;
+};

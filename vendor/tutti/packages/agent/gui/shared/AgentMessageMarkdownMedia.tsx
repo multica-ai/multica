@@ -22,12 +22,17 @@ import {
   retainCachedMarkdownMedia,
   type MarkdownMediaState
 } from "./agentMessageMarkdownLinks";
+import { observer } from "mobx-react-lite";
+export const MarkdownMedia = observer(MarkdownMediaRender);
+const UnsupportedMarkdownMediaPreview = observer(
+  UnsupportedMarkdownMediaPreviewRender
+);
 
 export function resetCachedMarkdownImagesForTests(): void {
   resetCachedMarkdownMediaForTests();
 }
 
-export function MarkdownMedia({
+function MarkdownMediaRender({
   node: _node,
   src,
   alt,
@@ -241,7 +246,7 @@ export function MarkdownMedia({
   );
 }
 
-function UnsupportedMarkdownMediaPreview(): JSX.Element {
+function UnsupportedMarkdownMediaPreviewRender(): JSX.Element {
   const { t } = useTranslation();
   return (
     <span className="mt-2 flex min-h-[160px] w-full items-center justify-center rounded-[8px] bg-[var(--transparency-block)] px-5 py-5 text-center text-[13px] leading-5 text-[var(--text-tertiary)]">

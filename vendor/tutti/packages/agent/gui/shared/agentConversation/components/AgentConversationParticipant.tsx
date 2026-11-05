@@ -6,8 +6,15 @@ import type {
   AgentConversationParticipantPresentation
 } from "../contracts/agentConversationParticipantPresentation";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { observer } from "mobx-react-lite";
+export const AgentConversationParticipantHeader = observer(
+  AgentConversationParticipantHeaderRender
+);
+const AgentConversationParticipantAvatar = observer(
+  AgentConversationParticipantAvatarRender
+);
 
-export function AgentConversationParticipantHeader({
+function AgentConversationParticipantHeaderRender({
   presentation,
   speaker
 }: {
@@ -52,7 +59,7 @@ export function AgentConversationParticipantHeader({
   );
 }
 
-function AgentConversationParticipantAvatar({
+function AgentConversationParticipantAvatarRender({
   presentation,
   speaker
 }: {

@@ -10,6 +10,9 @@ import {
   SuccessFilledIcon,
   WarningFilledIcon
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+export const AgentSetupStepIcon = observer(AgentSetupStepIconRender);
+export const AgentSetupDialog = observer(AgentSetupDialogRender);
 
 export type AgentSetupStepStatus =
   | "pending"
@@ -18,7 +21,7 @@ export type AgentSetupStepStatus =
   | "error"
   | "skipped";
 
-export function AgentSetupStepIcon({
+function AgentSetupStepIconRender({
   status,
   warning = false
 }: {
@@ -56,7 +59,7 @@ export interface AgentSetupDialogProps {
   title: ReactNode;
 }
 
-export function AgentSetupDialog({
+function AgentSetupDialogRender({
   afterContent,
   children,
   description,

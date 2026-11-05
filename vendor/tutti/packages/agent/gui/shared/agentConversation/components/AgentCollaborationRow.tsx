@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   ArrowRightLeft,
   ChevronDown,
@@ -31,13 +34,7 @@ export const AgentCollaborationRow = observer(function AgentCollaborationRow({
   basePath,
   onLinkAction,
   workspaceAppIcons
-}: {
-  collaboration: AgentCollaborationVM;
-  workspaceRoot: string | null;
-  basePath: string;
-  onLinkAction?: (action: WorkspaceLinkAction) => void;
-  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
-}): JSX.Element {
+}: AgentCollaborationRowProps): JSX.Element {
   "use memo";
   const [resultExpanded, setResultExpanded] = useState(false);
   const adoption = collaboration.adoption;
@@ -130,40 +127,21 @@ export const AgentCollaborationRow = observer(function AgentCollaborationRow({
       ) : null}
       {collaboration.mode === "consult" && resultText ? (
         <div className="mt-2">
-          <button
-            type="button"
-            data-testid="agent-collaboration-result-toggle"
-            aria-expanded={resultExpanded}
-            className="inline-flex items-center gap-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-            onClick={() => setResultExpanded((value) => !value)}
-          >
-            {translate(
-              resultExpanded
-                ? "agentHost.agentGui.collaborationResultHide"
-                : "agentHost.agentGui.collaborationResultShow"
-            )}
-            {resultExpanded ? (
-              <ChevronUp size={13} strokeWidth={2} aria-hidden="true" />
-            ) : (
-              <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
-            )}
-          </button>
+          <ButtonBinding1
+            resultExpanded={resultExpanded}
+            setResultExpanded={setResultExpanded}
+          />
           {resultExpanded ? (
             <div
               data-testid="agent-collaboration-result"
               className="mt-1.5 min-w-0"
             >
-              <AgentMessageMarkdown
-                content={resultText}
-                className={styles.assistantMarkdown}
+              <AgentMessageMarkdownBinding2
+                resultText={resultText}
                 onLinkAction={onLinkAction}
-                workspaceLinkContext={{
-                  workspaceRoot,
-                  basePath,
-                  source: "agent-markdown"
-                }}
+                workspaceRoot={workspaceRoot}
+                basePath={basePath}
                 workspaceAppIcons={workspaceAppIcons}
-                enableImageZoom
               />
             </div>
           ) : null}
@@ -270,3 +248,119 @@ function formatCollaborationDuration(durationMs: number): string {
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  resultExpanded,
+  setResultExpanded,
+  ...slotProps
+}: {
+  resultExpanded: boolean;
+  setResultExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    resultExpanded: boolean;
+    setResultExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setResultExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        data-testid="agent-collaboration-result-toggle"
+        aria-expanded={resultExpanded}
+        className="inline-flex items-center gap-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+        onClick={onClickProp1}
+      >
+        {translate(
+          resultExpanded
+            ? "agentHost.agentGui.collaborationResultHide"
+            : "agentHost.agentGui.collaborationResultShow"
+        )}
+        {resultExpanded ? (
+          <ChevronUp size={13} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+        )}
+      </button>
+    </Slot.Root>
+  );
+});
+
+const AgentMessageMarkdownBinding2 = observer(
+  function AgentMessageMarkdownBinding2({
+    resultText,
+    onLinkAction,
+    workspaceRoot,
+    basePath,
+    workspaceAppIcons
+  }: {
+    resultText: string;
+    onLinkAction: NonNullable<AgentCollaborationRowProps>["onLinkAction"];
+    workspaceRoot: NonNullable<AgentCollaborationRowProps>["workspaceRoot"];
+    basePath: NonNullable<AgentCollaborationRowProps>["basePath"];
+    workspaceAppIcons: NonNullable<AgentCollaborationRowProps>["workspaceAppIcons"];
+  }) {
+    const workspaceLinkContextProp2 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof AgentMessageMarkdown
+        >["workspaceLinkContext"]
+      >
+    >(
+      () => ({
+        workspaceRoot: workspaceRoot,
+        basePath: basePath,
+        source: "agent-markdown"
+      }),
+      [workspaceRoot, basePath]
+    );
+    return (
+      <AgentMessageMarkdown
+        content={resultText}
+        className={styles.assistantMarkdown}
+        onLinkAction={onLinkAction}
+        workspaceLinkContext={workspaceLinkContextProp2}
+        workspaceAppIcons={workspaceAppIcons}
+        enableImageZoom
+      />
+    );
+  }
+);
+
+type AgentCollaborationRowProps = {
+  collaboration: AgentCollaborationVM;
+  workspaceRoot: string | null;
+  basePath: string;
+  onLinkAction?: (action: WorkspaceLinkAction) => void;
+  workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+};
+
+type AgentMessageMarkdownBinding2Props = {
+  resultText: string;
+  onLinkAction: NonNullable<{
+    collaboration: AgentCollaborationVM;
+    workspaceRoot: string | null;
+    basePath: string;
+    onLinkAction?: (action: WorkspaceLinkAction) => void;
+    workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+  }>["onLinkAction"];
+  workspaceRoot: string | null;
+  basePath: NonNullable<{
+    collaboration: AgentCollaborationVM;
+    workspaceRoot: string | null;
+    basePath: string;
+    onLinkAction?: (action: WorkspaceLinkAction) => void;
+    workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
+  }>["basePath"];
+  workspaceAppIcons:
+    | readonly AgentMessageMarkdownWorkspaceAppIcon[]
+    | undefined;
+};

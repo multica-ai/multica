@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { WorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
 import type {
   WorkspaceFileReferenceAdapter,
@@ -56,22 +57,16 @@ export const AgentGUIReferencePickerSurface = observer(
     onConfirmBundles
   }: AgentGUIReferencePickerSurfaceProps): React.JSX.Element {
     return aggregator ? (
-      <ReferenceSourcePicker
+      <ReferenceSourcePickerBinding1
         aggregator={aggregator}
         copy={copy}
         initialTarget={initialTarget}
         isNodeSelectable={isNodeSelectable}
-        fileManagerCopy={fileManagerCopy ?? undefined}
+        fileManagerCopy={fileManagerCopy}
         open={open}
         purpose={purpose}
-        renderHeaderActions={
-          purpose === "directory" ? renderDirectoryHeaderActions : undefined
-        }
-        renderSidebarActions={
-          renderSidebarActions
-            ? (context) => renderSidebarActions({ ...context, purpose })
-            : undefined
-        }
+        renderDirectoryHeaderActions={renderDirectoryHeaderActions}
+        renderSidebarActions={renderSidebarActions}
         resolveContentErrorAction={resolveContentErrorAction}
         resolveEntryIconUrl={resolveEntryIconUrl}
         workspaceId={workspaceId}
@@ -93,3 +88,114 @@ export const AgentGUIReferencePickerSurface = observer(
     );
   }
 );
+
+const ReferenceSourcePickerBinding1 = observer(
+  function ReferenceSourcePickerBinding1({
+    aggregator,
+    copy,
+    initialTarget,
+    isNodeSelectable,
+    fileManagerCopy,
+    open,
+    purpose,
+    renderDirectoryHeaderActions,
+    renderSidebarActions,
+    resolveContentErrorAction,
+    resolveEntryIconUrl,
+    workspaceId,
+    onClose,
+    onConfirm,
+    onConfirmBundles
+  }: ReferenceSourcePickerBinding1Props) {
+    const renderSidebarActionsProp1 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof ReferenceSourcePicker
+        >["renderSidebarActions"]
+      >
+    >(
+      () => (context) => renderSidebarActions!({ ...context, purpose }),
+      [purpose, renderSidebarActions]
+    );
+    return (
+      <ReferenceSourcePicker
+        aggregator={aggregator}
+        copy={copy}
+        initialTarget={initialTarget}
+        isNodeSelectable={isNodeSelectable}
+        fileManagerCopy={fileManagerCopy ?? undefined}
+        open={open}
+        purpose={purpose}
+        renderHeaderActions={
+          purpose === "directory" ? renderDirectoryHeaderActions : undefined
+        }
+        renderSidebarActions={
+          renderSidebarActions ? renderSidebarActionsProp1 : undefined
+        }
+        resolveContentErrorAction={resolveContentErrorAction}
+        resolveEntryIconUrl={resolveEntryIconUrl}
+        workspaceId={workspaceId}
+        onClose={onClose}
+        onConfirm={onConfirm}
+        onConfirmBundles={onConfirmBundles}
+      />
+    );
+  }
+);
+
+type ReferenceSourcePickerBinding1Props = {
+  aggregator: import("../../../../../workspace/file-reference/src/core/referenceSourceAggregator").ReferenceSourceAggregator;
+  copy: WorkspaceFileReferenceCopy;
+  initialTarget:
+    | import("../../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceLocateTarget
+    | null
+    | undefined;
+  isNodeSelectable:
+    | ((
+        node: import("../../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceNode
+      ) => boolean)
+    | undefined;
+  fileManagerCopy: WorkspaceFileManagerI18nRuntime | null;
+  open: boolean;
+  purpose: "directory" | "reference";
+  renderDirectoryHeaderActions:
+    | ((context: {
+        refresh: () => void;
+        selectTarget: (
+          target: import("../../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceLocateTarget
+        ) => Promise<boolean>;
+        selectTargets: (
+          targets: readonly import("../../../../../workspace/file-reference/src/contracts/referenceSource").ReferenceLocateTarget[]
+        ) => Promise<number>;
+      }) => ReactNode)
+    | undefined;
+  renderSidebarActions:
+    | ((
+        context: Parameters<
+          NonNullable<ReferenceSourcePickerProps["renderSidebarActions"]>
+        >[0] & { purpose: "directory" | "reference" }
+      ) => ReactNode)
+    | undefined;
+  resolveContentErrorAction:
+    | ((
+        error: Error
+      ) =>
+        | import("../../../../../workspace/file-reference/src/ui/index").ReferenceSourceContentErrorAction
+        | null)
+    | undefined;
+  resolveEntryIconUrl:
+    | ((
+        entry: import("../../../../../workspace/file-manager/src/index").WorkspaceFileEntry
+      ) => Promise<string | null | undefined>)
+    | undefined;
+  workspaceId: string;
+  onClose: () => void;
+  onConfirm: (
+    refs: import("../../../../../workspace/file-reference/src/contracts/index").WorkspaceFileReference[]
+  ) => void;
+  onConfirmBundles:
+    | ((
+        result: import("../../../../../workspace/file-reference/src/ui/index").ReferenceGroupedSelection
+      ) => void)
+    | undefined;
+};

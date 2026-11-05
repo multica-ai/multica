@@ -11,6 +11,7 @@ import type {
 import type { AgentTranscriptEditRetryControl } from "../../../shared/agentConversation/components/useAgentTranscriptEditRetryProjection";
 import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
 import { userScrollBehavior } from "./agentGUIDetailScrollHelpers";
+import { observer } from "mobx-react-lite";
 
 const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
@@ -46,7 +47,7 @@ interface AgentGUIConversationTimelinePaneProps {
   };
 }
 
-export const AgentGUIConversationTimelinePane = memo(
+export const AgentGUIConversationTimelinePane = observer(
   function AgentGUIConversationTimelinePane({
     agentSessionId,
     editRetry,

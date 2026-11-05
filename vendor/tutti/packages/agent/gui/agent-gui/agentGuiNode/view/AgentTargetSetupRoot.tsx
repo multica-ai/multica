@@ -18,13 +18,7 @@ import {
 import { AgentTargetSetupGate } from "./AgentTargetSetupGate.tsx";
 import { useAgentTargetPreferences } from "./useAgentTargetPreferences.ts";
 
-export function useAgentTargetSetupRoot(input: {
-  activeConversationId: string | null;
-  agentTargets: readonly AgentGUIAgentTarget[];
-  environmentProvider: string | null | undefined;
-  openEnvironmentSetup?: OpenAgentEnvPanelAction;
-  selectedAgentTarget: AgentGUIAgentTarget;
-}): {
+export function useAgentTargetSetupRoot(input: useAgentTargetSetupRootProps): {
   controller: AgentTargetSetupController;
   environmentSetupVisible: boolean;
   homeTargetProjection: AgentGUIManagedHomeTargetProjection;
@@ -97,3 +91,11 @@ export const AgentTargetSetupRoot = observer(function AgentTargetSetupRoot({
     </AgentEnvPanelActionProvider>
   );
 });
+
+type useAgentTargetSetupRootProps = {
+  activeConversationId: string | null;
+  agentTargets: readonly AgentGUIAgentTarget[];
+  environmentProvider: string | null | undefined;
+  openEnvironmentSetup?: OpenAgentEnvPanelAction;
+  selectedAgentTarget: AgentGUIAgentTarget;
+};

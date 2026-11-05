@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Button } from "@tutti-os/ui-system";
 import {
   AlertCircle,
@@ -17,6 +18,11 @@ import type {
   AgentMessageContentVM,
   AgentMessageImageVM
 } from "../contracts/agentMessageRowVM";
+import { observer } from "mobx-react-lite";
+export const AgentUserImageGrid = observer(AgentUserImageGridRender);
+const AgentUserImageTile = observer(AgentUserImageTileRender);
+const ImageLoadingPlaceholder = observer(ImageLoadingPlaceholderRender);
+const ImageLoadFailurePlaceholder = observer(ImageLoadFailurePlaceholderRender);
 
 type ImageFailureKind = "load" | "read" | "unavailable";
 type ImageFailureUnavailableReason = "source_vm";
@@ -40,7 +46,7 @@ type ImageFailureReporter = (
   attempt: number
 ) => void;
 
-export function AgentUserImageGrid({
+function AgentUserImageGridRender({
   message
 }: {
   message: AgentMessageContentVM;
@@ -54,18 +60,19 @@ export function AgentUserImageGrid({
     },
     [runtime]
   );
+  const reportFailureCallback = usePersistCallback(reportFailure);
   const { failedSources, loadingIds, retryCounts, sources, markFailed, retry } =
     useAgentMessageImageSources(images, reportFailure);
   const { t } = useTranslation();
   const columnCount = Math.min(Math.max(images.length, 1), 4);
   const thumbnailWidth = images.length === 1 ? "160px" : "80px";
+  const styleProp1Value1 = `repeat(${columnCount}, ${thumbnailWidth})`;
+  const styleProp1 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () => ({ gridTemplateColumns: styleProp1Value1 }),
+    [styleProp1Value1]
+  );
   return (
-    <div
-      className={styles.userImageGrid}
-      style={{
-        gridTemplateColumns: `repeat(${columnCount}, ${thumbnailWidth})`
-      }}
-    >
+    <div className={styles.userImageGrid} style={styleProp1}>
       {images.map((image) => {
         const src = sources.get(image.id) ?? imageSourceUrl(image);
         const failureSource = imageFailureSource(image, src, runtime);
@@ -75,21 +82,20 @@ export function AgentUserImageGrid({
         const canRetry = canRetryImageFailure(displayedFailureSource);
         const attempt = retryCounts.get(image.id) ?? 0;
         return (
-          <AgentUserImageTile
+          <AgentUserImageTileBinding1
             key={image.id}
-            canRetry={canRetry}
             image={image}
+            canRetry={canRetry}
             src={src}
             failed={failed}
-            sourceLoading={!src && loadingIds.has(image.id)}
+            loadingIds={loadingIds}
             attempt={attempt}
-            failureLabel={t(imageFailureLabelKey(displayedFailureSource))}
-            retryLabel={t("agentHost.agentGui.retryImage")}
-            onFailed={() => {
-              markFailed(image.id, failureSource);
-              reportFailure(image, "load", attempt);
-            }}
-            onRetry={() => retry(image.id)}
+            t={t}
+            displayedFailureSource={displayedFailureSource}
+            markFailed={markFailed}
+            failureSource={failureSource}
+            reportFailure={reportFailureCallback}
+            retry={retry}
           />
         );
       })}
@@ -97,7 +103,7 @@ export function AgentUserImageGrid({
   );
 }
 
-function AgentUserImageTile({
+function AgentUserImageTileRender({
   attempt,
   canRetry,
   failed,
@@ -108,18 +114,7 @@ function AgentUserImageTile({
   retryLabel,
   sourceLoading,
   src
-}: {
-  attempt: number;
-  canRetry: boolean;
-  failed: boolean;
-  failureLabel: string;
-  image: AgentMessageImageVM;
-  onFailed: () => void;
-  onRetry: () => void;
-  retryLabel: string;
-  sourceLoading: boolean;
-  src: string | null;
-}): JSX.Element {
+}: AgentUserImageTileProps): JSX.Element {
   const [loadedImage, setLoadedImage] = useState<{
     attempt: number;
     src: string;
@@ -147,21 +142,13 @@ function AgentUserImageTile({
         />
       ) : src ? (
         <>
-          <ZoomableImage
+          <ZoomableImageBinding2
             key={`${image.id}:${attempt}:${src}`}
+            image={image}
+            attempt={attempt}
             src={src}
-            alt={image.name?.trim() || "image"}
-            className="block h-full w-full rounded-[7px] object-contain"
-            draggable={false}
-            downloadName={image.name?.trim() || "image.png"}
-            onLoad={() => {
-              setLoadedImage((current) =>
-                current?.attempt === attempt && current.src === src
-                  ? current
-                  : { attempt, src }
-              );
-            }}
-            onError={onFailed}
+            setLoadedImage={setLoadedImage}
+            onFailed={onFailed}
           />
           {loading ? <ImageLoadingPlaceholder /> : null}
         </>
@@ -359,7 +346,7 @@ function useAgentMessageImageSources(
   };
 }
 
-function ImageLoadingPlaceholder(): JSX.Element {
+function ImageLoadingPlaceholderRender(): JSX.Element {
   return (
     <div
       className="absolute inset-0 flex items-center justify-center bg-[color-mix(in_srgb,var(--text-primary)_6%,transparent)]"
@@ -374,7 +361,7 @@ function ImageLoadingPlaceholder(): JSX.Element {
   );
 }
 
-function ImageLoadFailurePlaceholder({
+function ImageLoadFailurePlaceholderRender({
   canRetry,
   icon: Icon,
   label,
@@ -542,3 +529,125 @@ function isMatchingImageFailure(
     failed.readerAvailable === current.readerAvailable
   );
 }
+
+const AgentUserImageTileBinding1 = observer(
+  function AgentUserImageTileBinding1({
+    image,
+    canRetry,
+    src,
+    failed,
+    loadingIds,
+    attempt,
+    t,
+    displayedFailureSource,
+    markFailed,
+    failureSource,
+    reportFailure,
+    retry
+  }: AgentUserImageTileBinding1Props) {
+    const onFailedProp2 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof AgentUserImageTile>["onFailed"]>
+    >(() => {
+      markFailed(image.id, failureSource);
+      reportFailure(image, "load", attempt);
+    });
+    const onRetryProp3 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof AgentUserImageTile>["onRetry"]>
+    >(() => retry(image.id));
+    return (
+      <AgentUserImageTile
+        key={image.id}
+        canRetry={canRetry}
+        image={image}
+        src={src}
+        failed={failed}
+        sourceLoading={!src && loadingIds.has(image.id)}
+        attempt={attempt}
+        failureLabel={t(imageFailureLabelKey(displayedFailureSource))}
+        retryLabel={t("agentHost.agentGui.retryImage")}
+        onFailed={onFailedProp2}
+        onRetry={onRetryProp3}
+      />
+    );
+  }
+);
+
+const ZoomableImageBinding2 = observer(function ZoomableImageBinding2({
+  image,
+  attempt,
+  src,
+  setLoadedImage,
+  onFailed
+}: {
+  image: NonNullable<AgentUserImageTileProps>["image"];
+  attempt: NonNullable<AgentUserImageTileProps>["attempt"];
+  src: string;
+  setLoadedImage: import("react").Dispatch<
+    import("react").SetStateAction<{ attempt: number; src: string } | null>
+  >;
+  onFailed: NonNullable<AgentUserImageTileProps>["onFailed"];
+}) {
+  const onLoadProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof ZoomableImage>["onLoad"]>
+  >(() => {
+    setLoadedImage((current) =>
+      current?.attempt === attempt && current.src === src
+        ? current
+        : { attempt, src }
+    );
+  });
+  return (
+    <ZoomableImage
+      key={`${image.id}:${attempt}:${src}`}
+      src={src}
+      alt={image.name?.trim() || "image"}
+      className="block h-full w-full rounded-[7px] object-contain"
+      draggable={false}
+      downloadName={image.name?.trim() || "image.png"}
+      onLoad={onLoadProp4}
+      onError={onFailed}
+    />
+  );
+});
+
+type AgentUserImageTileProps = {
+  attempt: number;
+  canRetry: boolean;
+  failed: boolean;
+  failureLabel: string;
+  image: AgentMessageImageVM;
+  onFailed: () => void;
+  onRetry: () => void;
+  retryLabel: string;
+  sourceLoading: boolean;
+  src: string | null;
+};
+
+type AgentUserImageTileBinding1Props = {
+  image: AgentMessageImageVM;
+  canRetry: boolean;
+  src: string | null;
+  failed: boolean;
+  loadingIds: ReadonlySet<string>;
+  attempt: number;
+  t: import("../../../i18n/runtime").TranslateFn;
+  displayedFailureSource: ImageFailureSource;
+  markFailed: (imageId: string, source: ImageFailureSource) => void;
+  failureSource: ImageFailureSource;
+  reportFailure: (
+    image: AgentMessageImageVM,
+    kind: ImageFailureKind,
+    attempt: number
+  ) => void;
+  retry: (imageId: string) => void;
+};
+
+type ZoomableImageBinding2Props = {
+  image: AgentMessageImageVM;
+  attempt: number;
+  src: string;
+  setLoadedImage: import("react").Dispatch<
+    import("react").SetStateAction<{ attempt: number; src: string } | null>
+  >;
+  onFailed: () => void;
+};

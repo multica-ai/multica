@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { GitHubBrandIcon } from "@tutti-os/ui-system/icons";
 import { ArrowLeftRight, Code, Compass, Import, Pencil, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -9,9 +11,13 @@ import type {
   AgentHomeSuggestionIcon,
   AgentHomeSuggestionItem
 } from "./model/agentGuiNodeTypes";
+const TuttiIcon = observer(TuttiIconRender);
+const TaskBreakdownIcon = observer(TaskBreakdownIconRender);
+const BattleIcon = observer(BattleIconRender);
+const QualityReviewIcon = observer(QualityReviewIconRender);
 
 /** Tutti brand glyph for the "Meet Tutti" chip. */
-function TuttiIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
+function TuttiIconRender(props: SVGProps<SVGSVGElement>): React.JSX.Element {
   return (
     <svg
       width="24"
@@ -30,7 +36,9 @@ function TuttiIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
 }
 
 /** Checklist glyph for the "Task breakdown" chip. */
-function TaskBreakdownIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
+function TaskBreakdownIconRender(
+  props: SVGProps<SVGSVGElement>
+): React.JSX.Element {
   return (
     <svg
       width="24"
@@ -49,7 +57,7 @@ function TaskBreakdownIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
 }
 
 /** Crossed-swords glyph for the "Agent interaction" chip. */
-function BattleIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
+function BattleIconRender(props: SVGProps<SVGSVGElement>): React.JSX.Element {
   return (
     <svg
       width="24"
@@ -68,7 +76,9 @@ function BattleIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
 }
 
 /** Speech-bubble with code brackets for the "Quality review" chip. */
-function QualityReviewIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
+function QualityReviewIconRender(
+  props: SVGProps<SVGSVGElement>
+): React.JSX.Element {
   return (
     <svg
       width="24"
@@ -137,108 +147,202 @@ export interface AgentHomeSuggestionsProps {
  * suggestions in a card. Clicking a suggestion prefills the composer (it does
  * not auto-send) so the user can edit before sending.
  */
-export const AgentHomeSuggestions = memo(
-  observer(function AgentHomeSuggestions({
-    categories,
-    onSelectSuggestion,
-    onSelectAction,
-    closeLabel
-  }: AgentHomeSuggestionsProps): React.JSX.Element | null {
-    "use memo";
+export const AgentHomeSuggestions = observer(function AgentHomeSuggestions({
+  categories,
+  onSelectSuggestion,
+  onSelectAction,
+  closeLabel
+}: AgentHomeSuggestionsProps): React.JSX.Element | null {
+  "use memo";
 
-    const [activeCategoryId, setActiveCategoryId] = useState<string | null>(
-      null
-    );
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
-    if (categories.length === 0) {
-      return null;
-    }
+  if (categories.length === 0) {
+    return null;
+  }
 
-    const activeCategory =
-      categories.find(
-        (category) =>
-          category.id === activeCategoryId && !isDirectCategory(category)
-      ) ?? null;
-    const ActiveCategoryIcon = activeCategory?.icon
-      ? CATEGORY_ICON[activeCategory.icon]
-      : null;
+  const activeCategory =
+    categories.find(
+      (category) =>
+        category.id === activeCategoryId && !isDirectCategory(category)
+    ) ?? null;
+  const ActiveCategoryIcon = activeCategory?.icon
+    ? CATEGORY_ICON[activeCategory.icon]
+    : null;
 
-    return (
-      <div className={styles.emptyHeroSuggestions}>
-        <div className={styles.emptyHeroSuggestionsChips}>
-          {categories.map((category) => {
-            const Icon = category.icon ? CATEGORY_ICON[category.icon] : null;
-            const direct = isDirectCategory(category);
-            const isActive = !direct && category.id === activeCategory?.id;
-            return (
-              <button
-                key={category.id}
-                type="button"
-                className={styles.emptyHeroSuggestionsChip}
-                aria-pressed={isActive}
-                onClick={() => {
-                  if (direct) {
-                    // A chip may carry both: fill the prompt first, then run the
-                    // action (e.g. open the @ palette on a specific tab).
-                    if (category.prompt) {
-                      onSelectSuggestion(category.prompt);
-                    }
-                    if (category.action) {
-                      onSelectAction?.(category.action);
-                    }
-                    return;
-                  }
-                  setActiveCategoryId((current) =>
-                    current === category.id ? null : category.id
-                  );
-                }}
-              >
-                {Icon ? (
-                  <Icon
-                    className={styles.emptyHeroSuggestionsChipIcon}
-                    aria-hidden
-                  />
-                ) : null}
-                <span>{category.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        {activeCategory ? (
-          <div className={styles.emptyHeroSuggestionsCard}>
-            <div className={styles.emptyHeroSuggestionsCardHeader}>
-              <span className={styles.emptyHeroSuggestionsCardTitle}>
-                {ActiveCategoryIcon ? (
-                  <ActiveCategoryIcon
-                    className={styles.emptyHeroSuggestionsChipIcon}
-                    aria-hidden
-                  />
-                ) : null}
-                {activeCategory.label}
-              </span>
-              <button
-                type="button"
-                className={styles.emptyHeroSuggestionsCardClose}
-                aria-label={closeLabel}
-                title={closeLabel}
-                onClick={() => setActiveCategoryId(null)}
-              >
-                <X aria-hidden />
-              </button>
-            </div>
-            {activeCategory.items?.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={styles.emptyHeroSuggestionsItem}
-                onClick={() => onSelectSuggestion(suggestionPrompt(item))}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
+  return (
+    <div className={styles.emptyHeroSuggestions}>
+      <div className={styles.emptyHeroSuggestionsChips}>
+        {categories.map((category) => {
+          const Icon = category.icon ? CATEGORY_ICON[category.icon] : null;
+          const direct = isDirectCategory(category);
+          const isActive = !direct && category.id === activeCategory?.id;
+          return (
+            <ButtonBinding1
+              key={category.id}
+              category={category}
+              isActive={isActive}
+              direct={direct}
+              onSelectSuggestion={onSelectSuggestion}
+              onSelectAction={onSelectAction}
+              setActiveCategoryId={setActiveCategoryId}
+              Icon={Icon}
+            />
+          );
+        })}
       </div>
+      {activeCategory ? (
+        <div className={styles.emptyHeroSuggestionsCard}>
+          <div className={styles.emptyHeroSuggestionsCardHeader}>
+            <span className={styles.emptyHeroSuggestionsCardTitle}>
+              {ActiveCategoryIcon ? (
+                <ActiveCategoryIcon
+                  className={styles.emptyHeroSuggestionsChipIcon}
+                  aria-hidden
+                />
+              ) : null}
+              {activeCategory.label}
+            </span>
+            <ButtonBinding2
+              closeLabel={closeLabel}
+              setActiveCategoryId={setActiveCategoryId}
+            />
+          </div>
+          {activeCategory.items?.map((item) => (
+            <ButtonBinding3
+              key={item.id}
+              item={item}
+              onSelectSuggestion={onSelectSuggestion}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  category,
+  isActive,
+  direct,
+  onSelectSuggestion,
+  onSelectAction,
+  setActiveCategoryId,
+  Icon,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => {
+    if (direct) {
+      // A chip may carry both: fill the prompt first, then run the
+      // action (e.g. open the @ palette on a specific tab).
+      if (category.prompt) {
+        onSelectSuggestion(category.prompt);
+      }
+      if (category.action) {
+        onSelectAction?.(category.action);
+      }
+      return;
+    }
+    setActiveCategoryId((current) =>
+      current === category.id ? null : category.id
     );
-  })
-);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={category.id}
+        type="button"
+        className={styles.emptyHeroSuggestionsChip}
+        aria-pressed={isActive}
+        onClick={onClickProp1}
+      >
+        {Icon ? (
+          <Icon className={styles.emptyHeroSuggestionsChipIcon} aria-hidden />
+        ) : null}
+        <span>{category.label}</span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  closeLabel,
+  setActiveCategoryId,
+  ...slotProps
+}: {
+  closeLabel: NonNullable<AgentHomeSuggestionsProps>["closeLabel"];
+  setActiveCategoryId: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    closeLabel: NonNullable<AgentHomeSuggestionsProps>["closeLabel"];
+    setActiveCategoryId: import("react").Dispatch<
+      import("react").SetStateAction<string | null>
+    >;
+  }
+>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setActiveCategoryId(null));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className={styles.emptyHeroSuggestionsCardClose}
+        aria-label={closeLabel}
+        title={closeLabel}
+        onClick={onClickProp2}
+      >
+        <X aria-hidden />
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding3 = observer(function ButtonBinding3({
+  item,
+  onSelectSuggestion,
+  ...slotProps
+}: {
+  item: AgentHomeSuggestionItem;
+  onSelectSuggestion: NonNullable<AgentHomeSuggestionsProps>["onSelectSuggestion"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    item: AgentHomeSuggestionItem;
+    onSelectSuggestion: NonNullable<AgentHomeSuggestionsProps>["onSelectSuggestion"];
+  }
+>) {
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => onSelectSuggestion(suggestionPrompt(item)));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={item.id}
+        type="button"
+        className={styles.emptyHeroSuggestionsItem}
+        onClick={onClickProp3}
+      >
+        {item.label}
+      </button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  category: AgentHomeSuggestionCategory;
+  isActive: boolean;
+  direct: boolean;
+  onSelectSuggestion: NonNullable<AgentHomeSuggestionsProps>["onSelectSuggestion"];
+  onSelectAction: NonNullable<AgentHomeSuggestionsProps>["onSelectAction"];
+  setActiveCategoryId: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+  Icon: React.ElementType<{ className?: string }> | null;
+};

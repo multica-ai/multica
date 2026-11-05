@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   useCallback,
   useEffect,
@@ -9,6 +11,8 @@ import {
   type ReactNode,
   type TransitionEvent
 } from "react";
+import { observer } from "mobx-react-lite";
+export const CollapsibleReveal = observer(CollapsibleRevealRender);
 
 interface CollapsibleRevealProps {
   expanded: boolean;
@@ -19,7 +23,7 @@ interface CollapsibleRevealProps {
   preMountOnIdle?: boolean;
 }
 
-export function CollapsibleReveal({
+function CollapsibleRevealRender({
   expanded,
   children,
   className,
@@ -27,7 +31,15 @@ export function CollapsibleReveal({
   onHeightTransitionEnd,
   preMountOnIdle = false
 }: CollapsibleRevealProps): JSX.Element | null {
-  "use memo";
+  const setRootRefCallback = usePersistCallback<typeof setRootRef>((...args) =>
+    setRootRef(...args)
+  );
+
+  const handleTransitionEndCallback = usePersistCallback<
+    typeof handleTransitionEnd
+  >((...args) => handleTransitionEnd(...args));
+
+  ("use memo");
   const [mounted, setMounted] = useState(expanded);
   const [visible, setVisible] = useState(expanded);
   const [height, setHeight] = useState<string>(expanded ? "auto" : "0px");
@@ -201,6 +213,11 @@ export function CollapsibleReveal({
     };
   }, [expanded, mounted, setRevealHeight, visible]);
 
+  const rootStyle: CSSProperties = useMemo<CSSProperties>(
+    () => ({ height }),
+    [height]
+  );
+
   if (!mounted) {
     return null;
   }
@@ -223,11 +240,9 @@ export function CollapsibleReveal({
     }
   };
 
-  const rootStyle: CSSProperties = { height };
-
   return (
     <div
-      ref={setRootRef}
+      ref={setRootRefCallback}
       className={["agent-collapsible-reveal", className ?? ""]
         .filter(Boolean)
         .join(" ")}
@@ -236,7 +251,7 @@ export function CollapsibleReveal({
       }
       aria-hidden={visible ? undefined : true}
       style={rootStyle}
-      onTransitionEnd={handleTransitionEnd}
+      onTransitionEnd={handleTransitionEndCallback}
     >
       <div
         ref={innerRef}

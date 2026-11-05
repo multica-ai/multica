@@ -7,8 +7,10 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { getTodoRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentTodoWriteContent = observer(AgentTodoWriteContentRender);
 
-export function AgentTodoWriteContent({
+function AgentTodoWriteContentRender({
   call
 }: AgentToolRendererProps): JSX.Element | null {
   "use memo";

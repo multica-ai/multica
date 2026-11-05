@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import { useState, type JSX } from "react";
 import type { AgentTaskStepVM } from "../contracts/agentTaskItemVM";
@@ -6,6 +8,7 @@ import { projectAgentTaskStepTool } from "../projection/agentTaskProjection";
 import { AgentToolCallHeader } from "./AgentToolCallHeader";
 import { AgentExpandedToolContent } from "./tool-renderers/AgentExpandedToolContent";
 import { hasAgentToolContent } from "./tool-renderers/agentToolContentShared";
+const AgentTaskStepRow = observer(AgentTaskStepRowRender);
 
 interface AgentTaskStepListProps {
   steps: AgentTaskStepVM[];
@@ -26,7 +29,7 @@ export const AgentTaskStepList = observer(function AgentTaskStepList({
   );
 });
 
-function AgentTaskStepRow({
+function AgentTaskStepRowRender({
   step,
   onLinkClick
 }: {
@@ -42,15 +45,12 @@ function AgentTaskStepRow({
   return (
     <div className="workspace-agents-status-panel__detail-tool-row">
       {hasDetail ? (
-        <button
-          type="button"
-          className="workspace-agents-status-panel__detail-tool-row-head workspace-agents-status-panel__detail-tool-row-head--button"
-          aria-expanded={expanded}
-          aria-label={ariaLabel}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <AgentToolCallHeader call={call} expanded={expanded} hasDetail />
-        </button>
+        <ButtonBinding1
+          expanded={expanded}
+          ariaLabel={ariaLabel}
+          setExpanded={setExpanded}
+          call={call}
+        />
       ) : (
         <div className="workspace-agents-status-panel__detail-tool-row-head">
           <AgentToolCallHeader call={call} expanded={false} hasDetail={false} />
@@ -111,3 +111,45 @@ function projectTaskStepCall(step: AgentTaskStepVM): AgentToolCallVM {
     occurredAtUnixMs: step.occurredAtUnixMs ?? null
   });
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  expanded,
+  ariaLabel,
+  setExpanded,
+  call,
+  ...slotProps
+}: {
+  expanded: boolean;
+  ariaLabel: string;
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  call: AgentToolCallVM;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    expanded: boolean;
+    ariaLabel: string;
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    call: AgentToolCallVM;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="workspace-agents-status-panel__detail-tool-row-head workspace-agents-status-panel__detail-tool-row-head--button"
+        aria-expanded={expanded}
+        aria-label={ariaLabel}
+        onClick={onClickProp1}
+      >
+        <AgentToolCallHeader call={call} expanded={expanded} hasDetail />
+      </button>
+    </Slot.Root>
+  );
+});

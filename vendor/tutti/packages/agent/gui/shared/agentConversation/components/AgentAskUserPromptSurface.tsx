@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { canonicalInteractionKey } from "@tutti-os/agent-activity-core";
 import { Button } from "@tutti-os/ui-system";
 import { observer } from "mobx-react-lite";
@@ -18,6 +20,8 @@ import {
   stripPromptTitlePunctuation
 } from "./interactivePromptPresentation";
 import { useAskUserAnswerFlow } from "./useAskUserAnswerFlow";
+const CompactQuickAnswerSurface = observer(CompactQuickAnswerSurfaceRender);
+const AskUserAnswerFlowSurface = observer(AskUserAnswerFlowSurfaceRender);
 
 type AskUserPrompt = Extract<AgentConversationPromptVM, { kind: "ask-user" }>;
 
@@ -73,7 +77,7 @@ export const AgentAskUserPromptSurface = observer(
   }
 );
 
-function CompactQuickAnswerSurface({
+function CompactQuickAnswerSurfaceRender({
   prompt,
   question,
   embedded = false,
@@ -103,44 +107,15 @@ function CompactQuickAnswerSurface({
         </div>
         <div className={styles.interactivePromptOptions}>
           {question.options.map((option) => (
-            <button
+            <ButtonBinding1
               key={option.label}
-              type="button"
-              className={styles.interactiveOptionButton}
-              aria-label={interactiveOptionLabel(
-                option.label,
-                option.description
-              )}
-              data-agent-question-option-id={option.id}
-              data-testid={
-                option.id
-                  ? `agent-question-${prompt.requestId}-${question.id}-option-${option.id}`
-                  : undefined
-              }
-              disabled={isSubmitting || isInteractionDisabled}
-              onClick={() =>
-                onSubmit({
-                  requestId: prompt.requestId,
-                  action: "submit",
-                  payload: {
-                    ...buildAskUserAnswerPayload({
-                      [question.id]: option.label
-                    })
-                  }
-                })
-              }
-            >
-              <span className={styles.interactiveOptionContent}>
-                <span className={styles.interactiveOptionTitle}>
-                  {option.label}
-                </span>
-                {option.description ? (
-                  <span className={styles.interactiveOptionDescription}>
-                    {option.description}
-                  </span>
-                ) : null}
-              </span>
-            </button>
+              option={option}
+              prompt={prompt}
+              question={question}
+              isSubmitting={isSubmitting}
+              isInteractionDisabled={isInteractionDisabled}
+              onSubmit={onSubmit}
+            />
           ))}
         </div>
       </div>
@@ -148,7 +123,7 @@ function CompactQuickAnswerSurface({
   );
 }
 
-function AskUserAnswerFlowSurface({
+function AskUserAnswerFlowSurfaceRender({
   prompt,
   conversationReturn,
   embedded = false,
@@ -202,15 +177,11 @@ function AskUserAnswerFlowSurface({
           <span className={styles.interactivePromptLead} role="status">
             {stripPromptTitlePunctuation(labels.waitingForAnswer)}
           </span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isSubmitting}
-            onClick={() => setCollapsed(false)}
-          >
-            {conversationReturn.continueAnswering}
-          </Button>
+          <ButtonBinding2
+            isSubmitting={isSubmitting}
+            setCollapsed={setCollapsed}
+            conversationReturn={conversationReturn}
+          />
         </div>
       </section>
     );
@@ -241,62 +212,37 @@ function AskUserAnswerFlowSurface({
             {question.options.map((option) => {
               const active = flow.selectedOptions.includes(option.label);
               return (
-                <button
+                <ButtonBinding3
                   key={option.label}
-                  type="button"
-                  className={styles.interactiveOptionButton}
-                  data-active={active}
-                  aria-pressed={active}
-                  aria-label={interactiveOptionLabel(
-                    option.label,
-                    option.description
-                  )}
-                  data-agent-question-option-id={option.id}
-                  data-testid={
-                    option.id
-                      ? `agent-question-${prompt.requestId}-${question.id}-option-${option.id}`
-                      : undefined
-                  }
-                  disabled={isSubmitting || isInteractionDisabled}
-                  onClick={() => flow.toggleOption(option.label)}
-                >
-                  <span className={styles.interactiveOptionContent}>
-                    <span className={styles.interactiveOptionTitle}>
-                      {option.label}
-                    </span>
-                    {option.description ? (
-                      <span className={styles.interactiveOptionDescription}>
-                        {option.description}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
+                  option={option}
+                  active={active}
+                  prompt={prompt}
+                  question={question}
+                  isSubmitting={isSubmitting}
+                  isInteractionDisabled={isInteractionDisabled}
+                  flow={flow}
+                />
               );
             })}
           </div>
         ) : null}
         {question.allowFreeText !== false ? (
-          <textarea
-            aria-label={question.question}
-            value={flow.freeText}
-            placeholder={labels.answerPlaceholder}
-            disabled={isSubmitting || isInteractionDisabled}
-            className={styles.interactivePromptTextarea}
-            data-testid={`agent-question-${prompt.requestId}-${question.id}-custom-answer`}
-            onChange={(event) => flow.setFreeText(event.currentTarget.value)}
+          <TextareaBinding4
+            question={question}
+            flow={flow}
+            labels={labels}
+            isSubmitting={isSubmitting}
+            isInteractionDisabled={isInteractionDisabled}
+            prompt={prompt}
           />
         ) : null}
         <div className={styles.interactivePromptActions}>
           {conversationReturn ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSubmitting}
-              onClick={() => setCollapsed(true)}
-            >
-              {conversationReturn.returnToConversation}
-            </Button>
+            <ButtonBinding5
+              isSubmitting={isSubmitting}
+              setCollapsed={setCollapsed}
+              conversationReturn={conversationReturn}
+            />
           ) : null}
           {prompt.questions.length > 1 ? (
             <Button
@@ -312,26 +258,15 @@ function AskUserAnswerFlowSurface({
             </Button>
           ) : null}
           {flow.isLastQuestion ? (
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              disabled={
-                isSubmitting ||
-                isInteractionDisabled ||
-                !flow.allQuestionsAnswered
-              }
-              data-testid={`agent-question-${prompt.requestId}-${question.id}-submit`}
-              onClick={() =>
-                onSubmit({
-                  requestId: prompt.requestId,
-                  action: "submit",
-                  payload: { ...flow.answerPayload }
-                })
-              }
-            >
-              {labels.submitAnswers}
-            </Button>
+            <ButtonBinding6
+              isSubmitting={isSubmitting}
+              isInteractionDisabled={isInteractionDisabled}
+              flow={flow}
+              prompt={prompt}
+              question={question}
+              onSubmit={onSubmit}
+              labels={labels}
+            />
           ) : (
             <Button
               type="button"
@@ -352,3 +287,326 @@ function AskUserAnswerFlowSurface({
     </section>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  option,
+  prompt,
+  question,
+  isSubmitting,
+  isInteractionDisabled,
+  onSubmit,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() =>
+    onSubmit({
+      requestId: prompt.requestId,
+      action: "submit",
+      payload: {
+        ...buildAskUserAnswerPayload({
+          [question.id]: option.label
+        })
+      }
+    })
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={option.label}
+        type="button"
+        className={styles.interactiveOptionButton}
+        aria-label={interactiveOptionLabel(option.label, option.description)}
+        data-agent-question-option-id={option.id}
+        data-testid={
+          option.id
+            ? `agent-question-${prompt.requestId}-${question.id}-option-${option.id}`
+            : undefined
+        }
+        disabled={isSubmitting || isInteractionDisabled}
+        onClick={onClickProp1}
+      >
+        <span className={styles.interactiveOptionContent}>
+          <span className={styles.interactiveOptionTitle}>{option.label}</span>
+          {option.description ? (
+            <span className={styles.interactiveOptionDescription}>
+              {option.description}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  isSubmitting,
+  setCollapsed,
+  conversationReturn,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => setCollapsed(false));
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={isSubmitting}
+        onClick={onClickProp2}
+      >
+        {conversationReturn.continueAnswering}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding3 = observer(function ButtonBinding3({
+  option,
+  active,
+  prompt,
+  question,
+  isSubmitting,
+  isInteractionDisabled,
+  flow,
+  ...slotProps
+}: ButtonBinding3Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding3Props>) {
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => flow.toggleOption(option.label));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={option.label}
+        type="button"
+        className={styles.interactiveOptionButton}
+        data-active={active}
+        aria-pressed={active}
+        aria-label={interactiveOptionLabel(option.label, option.description)}
+        data-agent-question-option-id={option.id}
+        data-testid={
+          option.id
+            ? `agent-question-${prompt.requestId}-${question.id}-option-${option.id}`
+            : undefined
+        }
+        disabled={isSubmitting || isInteractionDisabled}
+        onClick={onClickProp3}
+      >
+        <span className={styles.interactiveOptionContent}>
+          <span className={styles.interactiveOptionTitle}>{option.label}</span>
+          {option.description ? (
+            <span className={styles.interactiveOptionDescription}>
+              {option.description}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+const TextareaBinding4 = observer(function TextareaBinding4({
+  question,
+  flow,
+  labels,
+  isSubmitting,
+  isInteractionDisabled,
+  prompt
+}: TextareaBinding4Props) {
+  const onChangeProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"textarea">["onChange"]>
+  >((event) => flow.setFreeText(event.currentTarget.value));
+  return (
+    <textarea
+      aria-label={question.question}
+      value={flow.freeText}
+      placeholder={labels.answerPlaceholder}
+      disabled={isSubmitting || isInteractionDisabled}
+      className={styles.interactivePromptTextarea}
+      data-testid={`agent-question-${prompt.requestId}-${question.id}-custom-answer`}
+      onChange={onChangeProp4}
+    />
+  );
+});
+
+const ButtonBinding5 = observer(function ButtonBinding5({
+  isSubmitting,
+  setCollapsed,
+  conversationReturn,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => setCollapsed(true));
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={isSubmitting}
+        onClick={onClickProp5}
+      >
+        {conversationReturn.returnToConversation}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding6 = observer(function ButtonBinding6({
+  isSubmitting,
+  isInteractionDisabled,
+  flow,
+  prompt,
+  question,
+  onSubmit,
+  labels,
+  ...slotProps
+}: ButtonBinding6Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding6Props>) {
+  const onClickProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() =>
+    onSubmit({
+      requestId: prompt.requestId,
+      action: "submit",
+      payload: { ...flow.answerPayload }
+    })
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        disabled={
+          isSubmitting || isInteractionDisabled || !flow.allQuestionsAnswered
+        }
+        data-testid={`agent-question-${prompt.requestId}-${question.id}-submit`}
+        onClick={onClickProp6}
+      >
+        {labels.submitAnswers}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  option: import("../contracts/agentAskUserQuestionItemVM").AgentAskUserQuestionOptionVM;
+  prompt: NonNullable<
+    Omit<SharedAskUserSurfaceProps, "labels"> & {
+      question: AskUserPrompt["questions"][number];
+    }
+  >["prompt"];
+  question: NonNullable<
+    Omit<SharedAskUserSurfaceProps, "labels"> & {
+      question: AskUserPrompt["questions"][number];
+    }
+  >["question"];
+  isSubmitting: NonNullable<
+    Omit<SharedAskUserSurfaceProps, "labels"> & {
+      question: AskUserPrompt["questions"][number];
+    }
+  >["isSubmitting"];
+  isInteractionDisabled: boolean;
+  onSubmit: NonNullable<
+    Omit<SharedAskUserSurfaceProps, "labels"> & {
+      question: AskUserPrompt["questions"][number];
+    }
+  >["onSubmit"];
+};
+
+type ButtonBinding2Props = {
+  isSubmitting: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["isSubmitting"];
+  setCollapsed: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  conversationReturn: AgentInteractivePromptConversationReturn;
+};
+
+type ButtonBinding3Props = {
+  option: import("../contracts/agentAskUserQuestionItemVM").AgentAskUserQuestionOptionVM;
+  active: boolean;
+  prompt: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["prompt"];
+  question: import("../contracts/agentAskUserQuestionItemVM").AgentAskUserQuestionVM;
+  isSubmitting: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["isSubmitting"];
+  isInteractionDisabled: boolean;
+  flow: import("./useAskUserAnswerFlow").AskUserAnswerFlow;
+};
+
+type TextareaBinding4Props = {
+  question: import("../contracts/agentAskUserQuestionItemVM").AgentAskUserQuestionVM;
+  flow: import("./useAskUserAnswerFlow").AskUserAnswerFlow;
+  labels: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["labels"];
+  isSubmitting: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["isSubmitting"];
+  isInteractionDisabled: boolean;
+  prompt: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["prompt"];
+};
+
+type ButtonBinding5Props = {
+  isSubmitting: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["isSubmitting"];
+  setCollapsed: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  conversationReturn: AgentInteractivePromptConversationReturn;
+};
+
+type ButtonBinding6Props = {
+  isSubmitting: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["isSubmitting"];
+  isInteractionDisabled: boolean;
+  flow: import("./useAskUserAnswerFlow").AskUserAnswerFlow;
+  prompt: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["prompt"];
+  question: import("../contracts/agentAskUserQuestionItemVM").AgentAskUserQuestionVM;
+  onSubmit: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["onSubmit"];
+  labels: NonNullable<
+    SharedAskUserSurfaceProps & {
+      conversationReturn?: AgentInteractivePromptConversationReturn;
+    }
+  >["labels"];
+};

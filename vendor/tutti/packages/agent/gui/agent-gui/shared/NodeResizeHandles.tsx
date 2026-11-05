@@ -1,5 +1,7 @@
 import React from "react";
 import type { ResizeEdges } from "../../utils/nodeFrameResize";
+import { observer } from "mobx-react-lite";
+export const NodeResizeHandles = observer(NodeResizeHandlesRender);
 
 const HANDLE_CONFIGS: Array<{
   key: string;
@@ -23,7 +25,7 @@ const HANDLE_CONFIGS: Array<{
   }
 ];
 
-export function NodeResizeHandles({
+function NodeResizeHandlesRender({
   classNamePrefix,
   testIdPrefix,
   handleResizePointerDown

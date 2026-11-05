@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { SideQueueAction } from "@multica/tutti-agent-gui-host/side-entry";
 import { extractPlainTextFromContent } from "@tutti-os/ui-rich-text";
 import {
@@ -53,6 +56,11 @@ import {
   queuedPromptImageHasSafeRemoteUrl,
   queuedPromptImageLoadRequestIdentity
 } from "./queuedPromptImageLoadOwner";
+import { observer as observeClass } from "mobx-react";
+const AgentQueuedPromptText = observer(AgentQueuedPromptTextRender);
+export const AgentQueuedPromptPanelView = observer(
+  AgentQueuedPromptPanelViewRender
+);
 
 const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
@@ -242,6 +250,7 @@ class AgentQueuedPromptImage extends Component<
     this.loadOwner.start();
   }
 }
+observeClass(AgentQueuedPromptImage);
 
 /**
  * Text shown for a queued prompt. Falls back to the display prompt so a
@@ -279,7 +288,7 @@ interface AgentQueuedPromptTextProps {
   workspaceAppIcons: readonly AgentMessageMarkdownWorkspaceAppIcon[];
 }
 
-function AgentQueuedPromptText({
+function AgentQueuedPromptTextRender({
   displayText,
   measurementRef,
   onLinkClick,
@@ -290,19 +299,28 @@ function AgentQueuedPromptText({
     displayText,
     QUEUED_PROMPT_OVERFLOW_DESCENDANTS
   );
+  const refProp1 = usePersistCallback<
+    Extract<
+      NonNullable<React.ComponentProps<"div">["ref"]>,
+      (...args: never[]) => unknown
+    >
+  >((element) => {
+    overflowRef.current = element;
+    if (measurementRef) measurementRef.current = element;
+  });
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onClick"]>
+  >((event) => {
+    if (event.target instanceof Element && event.target.closest("a")) {
+      event.stopPropagation();
+    }
+  });
   const content = (
     <div
-      ref={(element) => {
-        overflowRef.current = element;
-        if (measurementRef) measurementRef.current = element;
-      }}
+      ref={refProp1}
       className={styles.composerQueuedPromptText}
       data-overflowing={overflowing ? "true" : "false"}
-      onClick={(event) => {
-        if (event.target instanceof Element && event.target.closest("a")) {
-          event.stopPropagation();
-        }
-      }}
+      onClick={onClickProp2}
     >
       <AgentMessageMarkdown
         content={displayText}
@@ -327,7 +345,7 @@ function AgentQueuedPromptText({
   );
 }
 
-export function AgentQueuedPromptPanelView({
+function AgentQueuedPromptPanelViewRender({
   queueStatus = "active",
   queuedPrompts,
   drainingQueuedPromptId,
@@ -355,16 +373,21 @@ export function AgentQueuedPromptPanelView({
     queuedPrompts.length > 1 ||
     singlePromptHasImages ||
     isSinglePromptOverflowing;
-  const panelStyle = {
-    "--agent-gui-queued-prompt-expanded-height": `${expandedListMaxHeightPx}px`
-  } as CSSProperties &
-    Record<"--agent-gui-queued-prompt-expanded-height", string>;
+  const panelStyle = useMemo(
+    () =>
+      ({
+        "--agent-gui-queued-prompt-expanded-height": `${expandedListMaxHeightPx}px`
+      }) as CSSProperties &
+        Record<"--agent-gui-queued-prompt-expanded-height", string>,
+    [expandedListMaxHeightPx]
+  );
   const toggleExpanded = (): void => {
     if (!canExpand) {
       return;
     }
     setIsExpanded((current) => !current);
   };
+  const toggleExpandedCallback = usePersistCallback(toggleExpanded);
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!canExpand) {
       return;
@@ -375,6 +398,7 @@ export function AgentQueuedPromptPanelView({
     event.preventDefault();
     toggleExpanded();
   };
+  const handleKeyDownCallback = usePersistCallback(handleKeyDown);
   const editQueuedPrompt = (queuedPromptId: string): void => {
     pointerHandledEditPromptIdRef.current = null;
     onEditQueuedPrompt(queuedPromptId);
@@ -389,6 +413,9 @@ export function AgentQueuedPromptPanelView({
     pointerHandledEditPromptIdRef.current = queuedPromptId;
     onEditQueuedPrompt(queuedPromptId);
   };
+  const handleEditQueuedPromptPointerDownCallback = usePersistCallback(
+    handleEditQueuedPromptPointerDown
+  );
   const handleEditQueuedPromptSelect = (queuedPromptId: string): void => {
     if (pointerHandledEditPromptIdRef.current === queuedPromptId) {
       pointerHandledEditPromptIdRef.current = null;
@@ -396,6 +423,9 @@ export function AgentQueuedPromptPanelView({
     }
     editQueuedPrompt(queuedPromptId);
   };
+  const handleEditQueuedPromptSelectCallback = usePersistCallback(
+    handleEditQueuedPromptSelect
+  );
 
   useLayoutEffect(() => {
     if (queuedPrompts.length !== 1) {
@@ -467,8 +497,8 @@ export function AgentQueuedPromptPanelView({
       data-queue-status={queueStatus}
       style={panelStyle}
       tabIndex={canExpand ? 0 : -1}
-      onClick={toggleExpanded}
-      onKeyDown={handleKeyDown}
+      onClick={toggleExpandedCallback}
+      onKeyDown={handleKeyDownCallback}
     >
       <div className={styles.composerQueuedPromptHeader}>
         <span className={styles.composerQueuedPromptLabel}>
@@ -547,13 +577,12 @@ export function AgentQueuedPromptPanelView({
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <CanvasNodeGhostIconButton
-                        aria-label={labels.sendQueuedPromptNext}
-                        disabled={isDraining}
-                        onClick={() => onSendQueuedPromptNext(queuedPrompt.id)}
-                      >
-                        <CanvasNodeGuideLinedIcon aria-hidden="true" />
-                      </CanvasNodeGhostIconButton>
+                      <CanvasNodeGhostIconButtonBinding1
+                        labels={labels}
+                        isDraining={isDraining}
+                        onSendQueuedPromptNext={onSendQueuedPromptNext}
+                        queuedPrompt={queuedPrompt}
+                      />
                     </TooltipTrigger>
                     <TooltipContent>
                       {labels.sendQueuedPromptNext}
@@ -561,13 +590,12 @@ export function AgentQueuedPromptPanelView({
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <CanvasNodeGhostIconButton
-                        aria-label={labels.deleteQueuedPrompt}
-                        disabled={isDraining}
-                        onClick={() => onRemoveQueuedPrompt(queuedPrompt.id)}
-                      >
-                        <CanvasNodeTrashLinedIcon aria-hidden="true" />
-                      </CanvasNodeGhostIconButton>
+                      <CanvasNodeGhostIconButtonBinding2
+                        labels={labels}
+                        isDraining={isDraining}
+                        onRemoveQueuedPrompt={onRemoveQueuedPrompt}
+                        queuedPrompt={queuedPrompt}
+                      />
                     </TooltipTrigger>
                     <TooltipContent>{labels.deleteQueuedPrompt}</TooltipContent>
                   </Tooltip>
@@ -575,14 +603,10 @@ export function AgentQueuedPromptPanelView({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
-                          <CanvasNodeGhostIconButton
-                            aria-label={labels.queuedPromptMoreActions}
-                            disabled={isDraining}
-                            stopsEventPropagation={false}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <CanvasNodeMoreLinedIcon aria-hidden="true" />
-                          </CanvasNodeGhostIconButton>
+                          <CanvasNodeGhostIconButtonBinding3
+                            labels={labels}
+                            isDraining={isDraining}
+                          />
                         </DropdownMenuTrigger>
                       </TooltipTrigger>
                       <TooltipContent>
@@ -599,21 +623,17 @@ export function AgentQueuedPromptPanelView({
                         promptId={queuedPrompt.id}
                         disabled={isDraining}
                       />
-                      <DropdownMenuItem
-                        className={styles.composerMenuItem}
-                        disabled={isDraining}
-                        onPointerDown={(event) => {
-                          handleEditQueuedPromptPointerDown(
-                            event,
-                            queuedPrompt.id
-                          );
-                        }}
-                        onSelect={() => {
-                          handleEditQueuedPromptSelect(queuedPrompt.id);
-                        }}
-                      >
-                        <span>{labels.editQueuedPrompt}</span>
-                      </DropdownMenuItem>
+                      <DropdownMenuItemBinding4
+                        isDraining={isDraining}
+                        handleEditQueuedPromptPointerDown={
+                          handleEditQueuedPromptPointerDownCallback
+                        }
+                        queuedPrompt={queuedPrompt}
+                        handleEditQueuedPromptSelect={
+                          handleEditQueuedPromptSelectCallback
+                        }
+                        labels={labels}
+                      />
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TooltipProvider>
@@ -654,3 +674,161 @@ export const AgentQueuedPromptPanel = observer(function AgentQueuedPromptPanel(
     </div>
   );
 });
+
+const CanvasNodeGhostIconButtonBinding1 = observer(
+  function CanvasNodeGhostIconButtonBinding1({
+    labels,
+    isDraining,
+    onSendQueuedPromptNext,
+    queuedPrompt,
+    ...slotProps
+  }: CanvasNodeGhostIconButtonBinding1Props &
+    Omit<
+      React.ComponentProps<typeof Slot.Root>,
+      keyof CanvasNodeGhostIconButtonBinding1Props
+    >) {
+    const onClickProp3 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof CanvasNodeGhostIconButton>["onClick"]
+      >
+    >(() => onSendQueuedPromptNext(queuedPrompt.id));
+    return (
+      <Slot.Root {...slotProps}>
+        <CanvasNodeGhostIconButton
+          aria-label={labels.sendQueuedPromptNext}
+          disabled={isDraining}
+          onClick={onClickProp3}
+        >
+          <CanvasNodeGuideLinedIcon aria-hidden="true" />
+        </CanvasNodeGhostIconButton>
+      </Slot.Root>
+    );
+  }
+);
+
+const CanvasNodeGhostIconButtonBinding2 = observer(
+  function CanvasNodeGhostIconButtonBinding2({
+    labels,
+    isDraining,
+    onRemoveQueuedPrompt,
+    queuedPrompt,
+    ...slotProps
+  }: CanvasNodeGhostIconButtonBinding2Props &
+    Omit<
+      React.ComponentProps<typeof Slot.Root>,
+      keyof CanvasNodeGhostIconButtonBinding2Props
+    >) {
+    const onClickProp4 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof CanvasNodeGhostIconButton>["onClick"]
+      >
+    >(() => onRemoveQueuedPrompt(queuedPrompt.id));
+    return (
+      <Slot.Root {...slotProps}>
+        <CanvasNodeGhostIconButton
+          aria-label={labels.deleteQueuedPrompt}
+          disabled={isDraining}
+          onClick={onClickProp4}
+        >
+          <CanvasNodeTrashLinedIcon aria-hidden="true" />
+        </CanvasNodeGhostIconButton>
+      </Slot.Root>
+    );
+  }
+);
+
+const CanvasNodeGhostIconButtonBinding3 = observer(
+  function CanvasNodeGhostIconButtonBinding3({
+    labels,
+    isDraining,
+    ...slotProps
+  }: {
+    labels: NonNullable<AgentQueuedPromptPanelViewProps>["labels"];
+    isDraining: boolean;
+  } & Omit<
+    React.ComponentProps<typeof Slot.Root>,
+    keyof {
+      labels: NonNullable<AgentQueuedPromptPanelViewProps>["labels"];
+      isDraining: boolean;
+    }
+  >) {
+    const onClickProp5 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof CanvasNodeGhostIconButton>["onClick"]
+      >
+    >((event) => event.stopPropagation());
+    return (
+      <Slot.Root {...slotProps}>
+        <CanvasNodeGhostIconButton
+          aria-label={labels.queuedPromptMoreActions}
+          disabled={isDraining}
+          stopsEventPropagation={false}
+          onClick={onClickProp5}
+        >
+          <CanvasNodeMoreLinedIcon aria-hidden="true" />
+        </CanvasNodeGhostIconButton>
+      </Slot.Root>
+    );
+  }
+);
+
+const DropdownMenuItemBinding4 = observer(function DropdownMenuItemBinding4({
+  isDraining,
+  handleEditQueuedPromptPointerDown,
+  queuedPrompt,
+  handleEditQueuedPromptSelect,
+  labels,
+  ...slotProps
+}: DropdownMenuItemBinding4Props &
+  Omit<
+    React.ComponentProps<typeof Slot.Root>,
+    keyof DropdownMenuItemBinding4Props
+  >) {
+  const onPointerDownProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onPointerDown"]>
+  >((event) => {
+    handleEditQueuedPromptPointerDown(event, queuedPrompt.id);
+  });
+  const onSelectProp7 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(() => {
+    handleEditQueuedPromptSelect(queuedPrompt.id);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <DropdownMenuItem
+        className={styles.composerMenuItem}
+        disabled={isDraining}
+        onPointerDown={onPointerDownProp6}
+        onSelect={onSelectProp7}
+      >
+        <span>{labels.editQueuedPrompt}</span>
+      </DropdownMenuItem>
+    </Slot.Root>
+  );
+});
+
+type CanvasNodeGhostIconButtonBinding1Props = {
+  labels: NonNullable<AgentQueuedPromptPanelViewProps>["labels"];
+  isDraining: boolean;
+  onSendQueuedPromptNext: NonNullable<AgentQueuedPromptPanelViewProps>["onSendQueuedPromptNext"];
+  queuedPrompt: AgentGUIQueuedPromptVM;
+};
+
+type CanvasNodeGhostIconButtonBinding2Props = {
+  labels: NonNullable<AgentQueuedPromptPanelViewProps>["labels"];
+  isDraining: boolean;
+  onRemoveQueuedPrompt: NonNullable<AgentQueuedPromptPanelViewProps>["onRemoveQueuedPrompt"];
+  queuedPrompt: AgentGUIQueuedPromptVM;
+};
+
+type DropdownMenuItemBinding4Props = {
+  isDraining: boolean;
+  handleEditQueuedPromptPointerDown: (
+    event: PointerEvent,
+    queuedPromptId: string
+  ) => void;
+  queuedPrompt: AgentGUIQueuedPromptVM;
+  handleEditQueuedPromptSelect: (queuedPromptId: string) => void;
+  labels: NonNullable<AgentQueuedPromptPanelViewProps>["labels"];
+};

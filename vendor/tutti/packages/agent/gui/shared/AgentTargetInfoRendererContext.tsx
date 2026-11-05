@@ -9,6 +9,10 @@ import type {
   AgentGUIAgentTarget,
   AgentGUIAgentTargetInfoRenderer
 } from "../types";
+import { observer } from "mobx-react-lite";
+export const AgentTargetInfoRendererProvider = observer(
+  AgentTargetInfoRendererProviderRender
+);
 
 interface AgentTargetInfoRendererContextValue {
   renderer: AgentGUIAgentTargetInfoRenderer | null;
@@ -23,7 +27,7 @@ const AgentTargetInfoRendererContext =
     targetsByAgentTargetId: EMPTY_TARGETS_BY_AGENT_TARGET_ID
   });
 
-export function AgentTargetInfoRendererProvider({
+function AgentTargetInfoRendererProviderRender({
   agentTargets,
   children,
   renderer

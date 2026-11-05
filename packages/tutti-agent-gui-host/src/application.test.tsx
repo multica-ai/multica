@@ -3,21 +3,21 @@ import type { AgentGUIProps } from "@tutti-os/agent-gui/agent-gui";
 import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach,expect,it,vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { AgentGUIMentionServiceBoundary } from "../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/AgentGUIMentionServiceBoundary";
 import { projectMentionAgentTargetPresentations } from "../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/model/agentGuiTargetPresentation";
 import {
-normalizeAgentGUIAgents,
-projectAgentGUIAgentsToTargets
+  normalizeAgentGUIAgents,
+  projectAgentGUIAgentsToTargets
 } from "../../../vendor/tutti/packages/agent/gui/agents";
 import { AgentRichTextReadonly } from "../../../vendor/tutti/packages/agent/gui/shared/AgentRichTextReadonly";
 import { AgentTargetPresentationProvider } from "../../../vendor/tutti/packages/agent/gui/shared/AgentTargetPresentationContext";
 import { fakeHostServices } from "../e2e-harness/fake-host-services";
 import { AgentGuiApplication } from "./application";
 import type {
-AgentGuiHostServices,
-AgentGuiInitSnapshot,
-AgentGuiWorkspaceState
+  AgentGuiHostServices,
+  AgentGuiInitSnapshot,
+  AgentGuiWorkspaceState
 } from "./protocol";
 
 const captured = vi.hoisted(() => ({
@@ -176,7 +176,10 @@ async function mount(
     handle,
     props: () => captured.props!,
     render: async () => {
-      await act(async () => render());
+      await act(async () => {
+        workspace = { ...workspace };
+        for (const listener of listeners) listener();
+      });
     },
     update: async (agents: AgentGuiWorkspaceState["agents"]) => {
       await act(async () => {

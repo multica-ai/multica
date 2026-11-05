@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   forwardRef,
   useCallback,
@@ -14,6 +15,7 @@ import { cn } from "../../../app/renderer/lib/utils";
 import { DESKTOP_WINDOW_TOP_MARGIN } from "../../workspaceDesktop/constants";
 import { resolveComposerPortalTarget } from "../composer/composerPortalTarget";
 import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
+import { observer } from "mobx-react-lite";
 
 const COMPOSER_MENU_GAP_PX = 8;
 const COMPOSER_MENU_VIEWPORT_PADDING_PX = 8;
@@ -236,147 +238,149 @@ function assignRef<T>(ref: RefObject<T | null> | undefined, value: T | null) {
   }
 }
 
-export const ComposerFloatingMenuSurface = forwardRef<
-  HTMLDivElement,
-  ComposerFloatingMenuSurfaceProps
->(function ComposerFloatingMenuSurface(
-  {
-    anchorRef,
-    children,
-    className,
-    contentClassName,
-    dismissBoundaryRef,
-    maxHeight,
-    onDismiss,
-    open,
-    placement,
-    surfaceRef,
-    testId
-  },
-  forwardedRef
-): React.JSX.Element | null {
-  const localSurfaceRef = useRef<HTMLDivElement | null>(null);
-  const frame = useComposerAnchoredMenuFrame({
-    anchorRef,
-    maxHeight,
-    open
-  });
+export const ComposerFloatingMenuSurface = observer(
+  forwardRef<HTMLDivElement, ComposerFloatingMenuSurfaceProps>(
+    function ComposerFloatingMenuSurface(
+      {
+        anchorRef,
+        children,
+        className,
+        contentClassName,
+        dismissBoundaryRef,
+        maxHeight,
+        onDismiss,
+        open,
+        placement,
+        surfaceRef,
+        testId
+      },
+      forwardedRef
+    ): React.JSX.Element | null {
+      const localSurfaceRef = useRef<HTMLDivElement | null>(null);
+      const frame = useComposerAnchoredMenuFrame({
+        anchorRef,
+        maxHeight,
+        open
+      });
 
-  const setSurfaceRef = useCallback(
-    (node: HTMLDivElement | null): void => {
-      localSurfaceRef.current = node;
-      assignRef(surfaceRef, node);
-      if (typeof forwardedRef === "function") {
-        forwardedRef(node);
-      } else if (forwardedRef) {
-        forwardedRef.current = node;
-      }
-    },
-    [forwardedRef, surfaceRef]
-  );
-
-  useEffect(() => {
-    if (!open || !onDismiss) {
-      return;
-    }
-
-    const isInsideMenu = (target: EventTarget | null): boolean => {
-      if (!(target instanceof Node)) {
-        return false;
-      }
-      const boundaryRef = dismissBoundaryRef ?? anchorRef;
-      return Boolean(
-        boundaryRef.current?.contains(target) ||
-        localSurfaceRef.current?.contains(target)
+      const setSurfaceRef = useCallback(
+        (node: HTMLDivElement | null): void => {
+          localSurfaceRef.current = node;
+          assignRef(surfaceRef, node);
+          if (typeof forwardedRef === "function") {
+            forwardedRef(node);
+          } else if (forwardedRef) {
+            forwardedRef.current = node;
+          }
+        },
+        [forwardedRef, surfaceRef]
       );
-    };
+      const setSurfaceRefCallback = usePersistCallback(setSurfaceRef);
 
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) {
-        return;
+      useEffect(() => {
+        if (!open || !onDismiss) {
+          return;
+        }
+
+        const isInsideMenu = (target: EventTarget | null): boolean => {
+          if (!(target instanceof Node)) {
+            return false;
+          }
+          const boundaryRef = dismissBoundaryRef ?? anchorRef;
+          return Boolean(
+            boundaryRef.current?.contains(target) ||
+              localSurfaceRef.current?.contains(target)
+          );
+        };
+
+        const handleKeyDown = (event: KeyboardEvent): void => {
+          if (event.key !== "Escape" || event.defaultPrevented) {
+            return;
+          }
+          event.preventDefault();
+          onDismiss();
+        };
+
+        const handlePointerDown = (event: PointerEvent): void => {
+          if (isInsideMenu(event.target)) {
+            return;
+          }
+          onDismiss();
+        };
+
+        const handleFocusIn = (event: FocusEvent): void => {
+          if (isInsideMenu(event.target)) {
+            return;
+          }
+          onDismiss();
+        };
+
+        document.addEventListener("keydown", handleKeyDown);
+        document.addEventListener("pointerdown", handlePointerDown, true);
+        document.addEventListener("focusin", handleFocusIn, true);
+        window.addEventListener("blur", onDismiss);
+        return () => {
+          document.removeEventListener("keydown", handleKeyDown);
+          document.removeEventListener("pointerdown", handlePointerDown, true);
+          document.removeEventListener("focusin", handleFocusIn, true);
+          window.removeEventListener("blur", onDismiss);
+        };
+      }, [anchorRef, dismissBoundaryRef, onDismiss, open]);
+
+      const style = useMemo<CSSProperties>(() => {
+        const baseStyle: CSSProperties = {
+          position: "fixed",
+          left: `${frame?.left ?? 0}px`,
+          width: `${frame?.width ?? 0}px`,
+          maxWidth: `${frame?.width ?? 0}px`,
+          overflow: "hidden",
+          zIndex: frame?.zIndex ?? "var(--z-popover)"
+        };
+        if (placement === "fixed-height") {
+          return {
+            ...baseStyle,
+            top: `${frame?.top ?? 0}px`,
+            minHeight: `${frame?.minHeight ?? COMPOSER_MENU_MIN_HEIGHT_PX}px`,
+            height: `${frame?.height ?? maxHeight}px`,
+            maxHeight: `${maxHeight}px`
+          };
+        }
+        return {
+          ...baseStyle,
+          bottom: `${frame?.bottom ?? 0}px`,
+          maxHeight: `${frame?.height ?? maxHeight}px`
+        };
+      }, [frame, maxHeight, placement]);
+
+      if (!open || typeof document === "undefined" || !document.body) {
+        return null;
       }
-      event.preventDefault();
-      onDismiss();
-    };
 
-    const handlePointerDown = (event: PointerEvent): void => {
-      if (isInsideMenu(event.target)) {
-        return;
-      }
-      onDismiss();
-    };
+      const portalTarget =
+        frame?.portalTarget ??
+        (anchorRef.current
+          ? resolveComposerPortalTarget(anchorRef.current)
+          : getPortalContainer());
 
-    const handleFocusIn = (event: FocusEvent): void => {
-      if (isInsideMenu(event.target)) {
-        return;
-      }
-      onDismiss();
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("focusin", handleFocusIn, true);
-    window.addEventListener("blur", onDismiss);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("focusin", handleFocusIn, true);
-      window.removeEventListener("blur", onDismiss);
-    };
-  }, [anchorRef, dismissBoundaryRef, onDismiss, open]);
-
-  const style = useMemo<CSSProperties>(() => {
-    const baseStyle: CSSProperties = {
-      position: "fixed",
-      left: `${frame?.left ?? 0}px`,
-      width: `${frame?.width ?? 0}px`,
-      maxWidth: `${frame?.width ?? 0}px`,
-      overflow: "hidden",
-      zIndex: frame?.zIndex ?? "var(--z-popover)"
-    };
-    if (placement === "fixed-height") {
-      return {
-        ...baseStyle,
-        top: `${frame?.top ?? 0}px`,
-        minHeight: `${frame?.minHeight ?? COMPOSER_MENU_MIN_HEIGHT_PX}px`,
-        height: `${frame?.height ?? maxHeight}px`,
-        maxHeight: `${maxHeight}px`
-      };
+      return createPortal(
+        <div
+          data-testid={testId}
+          ref={setSurfaceRefCallback}
+          className={cn(
+            "nodrag isolate rounded-[12px] border border-hairline bg-background-fronted p-[4px] text-foreground shadow-[var(--tsh-shell-shadow)] [-webkit-app-region:no-drag]",
+            "overflow-hidden",
+            className
+          )}
+          style={style}
+        >
+          {contentClassName ? (
+            <div className={contentClassName}>{children}</div>
+          ) : (
+            children
+          )}
+        </div>,
+        portalTarget
+      );
     }
-    return {
-      ...baseStyle,
-      bottom: `${frame?.bottom ?? 0}px`,
-      maxHeight: `${frame?.height ?? maxHeight}px`
-    };
-  }, [frame, maxHeight, placement]);
-
-  if (!open || typeof document === "undefined" || !document.body) {
-    return null;
-  }
-
-  const portalTarget =
-    frame?.portalTarget ??
-    (anchorRef.current
-      ? resolveComposerPortalTarget(anchorRef.current)
-      : getPortalContainer());
-
-  return createPortal(
-    <div
-      data-testid={testId}
-      ref={setSurfaceRef}
-      className={cn(
-        "nodrag isolate rounded-[12px] border border-hairline bg-background-fronted p-[4px] text-foreground shadow-[var(--tsh-shell-shadow)] [-webkit-app-region:no-drag]",
-        "overflow-hidden",
-        className
-      )}
-      style={style}
-    >
-      {contentClassName ? (
-        <div className={contentClassName}>{children}</div>
-      ) : (
-        children
-      )}
-    </div>,
-    portalTarget
-  );
-});
+  )
+);

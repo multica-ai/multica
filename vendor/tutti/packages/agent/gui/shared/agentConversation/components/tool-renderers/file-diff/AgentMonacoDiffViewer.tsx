@@ -3,6 +3,9 @@ import { AtomIcon } from "../../../../../app/renderer/components/icons/AtomIcon"
 import { translate } from "../../../../../i18n/index";
 import { AgentPathTailLabel } from "../AgentPathTailLabel";
 import { loadMonaco, type MonacoModule } from "./loadMonaco";
+import { observer } from "mobx-react-lite";
+import { observer as observeClass } from "mobx-react";
+export const AgentMonacoDiffViewer = observer(AgentMonacoDiffViewerRender);
 
 interface MonacoDiffResources {
   monaco: MonacoModule;
@@ -24,7 +27,7 @@ interface MonacoDiffEditorSurfaceState {
   loading: boolean;
 }
 
-export function AgentMonacoDiffViewer({
+function AgentMonacoDiffViewerRender({
   path,
   oldValue,
   newValue,
@@ -146,6 +149,7 @@ class MonacoDiffEditorSurface extends Component<
     );
   }
 }
+observeClass(MonacoDiffEditorSurface);
 
 function createMonacoDiffResources(
   monaco: MonacoModule,

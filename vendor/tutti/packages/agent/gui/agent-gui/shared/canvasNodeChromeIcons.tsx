@@ -1,5 +1,27 @@
 import type { JSX, SVGProps } from "react";
 import { CloseLinedIcon } from "../../app/renderer/components/icons/CloseLinedIcon";
+import { observer } from "mobx-react-lite";
+export const CanvasNodeCloseIcon = observer(CanvasNodeCloseIconRender);
+export const CanvasNodeGuideLinedIcon = observer(
+  CanvasNodeGuideLinedIconRender
+);
+export const CanvasNodeMoreLinedIcon = observer(CanvasNodeMoreLinedIconRender);
+export const CanvasNodeTrashLinedIcon = observer(
+  CanvasNodeTrashLinedIconRender
+);
+export const CanvasNodeMaximizeLinedIcon = observer(
+  CanvasNodeMaximizeLinedIconRender
+);
+export const CanvasNodeMinimizeLinedIcon = observer(
+  CanvasNodeMinimizeLinedIconRender
+);
+export const CanvasNodeLayoutLinedIcon = observer(
+  CanvasNodeLayoutLinedIconRender
+);
+export const CanvasNodePanelLinedIcon = observer(
+  CanvasNodePanelLinedIconRender
+);
+
 const GUIDE_LINED_PATH =
   "M8.29297 3.29297C8.68349 2.90245 9.31651 2.90245 9.70703 3.29297C10.0975 3.6835 10.0975 4.31652 9.70703 4.70703L6.41406 8H16C17.3261 8 18.5975 8.52716 19.5352 9.46484C20.4728 10.4025 21 11.6739 21 13V20C21 20.5523 20.5523 21 20 21C19.4477 21 19 20.5523 19 20V13C19 12.2044 18.6837 11.4415 18.1211 10.8789C17.5585 10.3163 16.7956 10 16 10H6.41406L9.70703 13.293C10.0975 13.6835 10.0975 14.3165 9.70703 14.707C9.31652 15.0975 8.68348 15.0975 8.29297 14.707L3.29297 9.70703C3.24631 9.66037 3.20472 9.60881 3.16797 9.55371C3.14195 9.51472 3.11956 9.47412 3.09961 9.43262C3.07767 9.38704 3.05788 9.34011 3.04297 9.29102C3.0379 9.27429 3.03445 9.25716 3.03027 9.24024C3.01125 9.16319 3.00001 9.08292 3 9C3 8.92032 3.00974 8.84285 3.02734 8.76856C3.03221 8.748 3.03678 8.7273 3.04297 8.70703C3.05787 8.65828 3.07777 8.61168 3.09961 8.56641C3.11877 8.52661 3.1403 8.48768 3.16504 8.4502C3.20242 8.39354 3.24516 8.34078 3.29297 8.29297L8.29297 3.29297Z";
 const MORE_LINED_PATH =
@@ -21,7 +43,7 @@ const PANEL_LINED_FRAME_PATH =
 const PANEL_LINED_RAIL_PATH =
   "M5 5H10.5C10.7761 5 11 5.22386 11 5.5V18.5C11 18.7761 10.7761 19 10.5 19H5V5Z";
 
-export function CanvasNodeCloseIcon({
+function CanvasNodeCloseIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -29,7 +51,7 @@ export function CanvasNodeCloseIcon({
   return <CloseLinedIcon className={className} {...props} />;
 }
 
-export function CanvasNodeGuideLinedIcon({
+function CanvasNodeGuideLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -48,7 +70,7 @@ export function CanvasNodeGuideLinedIcon({
   );
 }
 
-export function CanvasNodeMoreLinedIcon({
+function CanvasNodeMoreLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -67,7 +89,7 @@ export function CanvasNodeMoreLinedIcon({
   );
 }
 
-export function CanvasNodeTrashLinedIcon({
+function CanvasNodeTrashLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -86,7 +108,7 @@ export function CanvasNodeTrashLinedIcon({
   );
 }
 
-export function CanvasNodeMaximizeLinedIcon({
+function CanvasNodeMaximizeLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -105,7 +127,7 @@ export function CanvasNodeMaximizeLinedIcon({
   );
 }
 
-export function CanvasNodeMinimizeLinedIcon({
+function CanvasNodeMinimizeLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -124,7 +146,7 @@ export function CanvasNodeMinimizeLinedIcon({
   );
 }
 
-export function CanvasNodeLayoutLinedIcon({
+function CanvasNodeLayoutLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {
@@ -143,7 +165,7 @@ export function CanvasNodeLayoutLinedIcon({
   );
 }
 
-export function CanvasNodePanelLinedIcon({
+function CanvasNodePanelLinedIconRender({
   className,
   ...props
 }: SVGProps<SVGSVGElement>): JSX.Element {

@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { TooltipProvider } from "@tutti-os/ui-system";
 import { observer } from "mobx-react-lite";
 import { useCallback, useMemo, useState, type CSSProperties } from "react";
@@ -186,6 +187,7 @@ export const AgentGUINodeView = observer(function AgentGUINodeView({
   const requestComposerFocus = useCallback(() => {
     setLocalComposerFocusRequestSequence((current) => current + 1);
   }, []);
+  const requestComposerFocusCallback = usePersistCallback(requestComposerFocus);
   const requestCreateConversation = useStableEventCallback(
     (options?: { projectPath?: string | null; source?: string }) => {
       createConversationAction(options);
@@ -202,10 +204,14 @@ export const AgentGUINodeView = observer(function AgentGUINodeView({
     [composer.state.availableCommands, shell.workspaceId, workspaceAppIcons]
   );
 
-  const layoutStyle = {
-    "--agent-gui-detail-min-width": `${detailMinWidthPx}px`,
-    gridTemplateColumns: "minmax(var(--agent-gui-detail-min-width), 1fr)"
-  } as CSSProperties;
+  const layoutStyle = useMemo(
+    () =>
+      ({
+        "--agent-gui-detail-min-width": `${detailMinWidthPx}px`,
+        gridTemplateColumns: "minmax(var(--agent-gui-detail-min-width), 1fr)"
+      }) as CSSProperties,
+    [detailMinWidthPx]
+  );
   const effectiveRailConfigProvider = resolveAgentGUIRailConfigProvider(
     railConfigProvider,
     shell.data.provider
@@ -281,6 +287,18 @@ export const AgentGUINodeView = observer(function AgentGUINodeView({
     [labels.sharedAgentOwnerSeparator, targetPresentationKey, shell.workspaceId]
   );
 
+  const onOpenChangeProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<
+        typeof AgentGUIRenameConversationDialog
+      >["onOpenChange"]
+    >
+  >((open) => {
+    setRenameConversationDialogOpen(open);
+    if (!open) {
+      setRenameConversationTarget(null);
+    }
+  });
   const content = (
     <AgentTargetPresentationProvider agentTargets={agentTargetPresentations}>
       <AgentTargetSetupRoot
@@ -349,7 +367,7 @@ export const AgentGUINodeView = observer(function AgentGUINodeView({
                 selectProjectDirectory={effectiveSelectProjectDirectory}
                 projectSelectOptions={projectSelectOptions}
                 onRequestGitBranches={onRequestGitBranches}
-                onRequestComposerFocus={requestComposerFocus}
+                onRequestComposerFocus={requestComposerFocusCallback}
                 workspaceAppIcons={effectiveWorkspaceAppIcons}
                 workspaceUserProjectI18n={workspaceUserProjectI18n}
                 renderComposerFooterAccessory={renderComposerFooterAccessory}
@@ -391,12 +409,7 @@ export const AgentGUINodeView = observer(function AgentGUINodeView({
             renameConversationDialogOpen && renameConversationTarget !== null
           }
           labels={labels}
-          onOpenChange={(open) => {
-            setRenameConversationDialogOpen(open);
-            if (!open) {
-              setRenameConversationTarget(null);
-            }
-          }}
+          onOpenChange={onOpenChangeProp1}
           onRename={actions.renameConversation}
         />
       </AgentTargetSetupRoot>

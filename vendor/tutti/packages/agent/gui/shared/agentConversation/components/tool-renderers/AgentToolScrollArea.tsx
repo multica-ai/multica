@@ -1,6 +1,8 @@
 import type { HTMLAttributes, JSX, ReactNode } from "react";
 import { CustomScrollArea } from "../../../../app/renderer/components/ui/custom-scroll-area";
 import { cn } from "../../../../app/renderer/lib/utils";
+import { observer } from "mobx-react-lite";
+export const AgentToolScrollArea = observer(AgentToolScrollAreaRender);
 
 interface AgentToolScrollAreaProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
@@ -8,7 +10,7 @@ interface AgentToolScrollAreaProps extends HTMLAttributes<HTMLDivElement> {
   maxHeightClassName?: string;
 }
 
-export function AgentToolScrollArea({
+function AgentToolScrollAreaRender({
   children,
   className,
   viewportClassName,

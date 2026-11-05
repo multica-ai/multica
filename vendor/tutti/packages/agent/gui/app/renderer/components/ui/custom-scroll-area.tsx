@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import {
   forwardRef,
   useCallback,
@@ -11,6 +13,8 @@ import {
   type ReactNode
 } from "react";
 import { cn } from "../../lib/utils";
+import { observer } from "mobx-react-lite";
+export const CustomScrollbar = observer(CustomScrollbarRender);
 
 const MIN_THUMB_HEIGHT = 24;
 
@@ -36,7 +40,7 @@ export interface CustomScrollbarProps {
   syncKey?: unknown;
 }
 
-export function CustomScrollbar({
+function CustomScrollbarRender({
   getViewport,
   className,
   thumbClassName,
@@ -135,6 +139,7 @@ export function CustomScrollbar({
       scrollbarState.thumbHeight
     ]
   );
+  const handleTrackMouseDownCallback = usePersistCallback(handleTrackMouseDown);
 
   const handleThumbMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -172,6 +177,7 @@ export function CustomScrollbar({
     },
     [getViewport, scrollbarState.scrollable, scrollbarState.thumbHeight]
   );
+  const handleThumbMouseDownCallback = usePersistCallback(handleThumbMouseDown);
 
   useEffect(() => {
     if (!dragging) {
@@ -232,6 +238,12 @@ export function CustomScrollbar({
     };
   }, [getViewport, syncKey, syncScrollbarState]);
 
+  const styleProp1Value1 = `${scrollbarState.thumbHeight}px`;
+  const styleProp1Value2 = `translateY(${scrollbarState.thumbTop}px)`;
+  const styleProp1 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () => ({ height: styleProp1Value1, transform: styleProp1Value2 }),
+    [styleProp1Value1, styleProp1Value2]
+  );
   return (
     <div
       ref={trackRef}
@@ -240,16 +252,13 @@ export function CustomScrollbar({
       data-dragging={dragging ? "true" : "false"}
       data-testid={testId}
       aria-hidden="true"
-      onMouseDown={handleTrackMouseDown}
+      onMouseDown={handleTrackMouseDownCallback}
     >
       <div
         className={cn("tsh-custom-scrollbar__thumb", thumbClassName)}
         data-testid={thumbTestId}
-        onMouseDown={handleThumbMouseDown}
-        style={{
-          height: `${scrollbarState.thumbHeight}px`,
-          transform: `translateY(${scrollbarState.thumbTop}px)`
-        }}
+        onMouseDown={handleThumbMouseDownCallback}
+        style={styleProp1}
       />
     </div>
   );
@@ -265,55 +274,55 @@ export interface CustomScrollAreaProps extends HTMLAttributes<HTMLDivElement> {
   syncKey?: unknown;
 }
 
-export const CustomScrollArea = forwardRef<
-  HTMLDivElement,
-  CustomScrollAreaProps
->(function CustomScrollArea(
-  {
-    children,
-    className,
-    viewportClassName,
-    scrollbarClassName,
-    scrollbarThumbClassName,
-    scrollbarTestId,
-    scrollbarThumbTestId,
-    syncKey,
-    ...viewportProps
-  },
-  forwardedRef
-): React.JSX.Element {
-  "use memo";
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const getViewport = useCallback(() => viewportRef.current, []);
+export const CustomScrollArea = observer(
+  forwardRef<HTMLDivElement, CustomScrollAreaProps>(function CustomScrollArea(
+    {
+      children,
+      className,
+      viewportClassName,
+      scrollbarClassName,
+      scrollbarThumbClassName,
+      scrollbarTestId,
+      scrollbarThumbTestId,
+      syncKey,
+      ...viewportProps
+    },
+    forwardedRef
+  ): React.JSX.Element {
+    "use memo";
+    const viewportRef = useRef<HTMLDivElement | null>(null);
+    const getViewport = useCallback(() => viewportRef.current, []);
+    const getViewportCallback = usePersistCallback(getViewport);
 
-  return (
-    <div
-      className={cn(
-        "tsh-custom-scroll-area relative min-h-0 min-w-0",
-        className
-      )}
-    >
+    return (
       <div
-        ref={setRefs(viewportRef, forwardedRef)}
         className={cn(
-          "overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-          viewportClassName
+          "tsh-custom-scroll-area relative min-h-0 min-w-0",
+          className
         )}
-        {...viewportProps}
       >
-        {children}
+        <div
+          ref={setRefs(viewportRef, forwardedRef)}
+          className={cn(
+            "overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+            viewportClassName
+          )}
+          {...viewportProps}
+        >
+          {children}
+        </div>
+        <CustomScrollbar
+          getViewport={getViewportCallback}
+          className={scrollbarClassName}
+          thumbClassName={scrollbarThumbClassName}
+          testId={scrollbarTestId}
+          thumbTestId={scrollbarThumbTestId}
+          syncKey={syncKey ?? children}
+        />
       </div>
-      <CustomScrollbar
-        getViewport={getViewport}
-        className={scrollbarClassName}
-        thumbClassName={scrollbarThumbClassName}
-        testId={scrollbarTestId}
-        thumbTestId={scrollbarThumbTestId}
-        syncKey={syncKey ?? children}
-      />
-    </div>
-  );
-});
+    );
+  })
+);
 
 function setRefs<T>(
   localRef: MutableRefObject<T | null>,

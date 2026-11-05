@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useState } from "react";
 import { ShieldAlert, X } from "lucide-react";
 import { useTranslation } from "../../i18n/index";
@@ -7,8 +9,12 @@ import {
   acknowledgeCodexFullAccessWarning,
   isCodexFullAccessWarningAcknowledged
 } from "./view/agentFullAccessWarningPreference";
+import { observer } from "mobx-react-lite";
+export const AgentFullAccessRestoredWarning = observer(
+  AgentFullAccessRestoredWarningRender
+);
 
-export function AgentFullAccessRestoredWarning({
+function AgentFullAccessRestoredWarningRender({
   isSettingsLoading,
   permissionModeId,
   provider,
@@ -53,6 +59,44 @@ export function AgentFullAccessRestoredWarning({
           {t("agentHost.agentGui.fullAccessRestoredWarning.description")}
         </p>
       </div>
+      <ButtonBinding1
+        setDismissedForCurrentOpen={setDismissedForCurrentOpen}
+        t={t}
+      />
+      <ButtonBinding2
+        t={t}
+        setDismissedForCurrentOpen={setDismissedForCurrentOpen}
+      />
+    </section>
+  );
+}
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  setDismissedForCurrentOpen,
+  t,
+  ...slotProps
+}: {
+  setDismissedForCurrentOpen: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  t: import("../../i18n/runtime").TranslateFn;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setDismissedForCurrentOpen: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    t: import("../../i18n/runtime").TranslateFn;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => {
+    acknowledgeCodexFullAccessWarning();
+    setDismissedForCurrentOpen(true);
+  });
+  return (
+    <Slot.Root {...slotProps}>
       <button
         className={cn(
           "ml-auto shrink-0 rounded-full px-4 py-2 text-[13px] font-medium",
@@ -61,13 +105,37 @@ export function AgentFullAccessRestoredWarning({
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--state-danger)]"
         )}
         type="button"
-        onClick={() => {
-          acknowledgeCodexFullAccessWarning();
-          setDismissedForCurrentOpen(true);
-        }}
+        onClick={onClickProp1}
       >
         {t("agentHost.agentGui.fullAccessRestoredWarning.dontShowAgain")}
       </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  t,
+  setDismissedForCurrentOpen,
+  ...slotProps
+}: {
+  t: import("../../i18n/runtime").TranslateFn;
+  setDismissedForCurrentOpen: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    t: import("../../i18n/runtime").TranslateFn;
+    setDismissedForCurrentOpen: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+  }
+>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setDismissedForCurrentOpen(true));
+  return (
+    <Slot.Root {...slotProps}>
       <button
         aria-label={t(
           "agentHost.agentGui.fullAccessRestoredWarning.dismissLabel"
@@ -79,10 +147,10 @@ export function AgentFullAccessRestoredWarning({
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--state-danger)]"
         )}
         type="button"
-        onClick={() => setDismissedForCurrentOpen(true)}
+        onClick={onClickProp2}
       >
         <X aria-hidden="true" className="size-4" />
       </button>
-    </section>
+    </Slot.Root>
   );
-}
+});

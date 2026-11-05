@@ -47,7 +47,7 @@ export function useOptionalStableEventCallback<Args extends unknown[], Result>(
       return undefined;
     }
     return (...args: Args) => callbackRef.current?.(...args) as Result;
-  }, [callback != null]);
+  }, [callback]);
 }
 
 export const fallbackWorkspaceFileReferenceCopy: WorkspaceFileReferenceCopy = {

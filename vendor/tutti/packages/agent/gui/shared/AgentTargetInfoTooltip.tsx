@@ -10,6 +10,9 @@ import type {
   AgentGUIAgentTargetInfoRenderer,
   AgentGUIAgentTargetInfoSurface
 } from "../types";
+import { observer } from "mobx-react-lite";
+export const AgentTargetInfoTooltip = observer(AgentTargetInfoTooltipRender);
+const AgentTargetInfoContent = observer(AgentTargetInfoContentRender);
 
 interface AgentTargetInfoTooltipProps {
   align?: "center" | "end" | "start";
@@ -24,7 +27,7 @@ interface AgentTargetInfoTooltipProps {
   target: AgentGUIAgentTarget;
 }
 
-export function AgentTargetInfoTooltip({
+function AgentTargetInfoTooltipRender({
   align,
   children,
   fallbackLabel,
@@ -60,7 +63,7 @@ export function AgentTargetInfoTooltip({
   );
 }
 
-function AgentTargetInfoContent({
+function AgentTargetInfoContentRender({
   fallbackLabel,
   renderer,
   surface,

@@ -6,8 +6,10 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { getToolSearchRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentToolSearchContent = observer(AgentToolSearchContentRender);
 
-export function AgentToolSearchContent({
+function AgentToolSearchContentRender({
   call
 }: AgentToolRendererProps): JSX.Element | null {
   "use memo";

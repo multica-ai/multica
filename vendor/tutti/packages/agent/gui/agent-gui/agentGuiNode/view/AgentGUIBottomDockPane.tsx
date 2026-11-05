@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { cn } from "@tutti-os/ui-system";
 import { ChevronsDown } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -45,133 +47,156 @@ interface AgentGUIBottomDockPaneProps {
   onSubmitBottomDockInteractivePrompt: AgentGUINodeViewProps["actions"]["submitInteractivePrompt"];
 }
 
-export const AgentGUIBottomDockPane = memo(
-  observer(function AgentGUIBottomDockPane({
-    bottomDockRef,
-    showScrollToBottom,
-    scrollToBottomLabel,
-    onScrollToBottom,
-    bottomDockLiftedPrompt,
-    bottomDockReplacementPrompt,
-    composerProps,
-    interaction,
-    chrome,
-    keyboardShortcutsEnabled,
-    chromeLabels,
-    promptLabels,
-    onSubmitApprovalOption,
-    onAuthLogin,
-    onRetryActivation,
-    onRetryInlineNotice,
-    onContinueInNewConversation,
-    onSubmitBottomDockInteractivePrompt
-  }: AgentGUIBottomDockPaneProps): React.JSX.Element {
-    const {
-      approvalDisabledReason,
-      interactivePromptDisabledReason,
-      isRespondingApproval
-    } = interaction;
-    const liftedPromptDisabledReason = resolveAgentGUIInteractionDisabledReason(
-      {
-        promptKind: bottomDockLiftedPrompt?.kind,
-        approvalReason: approvalDisabledReason,
-        interactivePromptReason: interactivePromptDisabledReason
-      }
-    );
-    const replacementPromptDisabledReason =
-      resolveAgentGUIInteractionDisabledReason({
-        promptKind: bottomDockReplacementPrompt?.kind,
-        approvalReason: approvalDisabledReason,
-        interactivePromptReason: interactivePromptDisabledReason
-      });
+export const AgentGUIBottomDockPane = observer(function AgentGUIBottomDockPane({
+  bottomDockRef,
+  showScrollToBottom,
+  scrollToBottomLabel,
+  onScrollToBottom,
+  bottomDockLiftedPrompt,
+  bottomDockReplacementPrompt,
+  composerProps,
+  interaction,
+  chrome,
+  keyboardShortcutsEnabled,
+  chromeLabels,
+  promptLabels,
+  onSubmitApprovalOption,
+  onAuthLogin,
+  onRetryActivation,
+  onRetryInlineNotice,
+  onContinueInNewConversation,
+  onSubmitBottomDockInteractivePrompt
+}: AgentGUIBottomDockPaneProps): React.JSX.Element {
+  const {
+    approvalDisabledReason,
+    interactivePromptDisabledReason,
+    isRespondingApproval
+  } = interaction;
+  const liftedPromptDisabledReason = resolveAgentGUIInteractionDisabledReason({
+    promptKind: bottomDockLiftedPrompt?.kind,
+    approvalReason: approvalDisabledReason,
+    interactivePromptReason: interactivePromptDisabledReason
+  });
+  const replacementPromptDisabledReason =
+    resolveAgentGUIInteractionDisabledReason({
+      promptKind: bottomDockReplacementPrompt?.kind,
+      approvalReason: approvalDisabledReason,
+      interactivePromptReason: interactivePromptDisabledReason
+    });
 
-    return (
-      <AgentComposerRegion
-        regionRef={bottomDockRef}
-        floating={
-          showScrollToBottom ? (
-            <button
-              type="button"
-              className={cn(
-                styles.bottomDockScrollToBottom,
-                "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
-              )}
-              data-testid="agent-gui-scroll-to-bottom"
-              aria-label={scrollToBottomLabel}
-              title={scrollToBottomLabel}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={onScrollToBottom}
-            >
-              <ChevronsDown aria-hidden="true" size={15} strokeWidth={2.2} />
-            </button>
-          ) : null
-        }
-        lifted={
-          bottomDockLiftedPrompt ? (
-            <div
-              className={styles.bottomDockPrompt}
-              data-testid="agent-gui-bottom-dock-active-prompt"
-            >
-              <AgentInteractivePromptSurface
-                prompt={bottomDockLiftedPrompt}
-                conversationReturn={promptLabels.conversationReturn}
-                embedded={true}
-                edgeGlow={true}
-                keyboardShortcuts={keyboardShortcutsEnabled}
-                isSubmitting={isRespondingApproval}
-                isInteractionDisabled={Boolean(liftedPromptDisabledReason)}
-                interactionDisabledReason={liftedPromptDisabledReason}
-                onSubmit={onSubmitBottomDockInteractivePrompt}
-                labels={promptLabels}
-              />
-            </div>
-          ) : null
-        }
-        accessories={
-          <>
-            {chrome.inlineSource.chrome ? (
-              <AgentSessionChrome
-                source={chrome.inlineSource}
-                onSubmitApprovalOption={onSubmitApprovalOption}
-                onAuthLogin={onAuthLogin}
-                onRetryActivation={onRetryInlineNotice}
-                onContinueInNewConversation={onContinueInNewConversation}
-                labels={chromeLabels}
-              />
-            ) : null}
+  return (
+    <AgentComposerRegion
+      regionRef={bottomDockRef}
+      floating={
+        showScrollToBottom ? (
+          <ButtonBinding1
+            scrollToBottomLabel={scrollToBottomLabel}
+            onScrollToBottom={onScrollToBottom}
+          />
+        ) : null
+      }
+      lifted={
+        bottomDockLiftedPrompt ? (
+          <div
+            className={styles.bottomDockPrompt}
+            data-testid="agent-gui-bottom-dock-active-prompt"
+          >
+            <AgentInteractivePromptSurface
+              prompt={bottomDockLiftedPrompt}
+              conversationReturn={promptLabels.conversationReturn}
+              embedded={true}
+              edgeGlow={true}
+              keyboardShortcuts={keyboardShortcutsEnabled}
+              isSubmitting={isRespondingApproval}
+              isInteractionDisabled={Boolean(liftedPromptDisabledReason)}
+              interactionDisabledReason={liftedPromptDisabledReason}
+              onSubmit={onSubmitBottomDockInteractivePrompt}
+              labels={promptLabels}
+            />
+          </div>
+        ) : null
+      }
+      accessories={
+        <>
+          {chrome.inlineSource.chrome ? (
             <AgentSessionChrome
-              source={chrome.statusSource}
+              source={chrome.inlineSource}
               onSubmitApprovalOption={onSubmitApprovalOption}
               onAuthLogin={onAuthLogin}
-              onRetryActivation={onRetryActivation}
+              onRetryActivation={onRetryInlineNotice}
               onContinueInNewConversation={onContinueInNewConversation}
               labels={chromeLabels}
             />
-          </>
-        }
-        primary={
-          bottomDockReplacementPrompt ? (
-            <div
-              className={styles.bottomDockPrompt}
-              data-testid="agent-gui-bottom-dock-active-prompt"
-            >
-              <AgentInteractivePromptSurface
-                prompt={bottomDockReplacementPrompt}
-                embedded={true}
-                edgeGlow={true}
-                keyboardShortcuts={keyboardShortcutsEnabled}
-                isSubmitting={isRespondingApproval}
-                isInteractionDisabled={Boolean(replacementPromptDisabledReason)}
-                interactionDisabledReason={replacementPromptDisabledReason}
-                onSubmit={onSubmitBottomDockInteractivePrompt}
-                labels={promptLabels}
-              />
-            </div>
-          ) : (
-            <AgentComposer {...composerProps} />
-          )
-        }
-      />
-    );
-  })
-);
+          ) : null}
+          <AgentSessionChrome
+            source={chrome.statusSource}
+            onSubmitApprovalOption={onSubmitApprovalOption}
+            onAuthLogin={onAuthLogin}
+            onRetryActivation={onRetryActivation}
+            onContinueInNewConversation={onContinueInNewConversation}
+            labels={chromeLabels}
+          />
+        </>
+      }
+      primary={
+        bottomDockReplacementPrompt ? (
+          <div
+            className={styles.bottomDockPrompt}
+            data-testid="agent-gui-bottom-dock-active-prompt"
+          >
+            <AgentInteractivePromptSurface
+              prompt={bottomDockReplacementPrompt}
+              embedded={true}
+              edgeGlow={true}
+              keyboardShortcuts={keyboardShortcutsEnabled}
+              isSubmitting={isRespondingApproval}
+              isInteractionDisabled={Boolean(replacementPromptDisabledReason)}
+              interactionDisabledReason={replacementPromptDisabledReason}
+              onSubmit={onSubmitBottomDockInteractivePrompt}
+              labels={promptLabels}
+            />
+          </div>
+        ) : (
+          <AgentComposer {...composerProps} />
+        )
+      }
+    />
+  );
+});
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  scrollToBottomLabel,
+  onScrollToBottom,
+  ...slotProps
+}: {
+  scrollToBottomLabel: NonNullable<AgentGUIBottomDockPaneProps>["scrollToBottomLabel"];
+  onScrollToBottom: NonNullable<AgentGUIBottomDockPaneProps>["onScrollToBottom"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    scrollToBottomLabel: NonNullable<AgentGUIBottomDockPaneProps>["scrollToBottomLabel"];
+    onScrollToBottom: NonNullable<AgentGUIBottomDockPaneProps>["onScrollToBottom"];
+  }
+>) {
+  const onPointerDownProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onPointerDown"]>
+  >((event) => event.stopPropagation());
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className={cn(
+          styles.bottomDockScrollToBottom,
+          "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
+        )}
+        data-testid="agent-gui-scroll-to-bottom"
+        aria-label={scrollToBottomLabel}
+        title={scrollToBottomLabel}
+        onPointerDown={onPointerDownProp1}
+        onClick={onScrollToBottom}
+      >
+        <ChevronsDown aria-hidden="true" size={15} strokeWidth={2.2} />
+      </button>
+    </Slot.Root>
+  );
+});
