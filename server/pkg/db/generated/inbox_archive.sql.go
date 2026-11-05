@@ -145,7 +145,7 @@ WITH newest AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $10::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
        COALESCE(anchor.comment_id, '')::text AS comment_id
 FROM selected
 JOIN inbox_item i ON i.id = selected.id
@@ -218,6 +218,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.ActorType,
 			&i.InboxItem.ActorID,
 			&i.InboxItem.Details,
+			&i.InboxItem.Section,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.CommentID,

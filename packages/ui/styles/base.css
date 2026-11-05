@@ -48,15 +48,50 @@
   color: var(--shiki-dark) !important;
 }
 
-/* Multica icon: entrance spin animation */
-@keyframes entrance-spin {
-  0% { transform: rotate(0deg); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: rotate(360deg); opacity: 1; }
-}
+/* Multica brand motion — brand guidelines v3.1 §08. The word writes, the m
+ * rises; every brand animation is one of those two actions. Only the tile and
+ * the i dot overshoot (pop); nothing else does. Delays are set inline by the
+ * components so a sequence stays readable in one place. */
+@keyframes multica-pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes multica-rise { from { transform: translateY(82px); } }
+@keyframes multica-arch-rise { from { transform: translateY(102%); } }
+@keyframes multica-write { from { stroke-dashoffset: 1; } }
+@keyframes multica-think { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes multica-fade-in { from { opacity: 0; } }
+@keyframes multica-fade-out { to { opacity: 0; } }
+@keyframes multica-hop { 40% { transform: translateY(-14%); } }
 
-.animate-entrance-spin {
-  animation: entrance-spin 0.6s ease-out forwards;
+.multica-pop {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.multica-rise {
+  animation: multica-rise 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arch-rise {
+  transform-box: fill-box;
+  animation: multica-arch-rise 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-write {
+  stroke-dasharray: 1 1;
+  animation: multica-write 0.5s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+.multica-dot {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.multica-think {
+  stroke-dasharray: 0.24 0.76;
+  animation: multica-think 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.multica-fade-in { animation: multica-fade-in 0.24s ease both; }
+.multica-fade-out { animation: multica-fade-out 0.24s ease both; }
+/* Website nav only — the product never animates the wordmark on hover. */
+.multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.multica-hop-on-hover:hover > g {
+  animation: multica-hop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Onboarding: step / phase entry — 400ms fade.
@@ -336,7 +371,17 @@ html[data-sidebar-resizing="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-entrance-spin,
+  /* Brand motion settles on its final frame. The think highlight stops and
+     its 22% track stays, so "working" still reads without movement. */
+  .multica-pop,
+  .multica-rise,
+  .multica-arch-rise,
+  .multica-write,
+  .multica-dot,
+  .multica-think,
+  .multica-fade-in,
+  .multica-fade-out,
+  .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
   .shimmer-text-window,

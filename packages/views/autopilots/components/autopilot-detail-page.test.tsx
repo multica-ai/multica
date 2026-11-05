@@ -166,6 +166,19 @@ describe("AutopilotDetailPage", () => {
     expect(runNow).toHaveBeenCalledWith("ap-1");
   });
 
+  it("edits the whole autopilot from the header, next to Run now", async () => {
+    const user = userEvent.setup();
+    mount();
+    const header = await screen.findByRole("banner");
+    await within(header).findByText("Daily Sync");
+
+    const edit = within(header).getByRole("button", { name: "Edit" });
+    const runNowButton = within(header).getByRole("button", { name: "Run now" });
+    expect(edit.compareDocumentPosition(runNowButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(edit);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Edit autopilot dialog");
+  });
+
   it("can't run a paused autopilot", async () => {
     detail.autopilot = makeAutopilot({ status: "paused" });
     mount();
@@ -173,16 +186,14 @@ describe("AutopilotDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Run now" })).toBeDisabled();
   });
 
-  it("keeps edit, copy link and delete in the ⋯ menu", async () => {
-    const user = userEvent.setup();
+  it("keeps copy link and delete in the ⋯ menu", async () => {
     mount();
     await screen.findByRole("heading", { name: "Daily Sync", level: 1 });
 
     openMoreActions();
     expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete autopilot" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Edit" }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Edit autopilot dialog");
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
 
   it("pauses from the panel's status switch", async () => {
@@ -200,7 +211,7 @@ describe("AutopilotDetailPage", () => {
 
     const prompt = screen.getByRole("heading", { name: "Prompt", level: 2 }).closest("section")!;
     expect(within(prompt).getByText("Summarize what changed yesterday.")).toBeVisible();
-    expect(within(prompt).getByRole("button", { name: "Edit" })).toBeVisible();
+    expect(within(prompt).queryByRole("button", { name: "Edit" })).toBeNull();
 
     const triggers = screen.getByRole("heading", { name: "Triggers", level: 2 }).closest("section")!;
     expect(within(triggers).getByText("1")).toBeVisible();
@@ -219,6 +230,7 @@ describe("AutopilotDetailPage", () => {
     await screen.findByRole("heading", { name: "Daily Sync", level: 1 });
 
     expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.getByRole("switch", { name: "Pause autopilot" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("button", { name: "Add trigger" })).toBeNull();
     openMoreActions();

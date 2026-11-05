@@ -4,6 +4,7 @@
     "apps/web/**",
     "apps/desktop/**",
     "packages/**",
+    "server/internal/handler/testdata/quick_action_bodies.json",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",

@@ -104,7 +104,7 @@ export function createEnDict(
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 28 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 29 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -119,7 +119,7 @@ export function createEnDict(
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 28 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 29 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw, ZCode \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createEnDict(
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 28 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 29 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 28 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
+          "Multica supports 29 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -522,6 +522,58 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.8.0",
+        date: "2026-11-03",
+        title: "A new workspace layout, rebuilt views, and one window per workspace on desktop",
+        changes: [],
+        features: [
+          "A new workspace layout: an app bar for Work, Team, Chat, Inbox, and Auto, plus a side panel you can collapse and resize.",
+          "Views are rebuilt. Save favorites, combine or exclude filters, and filter by agent status or \"Me and my agents\".",
+          "Change an Issue's status or assignee right from the Work sidebar.",
+          "On desktop, each workspace opens in its own window.",
+          "Set up a WeCom bot by scanning a QR code, and see the agent's progress while it replies.",
+          "Qoder Cloud Agents supports chat, quick create, and Issue attachments, and shows Qoder credits for each run.",
+          "Run tasks on ZCode.",
+          "Send extra instructions to a running Pi agent. Pi also loads the skills Multica installs.",
+          "Limit how many tasks a runtime runs at once.",
+          "Manage workflows from the CLI.",
+          "See Hermes tokens and cost while a run is in progress.",
+          "Resolved threads show their conclusion, so agents skip settled discussions.",
+        ],
+        improvements: [
+          "Multica has a refreshed logo, icons, and colors.",
+          "The agent list has search again, and agent settings open from more places.",
+          "Empty pages share one look and suggest a next step.",
+          "Attachment previews have a pager below the file.",
+          "Skills can include up to 512 files, and failed imports show the real reason.",
+          "Prices are updated for MiniMax-M3, Cursor, and GPT-5.6.",
+          "Agents use one PR per Issue by default, and sub-Issue runs read the parent Issue.",
+          "Traditional Chinese uses \"AI 代理\" for agents.",
+          "The Autopilot Edit button now sits next to Run now.",
+        ],
+        fixes: [
+          "After a comment joins a queued run, replies in that thread still reach the right agent.",
+          "The floating chat (Cmd+J) no longer opens blank.",
+          "Lark shows binding and message checks separately.",
+          "Telegram private chats keep @bot in your text.",
+          "CLI attachment paths keep special characters, and repo checkout warns when it uses an old cache.",
+          "Agents see skill edits and the right skill names.",
+          "Tasks recover after a daemon restart, and Claude runs no longer hang at the end.",
+          "Onboarding counts computers correctly, and creating an agent works on narrow screens.",
+          "Codex models from the new catalog no longer start their own subagents.",
+          "Custom runtime configurations can be deleted again.",
+          "Hermes shows the real reason a run failed.",
+          "Quick create assigns the agent or squad you picked.",
+          "Clearing an advanced filter value no longer breaks the list.",
+          "The Auto nav item no longer shows a red dot you can't clear.",
+          "Devin lists models when you use an API key.",
+          "An older cancelled run no longer marks PR checks as failed.",
+          "The current release highlight on the changelog timeline is no longer cut off.",
+          "Settings search hides notification settings that aren't available.",
+          "Selected tabs no longer look outlined in dark mode.",
+        ],
+      },
       {
         version: "0.7.2",
         date: "2026-10-30",

@@ -46,7 +46,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { plainTriggerSummary } from "../../issues/components/task-run-labels";
+import { plainTriggerSummary, useFormatSpend } from "../../issues/components/task-run-labels";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
@@ -102,7 +102,7 @@ import { languageForPath } from "./diff-highlight";
 import { useLocale, useT } from "../../i18n";
 import {
   formatTokens,
-  formatUsd,
+  hasTokenFigure,
   summarizeTaskUsage,
 } from "../../runtimes/utils";
 import { formatBytes } from "../format-bytes";
@@ -328,6 +328,7 @@ export function AgentTranscriptDialog({
   contentState,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -934,9 +935,13 @@ export function AgentTranscriptDialog({
                 title={t(($) => $.transcript.usage_chip_title)}
               >
                 <Coins aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
-                <span className="font-medium">{formatTokens(usage.tokens)}</span>
-                <span className="text-faint-foreground">·</span>
-                <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
+                {hasTokenFigure(usage) && (
+                  <>
+                    <span className="font-medium">{formatTokens(usage.tokens)}</span>
+                    <span className="text-faint-foreground">·</span>
+                  </>
+                )}
+                <span className="text-muted-foreground">{formatSpend(usage)}</span>
               </span>
             )}
 
@@ -1069,7 +1074,7 @@ export function AgentTranscriptDialog({
                           )}
                           <RunDetailRow
                             label={t(($) => $.transcript.details_cost)}
-                            value={formatUsd(usage.cost)}
+                            value={formatSpend(usage)}
                           />
                         </>
                       )}

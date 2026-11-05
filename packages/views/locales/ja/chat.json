@@ -1,6 +1,9 @@
 {
   "page": {
     "title": "チャット",
+    "no_agent_title": "チャットできるエージェントはまだいません",
+    "no_agent_description": "エージェントを作成すると、ここで要望を話し合い、タスクに分解してもらえます。",
+    "no_agent_action": "新規エージェント",
     "select_prompt": "会話を選ぶか、＋ で新規作成してください",
     "agent_link_no_access": "このエージェントとチャットする権限がありません。"
   },
@@ -243,6 +246,7 @@
     "row_actions_aria": "チャットの操作"
   },
   "header": {
+    "agent_settings": "エージェント設定",
     "rename": "名前を変更",
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",

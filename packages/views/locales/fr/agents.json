@@ -12,7 +12,8 @@
       "mine": "Mes agents",
       "all": "Tous les agents",
       "archived": "Agents archivés"
-    }
+    },
+    "search": "Rechercher des agents"
   },
   "scope": {
     "mine": "Les miens",
@@ -47,14 +48,25 @@
   },
   "empty": {
     "title": "Aucun agent pour l'instant",
-    "description": "Créez un agent, puis assignez-lui des tâches."
+    "description": "Créez un agent, puis assignez-lui des tâches.",
+    "setup": {
+      "label": "Étapes de configuration",
+      "runtime": "Connecter un runtime",
+      "agent": "Créer un agent",
+      "issue": "Lui assigner une tâche",
+      "done": "(fait)",
+      "connect_runtime": "Connecter"
+    }
   },
   "no_matches": {
     "title": "Aucune correspondance",
     "no_archived": "Aucun agent archivé pour l'instant.",
     "no_filter_match": "Aucun agent ne correspond à ce filtre.",
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
-    "runtime_filtered": "Aucun agent sur « {{machine}} »."
+    "runtime_filtered": "Aucun agent sur « {{machine}} ».",
+    "search_active": "Aucun agent ne correspond à « {{query}} ».",
+    "search_active_filtered": "Aucun agent ne correspond à « {{query}} » dans ce filtre.",
+    "search_archived": "Aucun agent archivé ne correspond à « {{query}} »."
   },
   "runtime_filter": {
     "all": "Tous les runtimes",
@@ -168,7 +180,8 @@
     "copy_link": "Copier le lien",
     "copy_id": "Copier l'ID de l'agent",
     "link_copied_toast": "Lien copié",
-    "id_copied_toast": "ID de l'agent copié"
+    "id_copied_toast": "ID de l'agent copié",
+    "settings": "Paramètres"
   },
   "inspector": {
     "section_profile": "Profil",
@@ -222,7 +235,8 @@
   "panel": {
     "status": "Statut",
     "runs_7d": "Exécutions (7 j)",
-    "edit_access_aria": "Accès : {{value}}. Modifier l'accès"
+    "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
+    "all_settings": "Tous les paramètres"
   },
   "skill_attach": {
     "trigger_aria": "Rattacher un skill de l'espace de travail",
@@ -360,7 +374,8 @@
       "prompt_assistant": "Aider notre équipe à planifier et rédiger des projets",
       "thinking": "Mise à jour du brouillon…",
       "placeholder": "Décrivez l'agent dont vous avez besoin…",
-      "send": "Envoyer le message"
+      "send": "Envoyer le message",
+      "conversation_tab": "Conversation"
     },
     "live_draft": "Configuration de l'agent",
     "live_draft_hint": "Vous pouvez modifier le brouillon directement.",
@@ -869,7 +884,8 @@
       "redacted_title": "Configuré — masqué pour vous",
       "redacted_hint": "Seul le créateur de l'agent peut voir ou modifier les applications qu'il peut utiliser.",
       "shared_warning": "Cet agent est partagé. Les personnes qui peuvent l'exécuter pourront utiliser les applications Composio que vous activez ici. Passez en Privé ou restreignez la liste d'accès si ces applications exposent des données sensibles.",
-      "workspace_warning": "Public pour l'espace de travail : tout membre de l'espace de travail peut utiliser ces applications Composio via cet agent."
+      "workspace_warning": "Public pour l'espace de travail : tout membre de l'espace de travail peut utiliser ces applications Composio via cet agent.",
+      "open_settings": "Ouvrir les paramètres"
     },
     "runtime_config": {
       "mode_label": "Mode de routage",
@@ -1224,5 +1240,29 @@
     "restored": "Révision {{revision}} restaurée",
     "restore_failed": "Impossible de restaurer cette révision. Réessayez.",
     "restore_unchanged": "L'agent a déjà ces instructions."
+  },
+  "intro": {
+    "title": "Recrutez votre premier coéquipier IA",
+    "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",
+    "slides": {
+      "describe": {
+        "title": "Décrivez son rôle en une phrase",
+        "description": "Décrivez la mission, choisissez un runtime et un modèle, puis créez-le. Modifiez ses instructions ou ajoutez des skills quand vous voulez."
+      },
+      "assign": {
+        "title": "Confiez-lui du travail comme à un collègue",
+        "description": "Choisissez-le comme responsable de n'importe quelle tâche. Il s'y met tout seul, sans surveillance."
+      },
+      "deliver": {
+        "title": "Suivez son travail, recevez le résultat en commentaire",
+        "description": "Chaque étape est visible pendant l'exécution. Une fois terminé, il publie le résultat et la PR sur la tâche."
+      }
+    },
+    "art": {
+      "prompt": "Relire les PR frontend en priorité pour l'accessibilité et les performances, et publier les conclusions en commentaire de PR.",
+      "issue_title": "Mise en page de la page tarifs cassée sur mobile",
+      "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
+      "step_read": "Lecture de {{file}}"
+    }
   }
 }

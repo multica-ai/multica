@@ -12,7 +12,8 @@
       "mine": "自分のエージェント",
       "all": "すべてのエージェント",
       "archived": "アーカイブ済みのエージェント"
-    }
+    },
+    "search": "エージェントを検索"
   },
   "scope": {
     "mine": "自分のもの",
@@ -46,14 +47,25 @@
   },
   "empty": {
     "title": "まだエージェントがいません",
-    "description": "エージェントを作成してタスクを割り当てましょう。"
+    "description": "エージェントを作成してタスクを割り当てましょう。",
+    "setup": {
+      "label": "セットアップ手順",
+      "runtime": "ランタイムを接続する",
+      "agent": "エージェントを作成する",
+      "issue": "タスクを割り当てる",
+      "done": "（完了）",
+      "connect_runtime": "接続"
+    }
   },
   "no_matches": {
     "title": "一致する結果なし",
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
-    "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
+    "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。",
+    "search_active": "\"{{query}}\" に一致するエージェントがありません。",
+    "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
+    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。"
   },
   "columns": {
     "agent": "エージェント",
@@ -151,7 +163,8 @@
     "copy_link": "リンクをコピー",
     "copy_id": "エージェント ID をコピー",
     "link_copied_toast": "リンクをコピーしました",
-    "id_copied_toast": "エージェント ID をコピーしました"
+    "id_copied_toast": "エージェント ID をコピーしました",
+    "settings": "設定"
   },
   "inspector": {
     "section_profile": "プロフィール",
@@ -202,7 +215,8 @@
   "panel": {
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
-    "edit_access_aria": "アクセス: {{value}}。アクセスを変更"
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
+    "all_settings": "すべての設定"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",
@@ -548,7 +562,8 @@
       "redacted_title": "設定済み — あなたには非表示",
       "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
       "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
-      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
+      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。",
+      "open_settings": "設定を開く"
     },
     "runtime_config": {
       "mode_label": "ルーティングモード",
@@ -942,7 +957,8 @@
       "prompt_assistant": "チームのプロジェクト計画と文章作成を支援",
       "thinking": "下書きを更新中…",
       "placeholder": "必要なエージェントを説明…",
-      "send": "メッセージを送信"
+      "send": "メッセージを送信",
+      "conversation_tab": "会話"
     },
     "live_draft": "エージェント設定",
     "live_draft_hint": "下書きは直接編集できます。",
@@ -1198,5 +1214,29 @@
     "restored": "修正 {{revision}} を復元しました",
     "restore_failed": "この修正を復元できませんでした。もう一度お試しください。",
     "restore_unchanged": "エージェントには既にこの指示があります。"
+  },
+  "intro": {
+    "title": "最初の AI チームメイトを迎える",
+    "description": "エージェントはチームメンバーと同じようにタスクを引き受けます。ランタイム上で Claude Code や Codex などを使って作業し、終わったらコメントで成果を渡します。",
+    "slides": {
+      "describe": {
+        "title": "やることを一文で伝える",
+        "description": "役割を書き、ランタイムとモデルを選べば作成できます。指示の変更や skill の追加はいつでもできます。"
+      },
+      "assign": {
+        "title": "同僚と同じように任せる",
+        "description": "どのタスクでも担当者に選ぶだけ。自分で作業を始めるので、見張る必要はありません。"
+      },
+      "deliver": {
+        "title": "作業を見守り、コメントで受け取る",
+        "description": "実行の様子はリアルタイムで見えます。完了すると、結果と PR をタスクのコメントで渡します。"
+      }
+    },
+    "art": {
+      "prompt": "フロントエンドの PR をレビューし、アクセシビリティとパフォーマンスを重点的に見て、結論を PR コメントに書く。",
+      "issue_title": "料金ページのモバイル表示が崩れる",
+      "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
+      "step_read": "{{file}} を読む"
+    }
   }
 }

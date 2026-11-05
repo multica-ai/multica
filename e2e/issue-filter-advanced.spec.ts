@@ -114,9 +114,14 @@ test.describe("Issue filter: search, due date, advanced", () => {
 
     await expect(panel).toBeVisible();
     await expect.poll(() => visibleIssueTitles(page, all)).toEqual([lowLate, urgentLate].sort());
-    await expect(panel.getByRole("button", { name: "Switch to simple filter" })).toBeDisabled();
-    await expect(panel.getByText(/Simple filters can't show groups/)).toBeVisible();
+    const toSimple = panel.getByRole("button", { name: "Switch to simple filter" });
+    await expect(toSimple).toBeDisabled();
     await shot(page, "03-advanced");
+    await toSimple.locator("..").hover();
+    const blockedReason = page.getByText(/Simple filters can't show groups/);
+    await expect(blockedReason).toBeVisible();
+    await panel.getByText("Advanced filter").hover();
+    await expect(blockedReason).toBeHidden();
 
     // The trigger names the mode; the chip bar carries the tree as one chip.
     await page.keyboard.press("Escape");

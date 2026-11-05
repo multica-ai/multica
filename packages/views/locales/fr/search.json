@@ -77,7 +77,8 @@
     "assign_issue": "Assigner une tâche à {{name}}...",
     "new_issue": "Nouvelle tâche pour {{name}}",
     "pin_in_chat": "Épingler dans la discussion",
-    "unpin_in_chat": "Désépingler de la discussion"
+    "unpin_in_chat": "Désépingler de la discussion",
+    "settings": "Ouvrir les paramètres de l'agent"
   },
   "autopilot": {
     "run_now": "Exécuter une fois maintenant",

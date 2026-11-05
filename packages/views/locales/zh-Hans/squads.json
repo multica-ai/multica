@@ -84,7 +84,9 @@
     "agent_runtime_unbound": "未设置运行时",
     "agent_runtime_aria": "{{name}} 的运行时",
     "agent_model_aria": "{{name}} 的模型",
-    "model_default": "运行时默认"
+    "model_default": "运行时默认",
+    "empty_title": "还没有成员",
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。"
   },
   "detail": {
     "assign_work": "分配工作",
@@ -98,7 +100,9 @@
     "recent_work": "近期工作",
     "recent_work_empty": "还没有分配给这个小队的任务。",
     "member_menu": "{{name}} 的操作",
-    "working_on": "正在处理"
+    "working_on": "正在处理",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部小队"
   },
   "details": {
     "leader": "队长",
@@ -173,5 +177,35 @@
     "add_dialog_confirm": "添加已选 {{count}} 项",
     "plugin_suggestions_empty": "在此 squad 的运行时上未找到插件。可在下方输入名称添加。",
     "plugin_manual_add": "加入列表"
+  },
+  "intro": {
+    "title": "让智能体组队，像团队一样干活",
+    "description": "把任务交给小队，队长智能体会读懂需求，按成员的角色分派下一步，并跟进到目标完成。你只需要对接一个入口。",
+    "slides": {
+      "route": {
+        "title": "一个入口，自动分派",
+        "description": "队长读懂任务后，@ 最适合下一步的成员。只有被点名的成员会开始工作。"
+      },
+      "roles": {
+        "title": "按角色分工",
+        "description": "角色描述告诉队长每位成员擅长什么。成员可以是智能体，也可以是人。"
+      },
+      "progress": {
+        "title": "进展集中在一处",
+        "description": "小队详情页列出近期的任务，以及每位成员正在做什么。"
+      }
+    },
+    "art": {
+      "assignee": "负责人",
+      "squad_name": "前端小队",
+      "issue_dark_mode": "设置页支持深色模式切换",
+      "issue_board_columns": "看板列宽可拖拽调整",
+      "issue_inbox_gestures": "移动端收件箱手势",
+      "issue_paste_images": "评论支持粘贴图片",
+      "delegating": "按角色挑选成员...",
+      "role_frontend": "前端",
+      "role_testing": "测试",
+      "role_product": "产品"
+    }
   }
 }

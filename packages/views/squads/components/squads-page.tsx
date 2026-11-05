@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   ExternalLink,
   Loader2,
-  Plus,
   Rocket,
   Trash2,
   Users,
@@ -33,6 +32,7 @@ import {
 } from "@multica/core/squads/stores";
 import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { SquadsIntro } from "./squads-intro";
 import {
   Dialog,
   DialogContent,
@@ -59,8 +59,8 @@ import { useIntentNavigate } from "../../navigation";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
+  CollectionNoMatches,
   CollectionPageHeader,
-  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -619,22 +619,7 @@ export function SquadsPage() {
       />
 
       {!isLoading && squads.length === 0 ? (
-        <CollectionPageState
-          icon={Users}
-          title={t(($) => $.page.empty_no_squads)}
-          actions={
-            <>
-              <Button size="sm" variant="outline" onClick={openSquadQuickstart}>
-                <Rocket aria-hidden="true" className="size-3.5" />
-                {t(($) => $.page.quickstart_button)}
-              </Button>
-              <Button size="sm" variant="outline" onClick={openCreateSquad}>
-                <Plus aria-hidden="true" className="size-3.5" />
-                {t(($) => $.page.new_button)}
-              </Button>
-            </>
-          }
-        />
+        <SquadsIntro onCreate={openCreateSquad} onQuickstart={openSquadQuickstart} />
       ) : (
         <CollectionList
           label={scopeLabels[scope]}
@@ -651,7 +636,14 @@ export function SquadsPage() {
               : undefined
           }
           sort={sort}
-          empty={t(($) => $.page.no_matches)}
+          empty={
+            <CollectionNoMatches
+              title={t(($) => $.page.no_matches)}
+              description={hasActiveFilters ? t(($) => $.page.empty_no_match) : undefined}
+              onReset={clearFilters}
+              hasFilters={hasActiveFilters}
+            />
+          }
         />
       )}
     </div>

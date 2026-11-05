@@ -12,7 +12,8 @@
       "mine": "My agents",
       "all": "All agents",
       "archived": "Archived agents"
-    }
+    },
+    "search": "Search agents"
   },
   "scope": {
     "mine": "Mine",
@@ -47,14 +48,25 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent, then assign it issues."
+    "description": "Create an agent, then assign it issues.",
+    "setup": {
+      "label": "Setup steps",
+      "runtime": "Connect a runtime",
+      "agent": "Create an agent",
+      "issue": "Assign it an issue",
+      "done": "(done)",
+      "connect_runtime": "Connect"
+    }
   },
   "no_matches": {
     "title": "No matches",
     "no_archived": "No archived agents yet.",
     "no_filter_match": "No agents match this filter.",
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
-    "runtime_filtered": "No agents on \"{{machine}}\"."
+    "runtime_filtered": "No agents on \"{{machine}}\".",
+    "search_active": "No agents match \"{{query}}\".",
+    "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
+    "search_archived": "No archived agents match \"{{query}}\"."
   },
   "runtime_filter": {
     "all": "All runtimes",
@@ -168,7 +180,8 @@
     "copy_link": "Copy link",
     "copy_id": "Copy agent ID",
     "link_copied_toast": "Link copied",
-    "id_copied_toast": "Agent ID copied"
+    "id_copied_toast": "Agent ID copied",
+    "settings": "Settings"
   },
   "inspector": {
     "section_profile": "Profile",
@@ -222,7 +235,8 @@
   "panel": {
     "status": "Status",
     "runs_7d": "Runs (7d)",
-    "edit_access_aria": "Access: {{value}}. Change access"
+    "edit_access_aria": "Access: {{value}}. Change access",
+    "all_settings": "All settings"
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",
@@ -360,7 +374,8 @@
       "prompt_assistant": "Help our team plan and write projects",
       "thinking": "Updating the draft…",
       "placeholder": "Describe the agent you need…",
-      "send": "Send message"
+      "send": "Send message",
+      "conversation_tab": "Conversation"
     },
     "live_draft": "Agent configuration",
     "live_draft_hint": "You can edit the draft directly.",
@@ -869,7 +884,8 @@
       "redacted_title": "Configured — hidden from your view",
       "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
       "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
-      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
+      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent.",
+      "open_settings": "Open settings"
     },
     "runtime_config": {
       "mode_label": "Routing mode",
@@ -1224,5 +1240,29 @@
     "restored": "Restored revision {{revision}}",
     "restore_failed": "Couldn't restore this revision. Try again.",
     "restore_unchanged": "The agent already has these instructions."
+  },
+  "intro": {
+    "title": "Hire your first AI teammate",
+    "description": "Agents take on issues like teammates do: they work on your runtime with tools like Claude Code and Codex, then deliver in the comments.",
+    "slides": {
+      "describe": {
+        "title": "Say what it does in a sentence",
+        "description": "Describe the job, pick a runtime and a model, and create it. Change its instructions or add skills any time."
+      },
+      "assign": {
+        "title": "Assign it work like a teammate",
+        "description": "Pick it as the assignee on any issue. It gets started on its own, no need to watch over it."
+      },
+      "deliver": {
+        "title": "Watch it work, get results in comments",
+        "description": "Each step is visible while it runs. When it's done, it posts the result and the PR on the issue."
+      }
+    },
+    "art": {
+      "prompt": "Review frontend PRs for accessibility and performance, and post findings as PR comments.",
+      "issue_title": "Pricing page layout breaks on mobile",
+      "comment": "Fixed: pricing cards stack into one column under 375px. PR is open and tests pass.",
+      "step_read": "Read {{file}}"
+    }
   }
 }

@@ -162,6 +162,10 @@
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
+    "concurrency_title": "동시 실행",
+    "concurrency_none": "제한 없음",
+    "concurrency_hint": "이 런타임의 모든 에이전트가 동시에 진행할 수 있는 최대 실행 수({{min}}-{{max}}). 비워 두면 제한이 없습니다.",
+    "toast_concurrency_failed": "동시 실행 제한을 업데이트하지 못했습니다",
     "visibility_label": {
       "private": "비공개",
       "public": "공개",
@@ -667,6 +671,30 @@
       "working": "연결 해제 중…",
       "cancel": "취소",
       "done": "Qoder 연결을 해제했습니다"
+    }
+  },
+  "intro": {
+    "title": "에이전트에게 일할 컴퓨터를",
+    "description": "런타임은 에이전트가 실제로 태스크를 실행하는 곳입니다. 내 컴퓨터, 서버, 또는 클라우드 서비스를 쓸 수 있습니다.",
+    "slides": {
+      "local": {
+        "title": "이 컴퓨터는 자동 연결",
+        "description": "데스크톱 앱을 내려받아 로그인하면 이 컴퓨터의 Claude Code, Codex 등이 자동으로 나타납니다."
+      },
+      "remote": {
+        "title": "다른 머신은 명령 두 개로",
+        "description": "서버나 다른 컴퓨터에 CLI를 설치하고 multica setup을 실행하면 연결됩니다."
+      },
+      "cloud": {
+        "title": "클라우드 노드도 가능",
+        "description": "머신을 직접 관리하기 싫다면 Multica가 호스팅하는 클라우드 노드를 만드세요."
+      }
+    },
+    "art": {
+      "this_computer": "이 컴퓨터 · 데스크톱",
+      "detected": "감지된 harness",
+      "run_there": "해당 머신에서 실행",
+      "connected": "{{name}}이(가) Multica에 연결됨"
     }
   }
 }

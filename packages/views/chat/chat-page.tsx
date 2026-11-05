@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, MessageSquare } from "@multica/ui/icons";
+import { ArrowLeft, Bot, MessageSquare, Plus } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -14,6 +14,7 @@ import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-acti
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, ChatSession } from "@multica/core/types";
+import { CollectionPageState } from "../layout/collection-page";
 import { CollapsedNavTrigger, PageHeader } from "../layout/page-header";
 import { PanelHeader } from "../layout/panel-nav";
 import { useListColumnCollapsed } from "../layout/app-shell-context";
@@ -48,7 +49,7 @@ import { useRegisterCommandBarContext } from "../search/register-context";
  */
 export function ChatPage() {
   const { t } = useT("chat");
-  const { pathname, searchParams, replace } = useNavigation();
+  const { pathname, searchParams, push, replace } = useNavigation();
   const workspaceSlug = useRequiredWorkspaceSlug();
   const wsPaths = useWorkspacePaths();
   // App Router can retain this page after navigation. Once the URL belongs
@@ -245,7 +246,7 @@ export function ChatPage() {
   );
 
   const listBody = (
-    <div className="px-2 py-1">
+    <div className="min-h-0 flex-1 px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
         agents={c.agents}
@@ -257,6 +258,22 @@ export function ChatPage() {
   );
 
   const compactConversation = isCompact && (!!c.activeSessionId || composingNew);
+  // Nothing to talk to and nothing to reread: the composer would only be a
+  // disabled box, so the page explains the prerequisite instead.
+  const noAgentPage = c.noAgent && c.sessions.length === 0;
+  const noAgentState = (
+    <CollectionPageState
+      icon={Bot}
+      title={t(($) => $.page.no_agent_title)}
+      description={t(($) => $.page.no_agent_description)}
+      actions={
+        <Button size="sm" onClick={() => push(wsPaths.newAgent())}>
+          <Plus aria-hidden="true" />
+          {t(($) => $.page.no_agent_action)}
+        </Button>
+      }
+    />
+  );
   const backToList = () => {
     c.setActiveSession(null);
     setComposingNew(false);
@@ -324,7 +341,11 @@ export function ChatPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+        {noAgentPage ? (
+          noAgentState
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
+        )}
       </div>
     );
   }
@@ -336,14 +357,16 @@ export function ChatPage() {
   const hasTarget = !!c.activeSessionId || composingNew;
   return (
     <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed}>
+      <ListColumn collapsed={listCollapsed} width="list">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+        <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
       </ListColumn>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {listCollapsed && !c.currentSession && <PageHeader>{newChatButton}</PageHeader>}
         {hasTarget ? (
           conversation
+        ) : noAgentPage ? (
+          noAgentState
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
             <MessageSquare className="h-10 w-10 text-faint-foreground" />

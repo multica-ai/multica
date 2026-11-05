@@ -162,12 +162,16 @@ export interface IssueSourceContext {
 /**
  * An issue with an agent result the viewer has not seen yet
  * (`GET /api/issues/unread`). `outcome` is `completed` | `failed` for a run, or
- * `manual` when the viewer marked it unread; `agent_id` is null for manual.
+ * `manual` when the viewer marked it unread; `agent_id` and `task_id` are null
+ * for manual. `comment_id` is the last comment that run left on the issue, null
+ * when it left none.
  */
 export interface IssueUnread {
   issue_id: string;
   outcome: string;
   agent_id: string | null;
+  task_id: string | null;
+  comment_id: string | null;
   created_at: string;
 }
 
