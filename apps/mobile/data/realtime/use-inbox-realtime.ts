@@ -28,7 +28,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   dropInboxItemsByIssue,
-  patchInboxIssueStatus,
+  patchInboxIssueProjection,
   refreshInboxList,
   refreshInboxUnreadSummary,
 } from "./inbox-ws-updaters";
@@ -65,7 +65,7 @@ export function useInboxRealtime() {
 
         // Cross-cutting: issue events that need to patch inbox state.
         ws.on("issue:updated", (payload) => {
-          patchInboxIssueStatus(
+          patchInboxIssueProjection(
             qc,
             wsId,
             payload.issue.id,

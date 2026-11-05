@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { inboxKeys } from "@/data/queries/inbox";
 import {
   dropInboxItemsByIssue,
-  patchInboxIssueStatus,
+  patchInboxIssueProjection,
   refreshInboxList,
   refreshInboxUnreadSummary,
 } from "./inbox-ws-updaters";
@@ -105,12 +105,12 @@ describe("refreshInboxUnreadSummary", () => {
   });
 });
 
-describe("patchInboxIssueStatus", () => {
+describe("patchInboxIssueProjection", () => {
   it("follows a rename so the row shows the issue's current title", () => {
     const qc = new QueryClient();
     qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [item("n1", "issue-a")]);
 
-    patchInboxIssueStatus(qc, wsId, "issue-a", "todo", "Renamed issue");
+    patchInboxIssueProjection(qc, wsId, "issue-a", "todo", "Renamed issue");
 
     const row = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0];
     expect(row?.issue_title).toBe("Renamed issue");
@@ -125,7 +125,7 @@ describe("patchInboxIssueStatus", () => {
     const invalidate = vi.spyOn(qc, "invalidateQueries");
     qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [item("n1", "issue-a")]);
 
-    patchInboxIssueStatus(qc, wsId, "issue-a", "done");
+    patchInboxIssueProjection(qc, wsId, "issue-a", "done");
 
     expect(
       qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.issue_status,

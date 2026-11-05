@@ -32,7 +32,7 @@ type InboxItemResponse struct {
 	CreatedAt     string          `json:"created_at"`
 	IssueStatus   *string         `json:"issue_status"`
 	IssuePriority *string         `json:"issue_priority"`
-	IssueTitle    *string         `json:"issue_title,omitempty"`
+	IssueTitle    *string         `json:"issue_title"`
 	ActorType     *string         `json:"actor_type"`
 	ActorID       *string         `json:"actor_id"`
 	Details       json.RawMessage `json:"details"`

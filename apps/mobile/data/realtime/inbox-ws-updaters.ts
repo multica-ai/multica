@@ -19,7 +19,7 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { InboxItem, IssueStatus } from "@multica/core/types";
 import { inboxKeys } from "@/data/queries/inbox";
 
-export function patchInboxIssueStatus(
+export function patchInboxIssueProjection(
   qc: QueryClient,
   wsId: string,
   issueId: string,
