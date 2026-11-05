@@ -133,8 +133,9 @@ describe("AppRail spaces", () => {
     for (const href of ["/acme/inbox", "/acme/company", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
       expect(link(href)).not.toBeNull();
     }
-    // Projects belong to the work space, which links to the company page.
-    expect(link("/acme/company")).toHaveAttribute("aria-current", "page");
+    // Projects belong to the work space, which links to its issues page.
+    expect(link("/acme/issues")).toHaveAttribute("aria-current", "page");
+    expect(link("/acme/company")).not.toHaveAttribute("aria-current");
     expect(link("/acme/agents")).not.toHaveAttribute("aria-current");
   });
 

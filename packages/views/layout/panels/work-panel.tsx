@@ -15,7 +15,7 @@ import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
-import { Building2, Shield, Workflow } from "@multica/ui/icons";
+import { Shield, Workflow } from "@multica/ui/icons";
 import { CollapseNavButton } from "../page-header";
 import { PanelBody, PanelHeader, PanelLink, PanelList, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
@@ -137,12 +137,6 @@ export function WorkPanel() {
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue}>
           <PanelList className="mb-2">
-            <PanelLink
-              href={p.company()}
-              icon={<Building2 className="size-4 shrink-0" />}
-              label={t(($) => $.nav.company)}
-              active={pathname === p.company()}
-            />
             <PanelLink
               href={p.pipeline()}
               icon={<Workflow className="size-4 shrink-0" />}

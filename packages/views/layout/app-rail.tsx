@@ -188,9 +188,15 @@ export function AppRail({
       label: t(($) => $.rail.inbox),
       fullLabel: t(($) => $.nav.inbox),
     },
-    work: {
+    company: {
       href: p.company(),
       icon: routeIconForPath(p.company()),
+      label: t(($) => $.rail.company),
+      fullLabel: t(($) => $.nav.company),
+    },
+    work: {
+      href: p.issues(),
+      icon: routeIconForPath(p.issues()),
       label: t(($) => $.rail.work),
       fullLabel: t(($) => $.spaces.work),
     },
