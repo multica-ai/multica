@@ -3,8 +3,9 @@
 -- detects the row as dirty and re-aggregates its bucket.
 -- Without the conflict-side bump, a correction to historical token counts
 -- would never propagate to the rollup.
--- cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
--- when it reports none. It is overwritten like the token counters so a
+-- cost_usd_ticks is the upstream runtime's accounted price (1e-10 USD), NULL
+-- when unavailable. It may be a provider charge or a runtime estimate.
+-- It is overwritten like the token counters so a
 -- corrected report replaces the previous figure rather than accumulating.
 -- credits_micros follows the same rule for providers that bill in credits.
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, credits_micros, updated_at)
