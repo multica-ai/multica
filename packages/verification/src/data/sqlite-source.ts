@@ -50,7 +50,7 @@ export async function exportSQLite(
   database.exec("BEGIN");
   try {
     const version = rows("PRAGMA user_version")[0]?.user_version;
-    if (Number(version) !== 4)
+    if (![4, 5].includes(Number(version)))
       throw new VerificationError(
         problem(
           "unsupportedVersion",

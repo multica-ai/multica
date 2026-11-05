@@ -98,9 +98,9 @@ node packages/verification/dist/mcp/stdio.js --project /absolute/path/to/checkou
 }
 ```
 
-不要把 token 内容粘贴进对话。`databaseFile`/`filesRoot` 可选；配置后使用只读 SQLite 事务，限定 account/workspace 和已识别的 schema 4，不将数据库文件交给目标应用升级。无数据库路径时，通过来源正常 Local API 导出分页历史和附件，前后核对 generation、snapshotSeq、queueRevision；活动数据发生变化时拒绝不稳定快照。API 无法提供完整 Side 上下文时明确拒绝，使用 SQLite 适配器。
+不要把 token 内容粘贴进对话。`databaseFile`/`filesRoot` 可选；配置后使用只读 SQLite 事务，限定 account/workspace 和已识别的 schema 4/5，不将数据库文件交给目标应用升级。无数据库路径时，通过来源正常 Local API 导出分页历史和附件，前后核对 generation、snapshotSeq、queueRevision；活动数据发生变化时拒绝不稳定快照。API 无法提供完整 Side 上下文时明确拒绝，使用 SQLite 适配器。
 
-副本以版本化内容协议导入目标正常 store 的事务入口，不通过任意 SQL 写入。导入的命名空间为 `datasetId:restoreVersion`，持久记录 ID 映射和转换：不恢复 provider 原生会话、运行中的轮次转取消、队列暂停、工作目录重新绑定、移除队列云端执行引用、副本解除归档。新数据的身份、云端关联和运行状态不冒充原对象。
+副本以版本化内容协议导入目标正常 store 的事务入口，不通过任意 SQL 写入。导入的命名空间为 `datasetId:restoreVersion`，持久记录 ID 映射和转换：不恢复 provider 原生会话、运行中的轮次转取消、队列暂停、工作目录重新绑定、移除队列云端执行引用、副本解除归档。命令重试收据及已移除队列项的去重记录不作为原运行态恢复；副本使用新的请求命名空间。新数据的身份、云端关联和运行状态不冒充原对象。
 
 导入的网络响应丢失时，原任务变成 unknown，dataset 保持 partial。先查询原 requestId 和资源引用，再用 `setup_data/resumeImport` 复用原命名空间核对导入，避免创建第二份。`setup_reset` 只停止并归档本工具创建的旧副本，再恢复新版本；不修改源数据，不删除证据。
 
@@ -185,7 +185,7 @@ node scripts/verification/check-production.mjs
 ## 本轮执行结果
 
 - 验证包：类型、lint、构建通过；18 项手动基础测试、8 项手动协议集成通过。
-- Desktop：类型检查通过；133 个现有测试文件、1,411 项测试通过；lint 无错误，两个既有 Hook 警告。生产构建成功，625 个 JavaScript 产物及 Go 生产文件选择检查通过。
+- Desktop：类型检查通过；133 个现有测试文件、1,411 项测试通过；lint 无错误，两个既有 Hook 警告。生产构建成功，622 个 JavaScript 产物及 Go 生产文件选择检查通过。
 - Go：runtimeinstance、cli、daemon/localhost、localconversation/service、daemon 五个受影响包的默认测试通过；开发诊断测试和生产路由排除测试通过，生产 import POST 同样返回 404。
 - 实际 Setup prepare 已通过：创建新 worktree、固定源码及覆盖摘要、过滤安装 Desktop/Web 依赖、准备 Electron/工具链、生成 worktree 环境配置、编译 dev bundled CLI。活动正常 Desktop 正确触发 instanceBusy；准备完成的测试环境随后停止，没有启动第二个 Electron 或托管后端。
 - 冻结锁文件过滤安装、Turbo dry-run、文档本地链接/JSON/SVG 和差异空白检查通过。新验证包的标准 CI 任务没有执行命令。
