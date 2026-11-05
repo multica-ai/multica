@@ -167,3 +167,16 @@ Real Codex with a local model, real-account/model tests, a packaged Electron
 session and the entire repository test suite are separate validations. They are
 not implied by these focused checks. Any real-account or paid-model run requires
 explicit authorization.
+
+## Validation evidence and future engines
+
+See [validation evidence](chat-supplement-evidence/README.md) for the executed
+checks, simulation boundaries and fixture screenshots, including explicit
+recovery after a lost response. These images contain only local test data.
+
+Other harnesses can use the same chat receipt and composer path once their
+adapters provide negotiated, correlated acceptance for the exact active turn.
+Each engine needs its own protocol and completion-race tests. Hermes is not
+enabled here: concurrent `session/prompt` can queue another turn, and its generic
+`end_turn` result does not establish active-turn delivery. A separate Hermes
+contract and adapter are being developed locally; neither is part of this PR.
