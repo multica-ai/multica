@@ -155,7 +155,7 @@ it.each([false, true])(
       chinese ? "上下文 65.9k剩余 56%" : "Context 65.9kleft 56%"
     );
     await act(async () => trigger.click());
-    expect(document.querySelector(".multica-usage-detail")?.textContent).toBe(
+    expect(document.querySelector(".multica-usage-section .multica-usage-detail")?.textContent).toBe(
       `65,918 · ${chinese ? "上限未提供" : "Limit not reported"} tokens`
     );
   }
@@ -165,7 +165,7 @@ it("retains percentage summaries and exact used/limit details when the context l
   await renderUsage();
   expect(button("Usage").textContent).toBe("Context 10%");
   await open();
-  expect(document.querySelector(".multica-usage-detail")?.textContent).toBe(
+  expect(document.querySelector(".multica-usage-section .multica-usage-detail")?.textContent).toBe(
     "100 / 1,000 tokens"
   );
 });
@@ -291,3 +291,14 @@ it.each([false, true])(
     );
   }
 );
+
+it("opens status from slash repeatedly, retaining the current conversation identity and usage", async () => {
+  await renderUsage({ openRequest: 0 });
+  await renderUsage({ openRequest: 1 });
+  expect(document.body.textContent).toContain("Conversation ID: conversation");
+  expect(document.body.textContent).toContain("100 / 1,000 tokens");
+  await act(async () => { for (const listener of listeners) listener({ type: "dismissPopovers" }); });
+  expect(document.body.textContent).not.toContain("Conversation ID: conversation");
+  await renderUsage({ openRequest: 2 });
+  expect(document.body.textContent).toContain("Conversation ID: conversation");
+});

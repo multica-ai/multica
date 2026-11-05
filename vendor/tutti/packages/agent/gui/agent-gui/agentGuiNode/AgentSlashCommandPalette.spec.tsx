@@ -266,11 +266,11 @@ describe("AgentSlashCommandPalette", () => {
     expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText("Connectors")).toHaveClass(
-      "mt-3",
+      "mt-1",
       "pt-3",
-      "before:inset-x-3",
+      "before:inset-x-2",
       "before:border-t",
-      "before:border-[var(--border-1)]"
+      "before:border-border"
     );
     expect(screen.getByText("Connected")).toHaveClass(
       "text-[var(--state-success)]"

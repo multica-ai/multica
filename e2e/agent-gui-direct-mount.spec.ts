@@ -322,3 +322,56 @@ test("keeps streaming content at the measured end and preserves scroll-away inte
   await stream(90);
   await expect.poll(gap).toBeLessThanOrEqual(1);
 });
+
+test("slash host commands survive capability refresh and use the existing settings and Side bridge", async ({ page }) => {
+  await page.locator("#toggle").click();
+  const main = page.locator('[data-instance="main-conversation"]');
+  const editor = main.locator('[contenteditable="true"]');
+  await expect(main.getByText("Reply in main-conversation")).toBeVisible();
+  const command = (name: string) => page.getByTestId(`agent-gui-composer-slash-command-${name}`);
+  await editor.fill("/");
+  for (const name of ["side", "reasoning", "model", "status"]) await expect(command(name)).toBeVisible();
+  const palette = page.getByTestId("agent-gui-slash-palette-surface");
+  const fullHeight = (await palette.boundingBox())!.height;
+  expect(fullHeight).toBeLessThan(210);
+  // The request above refreshes the empty provider catalog. Host commands must
+  // still be present when that async refresh settles.
+  await expect(page.getByRole("status", { name: "Loading capabilities" })).toHaveCount(0);
+  await command("model").click();
+  await page.getByRole("menuitemradio", { name: "Fixture model", exact: true }).click();
+  await expect(main.getByTestId("multica-model-picker")).toContainText("Fixture model");
+  await expect(editor).toHaveText("");
+  await editor.fill("/rea");
+  await expect(command("reasoning")).toBeVisible();
+  await expect(command("model")).toHaveCount(0);
+  const filteredHeight = (await palette.boundingBox())!.height;
+  expect(filteredHeight).toBeLessThan(100);
+  expect(filteredHeight).toBeLessThan(fullHeight);
+  await command("reasoning").click();
+  await page.getByRole("menuitemradio", { name: "High", exact: true }).click();
+  await expect(main.getByTestId("multica-model-picker")).toContainText("High");
+  await editor.fill("/status");
+  await editor.press("Escape");
+  await editor.press("Enter");
+  await expect(page.getByText("Conversation ID: main-conversation", { exact: true })).toBeVisible();
+  await expect(page.getByText("100 / 1,000 tokens", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".multica-usage-popover")).toBeHidden();
+  await editor.click();
+  await editor.fill("/");
+  await command("side").click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { hostActions: { method: string; params: { sessionId?: string } }[] }).hostActions.filter((call) => call.method === "host.openSide").map((call) => call.params.sessionId))).toEqual(["main-conversation"]);
+  await expect(editor).toHaveText("");
+  const sends = await page.evaluate(() => (window as unknown as { hostActions: { method: string }[] }).hostActions.filter((call) => call.method === "session.send"));
+  expect(sends).toEqual([]);
+  await editor.fill("/");
+  for (const theme of ["light", "dark"]) {
+    if (theme === "dark") {
+      await page.locator("#theme").click();
+      await editor.fill("/");
+      await editor.click();
+    }
+    await expect(command("model")).toBeVisible();
+    await page.screenshot({ path: `.tmp/agent-gui-direct/slash-${theme}.png` });
+  }
+});

@@ -29,7 +29,8 @@ type Catalog struct {
 	paths   map[string]string
 	// codexDefault is the default a running Codex last reported; its model cache
 	// does not say.
-	codexDefault string
+	codexDefault    string
+	codexConfigured cached[string]
 }
 
 type cached[T any] struct {
@@ -131,14 +132,33 @@ func markDefault(models Models, id string) Models {
 
 // Models returns a provider's models. Claude's come from the CLI's
 // initialize response and are cached for a minute unless force is set;
-// Codex's come from its local model cache.
+// Codex's come from its local model cache, with its default resolved by the CLI.
 func (c *Catalog) Models(ctx context.Context, provider string, force bool) (Models, error) {
 	switch provider {
 	case "codex":
+		models := codexModels(c.codexDir)
+		if len(models.Models) == 0 {
+			return models, nil
+		}
 		c.mu.Lock()
-		reported := c.codexDefault
+		entry, reported := c.codexConfigured, c.codexDefault
 		c.mu.Unlock()
-		return markDefault(codexModels(c.codexDir), reported), nil
+		if force || entry.at.IsZero() || c.now().Sub(entry.at) >= modelsTTL {
+			exe, err := c.find(ctx, provider)
+			model := ""
+			if err == nil {
+				model, err = probeCodexDefault(ctx, probeRequest{executable: exe, dir: os.TempDir(), env: probeEnv(), timeout: modelsTimeout})
+			}
+			entry = cached[string]{at: c.now(), value: model, err: err}
+			c.mu.Lock()
+			c.codexConfigured = entry
+			c.mu.Unlock()
+		}
+		if entry.err == nil {
+			reported = entry.value
+		}
+		// Discovery failure must not hide the cached models or invent a default.
+		return markDefault(models, reported), nil
 	case "claude":
 	default:
 		return Models{}, ErrUnknownProvider

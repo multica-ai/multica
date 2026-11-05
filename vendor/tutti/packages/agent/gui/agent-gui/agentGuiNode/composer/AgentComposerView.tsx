@@ -572,16 +572,13 @@ export const AgentComposerView = observer(function AgentComposerView(
               : null}
             <ComposerFloatingMenuSurface
               anchorRef={input.inputShellRef}
-              className={cn(
-                composerStyles.dropdownSurface,
-                "max-h-[320px] overflow-hidden border-[var(--line-1)] p-0"
-              )}
-              contentClassName="h-full min-h-0"
+              className="flex flex-col rounded-lg border-0 bg-surface-raised p-1 text-popover-foreground shadow-[var(--menu-shadow)] ring-1 ring-surface-border"
+              contentClassName="flex min-h-0 flex-col overflow-hidden"
               dismissBoundaryRef={input.promptInputAreaRef}
               maxHeight={SLASH_PALETTE_HEIGHT_PX}
               onDismiss={closeSlashFloatingMenu}
               open={input.showSlashPalette}
-              placement="fixed-height"
+              placement="dynamic-above"
               surfaceRef={input.paletteContentRef}
               testId="agent-gui-slash-palette-surface"
             >

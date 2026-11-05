@@ -18,6 +18,7 @@ import {
   syncAgentGuiDocument
 } from "./agent-gui-appearance";
 import { ComposerDraftProvider } from "./composer-drafts";
+import { composerCommands, type ComposerCommandRequest } from "./composer-commands";
 import {
   ComposerFooterControls,
   type ProviderDraft
@@ -74,6 +75,8 @@ function AgentGuiApplicationRender({
   root: HTMLElement;
 }) {
   const [snapshot, setSnapshot] = useState(initial);
+  const [composerCommand, setComposerCommand] = useState<ComposerCommandRequest | null>(null);
+  const commandSequence = useRef(0);
   const [composerFocusSequence, setComposerFocusSequence] = useState<
     number | null
   >(null);
@@ -326,23 +329,34 @@ function AgentGuiApplicationRender({
     ? handle.toServerSessionId(node.lastActiveAgentSessionId)
     : null;
   const hostApi = useMemo(
-    () =>
-      createAgentGuiHostApi(
-        client,
-        {
-          workspaceId: snapshot.workspaceId,
-          locale: snapshot.locale,
-          local: snapshot.local
-        },
-        handle,
-        imageSessionId
-      ),
+    () => ({
+      ...createAgentGuiHostApi(
+          client,
+          {
+            workspaceId: snapshot.workspaceId,
+            locale: snapshot.locale,
+            local: snapshot.local
+          },
+          handle,
+          imageSessionId
+        ),
+      ...(snapshot.local ? {
+        composerCommands: composerCommands(
+          snapshot.locale === "zh-CN",
+          snapshot.sideWorkspace === true,
+          (name, agentSessionId) => setComposerCommand({
+            name, agentSessionId, sequence: ++commandSequence.current
+          })
+        )
+      } : {})
+    }),
     [
       client,
       handle,
       snapshot.locale,
       snapshot.workspaceId,
       snapshot.local,
+      snapshot.sideWorkspace,
       imageSessionId
     ]
   );
@@ -545,6 +559,7 @@ function AgentGuiApplicationRender({
       hostActionsProp8Value4
     ]
   );
+  const onComposerCommandHandled = usePersistCallback(() => setComposerCommand(null));
   const renderSlotsProp9Value1 = useMemo<
     NonNullable<
       NonNullable<
@@ -554,6 +569,8 @@ function AgentGuiApplicationRender({
   >(
     () => (context) => (
       <ComposerFooterControlsBinding1
+        commandRequest={composerCommand}
+        onCommandHandled={onComposerCommandHandled}
         context={context}
         client={client}
         handle={handle}
@@ -569,6 +586,8 @@ function AgentGuiApplicationRender({
       />
     ),
     [
+      composerCommand,
+      onComposerCommandHandled,
       client,
       handle,
       workspace,
@@ -640,6 +659,8 @@ function AgentGuiApplicationRender({
 
 const ComposerFooterControlsBinding1 = observer(
   function ComposerFooterControlsBinding1({
+    commandRequest,
+    onCommandHandled,
     context,
     client,
     handle,
@@ -718,6 +739,8 @@ const ComposerFooterControlsBinding1 = observer(
     });
     return (
       <ComposerFooterControls
+        commandRequest={commandRequest}
+        onCommandHandled={onCommandHandled}
         context={context}
         client={client}
         handle={handle}
@@ -737,6 +760,8 @@ const ComposerFooterControlsBinding1 = observer(
 );
 
 type ComposerFooterControlsBinding1Props = {
+  commandRequest: ComposerCommandRequest | null;
+  onCommandHandled(): void;
   context: import("../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/AgentGUINodeView").AgentGUIComposerFooterAccessoryContext;
   client: NonNullable<{
     client: AgentGuiHostServices;

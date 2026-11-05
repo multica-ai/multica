@@ -235,7 +235,14 @@ export type AgentHostWorkspaceApi = AgentHostRecord & {
   }) => AgentHostAsyncResult<unknown>;
 };
 
+/** UI actions owned by the embedding host, independent of provider catalogs. */
+export interface AgentHostComposerCommands {
+  commands: readonly { name: string; label: string; description?: string }[];
+  execute(input: { name: string; agentSessionId: string | null }): AgentHostAsyncResult<void>;
+}
+
 export interface AgentHostInputApi {
+  composerCommands?: AgentHostComposerCommands;
   account?: AgentHostAccountApi;
   agentTargetSetup?: AgentHostAgentTargetSetupApi;
   clipboard: AgentHostClipboardApi;
@@ -424,6 +431,7 @@ export type AgentHostUserProjectsApi = AgentHostRecord & {
 };
 
 export interface AgentHostRuntimeApi {
+  composerCommands?: AgentHostComposerCommands;
   account?: AgentHostAccountApi;
   agentTargetSetup?: AgentHostAgentTargetSetupApi;
   clipboard: AgentHostClipboardApi;
@@ -445,6 +453,7 @@ export function toAgentHostRuntimeApi(
   hostApi: AgentHostInputApi | AgentHostRuntimeApi
 ): AgentHostRuntimeApi {
   return {
+    composerCommands: hostApi.composerCommands,
     account: hostApi.account,
     agentTargetSetup: hostApi.agentTargetSetup,
     clipboard: hostApi.clipboard,

@@ -97,6 +97,7 @@ func TestCodexUsageAndModels(t *testing.T) {
 
 	exe, _ := fakeCLI(t, map[string]string{
 		`"method":"initialize"`:              `{"id":1,"result":{}}`,
+		`"method":"config/read"`:             `{"id":2,"result":{"config":{"model":"gpt-5"}}}`,
 		`"method":"account/rateLimits/read"`: `{"id":2,"result":{"rateLimits":{"planType":"plus","primary":{"usedPercent":5,"windowDurationMins":300,"resetsAt":1793000000},"secondary":{"usedPercent":7,"windowDurationMins":10080}}}}`,
 	})
 	codexDir := t.TempDir()
@@ -115,6 +116,55 @@ func TestCodexUsageAndModels(t *testing.T) {
 	}
 	if usage.Account.Windows[0].Label != "5h" || usage.Account.Windows[1].Label != "7d" {
 		t.Fatalf("windows = %+v", usage.Account.Windows)
+	}
+}
+
+func TestCodexDefaultIsAvailableBeforeAnyConversationRuns(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, config string
+	}{
+		{"configured", `{"config":{"model":"b"}}`},
+		{"runtime default", `{"config":{"model":null}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exe, args := fakeCLI(t, map[string]string{
+				`"method":"initialize"`:  `{"id":1,"result":{}}`,
+				`"method":"config/read"`: `{"id":2,"result":` + tc.config + `}`,
+				`"method":"model/list"`:  `{"id":3,"result":{"data":[{"id":"b","isDefault":true}]}}`,
+			})
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(`{"models":[{"slug":"a"},{"slug":"b","supported_reasoning_levels":[{"effort":"high"}]}]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c := New(finder(map[string]string{"codex": exe}), t.TempDir(), dir)
+			for _, force := range []bool{false, false, true} {
+				models, err := c.Models(context.Background(), "codex", force)
+				if err != nil || len(models.Models) != 2 || models.Models[0].IsDefault || !models.Models[1].IsDefault || models.Models[1].Thinking.SupportedLevels[0].Value != "high" {
+					t.Fatalf("models = %+v, %v", models, err)
+				}
+			}
+			if data, _ := os.ReadFile(args); strings.Count(string(data), "\n") != 2 {
+				t.Fatalf("expected one cached probe and one forced probe: %q", data)
+			}
+		})
+	}
+}
+
+func TestCodexDefaultDiscoveryFailureKeepsExplicitModels(t *testing.T) {
+	t.Parallel()
+	exe, _ := fakeCLI(t, map[string]string{
+		`"method":"initialize"`:  `{"id":1,"result":{}}`,
+		`"method":"config/read"`: `{"id":2,"error":{"code":-32603,"message":"unavailable"}}`,
+	})
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(`{"models":[{"slug":"a","supported_reasoning_levels":[{"effort":"high"}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := New(finder(map[string]string{"codex": exe}), t.TempDir(), dir)
+	models, err := c.Models(context.Background(), "codex", false)
+	if err != nil || len(models.Models) != 1 || models.Models[0].IsDefault || models.Models[0].Thinking.SupportedLevels[0].Value != "high" {
+		t.Fatalf("models = %+v, %v", models, err)
 	}
 }
 

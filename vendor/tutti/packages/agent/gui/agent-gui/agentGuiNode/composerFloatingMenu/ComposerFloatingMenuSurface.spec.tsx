@@ -17,6 +17,28 @@ function mockRect(rect: {
 }
 
 describe("ComposerFloatingMenuSurface", () => {
+  it("lets dynamic menus shrink to their contents while capping them at the available space above the composer", () => {
+    const anchor = document.body.appendChild(document.createElement("div"));
+    anchor.getBoundingClientRect = () => mockRect({
+      bottom: 230, height: 30, left: 100, right: 500, top: 200, width: 400
+    });
+    const anchorRef = createRef<HTMLDivElement>();
+    anchorRef.current = anchor;
+    const view = render(
+      <ComposerFloatingMenuSurface
+        anchorRef={anchorRef} maxHeight={280} open placement="dynamic-above"
+        testId="content-sized-menu"
+      ><div>One matching command</div></ComposerFloatingMenuSurface>
+    );
+    const surface = screen.getByTestId("content-sized-menu");
+    expect(surface.style.height).toBe("");
+    expect(surface.style.minHeight).toBe("");
+    expect(surface.style.top).toBe("");
+    expect(Number.parseFloat(surface.style.maxHeight)).toBeLessThanOrEqual(200 - DESKTOP_WINDOW_TOP_MARGIN - 8);
+    expect(Number.parseFloat(surface.style.bottom)).toBe(window.innerHeight - 200 + 8);
+    view.unmount();
+    anchor.remove();
+  });
   it("keeps viewport coordinates when a workbench boundary requests a body portal", () => {
     const boundary = document.createElement("div");
     boundary.setAttribute("data-slot", "viewport-menu-boundary");
