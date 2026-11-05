@@ -1,3 +1,5 @@
+import {persistedQueuedPromptSchema} from "./submission-storage";
+import {LOCAL_REASONING_EFFORTS} from "./protocol";
 // @vitest-environment node
 import { expect, it } from "vitest";
 import {
@@ -31,4 +33,8 @@ it("keeps unknown authoritative states and delivery outcomes conservative", () =
       state: "queued",
     }).success,
   ).toBe(false);
+});
+
+it("persists every reasoning effort the conversation protocol supports",()=>{
+ for(const reasoningEffort of LOCAL_REASONING_EFFORTS)expect(persistedQueuedPromptSchema.parse({requestId:"r",content:"message",reasoningEffort,display:{id:"r",createdAtUnixMs:1,content:[{type:"text",text:"message"}]}}).reasoningEffort).toBe(reasoningEffort);
 });
