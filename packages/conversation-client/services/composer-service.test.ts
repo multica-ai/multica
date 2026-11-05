@@ -2,6 +2,7 @@
 import { autorun } from "mobx";
 import { describe, expect, it, vi } from "vitest";
 import type { RuntimeModelsResult } from "@multica/core/types";
+import { GLOBAL_EXECUTION_PERMISSION_KEY } from "../models/composer-preferences";
 import { ComposerService, composerOptionsRequestSignature, mergeComposerOptionsSection, type ComposerOptionsRequest, type ComposerServiceOptions, type ComposerSettingsPatch } from "./composer-service";
 
 type Options = { provider: string; loadedAtUnixMs?: number; models?: string[]; skills?: string[]; commands?: string[]; capabilities?: unknown; capabilityCatalog?: { id: string; kind?: string }[] };
@@ -410,13 +411,70 @@ describe("choices", () => {
     expect(service.selectedModel("b", "c")).toBeNull();
   });
 
-  it("remembers a permission as the provider's default for what comes next", async () => {
-    const { service } = settingsHarness();
+  it("shares one permission across providers and existing conversations and restores it after restart", async () => {
+    const { service, stored } = settingsHarness();
     expect(service.selectedPermission("a")).toBe("default");
     await service.setPermissionSelection("a", "c", "full-access");
     expect(service.selectedPermission("a")).toBe("full-access");
     expect(service.selectedPermission("a", "c")).toBe("full-access");
+    expect(service.selectedPermission("b")).toBe("full-access");
+    expect(service.selectedPermission("b", "another-conversation")).toBe("full-access");
     expect(service.permissionRevision).toBe(1);
+    const restarted = settingsHarness({ stored }).service;
+    await restarted.hydrated();
+    expect(restarted.selectedPermission("b", "another-conversation")).toBe("full-access");
+    restarted.dispose();
+    service.dispose();
+  });
+
+  it("updates mounted services when the shared permission changes and unsubscribes on disposal", async () => {
+    const { options, stored } = selections();
+    const listeners = new Set<(value: string | null) => void>();
+    options.storage.subscribe = (key, listener) => {
+      expect(key).toBe(GLOBAL_EXECUTION_PERMISSION_KEY);
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    };
+    options.storage.write = async (key, value) => {
+      stored.set(key, value);
+      for (const listener of listeners) listener(value);
+    };
+    const first = new ComposerService(async () => ({ provider: "p" }), options);
+    const second = new ComposerService(async () => ({ provider: "p" }), options);
+    await Promise.all([first.hydrated(), second.hydrated()]);
+    const values: string[] = [];
+    const stop = autorun(() => { values.push(second.selectedPermission("b", "other")); });
+    await first.setPermissionSelection("a", "c", "auto");
+    expect(values).toEqual(["default", "auto"]);
+    await second.setPermissionSelection("b", null, "default");
+    expect(first.selectedPermission("a", "c")).toBe("default");
+    stop();
+    first.dispose();
+    second.dispose();
+    expect(listeners.size).toBe(0);
+  });
+
+  it.each([null, "broken", '"unknown"', '[["session:c","full-access"]]'])("uses the default for an absent or malformed global permission: %s", async (value) => {
+    const stored = new Map(value === null ? [] : [[GLOBAL_EXECUTION_PERMISSION_KEY, value]]);
+    const { service } = settingsHarness({ stored });
+    await service.hydrated();
+    expect(service.selectedPermission("a", "c")).toBe("default");
+    service.dispose();
+  });
+
+  it.each(["auto", "default"])("does not overwrite a %s change with a late initial storage read", async (mode) => {
+    const { options } = selections();
+    let receive!: (value: string | null) => void;
+    let finishRead!: (value: string | null) => void;
+    options.storage.subscribe = (_key, listener) => { receive = listener; return () => {}; };
+    options.storage.read = async (key) => key === GLOBAL_EXECUTION_PERMISSION_KEY
+      ? new Promise((resolve) => { finishRead = resolve; }) : null;
+    const service = new ComposerService(async () => ({ provider: "p" }), options);
+    receive(JSON.stringify(mode));
+    finishRead('"full-access"');
+    await service.hydrated();
+    expect(service.selectedPermission("a", "c")).toBe(mode);
+    service.dispose();
   });
 
   it("seeds a new conversation from the draft's choices", async () => {
@@ -425,6 +483,6 @@ describe("choices", () => {
     await service.seedConversation({ id: "a", model: "m" }, "c", { reasoningEffort: "high" });
     expect(service.selectedModel("a", "c")).toBe("draft-model");
     expect(JSON.parse(stored.get("reasoning-preferences-v1")!)).toEqual([["session:c", { model: "draft-model", effort: "high" }]]);
-    expect(JSON.parse(stored.get("permission-preferences-v1")!)).toEqual([["session:c", "default"]]);
+    expect(stored.has(GLOBAL_EXECUTION_PERMISSION_KEY)).toBe(false);
   });
 });

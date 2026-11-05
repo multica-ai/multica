@@ -4,13 +4,13 @@ import type {
   AgentActivityMessage,
   AgentActivityTurn
 } from "@tutti-os/agent-activity-core";
-import { autorun } from "mobx";
+import { autorun, observable, runInAction } from "mobx";
 import { describe, expect, it } from "vitest";
 import type { ConversationServices } from "../conversationServices";
 import { createTestRuntimeState } from "../shared/testing/createTestRuntimeState";
 import { ConversationRowsModel } from "./ConversationRowsModel";
 
-function fixture() {
+function fixture(totalTurnCount?: () => number) {
   const services = createTestRuntimeState("w");
   const transcript = new TranscriptModel<AgentActivityMessage>();
   const turns: AgentActivityTurn[] = ["t1", "t2"].map((turnId, index) => ({
@@ -42,7 +42,8 @@ function fixture() {
   } as unknown as ConversationServices;
   const rows = new ConversationRowsModel(runtime, "s", {
     workspaceId: "w",
-    userId: "u"
+    userId: "u",
+    totalTurnCount
   });
   const message = (
     id: string,
@@ -72,6 +73,36 @@ function fixture() {
 }
 
 describe("ConversationRowsModel", () => {
+  it("uses the real turn count when the initial page has only five turns", () => {
+    const total = observable.box(7);
+    const { services, rows, transcript, messages, message } = fixture(() => total.get());
+    const page = [
+      ...messages,
+      message("q3", "t3", "Third", 5, "user"),
+      message("q4", "t4", "Fourth", 6, "user"),
+      message("q5", "t5", "Fifth", 7, "user")
+    ];
+    transcript.commit("s", page.map((value) => value.messageId === "a1"
+      ? { ...value, payload: { content: "Large reply ".repeat(10_000) } } : value));
+    let virtualized = false;
+    const stop = autorun(() => { virtualized = rows.shouldVirtualize; });
+    try {
+      expect(rows.turnIds).toHaveLength(5);
+      expect(virtualized).toBe(false);
+      runInAction(() => total.set(8));
+      expect(virtualized).toBe(true);
+      transcript.commit("s", page);
+      expect(virtualized).toBe(false);
+      runInAction(() => total.set(100));
+      expect(virtualized).toBe(true);
+      runInAction(() => total.set(7));
+      expect(virtualized).toBe(false);
+    } finally {
+      stop();
+      services.dispose();
+    }
+  });
+
   it("recomputes only the changed turn and preserves unrelated row identities", () => {
     const { rows, transcript, messages, message } = fixture();
     let firstReads = 0,

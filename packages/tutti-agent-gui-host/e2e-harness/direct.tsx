@@ -2,7 +2,7 @@ import { fakeHostServices } from "./fake-host-services";
 // Test rig: two GUI instances beside app UI in one document, under the app's own stylesheet.
 import { ConversationServiceManager } from "@multica/conversation-client/services";
 import { createFakeTransport } from "@multica/conversation-client/testing";
-import type { LocalV2SnapshotTurn } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_NAVIGATION_CAPABILITY, type LocalV2SnapshotTurn } from "@multica/core/local-conversation/v2";
 import { useMemo,useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../apps/desktop/src/renderer/src/globals.css";
@@ -143,13 +143,14 @@ function service(id: string, theme: "light" | "dark", sidePane: boolean) {
   );
 }
 
-const TOTAL_TURNS = new URLSearchParams(location.search).has("navigationProfile") ? 500 : new URLSearchParams(location.search).has("navigation") ? 86 : 60,
+const TOTAL_TURNS = new URLSearchParams(location.search).has("small") ? 7 : new URLSearchParams(location.search).has("navigationProfile") ? 500 : new URLSearchParams(location.search).has("navigation") ? 86 : 60,
   PAGE_TURNS = 10;
 const paging = {
   navigation: [] as string[],
   navigationDelay: 100,
   failNavigation: false,
   reads: 0,
+  historyDelay: 20,
   failing: new URLSearchParams(location.search).has("failOlder"),
   started: [] as number[]
 };
@@ -247,36 +248,40 @@ function pagedSource(id: string): LocalConversationSource {
       return { ...base, turns: query.get("include_body") === "false" ? [] : turns, directory_range: range, range: query.get("include_body") === "false" ? null : range,
         nodes: turns.map((turn) => ({ node_index: turn.turn_index, turn_id: turn.id, turn_index: turn.turn_index, message_id: `${turn.id}-q`, summary: `Question ${turn.turn_index}`, has_agent_response: true })) };
     }
-    if (path.includes("/snapshot"))
+    if (path.includes("/snapshot")) {
+      const count = Math.min(TOTAL_TURNS, Number(new URL(path, "http://fixture").searchParams.get("turn_limit") ?? PAGE_TURNS));
       return {
         version: 2,
         store_generation: "g",
         snapshot_seq: TOTAL_TURNS * 2,
         has_older_turns: true,
         conversation: conversationSummary,
-        turns: Array.from({ length: PAGE_TURNS }, (_, i) =>
-          turnOf(TOTAL_TURNS - PAGE_TURNS + i)
+        turns: Array.from({ length: count }, (_, i) =>
+          turnOf(TOTAL_TURNS - count + i)
         )
       };
+    }
     const before = Number(/before_index=(\d+)/.exec(path)?.[1] ?? 0);
     if (!path.includes("/history")) return {};
     paging.reads++;
     paging.started.push(before);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, paging.historyDelay));
     if (paging.failing) throw new Error("device_unreachable: offline");
-    const from = Math.max(0, before - PAGE_TURNS);
+    const limit = Number(new URL(path, "http://fixture").searchParams.get("turn_limit") ?? PAGE_TURNS);
+    const from = Math.max(0, before - limit);
     return {
       store_generation: "g",
       has_older_turns: from > 0,
       turns: Array.from({ length: before - from }, (_, i) => turnOf(from + i))
     };
   });
+  transport.capabilities = async () => new URLSearchParams(location.search).has("navigation") ? [LOCAL_V2_NAVIGATION_CAPABILITY] : [];
   const service = new ConversationServiceManager({
     snapshots: () => ({ read: async () => null, write: async () => {} })
   }).get(transport, scope);
   const session = snapshot(id, "light", false).sessions[0]!;
   return {
-    navigation: new URLSearchParams(location.search).has("navigation") ? () => service.navigation(id) : undefined,
+    navigation: () => service.navigation(id),
     open: () => service.open(id),
     ensure: () => service.ensure(id),
     refresh: () => service.refresh(id),

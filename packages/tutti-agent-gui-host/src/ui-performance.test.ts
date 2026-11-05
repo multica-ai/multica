@@ -3,6 +3,7 @@ import { observable, runInAction } from "mobx";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AgentGuiHostEvent, AgentGuiInitSnapshot } from "./protocol";
 import { installConversationUiProfile } from "./ui-performance";
+import { measureConversationWork } from "@tutti-os/agent-gui";
 
 type Args = Parameters<typeof installConversationUiProfile>;
 const cleanups: (() => void)[] = [];
@@ -40,7 +41,8 @@ function setup(browserEntries = false) {
   const client = { subscribe: (listener: (event: AgentGuiHostEvent) => void) => {
     listeners.add(listener); return () => { listeners.delete(listener); };
   } } as Args[1];
-  const handle = { runtime: { activations: { pending: () => activations.get() } } } as unknown as Args[2];
+  const context = { dataCached: false, loadedTurns: 0, totalTurns: null as number | null, loadedItems: 0 };
+  const handle = { runtime: { activations: { pending: () => activations.get() } }, profileContext: () => context } as unknown as Args[2];
   const initial = { workspaceId: "workspace", userId: "user", hostVisible: true } as AgentGuiInitSnapshot;
   const profile = installConversationUiProfile(root, client, handle, initial);
   cleanups.push(() => profile.dispose());
@@ -53,8 +55,79 @@ function setup(browserEntries = false) {
     const pending = [...frames.values()]; frames.clear();
     for (const callback of pending) callback(performance.now());
   };
-  return { root, pane, profile, activate, frame, frames, logs, listeners, initial, observerCallbacks, disconnect };
+  return { root, pane, profile, activate, frame, frames, logs, listeners, initial, observerCallbacks, disconnect, context };
 }
+
+function selectSession(id: string) {
+  let nav = document.querySelector("#local-sessions");
+  if (!nav) nav = document.body.appendChild(Object.assign(document.createElement("nav"), { id: "local-sessions" }));
+  const link = document.createElement("a");
+  link.href = `http://localhost/conversations?session=${id}`;
+  link.addEventListener("click", (event) => event.preventDefault());
+  nav.replaceChildren(link);
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "timeStamp", { value: performance.now() });
+  link.dispatchEvent(event);
+}
+
+it("keeps a slow first entry open past two seconds and records its stages and first content frame", async () => {
+  const app = setup();
+  selectSession("long");
+  await vi.advanceTimersByTimeAsync(2_500);
+  expect(window.multicaUiPerformance!.snapshot()).toHaveLength(0);
+  measureConversationWork("other", "partition", () => vi.advanceTimersByTime(50));
+  measureConversationWork("long", "rows_projection", () => vi.advanceTimersByTime(30));
+  app.pane.setAttribute("data-agent-session-id", "long");
+  app.pane.insertAdjacentHTML("beforeend", '<div data-agent-transcript-session-id="long"><div data-agent-transcript-row="row">SECRET</div></div>');
+  Object.assign(app.context, { dataCached: true, totalTurns: 500, loadedTurns: 10, loadedItems: 130 });
+  await app.frame();
+  await app.frame(300);
+  const sample = window.multicaUiPerformance!.snapshot()[0];
+  expect(sample).toMatchObject({
+    conversationId: "long", firstVisit: true, dataCachedAtStart: false, outcome: "screen_quiet",
+    firstTranscriptFrameMs: 2596, firstQuietFrameMs: 2896, firstFrameRows: 1, mountedRowsAtEnd: 1,
+    totalTurns: 500, loadedTurns: 10, loadedItems: 130,
+    workStages: { rows_projection: { count: 1, totalMs: 30, maxMs: 30 } },
+  });
+  expect(sample.workStages.partition).toBeUndefined();
+  expect(sample.maxFrameIntervalMs).toBe(2596);
+  expect(JSON.stringify(app.logs.mock.calls)).not.toContain("SECRET");
+  sample.workStages.rows_projection!.count = 999;
+  expect(window.multicaUiPerformance!.snapshot()[0].workStages.rows_projection!.count).toBe(1);
+  selectSession("long");
+  window.multicaUiPerformance!.stop();
+  expect(window.multicaUiPerformance!.snapshot()[1]).toMatchObject({ firstVisit: false, dataCachedAtStart: true });
+});
+
+it("times out without reporting content or quietness when only a session container appears", async () => {
+  const app = setup();
+  selectSession("new");
+  await app.frame();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(window.multicaUiPerformance!.snapshot()[0]).toMatchObject({
+    outcome: "window_complete", firstTranscriptFrameMs: null, firstQuietFrameMs: null
+  });
+  const count = app.logs.mock.calls.length;
+  measureConversationWork("new", "partition", () => {});
+  expect(app.logs.mock.calls).toHaveLength(count);
+  expect(app.frames.size).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("waits for the selected transcript instead of counting a retained previous timeline", async () => {
+  const app = setup();
+  app.pane.insertAdjacentHTML("beforeend", '<div data-agent-transcript-session-id="previous"><div data-agent-transcript-row="old"></div></div>');
+  selectSession("next");
+  app.pane.setAttribute("data-agent-session-id", "next");
+  await app.frame(300);
+  await app.frame(300);
+  app.pane.querySelector("[data-agent-transcript-session-id]")!.setAttribute("data-agent-transcript-session-id", "next");
+  await app.frame();
+  window.multicaUiPerformance!.stop();
+  expect(window.multicaUiPerformance!.snapshot()[0]).toMatchObject({
+    selectedSessionFrameMs: 300, firstTranscriptFrameMs: 616, firstQuietFrameMs: null, firstFrameRows: 1
+  });
+});
 
 it("captures first-send disappearance and welcome reentry without retaining message content or sampling at idle", async () => {
   const app = setup();

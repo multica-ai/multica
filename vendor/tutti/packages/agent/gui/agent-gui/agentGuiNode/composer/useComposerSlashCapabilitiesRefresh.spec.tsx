@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { refreshComposerSlashCapabilities } from "./useComposerSlashCapabilitiesRefresh";
 
 describe("refreshComposerSlashCapabilities", () => {
-  it("refreshes capabilities again when slash search is reopened", () => {
+  it("reuses the capabilities cache when slash search is reopened", () => {
     const onRetryComposerOptions = vi.fn();
     const refreshedSessionRef = { current: null as string | null };
     const refresh = (isPaletteOpen: boolean): void =>
@@ -20,7 +20,6 @@ describe("refreshComposerSlashCapabilities", () => {
     refresh(true);
     expect(onRetryComposerOptions).toHaveBeenCalledTimes(2);
     expect(onRetryComposerOptions).toHaveBeenLastCalledWith({
-      force: true,
       section: "capabilities"
     });
 

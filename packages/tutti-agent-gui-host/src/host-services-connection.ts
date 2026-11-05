@@ -367,6 +367,7 @@ export function createHostServicesConnection(
         )
     },
     storage: {
+      subscribe: service.storage.subscribe?.bind(service.storage),
       read: (params, options) =>
         invoke(
           "storage.read",

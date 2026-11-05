@@ -202,6 +202,45 @@ state, which says direct as soon as any connection to that device is direct. `tu
 for an item that had to wait: Desktop routes ordinary sends through the queue too.
 Background and native turns carry `background: true`, so percentiles leave them out.
 
+## First entry into a long conversation (development)
+
+Development GUI mounts record a bounded `[ui-performance]` sample when a sidebar
+conversation is selected. Open previously unopened long conversations, pause on
+each for 3–5 seconds, then compare with a short conversation and a return visit.
+Use `window.multicaUiPerformance.snapshot()` to read completed samples;
+`start()` clears them and enables capture, and `stop()` ends capture. Electron
+also writes the summaries to its renderer log.
+
+An uncached conversation initially requests five turns. After the transcript
+commits and two animation frames provide a paint opportunity, the active view
+requests only the missing older turns up to `min(total turns, 10)`. Existing
+viewport prefetch can subsequently load more history. Virtualization uses the
+conversation's total turn count for its existing thresholds, including the
+minimum of eight turns, rather than treating the five-turn page as the total.
+Scheduled supplementation is cancelled when the view hides or unmounts.
+
+Each sample carries `conversationId`, `firstVisit` (since this capture was
+installed), `dataCachedAtStart`, total/loaded turn counts, loaded item counts and
+mounted row counts. `firstTranscriptFrameMs` is the first animation-frame callback
+that observes a transcript row for the selected session, not a browser paint
+acknowledgement. `firstQuietFrameMs` observes content followed by at least 250 ms
+without root DOM mutations or React commits; it does not promise image, font or
+network completion. Selection capture finishes after at least 2 seconds and a
+quiet interval, or times out at 10 seconds. A container alone is not content.
+
+`workStages` aggregates count, total and maximum duration for `source_load`
+(awaiting the loaded conversation), `source_projection` (committing source
+messages), `rows_projection`, `complexity`, `partition`, `locator`,
+`participant_headers` and `work_section`. Join the existing `snapshot.request`,
+`snapshot.received` and `snapshot.parsed` records by conversation and time for
+transport/JSON costs. React durations measure render work; browser long-frame
+records identify slow scripts and rendering phases. These measurements can
+overlap, so do not add their totals into an end-to-end duration. Work completed
+after a capture was stopped is not attributed to a subsequent capture.
+
+Only matching active captures read stage clocks. Capture stops when hidden or
+unmounted; no DOM or conversation content is retained in the samples.
+
 ## Reports from a phone
 
 A phone keeps its marks in a bounded buffer and reports them to an executor that

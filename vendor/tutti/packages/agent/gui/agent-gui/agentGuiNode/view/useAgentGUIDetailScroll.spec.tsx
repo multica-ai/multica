@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentGUINodeViewProps } from "../AgentGUINodeView";
+import type { ConversationNavigation } from "@multica/conversation-client/services";
 import { useAgentGUIDetailScroll } from "./useAgentGUIDetailScroll";
 
 vi.mock("@multica/tutti-agent-gui-host/timeline-end-position", () => ({
@@ -863,6 +864,28 @@ describe("useAgentGUIDetailScroll", () => {
     rerender({ showTimelineSkeleton: false });
 
     expect(harness.loadOlderConversationMessages).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry the same history cursor after measurement changes without new user input", () => {
+    const harness = createHarness({ scrollHeight: 100 });
+    harness.renderTranscriptRow();
+    const navigation = { window: null, historyStartIndex: 20, initialWindowPending: false } as ConversationNavigation;
+    const { rerender } = renderHook(({ loading }) => useAgentGUIDetailScroll({
+      ...harness.input({ activeConversationId: "history", hasOlderMessages: true, showTimelineSkeleton: false,
+        isLoadingOlderMessages: loading }), historyNavigation: navigation,
+    }), { initialProps: { loading: false } });
+    expect(harness.loadOlderConversationMessages).toHaveBeenCalledOnce();
+    rerender({ loading: true });
+    harness.setScrollHeight(120);
+    rerender({ loading: false });
+    act(() => harness.timeline.dispatchEvent(new Event("scroll")));
+    expect(harness.loadOlderConversationMessages).toHaveBeenCalledOnce();
+    act(() => {
+      harness.timeline.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+      harness.timeline.scrollTop = 0;
+      harness.timeline.dispatchEvent(new Event("scroll"));
+    });
+    expect(harness.loadOlderConversationMessages).toHaveBeenCalledTimes(2);
   });
 
   it("restores a prepend anchor from one timeline geometry snapshot", () => {

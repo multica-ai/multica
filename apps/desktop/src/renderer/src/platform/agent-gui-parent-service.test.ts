@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { ApiError } from "@multica/core/api";
+import { GLOBAL_EXECUTION_PERMISSION_KEY } from "@multica/conversation-client/models";
 import type { Agent,StorageAdapter } from "@multica/core/types";
 import type { AgentGuiHostEvent } from "@multica/tutti-agent-gui-host/protocol";
 import { QueryClient } from "@tanstack/react-query";
@@ -37,7 +38,7 @@ const agent = {
 } as unknown as Agent;
 const cleanups: Array<() => void> = [];
 
-function setup() {
+function setup(options: { storage?: StorageAdapter; userId?: string; workspaceId?: string } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } }
   });
@@ -56,10 +57,10 @@ function setup() {
   const onShowMessage = vi.fn();
   const service = createAgentGuiWorkspaceService({
     queryClient: qc,
-    workspaceId: "ws",
+    workspaceId: options.workspaceId ?? "ws",
     workspaceSlug: "acme",
-    userId: "user",
-    storage,
+    userId: options.userId ?? "user",
+    storage: options.storage ?? storage,
     isCurrent: () => active,
     resolveAvatar: (url) => url,
     onOpenTask: vi.fn(),
@@ -99,6 +100,55 @@ afterEach(() => {
 });
 
 describe("Agent GUI workspace service", () => {
+  it("receives permission changes from another window and releases its storage listener", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    const service = setup().service;
+    try {
+      const listener = vi.fn();
+      const release = service.storage.subscribe!({ key: GLOBAL_EXECUTION_PERMISSION_KEY }, listener);
+      const change = (userId: string, value: string) => Object.assign(new Event("storage"), {
+        key: `multica:tutti-gui:${userId}:${GLOBAL_EXECUTION_PERMISSION_KEY}`, newValue: value
+      });
+      target.dispatchEvent(change("another-user", '"full-access"'));
+      expect(listener).not.toHaveBeenCalled();
+      target.dispatchEvent(change("user", '"auto"'));
+      expect(listener).toHaveBeenCalledExactlyOnceWith('"auto"');
+      release();
+      target.dispatchEvent(change("user", '"default"'));
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      service.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists and broadcasts global permissions across workspaces while isolating accounts", async () => {
+    const values = new Map<string, string>();
+    const storage: StorageAdapter = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value); },
+      removeItem: (key) => { values.delete(key); }
+    };
+    const first = setup({ storage }).service;
+    const second = setup({ storage, workspaceId: "another-workspace" }).service;
+    const otherAccount = setup({ storage, userId: "another-user" }).service;
+    const listener = vi.fn();
+    const otherListener = vi.fn();
+    const release = second.storage.subscribe!({ key: GLOBAL_EXECUTION_PERMISSION_KEY }, listener);
+    otherAccount.storage.subscribe!({ key: GLOBAL_EXECUTION_PERMISSION_KEY }, otherListener);
+    await first.storage.write({ key: GLOBAL_EXECUTION_PERMISSION_KEY, value: '"auto"' });
+    expect(listener).toHaveBeenCalledExactlyOnceWith('"auto"');
+    expect(otherListener).not.toHaveBeenCalled();
+    expect(await second.storage.read({ key: GLOBAL_EXECUTION_PERMISSION_KEY })).toBe('"auto"');
+    expect(await otherAccount.storage.read({ key: GLOBAL_EXECUTION_PERMISSION_KEY })).toBeNull();
+    release();
+    await first.storage.write({ key: GLOBAL_EXECUTION_PERMISSION_KEY, value: '"default"' });
+    expect(listener).toHaveBeenCalledTimes(1);
+    const reopened = setup({ storage, workspaceId: "third-workspace" }).service;
+    expect(await reopened.storage.read({ key: GLOBAL_EXECUTION_PERMISSION_KEY })).toBe('"default"');
+  });
+
   it.each([
     ["success", "success"],
     ["info", "info"],

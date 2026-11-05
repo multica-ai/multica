@@ -198,7 +198,7 @@ export const AgentTranscriptViewport = observer(function AgentTranscriptViewport
     : [];
 
   return (
-    <div ref={directory.containerRef} data-agent-navigation-target={directory.targetMessageId} style={normalTurnStyle}>
+    <div ref={directory.containerRef} data-agent-transcript-session-id={agentSessionId} data-agent-navigation-target={directory.targetMessageId} style={normalTurnStyle}>
       <AgentMessageLocatorRail
         key={agentSessionId}
         followEndMode={followEndMode}

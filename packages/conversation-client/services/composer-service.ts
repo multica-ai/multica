@@ -2,7 +2,7 @@ import { action, makeObservable, observable } from "mobx";
 import { isLocalPermissionMode, isLocalReasoningEffort, localReasoningLevels, type LocalPermissionMode, type LocalReasoningEffort } from "@multica/core/local-conversation/protocol";
 import type { RuntimeModelsResult } from "@multica/core/types";
 import "../mobx-config";
-import { ModelPreferences, PermissionPreferences, ReasoningPreferences } from "../models/composer-preferences";
+import { GLOBAL_EXECUTION_PERMISSION_KEY, ModelPreferences, PermissionPreferences, ReasoningPreferences } from "../models/composer-preferences";
 
 export type ComposerOptionsSection = "core" | "capabilities" | "connectors";
 export type ComposerOptionsStatus = "loading" | "ready" | "error";
@@ -40,7 +40,6 @@ export interface ComposerOptionsRequest {
 
 const MODEL_PREFERENCES_KEY = "model-preferences-v1";
 const REASONING_PREFERENCES_KEY = "reasoning-preferences-v1";
-const PERMISSION_PREFERENCES_KEY = "permission-preferences-v1";
 const SETTINGS_UPDATE_TIMEOUT_MS = 30_000;
 
 /** A choice the service refused, with a stable code for callers. */
@@ -77,7 +76,7 @@ interface SettingsLane extends SessionSettingsUpdate {
 }
 
 export interface ComposerServiceOptions {
-  storage: { read(key: string): Promise<string | null>; write(key: string, value: string): Promise<unknown> };
+  storage: { read(key: string): Promise<string | null>; write(key: string, value: string): Promise<unknown>; subscribe?(key: string, listener: (value: string | null) => void): () => void };
   listModels(agentId: string, options?: { force?: boolean; signal?: AbortSignal }): Promise<RuntimeModelsResult>;
   /** The agent, if it is one of this workspace's. */
   agent(agentId: string): { model?: string | null; provider?: string } | undefined;
@@ -109,7 +108,7 @@ interface Entry<Options> {
 }
 
 /**
- * The composer's choices for each agent target: models, reasoning, permissions.
+ * Per-target model and reasoning choices, with one global permission preference.
  * Two requests with the same signature are interchangeable, so a settled result
  * answers a repeat and a load under way answers a duplicate.
  */
@@ -125,6 +124,7 @@ export class ComposerService<Options extends ComposerOptionsLike> {
   private readonly hydrations: { model: Promise<void>; reasoning: Promise<void>; permission: Promise<void> };
   private modelWrites: Promise<void> = Promise.resolve();
   private permissionWrites: Promise<void> = Promise.resolve();
+  private readonly releasePermissions?: () => void;
   /** Changes with any model or thinking choice, and with each catalog read. */
   modelRevision = 0;
   /** Changes with any permission choice. */
@@ -138,10 +138,17 @@ export class ComposerService<Options extends ComposerOptionsLike> {
       updateSettings: action, applyActivationSettings: action, reconcileSettings: action,
       startSettings: action, settleSettings: action, advanceSettings: action,
     });
+    let permissionChanged = false;
+    this.releasePermissions = deps.storage.subscribe?.(GLOBAL_EXECUTION_PERMISSION_KEY, (value) => {
+      permissionChanged = true;
+      this.receivePermissions(value);
+    });
     this.hydrations = {
       model: deps.storage.read(MODEL_PREFERENCES_KEY).then((value) => { this.models.hydrate(value); }),
       reasoning: deps.storage.read(REASONING_PREFERENCES_KEY).then((value) => { this.reasoning.hydrate(value); }),
-      permission: deps.storage.read(PERMISSION_PREFERENCES_KEY).then((value) => { this.permissions.hydrate(value); }),
+      permission: deps.storage.read(GLOBAL_EXECUTION_PERMISSION_KEY).then((value) => {
+        if (!permissionChanged) this.receivePermissions(value);
+      }),
     };
     for (const hydration of Object.values(this.hydrations)) void hydration.catch(() => {});
   }
@@ -227,6 +234,7 @@ export class ComposerService<Options extends ComposerOptionsLike> {
 
   dispose(): void {
     this.disposed = true;
+    this.releasePermissions?.();
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
   }
@@ -279,20 +287,16 @@ export class ComposerService<Options extends ComposerOptionsLike> {
     return effort && (!catalog || localReasoningLevels(catalog.models, model ?? this.deps.requireAgent(agentId).model).some((level) => level.value === effort)) ? effort : null;
   }
 
-  selectedPermission(agentId: string, sessionId?: string | null): LocalPermissionMode {
-    const conversation = sessionId ? this.deps.conversation(sessionId) : undefined;
-    if (conversation && conversation.agentId !== agentId) return "default";
-    const detail = conversation?.detail;
-    const saved = this.permissions.get(agentId, this.savedUnder(sessionId)) ?? detail?.permissionMode;
-    if (saved !== undefined) return saved;
-    // A remembered default only applies to drafts and confirmed empty conversations.
-    if (sessionId && !detail?.untouched) return "default";
-    return this.permissions.get(agentId) ?? "default";
+  selectedPermission(_agentId: string, _sessionId?: string | null): LocalPermissionMode {
+    void this.permissionRevision;
+    return this.permissions.get();
   }
 
-  /** A choice made for this conversation before its provider's default was remembered. */
-  permissionWithoutDefault(agentId: string, sessionId: string): LocalPermissionMode | undefined {
-    return this.permissions.get(agentId) === undefined ? this.permissions.get(agentId, sessionId) : undefined;
+  private receivePermissions(value: string | null): void {
+    if (this.disposed) return;
+    const previous = this.permissions.get();
+    this.permissions.hydrate(value);
+    if (previous !== this.permissions.get()) this.bumpPermissions();
   }
 
   async loadCatalog(agentId: string, options?: { force?: boolean; signal?: AbortSignal }): Promise<RuntimeModelsResult> {
@@ -385,12 +389,10 @@ export class ComposerService<Options extends ComposerOptionsLike> {
       this.assertIdle(sessionId, "permissions");
       const next = new PermissionPreferences();
       next.hydrate(this.permissions.serialize());
-      next.set(agentId, null, mode);
-      if (sessionId) next.set(agentId, this.deps.storedId(sessionId), mode);
-      await this.deps.storage.write(PERMISSION_PREFERENCES_KEY, next.serialize());
+      next.set(mode);
+      await this.deps.storage.write(GLOBAL_EXECUTION_PERMISSION_KEY, next.serialize());
       this.deps.assertOpen();
-      this.permissions.hydrate(next.serialize());
-      this.bumpPermissions();
+      this.receivePermissions(next.serialize());
     });
     this.permissionWrites = operation;
     return operation;
@@ -405,10 +407,6 @@ export class ComposerService<Options extends ComposerOptionsLike> {
     const effort = this.reasoning.get(agent.id) ? this.selectedReasoning(agent.id) : (isLocalReasoningEffort(requested?.reasoningEffort) ? requested.reasoningEffort : null);
     this.reasoning.set(agent.id, storedId, model, effort);
     await this.deps.storage.write(REASONING_PREFERENCES_KEY, this.reasoning.serialize());
-    await this.hydrations.permission;
-    await this.permissionWrites.catch(() => {});
-    this.permissions.set(agent.id, storedId, this.selectedPermission(agent.id));
-    await this.deps.storage.write(PERMISSION_PREFERENCES_KEY, this.permissions.serialize());
   }
 
   // ---- Writing a conversation's settings ----

@@ -27,6 +27,8 @@ type AgentSessionSubmitPromptInput
 import {
 AgentSessionsModel,
 ConversationRowsModel,
+measureConversationAsyncWork,
+measureConversationWork,
 type ConversationServices
 } from "@tutti-os/agent-gui";
 import { extractRichTextMentionsFromContent } from "@tutti-os/ui-rich-text/core";
@@ -200,7 +202,8 @@ export function createMulticaAgentGuiRuntime(
       {
         storage: {
           read: (key) => client.storage.read({ key }),
-          write: (key, value) => client.storage.write({ key, value })
+          write: (key, value) => client.storage.write({ key, value }),
+          subscribe: (key, listener) => client.storage.subscribe?.({ key }, listener) ?? (() => {})
         },
         listModels: (agentId, options) =>
           client.models.list(
@@ -805,7 +808,7 @@ export function createMulticaAgentGuiRuntime(
   /** Projects a local conversation from the source, which keeps it current. */
   async function loadLocalSession(guiId: string, fresh: boolean) {
     const sessionId = await backendSessionId(guiId);
-    await (fresh ? source.refresh(sessionId) : source.ensure(sessionId));
+    await measureConversationAsyncWork(guiId, "source_load", () => fresh ? source.refresh(sessionId) : source.ensure(sessionId));
     const detail = source.detail(sessionId);
     if (!detail)
       throw new MulticaAgentGuiError(
@@ -893,7 +896,7 @@ export function createMulticaAgentGuiRuntime(
     const detail = details.get(guiId)!;
     desktopQueue.receive(guiId, detail.promptQueue);
     const result = costProfile.measure("projection", detail.session.id, () =>
-      project(guiId, changedTurns)
+      measureConversationWork(guiId, "source_projection", () => project(guiId, changedTurns))
     );
     costProfile.measure("dispatch", detail.session.id, () => {
       desktopQueue.loads.markHydrated(guiId);
@@ -1388,7 +1391,10 @@ export function createMulticaAgentGuiRuntime(
       const key = id;
       let model = rowModels.get(key);
       if (!model) {
-        model = new ConversationRowsModel(runtime, id, options);
+        model = new ConversationRowsModel(runtime, id, {
+          ...options,
+          totalTurnCount: () => localConversation(id)?.summary.turn_count ?? 0,
+        });
         rowModels.set(key, model);
       }
       return model;
@@ -1468,6 +1474,15 @@ export function createMulticaAgentGuiRuntime(
 
   return {
     runtime,
+    profileContext(guiId: string) {
+      const conversation = localConversation(guiId);
+      return {
+        dataCached: Boolean(conversation),
+        totalTurns: conversation?.summary.turn_count ?? null,
+        loadedTurns: conversation?.turns.size ?? 0,
+        loadedItems: conversation?.items.size ?? 0,
+      };
+    },
     async moveQueuedToSide(agentSessionId: string, promptId: string) {
       const queue = desktopQueue.prompts.queueRecord(agentSessionId);
       const prompt = queue?.prompts.find((item) => item.id === promptId);
@@ -1499,22 +1514,6 @@ export function createMulticaAgentGuiRuntime(
       await composer.hydrated();
       initialized = true;
       await loadWorkspace();
-      const active = init.activeSessionId
-        ? workspace.sessions.find(
-            (session) => session.id === init.activeSessionId
-          )
-        : undefined;
-      if (active) {
-        const saved = composer.permissionWithoutDefault(
-          active.agent_id,
-          active.id
-        );
-        // Retain an explicit choice made before provider defaults were remembered.
-        if (saved !== undefined)
-          await composer
-            .setPermissionSelection(active.agent_id, null, saved)
-            .catch(reportError);
-      }
       await restorePromptQueues();
       receiveConnection(true);
     },

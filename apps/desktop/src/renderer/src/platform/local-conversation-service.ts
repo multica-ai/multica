@@ -1,4 +1,5 @@
 import { type ConversationService } from "@multica/conversation-client/services";
+import { GLOBAL_EXECUTION_PERMISSION_KEY } from "@multica/conversation-client/models";
 import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
 import {
@@ -817,12 +818,15 @@ export function createLocalConversationParentService(
       }
     },
     storage: {
+      subscribe: (params, listener) => cloud.storage.subscribe?.({
+        key: params.key === GLOBAL_EXECUTION_PERMISSION_KEY ? params.key : `local-provider:${options.storagePrefix ?? ""}${params.key}`
+      }, listener) ?? (() => {}),
       read: async ({ key }) => {
         assertCurrent();
         if (key === AGENT_MENTION_USAGE_KEY)
           return storage.getItem(usageStorageKey);
         return cloud.storage.read({
-          key: `local-provider:${options.storagePrefix ?? ""}${key}`
+          key: key === GLOBAL_EXECUTION_PERMISSION_KEY ? key : `local-provider:${options.storagePrefix ?? ""}${key}`
         });
       },
       write: async ({ key, value }) => {
@@ -844,7 +848,7 @@ export function createLocalConversationParentService(
           return;
         }
         return cloud.storage.write({
-          key: `local-provider:${options.storagePrefix ?? ""}${key}`,
+          key: key === GLOBAL_EXECUTION_PERMISSION_KEY ? key : `local-provider:${options.storagePrefix ?? ""}${key}`,
           value
         });
       }

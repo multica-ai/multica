@@ -23,6 +23,7 @@ import {
 import type { AgentConversationVM } from "../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentTranscriptRowVM } from "../shared/agentConversation/contracts/agentTranscriptRowVM";
 import { readPendingConversationMessages } from "./pendingConversationMessages";
+import { measureConversationWork } from "./conversationWorkProfile";
 
 const EMPTY: readonly never[] = Object.freeze([]);
 const TAIL = "\u0000pending";
@@ -68,6 +69,7 @@ export class ConversationRowsModel {
       userId?: string | null;
       workspaceRoot?: string;
       avoidGroupingEdits?: boolean;
+      totalTurnCount?: () => number;
     }
   ) {
     this.metadata = computed(
@@ -152,7 +154,7 @@ export class ConversationRowsModel {
     this.virtualization = computed(() => {
       const scores = this.turnIds.map((id) => this.turnComplexity(id));
       return shouldVirtualizeAgentTranscript({
-        turnCount: scores.length,
+        turnCount: Math.max(scores.length, options.totalTurnCount?.() ?? 0),
         complexity: {
           totalScore: scores.reduce((sum, score) => sum + score, 0),
           maxTurnScore: Math.max(0, ...scores),
@@ -309,9 +311,9 @@ export class ConversationRowsModel {
     if (!value) {
       value = computed(() => {
         const rows = this.turn(id)?.rows ?? EMPTY;
-        return calculateAgentTranscriptComplexity([
+        return measureConversationWork(this.agentSessionId, "complexity", () => calculateAgentTranscriptComplexity([
           { rows: rows.map((row) => ({ row })) }
-        ]).totalScore;
+        ]).totalScore);
       });
       this.complexities.set(id, value);
     }
@@ -349,7 +351,7 @@ export class ConversationRowsModel {
       latestTurnInteractions: [],
       pendingInteractions: []
     };
-    return buildAgentGUIConversationModels({
+    return measureConversationWork(this.agentSessionId, "rows_projection", () => buildAgentGUIConversationModels({
       conversation: {
         ...conversationSummaryFromAgentSession(session),
         activeTurn: active,
@@ -359,7 +361,7 @@ export class ConversationRowsModel {
       timelineItems: projectAgentGUIMessagesToTimelineItems(messages),
       workspaceRoot: this.options.workspaceRoot,
       avoidGroupingEdits: this.options.avoidGroupingEdits
-    }).conversation;
+    }).conversation);
   }
 
   private get optimisticMessages(): readonly AgentActivityMessage[] {

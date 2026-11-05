@@ -17,6 +17,17 @@ export function useAgentConversationNavigation({ navigation, loadedItems, turnGr
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [target, setTarget] = useState<{ messageId: string; turnId: string } | null>(null);
   const locateIntent = useRef(0);
+  const initialWindowPending = navigation?.initialWindowPending;
+  const hasLoadedTurns = turnGroups.length > 0;
+  useEffect(() => {
+    if (!navigation || !isVisible || !hasLoadedTurns || !initialWindowPending) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (document.visibilityState === "visible") void navigation.completeInitialWindow().catch(() => {});
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [navigation, isVisible, hasLoadedTurns, initialWindowPending]);
   useEffect(() => {
     if (navigation && isVisible) void navigation.ensure().catch(() => {});
   }, [navigation, isVisible]);

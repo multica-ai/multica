@@ -29,22 +29,37 @@ export class ConversationNavigation {
   private directoryIntent = 0;
   private directoryRead?: Promise<void>;
   private directoryDirection?: "before" | "after";
+  private initialWindowPrepared = false;
 
   constructor(private readonly options: {
     supported?(): Promise<boolean>;
     model(): ConversationModel | undefined;
     request(query: LocalV2NavigationQuery): Promise<unknown>;
     changed(): void;
+    initialWindow?: { pending(): boolean; complete(): Promise<void> };
   }) {
     makeAutoObservable<this, "options" | "pages" | "reads" | "countRead" | "pageRead" | "directoryRead">(this, {
       options: false, pages: false, reads: false, countRead: false, pageRead: false, directoryRead: false,
     }, { autoBind: true });
   }
 
+  get historyStartIndex(): number | null { return this.options.model()?.historyStartIndex ?? null; }
+  get initialWindowPending(): boolean {
+    return !this.initialWindowPrepared && Boolean(this.options.initialWindow?.pending());
+  }
+  async completeInitialWindow(): Promise<void> {
+    this.syncGeneration();
+    if (!this.initialWindowPending) return;
+    const pending = this.options.initialWindow!.complete();
+    this.initialWindowPrepared = true;
+    await pending;
+  }
+
   sync(): void {
     const model = this.options.model();
     if (!model) return;
     if (this.generation !== model.storeGeneration) {
+      this.initialWindowPrepared = false;
       this.generation = model.storeGeneration;
       this.intent++;
       this.directoryIntent++;

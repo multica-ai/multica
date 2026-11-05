@@ -27,7 +27,8 @@ export function localV2Error(error: unknown): LocalV2RequestError {
 }
 
 const SUMMARY_PAGES = 100;
-/** Turns read at once: a first screen and each page while the view fills its prefetch. */
+const INITIAL_TURNS = 5;
+/** Turns read on refresh and each page while the view fills its prefetch. */
 const PAGE_TURNS = 10;
 const LIST_RETRY_MIN_MS = 1_000;
 const LIST_RETRY_MAX_MS = 30_000;
@@ -302,6 +303,7 @@ export class ConversationService {
 
   private read(id: string, entry: ContentEntry): Promise<ConversationModel> {
     if (entry.loading) return entry.loading;
+    const turnLimit = entry.conversation ? PAGE_TURNS : INITIAL_TURNS;
     const epoch = entry.epoch;
     const superseded = () => this.entries.get(id)?.epoch !== epoch;
     const loading: Promise<ConversationModel> = (async () => {
@@ -313,7 +315,7 @@ export class ConversationService {
           this.changed(id, entry);
         }
       }
-      const snapshot = await this.snapshot(id, PAGE_TURNS);
+      const snapshot = await this.snapshot(id, turnLimit);
       if (superseded()) return this.current(id, snapshot);
       const authoritative = entry.cursorAhead;
       entry.cursorAhead = false;
@@ -352,6 +354,25 @@ export class ConversationService {
 
   /** Reads the page before the oldest loaded turn; one at a time, kept even if the view has left. */
   loadOlder(id: string): Promise<void> {
+    return this.loadOlderPage(id, PAGE_TURNS);
+  }
+
+  private initialHistoryLimit(id: string): number {
+    const entry = this.entries.get(id);
+    const conversation = entry?.conversation;
+    if (!entry?.users || !conversation?.hasOlderTurns || entry.navigation?.window || entry.navigation?.locating) return 0;
+    const total = conversation.summary.turn_count;
+    const loaded = total - conversation.historyStartIndex;
+    if (loaded <= 0) return 0;
+    return Math.max(0, Math.min(total, PAGE_TURNS) - loaded);
+  }
+
+  private completeInitialWindow(id: string): Promise<void> {
+    const limit = this.initialHistoryLimit(id);
+    return limit > 0 ? this.loadOlderPage(id, limit) : Promise.resolve();
+  }
+
+  private loadOlderPage(id: string, limit: number): Promise<void> {
     const entry = this.entry(id);
     const conversation = entry.conversation;
     if (!conversation?.hasOlderTurns) return Promise.resolve();
@@ -359,7 +380,7 @@ export class ConversationService {
     if (before === null || before <= 0) return Promise.resolve();
     return entry.older ??= (async () => {
       const epoch = entry.epoch;
-      const raw = await this.request("GET", `/sessions/${encodeURIComponent(id)}/history?before_index=${before}&turn_limit=${PAGE_TURNS}`);
+      const raw = await this.request("GET", `/sessions/${encodeURIComponent(id)}/history?before_index=${before}&turn_limit=${limit}`);
       const history = localV2HistorySchema.parse(raw);
       // Dropped, replaced or from another store: this page belongs to none of what is here.
       if (this.entries.get(id)?.epoch !== epoch || entry.conversation?.storeGeneration !== history.store_generation) return;
@@ -379,6 +400,10 @@ export class ConversationService {
       model: () => this.entries.get(id) === entry ? entry.conversation : undefined,
       request: (query) => this.request("GET", localV2NavigationPath(id, query)),
       changed: () => this.changed(id, entry, [], "navigation"),
+      initialWindow: {
+        pending: () => this.initialHistoryLimit(id) > 0,
+        complete: () => this.completeInitialWindow(id),
+      },
     });
   }
 

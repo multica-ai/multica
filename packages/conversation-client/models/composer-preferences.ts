@@ -64,23 +64,24 @@ export class ReasoningPreferences {
   serialize() { return JSON.stringify([...this.values]); }
 }
 
+export const GLOBAL_EXECUTION_PERMISSION_KEY = "global-execution-permission-v1";
+
 export class PermissionPreferences {
-  private values = new Map<string, LocalPermissionMode>();
+  private mode: LocalPermissionMode = "default";
 
   hydrate(raw: string | null) {
+    this.mode = "default";
     if (!raw) return;
     try {
-      const entries: unknown = JSON.parse(raw);
-      if (Array.isArray(entries)) for (const entry of entries) {
-        if (Array.isArray(entry) && typeof entry[0] === "string" && isLocalPermissionMode(entry[1])) this.values.set(entry[0], entry[1]);
-      }
-    } catch { /* Invalid saved preferences retain the provider's defaults. */ }
+      const value: unknown = JSON.parse(raw);
+      if (isLocalPermissionMode(value)) this.mode = value;
+    } catch { /* Invalid saved preferences use default permissions. */ }
   }
 
-  get(agentId: string, sessionId?: string | null) { return this.values.get(preferenceKey(agentId, sessionId)); }
-  set(agentId: string, sessionId: string | null | undefined, mode: LocalPermissionMode) {
+  get() { return this.mode; }
+  set(mode: LocalPermissionMode) {
     if (!isLocalPermissionMode(mode)) throw new Error("Invalid permission mode");
-    this.values.set(preferenceKey(agentId, sessionId), mode);
+    this.mode = mode;
   }
-  serialize() { return JSON.stringify([...this.values]); }
+  serialize() { return JSON.stringify(this.mode); }
 }
