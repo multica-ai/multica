@@ -5,7 +5,8 @@ import {
   type Ref,
   type RefObject
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import type { AgentConversationFollowEndMode } from "../agentConversationFollowEndController";
 import type { AgentTranscriptTurnGroup } from "./agentTranscriptModel";
 
@@ -43,7 +44,7 @@ export function useAgentTranscriptVirtualizer({
   scrollElement: HTMLElement | null;
   scrollMargin: number;
   shouldVirtualize: boolean;
-  turnGroups: readonly AgentTranscriptTurnGroup[];
+  turnGroups: readonly Pick<AgentTranscriptTurnGroup, "key" | "turnId">[];
   virtualScrollControllerRef?: Ref<AgentTranscriptVirtualScrollController>;
 }): AgentTranscriptVirtualizer {
   const virtualizerHostRef = useRef<HTMLDivElement | null>(null);
@@ -53,7 +54,25 @@ export function useAgentTranscriptVirtualizer({
       `${agentSessionId}\u0000${turnGroups[index]?.key ?? index}`,
     [agentSessionId, turnGroups]
   );
+  const followMeasuredEnd = usePersistCallback(
+    (instance: Virtualizer<HTMLElement, Element>, sync: boolean) => {
+      if (sync || !shouldVirtualize || !followsEnd || hasMovingTurnDisclosure) {
+        return;
+      }
+      // Direct DOM sizing runs after the core's resize scroll adjustment.
+      // Its intended offset can exceed the old DOM limit, so check the real
+      // viewport after the sizer has grown rather than trusting isAtEnd().
+      const viewport = instance.scrollElement;
+      if (
+        viewport &&
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1
+      ) {
+        instance.scrollToEnd({ behavior: "auto" });
+      }
+    }
+  );
   const rowVirtualizer = useVirtualizer<HTMLElement, Element>({
+    enabled: shouldVirtualize,
     anchorTo: shouldVirtualize && hasMovingTurnDisclosure ? "start" : "end",
     count: turnGroups.length,
     directDomUpdates: true,
@@ -62,6 +81,7 @@ export function useAgentTranscriptVirtualizer({
     followOnAppend: shouldVirtualize && followsEnd && !hasMovingTurnDisclosure,
     getItemKey: getVirtualItemKey,
     getScrollElement: () => scrollElement,
+    onChange: followMeasuredEnd,
     overscan: AGENT_TRANSCRIPT_VIRTUALIZATION_OVERSCAN,
     scrollMargin,
     scrollEndThreshold: 24,

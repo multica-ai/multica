@@ -53,8 +53,13 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     virtualScrollControllerRef,
     activeConversationId: selectedConversationId,
     hasOlderMessages,
-    isLoadingOlderMessages
+    isLoadingOlderMessages,
+    historyWindowActive = false,
+    historyNavigation
   } = input;
+  const historyRange = historyNavigation?.window;
+  const historyPaging = historyNavigation?.paging;
+  const historyLocating = historyNavigation?.locating;
   const [isTimelineScrolledToTop, setIsTimelineScrolledToTop] = useState(true);
   const followEndControllerRef = useRef(
     createAgentConversationFollowEndController()
@@ -68,14 +73,14 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
   );
   const dispatchFollowEnd = useCallback(
     (event: AgentConversationFollowEndEvent): void => {
-      const nextMode = followEndController.dispatch(event);
+      const nextMode = followEndController.dispatch(historyWindowActive && event === "user-reached-end" ? "user-scrolled-away" : event);
       const anchor = timelineScrollAnchorRef.current;
       if (anchor) {
         conversationScrollMemoryRef.current.write(anchor, nextMode);
       }
       setFollowEndMode(nextMode);
     },
-    [followEndController, timelineScrollAnchorRef]
+    [followEndController, timelineScrollAnchorRef, historyWindowActive]
   );
   const writeTimelineScrollAnchor = useCallback(
     (anchor: TimelineScrollAnchor): void => {
@@ -109,6 +114,9 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
   const lastVirtualScrollControllerRevisionRef = useRef(
     virtualScrollControllerRevision
   );
+  useLayoutEffect(() => {
+    if (historyWindowActive) dispatchFollowEnd("user-scrolled-away");
+  }, [historyWindowActive, dispatchFollowEnd]);
   useLayoutEffect(() => {
     if (!isVisible) {
       return;
@@ -482,6 +490,21 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       clientHeight: number,
       userScrolled = false
     ): void => {
+      if (historyNavigation?.window) {
+        const range = historyNavigation.window;
+        if (!clientHeight || historyNavigation.locating || showTimelineSkeleton) return;
+        const direction = userScrollDirectionRef.current;
+        const before = scrollTop < clientHeight && range.has_before && direction !== "toward-end";
+        const after = scrollHeight - scrollTop - clientHeight < clientHeight && range.has_after && direction !== "away";
+        const page = before ? "before" : after ? "after" : null;
+        if (!page || (historyNavigation.paging && !direction)) return;
+        const key = `${activeConversationId}:${page}:${page === "before" ? range.start_index : range.end_index}`;
+        if (!userScrolled && lastHistoryPrefetchRef.current === key) return;
+        lastHistoryPrefetchRef.current = key;
+        if (page === "before" && !historyNavigation.paging) pendingPrependScrollAnchorRef.current = { conversationId: activeConversationId, scrollHeight, scrollTop };
+        void historyNavigation.more(page).catch(() => {});
+        return;
+      }
       if (
         activeConversationId !== selectedConversationId ||
         !hasOlderMessages ||
@@ -641,6 +664,14 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       } else if (event.deltaY > 0) {
         userScrollDirectionRef.current = "toward-end";
       }
+      if (historyNavigation?.window && !(event.target instanceof Element && event.target.closest("[data-agent-transcript-scroll-away-intent]"))) {
+        loadOlderMessagesNearTop(
+          Math.max(0, timeline.scrollTop + event.deltaY),
+          timeline.scrollHeight,
+          timeline.clientHeight,
+          true
+        );
+      }
     };
     const captureKeyboardIntent = (event: KeyboardEvent): void => {
       if (
@@ -729,6 +760,10 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     selectedConversationId,
     hasOlderMessages,
     isLoadingOlderMessages,
+    historyNavigation,
+    historyRange,
+    historyPaging,
+    historyLocating,
     writeTimelineScrollAnchor
   ]);
 

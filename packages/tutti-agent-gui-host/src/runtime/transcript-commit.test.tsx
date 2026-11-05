@@ -257,13 +257,15 @@ describe("committing a conversation's transcript", () => {
     expect(result).toEqual({ accepted: true, queued: false });
   });
 
-  it("commits at once before deciding whether a run blocks changing the model", async () => {
+  it("commits at once before accepting a model change after a run ends", async () => {
     const { emit, handle, phase } = await open();
     emit(started);
     await interval();
     expect(handle.isModelSelectionBusy(session.id)).toBe(true);
     emit(finished);
     expect(phase()).toBe("running");
+    expect(handle.isModelSelectionBusy(session.id)).toBe(true);
+    await expect(handle.setModelSelection(agent.id, session.id, "another-model")).resolves.toBeUndefined();
     expect(handle.isModelSelectionBusy(session.id)).toBe(false);
     expect(phase()).toBe("settled");
   });
@@ -299,6 +301,25 @@ describe("committing a conversation's transcript", () => {
 });
 
 describe("the engine and the transcript within one commit", () => {
+  it("does not commit pending stream changes while the UI reads model-selection availability", async () => {
+    const { emit, handle, messages, content } = await open();
+    const before = messages();
+    emit(started);
+    handle.isModelSelectionBusy(session.id);
+    expect(messages()).toBe(before);
+    expect(content("it-1")).toBeUndefined();
+    await interval();
+    expect(content("it-1")).toBe("Hel");
+  });
+
+  it("checks pending stream changes before accepting a model-selection command", async () => {
+    const { emit, handle, content } = await open();
+    emit(started);
+    await expect(handle.setModelSelection(agent.id, session.id, "another-model"))
+      .rejects.toMatchObject({ code: "run_in_progress" });
+    expect(content("it-1")).toBe("Hel");
+  });
+
   it("agree on the turn whenever either one notifies", async () => {
     const { content, emit, engine, handle, phase } = await open();
     const seen: { from: string; text: unknown; phase: unknown }[] = [];

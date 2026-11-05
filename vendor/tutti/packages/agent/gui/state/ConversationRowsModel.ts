@@ -56,6 +56,8 @@ export class ConversationRowsModel {
   private readonly locations: IComputedValue<
     ReturnType<typeof buildUserMessageLocatorItems>
   >;
+  private readonly base: IComputedValue<AgentConversationVM | null>;
+  private readonly nonempty: IComputedValue<boolean>;
   private readonly rowOwners = new Map<string, string>();
 
   constructor(
@@ -96,7 +98,11 @@ export class ConversationRowsModel {
               ...session,
               updatedAtUnixMs: session.createdAtUnixMs,
               messageVersion: 0,
-              activeTurnId: null
+              activeTurnId: null,
+              activeTurn: null,
+              latestTurn: null,
+              latestTurnInteractions: [],
+              pendingInteractions: []
             }
           : null;
       },
@@ -104,11 +110,15 @@ export class ConversationRowsModel {
     );
     this.order = computed(
       () => {
-        const committed = [...runtime.transcript.turnIds(agentSessionId)];
+        const navigation = runtime.navigation?.(agentSessionId);
+        const available = runtime.transcript.turnIds(agentSessionId);
+        const visible = navigation ? new Set(navigation.visibleTurnIds()) : null;
+        const committed = visible ? available.filter((id) => visible.has(id)) : [...available];
         const active = runtime.sessions.activeTurn(agentSessionId);
-        if (active && !committed.includes(active.turnId))
+        const showLatest = !navigation?.window?.has_after;
+        if (showLatest && active && !committed.includes(active.turnId))
           committed.push(active.turnId);
-        return this.optimisticMessages.length
+        return showLatest && this.optimisticMessages.length
           ? [...committed, TAIL]
           : committed;
       },
@@ -128,6 +138,16 @@ export class ConversationRowsModel {
     );
     this.layout = computed(() =>
       this.assemble(this.turnIds.map((id) => this.turnStructure(id)))
+    );
+    this.base = computed(() => {
+      const base = this.project(EMPTY, null);
+      const session = this.header.get();
+      return base && session
+        ? { ...base, sourceDetail: { ...base.sourceDetail, session } }
+        : base;
+    });
+    this.nonempty = computed(() =>
+      this.turnIds.some((id) => Boolean(this.turnStructure(id)?.rows.length))
     );
     this.virtualization = computed(() => {
       const scores = this.turnIds.map((id) => this.turnComplexity(id));
@@ -162,6 +182,15 @@ export class ConversationRowsModel {
   /** Only layout consumers use this value. Text consumers must resolve a row by key. */
   get structure(): AgentConversationVM | null {
     return this.layout.get();
+  }
+  get presentationBase(): AgentConversationVM | null {
+    return this.base.get();
+  }
+  get hasRows(): boolean {
+    return this.nonempty.get();
+  }
+  canonicalTurn(id: string) {
+    return this.runtime.sessions.turn(this.agentSessionId, id);
   }
   get conversation(): AgentConversationVM | null {
     return this.projected.get();
@@ -266,7 +295,7 @@ export class ConversationRowsModel {
     };
   }
 
-  private turnStructure(id: string): AgentConversationVM | null {
+  turnStructure(id: string): AgentConversationVM | null {
     let value = this.structures.get(id);
     if (!value) {
       value = computed(() => this.turn(id), { equals: sameLayout });

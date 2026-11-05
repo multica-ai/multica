@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { observable, runInAction } from "mobx";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ConversationServicesProvider,
   type ConversationServices
@@ -36,6 +36,7 @@ vi.mock("../../../i18n/index", async (importOriginal) => {
 });
 
 describe("AgentTranscriptView", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
   it("uses standalone Agent target presentations for session mention icons", () => {
     const mention =
       "[@Jun Sun's Tutti Agent](mention://agent-session/session-source?agentTargetId=shared-agent%3Ajun-tutti&workspaceId=workspace-1) what is this";
@@ -1925,6 +1926,7 @@ describe("AgentTranscriptView", () => {
   });
 
   it("renders user message locator ticks and scrolls to the selected message", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
@@ -2023,6 +2025,7 @@ describe("AgentTranscriptView", () => {
   });
 
   it("formats rich mention syntax as plain text in user message locator previews", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
     const mentionPrompt =
       "[@我打算去泰国旅游，你制定下旅游计划](mention://agent-session/session-source?workspaceId=workspace-1) 这个计划你锐评一下";
     const displayPrompt =

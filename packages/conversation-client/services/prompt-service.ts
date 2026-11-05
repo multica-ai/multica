@@ -133,6 +133,7 @@ export class PromptService<
     string,
     PendingPrompt<Input, Display>[]
   >();
+  private readonly awaitingTranscript = new Map<string, Map<string, Display>>();
   private readonly errors = new Map<string, PromptError>();
   private readonly operations = new Map<string, Promise<StopResult>>();
   private readonly steering = new Map<
@@ -244,6 +245,7 @@ export class PromptService<
       ...new Set([
         ...this.queues.keys(),
         ...this.pendingBySession.keys(),
+        ...this.awaitingTranscript.keys(),
         ...this.errors.keys()
       ])
     ];
@@ -275,6 +277,7 @@ export class PromptService<
       this.pending(id).some(
         (item) => item.input.clientSubmitId === requestId
       ) ||
+      !!(requestId && this.awaitingTranscript.get(id)?.has(requestId)) ||
       !!this.queues.get(id)?.items.some((item) => item.requestId === requestId)
     );
   }
@@ -284,20 +287,31 @@ export class PromptService<
     const queue = this.queues.get(id);
     const dispatching =
       queue?.paused || queue?.error ? undefined : queue?.dispatchingRequestId;
-    const items = (queue?.items.map((item) =>
-      item.requestId === dispatching
+    const activeTurnId = this.options.turns.session(id)?.activeTurnId;
+    const items = (queue?.items
+      .filter((item) => !this.options.turns.turnForSubmit(id, item.requestId))
+      .map((item) =>
+      item.requestId === dispatching ||
+      (!queue.paused && !queue.error && !this.options.turns.runtimeBlocked(id) &&
+        this.awaitingTranscript.get(id)?.has(item.requestId) &&
+        (!activeTurnId || this.options.turns.turnForSubmit(id, item.requestId) === activeTurnId))
         ? { ...item.display, visibleInQueue: false }
         : item.display
     ) ?? []) as unknown as Display[];
     return [
       ...items,
-      ...this.pending(id)
-        .map((item) => item.display)
+      ...[
+        ...this.pending(id).map((item) => item.display),
+        ...(this.awaitingTranscript.get(id)?.values() ?? [])
+      ]
         .filter(
           (item) =>
             !items.some(
               (existing) => existing.clientSubmitId === item.clientSubmitId
             )
+        )
+        .filter(
+          (item, index, all) => all.findIndex((other) => other.id === item.id) === index
         )
     ];
   }
@@ -391,7 +405,9 @@ export class PromptService<
           agentSessionId: id,
           clientSubmitId: prompt.clientSubmitId || prompt.id,
           workspaceId: this.options.workspaceId,
-          status: "requested" as
+          status: (this.awaitingTranscript.get(id)?.has(prompt.clientSubmitId || prompt.id) &&
+            !this.queue(id)?.items.some((item) => item.requestId === (prompt.clientSubmitId || prompt.id))
+            ? "accepted" : "requested") as
             | "requested"
             | "uncertain"
             | "accepted"
@@ -574,6 +590,7 @@ export class PromptService<
         )
           return true;
         item.confirmed = true;
+        this.retainUntilTranscript(id, item);
         this.clearError(id, item.display.id, "admission");
         return false;
       })
@@ -645,6 +662,7 @@ export class PromptService<
         (queue) => {
           if (this.disposed) return queue;
           item.confirmed = true;
+          this.retainUntilTranscript(id, item);
           this.pendingBySession.set(
             id,
             this.pending(id).filter((value) => value !== item)
@@ -726,6 +744,8 @@ export class PromptService<
       try {
         const queue = await this.options.update(id, queueAction, requestId);
         if (this.disposed) return undefined;
+        if (queueAction === "remove" && requestId)
+          this.awaitingTranscript.get(id)?.delete(requestId);
         if (queueAction === "remove" && item) {
           this.pendingBySession.set(
             id,
@@ -842,6 +862,17 @@ export class PromptService<
   /** The conversation data this service reads has changed. */
   lifecycleChanged(): void {
     if (this.disposed) return;
+    let changed = false;
+    for (const [id, messages] of this.awaitingTranscript) {
+      for (const requestId of messages.keys()) {
+        if (this.options.turns.deleted(id) || this.options.turns.turnForSubmit(id, requestId)) {
+          messages.delete(requestId);
+          changed = true;
+        }
+      }
+      if (!messages.size) this.awaitingTranscript.delete(id);
+    }
+    if (changed) this.publish();
     this.cancels.reconcile();
     this.interactions.reconcile();
     for (const id of this.editRetries.sessionIds())
@@ -852,5 +883,14 @@ export class PromptService<
     this.disposed = true;
     this.cancels.dispose();
     this.commands.dispose();
+    this.awaitingTranscript.clear();
+  }
+
+  private retainUntilTranscript(id: string, item: PendingPrompt<Input, Display>): void {
+    // Admission can empty the queue before the corresponding user.message is committed.
+    if (item.display.visibleInQueue !== false || this.options.turns.turnForSubmit(id, item.input.clientSubmitId)) return;
+    let messages = this.awaitingTranscript.get(id);
+    if (!messages) this.awaitingTranscript.set(id, messages = new Map());
+    messages.set(item.input.clientSubmitId, item.display);
   }
 }

@@ -143,9 +143,12 @@ function service(id: string, theme: "light" | "dark", sidePane: boolean) {
   );
 }
 
-const TOTAL_TURNS = 60,
+const TOTAL_TURNS = new URLSearchParams(location.search).has("navigationProfile") ? 500 : new URLSearchParams(location.search).has("navigation") ? 86 : 60,
   PAGE_TURNS = 10;
 const paging = {
+  navigation: [] as string[],
+  navigationDelay: 100,
+  failNavigation: false,
   reads: 0,
   failing: new URLSearchParams(location.search).has("failOlder"),
   started: [] as number[]
@@ -226,6 +229,24 @@ function pagedSource(id: string): LocalConversationSource {
     turn_count: TOTAL_TURNS
   };
   const transport = createFakeTransport(scope, async (_method, path) => {
+    if (path.includes("/navigation")) {
+      paging.navigation.push(path);
+      const query = new URL(path, "http://fixture").searchParams;
+      const base = { store_generation: "g", snapshot_seq: TOTAL_TURNS * 2, node_count: TOTAL_TURNS };
+      if (!query.has("node_index") && !query.has("before_index") && !query.has("after_index")) return { ...base, nodes: [], turns: [], range: null };
+      await new Promise((resolve) => setTimeout(resolve, paging.navigationDelay));
+      if (paging.failNavigation) throw new Error("Navigation fixture unavailable");
+      const center = Number(query.get("node_index"));
+      const limit = Number(query.get("limit") ?? PAGE_TURNS);
+      const before = Number(query.get("before") ?? 4);
+      const after = Number(query.get("after") ?? 5);
+      const start = query.has("before_index") ? Math.max(0, Number(query.get("before_index")) - limit) : query.has("after_index") ? Number(query.get("after_index")) + 1 : Math.max(0, center - before);
+      const end = Math.min(TOTAL_TURNS - 1, query.has("before_index") ? Number(query.get("before_index")) - 1 : query.has("after_index") ? start + limit - 1 : center + after);
+      const turns = Array.from({ length: end - start + 1 }, (_, index) => turnOf(start + index));
+      const range = { start_index: start, end_index: end, has_before: start > 0, has_after: end < TOTAL_TURNS - 1 };
+      return { ...base, turns: query.get("include_body") === "false" ? [] : turns, directory_range: range, range: query.get("include_body") === "false" ? null : range,
+        nodes: turns.map((turn) => ({ node_index: turn.turn_index, turn_id: turn.id, turn_index: turn.turn_index, message_id: `${turn.id}-q`, summary: `Question ${turn.turn_index}`, has_agent_response: true })) };
+    }
     if (path.includes("/snapshot"))
       return {
         version: 2,
@@ -255,6 +276,7 @@ function pagedSource(id: string): LocalConversationSource {
   }).get(transport, scope);
   const session = snapshot(id, "light", false).sessions[0]!;
   return {
+    navigation: new URLSearchParams(location.search).has("navigation") ? () => service.navigation(id) : undefined,
     open: () => service.open(id),
     ensure: () => service.ensure(id),
     refresh: () => service.refresh(id),

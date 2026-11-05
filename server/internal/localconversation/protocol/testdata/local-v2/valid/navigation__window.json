@@ -1,0 +1,45 @@
+{
+  "store_generation": "g",
+  "snapshot_seq": 100,
+  "node_count": 25,
+  "nodes": [
+    {
+      "node_index": 2,
+      "message_id": "m4",
+      "turn_id": "t4",
+      "turn_index": 4,
+      "summary": "A user message",
+      "has_agent_response": false
+    }
+  ],
+  "range": {
+    "start_index": 4,
+    "end_index": 4,
+    "has_before": true,
+    "has_after": true
+  },
+  "turns": [
+    {
+      "id": "t4",
+      "turn_index": 4,
+      "request_id": "r4",
+      "status": "completed",
+      "started_at": "2026-11-05T00:00:00Z",
+      "messages": [
+        {
+          "id": "m4",
+          "role": "user",
+          "content": "A user message",
+          "created_at": "2026-11-05T00:00:00Z"
+        }
+      ],
+      "events": []
+    }
+  ],
+  "directory_range": {
+    "start_index": 4,
+    "end_index": 4,
+    "has_before": true,
+    "has_after": true
+  }
+}

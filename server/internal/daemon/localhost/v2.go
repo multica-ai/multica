@@ -34,6 +34,7 @@ const ConversationFocusCapability = "conversation-focus-v1"
 // PromptStatusCapability says clients may ask what became of queued messages,
 // and that queue.updated events carry the queue's order and the change's reason.
 const PromptStatusCapability = "prompt-status-v1"
+const NavigationCapability = "conversation-navigation-v1"
 
 // AttachmentReserveCapability says clients may choose attachment ids, link
 // stored content by SHA-256 and discard uploads a draft dropped.
@@ -205,7 +206,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
 		}
-		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability)
+		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability, NavigationCapability)
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
@@ -391,6 +392,8 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		listDirectories(w, r.URL.Query().Get("path"))
 	case path == "/directory-source" && r.Method == http.MethodGet:
 		v.directorySource(w, r, scopeID)
+	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "navigation" && r.Method == http.MethodGet:
+		v.navigation(w, r, scopeID, parts[1])
 	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "history" && r.Method == http.MethodGet:
 		before, err := strconv.ParseInt(r.URL.Query().Get("before_index"), 10, 64)
 		if err != nil {
@@ -1089,6 +1092,9 @@ func writeV2Error(w http.ResponseWriter, err error) {
 		status = http.StatusBadRequest
 		if code == "not_signed_in" || code == "account_mismatch" || code == "forbidden" {
 			status = http.StatusForbidden
+		}
+		if code == "generation_changed" {
+			status = http.StatusConflict
 		}
 	case errors.Is(err, store.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"

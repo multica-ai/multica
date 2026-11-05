@@ -27,4 +27,6 @@ export interface AgentGUIDetailScrollInput {
   activeConversationId: string | null;
   hasOlderMessages: boolean;
   isLoadingOlderMessages: boolean;
+  historyWindowActive?: boolean;
+  historyNavigation?: import("@multica/conversation-client/services").ConversationNavigation;
 }

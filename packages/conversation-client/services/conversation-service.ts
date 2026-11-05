@@ -1,11 +1,12 @@
 import type { z } from "zod";
 import { parseWithFallback } from "@multica/core/api/schema";
 import {
-  LOCAL_V2_VERSION, localV2HistorySchema, localV2QueueSchema, localV2ServerMessageSchema, localV2SessionListSchema, localV2SnapshotSchema, localV2UploadSchema,
+  LOCAL_V2_VERSION, localV2HistorySchema, localV2QueueSchema, localV2ServerMessageSchema, localV2SessionListSchema, localV2SnapshotSchema, localV2UploadSchema, localV2NavigationPath, LOCAL_V2_NAVIGATION_CAPABILITY,
   type LocalV2Event, type LocalV2Scope, type LocalV2Snapshot, type LocalV2Summary, type LocalV2Transport,
 } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { ConversationListModel, ConversationModel } from "../models";
+import { ConversationNavigation } from "./conversation-navigation";
 
 /** Conversations of other devices as last read, shown while the current state travels. */
 export interface ConversationSnapshotStore {
@@ -31,12 +32,13 @@ const PAGE_TURNS = 10;
 const LIST_RETRY_MIN_MS = 1_000;
 const LIST_RETRY_MAX_MS = 30_000;
 interface ContentEntry {
+  navigation?: ConversationNavigation;
   /** Replaced when the entry is dropped, so a late answer cannot land in a new one. */
   epoch: number;
   conversation?: ConversationModel;
   /** Views holding the conversation live. None left means it is being left or was left. */
   users: number;
-  observers: Set<(events: readonly LocalV2Event[]) => void>;
+  observers: Set<(events: readonly LocalV2Event[], change?: "navigation") => void>;
   /** Changes whenever the conversation does: the model updates in place. */
   version: number;
   error: Error | null;
@@ -208,16 +210,20 @@ export class ConversationService {
   /** Forgets a conversation's content; the list keeps it. */
   evict(id: string): void { this.entries.delete(id); }
 
-  observe(id: string, listener: (events: readonly LocalV2Event[]) => void): () => void {
+  observe(id: string, listener: (events: readonly LocalV2Event[], change?: "navigation") => void): () => void {
     const entry = this.entry(id);
     entry.observers.add(listener);
     return () => { entry.observers.delete(listener); };
   }
 
-  private changed(id: string, entry: ContentEntry, events: readonly LocalV2Event[] = []) {
+  private changed(id: string, entry: ContentEntry, events: readonly LocalV2Event[] = [], change?: "navigation") {
     entry.version++;
+    entry.navigation?.sync();
     this.options.onUsed(this, id);
-    for (const observer of [...entry.observers]) observer(events);
+    for (const observer of [...entry.observers]) {
+      if (change) observer(events, change);
+      else observer(events);
+    }
   }
 
   /**
@@ -349,7 +355,7 @@ export class ConversationService {
     const entry = this.entry(id);
     const conversation = entry.conversation;
     if (!conversation?.hasOlderTurns) return Promise.resolve();
-    const before = conversation.oldestTurnIndex();
+    const before = conversation.historyStartIndex;
     if (before === null || before <= 0) return Promise.resolve();
     return entry.older ??= (async () => {
       const epoch = entry.epoch;
@@ -359,11 +365,21 @@ export class ConversationService {
       if (this.entries.get(id)?.epoch !== epoch || entry.conversation?.storeGeneration !== history.store_generation) return;
       const current = entry.conversation;
       if (!current) return;
-      const oldest = current.oldestTurnIndex();
+      const oldest = current.historyStartIndex;
       if (oldest !== null && history.turns.length && history.turns.at(-1)!.turn_index !== oldest - 1) return;
       current.mergeHistory(history);
       this.changed(id, entry);
     })().finally(() => { entry.older = undefined; });
+  }
+
+  navigation(id: string): ConversationNavigation {
+    const entry = this.entry(id);
+    return entry.navigation ??= new ConversationNavigation({
+      supported: this.transport.capabilities ? async () => (await this.transport.capabilities!()).includes(LOCAL_V2_NAVIGATION_CAPABILITY) : undefined,
+      model: () => this.entries.get(id) === entry ? entry.conversation : undefined,
+      request: (query) => this.request("GET", localV2NavigationPath(id, query)),
+      changed: () => this.changed(id, entry, [], "navigation"),
+    });
   }
 
   private readQueue(id: string, entry: ContentEntry) {

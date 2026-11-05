@@ -32,12 +32,16 @@ export class ConversationModel {
   usage: Record<string, unknown> | null = null;
   summary: LocalV2Summary;
   hasOlderTurns = false;
+  historyStartIndex = 0;
   readonly queue: PromptQueueModel;
 
   /** Per-turn lookups, so reading a turn costs that turn rather than the whole conversation. */
   private readonly itemsByTurn = new Map<string, ItemModel[]>();
   private readonly messagesByTurn = new Map<string | null, UserMessageModel[]>();
   private readonly interactionsByTurn = new Map<string, InteractionModel[]>();
+  private readonly navigationTurnIds = new Set<string>();
+  /** An unloaded turn can finish before its earlier body read reaches this client. */
+  private readonly completedTurns = new Map<string, { status: TurnStatus; at: string; error: TurnError | null }>();
 
   seq = 0;
   storeGeneration = "";
@@ -58,6 +62,8 @@ export class ConversationModel {
       usage: observable.ref,
       summary: observable.ref,
       hasOlderTurns: observable,
+      historyStartIndex: observable,
+      mergeNavigation: action,
       replaceSnapshot: action,
       setSummary: action,
       applyEvents: action,
@@ -87,6 +93,7 @@ export class ConversationModel {
       this.queue.receive(snapshot.queue);
       return false;
     }
+    if (!sameStore || options.authoritative) this.completedTurns.clear();
     const previous = {
       turns: [...this.turns.values()], items: [...this.items.values()],
       messages: [...this.messages.values()], interactions: [...this.interactions.values()],
@@ -101,7 +108,16 @@ export class ConversationModel {
     this.usage = null;
     this.load(snapshot);
     this.queue.replace(snapshot.queue);
-    if (sameStore) this.retainHistory(previous);
+    if (sameStore) {
+      this.retainHistory(previous);
+      const kept = previous.turns.filter((turn) => this.navigationTurnIds.has(turn.id) && !this.turns.has(turn.id) && turn.status !== "running" && !previous.items.some((item) => item.turnId === turn.id && item.status === "in_progress"));
+      const ids = new Set(kept.map((turn) => turn.id));
+      for (const turn of kept) this.turns.set(turn.id, turn);
+      for (const item of previous.items) if (ids.has(item.turnId)) this.setItem(item);
+      for (const message of previous.messages) if (ids.has(message.turnId ?? "")) this.setMessage(message);
+      for (const interaction of previous.interactions) if (ids.has(interaction.turnId)) this.setInteraction(interaction);
+      this.sortTurns();
+    } else this.navigationTurnIds.clear();
     return true;
   }
 
@@ -109,6 +125,7 @@ export class ConversationModel {
     this.storeGeneration = snapshot.store_generation;
     this.summary = snapshot.conversation;
     this.hasOlderTurns = snapshot.has_older_turns;
+    this.historyStartIndex = snapshot.turns[0]?.turn_index ?? 0;
     this.settings = { ...snapshot.settings };
     this.createdAt = snapshot.created_at;
     this.forkedFromId = snapshot.forked_from_id;
@@ -149,6 +166,7 @@ export class ConversationModel {
     for (const message of previous.messages) if (message.turnId && ids.has(message.turnId)) this.setMessage(message);
     for (const interaction of previous.interactions) if (ids.has(interaction.turnId) && !this.interactions.has(interaction.id)) this.setInteraction(interaction);
     this.hasOlderTurns = kept.at(-1)!.index > 0;
+    this.historyStartIndex = kept.at(-1)!.index;
     this.sortTurns();
   }
 
@@ -165,6 +183,16 @@ export class ConversationModel {
   mergeHistory(history: LocalV2History): void {
     for (const turn of history.turns) this.addTurn(turn);
     this.hasOlderTurns = history.has_older_turns;
+    if (history.turns.length) this.historyStartIndex = Math.min(this.historyStartIndex, history.turns[0]!.turn_index);
+    this.sortTurns();
+  }
+
+  /** Navigation can cache disconnected windows without advancing the contiguous history cursor. */
+  mergeNavigation(turns: readonly LocalV2SnapshotTurn[]): void {
+    for (const turn of turns) {
+      this.navigationTurnIds.add(turn.id);
+      if (!this.turns.has(turn.id)) this.addTurn(turn);
+    }
     this.sortTurns();
   }
 
@@ -174,9 +202,10 @@ export class ConversationModel {
   receiveQueue(queue: LocalV2Queue): void { this.queue.receive(queue); }
 
   private addTurn(turn: LocalV2SnapshotTurn): void {
+    const completion = this.completedTurns.get(turn.id);
     this.turns.set(turn.id, new TurnModel(this, {
-      id: turn.id, index: turn.turn_index, requestId: turn.request_id, status: turnStatus(turn.status),
-      startedAt: turn.started_at, completedAt: turn.completed_at ?? null, error: turn.error ?? null,
+      id: turn.id, index: turn.turn_index, requestId: turn.request_id, status: completion?.status ?? turnStatus(turn.status),
+      startedAt: turn.started_at, completedAt: completion?.at ?? turn.completed_at ?? null, error: completion ? completion.error : turn.error ?? null,
     }));
     for (const message of turn.messages) {
       // Assistant rows repeat the turn's assistant_text items.
@@ -289,7 +318,11 @@ export class ConversationModel {
         }));
         return;
       case "turn.completed":
-        if (event.turn_id) this.turns.get(event.turn_id)?.complete(turnStatus(text(payload.status)), event.created_at, errorValue(payload.error));
+        if (event.turn_id) {
+          const completion = { status: turnStatus(text(payload.status)), at: event.created_at, error: errorValue(payload.error) };
+          this.completedTurns.set(event.turn_id, completion);
+          this.turns.get(event.turn_id)?.complete(completion.status, completion.at, completion.error);
+        }
         return;
       case "item.started":
       case "item.delta":

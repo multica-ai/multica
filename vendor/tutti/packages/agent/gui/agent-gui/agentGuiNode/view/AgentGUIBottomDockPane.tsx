@@ -3,7 +3,7 @@ import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { cn } from "@tutti-os/ui-system";
 import { ChevronsDown } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { DetailChromeState } from "../../../state/DetailChromeState";
 import { AgentComposer, type AgentComposerProps } from "../AgentComposer";
 import { AgentComposerRegion } from "../AgentComposerRegion";
@@ -34,6 +34,7 @@ interface AgentGUIBottomDockPaneProps {
     | AgentGUIInteractionViewModel["pendingApproval"]
     | AgentGUIInteractionViewModel["pendingInteractivePrompt"];
   composerProps: AgentComposerProps;
+  composerSlot?: ReactNode;
   interaction: AgentGUIInteractionViewModel;
   chrome: Pick<DetailChromeState, "statusSource" | "inlineSource">;
   keyboardShortcutsEnabled: boolean;
@@ -55,6 +56,7 @@ export const AgentGUIBottomDockPane = observer(function AgentGUIBottomDockPane({
   bottomDockLiftedPrompt,
   bottomDockReplacementPrompt,
   composerProps,
+  composerSlot,
   interaction,
   chrome,
   keyboardShortcutsEnabled,
@@ -157,7 +159,7 @@ export const AgentGUIBottomDockPane = observer(function AgentGUIBottomDockPane({
             />
           </div>
         ) : (
-          <AgentComposer {...composerProps} />
+          composerSlot ?? <AgentComposer {...composerProps} />
         )
       }
     />

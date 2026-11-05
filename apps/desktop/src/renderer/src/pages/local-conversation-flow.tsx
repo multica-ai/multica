@@ -22,8 +22,6 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
-  Clock3,
   Copy,
   FolderKanban,
   FolderMinus,
@@ -31,7 +29,6 @@ import {
   FolderPlus,
   GitFork,
   Loader2,
-  MonitorSmartphone,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -44,7 +41,6 @@ import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -64,7 +60,6 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   ContextMenu,
-  ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
@@ -91,9 +86,8 @@ import {
 } from "@multica/core/paths";
 import { getCurrentSlug } from "@multica/core/platform";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useNavigation, AppLink } from "@multica/views/navigation";
+import { useNavigation } from "@multica/views/navigation";
 import { useLocale, useT } from "@multica/views/i18n";
-import { ProviderLogo } from "@multica/views/runtimes/provider-logo";
 import { TuttiAgentGuiPanel } from "../components/tutti-agent-gui-panel";
 import type { ParentServiceOptions } from "../platform/agent-gui-parent-service";
 import type {
@@ -146,6 +140,7 @@ import {
 } from "../platform/local-device";
 import { deviceName, useLinkedDevices } from "../platform/linked-devices";
 import { pickRemoteFolder, RemoteFolderPicker } from "./remote-folder-picker";
+import { LocalConversationSessionRow } from "./local-conversation-session-row";
 import { useDocumentTitle } from "../hooks/use-document-title";
 import { useConversationFocus } from "../platform/use-conversation-focus";
 export const LocalConversationFlowPage = observer(
@@ -971,23 +966,18 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
   );
   const renderSessionActionsCallback = renderSessionActions;
   const renderSession = (entry: LocalSessionEntry) => {
-    const entryRunning = entry.running;
-    const waitingForAnswer = entry.waitingForAnswer;
-    const background = entry.backgroundTasks;
     return (
       <ContextMenu key={entry.id}>
-        <ContextMenuTriggerBinding1
-          entry={entry}
+        <LocalConversationSessionRow
+          id={entry.id}
+          model={sessions.model}
           setContextSelection={setContextSelection}
           sessionLinks={sessionLinks}
           flowPath={flowPath}
-          selectedId={selectedId}
+          selected={selectedId === entry.id}
           select={selectCallback}
-          entryRunning={entryRunning}
-          background={background}
           updatingId={updatingId}
           labels={labels}
-          waitingForAnswer={waitingForAnswer}
           t={t}
           projectLabels={projectLabels}
           renderSessionActions={renderSessionActionsCallback}
@@ -1780,135 +1770,6 @@ const ItemBinding8 = observer(function ItemBinding8({
       <Archive />
       {archived ? labels.history : labels.archive}
     </Item>
-  );
-});
-
-const AppLinkBinding9 = observer(function AppLinkBinding9({
-  sessionLinks,
-  entry,
-  flowPath,
-  selectedId,
-  select,
-  entryRunning,
-  background,
-  updatingId,
-  labels,
-  waitingForAnswer,
-  t
-}: {
-  sessionLinks: import("react").RefObject<Map<string, HTMLAnchorElement>>;
-  entry: LocalSessionEntry;
-  flowPath: string;
-  selectedId: string | null;
-  select: (id: string | null, choice?: LocalProviderId) => void;
-  entryRunning: boolean;
-  background: number;
-  updatingId: string | null;
-  labels: {
-    sessions: string;
-    new: string;
-    search: string;
-    empty: string;
-    noResults: string;
-    retry: string;
-    loading: string;
-    archive: string;
-    history: string;
-    pinned: string;
-    unpin: string;
-    directory: string;
-    newTitle: string;
-    storage: string;
-    directoryLocked: string;
-    unavailable: string;
-    failed: string;
-    fork: string;
-    forking: string;
-    forkHint: string;
-    forkWaiting: string;
-    forkEmpty: string;
-  };
-  waitingForAnswer: boolean;
-  t: ReturnType<typeof useT<"chat">>["t"];
-}) {
-  const refProp9 = usePersistCallback<
-    Extract<
-      NonNullable<React.ComponentProps<typeof AppLink>["ref"]>,
-      (...args: never[]) => unknown
-    >
-  >((node) => {
-    if (node) sessionLinks.current.set(entry.id, node);
-    else sessionLinks.current.delete(entry.id);
-  });
-  const onClickProp10 = usePersistCallback<
-    NonNullable<React.ComponentProps<typeof AppLink>["onClick"]>
-  >((event) => {
-    event.preventDefault();
-    select(entry.id, entry.provider);
-  });
-  return (
-    <AppLink
-      ref={refProp9}
-      href={`${flowPath}?${new URLSearchParams({ provider: entry.provider, session: entry.id })}`}
-      aria-current={selectedId === entry.id ? "true" : undefined}
-      onClick={onClickProp10}
-      className={`flex min-w-0 items-start gap-3 rounded-lg px-3 py-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring ${entryRunning || background ? "pr-16" : `group-hover:pr-11 group-focus-within:pr-11 ${updatingId === entry.id ? "pr-11" : ""}`} ${selectedId === entry.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/60"}`}
-    >
-      <span
-        aria-hidden="true"
-        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-foreground"
-      >
-        <ProviderLogo provider={entry.provider} className="size-5" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          {entry.pinned && (
-            <Pin
-              aria-label={labels.pinned}
-              className="size-3 shrink-0 text-muted-foreground"
-            />
-          )}
-          <span className="truncate font-medium">{entry.title}</span>
-        </span>
-        <span
-          className={`mt-0.5 block truncate text-caption ${waitingForAnswer ? "text-foreground" : "text-muted-foreground"}`}
-        >
-          {waitingForAnswer ? (
-            t(($) => $.desktop.local_conversation.waiting_for_answer)
-          ) : (
-            <>
-              {entry.provider === "codex" ? "Codex" : "Claude Code"} ·{" "}
-              {entry.preview || labels.storage}
-            </>
-          )}
-        </span>
-      </span>
-    </AppLink>
-  );
-});
-
-const IconButtonBinding10 = observer(function IconButtonBinding10({
-  t,
-  entry,
-  select
-}: {
-  t: ReturnType<typeof useT<"chat">>["t"];
-  entry: LocalSessionEntry;
-  select: (id: string | null, choice?: LocalProviderId) => void;
-}) {
-  const onClickProp11 = usePersistCallback<
-    NonNullable<React.ComponentProps<typeof IconButton>["onClick"]>
-  >(() => select(entry.id, entry.provider));
-  return (
-    <IconButton
-      size="icon-xs"
-      label={t(($) => $.desktop.local_conversation.waiting_for_answer_label, {
-        title: entry.title
-      })}
-      onClick={onClickProp11}
-    >
-      <CircleHelp aria-hidden="true" className="size-4 text-muted-foreground" />
-    </IconButton>
   );
 });
 
@@ -3467,204 +3328,6 @@ const TuttiAgentGuiPanelBinding33 = observer(
         onOpenTask={onOpenTaskProp41}
         onShowMessage={onShowMessageProp42}
       />
-    );
-  }
-);
-
-const ContextMenuTriggerBinding1 = observer(
-  function ContextMenuTriggerBinding1({
-    entry,
-    setContextSelection,
-    sessionLinks,
-    flowPath,
-    selectedId,
-    select,
-    entryRunning,
-    background,
-    updatingId,
-    labels,
-    waitingForAnswer,
-    t,
-    projectLabels,
-    renderSessionActions,
-    chinese,
-    remote,
-    v2
-  }: {
-    entry: LocalSessionEntry;
-    setContextSelection: import("react").Dispatch<
-      import("react").SetStateAction<string>
-    >;
-    sessionLinks: import("react").RefObject<Map<string, HTMLAnchorElement>>;
-    flowPath: string;
-    selectedId: string | null;
-    select: (id: string | null, choice?: LocalProviderId) => void;
-    entryRunning: boolean;
-    background: number;
-    updatingId: string | null;
-    labels: {
-      sessions: string;
-      new: string;
-      search: string;
-      empty: string;
-      noResults: string;
-      retry: string;
-      loading: string;
-      archive: string;
-      history: string;
-      pinned: string;
-      unpin: string;
-      directory: string;
-      newTitle: string;
-      storage: string;
-      directoryLocked: string;
-      unavailable: string;
-      failed: string;
-      fork: string;
-      forking: string;
-      forkHint: string;
-      forkWaiting: string;
-      forkEmpty: string;
-    };
-    waitingForAnswer: boolean;
-    t: ReturnType<typeof useT<"chat">>["t"];
-    projectLabels: {
-      unassigned: string;
-      unavailable: string;
-      actions: string;
-      move: string;
-      noWorkspaceProject: string;
-      create: string;
-      new: string;
-      empty: string;
-      loadFailed: string;
-      folderLoadFailed: string;
-      manage: string;
-      remove: string;
-      removed: string;
-      restore: string;
-      removedNotice: string;
-      undo: string;
-    };
-    renderSessionActions: (
-      entry: LocalSessionEntry,
-      contextMenu: boolean
-    ) => import("react").JSX.Element;
-    chinese: boolean;
-    remote: boolean;
-    v2: import("../../../../../../packages/conversation-client/services/conversation-service").ConversationService;
-  }) {
-    const onContextMenuProp43 = usePersistCallback<
-      NonNullable<
-        React.ComponentProps<typeof ContextMenuTrigger>["onContextMenu"]
-      >
-    >((event) => {
-      const selection = window.getSelection();
-      setContextSelection(
-        selection &&
-          event.currentTarget.contains(selection.anchorNode) &&
-          event.currentTarget.contains(selection.focusNode)
-          ? selection.toString()
-          : ""
-      );
-    });
-    return (
-      <ContextMenuTrigger
-        className="group relative block select-text"
-        data-session-id={entry.id}
-        onContextMenu={onContextMenuProp43}
-      >
-        <AppLinkBinding9
-          sessionLinks={sessionLinks}
-          entry={entry}
-          flowPath={flowPath}
-          selectedId={selectedId}
-          select={select}
-          entryRunning={entryRunning}
-          background={background}
-          updatingId={updatingId}
-          labels={labels}
-          waitingForAnswer={waitingForAnswer}
-          t={t}
-        />
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-          <div
-            className={`focus-within:opacity-100 group-hover:opacity-100 ${updatingId === entry.id ? "opacity-100" : "opacity-0"}`}
-          >
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <IconButton
-                    label={`${projectLabels.actions}：${entry.title}`}
-                    disabled={updatingId !== null}
-                    aria-busy={updatingId === entry.id}
-                  />
-                }
-              >
-                {updatingId === entry.id ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <MoreHorizontal className="size-3.5" />
-                )}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {renderSessionActions(entry, false)}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          {waitingForAnswer ? (
-            <IconButtonBinding10 t={t} entry={entry} select={select} />
-          ) : (
-            entryRunning && (
-              <Spinner
-                aria-label={
-                  chinese
-                    ? `会话运行中：${entry.title}`
-                    : `Conversation running: ${entry.title}`
-                }
-                className="shrink-0 text-muted-foreground motion-reduce:animate-none"
-              />
-            )
-          )}
-          {!remote &&
-            (() => {
-              const users = v2.list
-                .presence(entry.id)
-                .map((user) => user.device_name || user.peer_id.slice(-6))
-                .join(chinese ? "、" : ", ");
-              return (
-                users && (
-                  <span
-                    role="status"
-                    aria-label={
-                      chinese
-                        ? `${users} 正在使用：${entry.title}`
-                        : `In use on ${users}: ${entry.title}`
-                    }
-                    title={chinese ? `${users} 正在使用` : `In use on ${users}`}
-                    className="flex shrink-0 items-center text-muted-foreground"
-                  >
-                    <MonitorSmartphone aria-hidden="true" className="size-4" />
-                  </span>
-                )
-              );
-            })()}
-          {!entryRunning && background > 0 && (
-            <span
-              role="status"
-              aria-label={
-                chinese
-                  ? `后台运行中：${entry.title}（${background}）`
-                  : `Background tasks: ${entry.title} (${background})`
-              }
-              title={chinese ? "后台运行中" : "Running in background"}
-              className="flex shrink-0 items-center text-muted-foreground"
-            >
-              <Clock3 aria-hidden="true" className="size-4" />
-            </span>
-          )}
-        </div>
-      </ContextMenuTrigger>
     );
   }
 );

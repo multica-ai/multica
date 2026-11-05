@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LocalFolderProject } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
-import { groupLocalConversations, sessionEntry, type LocalConversationProjectGroup, type LocalSessionEntry } from "./local-conversation-projects";
+import { groupLocalConversations, type LocalConversationProjectGroup } from "./local-conversation-projects";
+import { LocalConversationListModel } from "./local-conversation-list-model";
 import { conversationService } from "./conversation-services";
 import type { DirectLocalV2Transport } from "./local-v2-transport";
 
@@ -21,6 +22,7 @@ export interface ConversationPageGroup extends LocalConversationProjectGroup {
  */
 export function useLocalConversationPages(transport: LocalV2Transport & Pick<DirectLocalV2Transport, "availability" | "onAvailability">, scope: LocalV2Scope, projects: LocalFolderProject[], hidden: string[], archived: boolean, search: string, enabled: boolean) {
   const client = conversationService(transport, scope);
+  const model = useMemo(() => new LocalConversationListModel(client.list), [client]);
   const [status, setStatus] = useState<{ pending: boolean; error: Error | null; fetching: boolean }>({ pending: true, error: null, fetching: false });
   const [pages, setPages] = useState(new Map<string | null, number>());
   const load = useCallback(() => {
@@ -42,8 +44,7 @@ export function useLocalConversationPages(transport: LocalV2Transport & Pick<Dir
     return () => { stopAvailability(); stopConnection(); };
   }, [enabled, load, transport, scope.userId, scope.workspaceId]);
   // Sides open beside their source; a conversation joins the list with its first message.
-  const sessions: LocalSessionEntry[] = client.list.summaries.filter((summary) => !summary.side_source_id && summary.turn_count > 0).map(sessionEntry)
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+  const sessions = model.sessions;
   const groups: ConversationPageGroup[] = groupLocalConversations(sessions, projects.filter((project) => !hidden.includes(project.id)), archived, search).map((group) => {
     const pageCount = pages.get(group.id) ?? 1;
     const visible = group.sessions.slice(0, pageCount * PAGE);
@@ -52,5 +53,5 @@ export function useLocalConversationPages(transport: LocalV2Transport & Pick<Dir
   const loadMore = async (group: ConversationPageGroup) => {
     setPages((current) => new Map(current).set(group.id, group.pageCount + 1));
   };
-  return { data: sessions, groups, loading: new Set<string | null>(), loadMore, isPending: enabled && status.pending, isError: !!status.error, error: status.error, isFetching: status.fetching, refetch: load };
+  return { model, data: sessions, groups, loading: new Set<string | null>(), loadMore, isPending: enabled && status.pending, isError: !!status.error, error: status.error, isFetching: status.fetching, refetch: load };
 }

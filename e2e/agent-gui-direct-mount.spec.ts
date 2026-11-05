@@ -277,6 +277,52 @@ test("expands and collapses tool work while keeping the final reply in view", as
   await expect(page.getByText("Answer 59", { exact: false })).toBeInViewport();
 });
 
+test("keeps streaming content at the measured end and preserves scroll-away intent", async ({ page }) => {
+  await page.goto("/tutti-agent-gui/performance.html");
+  await expect(page.getByText("Live reply", { exact: true })).toBeVisible();
+  const timeline = page.getByTestId("agent-gui-timeline");
+  const gap = () => timeline.evaluate((element) =>
+    element.scrollHeight - element.clientHeight - element.scrollTop
+  );
+  const stream = (count: number) => page.evaluate(async (count) => {
+    const fixture = (window as Window & {
+      conversationFixture: {
+        stream(count: number, rate: number): Promise<{ delivered: number }>;
+      };
+    }).conversationFixture;
+    const { delivered } = await fixture.stream(count, 120);
+    const token = `streamed-token-${String(delivered).padStart(4, "0")}`;
+    while (!document.body.textContent?.includes(token)) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() =>
+      requestAnimationFrame(() => resolve())
+    ));
+  }, count);
+  await expect.poll(gap).toBeLessThanOrEqual(1);
+
+  const incoming = stream(180);
+  await page.locator('[contenteditable="true"]').first().pressSequentially(
+    "Typing while the reply grows.", { delay: 8 }
+  );
+  await incoming;
+  await expect.poll(gap).toBeLessThanOrEqual(1);
+
+  await timeline.hover();
+  await page.mouse.wheel(0, -700);
+  await expect.poll(gap).toBeGreaterThan(100);
+  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.waitForTimeout(200);
+  const detachedTop = await timeline.evaluate((element) => element.scrollTop);
+  await stream(90);
+  expect(await timeline.evaluate((element) => element.scrollTop)).toBeCloseTo(detachedTop, 0);
+
+  await page.getByTestId("agent-gui-scroll-to-bottom").click();
+  await expect.poll(gap).toBeLessThanOrEqual(1);
+  await stream(90);
+  await expect.poll(gap).toBeLessThanOrEqual(1);
+});
+
 test("slash host commands survive capability refresh and use the existing settings and Side bridge", async ({ page }) => {
   await page.locator("#toggle").click();
   const main = page.locator('[data-instance="main-conversation"]');

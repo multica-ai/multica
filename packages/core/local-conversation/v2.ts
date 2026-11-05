@@ -147,6 +147,57 @@ export const localV2HistorySchema = z.object({
 });
 export type LocalV2History = z.infer<typeof localV2HistorySchema>;
 
+const navigationRangeSchema = z.object({
+  start_index: z.number().int().nonnegative(), end_index: z.number().int().nonnegative(),
+  has_before: z.boolean(), has_after: z.boolean(),
+}).refine((value) => value.end_index >= value.start_index, "Invalid navigation range");
+
+export const localV2NavigationSchema = z.object({
+  store_generation: z.string(),
+  snapshot_seq: z.number().int().nonnegative(),
+  node_count: z.number().int().nonnegative(),
+  nodes: z.array(z.object({
+    node_index: z.number().int().nonnegative(), message_id: z.string().min(1),
+    turn_id: z.string().min(1), turn_index: z.number().int().nonnegative(),
+    summary: z.string(), has_agent_response: z.boolean().default(false),
+  })),
+  directory_range: navigationRangeSchema.nullable().optional(),
+  range: navigationRangeSchema.nullable(),
+  turns: z.array(snapshotTurnSchema).max(20),
+}).superRefine((value, ctx) => {
+  if (value.range && (value.range.end_index < value.range.start_index || value.turns.length !== value.range.end_index - value.range.start_index + 1 || value.turns.some((turn, index) => turn.turn_index !== value.range!.start_index + index))) {
+    ctx.addIssue({ code: "custom", message: "Navigation requires a contiguous body window" });
+  }
+  if ((!value.range && value.turns.length) || value.nodes.some((node) => node.node_index >= value.node_count)) {
+    ctx.addIssue({ code: "custom", message: "Invalid navigation directory" });
+  }
+  if (value.directory_range && value.nodes.some((node) => node.turn_index < value.directory_range!.start_index || node.turn_index > value.directory_range!.end_index)) {
+    ctx.addIssue({ code: "custom", message: "Node outside navigation directory range" });
+  }
+});
+export type LocalV2Navigation = z.infer<typeof localV2NavigationSchema>;
+export const LOCAL_V2_NAVIGATION_CAPABILITY = "conversation-navigation-v1";
+
+/** Shared by desktop and mobile; device routing and authentication belong to their transports. */
+export type LocalV2NavigationQuery = (
+  | { nodeIndex: number; before?: number; after?: number }
+  | { turnIndex: number; before?: number; after?: number }
+  | { beforeIndex: number; limit?: number }
+  | { afterIndex: number; limit?: number }
+  | { nodeIndex?: never; turnIndex?: never; beforeIndex?: never; afterIndex?: never }
+) & { generation?: string; includeBody?: boolean };
+
+export function localV2NavigationPath(id: string, query: LocalV2NavigationQuery = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    const name = key === "generation" ? "store_generation" : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    params.set(name, String(value));
+  }
+  const suffix = params.toString();
+  return `/sessions/${encodeURIComponent(id)}/navigation${suffix ? `?${suffix}` : ""}`;
+}
+
 export const localV2SessionListSchema = z.object({
   scope_seq: z.number().int(),
   summaries: z.array(localV2SummarySchema),

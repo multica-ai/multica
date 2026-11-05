@@ -58,8 +58,7 @@ try {
   const followingGap = await gap();
   const composerRetained = await page.evaluate(() => window.originalComposer === document.querySelector('[contenteditable="true"]') && window.originalComposer.textContent.includes("Typing during a live conversation stays responsive."));
   check(composerRetained, "Streaming replaced the composer or lost typed text");
-  const allowedFollowingGap = baseline ? Math.max(8, baseline.followingGap + 1) : 8;
-  check(followingGap <= allowedFollowingGap, `Streaming lost the end: ${followingGap} (baseline ${baseline?.followingGap ?? "unavailable"})`);
+  check(followingGap <= 8, `Streaming lost the end: ${followingGap} (baseline ${baseline?.followingGap ?? "unavailable"})`);
   await timeline.hover(); await page.mouse.wheel(0, -700); await page.waitForTimeout(300);
   const detachedTop = await timeline.evaluate((element) => element.scrollTop);
   check(await gap() >= 100, "The scroll did not detach");

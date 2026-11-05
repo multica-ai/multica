@@ -126,22 +126,7 @@ export const AgentConversationFlowContent = observer(
       );
     }
 
-    const disclosedContent = (
-      <AgentTurnDisclosureProvider>{content}</AgentTurnDisclosureProvider>
-    );
-    const presentedContent =
-      agentTargets === undefined ? (
-        disclosedContent
-      ) : (
-        <AgentTargetPresentationProvider agentTargets={agentTargets}>
-          {disclosedContent}
-        </AgentTargetPresentationProvider>
-      );
-    return (
-      <AgentConversationClockProvider isVisible={isVisible}>
-        {presentedContent}
-      </AgentConversationClockProvider>
-    );
+    return <AgentConversationFrame isVisible={isVisible} agentTargets={agentTargets}>{content}</AgentConversationFrame>;
   }
 );
 
@@ -159,21 +144,44 @@ function BoundTranscriptRender({
   );
 }
 
+const AgentConversationFrame = observer(function AgentConversationFrame({ children, agentTargets, isVisible }: {
+  children: ReactNode;
+  agentTargets: AgentConversationFlowProps["agentTargets"];
+  isVisible: boolean;
+}) {
+  const disclosedContent = (
+      <AgentTurnDisclosureProvider>{children}</AgentTurnDisclosureProvider>
+    );
+    const presentedContent =
+      agentTargets === undefined ? (
+        disclosedContent
+      ) : (
+        <AgentTargetPresentationProvider agentTargets={agentTargets}>
+          {disclosedContent}
+        </AgentTargetPresentationProvider>
+      );
+    return (
+      <AgentConversationClockProvider isVisible={isVisible}>
+        {presentedContent}
+      </AgentConversationClockProvider>
+    );
+});
+
 export const AgentConversationFlow = observer(function AgentConversationFlow({
   agentSessionId,
+  isLoading,
+  loadingLabel,
+  loadingTestId,
+  empty,
+  agentTargets,
+  isVisible = true,
+  turnAttachments,
   ...props
-}: Omit<AgentConversationFlowProps, "conversation" | "agentSessionId"> & {
-  agentSessionId: string | null;
-}) {
+}: Omit<AgentConversationFlowProps, "conversation" | "agentSessionId"> & { agentSessionId: string | null }) {
   const runtime = useConversationServices();
-  const conversation = agentSessionId
-    ? runtime.conversationRows(agentSessionId).structure
-    : null;
-  return (
-    <AgentConversationFlowContent
-      {...props}
-      conversation={conversation}
-      agentSessionId={agentSessionId ?? undefined}
-    />
-  );
+  const rows = agentSessionId ? runtime.conversationRows(agentSessionId) : null;
+  const content = isLoading ? <AgentTranscriptSkeleton label={loadingLabel} testId={loadingTestId} />
+    : !rows || (!rows.hasRows && !turnAttachments?.length) ? <>{empty}</>
+    : <AgentTranscriptView {...props} agentSessionId={agentSessionId!} turnAttachments={turnAttachments} isVisible={isVisible} />;
+  return <AgentConversationFrame isVisible={isVisible} agentTargets={agentTargets}>{content}</AgentConversationFrame>;
 });

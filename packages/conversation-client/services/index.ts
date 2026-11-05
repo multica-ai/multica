@@ -2,6 +2,7 @@ export { SessionLoadService, type SessionLoadFailure, type SessionLoadRecord, ty
 export { ACTIVATION_CONFIRMATION_TIMEOUT_MS, ActivationService, EXISTING_ACTIVATION_TIMEOUT_MS, NEW_ACTIVATION_TIMEOUT_MS, type ActivationFailure, type ActivationServiceOptions, type ActivationSession } from "./activation-service";
 export { COMMIT_INTERVAL_MS, CommitCadence } from "./commit-cadence";
 export { ConversationService, LocalV2RequestError, localV2Error, type ConversationServiceOptions, type ConversationSnapshotStore } from "./conversation-service";
+export { ConversationNavigation } from "./conversation-navigation";
 export { ConversationServiceManager, type ConversationServiceManagerOptions } from "./conversation-service-manager";
 export { ComposerSelectionError, ComposerService, composerOptionsRequestSignature, mergeComposerOptionsSection, type ComposerOptionsLike, type ComposerOptionsRequest, type ComposerOptionsSection, type ComposerOptionsStatus, type ComposerServiceOptions, type ComposerSettingsLike, type ComposerSettingsPatch, type SessionSettingsStatus, type SessionSettingsUpdate } from "./composer-service";
 export { ConversationMutationService, type ConversationDeleteResult, type ConversationFork, type ConversationMutationOptions, type ConversationMutationStatus, type MutatedConversation } from "./conversation-mutation-service";

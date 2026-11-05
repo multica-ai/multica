@@ -491,6 +491,15 @@ function ComposerFooterControlsRender({
       else onSelectAgent(target);
     }
   });
+  const returnFocusToComposer = usePersistCallback(() => onReadyForFocus(Date.now()));
+  const handleModelMenuCloseAutoFocus = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuContent>["onCloseAutoFocus"]>
+  >((event) => {
+    if (!modelMenuFromCommand.current) return;
+    modelMenuFromCommand.current = false;
+    event.preventDefault();
+    onReadyForFocus(Date.now());
+  });
   return (
     <div className="multica-composer-footer-controls">
       {uploadCount > 0 && (
@@ -513,7 +522,7 @@ function ComposerFooterControlsRender({
       {snapshot.local && agentId && (
         <UsageIndicator
           openRequest={statusRequest}
-          onReturnFocus={() => onReadyForFocus(Date.now())}
+          onReturnFocus={returnFocusToComposer}
           client={client}
           localConversations={handle.localConversations}
           agentId={agentId}
@@ -556,12 +565,7 @@ function ComposerFooterControlsRender({
         </DropdownMenuTrigger>
         {/* Portals remain React descendants of the source window click-capture guard. */}
         <DropdownMenuContent
-          onCloseAutoFocus={(event) => {
-            if (!modelMenuFromCommand.current) return;
-            modelMenuFromCommand.current = false;
-            event.preventDefault();
-            onReadyForFocus(Date.now());
-          }}
+          onCloseAutoFocus={handleModelMenuCloseAutoFocus}
           className="multica-composer-footer-menu multica-model-picker-menu nodrag"
           align="end"
           side="top"

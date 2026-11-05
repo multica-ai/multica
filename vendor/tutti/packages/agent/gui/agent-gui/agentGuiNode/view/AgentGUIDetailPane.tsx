@@ -35,6 +35,7 @@ import {
   useStableEventCallback
 } from "./agentGUIViewUtils";
 import { useAgentGUIComposerFooter } from "./useAgentGUIComposerFooter";
+import { useAgentGUIComposerSurface } from "./useAgentGUIComposerSurface";
 import { useAgentGUIComposerInputHistoryProps } from "./useAgentGUIComposerInputHistoryProps";
 import { useAgentGUIDetailEditRetry } from "./useAgentGUIDetailEditRetry";
 import { useAgentGUIDetailModel } from "./useAgentGUIDetailModel";
@@ -237,6 +238,7 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
   });
   const submitPromptAndScrollToBottom = useStableEventCallback(
     (...args: Parameters<typeof submitPrompt>): void => {
+      if (rail.activeConversationId) services.navigation?.(rail.activeConversationId)?.latest();
       requestSubmittedPromptScrollToBottom();
       submitPrompt(...args);
     }
@@ -336,6 +338,11 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
     timelineRef,
     ...{ shell, rail, detail, composer, interaction, readiness, operations }
   });
+  const hasDisplayedUserMessage =
+    detail.hasSentUserMessage ||
+    conversation?.rows.some(
+      (row) => row.kind === "message" && row.speaker === "user"
+    ) === true;
   const baseComposerProps = useMemo<AgentComposerProps>(
     () => ({
       state: composer.state,
@@ -385,7 +392,7 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
       disabledReason: composerDisabledReason,
       presentationSubmitDisabled: timelineInteractionLocked,
       workspaceAppIcons,
-      placeholder: detail.hasSentUserMessage
+      placeholder: hasDisplayedUserMessage
         ? labels.followupPlaceholder
         : labels.initialPlaceholder,
       showStopButton,
@@ -506,7 +513,7 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
       composerProvider,
       composer.draftContent,
       composer.draftPrompt,
-      detail.hasSentUserMessage,
+      hasDisplayedUserMessage,
       activePromptResponsePending,
       composer.state.promptImagesSupported,
       detail.usage,
@@ -563,7 +570,11 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
     virtualScrollControllerRef,
     activeConversationId: rail.activeConversationId,
     hasOlderMessages: detail.hasOlderMessages,
-    isLoadingOlderMessages: detail.isLoadingOlderMessages
+    isLoadingOlderMessages: detail.isLoadingOlderMessages,
+    historyNavigation: rail.activeConversationId ? services.navigation?.(rail.activeConversationId) : undefined,
+    historyWindowActive: rail.activeConversationId
+      ? Boolean(services.navigation?.(rail.activeConversationId)?.window?.has_after || services.navigation?.(rail.activeConversationId)?.locating)
+      : false
   });
   const showDraftWelcome =
     hasActiveConversation &&
@@ -571,6 +582,15 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
     conversation?.rows.length === 0 &&
     conversationDetail?.turns.length === 0 &&
     !isComposerSending;
+  const showLatestMessages = useStableEventCallback(() => {
+    if (rail.activeConversationId) services.navigation?.(rail.activeConversationId)?.latest();
+    requestAnimationFrame(() => scrollTimelineToBottom());
+  });
+  const { slot: composerSlot, portal: composerPortal } = useAgentGUIComposerSurface(
+    !hasActiveConversation || (showDraftWelcome && !isHostSidePane)
+      ? emptyHeroComposerProps
+      : bottomDockComposerProps
+  );
   const homeContent =
     !hasActiveConversation || showDraftWelcome ? (
       <AgentGUIEmptyHomePane
@@ -593,6 +613,7 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
         onContinueInNewConversation={continueInNewConversation}
         chromeLabels={chromeLabels}
         composerProps={hasActiveConversation ? null : emptyHeroComposerProps}
+        composerSlot={composerSlot}
         labels={labels}
         suggestions={
           hasActiveConversation
@@ -611,6 +632,7 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
       aria-busy={timelineInteractionLocked || undefined}
       data-agent-session-id={rail.activeConversationId ?? undefined}
     >
+      {composerPortal}
       <div className={styles.detailWorkbench}>
         <section
           className={styles.detailPrimary}
@@ -645,10 +667,11 @@ export const AgentGUIDetailPane = observer(function AgentGUIDetailPane({
           />
           {hasActiveConversation ? (
             <AgentGUIBottomDockPane
+              composerSlot={composerSlot}
               bottomDockRef={bottomDockRef}
-              showScrollToBottom={!isTimelineScrolledToBottom}
+              showScrollToBottom={!isTimelineScrolledToBottom || (rail.activeConversationId ? services.navigation?.(rail.activeConversationId)?.window?.has_after === true : false)}
               scrollToBottomLabel={labels.scrollToBottom}
-              onScrollToBottom={scrollTimelineToBottom}
+              onScrollToBottom={showLatestMessages}
               bottomDockLiftedPrompt={bottomDockLiftedPrompt}
               bottomDockReplacementPrompt={bottomDockReplacementPrompt}
               composerProps={

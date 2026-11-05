@@ -6,6 +6,10 @@ import type {
   AgentMessageRowVM
 } from "../contracts/agentMessageRowVM";
 
+export function conversationUserMessageRowKey(messageId: string): string {
+  return `message:user:${messageId}`;
+}
+
 export function projectConversationUserRow(
   message: WorkspaceAgentSessionDetailTurn["userMessages"][number],
   fallbackTurnId: string,
@@ -15,7 +19,7 @@ export function projectConversationUserRow(
   const rawFirstTextBlock = firstRawUserPromptTextBlock(message);
   return {
     kind: "message",
-    id: `message:user:${message.id}`,
+    id: conversationUserMessageRowKey(message.id),
     turnId,
     speaker: "user",
     rawFirstTextBlock,

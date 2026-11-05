@@ -186,6 +186,6 @@ type useAgentTranscriptTurnAttachmentsProps = {
   onVisibilityChange?: (attachmentId: string, visible: boolean) => void;
   rowVirtualizer: TurnAttachmentVirtualizer;
   shouldVirtualize: boolean;
-  turnGroups: readonly AgentTranscriptTurnGroup[];
+  turnGroups: readonly Pick<AgentTranscriptTurnGroup, "key" | "turnId">[];
   virtualizerHostRef: RefObject<HTMLDivElement | null>;
 };

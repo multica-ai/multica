@@ -13,7 +13,10 @@ export interface AgentTranscriptTurnGroup {
 }
 
 export interface AgentMessageLocatorItem {
+  nodeIndex?: number;
+  messageId?: string;
   hasAgentResponse: boolean;
+  agentResponseKnown?: boolean;
   key: string;
   rowKey: string;
   turnGroupIndex: number;
@@ -28,25 +31,44 @@ export interface AgentParticipantTurnProjection {
 }
 
 export function useEnteringTranscriptRows(
-  rowKeys: string[]
+  rowKeys: string[],
+  rows: ReadonlyArray<AgentConversationVM["rows"][number]>
 ): ReadonlySet<string> {
   const previousKeysRef = useRef<Set<string> | null>(null);
   const previousKeys = previousKeysRef.current;
   const enteringRowKeys = new Set<string>();
+  const entryKeys = rowKeys.map((key, index) => transcriptRowEntryKey(rows[index], key));
 
   if (previousKeys) {
-    for (const key of rowKeys) {
+    for (const [index, key] of entryKeys.entries()) {
       if (!previousKeys.has(key)) {
-        enteringRowKeys.add(key);
+        enteringRowKeys.add(rowKeys[index]!);
       }
     }
   }
 
   useLayoutEffect(() => {
-    previousKeysRef.current = new Set(rowKeys);
-  }, [rowKeys]);
+    previousKeysRef.current = new Set(entryKeys);
+  }, [entryKeys]);
 
   return enteringRowKeys;
+}
+
+export function transcriptRowEntryKey(
+  row: AgentConversationVM["rows"][number] | undefined,
+  fallback: string
+): string {
+  if (row?.kind === "message" && row.speaker === "user") {
+    for (const message of row.messages) {
+      for (const item of message.sourceTimelineItems ?? []) {
+        const submitId = item.payload?.clientSubmitId;
+        // A durable acknowledgement replaces the echo of this same submission.
+        if (typeof submitId === "string" && submitId.trim())
+          return `client-submit:user:${submitId.trim()}`;
+      }
+    }
+  }
+  return fallback;
 }
 
 export function transcriptRowKey(
@@ -171,6 +193,7 @@ export function buildUserMessageLocatorItems(
       turnGroupIndex: turnGroupIndexByRowIndex.get(rowIndex) ?? rowIndex,
       rowIndex,
       turnId: row.turnId ?? null,
+      messageId: row.messages[0]?.sourceTimelineItems?.[0]?.eventId ?? row.messages[0]?.id,
       summary
     });
   });

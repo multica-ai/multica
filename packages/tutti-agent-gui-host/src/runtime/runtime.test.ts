@@ -8,7 +8,9 @@ ChatSession,
 PendingChatTaskItem
 } from "@multica/core/types";
 import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
-import { reaction } from "mobx";
+import type { LocalPromptQueue } from "@multica/core/local-conversation/protocol";
+import { reaction, runInAction } from "mobx";
+import { ConversationRowsModel } from "../../../../vendor/tutti/packages/agent/gui/state/ConversationRowsModel";
 import { afterEach,describe,expect,it,vi } from "vitest";
 import { fakeHostServices } from "../../e2e-harness/fake-host-services";
 import { LOCAL_TIMING_PREFIX } from "../local-timing";
@@ -514,6 +516,88 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
       });
     } finally {
       info.mockRestore();
+    }
+  });
+  it.each(["queued", "dispatched"] as const)("keeps the first message visible through creation and %s acknowledgement", async (outcome) => {
+    const data = backend();
+    const original = data.request.getMockImplementation()!;
+    let releaseDetail!: () => void;
+    let acknowledge!: (queue: LocalPromptQueue) => void;
+    const detailReady = new Promise<void>((resolve) => {
+      releaseDetail = resolve;
+    });
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "session.create") {
+        const created = await original(method, params);
+        created.created_at = created.updated_at = new Date().toISOString();
+        return created;
+      }
+      if (method === "session.load") await detailReady;
+      if (method === "queue.enqueue")
+        return new Promise<LocalPromptQueue>((resolve) => {
+          acknowledge = resolve;
+        });
+      if (method === "queue.update")
+        return { revision: 2, paused: false, items: [] };
+      return original(method, params);
+    });
+    const handle = createMulticaAgentGuiRuntime(data.client, init);
+    handles.push(handle);
+    await handle.initialize();
+    const input = {
+      mode: "new" as const,
+      agentSessionId: "first-local-draft",
+      agentTargetId: agent.id,
+      requestId: "first-activation",
+      clientSubmitId: "first-submit",
+      initialContent: [{ type: "text" as const, text: "First local message" }]
+    };
+    const rows = new ConversationRowsModel(handle.runtime, input.agentSessionId, {
+      workspaceId: init.workspaceId
+    });
+    const observed: number[] = [];
+    const stop = reaction(
+      () => rows.conversation?.rows.length ?? 0,
+      (count) => observed.push(count)
+    );
+    try {
+      runInAction(() => handle.runtime.activations.request(input));
+      await vi.waitFor(() =>
+        expect(data.request.mock.calls.some(([method]) => method === "session.load")).toBe(true)
+      );
+      releaseDetail();
+      await vi.waitFor(() =>
+        expect(data.request.mock.calls.some(([method]) => method === "queue.enqueue")).toBe(true)
+      );
+      expect(observed[0]).toBeGreaterThan(0);
+      expect(observed).not.toContain(0);
+      acknowledge({
+        revision: 1,
+        paused: outcome === "queued",
+        items: outcome === "dispatched" ? [] : [{
+          requestId: input.clientSubmitId,
+          content: "First local message",
+          display: {
+            id: input.clientSubmitId,
+            clientSubmitId: input.clientSubmitId,
+            content: input.initialContent,
+            createdAtUnixMs: Date.now()
+          }
+        }]
+      });
+      if (outcome === "dispatched") {
+        await vi.waitFor(() => expect(handle.runtime.prompts.pending(input.agentSessionId)).toHaveLength(0));
+        expect(observed).not.toContain(0);
+        return;
+      }
+      await vi.waitFor(() =>
+        expect(handle.runtime.prompts.queueRecord(input.agentSessionId)?.prompts).toHaveLength(1)
+      );
+      await handle.runtime.prompts.update(input.agentSessionId, "remove", input.clientSubmitId);
+      await vi.waitFor(() => expect(rows.conversation?.rows.length).toBe(0));
+    } finally {
+      releaseDetail();
+      stop();
     }
   });
   it("keeps first-send content recoverable for an explicit queue retry after admission failure", async () => {

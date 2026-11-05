@@ -1,5 +1,6 @@
 import { Slot } from "radix-ui";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import {
@@ -10,8 +11,7 @@ import {
   type CSSProperties,
   type FocusEvent,
   type JSX,
-  type MouseEvent,
-  type WheelEvent
+  type MouseEvent
 } from "react";
 import type { AgentConversationFollowEndMode } from "../agentConversationFollowEndController";
 import type { AgentMessageLocatorItem } from "./agentTranscriptModel";
@@ -24,6 +24,9 @@ import {
 export { findMessageLocatorScrollParent } from "./useAgentMessageLocatorSelection";
 
 const AGENT_MESSAGE_LOCATOR_PANEL_FADE_MS = 160;
+const PANEL_ITEM_HEIGHT_PX = 13 * 1.35;
+const PANEL_ITEM_GAP_PX = 12;
+const PANEL_OVERSCAN = 40;
 const AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX = 30;
 const AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX = 36;
 const AGENT_MESSAGE_LOCATOR_BOTTOM_SAFE_INSET_MAX_PX = 48;
@@ -42,6 +45,10 @@ export const AgentMessageLocatorRail = observer(
     isVisible = true,
     label,
     onLocate,
+    onPreview,
+    panelItems,
+    onPanelMore,
+    panelLoading,
     virtualSelectionSource
   }: AgentMessageLocatorRailProps): JSX.Element | null {
     const handleLocateItemCallback = usePersistCallback<
@@ -74,13 +81,19 @@ export const AgentMessageLocatorRail = observer(
     const [isPanelOpen, setIsPanelOpen] = useState(false);
     const [shouldRenderPanel, setShouldRenderPanel] = useState(false);
     const [activeKey, setActiveKey] = useState<string | null>(null);
-    const { selectItem, selectedKey } = useAgentMessageLocatorSelection({
+    const [panelTargetKey, setPanelTargetKey] = useState<string | null>(null);
+    const previewFromRail = usePersistCallback<typeof setActiveKey>((key) => {
+      setActiveKey(key);
+      setPanelTargetKey(key);
+    });
+    const { selectItem, selectedKey: observedSelectedKey } = useAgentMessageLocatorSelection({
       followEndMode,
-      items,
+      items: useMemo(() => items.filter((item) => item.turnGroupIndex >= 0), [items]),
       isVisible,
       locatorRef,
       virtualSelectionSource
     });
+    const selectedKey = observedSelectedKey ?? (panelItems !== undefined && followEndMode === "following" ? items.at(-1)?.key ?? null : null);
     const previousAgentResponseByKeyRef = useRef<ReadonlyMap<
       string,
       boolean
@@ -90,6 +103,13 @@ export const AgentMessageLocatorRail = observer(
     >(new Set());
     const [visibleFrame, setVisibleFrame] =
       useState<AgentMessageLocatorVisibleFrame | null>(null);
+    useEffect(() => {
+      if (!activeKey || !onPreview) return;
+      const item = items.find((value) => value.key === activeKey);
+      if (!item) return;
+      const timer = window.setTimeout(() => onPreview(item), 100);
+      return () => window.clearTimeout(timer);
+    }, [activeKey, onPreview]);
     useEffect(() => {
       if (isPanelOpen) {
         setShouldRenderPanel(true);
@@ -131,6 +151,7 @@ export const AgentMessageLocatorRail = observer(
 
         if (previousAgentResponseByKey) {
           for (const item of items) {
+            if (item.agentResponseKnown === false) continue;
             const hadAgentResponse =
               previousAgentResponseByKey.get(item.key) ?? false;
             if (
@@ -148,7 +169,7 @@ export const AgentMessageLocatorRail = observer(
       });
 
       previousAgentResponseByKeyRef.current = new Map(
-        items.map((item) => [item.key, item.hasAgentResponse])
+        items.filter((item) => item.agentResponseKnown !== false && (item.nodeIndex === undefined || item.messageId)).map((item) => [item.key, item.hasAgentResponse])
       );
     }, [items, selectedKey]);
     useEffect(() => {
@@ -295,7 +316,7 @@ export const AgentMessageLocatorRail = observer(
     ): void => {
       const item = itemFromPointerEvent(event);
       if (item) {
-        setActiveKey(item.key);
+        previewFromRail(item.key);
       }
     };
 
@@ -356,9 +377,14 @@ export const AgentMessageLocatorRail = observer(
         unreadAgentResponseKeys={unreadAgentResponseKeys}
         handleLocateItemCallback={handleLocateItemCallback}
         setActiveKey={setActiveKey}
+        previewFromRail={previewFromRail}
+        panelTargetKey={panelTargetKey ?? selectedKey}
         shouldRenderPanel={shouldRenderPanel}
         isPanelOpen={isPanelOpen}
         activeOrSelectedKey={activeOrSelectedKey}
+        panelItems={panelItems ?? items}
+        onPanelMore={onPanelMore}
+        panelLoading={panelLoading}
       />
     );
   }
@@ -389,17 +415,19 @@ function scrollMessageLocatorViewportToIndex(
 
 export function scrollTranscriptRowIntoView(
   row: HTMLElement,
-  scrollParent: HTMLElement | null
+  scrollParent: HTMLElement | null,
+  behavior: "smooth" | "auto" = "smooth"
 ): void {
   if (!scrollParent) {
     row.scrollIntoView({
       block: "center",
-      behavior: "smooth"
+      behavior
     });
     return;
   }
 
   const targetScrollTop = targetScrollTopForTranscriptRow(row, scrollParent);
+  if (behavior === "auto") { scrollParent.scrollTop = targetScrollTop; return; }
   animateMessageLocatorScroll(scrollParent, targetScrollTop);
 }
 
@@ -484,17 +512,6 @@ function parseCssPx(value: string): number {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
-function containMessageLocatorPanelWheel(
-  event: WheelEvent<HTMLDivElement>
-): void {
-  event.stopPropagation();
-  if (event.deltaY === 0) {
-    return;
-  }
-  event.preventDefault();
-  event.currentTarget.scrollTop += event.deltaY;
-}
-
 const ButtonBinding1 = observer(function ButtonBinding1({
   item,
   index,
@@ -539,6 +556,8 @@ const ButtonBinding1 = observer(function ButtonBinding1({
         data-selected={item.key === selectedKey ? "true" : undefined}
         data-agent-message-locator-turn-group-index={item.turnGroupIndex}
         data-multica-locator-turn-id={(item as { turnId?: string }).turnId}
+        data-multica-locator-message-id={item.messageId}
+        data-multica-locator-row-key={item.rowKey || undefined}
         data-unread-agent-response={
           unreadAgentResponseKeys.has(item.key) ? "true" : undefined
         }
@@ -554,6 +573,7 @@ const ButtonBinding1 = observer(function ButtonBinding1({
 
 const ButtonBinding2 = observer(function ButtonBinding2({
   item,
+  virtualOffset,
   activeOrSelectedKey,
   handleLocateItem,
   setActiveKey,
@@ -569,11 +589,16 @@ const ButtonBinding2 = observer(function ButtonBinding2({
   const onMouseEnterProp6 = usePersistCallback<
     NonNullable<React.ComponentProps<"button">["onMouseEnter"]>
   >(() => setActiveKey(item.key));
+  const style = useMemo<CSSProperties>(() => ({
+    position: "absolute", top: 0, left: 0, width: "100%", height: PANEL_ITEM_HEIGHT_PX,
+    transform: `translateY(${virtualOffset}px)`,
+  }), [virtualOffset]);
   return (
     <Slot.Root {...slotProps}>
       <button
         key={`panel:${item.key}`}
         type="button"
+        style={style}
         className="agent-gui-message-locator__panel-item nodrag tsh-desktop-no-drag"
         data-active={item.key === activeOrSelectedKey ? "true" : undefined}
         onClick={onClickProp4}
@@ -632,6 +657,8 @@ const DivBinding2 = observer(function DivBinding2({
   unreadAgentResponseKeys,
   handleLocateItemCallback,
   setActiveKey,
+  startIndex = 0,
+  endIndex = items.length,
   ...slotProps
 }: DivBinding2Props &
   Omit<React.ComponentProps<typeof Slot.Root>, keyof DivBinding2Props>) {
@@ -646,14 +673,14 @@ const DivBinding2 = observer(function DivBinding2({
   return (
     <Slot.Root {...slotProps}>
       <div className="agent-gui-message-locator__content" style={styleProp3}>
-        {items.slice(0, -1).map((item, index) => (
-          <DivBinding1 key={`segment:${item.key}`} item={item} index={index} />
+        {items.slice(startIndex, Math.min(endIndex, items.length - 1)).map((item, index) => (
+          <DivBinding1 key={`segment:${item.key}`} item={item} index={startIndex + index} />
         ))}
-        {items.map((item, index) => (
+        {items.slice(startIndex, endIndex).map((item, index) => (
           <ButtonBinding1
             key={item.key}
             item={item}
-            index={index}
+            index={startIndex + index}
             selectedKey={selectedKey}
             unreadAgentResponseKeys={unreadAgentResponseKeys}
             handleLocateItem={handleLocateItemCallback}
@@ -682,10 +709,20 @@ const NavBinding1 = observer(function NavBinding1({
   unreadAgentResponseKeys,
   handleLocateItemCallback,
   setActiveKey,
+  previewFromRail,
+  panelTargetKey,
   shouldRenderPanel,
   isPanelOpen,
-  activeOrSelectedKey
+  activeOrSelectedKey,
+  panelItems,
+  onPanelMore,
+  panelLoading
 }: NavBinding1Props) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const handleViewportScroll = usePersistCallback<React.UIEventHandler<HTMLDivElement>>((event) => setScrollTop(event.currentTarget.scrollTop));
+  const virtualized = items.length > 200;
+  const startIndex = virtualized ? Math.max(0, Math.floor(scrollTop / AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX) - 4) : 0;
+  const endIndex = virtualized ? Math.min(items.length, Math.ceil((scrollTop + Math.min(viewportHeight, window.innerHeight || 900)) / AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX) + 4) : items.length;
   const styleProp4Value1 = `${railHeight}px`;
   const styleProp4Value2 = `${viewportHeight}px`;
   const hasVisibleFrame = visibleFrame !== null;
@@ -717,6 +754,7 @@ const NavBinding1 = observer(function NavBinding1({
       aria-label={label ?? items[0]?.summary}
       data-agent-transcript-scroll-away-intent
       data-testid="agent-message-locator"
+      data-node-count={items.length}
       onBlurCapture={handleBlurCaptureCallback}
       onFocusCapture={openPanelCallback}
       onMouseEnter={openPanelCallback}
@@ -729,6 +767,7 @@ const NavBinding1 = observer(function NavBinding1({
         data-testid="agent-message-locator-viewport"
         onClick={handleViewportClickCallback}
         onMouseMove={handleViewportMouseMoveCallback}
+        onScroll={handleViewportScroll}
       >
         <DivBinding2
           railHeight={railHeight}
@@ -736,31 +775,120 @@ const NavBinding1 = observer(function NavBinding1({
           selectedKey={selectedKey}
           unreadAgentResponseKeys={unreadAgentResponseKeys}
           handleLocateItemCallback={handleLocateItemCallback}
-          setActiveKey={setActiveKey}
+          setActiveKey={previewFromRail}
+          startIndex={startIndex}
+          endIndex={endIndex}
         />
       </div>
       {shouldRenderPanel ? (
+        <AgentMessageLocatorPanel
+          panelItems={panelItems}
+          onPanelMore={onPanelMore}
+          panelLoading={panelLoading}
+          openPanelCallback={openPanelCallback}
+          closePanelSoonCallback={closePanelSoonCallback}
+          isPanelOpen={isPanelOpen}
+          activeOrSelectedKey={activeOrSelectedKey}
+          handleLocateItemCallback={handleLocateItemCallback}
+          setActiveKey={setActiveKey}
+          panelTargetKey={panelTargetKey}
+        />
+      ) : null}
+    </nav>
+  );
+});
+
+const AgentMessageLocatorPanel = observer(function AgentMessageLocatorPanel({
+  panelItems, onPanelMore, panelLoading, openPanelCallback, closePanelSoonCallback,
+  isPanelOpen, activeOrSelectedKey, handleLocateItemCallback, setActiveKey,
+  panelTargetKey,
+}: Pick<NavBinding1Props, "panelItems" | "onPanelMore" | "panelLoading" | "openPanelCallback" | "closePanelSoonCallback" | "isPanelOpen" | "activeOrSelectedKey" | "handleLocateItemCallback" | "setActiveKey" | "panelTargetKey">) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | undefined>();
+  const [panelScrollable, setPanelScrollable] = useState(false);
+  const panelStyle = useMemo(() => ({ height: panelHeight }), [panelHeight]);
+  const panelVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
+    enabled: true,
+    count: panelItems.length,
+    getScrollElement: () => panelRef.current,
+    getItemKey: useCallback((index: number) => panelItems[index]?.key ?? index, [panelItems]),
+    estimateSize: () => PANEL_ITEM_HEIGHT_PX,
+    gap: PANEL_ITEM_GAP_PX,
+    overscan: PANEL_OVERSCAN,
+    anchorTo: "end",
+    followOnAppend: false,
+  });
+  const panelContentHeight = panelVirtualizer.getTotalSize();
+  const panelContentStyle = useMemo(() => ({ height: panelContentHeight, position: "relative" as const }), [panelContentHeight]);
+  const panelAnchor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) {
+      setPanelHeight(undefined);
+      setPanelScrollable(false);
+      panelAnchor.current = null;
+      return;
+    }
+    if (panelItems.length && panelHeight === undefined) setPanelHeight(panel.getBoundingClientRect().height);
+    if (panelTargetKey !== panelAnchor.current) {
+      const index = panelItems.findIndex((item) => item.key === panelTargetKey);
+      if (index >= 0) {
+        panelVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
+        panelAnchor.current = panelTargetKey;
+      }
+    }
+    setPanelScrollable(panel.scrollHeight > panel.clientHeight);
+  }, [panelItems, panelHeight, panelTargetKey]);
+  const firstVisible = panelVirtualizer.range?.startIndex;
+  const lastVisible = panelVirtualizer.range?.endIndex;
+  // Keep real metadata ahead of the viewport, matching the rendered overscan.
+  useEffect(() => {
+    if (panelLoading || firstVisible === undefined || lastVisible === undefined) return;
+    if (firstVisible < PANEL_OVERSCAN) onPanelMore?.("before");
+    if (panelItems.length - 1 - lastVisible < PANEL_OVERSCAN) onPanelMore?.("after");
+  }, [firstVisible, lastVisible, panelItems.length, panelLoading, onPanelMore]);
+  const handlePanelWheel = usePersistCallback((event: globalThis.WheelEvent) => {
+    event.stopPropagation();
+    const panel = panelRef.current;
+    if (!panel || !event.deltaY) return;
+    if (!panelScrollable) {
+      event.preventDefault();
+      onPanelMore?.(event.deltaY < 0 ? "before" : "after");
+    }
+  });
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    // Short pages still need wheel paging; overflowing pages use native inertial scrolling.
+    panel.addEventListener("wheel", handlePanelWheel, { passive: panelScrollable });
+    return () => panel.removeEventListener("wheel", handlePanelWheel);
+  }, [handlePanelWheel, panelScrollable]);
+  return (
         <div
+          ref={panelRef}
+          style={panelStyle}
           className="agent-gui-message-locator__panel"
+          aria-busy={panelLoading || undefined}
           role="tooltip"
           data-open={isPanelOpen ? "true" : undefined}
           data-testid="agent-message-locator-panel"
+          data-item-count={panelItems.length}
           onMouseEnter={openPanelCallback}
           onMouseLeave={closePanelSoonCallback}
-          onWheel={containMessageLocatorPanelWheel}
         >
-          {items.map((item) => (
-            <ButtonBinding2
-              key={`panel:${item.key}`}
-              item={item}
-              activeOrSelectedKey={activeOrSelectedKey}
-              handleLocateItem={handleLocateItemCallback}
-              setActiveKey={setActiveKey}
-            />
-          ))}
+          <div style={panelContentStyle}>
+            {panelVirtualizer.getVirtualItems().map((virtualItem) => (
+              <ButtonBinding2
+                key={virtualItem.key}
+                item={panelItems[virtualItem.index]!}
+                virtualOffset={virtualItem.start}
+                activeOrSelectedKey={activeOrSelectedKey}
+                handleLocateItem={handleLocateItemCallback}
+                setActiveKey={setActiveKey}
+              />
+            ))}
+          </div>
         </div>
-      ) : null}
-    </nav>
   );
 });
 
@@ -770,6 +898,10 @@ type AgentMessageLocatorRailProps = {
   isVisible?: boolean;
   label?: string;
   onLocate: (item: AgentMessageLocatorItem) => void;
+  onPreview?: (item: AgentMessageLocatorItem) => void;
+  panelItems?: readonly AgentMessageLocatorItem[];
+  onPanelMore?: (direction: "before" | "after") => void;
+  panelLoading?: boolean;
   virtualSelectionSource?: AgentMessageLocatorVirtualSelectionSource;
 };
 
@@ -785,6 +917,7 @@ type ButtonBinding1Props = {
 };
 
 type ButtonBinding2Props = {
+  virtualOffset: number;
   item: AgentMessageLocatorItem;
   activeOrSelectedKey: string | null;
   handleLocateItem: (item: AgentMessageLocatorItem) => void;
@@ -794,6 +927,8 @@ type ButtonBinding2Props = {
 };
 
 type DivBinding2Props = {
+  startIndex?: number;
+  endIndex?: number;
   railHeight: number;
   items: readonly AgentMessageLocatorItem[];
   selectedKey: string | null;
@@ -805,6 +940,11 @@ type DivBinding2Props = {
 };
 
 type NavBinding1Props = {
+  panelTargetKey: string | null;
+  previewFromRail: import("react").Dispatch<import("react").SetStateAction<string | null>>;
+  panelItems: readonly AgentMessageLocatorItem[];
+  onPanelMore?: (direction: "before" | "after") => void;
+  panelLoading?: boolean;
   locatorRef: import("react").RefObject<HTMLElement | null>;
   label: string | undefined;
   items: readonly AgentMessageLocatorItem[];

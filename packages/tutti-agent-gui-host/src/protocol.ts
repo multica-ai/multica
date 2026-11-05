@@ -372,6 +372,7 @@ export type AgentGuiHostEvent =
  * conversations outlive the GUI, which projects them while it is mounted.
  */
 export interface LocalConversationSource {
+  navigation?(sessionId: string): import("@multica/conversation-client/services").ConversationNavigation;
   /** Starts keeping a conversation current; the returned function is leaving it. */
   open(sessionId: string): () => void;
   /** The conversation with at least its first turns. */
@@ -383,7 +384,7 @@ export interface LocalConversationSource {
   /** Watches changes; events is empty for a change that is not new events. */
   observe(
     sessionId: string,
-    listener: (events: readonly LocalV2Event[]) => void
+    listener: (events: readonly LocalV2Event[], change?: "navigation") => void
   ): () => void;
   conversation(sessionId: string): ConversationModel | undefined;
   /** What the GUI's session model needs from a loaded conversation. */

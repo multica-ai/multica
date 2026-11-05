@@ -3027,7 +3027,9 @@ aside.workspace-agents-status-panel
 
 .agent-gui-node__empty-hero-body
   > .agent-gui-chrome__session-chrome
-  + .agent-gui-node__composer-hero {
+  + .agent-gui-node__composer-hero,
+.agent-gui-node__empty-hero-body > .agent-gui-chrome__session-chrome
+  + [data-agent-composer-slot] .agent-gui-node__composer-hero {
   margin-top: calc(var(--agent-gui-empty-hero-gap, 24px) * -1);
 }
 
@@ -3062,7 +3064,7 @@ aside.workspace-agents-status-panel
 
 .agent-gui-node__bottom-dock
   > .agent-gui-chrome__session-chrome:has(
-    + .agent-gui-node__composer
+    + :is(.agent-gui-node__composer, [data-agent-composer-slot])
       .agent-gui-node__composer-input-group
       > .agent-gui-chrome__session-chrome
   ) {
@@ -3072,11 +3074,11 @@ aside.workspace-agents-status-panel
 
 .agent-gui-node__bottom-dock
   > .agent-gui-chrome__session-chrome:has(
-    + .agent-gui-node__composer
+    + :is(.agent-gui-node__composer, [data-agent-composer-slot])
       .agent-gui-node__composer-input-group
       > .agent-gui-chrome__session-chrome
   )
-  + .agent-gui-node__composer
+  + :is(.agent-gui-node__composer, [data-agent-composer-slot])
   .agent-gui-node__composer-input-group
   > .agent-gui-chrome__session-chrome {
   margin-right: 24px;
@@ -7808,12 +7810,12 @@ button.agent-gui-node__conversation-section-toggle:hover
   position: absolute;
   top: 50%;
   right: calc(22px + var(--agent-message-locator-scrollbar-gap));
-  display: grid;
+  display: block;
   width: min(360px, calc(100vw - 112px));
-  max-width: max-content;
   max-height: calc(var(--agent-message-locator-visible-height) - 32px);
-  gap: 12px;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  overflow-anchor: none;
   padding: 16px;
   border: 1px solid
     color-mix(in srgb, var(--line-2, var(--tutti-line-2)) 72%, transparent);
@@ -8076,7 +8078,8 @@ button.agent-gui-node__conversation-section-toggle:hover
   pointer-events: none;
 }
 
-.agent-gui-node__bottom-dock > .agent-gui-node__composer {
+.agent-gui-node__bottom-dock > .agent-gui-node__composer,
+.agent-gui-node__bottom-dock > [data-agent-composer-slot] .agent-gui-node__composer {
   padding-right: 12px;
   padding-left: 12px;
   pointer-events: none;
@@ -8141,10 +8144,10 @@ button.agent-gui-node__conversation-section-toggle:hover
 .agent-gui-node__bottom-dock > .agent-gui-chrome__session-chrome,
 .agent-gui-node__bottom-dock-prompt,
 .agent-gui-node__bottom-dock
-  > .agent-gui-node__composer
+  > :is(.agent-gui-node__composer, [data-agent-composer-slot])
   .agent-gui-node__composer-floating-prompt,
 .agent-gui-node__bottom-dock
-  > .agent-gui-node__composer
+  > :is(.agent-gui-node__composer, [data-agent-composer-slot])
   .agent-gui-node__composer-input-shell {
   pointer-events: auto;
 }
@@ -11000,7 +11003,8 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
   opacity: 0.65;
 }
 
-.agent-gui-node__empty-hero-body > .agent-gui-node__composer-hero {
+.agent-gui-node__empty-hero-body > .agent-gui-node__composer-hero,
+.agent-gui-node__empty-hero-body > [data-agent-composer-slot] .agent-gui-node__composer-hero {
   animation: agent-gui-empty-hero-enter 300ms cubic-bezier(0.16, 1, 0.3, 1)
     180ms backwards;
 }
@@ -11156,6 +11160,7 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
 
   .agent-gui-node__empty-hero-body,
   .agent-gui-node__empty-hero-body > .agent-gui-node__composer-hero,
+  .agent-gui-node__empty-hero-body > [data-agent-composer-slot] .agent-gui-node__composer-hero,
   .agent-gui-node__empty-hero-body > .agent-gui-node__empty-hero-suggestions {
     width: 100%;
   }
@@ -11176,6 +11181,8 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
 [data-workspace-node-window-kind="agentGui"][data-workspace-node-window-appearance="embedded"]
   .agent-gui-node__empty-hero-body
   > .agent-gui-node__composer-hero,
+[data-workspace-node-window-kind="agentGui"][data-workspace-node-window-appearance="embedded"]
+  .agent-gui-node__empty-hero-body > [data-agent-composer-slot] .agent-gui-node__composer-hero,
 [data-workspace-node-window-kind="agentGui"][data-workspace-node-window-appearance="embedded"]
   .agent-gui-node__empty-hero-suggestions,
 [data-workspace-node-window-kind="agentGui"][data-workspace-node-window-appearance="embedded"]
