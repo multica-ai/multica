@@ -119,6 +119,7 @@ interface AgentDetailPageProps {
 export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -630,6 +631,7 @@ export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -677,7 +679,12 @@ export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
-          <AgentWorkSections agent={agent} onViewAll={() => openWork(true)} />
+          <AgentWorkSections
+            key={`${wsId}:${agent.id}`}
+            agent={agent}
+            scrollParent={scrollParent}
+            onViewAll={() => openWork(true)}
+          />
 
           <AgentInstructionsSection
             agent={agent}
