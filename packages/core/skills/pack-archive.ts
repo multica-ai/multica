@@ -5,7 +5,7 @@ export const MAX_SKILL_FILE_BYTES = 1 << 20; // 1 MiB
 /** Mirrors server/internal/handler maxImportTotalSize (supporting files). */
 export const MAX_SKILL_BUNDLE_BYTES = 8 << 20; // 8 MiB
 /** Mirrors server/internal/handler maxImportFileCount. */
-export const MAX_SKILL_FILE_COUNT = 256;
+export const MAX_SKILL_FILE_COUNT = 512;
 /** Mirrors server/internal/handler maxImportArchiveUploadSize. */
 export const MAX_SKILL_ARCHIVE_BYTES = 16 << 20; // 16 MiB
 

@@ -29,6 +29,7 @@ export type WSEventType =
   | "task:running"
   | "task:waiting_local_directory"
   | "task:progress"
+  | "task:usage"
   | "task:completed"
   | "task:failed"
   | "task:message"
@@ -75,6 +76,7 @@ export type WSEventType =
   | "label:updated"
   | "label:deleted"
   | "issue_labels:changed"
+  | "issue_unread:changed"
   | "issue_metadata:changed"
   | "issue_properties:changed"
   | "property:created"
@@ -235,9 +237,21 @@ export interface InboxUnarchivedPayload {
   recipient_id: string;
 }
 
+/** Personal: the recipient's unread mark on an issue changed. Workspace-tagged
+ *  because personal events reach every connection the user has. */
+export interface IssueUnreadChangedPayload {
+  workspace_id: string;
+  recipient_id: string;
+  issue_id: string;
+  unread: boolean;
+}
+
 export interface InboxBatchReadPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications, read by viewing the
+   *  issue outside the inbox. Absent for "mark all as read". */
+  issue_id?: string;
 }
 
 export interface InboxBatchArchivedPayload {
@@ -371,6 +385,10 @@ export interface TaskRunningPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+}
+
+export interface TaskUsageUpdatedPayload {
+  task_id: string;
 }
 
 // task:waiting_local_directory fires when the daemon dequeues a task but
@@ -608,6 +626,7 @@ export interface WSEventPayloadMap {
   "issue:deleted": IssueDeletedPayload;
   "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_unread:changed": IssueUnreadChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;
   "property:created": PropertyChangedPayload;
   "property:updated": PropertyChangedPayload;
@@ -638,6 +657,7 @@ export interface WSEventPayloadMap {
   "task:message": TaskMessagePayload;
   "task:cancelled": TaskCancelledPayload;
   "task:progress": unknown;
+  "task:usage": TaskUsageUpdatedPayload;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
   "inbox:unread": InboxUnreadPayload;

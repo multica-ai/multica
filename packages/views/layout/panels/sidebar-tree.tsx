@@ -5,14 +5,17 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
+import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -22,7 +25,7 @@ import { useIssueActions } from "../../issues/actions/use-issue-actions";
 import { selectIssueTasks } from "../../issues/surface/activity";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
 
 /** A working agent's issue title: dimmer at rest and a wider highlight than
@@ -190,13 +193,16 @@ export function useKeptActiveItem<T extends { id: string }>(
 /**
  * The issues under an expanded row: the first page, then "Load more" in
  * steps. `params: null` means the row's settings can match nothing;
- * `undefined` that they are still resolving.
+ * `undefined` that they are still resolving, or — with `paramsError` — that
+ * they could not resolve, which `onRetry` tries again.
  */
 export function SidebarIssueList({
   id,
   wsId,
   source,
   params,
+  paramsError = false,
+  onRetry,
   activeIssueId,
   onCollapse,
 }: {
@@ -204,6 +210,8 @@ export function SidebarIssueList({
   wsId: string;
   source: string;
   params: SidebarIssuesRequest | null | undefined;
+  paramsError?: boolean;
+  onRetry?: () => void;
   activeIssueId: string | null;
   onCollapse: () => void;
 }) {
@@ -237,7 +245,21 @@ export function SidebarIssueList({
 
   return (
     <ul id={id} className="mb-2 ml-5 border-l border-surface-border pl-1.5">
-      {params === undefined || (params && query.isPending) ? (
+      {params === undefined && paramsError ? (
+        <li className="flex h-[26px] items-center gap-2 px-2 text-caption text-faint-foreground">
+          <span className="min-w-0 truncate">{t(($) => $.panels.work.project_issues_error)}</span>
+          {onRetry && (
+            <button
+              type="button"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              onKeyDown={onKeyDown}
+              onClick={onRetry}
+            >
+              {t(($) => $.panels.work.project_issues_retry)}
+            </button>
+          )}
+        </li>
+      ) : params === undefined || (params && query.isPending) ? (
         <li className="flex h-[26px] items-center gap-2 px-2">
           <div className="size-3 shrink-0 rounded-full bg-muted" />
           <div className="h-3 w-24 rounded-xs bg-muted" />
@@ -406,7 +428,40 @@ function SidebarStatusPicker({
   );
 }
 
-/** The title shimmers while an agent runs on the issue; queued agents show dimmed. */
+/** An unread issue opens on what its run left instead of at the top. */
+export function unreadIssueHref(href: string, unread: IssueUnread | null): string {
+  const target = issueUnreadTarget(unread);
+  return target ? `${href}#comment-${target}` : href;
+}
+
+/** An agent result the viewer has not seen yet. It takes the avatar's place
+ *  once the run ends, so the two never show together. */
+export function IssueUnreadDot({ unread }: { unread: IssueUnread }) {
+  const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
+  const { getActorName } = useActorName();
+  const label =
+    unread.outcome === "manual" || !unread.agent_id
+      ? t(($) => $.agent_activity.unread_manual)
+      : unread.outcome === "failed"
+        ? t(($) => $.agent_activity.unread_failed, { agent: getActorName("agent", unread.agent_id), time: timeAgo(unread.created_at) })
+        : t(($) => $.agent_activity.unread_completed, { agent: getActorName("agent", unread.agent_id), time: timeAgo(unread.created_at) });
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span role="img" aria-label={label} className="flex size-4 shrink-0 items-center justify-center">
+            <span className="size-2 rounded-full bg-brand" />
+          </span>
+        }
+      />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The title shimmers while an agent runs on the issue; queued agents show
+ *  dimmed. Once the run ends, an unread result shows a dot and a brighter title. */
 const SidebarIssueRow = memo(function SidebarIssueRow({
   wsId,
   issue,
@@ -427,6 +482,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   onKeyDown: (event: React.KeyboardEvent) => void;
 }) {
   const agents = useIssueAgentState(wsId, issue.id);
+  const unread = useIssueUnread(wsId, issue.id);
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -439,16 +495,19 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           className="size-3"
         />
         <AppLink
-          href={href}
+          href={unreadIssueHref(href, unread)}
           newTabTitle={issue.title}
           aria-current={active ? "page" : undefined}
           onKeyDown={onKeyDown}
           className={ISSUE_ROW_LINK_CLASS}
         >
-          <ShimmerText active={!!agents?.running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
+          <ShimmerText
+            active={!!agents?.running}
+            className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
+          >
             {issue.title}
           </ShimmerText>
-          {agents && <IssueAgentBadge agents={agents} />}
+          {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
         </AppLink>
       </div>
     </IssueActionsContextMenu>

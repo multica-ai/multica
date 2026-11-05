@@ -2,7 +2,11 @@
 import { describe, expect, it } from "vitest";
 import type { SkillListFilters } from "@multica/core/skills/stores";
 import type { Agent, Label, SkillSummary } from "@multica/core/types";
-import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
+import {
+  matchesSkillSearch,
+  rowMatchesFilters,
+  type SkillRow,
+} from "./skill-list-filter";
 
 function makeSkill(overrides: Partial<SkillSummary> = {}): SkillSummary {
   return {
@@ -56,6 +60,27 @@ const EMPTY_FILTERS: SkillListFilters = {
 function withLabels(filters: SkillListFilters, ...ids: string[]): SkillListFilters {
   return { ...filters, labels: ids };
 }
+
+describe("matchesSkillSearch", () => {
+  const reviewer = makeRow({ name: "PR Reviewer", description: "Reviews pull requests" });
+  const chinese = makeRow({ name: "审核助手", description: "代码审查" });
+
+  it.each([
+    [reviewer, "", true],
+    [reviewer, "   ", true],
+    [reviewer, "  REVIEWER ", true],
+    [reviewer, "pull requests", true],
+    [reviewer, "deploy", false],
+    [makeRow(), "pull", false],
+    [chinese, "审核", true],
+    [chinese, "shenhe", true],
+    [chinese, "shzs", true],
+    [chinese, "daima", true],
+    [chinese, "fabu", false],
+  ])("case %#", (row, query, expected) => {
+    expect(matchesSkillSearch(row, query)).toBe(expected);
+  });
+});
 
 describe("rowMatchesFilters — labels dimension", () => {
   const noFilters = EMPTY_FILTERS;

@@ -116,6 +116,7 @@ interface AgentDetailPageProps {
 export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -486,6 +487,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <MessageSquare />
         </IconButton>
       )}
+      <IconButton
+        label={t(($) => $.detail.settings)}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        onClick={() => openAdvanced("general")}
+      >
+        <Settings2 />
+      </IconButton>
       {!isArchived && canAssign.allowed && (
         <Button type="button" size="sm" onClick={handleAssign}>
           <Plus />
@@ -507,7 +516,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         <DropdownMenuContent align="end" className="w-auto min-w-48">
           <DropdownMenuItem onClick={() => openAdvanced("general")}>
             <Settings2 />
-            {t(($) => $.detail.advanced_settings)}
+            {t(($) => $.detail.settings)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -619,6 +628,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -645,6 +655,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
             onEditAccess={() => openAdvanced("access")}
+            onOpenSettings={() => openAdvanced("general")}
           />
         }
       >
@@ -665,7 +676,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
-          <AgentWorkSections agent={agent} onViewAll={() => openWork(true)} />
+          <AgentWorkSections
+            key={`${wsId}:${agent.id}`}
+            agent={agent}
+            scrollParent={scrollParent}
+            onViewAll={() => openWork(true)}
+          />
 
           <AgentInstructionsSection
             agent={agent}

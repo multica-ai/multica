@@ -74,7 +74,8 @@
     "assign_issue": "把任务指派给 {{name}}...",
     "new_issue": "新建任务给 {{name}}",
     "pin_in_chat": "在聊天里固定",
-    "unpin_in_chat": "从聊天里取消固定"
+    "unpin_in_chat": "从聊天里取消固定",
+    "settings": "打开智能体设置"
   },
   "autopilot": {
     "run_now": "立即运行一次",

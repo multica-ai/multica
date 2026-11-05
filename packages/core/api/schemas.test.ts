@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentTaskSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -68,13 +69,50 @@ import {
   EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema, SidebarProjectPrefsDocSchema } from "./schemas";
+import type { SidebarIssueAssignee } from "../issues/stores/sidebar-tree-store";
 import {
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
+import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("IssueUnreadPageSchema", () => {
+  const endpoint = "GET /api/issues/unread";
+
+  it("defaults missing run fields and next_cursor to null", () => {
+    const parsed = parseWithFallback(
+      {
+        items: [
+          {
+            issue_id: "i-1", outcome: "completed", agent_id: "a-1", task_id: "t-1", comment_id: "c-1",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          { issue_id: "i-2", outcome: "manual", created_at: "2026-01-01T00:00:00Z", extra: true },
+        ],
+      },
+      IssueUnreadPageSchema,
+      EMPTY_ISSUE_UNREAD_PAGE,
+      { endpoint },
+    );
+    expect(parsed.items.map((u) => [u.issue_id, u.agent_id, u.task_id, u.comment_id])).toEqual([
+      ["i-1", "a-1", "t-1", "c-1"],
+      ["i-2", null, null, null],
+    ]);
+    expect(parsed.next_cursor).toBeNull();
+  });
+
+  it("falls back to an empty last page for a malformed body", () => {
+    expect(parseWithFallback({ items: "nope" }, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
+    expect(parseWithFallback(null, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
+  });
+});
 
 const baseIssue = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -1047,6 +1085,35 @@ describe("UserSchema timezone drift", () => {
   });
 });
 
+describe("UserSchema whats_new_seen_version drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("leaves the field undefined when an older server omits it", () => {
+    const parsed = UserSchema.parse(base);
+    expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+
+  it("keeps null and string values distinct from absence", () => {
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: null }).whats_new_seen_version).toBe(null);
+    expect(UserSchema.parse({ ...base, whats_new_seen_version: "0.7.2" }).whats_new_seen_version).toBe("0.7.2");
+  });
+
+  it("degrades a wrong-type value to undefined without discarding the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, whats_new_seen_version: 7 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.email).toBe("ada@example.com");
+    expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+});
+
 describe("SquadListSchema member preview drift", () => {
   const baseSquad = {
     id: "squad-1",
@@ -1944,6 +2011,13 @@ describe("SidebarProjectPrefsDocSchema", () => {
     expect(SidebarProjectPrefsDocSchema.parse(doc)).toEqual(doc);
   });
 
+  it.each(["anyone", "me", "my_agents", "me_and_my_agents"] satisfies SidebarIssueAssignee[])(
+    "keeps the %s assignee setting",
+    (assignee) => {
+      expect(SidebarProjectPrefsDocSchema.parse({ issues: { assignee } }).issues.assignee).toBe(assignee);
+    },
+  );
+
   it("drops settings saved by another client version instead of failing the document", () => {
     const parsed = SidebarProjectPrefsDocSchema.parse({
       projects: { ordering: "future-order", statuses: "planned", onlyMine: "no", showCount: true },
@@ -2388,5 +2462,34 @@ describe("AgentActivityBucketListSchema duration", () => {
     expect(parsed[0]?.task_count).toBe(201);
     expect(parsed[0]?.duration_ms).toBeUndefined();
     expect(parsed[0]?.duration_count).toBeUndefined();
+  });
+});
+
+describe("task usage credits", () => {
+  const slice = {
+    provider: "qoder_cloud",
+    model: "",
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("keeps credits and treats a missing field as token-only usage", () => {
+    const parsed = AgentTaskSchema.parse({
+      id: "run",
+      usage: [{ ...slice, credits_micros: 1_250_000 }, { ...slice, provider: "anthropic" }],
+    });
+    expect(parsed.usage?.[0]?.credits_micros).toBe(1_250_000);
+    expect(parsed.usage?.[1]?.credits_micros).toBeUndefined();
+  });
+
+  it("drops malformed credits without losing the usage row", () => {
+    const parsed = AgentTaskSchema.parse({
+      id: "run",
+      usage: [{ ...slice, credits_micros: "lots" }],
+    });
+    expect(parsed.usage).toHaveLength(1);
+    expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
   });
 });

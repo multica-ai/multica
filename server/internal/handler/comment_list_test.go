@@ -1531,3 +1531,105 @@ func TestCreateCommentPreservesDirectParent(t *testing.T) {
 		t.Fatalf("reply-to-reply parent_id: want direct parent %s, got %v (root was %s)", reply.ID, nested.ParentID, root.ID)
 	}
 }
+
+// TestListComments_RootsOnlyReturnsThreadResolution pins the roots-only
+// resolution projection: unresolved threads carry none of the new fields, a
+// resolved root closes its own thread (thread_resolved only), and otherwise
+// the latest-resolved reply — at any nesting depth — is the conclusion.
+func TestListComments_RootsOnlyReturnsThreadResolution(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	fx := newCommentListFixture(t)
+	base := fx.Base
+
+	// Baseline: nothing resolved — no new fields anywhere.
+	w, rows := listComments(t, fx.IssueID, "roots_only=true")
+	for _, key := range []string{"thread_resolved", "resolution_id", "resolution_content", "resolution_content_truncated"} {
+		if strings.Contains(w.Body.String(), "\""+key+"\"") {
+			t.Fatalf("unresolved roots_only response must not contain %q", key)
+		}
+	}
+
+	// Root1 resolves on its nested reply r1b1 (depth 2); Root2 has two
+	// resolved replies, the newer (r2b) must win.
+	setCommentResolvedAt(t, fx.R1b1, base.Add(20*time.Minute))
+	setCommentResolvedAt(t, fx.R2a, base.Add(21*time.Minute))
+	setCommentResolvedAt(t, fx.R2b, base.Add(22*time.Minute))
+
+	_, rows = listComments(t, fx.IssueID, "roots_only=true")
+	m := byID(rows)
+
+	r1 := m[fx.Root1]
+	if r1.ThreadResolved == nil || !*r1.ThreadResolved || r1.ResolutionID == nil || *r1.ResolutionID != fx.R1b1 {
+		t.Fatalf("nested reply resolution: got resolved=%v id=%v want %s", r1.ThreadResolved, r1.ResolutionID, fx.R1b1)
+	}
+	if r1.ResolutionContent == nil || *r1.ResolutionContent != "r1b1" {
+		t.Fatalf("nested reply resolution content got=%v want r1b1", r1.ResolutionContent)
+	}
+
+	if r2 := m[fx.Root2]; r2.ResolutionID == nil || *r2.ResolutionID != fx.R2b {
+		t.Fatalf("latest resolved_at must win: resolution_id got=%v want=%s", r2.ResolutionID, fx.R2b)
+	}
+
+	// A resolved root ignores resolutions on its replies: thread_resolved
+	// only, no resolution_id/content.
+	setCommentResolvedAt(t, fx.Root2, base.Add(30*time.Minute))
+	_, rows = listComments(t, fx.IssueID, "roots_only=true")
+	if rr := byID(rows)[fx.Root2]; rr.ThreadResolved == nil || !*rr.ThreadResolved || rr.ResolutionID != nil || rr.ResolutionContent != nil {
+		t.Fatalf("root-resolved thread: want thread_resolved only, got %+v", rr)
+	}
+
+	// The default (non-roots) list must not leak the new fields.
+	_, all := listComments(t, fx.IssueID, "")
+	for _, c := range all {
+		if c.ResolutionID != nil || c.ResolutionContent != nil || c.ResolutionContentTruncated != nil {
+			t.Fatalf("default list leaked resolution fields on %s", c.ID)
+		}
+	}
+}
+
+// TestListComments_RootsOnlyResolutionSinceAndSummary covers the two allowed
+// compositions: --roots-only --since still reports a returned root's thread
+// resolution, and --roots-only --summary clips resolution_content like
+// content with resolution_content_truncated set.
+func TestListComments_RootsOnlyResolutionSinceAndSummary(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	fx := newCommentListFixture(t)
+	base := fx.Base
+
+	setCommentResolvedAt(t, fx.R1b1, base.Add(20*time.Minute)) // short conclusion
+	setCommentResolvedAt(t, fx.R2b, base.Add(21*time.Minute))
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE comment SET content = $1 WHERE id = $2`, strings.Repeat("y", 500), fx.R2b,
+	); err != nil {
+		t.Fatalf("lengthen r2b: %v", err)
+	}
+
+	// since between the two roots: only Root2 returns, with its resolution.
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
+	_, rows := listComments(t, fx.IssueID, v.Encode())
+	if len(rows) != 1 || rows[0].ID != fx.Root2 {
+		t.Fatalf("roots_only+since: want only %s, got %v", fx.Root2, ids(rows))
+	}
+	if rows[0].ResolutionID == nil || *rows[0].ResolutionID != fx.R2b {
+		t.Fatalf("roots_only+since: resolution_id got=%v want=%s", rows[0].ResolutionID, fx.R2b)
+	}
+
+	_, rows = listComments(t, fx.IssueID, "roots_only=true&summary=true")
+	m := byID(rows)
+	l := m[fx.Root2]
+	if l.ResolutionContentTruncated == nil || !*l.ResolutionContentTruncated {
+		t.Fatalf("summary: long resolution should be truncated, got %v", l.ResolutionContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(*l.ResolutionContent); rc != summaryContentRunes+1 {
+		t.Fatalf("summary: clipped resolution rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if s := m[fx.Root1]; s.ResolutionContentTruncated == nil || *s.ResolutionContentTruncated || *s.ResolutionContent != "r1b1" {
+		t.Fatalf("summary: short resolution should be untruncated, got %v %v", s.ResolutionContentTruncated, s.ResolutionContent)
+	}
+}

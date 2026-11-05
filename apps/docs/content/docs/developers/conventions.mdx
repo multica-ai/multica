@@ -120,10 +120,10 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 `issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Entity | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| Entity | en | zh-Hans | ja | ko | fr | es |
+| --- | --- | --- | --- | --- | --- | --- |
+| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **Tarea** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** | **Ejecución** |
 
 Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
@@ -170,6 +170,8 @@ Introduce its credential as a **Qoder personal access token (PAT)** in explanato
 | Label | **标签** |
 | Settings | **设置** |
 | Onboarding | **上手引导** |
+
+For Agent, use **智能体** in Simplified Chinese (`zh-Hans`) and **AI 代理** in Traditional Chinese (`zh-Hant`). Keep a single space between AI and adjacent Chinese text, for example **新建 AI 代理**. If the source already includes AI, write it once: **讓 AI 代理幫我寫程式碼**.
 
 ### Translate fully — generic UI words
 

@@ -485,7 +485,13 @@ func TestRuntimeToResponseLaunchHeader(t *testing.T) {
 		{`null`, "opencode run (json)"},
 		{`[]`, "opencode run (json)"},
 	} {
-		got := runtimeToResponse(db.AgentRuntime{Provider: "opencode", Metadata: []byte(tc.metadata)})
+		got := runtimeToResponse(db.AgentRuntime{
+			Provider: "opencode", Metadata: []byte(tc.metadata),
+			MaxConcurrentTasks: pgtype.Int4{Int32: 3, Valid: true},
+		})
+		if got.MaxConcurrentTasks == nil || *got.MaxConcurrentTasks != 3 {
+			t.Errorf("metadata %s: runtime concurrency cap was lost", tc.metadata)
+		}
 		if got.LaunchHeader != tc.want {
 			t.Errorf("metadata %s: header = %q, want %q", tc.metadata, got.LaunchHeader, tc.want)
 		}

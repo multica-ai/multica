@@ -2804,6 +2804,31 @@ func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskRespon
 	resp.PriorSessionResumeUnavailable = true
 }
 
+// loadClaimParentIssue reads a sub-issue's parent for the claim payload. The
+// parent is context, not a precondition, so a failed read only drops it.
+func (h *Handler) loadClaimParentIssue(ctx context.Context, task *db.AgentTaskQueue, issue db.Issue) (*ClaimParentIssue, int32) {
+	parent, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          issue.ParentIssueID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("task claim: failed to load parent issue",
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+				"parent_issue_id", uuidToString(issue.ParentIssueID),
+				"error", err,
+			)
+		}
+		return nil, 0
+	}
+	return &ClaimParentIssue{
+		ID:     uuidToString(parent.ID),
+		Title:  parent.Title,
+		Status: parent.Status,
+	}, parent.Number
+}
+
 func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
@@ -2832,7 +2857,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.DispatchedAt = &generation
 		resp.StartClaimSupported = true
 	}
-	var issueNumber int32
+	var issueNumber, parentIssueNumber int32
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -3111,6 +3136,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		if issue.AssigneeID.Valid {
 			resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
+		}
+		if issue.ParentIssueID.Valid {
+			resp.ParentIssue, parentIssueNumber = h.loadClaimParentIssue(r.Context(), task, issue)
 		}
 		// This claim's own snapshot, recorded by FinalizeTaskClaim so a LATER
 		// run that resumes this one's session can compare against what THIS run
@@ -3628,6 +3656,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
+		resp.ChatNoticeLocale = h.qoderChatNoticeLocale(r.Context(), runtime, *task, cs, resp.ChatChannelType, resp.ChatType)
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
@@ -4065,6 +4094,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+		}
+		if resp.ParentIssue != nil && parentIssueNumber > 0 {
+			resp.ParentIssue.Identifier = service.IssueIdentifier(ws.IssuePrefix, parentIssueNumber)
 		}
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
@@ -5434,6 +5466,20 @@ type TaskUsagePayload struct {
 	// every provider except Grok today) — stored as NULL so the reader knows
 	// to fall back to rate-table estimation rather than reading a real $0.
 	CostUSDTicks int64 `json:"cost_usd_ticks"`
+	// CreditsMicros is the provider's own charge in millionths of its credit
+	// unit, for providers that bill in credits instead of exposing tokens
+	// (Qoder Cloud Agents). A pointer because 0 credits is a real answer that
+	// must stay distinct from "this provider does not report credits".
+	CreditsMicros *int64 `json:"credits_micros,omitempty"`
+}
+
+// reportedCredits converts a reported credit charge into the nullable column.
+// Negative is nonsense from a malformed report and is dropped.
+func reportedCredits(micros *int64) pgtype.Int8 {
+	if micros == nil || *micros < 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *micros, Valid: true}
 }
 
 // authoritativeCostTicks converts a reported cost into the nullable column.
@@ -5451,13 +5497,21 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	task, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
 	if !ok {
 		return
 	}
 
 	var req struct {
 		Usage []TaskUsagePayload `json:"usage"`
+		// Snapshot marks a mid-run cumulative report from a daemon that meters
+		// while its agent works (STOE-30). The rows are upserted identically —
+		// UpsertTaskUsage overwrites per (task_id, provider, model), so a
+		// snapshot can never add up twice — but the additive metrics counter and
+		// the per-run cache-ratio log stay on the terminal report: summing each
+		// cumulative snapshot into RecordLLMUsage would bill the same tokens
+		// once per flush.
+		Snapshot bool `json:"snapshot"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -5470,6 +5524,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	// resolve to a provider instead of landing as '' and pricing $0.
 	var runtimeProvider string
 	runtimeProviderLoaded := false
+	updated := false
 	for _, u := range req.Usage {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
@@ -5485,7 +5540,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			provider = runtimeProvider
 		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
-			TaskID:           parseUUID(taskID),
+			TaskID:           task.ID,
 			Provider:         provider,
 			Model:            u.Model,
 			InputTokens:      u.InputTokens,
@@ -5493,29 +5548,50 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
 			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
+			CreditsMicros:    reportedCredits(u.CreditsMicros),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
+		updated = true
+		// A snapshot reports the run's total so far, so it is not a new charge:
+		// RecordLLMUsage adds, and each flush would bill the tokens the previous
+		// flush already billed. The terminal report carries them once.
+		if !req.Snapshot {
+			h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
+		}
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are
 		// observable in logs, not just queryable from runtime_usage. The ratio
 		// is cached input over total input-side tokens; a persistently low
 		// value flags a prompt prefix that is not being reused across runs
 		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
-		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
-			slog.Info("task prompt-cache usage",
-				"task_id", taskID,
-				"provider", provider,
-				"model", u.Model,
-				"input_tokens", u.InputTokens,
-				"output_tokens", u.OutputTokens,
-				"cache_read_tokens", u.CacheReadTokens,
-				"cache_write_tokens", u.CacheWriteTokens,
-				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
-			)
+		if !req.Snapshot {
+			if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+				slog.Info("task prompt-cache usage",
+					"task_id", taskID,
+					"provider", provider,
+					"model", u.Model,
+					"input_tokens", u.InputTokens,
+					"output_tokens", u.OutputTokens,
+					"cache_read_tokens", u.CacheReadTokens,
+					"cache_write_tokens", u.CacheWriteTokens,
+					"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+				)
+			}
 		}
+	}
+
+	if updated {
+		// This invalidates the existing task and issue-usage queries without
+		// broadcasting token counts or changing task progress/status.
+		h.Bus.Publish(events.Event{
+			Type:        protocol.EventTaskUsage,
+			WorkspaceID: workspaceID,
+			ActorType:   "system",
+			TaskID:      uuidToString(task.ID),
+			Payload:     protocol.TaskUsageUpdatedPayload{TaskID: uuidToString(task.ID)},
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -6352,7 +6428,7 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
 }
@@ -6381,7 +6457,7 @@ func (h *Handler) hydrateAgentTaskUsage(ctx context.Context, agentID pgtype.UUID
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
 	return nil
@@ -6397,11 +6473,17 @@ func appendTaskUsage(
 	cacheReadTokens int64,
 	cacheWriteTokens int64,
 	costUsdTicks pgtype.Int8,
+	creditsMicros pgtype.Int8,
 ) {
 	var cost *int64
 	if costUsdTicks.Valid {
 		value := costUsdTicks.Int64
 		cost = &value
+	}
+	var credits *int64
+	if creditsMicros.Valid {
+		value := creditsMicros.Int64
+		credits = &value
 	}
 	id := uuidToString(taskID)
 	byTask[id] = append(byTask[id], TaskUsageData{
@@ -6412,6 +6494,7 @@ func appendTaskUsage(
 		CacheReadTokens:  cacheReadTokens,
 		CacheWriteTokens: cacheWriteTokens,
 		CostUsdTicks:     cost,
+		CreditsMicros:    credits,
 	})
 }
 

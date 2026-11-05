@@ -14,7 +14,7 @@ import { assigneeTypesForActorKind } from "./surface/scope";
 import { effectiveNegatedFilters } from "./stores/view-store";
 import { FILTER_DIMENSION_TABLE_FIELD, advancedFilterToTableQuery, advancedFilterUsesField } from "./stores/filter-tree";
 import type { MyIssuesRelation } from "./stores/my-issues-view-store";
-import type { SidebarIssueSettings, SidebarProjectSettings } from "./stores/sidebar-tree-store";
+import type { SidebarIssueAssignee, SidebarIssueSettings, SidebarProjectSettings } from "./stores/sidebar-tree-store";
 
 /** Rows an expanded sidebar list shows before "Load more". */
 export const SIDEBAR_FIRST_PAGE = 5;
@@ -43,19 +43,43 @@ export function shownSidebarStatuses(
   return statuses.filter((s) => !hidden.has(s.key)).map((s) => s.key);
 }
 
-/** List params for an expanded project, or `null` when the settings leave nothing to list. */
-export function projectSidebarParams(
+/** The viewer relations each assignee setting lists through the table query, OR'd together. */
+const ASSIGNEE_RELATIONS: Record<SidebarIssueAssignee, IssueTableRelation[]> = {
+  anyone: [],
+  me: ["assigned"],
+  my_agents: ["my_agents"],
+  me_and_my_agents: ["assigned", "my_agents"],
+};
+
+/** The request for an expanded project, or `null` when the settings leave nothing to list. */
+export function projectSidebarRequest(
   projectId: string,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
   userId: string | undefined,
-): ListIssuesParams | null {
+): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
   if (settings.assignee !== "anyone" && !userId) return null;
+  const statusFilter = shown.length < statuses.length ? { statuses: shown } : {};
+  // The list endpoint cannot OR the user with their agents: `involves_user_id`
+  // never matches issues assigned to the user directly.
+  if (settings.assignee === "me_and_my_agents") {
+    return {
+      table: {
+        scope: { kind: "project", project_id: projectId },
+        filters: {
+          ...statusFilter,
+          relations: ASSIGNEE_RELATIONS.me_and_my_agents,
+          include_sub_issues: settings.showSubIssues,
+        },
+        sort: { field: settings.sortBy, direction: settings.sortDirection },
+      },
+    };
+  }
   return {
     project_id: projectId,
-    ...(shown.length < statuses.length ? { statuses: shown } : {}),
+    ...statusFilter,
     ...(settings.assignee === "me" ? { assignee_id: userId } : {}),
     ...(settings.assignee === "my_agents" ? { involves_user_id: userId } : {}),
     ...(settings.showSubIssues ? {} : { top_level_only: true }),
@@ -118,12 +142,22 @@ function viewTableSort(display: Record<string, unknown>): IssueTableQuerySpec["s
   return { field, direction: display.sortDirection === "desc" ? "desc" : "asc" };
 }
 
+/** Whether listing the view needs the viewer's unread issues. */
+export function viewSidebarNeedsUnread(view: SidebarViewFields): boolean {
+  return baselineFromQuery(view.query).raw.unreadFilter;
+}
+
 /**
  * The request for an expanded saved view: its scope, filters and ordering,
  * so the sidebar lists what opening the view shows. `null` when the view's
- * scope cannot be listed.
+ * scope cannot be listed. A view filtered to unread needs `unreadIssueIds`
+ * (see `viewSidebarNeedsUnread`); without them it lists nothing.
  */
-export function viewSidebarRequest(view: SidebarViewFields, today: string): SidebarTableRequest | null {
+export function viewSidebarRequest(
+  view: SidebarViewFields,
+  today: string,
+  unreadIssueIds: readonly string[] = [],
+): SidebarTableRequest | null {
   const scope = viewTableScope(view);
   if (!scope) return null;
   const { raw } = baselineFromQuery(view.query);
@@ -159,6 +193,7 @@ export function viewSidebarRequest(view: SidebarViewFields, today: string): Side
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
         ...(fields.agentRunningFilter ? { working_only: true } : {}),
+        ...(fields.unreadFilter ? { unread_issue_ids: [...unreadIssueIds].sort() } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },
       sort: viewTableSort(display),
@@ -172,7 +207,7 @@ export function viewSidebarRequest(view: SidebarViewFields, today: string): Side
  * leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: BuiltinViewKey,
+  builtin: Exclude<BuiltinViewKey, "unread">,
   myRelation: MyIssuesRelation,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
@@ -180,8 +215,7 @@ export function builtinSidebarRequest(
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
   const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
-  const relations: IssueTableRelation[] =
-    settings.assignee === "me" ? ["assigned"] : settings.assignee === "my_agents" ? ["my_agents"] : [];
+  const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
     table: {
       scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },

@@ -9,6 +9,7 @@ import {
   Calendar,
   CalendarClock,
   Check,
+  CircleDot,
   CircleEqual,
   ExternalLink,
   FolderOpen,
@@ -24,6 +25,7 @@ import {
   Unlink,
   UserMinus,
 } from "@multica/ui/icons";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
@@ -34,6 +36,7 @@ import {
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueUnread, useMarkIssueRead, useMarkIssueUnread } from "@multica/core/issues/unread";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
@@ -61,6 +64,7 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
+import { InboxRestoreMenuItem } from "./inbox-restore";
 import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
 import { useT } from "../../i18n";
 
@@ -106,6 +110,8 @@ interface IssueActionsMenuItemsProps {
    *  to the list the user came from and only falls back to this path when
    *  there is no in-app history. List surfaces leave it unset and stay put. */
   onDeletedFallbackPath?: string;
+  /** The reader's archived inbox notification for this issue; adds "Restore to inbox". */
+  archivedInboxItemId?: string;
   /** `sidebar` is the trimmed menu for sidebar rows, where only the title is
    *  visible: it names the issue in a header, shows current values beside
    *  Status / Priority / Assignee, and keeps only triage and navigation
@@ -122,11 +128,13 @@ export function IssueActionsMenuItems({
   primitives: P,
   onClose,
   onDeletedFallbackPath,
+  archivedInboxItemId,
   variant = "full",
   onStopRun,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const { canDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -141,6 +149,9 @@ export function IssueActionsMenuItems({
     updateField({ status });
   };
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const unread = useIssueUnread(wsId, sidebar ? issue.id : "");
+  const { mutate: markRead } = useMarkIssueRead(wsId);
+  const { mutate: markUnread } = useMarkIssueUnread(wsId);
   const {
     isPinned,
     updateField,
@@ -410,6 +421,19 @@ export function IssueActionsMenuItems({
         )}
         {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
+      {archivedInboxItemId && <InboxRestoreMenuItem itemId={archivedInboxItemId} Item={P.Item} />}
+      {sidebar &&
+        (unread ? (
+          <P.Item onClick={() => markRead(issue.id)}>
+            <Check className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_read)}
+          </P.Item>
+        ) : (
+          <P.Item onClick={() => markUnread(issue.id)}>
+            <CircleDot className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_unread)}
+          </P.Item>
+        ))}
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
@@ -483,6 +507,8 @@ export function IssueActionsMenuItems({
           <P.Separator />
 
           <P.Item
+            disabled={!canDelete(issue)}
+            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
             variant="destructive"
             onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
           >

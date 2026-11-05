@@ -103,7 +103,7 @@ describe("issue surface view store registry", () => {
 
     const legacy = getIssueSurfaceViewStore("workspace:legacy").getState();
     expect([legacy.sortBy, legacy.sortDirection]).toEqual([
-      "created_at",
+      "updated_at",
       "desc",
     ]);
     expect(legacy.cardProperties.description).toBe(false);

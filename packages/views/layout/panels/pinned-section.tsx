@@ -23,6 +23,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
+import { useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
 import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
@@ -33,9 +34,11 @@ import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateCl
 import {
   ISSUE_ROW_LINK_CLASS,
   IssueAgentBadge,
+  IssueUnreadDot,
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
+  unreadIssueHref,
   useIssueAgentState,
 } from "./sidebar-tree";
 
@@ -189,6 +192,7 @@ function SortablePinItem({
   iconNode,
   active,
   running = false,
+  unread = false,
   trailing,
   onNavigate,
   issue,
@@ -201,6 +205,8 @@ function SortablePinItem({
   active: boolean;
   /** Shimmers the label while an agent works on the pinned issue. */
   running?: boolean;
+  /** Brightens the label while the issue has an unread agent result. */
+  unread?: boolean;
   trailing?: React.ReactNode;
   /** Runs on a real click (not a drag-release) before navigation. */
   onNavigate?: () => void;
@@ -242,7 +248,10 @@ function SortablePinItem({
         }}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
       >
-        <ShimmerText active={running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
+        <ShimmerText
+          active={running}
+          className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, unread && "text-foreground")}
+        >
           {label}
         </ShimmerText>
         {/* Holds the same right-edge slot as a tree row's avatars, and yields
@@ -308,6 +317,7 @@ function PinRow({
 }) {
   const isIssue = pin.item_type === "issue";
   const agents = useIssueAgentState(wsId, isIssue ? pin.item_id : "");
+  const unread = useIssueUnread(wsId, isIssue ? pin.item_id : "");
   const statusCatalog = useIssueStatuses(wsId);
   const statusLabel = useStatusLabel(wsId);
   const issueQuery = useQuery({ ...issueDetailOptions(wsId, pin.item_id), enabled: isIssue });
@@ -332,12 +342,13 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={href}
+        href={unreadIssueHref(href, unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}
         running={!!agents?.running}
-        trailing={agents && <IssueAgentBadge agents={agents} />}
+        unread={!agents && !!unread}
+        trailing={agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
         issue={issue}
         iconNode={
           <SidebarIssueStatus
