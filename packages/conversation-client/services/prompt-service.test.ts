@@ -107,6 +107,23 @@ describe("messages restored after a reload", () => {
 });
 
 describe("presenting the queue", () => {
+  it("keeps a tentative dispatch queued while another turn is still running", () => {
+    const { prompts, turns } = service();
+    vi.spyOn(turns, "session").mockReturnValue({ workspaceId: "w", activeTurnId: "previous" });
+    vi.spyOn(turns, "turn").mockReturnValue({ turnId: "previous", phase: "running" });
+    prompts.receive("s", {
+      revision: 1, paused: false, dispatchingRequestId: "next",
+      items: [{ requestId: "next", display: { id: "next", clientSubmitId: "next" } }]
+    } as LocalPromptQueue);
+    expect(prompts.visibleQueuedPrompts("s").map((item) => item.id)).toEqual(["next"]);
+    expect(prompts.pendingSubmits("s")).toEqual([]);
+    vi.spyOn(turns, "session").mockReturnValue({ workspaceId: "w", activeTurnId: null });
+    prompts.receive("s", { ...prompts.queue("s")!, revision: 2 });
+    expect(prompts.visibleQueuedPrompts("s")).toEqual([]);
+    expect(prompts.pendingSubmits("s")).toMatchObject([{ clientSubmitId: "next" }]);
+    prompts.dispose();
+  });
+
   it.each(["ready", "paused", "failed", "other-turn"])("presents an immediate submission against the authoritative %s queue state", async (state) => {
     const { prompts, turns } = service();
     const turn = vi.spyOn(turns, "turnForSubmit");

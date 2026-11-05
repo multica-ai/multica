@@ -285,9 +285,12 @@ export class PromptService<
   /** Everything queued for the session, each message once: one the daemon has is not also pending. */
   prompts(id: string): Display[] {
     const queue = this.queues.get(id);
-    const dispatching =
-      queue?.paused || queue?.error ? undefined : queue?.dispatchingRequestId;
     const activeTurnId = this.options.turns.session(id)?.activeTurnId;
+    const activeTurn = activeTurnId ? this.options.turns.turn(id, activeTurnId) : null;
+    // A daemon can report an attempted dispatch before rejecting it as busy.
+    const dispatching =
+      queue?.paused || queue?.error || (activeTurnId && activeTurn?.phase !== "settled")
+        ? undefined : queue?.dispatchingRequestId;
     const items = (queue?.items
       .filter((item) => !this.options.turns.turnForSubmit(id, item.requestId))
       .map((item) =>
