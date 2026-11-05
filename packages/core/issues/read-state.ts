@@ -3,9 +3,9 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import type { Issue } from "../types";
 
-/** Keep opaque client refusals on the existing unavailable surface. */
+/** Only authentication and opaque access/not-found refusals imply unavailable. */
 function isUnavailable(error: unknown): boolean {
-  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404);
 }
 
 /** Presentation and manual retry for an uncached primary issue read only. */

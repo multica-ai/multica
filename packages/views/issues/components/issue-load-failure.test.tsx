@@ -81,6 +81,50 @@ describe("primary issue read failures through the production API client", () => 
     expect(primary).toHaveBeenCalledTimes(1);
     expect(replace).not.toHaveBeenCalled();
   });
+  it.each([
+    [408, "route"], [429, "route"],
+    [408, "inbox"], [429, "inbox"],
+    [408, "peek"], [429, "peek"],
+  ] as const)("HTTP %s in %s allows a scoped manual retry, another refusal and recovery", async (status, host) => {
+    primary.mockImplementation(() => Promise.resolve(response(status)));
+    const unrelatedKey = issueKeys.detail(scope.wsId, "UNRELATED-2");
+    qc.setQueryData(unrelatedKey, issue);
+    render(surface(host === "route" ? "SYN-1" : uuid, host));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByText("Could not load issue.")).toBeInTheDocument();
+    expect(screen.queryByText(enIssues.detail.not_found_title)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("SYNTHETIC_PRIVATE_ERROR");
+    const initialReads = primary.mock.calls.length;
+    // Shared UUID hosts also mount the existing independent reactions read.
+    expect(initialReads).toBe(host === "route" ? 1 : 2);
+    let settle!: (value: Response) => void;
+    primary.mockImplementationOnce(() => new Promise<Response>((resolve) => { settle = resolve; }));
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    expect(primary).toHaveBeenCalledTimes(initialReads + 1);
+    await act(async () => { settle(response(status)); });
+    await waitFor(() => expect(retry).toBeEnabled());
+    expect(primary).toHaveBeenCalledTimes(initialReads + 1);
+    expect(document.body).not.toHaveTextContent("SYNTHETIC_PRIVATE_ERROR");
+    primary.mockImplementation(() => Promise.resolve(response(200, issue)));
+    fireEvent.click(retry);
+    await screen.findAllByText("Synthetic issue");
+    expect(screen.queryByText("Could not load issue.")).not.toBeInTheDocument();
+    // Route recovery mounts reactions; shared UUID hosts already read reactions at mount.
+    expect(primary).toHaveBeenCalledTimes(initialReads + (host === "route" ? 3 : 2));
+    expect(qc.getQueryData(unrelatedKey)).toEqual(issue);
+  });
+  it.each([400, 422])("does not infer nonexistence from other HTTP %s or error text", async (status) => {
+    primary.mockImplementation(() => Promise.resolve(response(status, { error: "Issue not found" })));
+    render(surface("SYN-1"));
+    await screen.findByText("Could not load issue.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByText(enIssues.detail.not_found_title)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Issue not found");
+    expect(primary).toHaveBeenCalledTimes(1);
+  });
   it("shows a network failure without displaying the exception", async () => {
     primary.mockRejectedValue(new TypeError("SYNTHETIC_PRIVATE_ERROR"));
     render(surface("SYN-1"));
