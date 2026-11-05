@@ -782,9 +782,10 @@ RETURNING task.*;
 -- drop what they actually typed. Callers release the kickoff separately
 -- (ReleaseOnboardingKickoffFromTask) so the next send re-adopts it.
 DELETE FROM chat_message
-WHERE task_id = $1
+WHERE chat_message.task_id = $1
   AND role = 'user'
   AND message_kind <> 'onboarding_kickoff'
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = chat_message.id)
 RETURNING *;
 
 -- name: ReleaseOnboardingKickoffFromTask :exec
@@ -879,6 +880,7 @@ ORDER BY message.created_at ASC, message.id ASC;
 -- newer queued successor that is already bound to its own user message.
 SELECT message.* FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = message.id)
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -917,7 +919,8 @@ ORDER BY message.created_at ASC, message.id ASC;
 -- for new task-owned direct-chat tasks; legacy/channel (chat_input_task_id
 -- NULL) tasks keep using ListChatMessagesForLegacyTask + trailingUserMessages.
 SELECT * FROM chat_message
-WHERE task_id = $1 AND role = 'user'
+WHERE chat_message.task_id = $1 AND role = 'user'
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = chat_message.id)
 ORDER BY created_at ASC, id ASC;
 
 -- name: ListChatMessagesPageForChannelContext :many
