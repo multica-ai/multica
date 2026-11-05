@@ -30,6 +30,7 @@ const complete: CompanySetupReadiness = {
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,
+  secretary_instructions_current: true,
   ready: true,
 };
 
@@ -104,6 +105,13 @@ describe("buildCompanySetupRequest", () => {
 
   it("uses the timezone it is given", () => {
     expect(buildCompanySetupRequest("Asia/Tokyo")).toMatchObject({ timezone: "Asia/Tokyo" });
+  });
+
+  it("asks for the instruction update only when the caller chooses it", () => {
+    expect(buildCompanySetupRequest("Asia/Tokyo")).not.toHaveProperty("update_secretary_instructions");
+    expect(buildCompanySetupRequest("Asia/Tokyo", { updateInstructions: true })).toMatchObject({
+      update_secretary_instructions: true,
+    });
   });
 
   it("uses the browser's timezone when none is given", () => {

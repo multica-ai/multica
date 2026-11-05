@@ -56,8 +56,8 @@ link. A claim you cannot link is marked as an inference.
 
 A floor chief rolls up its leaders' answers. It does not replace them.
 
-- Ask each squad leader on the floor for its part, unless the digest already gives you
-  what you need.
+- Ask each squad leader on the floor for its part, unless its own issues and runs
+  already answer the question.
 - Read each answer critically. Challenge a weak one, as the Secretary would.
 - Report progress by squad. A quiet squad is one line.
 - Give one floor-level view: the overall schedule and risk for the floor, the risks

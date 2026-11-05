@@ -75,6 +75,7 @@ const READY: CompanySetupReadiness = {
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,
+  secretary_instructions_current: true,
   ready: true,
 };
 

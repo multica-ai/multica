@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -134,6 +135,21 @@ func (d companyData) squad(key string) (companySquad, bool) {
 		}
 	}
 	return companySquad{}, false
+}
+
+// SecretaryTemplateInstructions is the Secretary's instruction template from the
+// embedded starter data, trimmed the way setup stores it. Readiness compares the
+// Secretary's instructions with it to tell whether they are current.
+func SecretaryTemplateInstructions() (string, error) {
+	d, err := loadCompanyData()
+	if err != nil {
+		return "", err
+	}
+	text, ok := d.instructions("secretary")
+	if !ok {
+		return "", fmt.Errorf("starter data has no secretary instruction template")
+	}
+	return strings.TrimSpace(text), nil
 }
 
 // instructions returns the instruction text of a template id.

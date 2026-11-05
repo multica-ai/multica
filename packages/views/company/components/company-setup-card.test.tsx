@@ -40,6 +40,7 @@ const NOT_SET_UP: CompanySetupReadiness = {
   executive_floor: false,
   autopilot_daily: false,
   autopilot_weekly_paused: false,
+  secretary_instructions_current: true,
   ready: false,
 };
 
@@ -50,6 +51,7 @@ const READY: CompanySetupReadiness = {
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,
+  secretary_instructions_current: true,
   ready: true,
 };
 
@@ -147,6 +149,21 @@ describe("CompanySetupCard", () => {
     );
     await waitFor(() => expect(api.pinChatAgent).toHaveBeenCalledTimes(1));
     expect(api.pinChatAgent).toHaveBeenCalledWith("sec-1");
+  });
+
+  it("offers to update outdated Secretary instructions and sends the update only on that choice", async () => {
+    api.setupCompany.mockResolvedValue({ ...READY, secretary_instructions_current: true });
+    setup({ ...READY, secretary_instructions_current: false });
+    fireEvent.click(screen.getByRole("button", { name: "Update instructions" }));
+    await waitFor(() => expect(api.setupCompany).toHaveBeenCalledTimes(1));
+    expect(api.setupCompany.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ update_secretary_instructions: true }),
+    );
+  });
+
+  it("does not offer the instruction update while the Secretary runs the starter instructions", () => {
+    setup(READY);
+    expect(screen.queryByRole("button", { name: "Update instructions" })).toBeNull();
   });
 
   it("switches to the install guide when setup is refused for a missing runtime", async () => {

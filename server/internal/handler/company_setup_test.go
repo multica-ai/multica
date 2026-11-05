@@ -431,3 +431,70 @@ func TestCompanySetup_FloorLimitMatchesTheService(t *testing.T) {
 		t.Fatalf("companySlotsPerFloor = %d, service.CompanySlotsPerFloor = %d", companySlotsPerFloor, service.CompanySlotsPerFloor)
 	}
 }
+
+// An edited Secretary keeps its instructions on an ordinary setup call, and
+// reports that they are not the starter template.
+func TestCompanySetup_KeepsAnEditedSecretaryUnlessAskedToUpdate(t *testing.T) {
+	e := newSetupEnv(t)
+	template, err := service.SecretaryTemplateInstructions()
+	if err != nil {
+		t.Fatalf("template: %v", err)
+	}
+	secretary := dbfx.Agent(t, service.SecretaryAgentName, e.RuntimeID, testutil.Cols{"workspace_id": e.WorkspaceID})
+	dbfx.Exec(t, `UPDATE workspace SET secretary_agent_id = $1 WHERE id = $2`, secretary, e.WorkspaceID)
+	dbfx.Insert(t, "company_floor", testutil.Cols{"workspace_id": e.WorkspaceID, "name": service.ExecutiveFloorName, "position": 0})
+	// The boss's edit, as the instruction hook records it: the agent row and a revision.
+	dbfx.Exec(t, `UPDATE agent SET instructions = $1 WHERE id = $2`, "The boss's own words.", secretary)
+	dbfx.Insert(t, "agent_instruction_revision", testutil.Cols{
+		"workspace_id": e.WorkspaceID, "agent_id": secretary, "revision": 1,
+		"instructions": "The boss's own words.", "source": "human",
+		"actor_type": "member", "actor_id": testUserID,
+	})
+
+	var out CompanySetupReadinessResponse
+	e.post(t, "", setupBody(map[string]any{"secretary_instructions": template})).Want(http.StatusOK).JSON(&out)
+	if out.SecretaryInstructionsCurrent {
+		t.Fatalf("readiness says current for an edited Secretary")
+	}
+	if got := dbfx.Count(t, `SELECT count(*) FROM agent WHERE id = $1 AND instructions = $2`, secretary, "The boss's own words."); got != 1 {
+		t.Fatalf("setup without the update flag replaced the boss's instructions")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1`, secretary); n != 1 {
+		t.Fatalf("setup without the update flag recorded %d revisions, want the boss's one", n)
+	}
+
+	e.post(t, "", setupBody(map[string]any{"secretary_instructions": template, "update_secretary_instructions": true})).Want(http.StatusOK).JSON(&out)
+	if !out.SecretaryInstructionsCurrent {
+		t.Fatalf("readiness after the update = %+v, want the starter instructions current", out)
+	}
+	if got := dbfx.Count(t, `SELECT count(*) FROM agent WHERE id = $1 AND instructions = $2`, secretary, template); got != 1 {
+		t.Fatalf("update did not write the starter instructions")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1`, secretary); n != 2 {
+		t.Fatalf("revisions after the update = %d, want the boss's edit and the update", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1 AND instructions = $2`, secretary, "The boss's own words."); n != 1 {
+		t.Fatalf("the replaced text is no longer in the instruction history")
+	}
+}
+
+// Updating a Secretary that already runs the template changes nothing.
+func TestCompanySetup_UpdateOfCurrentInstructionsRecordsNothing(t *testing.T) {
+	e := newSetupEnv(t)
+	template, err := service.SecretaryTemplateInstructions()
+	if err != nil {
+		t.Fatalf("template: %v", err)
+	}
+	e.post(t, "", setupBody(map[string]any{"secretary_instructions": template})).Want(http.StatusOK)
+	secretary := e.secretaryID(t)
+	before := dbfx.Count(t, `SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1`, secretary)
+
+	var out CompanySetupReadinessResponse
+	e.post(t, "", setupBody(map[string]any{"secretary_instructions": template, "update_secretary_instructions": true})).Want(http.StatusOK).JSON(&out)
+	if !out.SecretaryInstructionsCurrent {
+		t.Fatalf("readiness = %+v, want the instructions current", out)
+	}
+	if after := dbfx.Count(t, `SELECT count(*) FROM agent_instruction_revision WHERE agent_id = $1`, secretary); after != before {
+		t.Fatalf("update of current instructions recorded revisions: before %d, after %d", before, after)
+	}
+}

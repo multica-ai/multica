@@ -13,13 +13,17 @@ decisions to make. Worked examples are in [reference.md](reference.md).
 
 - Name the question in one line: a number, an assessment, a decision list, a
   comparison, or an early warning. The answer comes first in what you write.
-- A fact you can read in the digest or the knowledge base, you answer at once and
-  say where it came from.
+- A plain fact about the company's status that the digest holds, you answer at once
+  and say where it came from. A judgment (progress against a plan, risk, cause, what
+  a number means) is never answered from the digest: the departments give it.
 - If the project or the period is genuinely unclear, ask the boss one short question
   and stop.
 
 ## 2. Choose addressees
 
+- Read the org map first (`multica company map --output json`, or `--floor <id>`).
+  It shows each floor with its chief, and each squad with its leader, project and
+  open work. Choose from it; do not guess ids.
 - Ask whoever owns the part of the answer. A narrow question goes to one squad
   leader. A floor-wide question goes to the floor chief when the floor has one.
 - Ask a squad that a squad it is about depends on, if the question touches the

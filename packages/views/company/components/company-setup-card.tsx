@@ -54,7 +54,9 @@ export function CompanySetupCard() {
   const ready = isCompanySetupReady(readiness);
   const marketResearchExists = squads.some((squad) => !squad.archived_at && squad.name === MARKET_RESEARCH.name);
   // Members see the trigger only while setup is incomplete; the squad offer is for the boss.
-  const visible = !ready || (canManage && !marketResearchExists);
+  // The Secretary's instructions are the starter template unless the boss edited them or the template has moved on.
+  const instructionsOutdated = readiness.secretary_id !== null && !readiness.secretary_instructions_current;
+  const visible = !ready || (canManage && (!marketResearchExists || instructionsOutdated));
   if (!visible) return null;
 
   const runtimeMissing = !readiness.runtime_online || refusal?.code === "runtime_required";
@@ -84,11 +86,11 @@ export function CompanySetupCard() {
     }
   };
 
-  const runSetup = () =>
-    setup.mutate(buildCompanySetupRequest(), {
+  const runSetup = (updateInstructions = false) =>
+    setup.mutate(buildCompanySetupRequest(undefined, { updateInstructions }), {
       onSuccess: () => {
         setRefusal(null);
-        toast.success(t(($) => $.company.setup_done));
+        toast.success(t(($) => (updateInstructions ? $.company.setup_instructions_done : $.company.setup_done)));
       },
       onError: (err) => {
         const parsed = err instanceof ApiError ? parseCompanySetupRefusal(err.body) : null;
@@ -193,9 +195,18 @@ export function CompanySetupCard() {
               <p className="text-caption text-muted-foreground">{t(($) => $.company.setup_read_only)}</p>
             ) : null}
 
+            {canManage && instructionsOutdated && !runtimeMissing ? (
+              <div className="flex flex-col items-start gap-2">
+                <p className="text-caption text-muted-foreground">{t(($) => $.company.setup_instructions_hint)}</p>
+                <Button type="button" variant="outline" size="sm" disabled={setup.isPending} onClick={() => runSetup(true)}>
+                  {t(($) => $.company.setup_instructions_action)}
+                </Button>
+              </div>
+            ) : null}
+
             {!ready && !runtimeMissing && canManage ? (
               <div>
-                <Button type="button" disabled={setup.isPending} aria-busy={setup.isPending} onClick={runSetup}>
+                <Button type="button" disabled={setup.isPending} aria-busy={setup.isPending} onClick={() => runSetup()}>
                   {setup.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
                   {setup.isPending ? t(($) => $.company.setup_pending) : t(($) => $.company.setup_action)}
                 </Button>

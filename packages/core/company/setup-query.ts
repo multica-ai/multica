@@ -26,13 +26,17 @@ export function companySetupOptions(wsId: string) {
  * defaults to the browser's; when the runtime cannot tell, it is left out and
  * the server falls back to the caller's saved timezone, then UTC.
  */
-export function buildCompanySetupRequest(timezone?: string): CompanySetupRequest {
+export function buildCompanySetupRequest(
+  timezone?: string,
+  options: { updateInstructions?: boolean } = {},
+): CompanySetupRequest {
   const template = AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === "secretary");
   if (!template) throw new Error('no instruction template "secretary"');
   const zone = timezone ?? browserTimezone();
   return {
     secretary_instructions: template.instructions,
     ...(zone ? { timezone: zone } : {}),
+    ...(options.updateInstructions ? { update_secretary_instructions: true } : {}),
   };
 }
 

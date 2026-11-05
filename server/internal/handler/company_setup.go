@@ -37,7 +37,10 @@ type CompanySetupReadinessResponse struct {
 	// SecretaryDeskProjectID is the project the Secretary files its requests in;
 	// null until setup has made it.
 	SecretaryDeskProjectID *string `json:"secretary_desk_project_id"`
-	Ready                  bool    `json:"ready"`
+	// SecretaryInstructionsCurrent is true when the Secretary runs the starter
+	// instructions. False means the boss can update them.
+	SecretaryInstructionsCurrent bool `json:"secretary_instructions_current"`
+	Ready                        bool `json:"ready"`
 }
 
 type companySetupRequest struct {
@@ -47,15 +50,19 @@ type companySetupRequest struct {
 	// Timezone is the IANA timezone of the 08:00 daily brief. When empty, the
 	// caller's saved timezone is used, then UTC.
 	Timezone string `json:"timezone"`
+	// UpdateSecretaryInstructions replaces an existing Secretary's instructions
+	// with the template. Only the boss asks for it, from the setup card.
+	UpdateSecretaryInstructions bool `json:"update_secretary_instructions"`
 }
 
 func companySetupReadinessToResponse(r service.CompanySetupReadiness) CompanySetupReadinessResponse {
 	resp := CompanySetupReadinessResponse{
-		RuntimeOnline:         r.RuntimeOnline,
-		ExecutiveFloor:        r.ExecutiveFloor,
-		AutopilotDaily:        r.AutopilotDaily,
-		AutopilotWeeklyPaused: r.AutopilotWeeklyPaused,
-		Ready:                 r.Ready,
+		RuntimeOnline:                r.RuntimeOnline,
+		ExecutiveFloor:               r.ExecutiveFloor,
+		AutopilotDaily:               r.AutopilotDaily,
+		AutopilotWeeklyPaused:        r.AutopilotWeeklyPaused,
+		SecretaryInstructionsCurrent: r.SecretaryInstructionsCurrent,
+		Ready:                        r.Ready,
 	}
 	if r.SecretaryID != "" {
 		id := r.SecretaryID
@@ -165,11 +172,12 @@ func (h *Handler) SetupCompany(w http.ResponseWriter, r *http.Request) {
 
 	svc := service.NewCompanySetupService(h.Queries, h.TxStarter)
 	created, err := svc.Setup(r.Context(), service.CompanySetupInput{
-		WorkspaceID:           wsUUID,
-		Actor:                 member,
-		Runtime:               runtime,
-		SecretaryInstructions: instructions,
-		Timezone:              timezone,
+		WorkspaceID:                 wsUUID,
+		Actor:                       member,
+		Runtime:                     runtime,
+		SecretaryInstructions:       instructions,
+		UpdateSecretaryInstructions: req.UpdateSecretaryInstructions,
+		Timezone:                    timezone,
 	})
 	if err != nil {
 		writeCompanySetupError(w, r, workspaceID, err)

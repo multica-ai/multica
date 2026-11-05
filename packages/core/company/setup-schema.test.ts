@@ -14,6 +14,7 @@ const complete: CompanySetupReadiness = {
   executive_floor: true,
   autopilot_daily: true,
   autopilot_weekly_paused: true,
+  secretary_instructions_current: true,
   ready: true,
 };
 
@@ -30,6 +31,7 @@ describe("CompanySetupReadinessSchema", () => {
       executive_floor: false,
       autopilot_daily: false,
       autopilot_weekly_paused: false,
+      secretary_instructions_current: true,
       ready: false,
     });
   });
@@ -39,6 +41,13 @@ describe("CompanySetupReadinessSchema", () => {
     expect(
       CompanySetupReadinessSchema.parse({ secretary_desk_project_id: "" }).secretary_desk_project_id,
     ).toBeNull();
+  });
+
+  it("reads outdated Secretary instructions, and defaults to current when an older server omits it", () => {
+    expect(CompanySetupReadinessSchema.parse({ ...complete, secretary_instructions_current: false })).toMatchObject({
+      secretary_instructions_current: false,
+    });
+    expect(CompanySetupReadinessSchema.parse(complete)).toMatchObject({ secretary_instructions_current: true });
   });
 
   it("reads an empty secretary id as no secretary", () => {
@@ -67,6 +76,7 @@ describe("CompanySetupReadinessSchema", () => {
       executive_floor: false,
       autopilot_daily: false,
       autopilot_weekly_paused: false,
+      secretary_instructions_current: true,
       ready: false,
     });
   });

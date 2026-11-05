@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -88,6 +89,11 @@ type CompanySetupInput struct {
 	Actor                 db.Member
 	Runtime               db.AgentRuntime
 	SecretaryInstructions string
+	// UpdateSecretaryInstructions replaces an existing Secretary's instructions
+	// with SecretaryInstructions. Setup never does this on its own: a boss's edits
+	// to the Secretary's instructions are kept unless the boss asks for the update.
+	// The previous text stays in the instruction history.
+	UpdateSecretaryInstructions bool
 	// Timezone is a valid IANA name, or empty for the actor's own timezone and
 	// then UTC.
 	Timezone string
@@ -118,7 +124,11 @@ type CompanySetupReadiness struct {
 	ExecutiveFloor         bool
 	AutopilotDaily         bool
 	AutopilotWeeklyPaused  bool
-	Ready                  bool
+	// SecretaryInstructionsCurrent is true when the Secretary's instructions are
+	// the starter template. False with a Secretary means the template has moved on
+	// (or the boss edited it); the boss can update them on purpose.
+	SecretaryInstructionsCurrent bool
+	Ready                        bool
 }
 
 // Setup creates whatever the workspace is missing and reuses the rest.
@@ -220,7 +230,17 @@ func ensureSecretary(ctx context.Context, q *db.Queries, in CompanySetupInput, w
 	if ws.SecretaryAgentID.Valid {
 		agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: ws.SecretaryAgentID, WorkspaceID: in.WorkspaceID})
 		if err == nil && !agent.ArchivedAt.Valid {
-			return agent, nil, nil
+			if !in.UpdateSecretaryInstructions {
+				return agent, nil, nil
+			}
+			updated, _, err := SetAgentInstructions(ctx, q, agent.ID, in.SecretaryInstructions, InstructionChange{
+				Source: InstructionSourceHuman,
+				Actor:  GovernanceActor{Type: GovernanceActorMember, ID: in.Actor.UserID},
+			})
+			if err != nil {
+				return db.Agent{}, nil, err
+			}
+			return updated, nil, nil
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return db.Agent{}, nil, err
@@ -457,6 +477,11 @@ func (s *CompanySetupService) Readiness(ctx context.Context, workspaceID pgtype.
 		case err == nil && !agent.ArchivedAt.Valid:
 			secretaryID = agent.ID
 			out.SecretaryID = util.UUIDToString(agent.ID)
+			template, err := SecretaryTemplateInstructions()
+			if err != nil {
+				return out, err
+			}
+			out.SecretaryInstructionsCurrent = strings.TrimSpace(agent.Instructions) == template
 		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return out, err
 		}

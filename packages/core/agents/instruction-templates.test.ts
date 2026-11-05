@@ -240,13 +240,21 @@ describe("specialist templates", () => {
 describe("secretary template", () => {
   const secretary = AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === "secretary")?.instructions ?? "";
 
-  it("reads the boss's feedback before anything else in every run", () => {
+  it("reads the boss's feedback before anything else in a brief run, and not in chat or request runs", () => {
     const feedback = secretary.indexOf("multica brief feedback --recent 14d --json");
 
-    expect(secretary).toContain("At the start of every run");
+    expect(secretary).toContain("At the start of every brief run");
+    expect(secretary).toContain("Chat turns and request runs do not start with it.");
     expect(feedback).toBeGreaterThan(-1);
     expect(feedback).toBeLessThan(secretary.indexOf("multica brief digest --since 24h --json"));
     expect(feedback).toBeLessThan(secretary.indexOf("Pull, not push:"));
+  });
+
+  it("does not run the digest first in a chat turn, and sends departmental judgment to the org map and the leaders", () => {
+    expect(secretary).toContain("Do not run the feedback or the digest first");
+    expect(secretary).toContain("multica company map --output json");
+    expect(secretary).toContain("The digest does not hold their judgment; their answers do.");
+    expect(secretary).toContain("Do not answer such a question from the digest alone.");
   });
 
   it("records standing preferences from feedback in memory", () => {
@@ -264,9 +272,11 @@ describe("secretary template", () => {
     expect(secretary).toContain("Do not invent a preference from silence");
   });
 
-  it("reads the company only through the digest, and says so first", () => {
+  it("reads status facts from the digest and analysis from the leaders' answers", () => {
     expect(secretary).toContain("multica brief digest --since 24h --json");
-    expect(secretary).toContain("The digest is the only source of company facts");
+    expect(secretary).toContain("The digest is the source of status facts");
+    expect(secretary).toContain("For analysis, the leaders' answers are the source");
+    expect(secretary).not.toContain("The digest is the only source of company facts");
     expect(secretary).toContain("never from memory");
   });
 
@@ -397,8 +407,9 @@ describe("secretary v2: chief of staff", () => {
     expect(secretary).toContain("refuses a directive without one");
   });
 
-  it("answers quick factual questions from the digest", () => {
-    expect(secretary).toContain("Answer a quick factual question from the digest");
+  it("answers plain status facts from the digest and says where they came from", () => {
+    expect(secretary).toContain("A fact about the company that the digest holds");
+    expect(secretary).toContain("saying where it came from");
   });
 
   it("keeps the daily brief procedure, which the autopilot relies on", () => {

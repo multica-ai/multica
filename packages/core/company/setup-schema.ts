@@ -20,6 +20,8 @@ export interface CompanySetupReadiness {
   autopilot_daily: boolean;
   /** The Secretary's weekly review autopilot exists and is paused. */
   autopilot_weekly_paused: boolean;
+  /** The Secretary runs the starter instructions. False when the boss has edited them or the template has moved on. */
+  secretary_instructions_current: boolean;
   /** The server's own verdict. Use isCompanySetupReady for the decision. */
   ready: boolean;
 }
@@ -29,6 +31,8 @@ export interface CompanySetupRequest {
   secretary_instructions: string;
   /** IANA timezone for the 08:00 daily brief. Omitted, the server uses the caller's saved timezone, then UTC. */
   timezone?: string;
+  /** Replace an existing Secretary's instructions with the template. Only on the boss's explicit choice. */
+  update_secretary_instructions?: boolean;
 }
 
 /** The 409 body when setup needs an online Hermes runtime first. */
@@ -58,6 +62,7 @@ export const CompanySetupReadinessSchema = z
     executive_floor: z.boolean().default(false),
     autopilot_daily: z.boolean().default(false),
     autopilot_weekly_paused: z.boolean().default(false),
+    secretary_instructions_current: z.boolean().default(true),
     ready: z.boolean().default(false),
   })
   .loose();
@@ -70,6 +75,7 @@ export const FALLBACK_COMPANY_SETUP_READINESS: CompanySetupReadiness = {
   executive_floor: false,
   autopilot_daily: false,
   autopilot_weekly_paused: false,
+  secretary_instructions_current: true,
   ready: false,
 };
 
