@@ -151,10 +151,10 @@ describe("CollapsedNavTrigger in the app shell", () => {
     expect(trigger()).not.toHaveClass("md:hidden");
   });
 
-  // Inbox brings its own list column, so the panel's open state is not what
+  // Chat brings its own list column, so the panel's open state is not what
   // the trigger reopens there; the collapsed list column is.
   it("follows the list column in spaces without a shell panel", () => {
-    const trigger = renderInShell("/acme/inbox");
+    const trigger = renderInShell("/acme/chat");
     act(() => sidebar!.setOpen(false));
     expect(trigger()).toHaveClass("md:hidden");
 

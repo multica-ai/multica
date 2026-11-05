@@ -23,12 +23,15 @@ const WIDTH_CLASS: Record<PanelWidth, string> = {
 export function ListColumn({
   collapsed = false,
   width = "nav",
+  resizeOnly = false,
   className,
   innerClassName,
   children,
 }: {
   collapsed?: boolean;
   width?: PanelWidth;
+  /** Keep the edge as a resize affordance when navigation lives in another column. */
+  resizeOnly?: boolean;
   className?: string;
   innerClassName?: string;
   children: React.ReactNode;
@@ -72,7 +75,7 @@ export function ListColumn({
       </aside>
       {!collapsed && sidebar && !sidebar.isCompact && onToggle && (
         <div className="relative w-0 shrink-0">
-          <PanelResizeHandle panelRef={ref} onToggle={onToggle} width={width} />
+          <PanelResizeHandle panelRef={ref} onToggle={onToggle} width={width} resizeOnly={resizeOnly} />
         </div>
       )}
     </>

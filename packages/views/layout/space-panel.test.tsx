@@ -57,9 +57,9 @@ describe("SpacePanel", () => {
     expect(screen.getByTestId("work-panel")).toBeInTheDocument();
   });
 
-  // Inbox, Chat and Settings render their own list column in the card.
+  // Chat and Settings supply their own navigation column.
   it("renders nothing for spaces that bring their own column", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderPanel();
     expect(panel()).toBeNull();
   });
@@ -107,14 +107,14 @@ describe("SpacePanel", () => {
     }
   });
 
-  it("previews Inbox and Chat from another space, not over their own page", () => {
+  it("previews Work navigation for Inbox and the standalone Chat list", () => {
     vi.useFakeTimers();
     try {
       renderPanel();
       act(() => shell!.toggleNav());
       act(() => shell!.requestPeek("inbox"));
       act(() => vi.advanceTimersByTime(200));
-      expect(screen.getByTestId("inbox-peek")).toBeInTheDocument();
+      expect(document.querySelector("[data-slot=space-panel-peek] [data-testid=work-panel]")).toBeInTheDocument();
       act(() => shell!.requestPeek("chat"));
       expect(screen.getByTestId("chat-peek")).toBeInTheDocument();
     } finally {
@@ -124,7 +124,7 @@ describe("SpacePanel", () => {
 
   // There the page's own list column floats instead (ListColumn).
   it("leaves the current list space's preview to its list column", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderPanel();
     act(() => shell!.toggleNav());
     act(() => shell!.requestPeek("inbox"));

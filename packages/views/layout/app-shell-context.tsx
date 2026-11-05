@@ -6,11 +6,11 @@ import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../navigation";
 
 /**
- * Spaces whose navigation lives in the shell panel. Inbox, Chat and Settings
- * are list-and-detail pages that already render their own list column in the
- * same card, so the shell adds no panel for them.
+ * Spaces whose navigation lives in the shell panel. Inbox keeps its own
+ * route/history identity and list column beside the Work navigation. Chat
+ * and Settings supply their own navigation column.
  */
-export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
+export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["inbox", "work", "team", "autopilots"]);
 
 // Opening waits for the pointer to settle so sweeping across the rail does
 // not flash every panel; closing waits long enough to cross the gap between
@@ -23,13 +23,13 @@ interface AppShellContextValue {
   /** The current space has a shell panel (collapsible with the sidebar toggle). */
   hasPanel: boolean;
   /**
-   * Inbox, Chat and Settings keep their own list column, which collapses with
-   * the space panel. Tracked apart from the panel's open state so the md–lg
-   * auto-collapse never hides a list the page needs.
+   * Chat and Settings collapse their page-owned navigation columns together
+   * with the shell panel. Inbox keeps its notification list expanded. The
+   * md–lg auto-collapse never hides a page-owned list.
    */
   listCollapsed: boolean;
   setListCollapsed: (collapsed: boolean) => void;
-  /** The sidebar toggle: the space panel and list columns together, or the compact sheet. */
+  /** Toggle the current navigation column, or the compact sheet. */
   toggleNav: () => void;
   /**
    * The current space's nav (its panel or list column) is off screen, so the
@@ -140,8 +140,8 @@ export function AppShellProvider({
   const sidebarOpen = sidebar?.open ?? true;
   const isCompact = sidebar?.isCompact ?? false;
   const usesListColumn = space !== null && !hasPanel;
-  // One toggle for the whole nav: whatever the current space shows decides
-  // the direction, and the panel and every list column follow it together.
+  // Inbox toggles only Work navigation; its page-owned list stays expanded.
+  // Other spaces retain the shared panel/list collapse preference.
   const toggleNav = useCallback(() => {
     if (isCompact || !setSidebarOpen) {
       toggleSidebar?.();
@@ -149,8 +149,8 @@ export function AppShellProvider({
     }
     const collapse = usesListColumn ? !listCollapsed : sidebarOpen;
     setSidebarOpen(!collapse);
-    setListCollapsed(collapse);
-  }, [isCompact, listCollapsed, setSidebarOpen, sidebarOpen, toggleSidebar, usesListColumn]);
+    if (space !== "inbox") setListCollapsed(collapse);
+  }, [isCompact, listCollapsed, setSidebarOpen, sidebarOpen, toggleSidebar, usesListColumn, space]);
   const navCollapsed = !isCompact && (usesListColumn ? listCollapsed : !sidebarOpen);
 
   const value = useMemo<AppShellContextValue>(
@@ -192,8 +192,9 @@ export function useAppShell(): AppShellContextValue | null {
 }
 
 /**
- * Whether a list-and-detail page (Inbox, Chat, Settings) hides its list
- * column. Below `md` those pages manage the list themselves.
+ * Whether a page-owned navigation column (Chat, Settings) hides its list.
+ * Inbox has a shell panel and keeps its notification list expanded. Below
+ * `md` the pages manage their own list/detail switch.
  */
 export function useListColumnCollapsed(): boolean {
   const shell = useAppShell();

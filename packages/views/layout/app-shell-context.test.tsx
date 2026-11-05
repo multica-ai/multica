@@ -69,12 +69,12 @@ describe("AppShellProvider", () => {
     expect(shell).toBeNull();
   });
 
-  it("gives panels to work, team and autopilots only", () => {
+  it("gives Inbox the Work panel while preserving its own space", () => {
     const cases: [string, string | null, boolean][] = [
       ["/acme/my-issues", "work", true],
       ["/acme/squads/s-1", "team", true],
       ["/acme/autopilots", "autopilots", true],
-      ["/acme/inbox", "inbox", false],
+      ["/acme/inbox", "inbox", true],
       ["/acme/chat", "chat", false],
       ["/acme/settings", "settings", false],
       ["/acme/attachments/a-1", null, false],
@@ -145,7 +145,7 @@ describe("AppShellProvider", () => {
 
     act(() => shell!.toggleNav());
     expect(sidebarState).toBe("collapsed");
-    visit("/acme/inbox");
+    visit("/acme/chat");
     expect(listColumnCollapsed).toBe(true);
 
     act(() => shell!.toggleNav());
@@ -155,7 +155,7 @@ describe("AppShellProvider", () => {
   });
 
   it("collapses a list column the md–lg auto-collapse left open", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderNavShell();
     act(() => setSidebarOpen!(false));
     expect(listColumnCollapsed).toBe(false);
@@ -208,7 +208,45 @@ describe("AppShellProvider", () => {
 
     rerender(shellAt("/acme/inbox"));
     expect(shell!.space).toBe("inbox");
-    expect(shell!.hasPanel).toBe(false);
+    expect(shell!.hasPanel).toBe(true);
     expect(shell!.spaceHref("work", "/acme/issues")).toBe("/acme/issues");
   });
+});
+
+
+it("keeps Inbox expanded when Work navigation is collapsed and preserves Chat list behavior", () => {
+  navigation.pathname = "/acme/inbox";
+  const { rerender } = renderNavShell();
+  act(() => setSidebarOpen!(false));
+  expect(listColumnCollapsed).toBe(false);
+  act(() => shell!.toggleNav());
+  expect(sidebarState).toBe("expanded");
+  act(() => shell!.toggleNav());
+  expect(sidebarState).toBe("collapsed");
+  expect(listColumnCollapsed).toBe(false);
+  expect(shell!.listCollapsed).toBe(false);
+  navigation.pathname = "/acme/chat";
+  rerender(<SidebarProvider><AppShellProvider><NavReader /></AppShellProvider></SidebarProvider>);
+  act(() => shell!.toggleNav());
+  expect(listColumnCollapsed).toBe(true);
+});
+
+it("keeps Work and Inbox URL memories separate in both workspaces", () => {
+  const { rerender } = renderShell();
+  function visit(path: string, search = "") {
+    navigation.pathname = path;
+    navigation.search = search;
+    rerender(<AppShellProvider><Reader /></AppShellProvider>);
+  }
+  visit("/acme/projects/launch", "tab=issues");
+  visit("/acme/inbox", "view=archived&issue=a");
+  expect(shell!.spaceHref("work", "/acme/issues")).toBe("/acme/projects/launch?tab=issues");
+  visit("/beta/projects/beta", "tab=overview");
+  visit("/beta/inbox", "issue=b");
+  expect(shell!.spaceHref("work", "/beta/issues")).toBe("/beta/projects/beta?tab=overview");
+  visit("/beta/agents");
+  expect(shell!.spaceHref("inbox", "/beta/inbox")).toBe("/beta/inbox?issue=b");
+  visit("/acme/agents");
+  expect(shell!.spaceHref("inbox", "/acme/inbox")).toBe("/acme/inbox?view=archived&issue=a");
+  expect(shell!.spaceHref("work", "/acme/issues")).toBe("/acme/projects/launch?tab=issues");
 });
