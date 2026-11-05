@@ -42,6 +42,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -166,6 +167,7 @@ function ProjectRowActions({
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const deleteProject = useDeleteProject();
+  const deleting = deleteProject.isPendingFor(project.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const togglePin = () => {
@@ -202,9 +204,11 @@ function ProjectRowActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
+              disabled={deleting}
+              aria-busy={deleting}
               onClick={() => setDeleteOpen(true)}
             >
-              <Trash2 className="size-3.5" />
+              {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="size-3.5" />}
               {t(($) => $.page.delete)}
             </DropdownMenuItem>
           </>
@@ -232,7 +236,10 @@ function ProjectRowActions({
               type="button"
               variant="destructive"
               size="sm"
+              disabled={deleting}
+              aria-busy={deleting}
               onClick={() => {
+                if (deleteProject.isPendingFor(project.id)) return;
                 deleteProject.mutate(project.id, {
                   onError: (err) =>
                     toast.error(
@@ -413,6 +420,7 @@ function ProjectBatchToolbar({
   const { t } = useT("projects");
   const createPin = useCreatePin();
   const deleteProject = useDeleteProject();
+  const deleting = rows.some((project) => deleteProject.isPendingFor(project.id));
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
@@ -442,9 +450,11 @@ function ProjectBatchToolbar({
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
+            disabled={deleting}
+            aria-busy={deleting}
             onClick={() => setConfirmDelete(true)}
           >
-            <Trash2 className="mr-1 size-3.5" />
+            {deleting ? <Spinner className="mr-1 size-3.5" aria-hidden="true" /> : <Trash2 className="mr-1 size-3.5" />}
             {t(($) => $.page.delete)}
           </Button>
         )}
@@ -464,7 +474,10 @@ function ProjectBatchToolbar({
               type="button"
               variant="destructive"
               size="sm"
+              disabled={deleting}
+              aria-busy={deleting}
               onClick={() => {
+                if (rows.some((project) => deleteProject.isPendingFor(project.id))) return;
                 for (const p of rows) deleteProject.mutate(p.id);
                 setConfirmDelete(false);
                 onClear();

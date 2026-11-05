@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
 import { issueKeys } from "../issues/queries";
@@ -65,7 +65,15 @@ export function useUpdateProject() {
 export function useDeleteProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  return useMutation({
+  const mutationKey = ["deleteProject", wsId] as const;
+  // Track pending identities across callers, including paused mutations whose
+  // original row or batch toolbar has unmounted.
+  useMutationState({
+    filters: { mutationKey, exact: true, status: "pending" },
+    select: (mutation) => mutation.state.variables,
+  });
+  const mutation = useMutation({
+    mutationKey,
     mutationFn: (id: string) => api.deleteProject(id),
     onSuccess: async (_data, id) => {
       // Reads started during DELETE may still contain the removed project.
@@ -88,4 +96,14 @@ export function useDeleteProject() {
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
     },
   });
+  return {
+    ...mutation,
+    // Read the cache at call time as well as subscribing above: a second
+    // confirmation can arrive before React renders the first pending update.
+    isPendingFor: (id: string) => qc.isMutating({
+      mutationKey,
+      exact: true,
+      predicate: (pending) => pending.state.variables === id,
+    }) > 0,
+  };
 }

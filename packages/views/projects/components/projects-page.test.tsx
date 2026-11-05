@@ -55,7 +55,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@multica/core/projects", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
   useUpdateProject: () => ({ mutate: mocks.updateProject }),
-  useDeleteProject: () => ({ mutate: mocks.deleteProject }),
+  useDeleteProject: () => ({ mutate: mocks.deleteProject, isPendingFor: () => false }),
   useProjectViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.projectViewState),
 }));

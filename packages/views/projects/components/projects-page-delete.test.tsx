@@ -15,6 +15,7 @@ import {
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import type { Project } from "@multica/core/types";
+import { useProjectViewStore } from "@multica/core/projects";
 import { projectKeys } from "@multica/core/projects/queries";
 import { toast } from "sonner";
 import { renderWithI18n } from "../../test/i18n";
@@ -90,6 +91,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   const listProjects = vi.fn();
 
   beforeEach(() => {
+    useProjectViewStore.setState({ viewMode: "compact" });
     qc = new QueryClient({
       defaultOptions: {
         queries: { staleTime: Infinity, retry: false },
@@ -138,11 +140,18 @@ describe("ProjectsPage deletion lifecycle", () => {
     );
   }
 
-  async function confirmDeletion() {
+  async function confirmDeletion(title?: string) {
     const user = userEvent.setup();
-    fireEvent.keyDown(screen.getByRole("button", { name: "Project actions" }), {
-      key: "ArrowDown",
-    });
+    const row = title
+      ? (screen.getByText(title).closest('[role="row"]') as HTMLElement)
+      : null;
+    const actions = row ? within(row) : screen;
+    fireEvent.keyDown(
+      actions.getByRole("button", { name: "Project actions" }),
+      {
+        key: "ArrowDown",
+      },
+    );
     await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
@@ -150,6 +159,158 @@ describe("ProjectsPage deletion lifecycle", () => {
       }),
     );
   }
+
+  async function repeatFromRowMenu() {
+    const user = userEvent.setup();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Project actions" }), {
+      key: "ArrowDown",
+    });
+    const action = await screen.findByRole("menuitem", { name: "Delete" });
+    await user.click(action);
+    const dialog = screen.queryByRole("dialog");
+    if (dialog)
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+  }
+
+  async function submitBatch() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+    const action = screen.getByRole("button", { name: "Delete" });
+    await user.click(action);
+    const dialog = screen.queryByRole("dialog");
+    if (dialog)
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+  }
+
+  it.each([
+    ["compact", "online"],
+    ["compact", "offline"],
+    ["comfortable", "online"],
+    ["comfortable", "offline"],
+  ] as const)(
+    "does not resubmit a %s project after remount while %s",
+    async (mode, connection) => {
+      useProjectViewStore.setState({ viewMode: mode });
+      if (connection === "offline") onlineManager.setOnline(false);
+      const page = renderPage();
+      await confirmDeletion();
+      await waitFor(() =>
+        expect(qc.getMutationCache().getAll()[0]?.state.status).toBe("pending"),
+      );
+      page.unmount();
+      renderPage();
+      await repeatFromRowMenu();
+      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
+      expect(
+        qc
+          .getMutationCache()
+          .getAll()
+          .filter((m) => m.state.status === "pending"),
+      ).toHaveLength(1);
+      act(() => onlineManager.setOnline(true));
+      await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+      listProjects.mockResolvedValue({ projects: [], total: 0 });
+      await act(async () => pending.resolve());
+      await waitFor(() =>
+        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
+      );
+      expect(deleteProject).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["online", "offline"])(
+    "does not resubmit a batch through remounted toolbar or row while %s",
+    async (connection) => {
+      if (connection === "offline") onlineManager.setOnline(false);
+      renderPage();
+      await submitBatch();
+      // Submission clears selection and unmounts the batch mutation owner.
+      expect(
+        screen.getByRole("checkbox", { name: "Select row" }),
+      ).not.toBeChecked();
+      await submitBatch();
+      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
+      expect(
+        qc
+          .getMutationCache()
+          .getAll()
+          .filter((m) => m.state.status === "pending"),
+      ).toHaveLength(1);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+      await repeatFromRowMenu();
+      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
+      expect(
+        qc
+          .getMutationCache()
+          .getAll()
+          .filter((m) => m.state.status === "pending"),
+      ).toHaveLength(1);
+      act(() => onlineManager.setOnline(true));
+      await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+      listProjects.mockResolvedValue({ projects: [], total: 0 });
+      await act(async () => pending.resolve());
+      await waitFor(() =>
+        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
+      );
+      expect(deleteProject).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["row", "batch"])(
+    "re-enables deletion after a failed %s request, including after unmount",
+    async (source) => {
+      const page = renderPage();
+      if (source === "row") await confirmDeletion();
+      else await submitBatch();
+      await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+      page.unmount();
+      renderPage();
+      await act(async () => pending.reject(new Error("Forbidden")));
+      await waitFor(() =>
+        expect(qc.getMutationCache().getAll()[0]?.state.status).toBe("error"),
+      );
+      const retry = deferred();
+      deleteProject.mockReturnValue(retry.promise);
+      if (source === "row") await confirmDeletion();
+      else await submitBatch();
+      await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(2));
+      expect(qc.getQueryData(detailKey)).toEqual(project);
+      listProjects.mockResolvedValue({ projects: [], total: 0 });
+      await act(async () => retry.resolve());
+      await waitFor(() =>
+        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
+      );
+    },
+  );
+
+  it("blocks an overlapping batch while allowing a different project to be deleted", async () => {
+    const other = { ...project, id: "project-2", title: "Another project" };
+    qc.setQueryData(listKey, { projects: [project, other], total: 2 });
+    listProjects.mockResolvedValue({ projects: [project, other], total: 2 });
+    renderPage();
+    await confirmDeletion(project.title);
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+    const batchAction = screen.getByRole("button", { name: "Delete" });
+    expect(batchAction).toBeDisabled();
+    expect(batchAction).toHaveAttribute("aria-busy", "true");
+    await user.click(batchAction);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await confirmDeletion(other.title);
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(2));
+    expect(deleteProject.mock.calls.map(([id]) => id)).toEqual([
+      project.id,
+      other.id,
+    ]);
+    listProjects.mockResolvedValue({ projects: [], total: 0 });
+    await act(async () => pending.resolve());
+    await waitFor(() =>
+      expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(other.title)).not.toBeInTheDocument();
+  });
 
   it.each([
     ["403", Object.assign(new Error("Forbidden"), { status: 403 })],

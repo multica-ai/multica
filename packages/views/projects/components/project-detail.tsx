@@ -12,6 +12,7 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -146,6 +147,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const deleting = deleteProject.isPendingFor(projectId);
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -227,7 +229,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const handleDelete = useCallback(() => {
-    if (!project) return;
+    if (!project || deleteProject.isPendingFor(project.id)) return;
     deleteProject.mutate(project.id, {
       onSuccess: () => {
         toast.success(t(($) => $.detail.toast_project_deleted));
@@ -549,9 +551,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               variant="destructive"
+                              disabled={deleting}
+                              aria-busy={deleting}
                               onClick={() => setDeleteDialogOpen(true)}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
                               {t(($) => $.detail.delete_action)}
                             </DropdownMenuItem>
                           </>
@@ -623,7 +627,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              <AlertDialogAction disabled={deleting} aria-busy={deleting} onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
                 {t(($) => $.delete_dialog.confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>

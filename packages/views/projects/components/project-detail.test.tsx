@@ -9,6 +9,7 @@ import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
   role: "admin",
+  deletionPending: false,
   copyText: vi.fn(),
   deleteProject: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
@@ -51,7 +52,7 @@ vi.mock("@multica/core/projects/queries", () => ({
 
 vi.mock("@multica/core/projects/mutations", () => ({
   useUpdateProject: () => ({ mutate: vi.fn() }),
-  useDeleteProject: () => ({ mutate: mocks.deleteProject }),
+  useDeleteProject: () => ({ mutate: mocks.deleteProject, isPendingFor: () => mocks.deletionPending }),
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -135,11 +136,13 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({
     children,
     onClick,
+    disabled,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
+    disabled?: boolean;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" onClick={onClick} disabled={disabled}>
       {children}
     </button>
   ),
@@ -198,11 +201,13 @@ vi.mock("@multica/ui/components/ui/alert-dialog", () => ({
   AlertDialogAction: ({
     children,
     onClick,
+    disabled,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
+    disabled?: boolean;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" onClick={onClick} disabled={disabled}>
       {children}
     </button>
   ),
@@ -313,6 +318,7 @@ function renderProjectDetail() {
 
 beforeEach(() => {
   mocks.role = "admin";
+  mocks.deletionPending = false;
   mocks.copyText.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset();
   mocks.getShareableUrl.mockClear();
@@ -362,6 +368,27 @@ describe("ProjectDetail project deletion", () => {
 
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Project deleted");
     expect(mocks.push).toHaveBeenCalledWith("/test-workspace/projects");
+  });
+
+  it("disables the detail delete action while another caller is deleting this project", async () => {
+    mocks.deletionPending = true;
+    renderProjectDetail();
+    const user = userEvent.setup();
+    const action = screen.getByRole("button", { name: "Delete project" });
+    expect(action).toBeDisabled();
+    await user.click(action);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
+  });
+
+  it("checks current pending state again when confirming a previously opened dialog", async () => {
+    renderProjectDetail();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete project" }));
+    // A different list/batch caller starts deleting after this dialog opens.
+    mocks.deletionPending = true;
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
   });
 
   it("offers deletion to the project creator", () => {
