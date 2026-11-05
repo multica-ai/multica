@@ -325,11 +325,12 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name        string `json:"name"`
-		RuntimeMode string `json:"runtime_mode,omitempty"`
-		Type        string `json:"type"`
-		Version     string `json:"version"` // agent CLI version (claude/codex)
-		Status      string `json:"status"`
+		Name         string `json:"name"`
+		RuntimeMode  string `json:"runtime_mode,omitempty"`
+		Type         string `json:"type"`
+		Version      string `json:"version"` // agent CLI version (claude/codex)
+		LaunchHeader string `json:"launch_header"`
+		Status       string `json:"status"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -775,10 +776,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":      runtime.Version,
-			"cli_version":  req.CLIVersion,
-			"launched_by":  req.LaunchedBy,
-			"capabilities": requestClientCapabilities(r),
+			"version":       runtime.Version,
+			"launch_header": runtime.LaunchHeader,
+			"cli_version":   req.CLIVersion,
+			"launched_by":   req.LaunchedBy,
+			"capabilities":  requestClientCapabilities(r),
 		})
 
 		var registered db.AgentRuntime

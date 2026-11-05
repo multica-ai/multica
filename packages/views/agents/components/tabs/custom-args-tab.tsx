@@ -166,7 +166,13 @@ export function CustomArgsTab({
     </form>
   );
 
-  const launchHeader = runtimeDevice?.launch_header;
+  // OpenCode custom arguments are run flags and select the run fallback.
+  const launchHeader =
+    runtimeDevice?.provider === "opencode" &&
+    runtimeDevice.launch_header === "opencode acp" &&
+    currentArgs.length > 0
+      ? "opencode run (json)"
+      : runtimeDevice?.launch_header;
   const launchCommand = launchHeader
     ? [launchHeader, ...currentArgs.map(formatArgForPreview)].join(" ")
     : null;

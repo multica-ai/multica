@@ -542,3 +542,22 @@ func TestRegisterRuntimes_ProfileCompatibilityTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterRuntimes_RefreshesResolvedLaunchHeader(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{"opencode": {Path: "/unused/opencode", Command: "opencode"}}
+	for _, override := range []string{"run", "", "run"} {
+		t.Setenv("MULTICA_OPENCODE_TRANSPORT", override)
+		if _, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+			t.Fatal(err)
+		}
+		want := "opencode acp"
+		if override == "run" {
+			want = "opencode run (json)"
+		}
+		if len(fx.sentRuntimes) != 1 || fx.sentRuntimes[0]["launch_header"] != want {
+			t.Fatalf("registration = %v, want header %q", fx.sentRuntimes, want)
+		}
+	}
+}

@@ -474,3 +474,20 @@ func TestRuntimeHeatmapEndpointsUseViewerTZ(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeToResponseLaunchHeader(t *testing.T) {
+	for _, tc := range []struct{ metadata, want string }{
+		{`{"launch_header":"opencode acp"}`, "opencode acp"},
+		{`{}`, "opencode run (json)"},
+		{`{"launch_header":""}`, "opencode run (json)"},
+		{`{"launch_header":"  "}`, "opencode run (json)"},
+		{`{"launch_header":42}`, "opencode run (json)"},
+		{`null`, "opencode run (json)"},
+		{`[]`, "opencode run (json)"},
+	} {
+		got := runtimeToResponse(db.AgentRuntime{Provider: "opencode", Metadata: []byte(tc.metadata)})
+		if got.LaunchHeader != tc.want {
+			t.Errorf("metadata %s: header = %q, want %q", tc.metadata, got.LaunchHeader, tc.want)
+		}
+	}
+}

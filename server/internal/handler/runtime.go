@@ -61,6 +61,13 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
+	launchHeader := agent.LaunchHeader(rt.Provider)
+	if fields, ok := metadata.(map[string]any); ok {
+		if header, ok := fields["launch_header"].(string); ok && strings.TrimSpace(header) != "" {
+			launchHeader = header
+		}
+	}
+
 	return AgentRuntimeResponse{
 		ID:           uuidToString(rt.ID),
 		WorkspaceID:  uuidToString(rt.WorkspaceID),
@@ -69,7 +76,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		CustomName:   textToPtr(rt.CustomName),
 		RuntimeMode:  rt.RuntimeMode,
 		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
+		LaunchHeader: launchHeader,
 		Status:       rt.Status,
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
