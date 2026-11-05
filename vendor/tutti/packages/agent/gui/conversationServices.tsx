@@ -355,6 +355,7 @@ export interface ConversationDataService {
 }
 
 export interface ConversationServices extends AgentConversationServices {
+  navigation?(id: string): import("@multica/conversation-client/services").ConversationNavigation | undefined;
   conversations: ConversationDataService;
 
   attachments?: AttachmentService;

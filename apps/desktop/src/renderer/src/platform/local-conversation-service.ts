@@ -152,6 +152,7 @@ export function localConversationSource(
   scope: LocalV2Scope
 ): LocalConversationSource {
   return {
+    navigation: (id) => store.navigation(id),
     open: (id) => store.open(id),
     ensure: (id) => store.ensure(id),
     refresh: (id) => store.refresh(id),

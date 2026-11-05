@@ -9,6 +9,7 @@ const roots = [
   "packages/tutti-agent-gui-host/src",
   ...[
     "pages/local-conversation-flow.tsx",
+    "pages/local-conversation-session-row.tsx",
     "pages/local-side-workspace.tsx",
     "pages/local-side-feedback.tsx",
     "pages/remote-folder-picker.tsx",

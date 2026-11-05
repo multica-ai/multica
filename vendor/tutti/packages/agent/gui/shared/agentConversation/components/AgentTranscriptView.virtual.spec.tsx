@@ -6,7 +6,7 @@ import {
   waitFor
 } from "@testing-library/react";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
-import { createRef } from "react";
+import { createRef, useReducer } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentConversationVM } from "../contracts/agentConversationVM";
 import type { AgentTranscriptRowVM } from "../contracts/agentTranscriptRowVM";
@@ -18,6 +18,7 @@ const virtualizerMockState = vi.hoisted(() => ({
   scrollRect: { height: 480, width: 800 },
   virtualIndexes: [100, 101, 102, 103, 104],
   containerRef: vi.fn(),
+  refresh: () => {},
   isAtEnd: vi.fn(() => true),
   scrollToEnd: vi.fn(),
   scrollToOffset: vi.fn(),
@@ -38,8 +39,10 @@ vi.mock("../../../i18n/index", () => ({
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: vi.fn(() =>
-    Object.assign(virtualizerMockState.instance, {
+  useVirtualizer: vi.fn(() => {
+    const [, refresh] = useReducer((value: number) => value + 1, 0);
+    virtualizerMockState.refresh = refresh;
+    return Object.assign(virtualizerMockState.instance, {
       getTotalSize: () => 20000,
       getVirtualItems: () =>
         virtualizerMockState.virtualIndexes.map((index) => ({
@@ -57,9 +60,14 @@ vi.mock("@tanstack/react-virtual", () => ({
       scrollToEnd: virtualizerMockState.scrollToEnd,
       scrollToOffset: virtualizerMockState.scrollToOffset,
       scrollToIndex: virtualizerMockState.scrollToIndex
-    })
-  )
+    });
+  })
 }));
+
+vi.mock("./agentTurnWorkSectionModel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./agentTurnWorkSectionModel")>();
+  return { ...actual, buildAgentTurnWorkSectionModel: vi.fn(actual.buildAgentTurnWorkSectionModel) };
+});
 
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
@@ -67,6 +75,9 @@ import type {
   AgentTranscriptVirtualScrollController
 } from "./AgentTranscriptView";
 import { AgentTranscriptLayout as AgentTranscriptView } from "./AgentTranscriptView";
+import { AgentTranscriptViewport } from "./AgentTranscriptViewport";
+import { TranscriptPresentationModel } from "../../../state/TranscriptPresentationModel";
+import { buildAgentTurnWorkSectionModel } from "./agentTurnWorkSectionModel";
 
 const TRANSCRIPT_LABELS = {
   thinkingLabel: "Thought process",
@@ -107,6 +118,72 @@ describe("AgentTranscriptView virtual rendering", () => {
       undefined;
   });
 
+  it("builds only newly visible turn models when the virtual window grows", async () => {
+    virtualizerMockState.virtualIndexes = [10];
+    render(
+      <div data-testid="agent-gui-timeline" style={{ overflow: "auto" }}>
+        <AgentTranscriptView
+          conversation={conversationWithMultiRowTurns(40)}
+          labels={TRANSCRIPT_LABELS}
+        />
+      </div>
+    );
+    await waitFor(() => expect(screen.getByText("turn 10 user row")).toBeTruthy());
+    vi.mocked(buildAgentTurnWorkSectionModel).mockClear();
+
+    virtualizerMockState.virtualIndexes = [10, 11];
+    act(() => virtualizerMockState.refresh());
+
+    expect(screen.getByText("turn 11 user row")).toBeTruthy();
+    expect(buildAgentTurnWorkSectionModel).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(buildAgentTurnWorkSectionModel).mock.calls[0]?.[0].key).toBe("turn-11");
+  });
+
+  it("keeps structural projections when only viewport layout options change", () => {
+    virtualizerMockState.virtualIndexes = [10];
+    const conversation = conversationWithMultiRowTurns(40);
+    const rendered = render(
+      <div data-testid="agent-gui-timeline" style={{ overflow: "auto" }}>
+        <AgentTranscriptView conversation={conversation} labels={TRANSCRIPT_LABELS} virtualListLayoutRevision={0} />
+      </div>
+    );
+    vi.mocked(buildAgentTurnWorkSectionModel).mockClear();
+    rendered.rerender(
+      <div data-testid="agent-gui-timeline" style={{ overflow: "auto" }}>
+        <AgentTranscriptView conversation={conversation} labels={TRANSCRIPT_LABELS} virtualListLayoutRevision={1} followEndMode="detached" />
+      </div>
+    );
+    expect(useVirtualizer).toHaveBeenLastCalledWith(expect.objectContaining({ followOnAppend: false }));
+    expect(buildAgentTurnWorkSectionModel).not.toHaveBeenCalled();
+  });
+
+  it("reuses visible turn content when virtual positions and the range change", async () => {
+    virtualizerMockState.virtualIndexes = [10];
+    const conversation = conversationWithMultiRowTurns(40);
+    const model = TranscriptPresentationModel.fromConversation(conversation, false);
+    const renderTurn = vi.fn((group: { key: string }) => <p>Content {group.key}</p>);
+    render(
+      <div data-testid="agent-gui-timeline" style={{ overflow: "auto" }}>
+        <AgentTranscriptViewport
+          model={model}
+          virtualize
+          renderTurnGroup={renderTurn}
+        />
+      </div>
+    );
+    await waitFor(() => expect(screen.getByText("Content turn-10")).toBeTruthy());
+    renderTurn.mockClear();
+
+    act(() => virtualizerMockState.refresh());
+    expect(renderTurn).not.toHaveBeenCalled();
+
+    virtualizerMockState.virtualIndexes = [10, 11];
+    act(() => virtualizerMockState.refresh());
+    expect(screen.getByText("Content turn-11")).toBeTruthy();
+    expect(renderTurn).toHaveBeenCalledTimes(1);
+    expect(renderTurn.mock.calls[0]?.[0].key).toBe("turn-11");
+  });
+
   it("does not virtualize normal short conversations", () => {
     virtualizerMockState.virtualIndexes = [0];
 
@@ -127,6 +204,7 @@ describe("AgentTranscriptView virtual rendering", () => {
     ).toBeNull();
     expect(screen.getByText("virtual transcript row 0")).toBeTruthy();
     expect(screen.getByText("virtual transcript row 11")).toBeTruthy();
+    expect(useVirtualizer).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
   });
 
   it("virtualizes by turn and keeps all rows from the visible turn mounted together", async () => {

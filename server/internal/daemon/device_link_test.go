@@ -41,6 +41,7 @@ func (a *linkAccount) fetch(context.Context) ([]p2p.Peer, error) {
 }
 
 type linkDevice struct {
+	svc   *service.Service
 	id    peer.ID
 	p2p   *p2p.Service
 	v2    *localhost.V2
@@ -84,7 +85,7 @@ func newLinkDevice(t *testing.T, acct *linkAccount, key crypto.PrivKey, token st
 	link.register(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &linkDevice{id: ps.ID(), p2p: ps, v2: v2, link: link, token: token, srv: srv}
+	return &linkDevice{svc: svc, id: ps.ID(), p2p: ps, v2: v2, link: link, token: token, srv: srv}
 }
 
 func newLinkKey(t *testing.T) (crypto.PrivKey, peer.ID) {

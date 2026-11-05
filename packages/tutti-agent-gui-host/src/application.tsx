@@ -84,8 +84,7 @@ function AgentGuiApplicationRender({
   const [node, setNode] = useState<NodeState>(() =>
     initialNodeState(initial, handle)
   );
-  // The composer remounts between an existing conversation and its home.
-  // Keep the requested target outside that composer until the old session exits.
+  // Keep the requested target until the composer has left the old session scope.
   const [pendingTarget, setPendingTarget] = useState<{
     target: ReturnType<typeof executionTargets>[number];
     fromSession: string;

@@ -1562,6 +1562,233 @@
           "$ref": "#/$defs/error"
         }
       }
+    },
+    "navigation": {
+      "type": "object",
+      "required": [
+        "store_generation",
+        "snapshot_seq",
+        "node_count",
+        "nodes",
+        "range",
+        "turns"
+      ],
+      "properties": {
+        "store_generation": {
+          "type": "string"
+        },
+        "snapshot_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "node_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "node_index",
+              "message_id",
+              "turn_id",
+              "turn_index",
+              "summary",
+              "has_agent_response"
+            ],
+            "properties": {
+              "node_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "message_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "turn_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "turn_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "summary": {
+                "type": "string"
+              },
+              "has_agent_response": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "range": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "start_index",
+                "end_index",
+                "has_before",
+                "has_after"
+              ],
+              "properties": {
+                "start_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "has_before": {
+                  "type": "boolean"
+                },
+                "has_after": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "turns": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "turn_index",
+              "status",
+              "started_at",
+              "messages",
+              "events"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "turn_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": "string"
+              },
+              "completed_at": {
+                "type": "string"
+              },
+              "messages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "role",
+                    "content",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "attachment_ids": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "failed": {
+                      "type": "boolean"
+                    },
+                    "steered": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/event"
+                }
+              }
+            }
+          }
+        },
+        "directory_range": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "start_index",
+                "end_index",
+                "has_before",
+                "has_after"
+              ],
+              "properties": {
+                "start_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "has_before": {
+                  "type": "boolean"
+                },
+                "has_after": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "range": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "turns": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

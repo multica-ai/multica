@@ -10,6 +10,7 @@ import {
   Component,
   Profiler,
   useEffect,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode
@@ -27,6 +28,7 @@ import type {
   LocalConversationSource
 } from "./protocol";
 import { createMulticaAgentGuiRuntime } from "./runtime";
+import { installConversationUiProfile } from "./ui-performance";
 import { observer } from "mobx-react-lite";
 import { observer as observeClass } from "mobx-react";
 const ErrorView = observer(ErrorViewRender);
@@ -206,9 +208,22 @@ const ProfilerBinding1 = observer(function ProfilerBinding1({
   initial,
   root
 }: ProfilerBinding1Props) {
+  const profile = useRef<ReturnType<typeof installConversationUiProfile> | null>(null);
+  useEffect(() => {
+    if (!import.meta.env.DEV || !state.handle) return;
+    const current = installConversationUiProfile(root, client, state.handle, initial);
+    profile.current = current;
+    return () => {
+      current.dispose();
+      if (profile.current === current) profile.current = null;
+    };
+  }, [root, client, state.handle, initial]);
   const onRenderProp2 = usePersistCallback<
     NonNullable<React.ComponentProps<typeof Profiler>["onRender"]>
-  >((_id, _phase, actualDuration) => state.handle?.rendered(actualDuration));
+  >((_id, _phase, actualDuration) => {
+    state.handle?.rendered(actualDuration);
+    profile.current?.rendered(actualDuration);
+  });
   return (
     <Profiler id="agent-gui" onRender={onRenderProp2}>
       <AgentGuiApplication

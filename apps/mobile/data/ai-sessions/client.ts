@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
-import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { LOCAL_TIMING_REPORT_CAPABILITY, LOCAL_TIMING_REQUEST_HEADER, isLocalTimingModelOutput, localTimingCloseReason, localTimingFailure, localTimingRequestId, type LocalTimingRecord } from "@multica/core/local-conversation/timing";
 import { createRequestId } from "@/lib/request-id";
@@ -141,6 +141,10 @@ export class AISessionClient {
   async snapshot(id: string, signal?: AbortSignal) {
     const next = await this.request("GET", `/sessions/${encodeURIComponent(id)}/snapshot`, localV2SnapshotSchema, undefined, signal, REQUEST_TIMEOUT_MS, id);
     return retainSnapshotHistory(this.qc.getQueryData<LocalV2Snapshot>(aiKeys.snapshot(this.scope, id)), next);
+  }
+
+  navigation(id: string, query: LocalV2NavigationQuery = {}, signal?: AbortSignal) {
+    return this.request("GET", localV2NavigationPath(id, query), localV2NavigationSchema, undefined, signal);
   }
   private async refreshQueue(id: string) {
     if (this.refreshingQueues.has(id)) return;

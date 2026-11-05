@@ -29,9 +29,19 @@ const restored = (id: string) => ({
 function service(options: Partial<PromptServiceOptions<Input, Display>> = {}) {
   const update = vi.fn(async () => empty(2));
   const enqueue = vi.fn(async () => empty(2));
+  const turns = options.turns ?? {
+    session: () => null,
+    turn: () => null,
+    deleted: () => false,
+    runtimeBlocked: () => false,
+    interactionStatus: () => null,
+    stopTarget: () => null,
+    turnForSubmit: () => null
+  };
   return {
     update,
     enqueue,
+    turns,
     prompts: new PromptService<Input, Display>({
       enqueue,
       update,
@@ -42,15 +52,7 @@ function service(options: Partial<PromptServiceOptions<Input, Display>> = {}) {
       recoverEditRetry: vi.fn(),
       reconcile: vi.fn(),
       reconcileWorkspace: vi.fn(),
-      turns: {
-        session: () => null,
-        turn: () => null,
-        deleted: () => false,
-        runtimeBlocked: () => false,
-        interactionStatus: () => null,
-        stopTarget: () => null,
-        turnForSubmit: () => null
-      },
+      turns,
       ...options
     })
   };
@@ -105,6 +107,83 @@ describe("messages restored after a reload", () => {
 });
 
 describe("presenting the queue", () => {
+  it.each(["ready", "paused", "failed", "other-turn"])("presents an immediate submission against the authoritative %s queue state", async (state) => {
+    const { prompts, turns } = service();
+    const turn = vi.spyOn(turns, "turnForSubmit");
+    if (state === "other-turn")
+      vi.spyOn(turns, "session").mockReturnValue({ workspaceId: "w", activeTurnId: "other" });
+    prompts.submit(
+      { agentSessionId: "s", clientSubmitId: "a" },
+      { id: "a", clientSubmitId: "a", visibleInQueue: false }
+    );
+    await settled();
+    prompts.receive("s", {
+      revision: 3, paused: state === "paused", error: state === "failed" ? "Retry" : undefined,
+      items: [{ requestId: "a", display: { id: "a", clientSubmitId: "a" } }] as never
+    });
+    expect(prompts.visibleQueuedPrompts("s").map((item) => item.id)).toEqual(state === "ready" ? [] : ["a"]);
+    turn.mockReturnValue("turn-a");
+    prompts.lifecycleChanged();
+    expect(prompts.prompts("s")).toEqual([]);
+    prompts.dispose();
+  });
+  it.each([false, true])("retains an accepted immediate message until its transcript arrives (snapshot first: %s)", async (snapshotFirst) => {
+    const saved: unknown[] = [];
+    const { prompts, turns, enqueue } = service({ save: (queues) => saved.push(queues) });
+    const delivered = vi.spyOn(turns, "turnForSubmit");
+    prompts.submit(
+      { agentSessionId: "s", clientSubmitId: "a" },
+      { id: "a", clientSubmitId: "a", visibleInQueue: false }
+    );
+    if (snapshotFirst) {
+      prompts.receive("s", {
+        revision: 1, paused: false, dispatchingRequestId: "a",
+        items: [{ requestId: "a", display: { id: "a", clientSubmitId: "a" } }] as never
+      });
+      prompts.receive("s", empty(3));
+    }
+    await settled();
+    expect(prompts.pending("s")).toEqual([]);
+    expect(saved.at(-1)).toEqual([]);
+    expect(prompts.visibleQueuedPrompts("s")).toEqual([]);
+    expect(prompts.pendingSubmits("s")).toMatchObject([{ clientSubmitId: "a", status: "accepted" }]);
+    expect(prompts.isSubmitting("s")).toBe(false);
+    expect(prompts.hasUnconfirmedSubmit("s")).toBe(true);
+    expect(prompts.hasPrompt("s", "a")).toBe(true);
+    expect(enqueue).toHaveBeenCalledOnce();
+    delivered.mockReturnValue("turn-a");
+    prompts.lifecycleChanged();
+    expect(prompts.pendingSubmits("s")).toEqual([]);
+    expect(prompts.hasPrompt("s", "a")).toBe(false);
+    prompts.dispose();
+  });
+
+  it("does not restore an optimistic message when its transcript precedes admission acknowledgement", async () => {
+    const { prompts, turns } = service();
+    vi.spyOn(turns, "turnForSubmit").mockReturnValue("turn-a");
+    prompts.submit(
+      { agentSessionId: "s", clientSubmitId: "a" },
+      { id: "a", clientSubmitId: "a", visibleInQueue: false }
+    );
+    await settled();
+    expect(prompts.pendingSubmits("s")).toEqual([]);
+    prompts.dispose();
+  });
+
+  it("clears the accepted presentation after explicit removal", async () => {
+    const { prompts, enqueue } = service();
+    prompts.submit(
+      { agentSessionId: "s", clientSubmitId: "a" },
+      { id: "a", clientSubmitId: "a", visibleInQueue: false }
+    );
+    await settled();
+    expect(prompts.pendingSubmits("s")).toHaveLength(1);
+    prompts.update("s", "remove", "a");
+    await settled();
+    expect(prompts.pendingSubmits("s")).toEqual([]);
+    expect(enqueue).toHaveBeenCalledOnce();
+    prompts.dispose();
+  });
   it("tells observers once per change, after saving what has not been handed over", async () => {
     const order: string[] = [];
     const { prompts } = service({ save: () => order.push("save") });

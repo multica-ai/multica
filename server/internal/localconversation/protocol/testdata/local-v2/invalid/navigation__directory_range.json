@@ -1,0 +1,23 @@
+{
+  "store_generation": "g",
+  "snapshot_seq": 100,
+  "node_count": 25,
+  "nodes": [
+    {
+      "node_index": 2,
+      "message_id": "m4",
+      "turn_id": "t4",
+      "turn_index": 4,
+      "summary": "A user message",
+      "has_agent_response": false
+    }
+  ],
+  "range": null,
+  "turns": [],
+  "directory_range": {
+    "start_index": 4,
+    "end_index": -1,
+    "has_before": true,
+    "has_after": true
+  }
+}

@@ -3,12 +3,21 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
-import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema } from "./v2";
+import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema, localV2NavigationSchema, localV2NavigationPath } from "./v2";
 
 const root = join(__dirname, "../../../server/internal/localconversation/protocol/testdata/local-v2");
-const schemas: Record<string, ZodType> = { server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema };
+const schemas: Record<string, ZodType> = { server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema, navigation: localV2NavigationSchema };
 
 describe("local conversation v2 wire schemas", () => {
+  it("rejects malformed metadata ranges without requiring body data", () => {
+    const page = JSON.parse(readFileSync(join(root, "valid/navigation__metadata.json"), "utf8"));
+    expect(localV2NavigationSchema.safeParse({ ...page, directory_range: { ...page.directory_range, end_index: -1 } }).success).toBe(false);
+    expect(localV2NavigationSchema.safeParse({ ...page, nodes: [{ ...page.nodes[0], turn_index: page.directory_range.end_index + 1 }] }).success).toBe(false);
+  });
+  it("builds the same navigation path for local, P2P and mobile transports", () => {
+    expect(localV2NavigationPath("a/b")).toBe("/sessions/a%2Fb/navigation");
+    expect(localV2NavigationPath("c", { nodeIndex: 2, before: 4, after: 5, generation: "g", includeBody: false })).toBe("/sessions/c/navigation?node_index=2&before=4&after=5&store_generation=g&include_body=false");
+  });
   const valid = readdirSync(join(root, "valid")).filter((file) => file.endsWith(".json"));
 
   it("has golden samples to decode", () => {

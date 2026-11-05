@@ -237,7 +237,10 @@ export function createMulticaAgentGuiRuntime(
           };
         },
         storedId: (sessionId) => migration.canonicalId(sessionId),
-        busy: isModelSelectionBusy,
+        busy: (sessionId) => {
+          commits.flush();
+          return isModelSelectionBusy(sessionId);
+        },
         selectionChanged() {
           runInAction(() => workspaceVersion.set(workspaceVersion.get() + 1));
         },
@@ -598,7 +601,6 @@ export function createMulticaAgentGuiRuntime(
     };
   }
   function isModelSelectionBusy(sessionId?: string | null) {
-    commits.flush();
     if (!sessionId) return false;
     const canonical = sessionState.session(sessionId);
     return Boolean(
@@ -656,8 +658,8 @@ export function createMulticaAgentGuiRuntime(
       }
     for (const id of wanted) {
       if (openLocal.has(id)) continue;
-      const stopObserving = source.observe(id, (events) =>
-        receiveLocal(id, events)
+      const stopObserving = source.observe(id, (events, change) =>
+        receiveLocal(id, events, change)
       );
       const leave = source.open(id);
       openLocal.set(id, () => {
@@ -816,7 +818,7 @@ export function createMulticaAgentGuiRuntime(
   }
 
   /** A local conversation changed: new events, a page of history or its queue. */
-  function receiveLocal(guiId: string, events: readonly LocalV2Event[]) {
+  function receiveLocal(guiId: string, events: readonly LocalV2Event[], change?: "navigation") {
     const conversation = localConversation(guiId);
     if (!conversation) return;
     for (const event of events) {
@@ -835,7 +837,8 @@ export function createMulticaAgentGuiRuntime(
     );
     commits.schedule(guiId);
     // A page of history or a queue change is not a stream: only this tick's changes can join it.
-    if (!events.length) queueMicrotask(() => commits.flush());
+    if (change === "navigation") commits.flush();
+    else if (!events.length) queueMicrotask(() => commits.flush());
   }
 
   function commitLocal(guiId: string) {
@@ -1227,6 +1230,10 @@ export function createMulticaAgentGuiRuntime(
 
   const rowModels = new Map<string, ConversationRowsModel>();
   const runtime: ConversationServices = {
+    navigation: source.navigation ? (id) => {
+      const resolved = resolvedServerId(id);
+      return resolved ? source.navigation!(resolved) : undefined;
+    } : undefined,
     conversations: {
       refreshWorkspace: async (id) => {
         scope(id);
@@ -1399,6 +1406,7 @@ export function createMulticaAgentGuiRuntime(
       turnMessages: (id, turnId) => transcriptModel.turnMessages(id, turnId),
       hasOlderMessages: (id) => {
         transcriptModel.revision(id);
+        if (runtime.navigation?.(id)?.window) return false;
         return localConversation(id)?.hasOlderTurns ?? false;
       },
       conversationIds: () => transcriptModel.conversationIds()

@@ -48,7 +48,8 @@ export function findParticipantHeaderRenderKeys(
   groups: readonly AgentTranscriptTurnGroup[],
   rowKeys: readonly string[],
   modelByGroupKey: ReadonlyMap<string, AgentTurnWorkSectionModel | null>,
-  participantTurnIndexByRowIndex: ReadonlyMap<number, number>
+  participantTurnIndexByRowIndex: ReadonlyMap<number, number>,
+  groupRowOffsets?: ReadonlyMap<string, number>
 ): ReadonlySet<string> {
   const headerCandidateByTurn = new Map<
     number,
@@ -84,8 +85,9 @@ export function findParticipantHeaderRenderKeys(
       if (row.kind !== "message" || row.messages.length === 0) {
         continue;
       }
+      const rowIndex = (groupRowOffsets?.get(group.key) ?? 0) + entry.rowIndex;
       const participantTurnIndex =
-        participantTurnIndexByRowIndex.get(entry.rowIndex) ?? entry.rowIndex;
+        participantTurnIndexByRowIndex.get(rowIndex) ?? rowIndex;
       let candidateBySpeaker = headerCandidateByTurn.get(participantTurnIndex);
       if (!candidateBySpeaker) {
         candidateBySpeaker = new Map();
@@ -99,7 +101,7 @@ export function findParticipantHeaderRenderKeys(
         continue;
       }
       candidateBySpeaker.set(row.speaker, {
-        renderKey: entry.renderKey ?? rowKeys[entry.rowIndex] ?? row.id,
+        renderKey: entry.renderKey ?? rowKeys[rowIndex] ?? row.id,
         visibilityPriority
       });
     }

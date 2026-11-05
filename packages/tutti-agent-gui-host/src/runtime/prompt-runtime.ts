@@ -16,7 +16,7 @@ AgentSessionSubmitPromptInput,
 PendingActivationIntentRecord
 } from "@tutti-os/agent-activity-core";
 import { AgentSessionsModel } from "@tutti-os/agent-gui";
-import { comparer,computed,reaction,type IComputedValue } from "mobx";
+import { comparer,computed,observable,reaction,runInAction,type IComputedValue } from "mobx";
 import type { AgentActivationState } from "../../../../vendor/tutti/packages/agent/gui/state/conversation-services";
 import type { DesktopPendingStore } from "./desktop-pending-store";
 import { normalizeActivation,presentActivation } from "./presented-state";
@@ -174,6 +174,7 @@ export function createPromptRuntime<Result>(
         );
       }
     });
+  const completedActivations = observable.set<string>();
   const activations = new ActivationService<
     AgentSessionActivationInput,
     Settings,
@@ -184,7 +185,10 @@ export function createPromptRuntime<Result>(
     isDeleted: (id) => sessions.isDeleted(id),
     activate: options.activate,
     applyResult: (request, result) =>
-      options.applyActivationResult(request, result),
+      runInAction(() => {
+        options.applyActivationResult(request, result);
+        completedActivations.add(request.requestId);
+      }),
     updateSettings: options.updateActivationSettings,
     reconcile: (id) => loads.request(id, { state: true, messages: false }),
     describeError: options.describeActivationError
@@ -221,7 +225,9 @@ export function createPromptRuntime<Result>(
           options
             .messages(value.agentSessionId)
             .some((message) => message.role === "user") ||
-          !service.hasPrompt(value.agentSessionId, value.clientSubmitId)
+          // Session metadata can confirm creation before the initial prompt reaches the queue.
+          (completedActivations.has(value.requestId) &&
+            !service.hasPrompt(value.agentSessionId, value.clientSubmitId))
       };
     return value;
   }
@@ -353,6 +359,7 @@ export function createPromptRuntime<Result>(
       loads.dispose();
       service.dispose();
       readings.clear();
+      runInAction(() => completedActivations.clear());
     }
   };
 }

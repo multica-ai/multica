@@ -578,7 +578,7 @@ describe("desktop queue presentation", () => {
     expect(sendInput).not.toHaveBeenCalled();
     expect(options.update).not.toHaveBeenCalled();
   });
-  it("keeps an idle submit out of the queue before and after desktop admission", async () => {
+  it.each([undefined, "first"])("keeps an idle submit out of the queue before and after admission (dispatching: %s)", async (dispatchingRequestId) => {
     const { engine, receive, options } = setup();
     let accept!: (queue: LocalPromptQueue) => void;
     options.enqueue.mockImplementation(
@@ -594,7 +594,7 @@ describe("desktop queue presentation", () => {
       revision: 1,
       paused: false,
       items: [queued("first")],
-      dispatchingRequestId: "first"
+      dispatchingRequestId
     };
     receive("session", receipt);
     accept(receipt);

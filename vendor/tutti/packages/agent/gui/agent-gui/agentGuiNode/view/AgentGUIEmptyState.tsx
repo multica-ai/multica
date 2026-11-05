@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   cn
 } from "@tutti-os/ui-system";
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { Button } from "../../../app/renderer/components/ui/button";
 import {
   MANAGED_AGENT_ICON_FALLBACK_URL,
@@ -112,6 +112,7 @@ interface AgentGUIEmptyHomePaneProps {
   onContinueInNewConversation: AgentGUINodeViewProps["actions"]["continueInNewConversation"];
   chromeLabels: ChromeLabels;
   composerProps: AgentComposerProps | null;
+  composerSlot?: ReactNode;
   labels: AgentGUIViewLabels;
   suggestions: readonly AgentHomeSuggestionCategory[];
   suggestionsCloseLabel?: string;
@@ -248,6 +249,7 @@ interface AgentGUIEmptyHeroPaneProps {
   selectedAgentTarget: AgentGUIAgentTarget | null;
   chromeLabels: ChromeLabels;
   composerProps: AgentComposerProps | null;
+  composerSlot?: ReactNode;
   providerSelectLabel: string;
   sharedAgentOwnerSeparator: string;
   suggestions: readonly AgentHomeSuggestionCategory[];
@@ -274,6 +276,7 @@ export const AgentGUIEmptyHeroPane = observer(function AgentGUIEmptyHeroPane({
   selectedAgentTarget,
   chromeLabels,
   composerProps,
+  composerSlot,
   providerSelectLabel,
   sharedAgentOwnerSeparator,
   suggestions,
@@ -354,7 +357,7 @@ export const AgentGUIEmptyHeroPane = observer(function AgentGUIEmptyHeroPane({
           onContinueInNewConversation={onContinueInNewConversation}
           labels={chromeLabels}
         />
-        {composerProps ? <AgentComposer {...composerProps} /> : null}
+        {composerProps ? (composerSlot ?? <AgentComposer {...composerProps} />) : null}
         <AgentHomeSuggestions
           categories={suggestions}
           onSelectSuggestion={onSelectSuggestion}
