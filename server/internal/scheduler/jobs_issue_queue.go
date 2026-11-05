@@ -8,7 +8,7 @@ import (
 )
 
 type IssueQueuePromoter interface {
-	PromoteQueuedIssues(ctx context.Context, workspaceID, projectID pgtype.UUID, anyScope bool) (int, error)
+	PromoteQueuedIssues(ctx context.Context, workspaceID pgtype.UUID, anyScope bool) (int, error)
 }
 
 // IssueQueueSweepJob promotes queued backlog issues whose turn has come. The
@@ -21,7 +21,7 @@ func IssueQueueSweepJob(promoter IssueQueuePromoter) JobSpec {
 		RunTimeout: 45 * time.Second, StaleTimeout: time.Minute, HeartbeatInterval: 10 * time.Second,
 		AllowStaleReentry: true, MaxAttempts: 1, Scopes: StaticScopes(ScopeGlobal),
 		Handler: func(ctx context.Context, _ HandlerInput) (HandlerResult, error) {
-			_, err := promoter.PromoteQueuedIssues(ctx, pgtype.UUID{}, pgtype.UUID{}, true)
+			_, err := promoter.PromoteQueuedIssues(ctx, pgtype.UUID{}, true)
 			return HandlerResult{}, err
 		},
 	}

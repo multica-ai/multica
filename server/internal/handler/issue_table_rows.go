@@ -402,7 +402,7 @@ func (h *Handler) queryIssueTableRows(w http.ResponseWriter, r *http.Request, re
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
-	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.queue_order, i.properties,
+	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.run_queued, i.run_after_issue_ids, i.properties,
 	       i.revision, i.duplicate_of_issue_id,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
@@ -446,7 +446,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.ProjectID,
 			&row.issue.Metadata,
 			&row.issue.Stage,
-			&row.issue.QueueOrder,
+			&row.issue.RunQueued,
+			&row.issue.RunAfterIssueIds,
 			&row.issue.Properties,
 			&row.issue.Revision,
 			&row.issue.DuplicateOfIssueID,

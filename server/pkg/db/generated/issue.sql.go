@@ -61,7 +61,7 @@ SET duplicate_of_issue_id = NULL,
 WHERE workspace_id = $1
   AND duplicate_of_issue_id = $2::uuid
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
 type ClearIssueDuplicatesOfParams struct {
@@ -113,10 +113,11 @@ func (q *Queries) ClearIssueDuplicatesOf(ctx context.Context, arg ClearIssueDupl
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -297,49 +298,30 @@ func (q *Queries) CountIssuesUpTo(ctx context.Context, arg CountIssuesUpToParams
 	return column_1, err
 }
 
-const countQueueBlockers = `-- name: CountQueueBlockers :one
-SELECT (
-  (SELECT COUNT(*) FROM issue p
-  WHERE p.workspace_id = $1
-    AND p.project_id IS NOT DISTINCT FROM $2::uuid
-    AND p.queue_order < $3::int
-    AND NOT (p.id = ANY($4::uuid[]))
-    AND NOT (p.status IN ('done', 'cancelled') OR EXISTS (
+const countUnfinishedIssues = `-- name: CountUnfinishedIssues :one
+SELECT COUNT(*)::int FROM issue p
+WHERE p.workspace_id = $1
+  AND p.id = ANY($2::uuid[])
+  AND (
+    NOT (p.status IN ('done', 'cancelled') OR EXISTS (
       SELECT 1 FROM issue_status cs
       WHERE cs.workspace_id = p.workspace_id AND cs.key = p.status
-        AND cs.category IN ('done', 'closed'))))
-  +
-  (SELECT COUNT(*) FROM issue r
-  WHERE $2::uuid IS NOT NULL
-    AND r.workspace_id = $1
-    AND r.project_id = $2::uuid
-    AND r.queue_order IS NULL
-    AND NOT (r.id = ANY($4::uuid[]))
-    AND EXISTS (
+        AND cs.category IN ('done', 'closed')))
+    OR EXISTS (
       SELECT 1 FROM agent_task_queue t
-      WHERE t.issue_id = r.id
-        AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')))
-)::int
+      WHERE t.issue_id = p.id
+        AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory'))
+  )
 `
 
-type CountQueueBlockersParams struct {
+type CountUnfinishedIssuesParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	ProjectID   pgtype.UUID   `json:"project_id"`
-	QueueOrder  int32         `json:"queue_order"`
-	ExcludeIds  []pgtype.UUID `json:"exclude_ids"`
+	Ids         []pgtype.UUID `json:"ids"`
 }
 
-// Unfinished issues numbered below `queue_order` in a scope, ignoring the
-// issues being numbered (they are about to take a new number). Also counts the
-// unnumbered issues of the project that an agent is running, as
-// ListReleasableQueuedIssues does.
-func (q *Queries) CountQueueBlockers(ctx context.Context, arg CountQueueBlockersParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countQueueBlockers,
-		arg.WorkspaceID,
-		arg.ProjectID,
-		arg.QueueOrder,
-		arg.ExcludeIds,
-	)
+// How many of the given issues are still unfinished or running an agent.
+func (q *Queries) CountUnfinishedIssues(ctx context.Context, arg CountUnfinishedIssuesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countUnfinishedIssues, arg.WorkspaceID, arg.Ids)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -354,7 +336,7 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, COALESCE($17::jsonb, '{}'::jsonb), now(), COALESCE($18::uuid, gen_random_uuid())
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
 type CreateIssueParams struct {
@@ -431,10 +413,11 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -448,7 +431,7 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, COALESCE($19::jsonb, '{}'::jsonb), COALESCE($20::jsonb, '{}'::jsonb), now(), COALESCE($21::uuid, gen_random_uuid())
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
 type CreateIssueWithOriginParams struct {
@@ -531,10 +514,11 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -647,7 +631,7 @@ SET parent_issue_id = NULL,
 WHERE workspace_id = $1
   AND parent_issue_id = $2
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
 type DetachDirectChildIssuesParams struct {
@@ -696,10 +680,11 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -712,7 +697,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (status = ANY($2::text[]))
@@ -775,16 +760,17 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
 
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.queue_order, i.done_at, i.reopen_count, i.last_reopened_at FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.done_at, i.reopen_count, i.last_reopened_at, i.run_queued, i.run_after_issue_ids FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (i.status = ANY($3::text[]))
@@ -858,16 +844,17 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE id = $1
 `
 
@@ -905,16 +892,17 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -957,16 +945,17 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -1018,10 +1007,11 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -1046,7 +1036,7 @@ func (q *Queries) GetIssueGCStatus(ctx context.Context, id pgtype.UUID) (GetIssu
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1089,10 +1079,11 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -1192,7 +1183,7 @@ func (q *Queries) IssueHasDuplicates(ctx context.Context, arg IssueHasDuplicates
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE parent_issue_id = $1
 ORDER BY number ASC
 `
@@ -1243,10 +1234,11 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1259,7 +1251,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listChildrenByParents = `-- name: ListChildrenByParents :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
 ORDER BY parent_issue_id, number ASC
@@ -1317,10 +1309,11 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1333,7 +1326,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 }
 
 const listIssueDuplicates = `-- name: ListIssueDuplicates :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1
   AND duplicate_of_issue_id = $2::uuid
   AND status = 'cancelled'
@@ -1385,10 +1378,11 @@ func (q *Queries) ListIssueDuplicates(ctx context.Context, arg ListIssueDuplicat
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1486,7 +1480,7 @@ func (q *Queries) ListIssueRefsInWorkspace(ctx context.Context, arg ListIssueRef
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.queue_order, i.properties,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.run_queued, i.run_after_issue_ids, i.properties,
        i.revision, i.duplicate_of_issue_id
 FROM issue i
 WHERE i.workspace_id = $1
@@ -1579,7 +1573,8 @@ type ListIssuesRow struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
-	QueueOrder         pgtype.Int4        `json:"queue_order"`
+	RunQueued          bool               `json:"run_queued"`
+	RunAfterIssueIds   []pgtype.UUID      `json:"run_after_issue_ids"`
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
@@ -1635,7 +1630,8 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.ProjectID,
 			&i.Metadata,
 			&i.Stage,
-			&i.QueueOrder,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 			&i.Properties,
 			&i.Revision,
 			&i.DuplicateOfIssueID,
@@ -1651,7 +1647,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 }
 
 const listIssuesByIDsInWorkspace = `-- name: ListIssuesByIDsInWorkspace :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE workspace_id = $1 AND id = ANY($2::uuid[])
 `
 
@@ -1700,10 +1696,11 @@ func (q *Queries) ListIssuesByIDsInWorkspace(ctx context.Context, arg ListIssues
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1718,7 +1715,7 @@ func (q *Queries) ListIssuesByIDsInWorkspace(ctx context.Context, arg ListIssues
 const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.queue_order, i.properties,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.run_queued, i.run_after_issue_ids, i.properties,
        i.revision, i.duplicate_of_issue_id
 FROM issue i
 WHERE i.workspace_id = $1
@@ -1857,7 +1854,8 @@ type ListOpenIssuesRow struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
-	QueueOrder         pgtype.Int4        `json:"queue_order"`
+	RunQueued          bool               `json:"run_queued"`
+	RunAfterIssueIds   []pgtype.UUID      `json:"run_after_issue_ids"`
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
@@ -1907,7 +1905,8 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.ProjectID,
 			&i.Metadata,
 			&i.Stage,
-			&i.QueueOrder,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 			&i.Properties,
 			&i.Revision,
 			&i.DuplicateOfIssueID,
@@ -1922,58 +1921,16 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
-const listQueueFrontiers = `-- name: ListQueueFrontiers :many
-SELECT p.project_id, array_agg(DISTINCT p.queue_order ORDER BY p.queue_order)::int[] AS unfinished
-FROM issue p
-WHERE p.workspace_id = $1
-  AND p.queue_order IS NOT NULL
-  AND NOT (p.status IN ('done', 'cancelled') OR EXISTS (
-    SELECT 1 FROM issue_status cs
-    WHERE cs.workspace_id = p.workspace_id AND cs.key = p.status
-      AND cs.category IN ('done', 'closed')))
-GROUP BY p.project_id
-`
-
-type ListQueueFrontiersRow struct {
-	ProjectID  pgtype.UUID `json:"project_id"`
-	Unfinished []int32     `json:"unfinished"`
-}
-
-// The queue_order numbers still unfinished in each project (NULL = no project),
-// ascending. A backlog issue waits on the nearest one below its own number.
-func (q *Queries) ListQueueFrontiers(ctx context.Context, workspaceID pgtype.UUID) ([]ListQueueFrontiersRow, error) {
-	rows, err := q.db.Query(ctx, listQueueFrontiers, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListQueueFrontiersRow{}
-	for rows.Next() {
-		var i ListQueueFrontiersRow
-		if err := rows.Scan(&i.ProjectID, &i.Unfinished); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listReleasableQueuedIssues = `-- name: ListReleasableQueuedIssues :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.queue_order, i.done_at, i.reopen_count, i.last_reopened_at FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.done_at, i.reopen_count, i.last_reopened_at, i.run_queued, i.run_after_issue_ids FROM issue i
 WHERE i.status = 'backlog'
-  AND i.queue_order IS NOT NULL
+  AND i.run_queued
   AND i.triage_state IS NULL
-  AND ($1::bool OR (
-        i.workspace_id = $2::uuid
-        AND i.project_id IS NOT DISTINCT FROM $3::uuid))
+  AND ($1::bool OR i.workspace_id = $2::uuid)
   AND NOT EXISTS (
     SELECT 1 FROM issue p
     WHERE p.workspace_id = i.workspace_id
-      AND p.project_id IS NOT DISTINCT FROM i.project_id
-      AND p.queue_order < i.queue_order
+      AND p.id = ANY(i.run_after_issue_ids)
       AND (
         NOT (p.status IN ('done', 'cancelled') OR EXISTS (
           SELECT 1 FROM issue_status cs
@@ -1990,40 +1947,31 @@ WHERE i.status = 'backlog'
     WHERE i.project_id IS NOT NULL
       AND r.workspace_id = i.workspace_id
       AND r.project_id = i.project_id
-      AND r.queue_order IS NULL
+      AND NOT r.run_queued
       AND EXISTS (
         SELECT 1 FROM agent_task_queue t
         WHERE t.issue_id = r.id
           AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory'))
   )
-ORDER BY i.workspace_id, i.queue_order, i.created_at, i.id
-LIMIT $4::int
+ORDER BY i.workspace_id, i.created_at, i.id
+LIMIT $3::int
 `
 
 type ListReleasableQueuedIssuesParams struct {
 	AnyScope    bool        `json:"any_scope"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ProjectID   pgtype.UUID `json:"project_id"`
 	PageLimit   int32       `json:"page_limit"`
 }
 
-// Backlog issues whose turn in the run queue has come: no issue in the same
-// scope (workspace + project, or no project) holds a lower queue_order while
-// unfinished. A finished issue is one on done/cancelled or a custom status in
+// Queued backlog issues whose waits are over: every issue in run_after_issue_ids
+// has finished. A finished issue is one on done/cancelled or a custom status in
 // the done/closed category, and no agent run of it is still queued, dispatched,
 // parked on a local directory or running: its status alone can be set before
-// the run that finishes the work has ended. An unnumbered issue of the same
-// project that an agent is running blocks too: the agent moved it on its own,
-// outside the queue, and it shares the checkout. any_scope reads every scope in
-// every workspace; otherwise the workspace and project (NULL = no project) are
-// narrowed.
+// the run that finishes the work has ended. A queued issue also waits while an
+// unqueued issue of its project is running an agent, because they share the
+// checkout. any_scope reads every workspace; otherwise only the given one.
 func (q *Queries) ListReleasableQueuedIssues(ctx context.Context, arg ListReleasableQueuedIssuesParams) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, listReleasableQueuedIssues,
-		arg.AnyScope,
-		arg.WorkspaceID,
-		arg.ProjectID,
-		arg.PageLimit,
-	)
+	rows, err := q.db.Query(ctx, listReleasableQueuedIssues, arg.AnyScope, arg.WorkspaceID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -2062,11 +2010,59 @@ func (q *Queries) ListReleasableQueuedIssues(ctx context.Context, arg ListReleas
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunQueueWaits = `-- name: ListRunQueueWaits :many
+SELECT i.id AS issue_id, p.id AS waiting_on_id
+FROM issue i
+JOIN issue p ON p.workspace_id = i.workspace_id AND p.id = ANY(i.run_after_issue_ids)
+WHERE i.workspace_id = $1
+  AND i.run_queued
+  AND i.status = 'backlog'
+  AND i.triage_state IS NULL
+  AND (
+    NOT (p.status IN ('done', 'cancelled') OR EXISTS (
+      SELECT 1 FROM issue_status cs
+      WHERE cs.workspace_id = p.workspace_id AND cs.key = p.status
+        AND cs.category IN ('done', 'closed')))
+    OR EXISTS (
+      SELECT 1 FROM agent_task_queue t
+      WHERE t.issue_id = p.id
+        AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory'))
+  )
+`
+
+type ListRunQueueWaitsRow struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WaitingOnID pgtype.UUID `json:"waiting_on_id"`
+}
+
+// One row per (queued backlog issue, predecessor) pair where the predecessor is
+// still unfinished or running, so the issue waits on it.
+func (q *Queries) ListRunQueueWaits(ctx context.Context, workspaceID pgtype.UUID) ([]ListRunQueueWaitsRow, error) {
+	rows, err := q.db.Query(ctx, listRunQueueWaits, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRunQueueWaitsRow{}
+	for rows.Next() {
+		var i ListRunQueueWaitsRow
+		if err := rows.Scan(&i.IssueID, &i.WaitingOnID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2159,7 +2155,7 @@ func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDelete
 }
 
 const lockIssueForDescriptionUpdate = `-- name: LockIssueForDescriptionUpdate :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -2207,10 +2203,11 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -2309,7 +2306,7 @@ SET description = CASE
     updated_at = now()
 WHERE id = $4
   AND workspace_id = $5
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
 type MaterializeIssueChannelMediaMarkdownParams struct {
@@ -2367,10 +2364,11 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -2424,24 +2422,32 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 	return i, err
 }
 
-const setIssueQueueOrder = `-- name: SetIssueQueueOrder :one
+const setIssueRunQueue = `-- name: SetIssueRunQueue :one
 UPDATE issue SET
-    queue_order = $3::integer,
+    run_queued = $3::boolean,
+    run_after_issue_ids = $4::uuid[],
     revision = revision + 1,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
-type SetIssueQueueOrderParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	QueueOrder  pgtype.Int4 `json:"queue_order"`
+type SetIssueRunQueueParams struct {
+	ID               pgtype.UUID   `json:"id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	RunQueued        bool          `json:"run_queued"`
+	RunAfterIssueIds []pgtype.UUID `json:"run_after_issue_ids"`
 }
 
-// Arms (or, with NULL, clears) the issue's place in the automatic run queue.
-func (q *Queries) SetIssueQueueOrder(ctx context.Context, arg SetIssueQueueOrderParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, setIssueQueueOrder, arg.ID, arg.WorkspaceID, arg.QueueOrder)
+// Puts the issue in the automatic run queue, waiting on run_after_issue_ids, or
+// with run_queued false takes it out of the queue (the waits are cleared too).
+func (q *Queries) SetIssueRunQueue(ctx context.Context, arg SetIssueRunQueueParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, setIssueRunQueue,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.RunQueued,
+		arg.RunAfterIssueIds,
+	)
 	var i Issue
 	err := row.Scan(
 		&i.ID,
@@ -2474,32 +2480,40 @@ func (q *Queries) SetIssueQueueOrder(ctx context.Context, arg SetIssueQueueOrder
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
 
-const setIssuesQueueOrder = `-- name: SetIssuesQueueOrder :many
+const setIssuesRunQueue = `-- name: SetIssuesRunQueue :many
 UPDATE issue SET
-    queue_order = $2::integer,
+    run_queued = $1::boolean,
+    run_after_issue_ids = $2::uuid[],
     revision = revision + 1,
     updated_at = now()
-WHERE id = ANY($3::uuid[]) AND workspace_id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, queue_order, done_at, reopen_count, last_reopened_at
+WHERE id = ANY($3::uuid[]) AND workspace_id = $4::uuid
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, done_at, reopen_count, last_reopened_at, run_queued, run_after_issue_ids
 `
 
-type SetIssuesQueueOrderParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	QueueOrder  pgtype.Int4   `json:"queue_order"`
-	Ids         []pgtype.UUID `json:"ids"`
+type SetIssuesRunQueueParams struct {
+	RunQueued        bool          `json:"run_queued"`
+	RunAfterIssueIds []pgtype.UUID `json:"run_after_issue_ids"`
+	Ids              []pgtype.UUID `json:"ids"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
 }
 
-// Batch form of SetIssueQueueOrder; ids outside the workspace are skipped.
-func (q *Queries) SetIssuesQueueOrder(ctx context.Context, arg SetIssuesQueueOrderParams) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, setIssuesQueueOrder, arg.WorkspaceID, arg.QueueOrder, arg.Ids)
+// Batch form of SetIssueRunQueue; ids outside the workspace are skipped.
+func (q *Queries) SetIssuesRunQueue(ctx context.Context, arg SetIssuesRunQueueParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, setIssuesRunQueue,
+		arg.RunQueued,
+		arg.RunAfterIssueIds,
+		arg.Ids,
+		arg.WorkspaceID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2538,10 +2552,11 @@ func (q *Queries) SetIssuesQueueOrder(ctx context.Context, arg SetIssuesQueueOrd
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
-			&i.QueueOrder,
 			&i.DoneAt,
 			&i.ReopenCount,
 			&i.LastReopenedAt,
+			&i.RunQueued,
+			&i.RunAfterIssueIds,
 		); err != nil {
 			return nil, err
 		}
@@ -2563,7 +2578,7 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
     -- did_change/did_activity would be decided against the pre-wait row too.
     -- Materialized so the locking clause is never inlined away.
     SELECT
-        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.queue_order, i.done_at, i.reopen_count, i.last_reopened_at,
+        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.done_at, i.reopen_count, i.last_reopened_at, i.run_queued, i.run_after_issue_ids,
         COALESCE($4::text, i.title) AS next_title,
         COALESCE($5::text, i.description) AS next_description,
         COALESCE($6::text, i.status) AS next_status,
@@ -2621,7 +2636,7 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
     FOR UPDATE
 ), changed AS (
     SELECT
-        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.duplicate_of_issue_id, candidate.queue_order, candidate.done_at, candidate.reopen_count, candidate.last_reopened_at, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_duplicate_of_issue_id,
+        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.duplicate_of_issue_id, candidate.done_at, candidate.reopen_count, candidate.last_reopened_at, candidate.run_queued, candidate.run_after_issue_ids, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_duplicate_of_issue_id,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             position, start_date, due_date, parent_issue_id, project_id, stage,
@@ -2671,7 +2686,7 @@ WHERE i.id = changed.id
   -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
   -- after waiting for the first writer, leaving the stale writer with 0 rows.
   AND ($2::bigint IS NULL OR i.revision = $2::bigint)
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.queue_order, i.done_at, i.reopen_count, i.last_reopened_at
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.done_at, i.reopen_count, i.last_reopened_at, i.run_queued, i.run_after_issue_ids
 `
 
 type UpdateIssueParams struct {
@@ -2744,10 +2759,11 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }
@@ -2774,7 +2790,7 @@ UPDATE issue AS i SET
     updated_at = now()
 FROM wakeup_source
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.queue_order, i.done_at, i.reopen_count, i.last_reopened_at
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.done_at, i.reopen_count, i.last_reopened_at, i.run_queued, i.run_after_issue_ids
 `
 
 type UpdateIssueStatusParams struct {
@@ -2828,10 +2844,11 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.LastActivityAt,
 		&i.TriageState,
 		&i.DuplicateOfIssueID,
-		&i.QueueOrder,
 		&i.DoneAt,
 		&i.ReopenCount,
 		&i.LastReopenedAt,
+		&i.RunQueued,
+		&i.RunAfterIssueIds,
 	)
 	return i, err
 }

@@ -394,6 +394,7 @@ var concurrentIndexCleanups = map[string]string{
 	"484_issue_triage_state_index":                              "idx_issue_triage_state",
 	"537_issue_duplicate_of_index":                              "idx_issue_duplicate_of",
 	"596_issue_queue_order_index":                               "idx_issue_queue_order",
+	"910_issue_run_queue_index":                                 "idx_issue_run_queued",
 	"599_runtime_quickstart_request_index":                      "idx_runtime_quickstart_request_runtime",
 	"602_office_floor_pkey_uidx":                                "office_floor_pkey_uidx",
 	"604_office_floor_workspace_position_idx":                   "office_floor_workspace_position_idx",

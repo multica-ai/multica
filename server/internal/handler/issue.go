@@ -80,10 +80,11 @@ type IssueResponse struct {
 	// groups (null = unstaged). See service/issue_wakeup_system.go for how a
 	// closed stage wakes the parent's assignee.
 	Stage *int32 `json:"stage"`
-	// QueueOrder is the issue's place in the automatic run queue (null = not
-	// queued). See service/issue_queue.go.
-	QueueOrder *int32  `json:"queue_order"`
-	StartDate  *string `json:"start_date"`
+	// RunQueued is true while the issue is in the automatic run queue; the
+	// issue then starts once every issue in RunAfterIssueIds has finished.
+	RunQueued        bool     `json:"run_queued"`
+	RunAfterIssueIds []string `json:"run_after_issue_ids"`
+	StartDate        *string  `json:"start_date"`
 	DueDate    *string `json:"due_date"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
@@ -498,7 +499,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
 		Stage:              int4ToPtr(i.Stage),
-		QueueOrder:         int4ToPtr(i.QueueOrder),
+		RunQueued:          i.RunQueued,
+		RunAfterIssueIds:   uuidStringsOrEmpty(i.RunAfterIssueIds),
 		StartDate:          dateToPtr(i.StartDate),
 		DueDate:            dateToPtr(i.DueDate),
 		CreatedAt:          timestampToString(i.CreatedAt),
@@ -537,7 +539,8 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
 		Stage:              int4ToPtr(i.Stage),
-		QueueOrder:         int4ToPtr(i.QueueOrder),
+		RunQueued:          i.RunQueued,
+		RunAfterIssueIds:   uuidStringsOrEmpty(i.RunAfterIssueIds),
 		StartDate:          dateToPtr(i.StartDate),
 		DueDate:            dateToPtr(i.DueDate),
 		CreatedAt:          timestampToString(i.CreatedAt),
@@ -608,7 +611,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
 		Stage:              int4ToPtr(i.Stage),
-		QueueOrder:         int4ToPtr(i.QueueOrder),
+		RunQueued:          i.RunQueued,
+		RunAfterIssueIds:   uuidStringsOrEmpty(i.RunAfterIssueIds),
 		StartDate:          dateToPtr(i.StartDate),
 		DueDate:            dateToPtr(i.DueDate),
 		CreatedAt:          timestampToString(i.CreatedAt),
@@ -1766,7 +1770,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.queue_order, i.properties,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.run_queued, i.run_after_issue_ids, i.properties,
 	   i.revision, i.duplicate_of_issue_id
 FROM issue i
 WHERE %s
@@ -1806,7 +1810,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.ProjectID,
 			&row.Metadata,
 			&row.Stage,
-			&row.QueueOrder,
+			&row.RunQueued,
+			&row.RunAfterIssueIds,
 			&row.Properties,
 			&row.Revision,
 			&row.DuplicateOfIssueID,
@@ -2368,7 +2373,7 @@ WITH ranked AS (
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at,
-		i.number, i.project_id, i.metadata, i.stage, i.queue_order, i.properties, i.revision, i.duplicate_of_issue_id,
+		i.number, i.project_id, i.metadata, i.stage, i.run_queued, i.run_after_issue_ids, i.properties, i.revision, i.duplicate_of_issue_id,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -2381,7 +2386,7 @@ SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
-	number, project_id, metadata, stage, queue_order, properties, revision, duplicate_of_issue_id, group_total
+	number, project_id, metadata, stage, run_queued, run_after_issue_ids, properties, revision, duplicate_of_issue_id, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -2428,7 +2433,8 @@ ORDER BY
 			&row.ProjectID,
 			&row.Metadata,
 			&row.Stage,
-			&row.QueueOrder,
+			&row.RunQueued,
+			&row.RunAfterIssueIds,
 			&row.Properties,
 			&row.Revision,
 			&row.DuplicateOfIssueID,

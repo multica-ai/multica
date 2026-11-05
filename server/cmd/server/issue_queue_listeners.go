@@ -34,14 +34,11 @@ func registerIssueQueueListeners(bus *events.Bus, h *handler.Handler) {
 		if issuestatus.IsBuiltIn(issue.Status) && issue.Status != issuestatus.Done && issue.Status != issuestatus.Cancelled {
 			return
 		}
-		workspaceID, projectID := parseUUID(issue.WorkspaceID), optionalUUID("")
-		if issue.ProjectID != nil {
-			projectID = optionalUUID(*issue.ProjectID)
-		}
+		workspaceID := parseUUID(issue.WorkspaceID)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), issueQueuePromoteTimeout)
 			defer cancel()
-			if _, err := h.PromoteQueuedIssues(ctx, workspaceID, projectID, false); err != nil {
+			if _, err := h.PromoteQueuedIssues(ctx, workspaceID, false); err != nil {
 				slog.Warn("issue queue: promote failed", "error", err, "issue_id", issue.ID)
 			}
 		}()

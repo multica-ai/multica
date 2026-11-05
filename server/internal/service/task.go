@@ -8114,7 +8114,8 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"project_id":       util.UUIDToPtr(issue.ProjectID),
 		"position":         issue.Position,
 		"stage":            util.Int4ToPtr(issue.Stage),
-		"queue_order":      util.Int4ToPtr(issue.QueueOrder),
+		"run_queued":       issue.RunQueued,
+		"run_after_issue_ids": runAfterIDStrings(issue.RunAfterIssueIds),
 		"start_date":       util.DateToPtr(issue.StartDate),
 		"due_date":         util.DateToPtr(issue.DueDate),
 		"created_at":       util.TimestampToString(issue.CreatedAt),
@@ -8504,4 +8505,14 @@ func agentToMap(a db.Agent) map[string]any {
 // session with no channel binding is not announced here.
 func (s *TaskService) PublishChatReplyDone(ctx context.Context, run db.AgentTaskQueue, msg db.ChatMessage) {
 	s.broadcastChatDone(ctx, run, &msg, false)
+}
+
+// runAfterIDStrings renders a queued issue's waits for the websocket payload,
+// always as an array so clients can read it without a null check.
+func runAfterIDStrings(ids []pgtype.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, util.UUIDToString(id))
+	}
+	return out
 }

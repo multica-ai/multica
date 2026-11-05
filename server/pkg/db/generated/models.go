@@ -1110,10 +1110,11 @@ type Issue struct {
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
 	TriageState        pgtype.Text        `json:"triage_state"`
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
-	QueueOrder         pgtype.Int4        `json:"queue_order"`
 	DoneAt             pgtype.Timestamptz `json:"done_at"`
 	ReopenCount        int32              `json:"reopen_count"`
 	LastReopenedAt     pgtype.Timestamptz `json:"last_reopened_at"`
+	RunQueued          bool               `json:"run_queued"`
+	RunAfterIssueIds   []pgtype.UUID      `json:"run_after_issue_ids"`
 }
 
 type IssueChildEvent struct {
