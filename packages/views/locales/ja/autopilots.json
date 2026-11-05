@@ -147,6 +147,10 @@
   "run": {
     "issue_linked": "タスクをリンク済み",
     "view_log": "実行ログを表示",
+    "log_unavailable": "実行ログを表示できません",
+    "log_load_failed": "実行ログを読み込めませんでした。",
+    "no_log": "この実行にはログがありません。",
+    "retry": "再試行",
     "skipped_group": {
       "label": "スキップ済み",
       "summary": "スキップされた実行 {{count}} 件"

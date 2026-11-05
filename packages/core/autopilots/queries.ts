@@ -11,6 +11,8 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "runs", id] as const,
   run: (wsId: string, autopilotId: string, runId: string) =>
     [...autopilotKeys.all(wsId), "runs", autopilotId, runId] as const,
+  transcript: (wsId: string, autopilotId: string, runId: string, taskId: string) =>
+    [...autopilotKeys.run(wsId, autopilotId, runId), "transcript", taskId] as const,
   deliveries: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "deliveries", id] as const,
   delivery: (wsId: string, autopilotId: string, deliveryId: string) =>
@@ -116,6 +118,21 @@ export function cronPreviewOptions(
     staleTime: 30_000,
     // A 400 (invalid expression/timezone) is a stable answer for this input,
     // not a transient failure — retrying would only delay the inline error.
+    retry: false,
+  });
+}
+
+/** A terminal run transcript is scoped to the run resolved by the guarded API. */
+export function autopilotRunTranscriptOptions(
+  wsId: string,
+  autopilotId: string,
+  runId: string,
+  taskId: string,
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.transcript(wsId, autopilotId, runId, taskId),
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: taskId.length > 0,
     retry: false,
   });
 }

@@ -147,6 +147,10 @@
   "run": {
     "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
+    "log_unavailable": "실행 로그를 사용할 수 없습니다",
+    "log_load_failed": "실행 로그를 불러오지 못했습니다.",
+    "no_log": "이 실행에는 로그가 없습니다.",
+    "retry": "다시 시도",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"
