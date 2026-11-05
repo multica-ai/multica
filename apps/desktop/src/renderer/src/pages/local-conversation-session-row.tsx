@@ -209,10 +209,7 @@ const LocalConversationSummary = observer(function LocalConversationSummary({
           {waitingForAnswer ? (
             t(($) => $.desktop.local_conversation.waiting_for_answer)
           ) : (
-            <>
-              {entry.provider === "codex" ? "Codex" : "Claude Code"} ·{" "}
-              {entry.preview || labels.storage}
-            </>
+            entry.preview || labels.storage
           )}
         </span>
       </span>
