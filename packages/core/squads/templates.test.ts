@@ -124,6 +124,8 @@ describe("squad instructions", () => {
     for (const t of SQUAD_TEMPLATES) {
       expect(t.instructions, t.id).toContain("--assignee-id <member id>");
       expect(t.instructions, t.id).not.toContain('--assignee "');
+      expect(t.instructions, t.id).toContain("Your assignees come only from the Squad Roster");
+      expect(t.instructions, t.id).toContain("Do not list the workspace's agents");
       expect(t.instructions, t.id).toContain("Assign by that id, never by name");
     }
   });
