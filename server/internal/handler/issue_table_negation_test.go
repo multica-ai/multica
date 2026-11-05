@@ -37,6 +37,17 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 		"status": "in_progress", "creator_id": otherUser,
 	})
 
+	subscribe := func(issueID, userType, userID string) {
+		dbfx.InsertNoID(t, "issue_subscriber", testutil.Cols{
+			"issue_id": issueID, "user_type": userType, "user_id": userID, "reason": "manual",
+		}, "issue_id = $1", issueID)
+	}
+	// Only the test user's own member rows count as "subscribed".
+	subscribe(assignedToMe, "member", testUserID)
+	subscribe(theirAgent, "member", testUserID)
+	subscribe(unassignedByOther, "member", otherUser)
+	subscribe(mineByAgent, "agent", myAgent)
+
 	fixture := map[string]struct{}{
 		assignedToMe: {}, mineByAgent: {}, theirAgent: {}, unassignedByOther: {},
 	}
@@ -101,6 +112,19 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 	assertRows("relations OR within the dimension",
 		issueTableFiltersRequest{Relations: []string{"assigned", "my_agents"}},
 		assignedToMe, mineByAgent)
+	assertRows("relation subscribed matches only my member subscriptions",
+		issueTableFiltersRequest{Relations: []string{"subscribed"}},
+		assignedToMe, theirAgent)
+	assertRows("relation is not subscribed",
+		issueTableFiltersRequest{Relations: []string{"subscribed"}, Negate: []string{"relations"}},
+		mineByAgent, unassignedByOther)
+	subscribedNotMine := issueTableFilterNode{Match: "all", Children: []issueTableFilterNode{
+		{Field: "relations", Values: rawValues("subscribed")},
+		{Field: "relations", Negate: true, Values: rawValues("assigned", "my_agents")},
+	}}
+	assertRows("subscribed but not assigned to me or my agents",
+		issueTableFiltersRequest{Advanced: &subscribedNotMine},
+		theirAgent)
 	assertRows("relation is not created by me",
 		issueTableFiltersRequest{Relations: []string{"created"}, Negate: []string{"relations"}},
 		mineByAgent, theirAgent, unassignedByOther)

@@ -11,6 +11,9 @@ import { ContentEditor } from "./content-editor";
 
 const listQuickActions = vi.hoisted(() => vi.fn());
 const renderQuickAction = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
@@ -39,6 +42,7 @@ beforeAll(() => {
 beforeEach(() => {
   listQuickActions.mockReset();
   renderQuickAction.mockReset().mockResolvedValue("Rendered feedback");
+  toastError.mockReset();
 });
 
 const clients: QueryClient[] = [];
@@ -76,7 +80,7 @@ function pendingCatalog() {
 function Composer() {
   return (
     <ContentEditor
-      quickActionMenu={useQuickActionMenu("issue")}
+      quickActionMenu={useQuickActionMenu()}
       enableSlashCommands
       slashCommandMode="command"
       showBubbleMenu={false}
@@ -128,6 +132,73 @@ async function type(editor: Editor, text: string) {
 const menuItem = () => screen.queryByRole("button", { name: "/delayed-feedback" });
 
 describe("comment quick-action catalog updates in the real editor", () => {
+  it.each(["", "agent", "squad"])(
+    "inserts a cached %s action synchronously on Enter without a render request",
+    async (targetType) => {
+      const configured = {
+        ...action,
+        assignee_type: targetType,
+        assignee_id: targetType ? "target-id" : "",
+        target_name: targetType ? "Review Team" : undefined,
+      };
+      listQuickActions.mockResolvedValue({ quick_actions: [configured] });
+      renderQuickAction.mockReturnValue(new Promise(() => {}));
+      const { editor, dom } = await mount([configured]);
+      await type(editor, "/delayed");
+      await waitFor(() => expect(menuItem()).toBeVisible());
+
+      fireEvent.keyDown(dom, { key: "Enter" });
+
+      expect(editor.getText()).toBe(targetType ? "@Review Team\n\nRendered feedback" : "Rendered feedback");
+      expect(renderQuickAction).not.toHaveBeenCalled();
+      const mentions: { type: string; id: string }[] = [];
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === "mention") mentions.push({ type: node.attrs.type, id: node.attrs.id });
+      });
+      expect(mentions).toEqual(targetType ? [{ type: targetType, id: "target-id" }] : []);
+    },
+  );
+
+  it("keeps the draft and reports an unavailable target without a render request", async () => {
+    const unavailable = { ...action, assignee_type: "agent", assignee_id: "target-id", target_missing: true };
+    listQuickActions.mockResolvedValue({ quick_actions: [unavailable] });
+    renderQuickAction.mockReturnValue(new Promise(() => {}));
+    const { editor, dom } = await mount([unavailable]);
+    await type(editor, "/delayed");
+    await waitFor(() => expect(menuItem()).toBeVisible());
+
+    fireEvent.keyDown(dom, { key: "Enter" });
+
+    expect(editor.getText()).toBe("/delayed");
+    expect(toastError).toHaveBeenCalledWith("This target is unavailable");
+    expect(renderQuickAction).not.toHaveBeenCalled();
+  });
+
+  it("uses a refreshed body and target while preserving the surrounding draft and undo", async () => {
+    listQuickActions.mockResolvedValue({ quick_actions: [action] });
+    const { editor, dom, client } = await mount([action]);
+    await type(editor, "Keep this /delayed");
+    await waitFor(() => expect(menuItem()).toBeVisible());
+    const updated = {
+      ...action,
+      name: "delayed-updated",
+      prompt: "Updated feedback",
+      assignee_type: "squad",
+      assignee_id: "updated-target",
+      target_name: "Current Team",
+    };
+    await act(async () => client.setQueryData(quickActionKeys.list("ws"), { quick_actions: [updated] }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "/delayed-updated" })).toBeVisible());
+    expect(editor.getText()).toBe("Keep this /delayed");
+
+    fireEvent.keyDown(dom, { key: "Enter" });
+
+    expect(editor.getText()).toBe("Keep this \n\n@Current Team\n\nUpdated feedback");
+    expect(renderQuickAction).not.toHaveBeenCalled();
+    act(() => { editor.commands.undo(); });
+    expect(editor.getText()).toBe("Keep this /delayed");
+  });
+
   it.each(["/", "/delayed"])(
     "refreshes %s after a delayed catalog arrives without another keystroke or editor reset",
     async (query) => {
@@ -146,7 +217,7 @@ describe("comment quick-action catalog updates in the real editor", () => {
 
       fireEvent.click(menuItem()!);
       await waitFor(() => expect(editor.getText()).toBe("Rendered feedback"));
-      expect(renderQuickAction).toHaveBeenCalledExactlyOnceWith("issue", "action");
+      expect(renderQuickAction).not.toHaveBeenCalled();
     },
   );
 

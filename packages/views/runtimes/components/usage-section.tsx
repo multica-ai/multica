@@ -45,6 +45,7 @@ import {
 } from "./charts";
 import { CustomPricingDialog } from "./custom-pricing-dialog";
 import { useT } from "../../i18n";
+import { ObjectSectionEmpty } from "../../layout/object-page";
 
 // Single source of truth for the period selector. KPIs, the When-chart, the
 // Cost-by tabs, and the CSV export all read from the same `days` value so
@@ -880,12 +881,7 @@ function UsageSkeleton() {
 function UsageEmpty() {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-8">
-      <BarChart3 className="h-5 w-5 text-faint-foreground" />
-      <p className="mt-2 text-caption text-muted-foreground">
-        {t(($) => $.usage.no_data)}
-      </p>
-    </div>
+    <ObjectSectionEmpty icon={BarChart3} description={t(($) => $.usage.no_data)} />
   );
 }
 

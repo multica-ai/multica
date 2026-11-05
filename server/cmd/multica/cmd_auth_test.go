@@ -86,7 +86,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 	failing := func(string) net.IP { return nil }
 
-	cases := []struct {
+	type bindingCase struct {
 		name         string
 		flagHost     string
 		serverURL    string
@@ -94,7 +94,17 @@ func TestResolveCallbackBinding(t *testing.T) {
 		detect       func(string) net.IP
 		wantCallback string
 		wantBind     string
-	}{
+		wantError    bool
+	}
+	cases := []bindingCase{
+		{
+			name:         "IPv6 app URL uses a supported loopback callback",
+			appURL:       "http://[fd00::1]:3000",
+			detect:       failing,
+			wantCallback: "localhost",
+			wantBind:     "127.0.0.1",
+		},
+
 		{
 			name:         "public app URL stays on loopback",
 			appURL:       "https://multica.ai",
@@ -137,19 +147,35 @@ func TestResolveCallbackBinding(t *testing.T) {
 		},
 		{
 			name:         "--callback-host flag overrides everything",
-			flagHost:     "cli.internal.example",
+			flagHost:     "10.0.0.5",
 			appURL:       "https://multica.ai",
 			serverURL:    "https://api.multica.ai",
 			detect:       fixed("10.0.0.5"),
-			wantCallback: "cli.internal.example",
+			wantCallback: "10.0.0.5",
 			wantBind:     "0.0.0.0",
 		},
+	}
+
+	for _, host := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1", "::1", "fd00::1", "::ffff:192.168.0.1", "cli.internal.example", "localhost:1234", "127.0.0.1@evil.example"} {
+		cases = append(cases, bindingCase{name: "unsupported explicit host " + host, flagHost: host, wantError: true})
+	}
+	for _, ip := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1"} {
+		cases = append(cases, bindingCase{name: "unsupported outbound IP " + ip, appURL: "http://192.168.0.28:3000", detect: fixed(ip), wantError: true})
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gotCallback, gotBind := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "--callback-host") {
+					t.Fatalf("expected actionable callback error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if gotCallback != tc.wantCallback {
 				t.Errorf("callback host = %q, want %q", gotCallback, tc.wantCallback)
 			}

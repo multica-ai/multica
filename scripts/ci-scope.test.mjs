@@ -39,6 +39,7 @@ for (const [name, files, selected] of [
   ["reserved slug output", ["packages/core/paths/reserved-slugs.ts"], ["frontend", "quality", "scripts"]],
   ["integration key gates", ["server/cmd/server/router.go"], ["backend", "runtime", "scripts"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality"]],
+  ["shared quick action body contract", ["server/internal/handler/testdata/quick_action_bodies.json"], ["frontend", "backend", "runtime"]],
   ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality"]],
   ["workspace package patch", ["patches/example.patch"], ["frontend", "quality"]],
   ["mobile package patch", ["apps/mobile/patches/example.patch"], ["quality"]],

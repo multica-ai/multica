@@ -62,8 +62,8 @@ export function StatusPicker({
    * The issue's project. When it uses a workflow, only that workflow's steps
    * are offered, in workflow order, each naming who entering it hands the
    * issue to. (MUL-7420) `null` is an issue outside any project: it offers
-   * the Default workflow's statuses, and search still reaches every status.
-   * (MUL-8121) Omit (`undefined`) when the surface spans projects.
+   * only the Default workflow's statuses, search included. (MUL-8121,
+   * MUL-8250) Omit (`undefined`) when the surface spans projects.
    */
   projectId?: string | null;
   /**
@@ -97,7 +97,6 @@ export function StatusPicker({
     workflow,
     project,
     defaultScope,
-    catalog,
   } = useIssueStatusOptions(wsId, projectId, status);
   const allOptions = useMemo(
     () => (allowedStatuses ? projectOptions.filter((o) => allowedStatuses.has(o.key)) : projectOptions),
@@ -107,11 +106,8 @@ export function StatusPicker({
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return allOptions;
-    // Outside a project only the list is narrowed to Default, not what the
-    // issue may take: search reaches every status. (MUL-8121)
-    const pool = defaultScope ? catalog : allOptions;
-    return pool.filter((o) => o.label.toLowerCase().includes(q));
-  }, [allOptions, catalog, defaultScope, query]);
+    return allOptions.filter((o) => o.label.toLowerCase().includes(q));
+  }, [allOptions, query]);
 
   const searchable = !!workflow || !!defaultScope || allOptions.length > SEARCH_THRESHOLD;
   const [pendingStatus, setPendingStatus] = useState<IssueStatus | null>(null);

@@ -33,7 +33,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
-import { ObjectSection, ObjectSectionCard } from "../../layout/object-page";
+import { ObjectSection, ObjectSectionCard, ObjectSectionEmpty } from "../../layout/object-page";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -132,9 +132,7 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
-          {t(($) => $.deliveries.empty)}
-        </div>
+        <ObjectSectionEmpty icon={Webhook} description={t(($) => $.deliveries.empty)} />
       ) : (
         <ObjectSectionCard>
           {deliveries.map((delivery) => (

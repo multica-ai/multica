@@ -2,6 +2,7 @@
   "page": {
     "title": "エージェント",
     "new_agent": "新規エージェント",
+    "search": "エージェントを検索",
     "show_archived": "アーカイブ済みを表示 ({{count}}) →",
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
@@ -44,12 +45,21 @@
     "title": "アーカイブ済みエージェント"
   },
   "empty": {
-    "title": "まだエージェントがいません",
-    "description": "エージェントを作成してタスクを割り当てましょう。"
+    "setup": {
+      "label": "セットアップ手順",
+      "runtime": "ランタイムを接続する",
+      "agent": "エージェントを作成する",
+      "issue": "タスクを割り当てる",
+      "done": "（完了）",
+      "connect_runtime": "接続"
+    }
   },
   "no_matches": {
     "title": "一致する結果なし",
+    "search_active": "\"{{query}}\" に一致するエージェントがありません。",
+    "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
+    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
@@ -146,7 +156,7 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "advanced_settings": "詳細設定",
+    "settings": "設定",
     "copy_link": "リンクをコピー",
     "copy_id": "エージェント ID をコピー",
     "link_copied_toast": "リンクをコピーしました",
@@ -201,7 +211,8 @@
   "panel": {
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
-    "edit_access_aria": "アクセス: {{value}}。アクセスを変更"
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
+    "all_settings": "すべての設定"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",
@@ -540,6 +551,7 @@
       "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
       "empty_title": "接続済みのアプリがありません",
       "empty_link_to_settings": "設定 → 連携 で接続する",
+      "open_settings": "設定を開く",
       "connected": "接続済み",
       "toggle_aria": "この agent に {{toolkit}} を許可",
       "saving": "保存中…",
@@ -928,6 +940,7 @@
       "switch_runtime_failed": "ランタイムを切り替えられませんでした。会話は引き続き元のランタイムで実行されています。",
       "switch_runtime_pending": "現在の返信を停止するとランタイムを切り替えられます。",
       "switch_runtime_success": "ランタイムを切り替えました。下書き設定はそのまま残り、以降の会話は新しいランタイムで新しいモデルセッションとして続きます。",
+      "conversation_tab": "会話",
       "chat_title": "Agent Builder",
       "runtime_online": "ランタイムはオンライン",
       "runtime_offline": "ランタイムはオフライン",
@@ -1026,5 +1039,29 @@
       "next": "次へ"
     }
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "最初の AI チームメイトを迎える",
+    "description": "エージェントはチームメンバーと同じようにタスクを引き受けます。ランタイム上で Claude Code や Codex などを使って作業し、終わったらコメントで成果を渡します。",
+    "slides": {
+      "describe": {
+        "title": "やることを一文で伝える",
+        "description": "役割を書き、ランタイムとモデルを選べば作成できます。指示の変更や skill の追加はいつでもできます。"
+      },
+      "assign": {
+        "title": "同僚と同じように任せる",
+        "description": "どのタスクでも担当者に選ぶだけ。自分で作業を始めるので、見張る必要はありません。"
+      },
+      "deliver": {
+        "title": "作業を見守り、コメントで受け取る",
+        "description": "実行の様子はリアルタイムで見えます。完了すると、結果と PR をタスクのコメントで渡します。"
+      }
+    },
+    "art": {
+      "prompt": "フロントエンドの PR をレビューし、アクセシビリティとパフォーマンスを重点的に見て、結論を PR コメントに書く。",
+      "issue_title": "料金ページのモバイル表示が崩れる",
+      "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
+      "step_read": "{{file}} を読む"
+    }
+  }
 }
