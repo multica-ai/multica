@@ -514,6 +514,9 @@
               "$ref": "#/$defs/id"
             }
           }
+        },
+        "submission_id": {
+          "type": "string"
         }
       }
     },
@@ -1789,6 +1792,184 @@
           }
         }
       ]
+    },
+    "submission": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "revision",
+        "state",
+        "attempt",
+        "position"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "starting",
+            "attached",
+            "removed",
+            "recovery_required"
+          ]
+        },
+        "item": {
+          "type": "object"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "attempt": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "attempt_id",
+                "request_id",
+                "turn_ids",
+                "delivery",
+                "settings"
+              ],
+              "properties": {
+                "attempt_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "request_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "turn_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "delivery": {
+                  "enum": [
+                    "not_sent",
+                    "intent_recorded",
+                    "confirmed",
+                    "unknown"
+                  ]
+                },
+                "settings": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "submission_result": {
+      "type": "object",
+      "required": [
+        "store_generation",
+        "snapshot_seq",
+        "queue_revision",
+        "submission",
+        "queue"
+      ],
+      "properties": {
+        "store_generation": {
+          "type": "string"
+        },
+        "snapshot_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queue_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submission": {
+          "$ref": "#/$defs/submission"
+        },
+        "queue": {
+          "$ref": "#/$defs/prompt_queue"
+        }
+      }
+    },
+    "submission_statuses": {
+      "type": "object",
+      "required": [
+        "store_generation",
+        "snapshot_seq",
+        "queue_revision",
+        "submissions",
+        "known_history"
+      ],
+      "properties": {
+        "store_generation": {
+          "type": "string"
+        },
+        "snapshot_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queue_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/submission"
+          }
+        },
+        "known_history": {
+          "type": "boolean"
+        }
+      }
+    },
+    "prompt_queue": {
+      "type": "object",
+      "required": [
+        "revision",
+        "paused",
+        "items"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "dispatching_request_id": {
+          "type": "string"
+        }
+      }
     }
   }
 }

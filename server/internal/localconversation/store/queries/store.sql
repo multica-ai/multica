@@ -314,3 +314,61 @@ DELETE FROM prompt_queue_tombstone WHERE conversation_id = ? AND removed_at < ?;
 
 -- name: CountPromptQueueTombstone :one
 SELECT COUNT(*) FROM prompt_queue_tombstone WHERE conversation_id = ? AND request_id = ?;
+
+-- name: GetSubmission :one
+SELECT * FROM prompt_submission WHERE conversation_id = ? AND request_id = ?;
+
+-- name: ListOpenSubmissions :many
+SELECT * FROM prompt_submission WHERE prompt_submission.conversation_id = ? AND (state IN ('queued', 'starting', 'recovery_required') OR request_id IN (SELECT conversation_execution.request_id FROM conversation_execution WHERE conversation_execution.conversation_id = prompt_submission.conversation_id)) ORDER BY updated_at, request_id;
+
+-- name: PutSubmission :exec
+INSERT INTO prompt_submission (conversation_id, request_id, item, state, revision, attempt_id, message_id, blocked_reason, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (conversation_id, request_id) DO UPDATE SET item = CASE WHEN excluded.state = 'removed' THEN '{}' ELSE prompt_submission.item END, state = excluded.state, revision = excluded.revision, attempt_id = excluded.attempt_id, message_id = excluded.message_id, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at;
+
+-- name: GetAttempt :one
+SELECT * FROM prompt_attempt WHERE conversation_id = ? AND attempt_id = ?;
+
+-- name: GetAttemptByRequest :one
+SELECT * FROM prompt_attempt WHERE conversation_id = ? AND request_id = ? ORDER BY rowid DESC LIMIT 1;
+
+-- name: PutAttempt :exec
+INSERT INTO prompt_attempt (conversation_id, request_id, attempt_id, submission_id, delivery, turn_ids, settings)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (conversation_id, attempt_id) DO UPDATE SET delivery = excluded.delivery, turn_ids = excluded.turn_ids, settings = excluded.settings;
+
+-- name: GetExecution :one
+SELECT * FROM conversation_execution WHERE conversation_id = ?;
+
+-- name: ClaimExecution :exec
+INSERT INTO conversation_execution (conversation_id, request_id, attempt_id) VALUES (?, ?, ?);
+
+-- name: ReleaseExecution :exec
+DELETE FROM conversation_execution WHERE conversation_id = ? AND attempt_id = ?;
+
+-- name: ListExecutions :many
+SELECT * FROM conversation_execution;
+
+-- name: GetQueueItemPosition :one
+SELECT position FROM prompt_queue_item WHERE conversation_id = ? AND request_id = ?;
+
+-- name: ListAttempts :many
+SELECT * FROM prompt_attempt WHERE conversation_id = ? AND submission_id = ?;
+
+-- name: DeleteConversationSubmissions :exec
+DELETE FROM prompt_submission WHERE conversation_id = ?;
+
+-- name: DeleteConversationAttempts :exec
+DELETE FROM prompt_attempt WHERE conversation_id = ?;
+
+-- name: DeleteConversationExecution :exec
+DELETE FROM conversation_execution WHERE conversation_id = ?;
+
+-- name: GetQueueOperation :one
+SELECT * FROM queue_operation WHERE conversation_id = ? AND operation_id = ?;
+
+-- name: InsertQueueOperation :exec
+INSERT INTO queue_operation (conversation_id, operation_id, action, request_id) VALUES (?, ?, ?, ?);
+
+-- name: DeleteConversationQueueOperations :exec
+DELETE FROM queue_operation WHERE conversation_id = ?;

@@ -273,6 +273,10 @@ func merge(dst *store.Batch, part store.Batch) {
 	if part.Queue != nil {
 		dst.Queue = part.Queue
 	}
+	if part.Operation != nil {
+		dst.Operation = part.Operation
+	}
+	dst.Submissions = append(dst.Submissions, part.Submissions...)
 	dst.MoreTurns = append(dst.MoreTurns, part.MoreTurns...)
 	dst.Remotes = append(dst.Remotes, part.Remotes...)
 	dst.Interactions = append(dst.Interactions, part.Interactions...)
@@ -310,12 +314,15 @@ func mergeSummary(dst, src *store.SummaryPatch) {
 }
 
 func isEmpty(b store.Batch) bool {
-	return b.StartTurn == nil && len(b.Events) == 0 && len(b.Messages) == 0 && b.CompleteTurn == nil && b.Summary == nil && b.ProviderSessionID == nil && len(b.Attachments) == 0 && b.Receipt == nil && b.Settings == nil && len(b.Interactions) == 0 && len(b.Resolutions) == 0 && b.Metadata == nil && b.Queue == nil && len(b.Remotes) == 0
+	return b.StartTurn == nil && len(b.Events) == 0 && len(b.Messages) == 0 && b.CompleteTurn == nil && b.Summary == nil && b.ProviderSessionID == nil && len(b.Attachments) == 0 && b.Receipt == nil && b.Settings == nil && len(b.Interactions) == 0 && len(b.Resolutions) == 0 && b.Metadata == nil && b.Queue == nil && len(b.Remotes) == 0 && b.Operation == nil && len(b.Submissions) == 0
 }
 
 // batchBytes estimates a part's size for the batch and backlog budgets.
 func batchBytes(b store.Batch) int {
 	n := 0
+	for _, c := range b.Submissions {
+		n += len(c.Item) + 256
+	}
 	for _, e := range b.Events {
 		n += len(e.Payload) + len(e.Type) + len(e.ItemID) + len(e.TurnID) + 64
 	}

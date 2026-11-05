@@ -5,14 +5,14 @@ import { ACTIVATION_CONFIRMATION_TIMEOUT_MS, ActivationService, NEW_ACTIVATION_T
 type Settings = Record<string, unknown>;
 interface Request { mode: "new" | "existing"; requestId: string; agentSessionId: string; settings?: Settings }
 
-function setup() {
+function setup(checkpoint?: (request:Request)=>Promise<void>) {
   const activate = vi.fn<(request: Request, signal: AbortSignal) => Promise<string>>();
   const applyResult = vi.fn<(request: Request, result: string) => void>();
   const updateSettings = vi.fn(async (_id: string, _settings: Settings) => {});
   const reconcile = vi.fn<(id: string) => void>();
   const deleted = new Set<string>();
   const service = new ActivationService<Request, Settings, string>({
-    workspaceId: "w", nowUnixMs: () => Date.now(), isDeleted: (id) => deleted.has(id), activate, applyResult, updateSettings, reconcile,
+    checkpoint,workspaceId: "w", nowUnixMs: () => Date.now(), isDeleted: (id) => deleted.has(id), activate, applyResult, updateSettings, reconcile,
     describeError: (error) => ({ code: "failed_code", message: error instanceof Error ? error.message : null }),
   });
   return { service, activate, applyResult, updateSettings, reconcile, deleted };
@@ -159,4 +159,14 @@ describe("ActivationService", () => {
     expect(applyResult).not.toHaveBeenCalled();
     expect(service.request(created("r2"))).toBe(false);
   });
+});
+
+it("does not create a conversation before reliable storage commits",async()=>{
+ let commit!:()=>void;const {service,activate}=setup(()=>new Promise<void>((resolve)=>{commit=resolve;}));
+ service.request(created());await Promise.resolve();expect(activate).not.toHaveBeenCalled();
+ commit();expect(await service.saved("r1")).toBe(true);await Promise.resolve();expect(activate).toHaveBeenCalledOnce();service.dispose();
+});
+it("does not create or send when the activation checkpoint fails",async()=>{
+ const {service,activate}=setup(async()=>{throw new Error("disk full");});service.request(created());
+ expect(await service.saved("r1")).toBe(false);await Promise.resolve();expect(activate).not.toHaveBeenCalled();service.dispose();
 });

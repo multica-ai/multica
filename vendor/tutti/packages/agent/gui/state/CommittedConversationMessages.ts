@@ -38,8 +38,9 @@ export class CommittedConversationMessages {
     private readonly agentSessionId: string,
     private readonly locale: ConversationLocale,
     private readonly legacyClientSubmitId?: (
-      messageId: string
-    ) => string | undefined
+      messageId: string,
+    ) => string | undefined,
+    private readonly submissionIdentity?: (requestId: string) => string,
   ) {}
 
   update(
@@ -143,8 +144,11 @@ export class CommittedConversationMessages {
     const known = previous.get(source.messageId);
     // Old receipts are consulted only while migrating messages without a native request id.
     const clientSubmitId =
-      source.role === "user" && !source.payload.clientSubmitId
-        ? this.legacyClientSubmitId?.(source.messageId)
+      source.role === "user"
+        ? typeof source.payload.clientSubmitId === "string"
+          ? (this.submissionIdentity?.(source.payload.clientSubmitId) ??
+            source.payload.clientSubmitId)
+          : this.legacyClientSubmitId?.(source.messageId)
         : undefined;
     const submitted =
       !clientSubmitId ||

@@ -732,7 +732,7 @@ describe("desktop queue presentation", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(options.update.mock.calls).toEqual([
         ["session", "stop", undefined],
-        ["session", "stop", undefined]
+        ["session", "stop", "first","started"]
       ]);
       expect(prompts.cancelRecord("session")).toMatchObject({
         status: "accepted",

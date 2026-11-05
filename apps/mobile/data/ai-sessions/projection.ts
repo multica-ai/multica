@@ -1,3 +1,4 @@
+import { localSubmissionEventSchema, mergeSubmission } from "@multica/core/local-conversation/submission";
 import { localV2SnapshotSchema, localV2SummarySchema, type LocalV2Event, type LocalV2Snapshot, type LocalV2Summary } from "@multica/core/local-conversation/v2";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -11,6 +12,10 @@ export function applyEvents(snapshot: LocalV2Snapshot, events: LocalV2Event[]): 
     if (event.seq !== next.snapshot_seq + 1) return null;
     next.snapshot_seq = event.seq;
     const p = event.payload;
+    if(event.type==="submission.updated"){
+      const result=localSubmissionEventSchema.safeParse(p);
+      if(result.success){const values=new Map(next.submissions.map((value)=>[value.request_id,value]));const value=result.data.submission;values.set(value.request_id,mergeSubmission(values.get(value.request_id),value));next.submissions=[...values.values()];}
+    }
     if (event.type === "queue.updated") {
       const queue = localV2SnapshotSchema.shape.queue.safeParse({ ...next.queue, ...p, error: typeof p.error === "string" ? p.error : undefined });
       if (queue.success && queue.data.revision >= next.queue.revision) next.queue = queue.data;

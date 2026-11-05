@@ -1,3 +1,4 @@
+import { SUBMISSION_LIFECYCLE_CAPABILITY } from "@multica/core/local-conversation/submission";
 import type { z } from "zod";
 import { parseWithFallback } from "@multica/core/api/schema";
 import {
@@ -82,6 +83,7 @@ export class ConversationService {
   /** The list, complete and current; views read it directly. */
   readonly list = new ConversationListModel();
   private summaryLoad?: Promise<void>;
+  private lastGeneration = "";
   private scopeSeq = 0;
   private listRetry = LIST_RETRY_MIN_MS;
   private listTimer?: ReturnType<typeof setTimeout>;
@@ -102,7 +104,13 @@ export class ConversationService {
   constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope, private options: ConversationServiceOptions) {}
 
   /** Someone is looking at a conversation until the returned function is called. Only views call this: it keeps the provider's process warm. */
-  focus(id: string): () => void { return this.focused.hold(id); }
+  get deviceId(): string {
+    return this.options.deviceId;
+  }
+
+  focus(id: string): () => void {
+    return this.focused.hold(id);
+  }
 
   async request(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<unknown> {
     try { return await this.transport.request(this.scope, method, path, body); }
@@ -128,7 +136,26 @@ export class ConversationService {
   }
 
   private noteGeneration(generation: string) {
-    if (generation) this.options.onGeneration(generation);
+    if (generation) {
+      this.lastGeneration = generation;
+      this.options.onGeneration(generation);
+    }
+  }
+
+  async submissionContext(): Promise<{
+    generation: string;
+    lifecycle: boolean;
+  }> {
+    const [generation, capabilities] = await Promise.all([
+      this.transport.storeGeneration?.(),
+      this.transport.capabilities?.(),
+    ]);
+    if (generation) this.noteGeneration(generation);
+    return {
+      generation: generation ?? this.lastGeneration,
+      lifecycle:
+        capabilities?.includes(SUBMISSION_LIFECYCLE_CAPABILITY) === true,
+    };
   }
 
   fileUrl(path: string): string { return this.transport.fileUrl(this.scope, path); }

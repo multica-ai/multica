@@ -36,7 +36,7 @@ export interface TurnCancelsOptions {
   turns: PromptTurnReader;
   commands: PromptCommands;
   /** Pauses the queue and interrupts whatever the daemon is running. */
-  stop(id: string): Promise<StopResult>;
+  stop(id: string, requestId?: string, turnId?: string): Promise<StopResult>;
   reconcileWorkspace(): void;
 }
 
@@ -111,7 +111,15 @@ export class TurnCancels {
           && (!record.targetClientSubmitId || record.turnId === turn.turnId)) {
           this.cancelExpiry(id);
           this.set(id, { ...record, status: "requested", turnId: turn.turnId });
-          void this.settleWhen(id, record.commandId, this.options.stop(id));
+          void this.settleWhen(
+            id,
+            record.commandId,
+            this.options.stop(
+              id,
+              record.targetClientSubmitId ?? undefined,
+              record.turnId ?? undefined,
+            ),
+          );
         }
       } else if (!active || active.phase === "settled") {
         this.clear(id);

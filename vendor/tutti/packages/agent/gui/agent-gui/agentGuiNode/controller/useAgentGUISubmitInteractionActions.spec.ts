@@ -812,3 +812,17 @@ describe("existing-session prompt submission", () => {
     ).toBe("continue");
   });
 });
+
+it.each([true,false])("clears the composer only after a successful reliable checkpoint (%s)",async(saved)=>{
+ const {input,draftByScopeKeyRef,conversationServices,setDraftByScopeKey}=createSubmitInput();
+ draftByScopeKeyRef.current={"session:session-1":draft("keep until saved")};
+ let settle!:(value:boolean)=>void;
+ const ready=new Promise<boolean>((resolve)=>{settle=resolve;});
+ const submit=vi.spyOn(conversationServices.prompts,"submitPrompt").mockReturnValue({accepted:true,queued:false,ready});
+ const {result}=renderHook(()=>useAgentGUISubmitInteractionActions(input));
+ act(()=>result.current.submitPrompt([{type:"text",text:"keep until saved"}]));
+ expect(setDraftByScopeKey).not.toHaveBeenCalled();
+ act(()=>result.current.submitPrompt([{type:"text",text:"keep until saved"}]));expect(submit).toHaveBeenCalledOnce();
+ await act(async()=>{settle(saved);await ready;});
+ expect(agentComposerDraftPrompt(draftByScopeKeyRef.current["session:session-1"]!)).toBe(saved?"":"keep until saved");
+});

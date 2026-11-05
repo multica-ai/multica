@@ -170,11 +170,16 @@ export interface AgentGuiOperations {
       import("@multica/conversation-client/services").PromptStatus
     >;
   };
+  "queue.prepare": {
+    params:AgentGuiOperations["queue.enqueue"]["params"];
+    result:AgentGuiOperations["queue.enqueue"]["params"];
+  };
   "queue.update": {
     params: {
       sessionId: string;
       action: "pause" | "stop" | "resume" | "remove" | "sendNow";
       requestId?: string;
+      targetTurnId?: string;
     };
     result: import("@multica/core/local-conversation/protocol").LocalPromptQueue;
   };
@@ -372,7 +377,20 @@ export type AgentGuiHostEvent =
  * conversations outlive the GUI, which projects them while it is mounted.
  */
 export interface LocalConversationSource {
-  navigation?(sessionId: string): import("@multica/conversation-client/services").ConversationNavigation;
+  submissionStorage?: import("@multica/core/local-conversation/submission-storage").SubmissionStorage;
+  submissionContext?(): Promise<{ generation: string; lifecycle: boolean }>;
+  inspectSubmissions?(
+    sessionId: string,
+    requestIds: string[],
+  ): Promise<
+    | import("zod").infer<
+        typeof import("@multica/core/local-conversation/submission").localSubmissionStatusesSchema
+      >
+    | null
+  >;
+  navigation?(
+    sessionId: string,
+  ): import("@multica/conversation-client/services").ConversationNavigation;
   /** Starts keeping a conversation current; the returned function is leaving it. */
   open(sessionId: string): () => void;
   /** The conversation with at least its first turns. */
@@ -399,6 +417,9 @@ export type AgentGuiOperationInvoker = <M extends AgentGuiOperation>(
 ) => Promise<AgentGuiOperations[M]["result"]>;
 export interface AgentGuiHostServices {
   queue: {
+    prepare?(
+      params: AgentGuiOperations["queue.enqueue"]["params"],
+    ): Promise<AgentGuiOperations["queue.enqueue"]["params"]>;
     enqueue(
       params: AgentGuiOperations["queue.enqueue"]["params"],
       options?: AgentGuiCallOptions

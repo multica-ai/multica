@@ -63,7 +63,7 @@ type CodexLauncher func(ctx context.Context, conv sqlitedb.Conversation) (CodexS
 // runner runs one conversation's turns on its provider.
 type runner interface {
 	Send(ctx context.Context, req SendRequest) error
-	Interrupt(ctx context.Context) error
+	Interrupt(ctx context.Context, expectedTurnID ...string) error
 	ApplySettings(ctx context.Context, st store.ConversationSettings) error
 	// Running reports whether a turn is in progress.
 	Running() bool
@@ -212,6 +212,12 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 			s.traces.reached(committed.Events, timing.StageBatcherFirstOutput)
 			s.traces.observe(committed.Events)
 			s.hub.Publish(id, committed)
+			for _, event := range committed.Events {
+				if event.Type == "turn.completed" {
+					go s.dispatchQueue(id)
+					break
+				}
+			}
 			s.traces.reached(committed.Events, timing.StageHubFirstOutputPublish)
 		},
 		Failed: func(id string, err error) {
@@ -220,6 +226,13 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 			}
 		},
 	})
+	if err := s.recoverSubmissions(ctx); err != nil {
+		s.batcher.Close()
+		writer.Close()
+		_ = contextServer.Close()
+		_ = st.Close()
+		return nil, err
+	}
 	// Queued messages wait for the user after a restart (plan §8.2).
 	queued, err := st.QueuedConversations(ctx)
 	if err != nil {
@@ -251,6 +264,11 @@ func (s *Service) Close(ctx context.Context) error {
 	s.titles.mu.Unlock()
 	s.runners = map[string]runner{}
 	s.mu.Unlock()
+	s.queues.mu.Lock()
+	for _, run := range s.queues.preparing {
+		run.cancel()
+	}
+	s.queues.mu.Unlock()
 	s.computers.mu.Lock()
 	ids := make([]string, 0, len(s.computers.active))
 	for id := range s.computers.active {
@@ -429,7 +447,28 @@ type SendResult struct {
 
 // Send accepts a user message idempotently: a retry with the same request
 // id and content returns the original turn; different content is rejected.
-func (s *Service) Send(ctx context.Context, cmd SendCommand) (SendResult, error) {
+func (s *Service) Send(ctx context.Context, cmd SendCommand) (result SendResult, err error) {
+	if _, err := s.scopedConversation(ctx, cmd.ScopeID, cmd.ConversationID); err != nil {
+		return SendResult{}, err
+	}
+	if result, done, err := s.replay(ctx, cmd.ScopeID, cmd.RequestID, sendFingerprint(cmd)); done || err != nil {
+		return result, err
+	}
+	if err := validReferences(cmd.References); err != nil {
+		return result, err
+	}
+	if _, err := s.promptWithAttachments(ctx, cmd); err != nil {
+		return result, err
+	}
+	runCtx, finish, err := s.directExecution(ctx, cmd)
+	if err != nil {
+		return SendResult{}, err
+	}
+	defer func() { finish(err) }()
+	return s.send(runCtx, cmd)
+}
+
+func (s *Service) send(ctx context.Context, cmd SendCommand) (SendResult, error) {
 	conv, err := s.scopedConversation(ctx, cmd.ScopeID, cmd.ConversationID)
 	if err != nil {
 		return SendResult{}, err
@@ -500,6 +539,7 @@ func (s *Service) Interrupt(ctx context.Context, scopeID int64, conversationID s
 	if _, err := s.scopedConversation(ctx, scopeID, conversationID); err != nil {
 		return err
 	}
+	s.cancelSubmissionRun(conversationID)
 	if found, err := s.cancelRemote(ctx, scopeID, conversationID); found || err != nil {
 		return err
 	}

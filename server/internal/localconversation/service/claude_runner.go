@@ -139,12 +139,13 @@ type ClaudeRunner struct {
 	mu sync.Mutex
 	// normMu serializes the normalizer between the adapter reader and
 	// finish, which may run from the exit or interrupt path.
-	normMu      sync.Mutex
-	adapter     ClaudeAdapter
-	norm        *claude.Normalizer
-	turn        *claudeTurn
-	contextName string
-	gate        prepareGate
+	normMu       sync.Mutex
+	interrupting bool
+	adapter      ClaudeAdapter
+	norm         *claude.Normalizer
+	turn         *claudeTurn
+	contextName  string
+	gate         prepareGate
 	// prompted is set once the running adapter has been given input. Before
 	// that, a Query's own output (such as from a preheat) is no reply to anyone.
 	prompted bool
@@ -246,14 +247,20 @@ func (r *ClaudeRunner) Send(ctx context.Context, req SendRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	admissionContext := ctx
 	ctx, cancel := detachSend(ctx)
 	defer cancel()
 	r.mu.Lock()
+	if err := admissionContext.Err(); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+
 	if r.gate.closed {
 		r.mu.Unlock()
 		return ErrClosing
 	}
-	if r.turn != nil {
+	if r.turn != nil || r.interrupting {
 		r.mu.Unlock()
 		return ErrTurnRunning
 	}
@@ -496,16 +503,26 @@ func (r *ClaudeRunner) StopTasks(ctx context.Context, taskIDs []string) error {
 
 // Interrupt asks Claude to stop the running turn. The turn completes as
 // cancelled when the adapter confirms or the Query ends.
-func (r *ClaudeRunner) Interrupt(ctx context.Context) error {
+func (r *ClaudeRunner) Interrupt(ctx context.Context, expectedTurnID ...string) error {
 	r.mu.Lock()
 	turn, adapter := r.turn, r.adapter
+	if len(expectedTurnID) > 0 && (turn == nil || turn.id != expectedTurnID[0]) {
+		r.mu.Unlock()
+		return nil
+	}
+	if r.interrupting {
+		r.mu.Unlock()
+		return nil
+	}
 	if turn != nil {
+		r.interrupting = true
 		turn.cancelRequested = true
 		if !turn.inputSent {
 			turn.stop.fire()
 		}
 	}
 	r.mu.Unlock()
+	defer func() { r.mu.Lock(); r.interrupting = false; r.mu.Unlock() }()
 	if turn == nil || adapter == nil {
 		return nil
 	}
@@ -1221,5 +1238,5 @@ func (r *ClaudeRunner) startNativeTurn() *claudeTurn {
 func (r *ClaudeRunner) Running() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.turn != nil
+	return r.turn != nil || r.interrupting
 }

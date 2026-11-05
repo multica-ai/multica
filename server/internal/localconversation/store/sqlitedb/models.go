@@ -61,6 +61,12 @@ type Conversation struct {
 	BackgroundTasks       int64
 }
 
+type ConversationExecution struct {
+	ConversationID string
+	RequestID      string
+	AttemptID      string
+}
+
 type Event struct {
 	ConversationID string
 	Seq            int64
@@ -113,6 +119,16 @@ type PreviewRoot struct {
 	CreatedAt string
 }
 
+type PromptAttempt struct {
+	ConversationID string
+	RequestID      string
+	AttemptID      string
+	SubmissionID   string
+	Delivery       string
+	TurnIds        string
+	Settings       string
+}
+
 type PromptQueue struct {
 	ConversationID string
 	Revision       int64
@@ -133,6 +149,25 @@ type PromptQueueTombstone struct {
 	ConversationID string
 	RequestID      string
 	RemovedAt      string
+}
+
+type PromptSubmission struct {
+	ConversationID string
+	RequestID      string
+	Item           string
+	State          string
+	Revision       int64
+	AttemptID      string
+	MessageID      string
+	BlockedReason  string
+	UpdatedAt      string
+}
+
+type QueueOperation struct {
+	ConversationID string
+	OperationID    string
+	Action         string
+	RequestID      string
 }
 
 type Scope struct {

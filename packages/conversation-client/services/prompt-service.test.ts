@@ -298,3 +298,100 @@ it("notifies observable readers when an admission fails", async () => {
   stop();
   prompts.dispose();
 });
+
+describe("durable submission admission", () => {
+  it("does not send or publish before storage commits, and preserves a draft on failure", async () => {
+    let reject!: (error: Error) => void;
+    const checkpoint = vi.fn(
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const { prompts, enqueue } = service({
+      checkpoint,
+      admit: (input, queued) => ({
+        id: input.clientSubmitId,
+        visibleInQueue: queued,
+      }),
+    });
+    const result = prompts.submitPrompt({
+      agentSessionId: "s",
+      clientSubmitId: "disk-failed",
+    });
+    expect(result.accepted).toBe(true);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(prompts.pending("s")).toHaveLength(0);
+    reject(new Error("disk full"));
+    expect(await result.ready).toBe(false);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(prompts.pending("s")).toHaveLength(0);
+  });
+  it("starts the request after local commit without awaiting a slow network", async () => {
+    let resolve!: () => void;
+    const enqueue = vi.fn(() => new Promise<LocalPromptQueue>(() => {}));
+    const { prompts } = service({
+      enqueue,
+      checkpoint: () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+      admit: (input, queued) => ({
+        id: input.clientSubmitId,
+        visibleInQueue: queued,
+      }),
+    });
+    const result = prompts.submitPrompt({
+      agentSessionId: "s",
+      clientSubmitId: "persisted",
+    });
+    resolve();
+    expect(await result.ready).toBe(true);
+    await settled();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+  it("merges partial authority without replacing a full queue or accepting older state", () => {
+    const { prompts } = service();
+    const queue: LocalPromptQueue = {
+      ...empty(30),
+      paused: true,
+      items: [
+        {
+          requestId: "r",
+          content: "hello",
+          display: {
+            id: "r",
+            content: [{ type: "text", text: "hello" }],
+            createdAtUnixMs: 1,
+          },
+        },
+      ],
+    };
+    prompts.receive("s", queue);
+    const value = {
+      request_id: "r",
+      revision: 3,
+      state: "starting" as const,
+      item: {},
+      position: null,
+      blocked_reason: "",
+      message_id: "",
+      attempt: {
+        attempt_id: "attempt",
+        request_id: "native-retry",
+        turn_ids: [],
+        delivery: "not_sent" as const,
+        settings: {},
+      },
+    };
+    prompts.receiveSubmissions("s", [value], "g");
+    prompts.receiveSubmissions(
+      "s",
+      [{ ...value, revision: 2, state: "queued" }],
+      "g",
+    );
+    expect(prompts.queue("s")).toEqual(queue);
+    expect(prompts.submission("s", "r")?.state).toBe("starting");
+    expect(prompts.requestIdentity("s", "native-retry")).toBe("r");
+  });
+});

@@ -133,7 +133,9 @@ func v2Do(t *testing.T, srv *httptest.Server, method, path string, body any, hea
 	return res.StatusCode, out
 }
 
-func serverMessageSchema(t *testing.T) *jsonschema.Schema {
+func serverMessageSchema(t *testing.T) *jsonschema.Schema { return localV2Schema(t, "server_message") }
+
+func localV2Schema(t *testing.T, def string) *jsonschema.Schema {
 	t.Helper()
 	c := jsonschema.NewCompiler()
 	for id, path := range protocol.SchemaFiles {
@@ -149,7 +151,7 @@ func serverMessageSchema(t *testing.T) *jsonschema.Schema {
 			t.Fatal(err)
 		}
 	}
-	schema, err := c.Compile(protocol.LocalV2ID + "#/$defs/server_message")
+	schema, err := c.Compile(protocol.LocalV2ID + "#/$defs/" + def)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,5 +727,54 @@ func TestV2PromptStatuses(t *testing.T) {
 	_, hello := v2Do(t, srv, http.MethodGet, "/local/v2/hello", nil, h)
 	if capabilities, _ := hello["capabilities"].([]any); !slices.Contains(capabilities, any(PromptStatusCapability)) {
 		t.Fatalf("capabilities = %v", capabilities)
+	}
+}
+
+func TestV2SubmissionLifecycleAcrossLocalAndPhoneTransport(t *testing.T) {
+	t.Parallel()
+	srv, _, v := newV2Fixture(t)
+	headers := v2Headers("user-1")
+	v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "conv-submission", "provider": "claude"}, headers)
+	v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-submission/commands", map[string]any{"type": "queue_update", "action": "pause", "operation_id": "pause-once"}, headers)
+	open := &atomic.Bool{}
+	open.Store(true)
+	phone := remoteServer(t, v, RemotePeer{ID: "peer-phone", DeviceName: "Phone"}, open)
+	command := map[string]any{"type": "submit", "item": map[string]any{"requestId": "phone-message", "content": "Persist me", "display": map[string]any{"id": "phone-message", "createdAtUnixMs": 1}}}
+	status, body := v2Do(t, phone, http.MethodPost, "/local/v2/sessions/conv-submission/commands", command, remoteHeaders("phone-client"))
+	if status != http.StatusAccepted {
+		t.Fatalf("phone submit=%d %+v", status, body)
+	}
+	validateLocalV2(t, "submission_result", body)
+	value := body["submission"].(map[string]any)
+	if value["state"] != "queued" {
+		t.Fatalf("pause not preserved: %+v", body)
+	}
+	status, replay := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-submission/commands", command, headers)
+	if status != http.StatusAccepted || replay["submission"].(map[string]any)["revision"] != value["revision"] {
+		t.Fatalf("cross-transport replay=%d %+v", status, replay)
+	}
+	status, states := v2Do(t, phone, http.MethodPost, "/local/v2/sessions/conv-submission/queue/status", map[string]any{"request_ids": []string{"phone-message"}}, remoteHeaders("phone-client"))
+	if status != http.StatusOK {
+		t.Fatalf("status=%d %+v", status, states)
+	}
+	validateLocalV2(t, "submission_statuses", states)
+	_, snapshot := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/conv-submission/snapshot", nil, headers)
+	if len(snapshot["submissions"].([]any)) != 1 {
+		t.Fatalf("snapshot lost submission: %+v", snapshot)
+	}
+}
+
+func validateLocalV2(t *testing.T, def string, body any) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := localV2Schema(t, def).Validate(value); err != nil {
+		t.Fatalf("%s response: %v", def, err)
 	}
 }

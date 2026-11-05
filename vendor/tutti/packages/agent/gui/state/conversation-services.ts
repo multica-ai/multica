@@ -28,6 +28,7 @@ export interface AgentActivationState {
     options?: { selectionSource?: "activation" | "user-selection" }
   ): "not-applicable" | "preserve" | "rollback";
   request(input: AgentSessionActivationInput): boolean;
+  saved?(requestId: string): Promise<boolean> | undefined;
   patchSettings(
     id: string,
     settings: NonNullable<AgentSessionActivationInput["settings"]>

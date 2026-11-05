@@ -183,6 +183,7 @@ export function useAgentGUISubmitInteractionActions(
     workspaceId
   ]);
 
+  const savingPrompts = useRef(new Set<string>());
   const executePrompt = useCallback(
     (
       agentSessionId: string,
@@ -259,32 +260,35 @@ export function useAgentGUISubmitInteractionActions(
           targetMode: "existing"
         }
       });
-      const { accepted, queued } = conversationServices.prompts.submitPrompt({
-        agentSessionId,
-        ...(options?.capabilityRefs?.length
-          ? { capabilityRefs: options.capabilityRefs }
-          : {}),
-        clientSubmitId: submitTrace.clientSubmitId,
-        content: normalizedContent,
-        ...(displayPrompt && displayPrompt.trim() ? { displayPrompt } : {}),
-        submitDiagnostics: agentSubmitTraceDiagnostics(submitTrace),
-        ...(options?.requiredSettingsPatch
-          ? {
-              requiredSettingsPatch: {
-                ...options.requiredSettingsPatch
-              }
-            }
-          : {}),
-        ...(options?.targetTurnId?.trim()
-          ? { targetTurnId: options.targetTurnId.trim() }
-          : {}),
-        ...(options?.immediate === true
-          ? { routing: "immediate" as const }
-          : options?.sendNow === true
-            ? { routing: "send_now" as const }
+      if (savingPrompts.current.has(agentSessionId)) return;
+      const { accepted, queued, ready } =
+        conversationServices.prompts.submitPrompt({
+          agentSessionId,
+          ...(options?.capabilityRefs?.length
+            ? { capabilityRefs: options.capabilityRefs }
             : {}),
-        runtimeContent: toRuntimeSendContent(normalizedContent)
-      });
+          clientSubmitId: submitTrace.clientSubmitId,
+          content: normalizedContent,
+          ...(displayPrompt && displayPrompt.trim() ? { displayPrompt } : {}),
+          submitDiagnostics: agentSubmitTraceDiagnostics(submitTrace),
+          ...(options?.requiredSettingsPatch
+            ? {
+                requiredSettingsPatch: {
+                  ...options.requiredSettingsPatch,
+                },
+              }
+            : {}),
+          ...(options?.targetTurnId?.trim()
+            ? { targetTurnId: options.targetTurnId.trim() }
+            : {}),
+          ...(options?.immediate === true
+            ? { routing: "immediate" as const }
+            : options?.sendNow === true
+              ? { routing: "send_now" as const }
+              : {}),
+          runtimeContent: toRuntimeSendContent(normalizedContent),
+        });
+      const finish=()=>{
       submitTrace.queued = queued;
       setDetailError(null);
       // Clear the composer optimistically the instant the engine takes the
@@ -322,6 +326,13 @@ export function useAgentGUISubmitInteractionActions(
         trace: submitTrace,
         workspaceId
       });
+      };
+      if(ready){
+        savingPrompts.current.add(agentSessionId);
+        void ready.then((saved)=>{savingPrompts.current.delete(agentSessionId);if(saved)finish();});
+        return;
+      }
+      finish();
     },
     [
       agentActivityRuntime,
@@ -542,7 +553,7 @@ export function useAgentGUISubmitInteractionActions(
           displayPromptText,
           options
         );
-        if (activationResult) {
+        const clearHomeDraft=()=>{
           draftByScopeKeyRef.current = clearSubmittedAgentGUIHomeDraft({
             draftKey: homeDraftKey,
             drafts: draftByScopeKeyRef.current,
@@ -556,6 +567,8 @@ export function useAgentGUISubmitInteractionActions(
             })
           );
         }
+        if(activationResult?.ready)void activationResult.ready.then((saved)=>{if(saved)clearHomeDraft();});
+        else if(activationResult)clearHomeDraft();
         return;
       }
       const activeTurnId = activeEngineActiveTurn?.turnId.trim() ?? "";

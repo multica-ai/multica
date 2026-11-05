@@ -88,6 +88,7 @@
     "electron": "^44.9.3",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
+    "fake-indexeddb": "^6.2.7",
     "globals": "^16.0.0",
     "jsdom": "catalog:",
     "tailwindcss": "^4",

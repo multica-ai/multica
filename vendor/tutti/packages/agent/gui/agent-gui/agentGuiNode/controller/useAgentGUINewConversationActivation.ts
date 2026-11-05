@@ -375,18 +375,26 @@ export function useAgentGUINewConversationActivation(
         )
       });
       if (requestId === null) return null;
-      activeConversationIdRef.current = agentSessionId;
-      setActiveConversationId(agentSessionId);
-      requestRailReveal(agentSessionId, "created");
-      isComposerHomeRef.current = false;
-      setIsComposerHome(false);
-      setIntent({
-        id: agentSessionId,
-        source: "activation",
-        tag: "active"
+      const reveal = () => {
+        activeConversationIdRef.current = agentSessionId;
+        setActiveConversationId(agentSessionId);
+        requestRailReveal(agentSessionId, "created");
+        isComposerHomeRef.current = false;
+        setIsComposerHome(false);
+        setIntent({
+          id: agentSessionId,
+          source: "activation",
+          tag: "active",
+        });
+        setIsLoadingMessages(false);
+      };
+      const saved = conversationServices.activations.saved?.(requestId);
+      const ready = saved?.then((success) => {
+        if (success) reveal();
+        return success;
       });
-      setIsLoadingMessages(false);
-      return { agentSessionId, requestId };
+      if (!saved) reveal();
+      return { agentSessionId, requestId, ready };
     },
     [
       activeSessionState,

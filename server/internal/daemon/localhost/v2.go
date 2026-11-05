@@ -206,7 +206,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
 		}
-		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability, NavigationCapability)
+		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability, NavigationCapability, service.SubmissionLifecycleCapability)
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
@@ -374,7 +374,12 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"statuses": statuses})
+		details, err := v.svc.Submissions(r.Context(), scopeID, parts[1], body.RequestIDs)
+		if err != nil {
+			writeV2Error(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"statuses": statuses, "submissions": details.Submissions, "store_generation": details.StoreGeneration, "snapshot_seq": details.SnapshotSeq, "queue_revision": details.QueueRevision, "known_history": details.KnownHistory})
 	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "side-workspace" && r.Method == http.MethodGet:
 		if _, err := v.svc.Snapshot(r.Context(), scopeID, parts[1], 1); err != nil {
 			writeV2Error(w, err)
@@ -492,11 +497,7 @@ func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id 
 	for i, in := range snap.PendingInteractions {
 		pending[i] = map[string]any{"interaction_id": in.ID, "turn_id": in.TurnID, "kind": in.Kind, "request": json.RawMessage(in.Payload), "created_at": in.CreatedAt}
 	}
-	queue, err := v.svc.Queue(r.Context(), scopeID, id)
-	if err != nil {
-		writeV2Error(w, err)
-		return
-	}
+	queue := v.svc.SnapshotQueue(id, snap.Queue, snap.Submissions)
 	c := snap.Conversation
 	settings := map[string]any{"model": nil, "reasoning_effort": nil, "permission_mode": c.PermissionMode}
 	// A conversation that picked Claude's old "default" row follows the default.
@@ -509,7 +510,7 @@ func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id 
 	v.writeSnapshot(w, r, id, began, map[string]any{
 		"version": V2Version, "store_generation": v.svc.Generation(), "snapshot_seq": snap.SnapshotSeq,
 		"conversation": summaryDTO(c), "turns": turns, "has_older_turns": snap.HasOlderTurns,
-		"pending_interactions": pending, "settings": settings, "queue": queue,
+		"pending_interactions": pending, "settings": settings, "queue": queue, "submissions": snap.Submissions,
 		"created_at": c.CreatedAt, "forked_from_id": c.ForkedFromID, "forked_from_turn_id": c.ForkedFromTurnID,
 		"imported_from_session_id": c.ImportedFromSessionID, "open_background_items": eventDTOs(snap.OpenBackgroundItems),
 	})
@@ -592,9 +593,10 @@ type commandBody struct {
 	// queue_enqueue: the client's queued message; paused queues it
 	// without dispatching. queue_update: the action and, for remove and
 	// send_now, the item's request_id.
-	Item   json.RawMessage `json:"item"`
-	Paused bool            `json:"paused"`
-	Action string          `json:"action"`
+	Item        json.RawMessage `json:"item"`
+	Paused      bool            `json:"paused"`
+	Action      string          `json:"action"`
+	OperationID string          `json:"operation_id"`
 	// send: provider text replacing Text, such as Text with context.
 	Prompt string `json:"prompt"`
 	// fork and create_side: the turn the copy ends after; empty takes
@@ -632,13 +634,13 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		return
 	}
 	switch body.Type {
-	case "send", "answer", "queue_enqueue", "compact":
+	case "send", "answer", "queue_enqueue", "submit", "compact":
 		v.actedOn(id, callerOf(r.Context()))
 	}
 	switch body.Type {
 	case "send", "compact":
 		v.svc.NoteRequest(id, body.RequestID, received, callerOf(r.Context()).timing())
-	case "queue_enqueue":
+	case "queue_enqueue", "submit":
 		var item struct {
 			RequestID string `json:"requestId"`
 		}
@@ -763,6 +765,13 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 			return
 		}
 		writeJSON(w, http.StatusCreated, summaryDTO(conv))
+	case "submit":
+		result, err := v.svc.Submit(r.Context(), scopeID, id, body.Item, callerOf(r.Context()).origin())
+		if err != nil {
+			writeV2Error(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, result)
 	case "queue_enqueue":
 		queue, err := v.svc.Enqueue(r.Context(), scopeID, id, body.Item, body.Paused, callerOf(r.Context()).origin())
 		if err != nil {
@@ -771,7 +780,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		}
 		writeJSON(w, http.StatusOK, queue)
 	case "queue_update":
-		queue, err := v.svc.UpdateQueue(r.Context(), scopeID, id, body.Action, body.RequestID)
+		queue, err := v.svc.ControlQueue(r.Context(), scopeID, id, body.Action, body.RequestID, body.OperationID,body.TurnID)
 		if err != nil {
 			writeV2Error(w, err)
 			return

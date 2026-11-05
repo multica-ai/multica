@@ -81,8 +81,7 @@ func (s *Service) cloudFor(ctx context.Context, scopeID int64) (cloudAgents, err
 }
 
 // conversationBusy reports whether a turn of the conversation runs: a
-// local one by its runner's live state (its completion commits after the
-// turn ends), a cloud agent one by the store.
+// local one by its live state, and every persisted turn until its completion commits.
 func (s *Service) conversationBusy(ctx context.Context, conversationID string) (bool, error) {
 	s.mu.Lock()
 	r := s.runners[conversationID]
@@ -95,7 +94,7 @@ func (s *Service) conversationBusy(ctx context.Context, conversationID string) (
 		return false, err
 	}
 	for _, t := range turns {
-		if t.Status == "running" && t.Remote != "" {
+		if t.Status == "running" {
 			return true, nil
 		}
 	}
@@ -112,7 +111,27 @@ type RemoteResult struct {
 // SendToAgents records a message for defined agents, one turn each, then
 // sends it to each agent's cloud chat and mirrors the executions.
 // Retrying the same request id returns the same turns.
-func (s *Service) SendToAgents(ctx context.Context, cmd SendCommand, agents []RemoteAgent) (RemoteResult, error) {
+func (s *Service) SendToAgents(ctx context.Context, cmd SendCommand, agents []RemoteAgent) (result RemoteResult, err error) {
+	if _, err := s.scopedConversation(ctx, cmd.ScopeID, cmd.ConversationID); err != nil {
+		return result, err
+	}
+	if receipt, e := s.store.Receipt(ctx, cmd.ScopeID, cmd.RequestID); e == nil {
+		if receipt.Fingerprint != sendFingerprint(cmd) {
+			return result, ErrRequestConflict
+		}
+		_ = json.Unmarshal([]byte(receipt.Result), &result)
+		result.Replayed = true
+		return result, nil
+	}
+	runCtx, finish, err := s.directExecution(ctx, cmd, true)
+	if err != nil {
+		return result, err
+	}
+	defer func() { finish(err) }()
+	return s.sendToAgents(runCtx, cmd, agents)
+}
+
+func (s *Service) sendToAgents(ctx context.Context, cmd SendCommand, agents []RemoteAgent) (RemoteResult, error) {
 	conv, err := s.scopedConversation(ctx, cmd.ScopeID, cmd.ConversationID)
 	if err != nil {
 		return RemoteResult{}, err
@@ -183,9 +202,15 @@ func (s *Service) SendToAgents(ctx context.Context, cmd SendCommand, agents []Re
 		b.Events = append(b.Events, event(t.ID, "turn.started", map[string]any{"request_id": cmd.RequestID, "input_message_id": messageID}, false))
 	}
 	persisting := s.opts.Now()
-	if _, err := s.batcher.AppendWait(ctx, b); err != nil {
+	if _, err := s.batcher.AppendWait(context.WithoutCancel(ctx), b); err != nil {
 		if errors.Is(err, store.ErrDuplicateRequest) {
-			return s.SendToAgents(ctx, cmd, agents)
+			return s.sendToAgents(ctx, cmd, agents)
+		}
+		return RemoteResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		for _, id := range result.TurnIDs {
+			s.finishRemote(conv.ID, id, "cancelled", "", "")
 		}
 		return RemoteResult{}, err
 	}
@@ -297,7 +322,7 @@ func (s *Service) runRemote(scopeID int64, conversationID, turnID, messageID, pr
 	sent, _ := v.(map[string]any)
 	taskID, _ := sent["task_id"].(string)
 	if err != nil || taskID == "" {
-		fail(errors.New("Cloud send was not confirmed. Inspect the agent's cloud chat before retrying."))
+		s.finishRemote(conversationID, turnID, "failed", "Cloud send was not confirmed. Inspect the agent's cloud chat before retrying.", "", "outcome_unknown")
 		return
 	}
 	state.TaskID, state.ContextThrough = taskID, messageID
@@ -449,7 +474,7 @@ func remoteEvents(turnID string, msg map[string]any, at time.Time) []store.NewEv
 // finishRemote completes a cloud agent turn: its streamed text becomes the
 // reply, a failure pauses the conversation's queue, and the queue and
 // title follow as for any turn.
-func (s *Service) finishRemote(conversationID, turnID, status, failure, reply string) {
+func (s *Service) finishRemote(conversationID, turnID, status, failure, reply string, kind ...string) {
 	ctx := context.Background()
 	t, err := s.store.Turn(ctx, conversationID, turnID)
 	if err != nil || t.Status != "running" {
@@ -515,8 +540,12 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 	payload := map[string]any{"status": status}
 	completion := &store.TurnCompletion{TurnID: turnID, Status: status, CompletedAt: now}
 	if failure != "" {
-		payload["error"] = map[string]any{"kind": "agent_error", "message": failure}
-		completion.ErrorKind, completion.Error = "agent_error", failure
+		errorKind := "agent_error"
+		if len(kind) > 0 {
+			errorKind = kind[0]
+		}
+		payload["error"] = map[string]any{"kind": errorKind, "message": failure}
+		completion.ErrorKind, completion.Error = errorKind, failure
 	}
 	data, _ := json.Marshal(payload)
 	b.Events = append(b.Events, store.NewEvent{TurnID: turnID, Type: "turn.completed", Final: true, Payload: data, CreatedAt: now})
@@ -560,7 +589,7 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 
 // cancelRemote stops the conversation's running cloud agent turns: sent
 // ones through the cloud, unsent ones locally.
-func (s *Service) cancelRemote(ctx context.Context, scopeID int64, conversationID string) (bool, error) {
+func (s *Service) cancelRemote(ctx context.Context, scopeID int64, conversationID string, expectedRequest ...string) (bool, error) {
 	turns, err := s.store.ConversationTurns(ctx, conversationID)
 	if err != nil {
 		return false, err
@@ -568,7 +597,7 @@ func (s *Service) cancelRemote(ctx context.Context, scopeID int64, conversationI
 	found := false
 	for _, t := range turns {
 		r := remoteOf(t)
-		if r == nil || t.Status != "running" {
+		if r == nil || t.Status != "running" || (len(expectedRequest) > 0 && t.RequestID != expectedRequest[0]) {
 			continue
 		}
 		found = true

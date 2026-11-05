@@ -67,6 +67,7 @@ export interface UseAgentGUINewConversationActivationInput {
 }
 
 export interface AgentGUINewConversationActivationResult {
+  ready?: Promise<boolean>;
   agentSessionId: string;
   requestId: string;
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { localV2UploadSchema } from "@multica/core/local-conversation/v2";
 import { useAIDrafts, type DraftAttachment } from "./drafts";
-import { fileContentHash } from "./files";
+import { fileContentHash,retainSubmissionAsset,removeSubmissionAsset } from "./files";
 import type { AISessionClient } from "./client";
 
 const MAX_CONCURRENT_UPLOADS = 3;
@@ -45,6 +45,8 @@ export function sendFile(client: UploadClient, asset: UploadAsset, body: Blob, i
 function attachmentId() { return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""); }
 
 interface UploadDeps {
+ retain?(key:string,uri:string):Promise<string>;
+ discard?(key:string):Promise<void>;
   hash(uri: string): Promise<string | null>;
   /** Answers the stored id; a daemon too old to take the chosen one names its own. */
   transfer(client: UploadClient, asset: UploadAsset, id: string, signal: AbortSignal): Promise<string>;
@@ -57,6 +59,7 @@ interface Job {
   asset: UploadAsset;
   abort: AbortController;
   stopped: Promise<void>;
+  ready?:Promise<void>;
   status: DraftAttachment["status"];
   storedId: string;
 }
@@ -66,7 +69,7 @@ interface Job {
  * Each attachment has its final id from the start, so sending only has to wait
  * for the outcome. Content the device already has is not transferred again.
  */
-export function createDraftUploads({ hash, transfer, update }: UploadDeps) {
+export function createDraftUploads({ hash, transfer, update,retain,discard }: UploadDeps) {
   const jobs = new Map<string, Job>();
   const queue: (() => void)[] = [];
   let active = 0;
@@ -76,6 +79,7 @@ export function createDraftUploads({ hash, transfer, update }: UploadDeps) {
   };
 
   const attempt = async (job: Job, id: string) => {
+    await job.ready;
     await slot();
     try {
       if (job.abort.signal.aborted) throw new Error("aborted");
@@ -109,10 +113,17 @@ export function createDraftUploads({ hash, transfer, update }: UploadDeps) {
     start(client: UploadClient, key: string, asset: UploadAsset) {
       const id = attachmentId();
       const job: Job = { client, key, asset, abort: new AbortController(), stopped: Promise.resolve(), status: "uploading", storedId: id };
+      if(retain)job.ready=retain(`${key}:${id}`,asset.uri).then((uri)=>{job.asset={...asset,uri};if(jobs.get(id)===job)update(key,id,{uri,mimeType:asset.mimeType});});
       jobs.set(id, job);
       update(key, id, { id, name: asset.name, status: "uploading" });
       run(id, job);
       return id;
+    },
+    async prepare(ids:readonly string[]){
+      return Promise.all(ids.flatMap((id)=>{const job=jobs.get(id);return job?[Promise.resolve(job.ready).then(()=>({id,uri:job.asset.uri,name:job.asset.name,mimeType:job.asset.mimeType}))]:[];}));
+    },
+    restore(client:UploadClient,key:string,files:readonly {id:string;uri:string;name:string;mimeType?:string|null}[]){
+      for(const file of files){if(jobs.has(file.id))continue;const job:Job={client,key,asset:file,abort:new AbortController(),stopped:Promise.resolve(),status:"failed",storedId:file.id};jobs.set(file.id,job);}
     },
     /** Waits for these attachments and answers their stored ids; an earlier failure gets another attempt. Attachments it does not know are stored. */
     async ensure(ids: readonly string[]) {
@@ -127,12 +138,13 @@ export function createDraftUploads({ hash, transfer, update }: UploadDeps) {
       }));
     },
     /** A message owns these attachments now. */
-    forget(ids: readonly string[]) { for (const id of ids) jobs.delete(id); },
+    forget(ids: readonly string[]) { for (const id of ids){const job=jobs.get(id);jobs.delete(id);if(job)void discard?.(`${job.key}:${id}`).catch(()=>{});} },
     /** The draft dropped it: stop the transfer and discard what arrived. */
     remove(client: UploadClient, id: string) {
       const job = jobs.get(id);
       jobs.delete(id);
       job?.abort.abort();
+      if(job)void discard?.(`${job.key}:${id}`).catch(()=>{});
       void (job?.stopped ?? Promise.resolve()).then(() => client.request("DELETE", `/attachments/${encodeURIComponent(id)}`, z.unknown())).catch(() => undefined);
     },
   };
@@ -140,6 +152,7 @@ export function createDraftUploads({ hash, transfer, update }: UploadDeps) {
 
 export const draftUploads = createDraftUploads({
   hash: fileContentHash,
+  retain:retainSubmissionAsset,discard:removeSubmissionAsset,
   transfer: async (client, asset, id, signal) => {
     const local = await fetch(asset.uri);
     return sendFile(client, asset, await local.blob(), id, signal);

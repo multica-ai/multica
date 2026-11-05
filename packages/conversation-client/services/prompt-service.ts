@@ -1,3 +1,7 @@
+import {
+  mergeSubmission,
+  type LocalSubmission,
+} from "@multica/core/local-conversation/submission";
 import type { LocalPromptQueue } from "@multica/core/local-conversation/protocol";
 import {
 action,
@@ -82,10 +86,12 @@ export interface PromptServiceOptions<
   Display extends PromptDisplay
 > {
   enqueue(input: Input): Promise<LocalPromptQueue>;
+  checkpoint?(input: Input, display: Display): Promise<void>;
   update(
     id: string,
     action: PromptQueueAction,
-    requestId?: string
+    requestId?: string,
+    targetTurnId?: string,
   ): Promise<LocalPromptQueue>;
   error(error: unknown): void;
   /** Messages a previous document had not handed to the daemon. */
@@ -128,6 +134,11 @@ export class PromptService<
   Input extends PromptInput,
   Display extends PromptDisplay
 > {
+  private readonly authorities = new Map<
+    string,
+    Map<string, LocalSubmission>
+  >();
+  private readonly generations = new Map<string, string>();
   private readonly queues = new Map<string, LocalPromptQueue>();
   private readonly pendingBySession = new Map<
     string,
@@ -151,6 +162,7 @@ export class PromptService<
   private readonly interactions: InteractionResponses;
   private readonly editRetries: EditRetries;
   private disposed = false;
+  private readonly saving = new Map<string, Set<string>>();
   private readonly presented = new Map<string, IComputedValue<unknown>>();
 
   /** Changes with what is sent and queued, for whoever presents it. */
@@ -169,8 +181,8 @@ export class PromptService<
       workspaceId,
       turns,
       commands,
-      stop: (id) => this.sendStop(id),
-      reconcileWorkspace: options.reconcileWorkspace
+      stop: (id, requestId, turnId) => this.sendStop(id, requestId, turnId),
+      reconcileWorkspace: options.reconcileWorkspace,
     });
     this.interactions = new InteractionResponses({
       workspaceId,
@@ -314,9 +326,38 @@ export class PromptService<
             )
         )
         .filter(
-          (item, index, all) => all.findIndex((other) => other.id === item.id) === index
-        )
-    ];
+          (item, index, all) =>
+            all.findIndex((other) => other.id === item.id) === index,
+        ),
+    ]
+      .filter(
+        (prompt) =>
+          this.authorities.get(id)?.get(prompt.clientSubmitId || prompt.id)
+            ?.state !== "removed",
+      )
+      .map((prompt) => {
+        const authority = this.authorities
+          .get(id)
+          ?.get(prompt.clientSubmitId || prompt.id);
+        if (!authority) return prompt;
+        return {
+          ...prompt,
+          visibleInQueue:
+            authority.state === "queued" ||
+            authority.state === "recovery_required",
+        };
+      });
+  }
+
+  submission(id: string, requestId: string): LocalSubmission | undefined {
+    void this.revision;
+    return this.authorities.get(id)?.get(requestId);
+  }
+  requestIdentity(id: string, requestId: string): string {
+    void this.revision;
+    for (const value of this.authorities.get(id)?.values() ?? [])
+      if (value.attempt?.request_id === requestId) return value.request_id;
+    return requestId;
   }
 
   private read<T>(area: string, id: string, derive: () => T): T {
@@ -498,7 +539,8 @@ export class PromptService<
       ? this.options.turns.turn(id, session.activeTurnId)
       : null;
     return Boolean(
-      queue?.prompts.length ||
+      this.saving.get(id)?.size ||
+        queue?.prompts.length ||
         queue?.inFlight ||
         (this.options.canSubmit
           ? !this.options.canSubmit(id)
@@ -507,12 +549,36 @@ export class PromptService<
             (turn && turn.phase !== "settled"))
     );
   }
-  submitPrompt(input: Input): { accepted: boolean; queued: boolean } {
+  submitPrompt(input: Input): {
+    accepted: boolean;
+    queued: boolean;
+    ready?: Promise<boolean>;
+  } {
     this.options.beforeTurnOperation?.();
     const queued = this.wouldBeVisibleInQueue(input.agentSessionId);
     const saved = structuredClone(input);
     const display = this.options.admit?.(saved, queued);
     if (!display) return { accepted: false, queued: false };
+    if (this.options.checkpoint) {
+      const id = input.agentSessionId;
+      const saving = this.saving.get(id) ?? new Set<string>();
+      this.saving.set(id, saving);
+      saving.add(input.clientSubmitId);
+      const ready = this.options.checkpoint(saved, display).then(
+        () => {
+          saving.delete(input.clientSubmitId);
+          if (this.disposed) return false;
+          this.submit(saved, display);
+          return true;
+        },
+        (error: unknown) => {
+          saving.delete(input.clientSubmitId);
+          this.options.error(error);
+          return false;
+        },
+      );
+      return { accepted: true, queued, ready };
+    }
     this.submit(saved, display);
     return { accepted: true, queued };
   }
@@ -564,9 +630,55 @@ export class PromptService<
     this.options.error(error);
   }
 
+  /** Status queries are partial: they never replace the queue or advance its revision. */
+  receiveSubmissions(
+    id: string,
+    submissions: readonly LocalSubmission[],
+    generation?: string,
+    publish = true,
+  ): void {
+    if (this.disposed) return;
+    if (generation) {
+      const previous = this.generations.get(id);
+      if (previous && previous !== generation) {
+        this.authorities.delete(id);
+        this.queues.delete(id);
+      }
+      this.generations.set(id, generation);
+    }
+    if (submissions) {
+      const values =
+        this.authorities.get(id) ?? new Map<string, LocalSubmission>();
+      this.authorities.set(id, values);
+      for (const value of submissions)
+        values.set(
+          value.request_id,
+          mergeSubmission(values.get(value.request_id), value),
+        );
+      this.pendingBySession.set(
+        id,
+        this.pending(id).filter(
+          (item) =>
+            !item.restored ||
+            item.admission ||
+            !["attached", "removed"].includes(
+              values.get(item.input.clientSubmitId)?.state ?? "",
+            ),
+        ),
+      );
+    }
+    if (publish) this.publish();
+  }
+
   /** The queue as the daemon reports it. An acknowledgement can arrive after a newer snapshot, so revisions only rise. */
   receive(id: string, incoming?: LocalPromptQueue): void {
     if (this.disposed || !incoming) return;
+    this.receiveSubmissions(
+      id,
+      incoming.submissions ?? [],
+      incoming.storeGeneration,
+      false,
+    );
     const known = this.queues.get(id);
     const queue =
       known && incoming.revision < known.revision ? known : incoming;
@@ -699,7 +811,8 @@ export class PromptService<
   private runUpdate(
     id: string,
     queueAction: PromptQueueAction,
-    promptId?: string
+    promptId?: string,
+    targetTurnId?: string,
   ): Promise<StopResult> | undefined {
     const prompt = this.prompts(id).find((item) => item.id === promptId);
     const requestId = prompt?.clientSubmitId || promptId;
@@ -745,7 +858,9 @@ export class PromptService<
       )
         return undefined;
       try {
-        const queue = await this.options.update(id, queueAction, requestId);
+        const queue = await (targetTurnId
+          ? this.options.update(id, queueAction, requestId, targetTurnId)
+          : this.options.update(id, queueAction, requestId));
         if (this.disposed) return undefined;
         if (queueAction === "remove" && requestId)
           this.awaitingTranscript.get(id)?.delete(requestId);
@@ -781,13 +896,17 @@ export class PromptService<
   }
 
   /** A stop still on its way may predate the turn this one is for, so it goes after it. */
-  private sendStop(id: string): Promise<StopResult> {
+  private sendStop(
+    id: string,
+    requestId?: string,
+    turnId?: string,
+  ): Promise<StopResult> {
     const running = this.operations.get(
-      JSON.stringify([id, "stop", undefined])
+      JSON.stringify([id, "stop", requestId]),
     );
     return running
-      ? running.then(() => this.sendStop(id))
-      : this.runUpdate(id, "stop")!;
+      ? running.then(() => this.sendStop(id, requestId, turnId))
+      : this.runUpdate(id, "stop", requestId, turnId)!;
   }
 
   /** Stops the session; a message on its way is stopped once it has started a turn. */
@@ -798,7 +917,15 @@ export class PromptService<
     if (this.cancels.pending(id)) return;
     // Sent whatever this client knows, since the daemon may be running what it has not
     // heard of, and it persists the pause before the cancellation can release the next turn.
-    this.cancels.request(id, clientSubmitId, this.sendStop(id));
+    this.cancels.request(
+      id,
+      clientSubmitId,
+      this.sendStop(
+        id,
+        clientSubmitId ?? undefined,
+        this.options.turns.session(id)?.activeTurnId ?? undefined,
+      ),
+    );
   }
 
   cancelStatus(id: string | null | undefined): TurnCancelStatus | null {

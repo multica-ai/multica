@@ -116,6 +116,7 @@ export interface AgentSessionSubmitPromptInput {
 export interface AgentSessionSubmitPromptResult {
   accepted: boolean;
   queued: boolean;
+  ready?: Promise<boolean>;
 }
 
 export interface AgentQueuedPrompt {

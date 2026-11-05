@@ -55,3 +55,10 @@ describe("AI reference drafts", () => {
     expect(useAIDrafts.getState().attachments[key]).toEqual([{ id: "file-2", name: "New file", status: "uploaded" }]);
   });
 });
+
+it("hands a durably checkpointed message out of the composer without creating a second pending outbox",()=>{
+ const store=useAIDrafts.getState();store.setDraft(key,"Review");store.setReferences(key,[reference]);
+ store.takeOwnership(key,request);
+ expect(useAIDrafts.getState().drafts[key]).toBeUndefined();expect(useAIDrafts.getState().references[key]).toBeUndefined();expect(useAIDrafts.getState().pending).toEqual({});
+ store.setDraft(key,"New draft");store.takeOwnership(key,request);expect(useAIDrafts.getState().drafts[key]).toBe("New draft");
+});

@@ -2914,3 +2914,88 @@ it("migrates an unknown legacy delivery into a visible paused draft without repl
   expect(wasEnqueued(data.request)).toBe(false);
   vi.unstubAllGlobals();
 });
+
+it("saves a complete desktop submission before calling its transport and keeps network failures recoverable", async () => {
+  const data = backend();
+  data.sessions.push(session);
+  const source = localSourceFromClient(data.client);
+  const records = new Map<
+    string,
+    import("@multica/core/local-conversation/submission-storage").StoredSubmission
+  >();
+  let commit!: (value: void) => void;
+  source.submissionStorage = {
+    read: async () => [...records.values()],
+    put: vi.fn(async (record) => {
+      await new Promise<void>((resolve) => {
+        commit = resolve;
+      });
+      records.set(record.requestId, record);
+      return record;
+    }),
+    confirm: async () => {},
+    remove: async (id) => {
+      records.delete(id);
+    },
+  };
+  source.submissionContext = async () => ({
+    generation: "test",
+    lifecycle: true,
+  });
+  data.rejectSend(new Error("connection lost"));
+  const handle = createRuntime(
+    data.client,
+    { ...init, sessions: [session] },
+    source,
+  );
+  handles.push(handle);
+  await handle.initialize();
+  await handle.runtime.conversations.load(init.workspaceId, session.id);
+  const result = handle.runtime.prompts.submitPrompt({
+    agentSessionId: session.id,
+    clientSubmitId: "durable",
+    content: [{ type: "text", text: "Keep me" }],
+  });
+  await vi.waitFor(() =>
+    expect(source.submissionStorage!.put).toHaveBeenCalledOnce(),
+  );
+  expect(wasEnqueued(data.request)).toBe(false);
+  commit();
+  expect(await result.ready).toBe(true);
+  await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
+  expect(records.get("durable")).toMatchObject({
+    requestId: "durable",
+    stage: "unconfirmed",
+    prepared: { content: "Keep me", requestId: "durable" },
+  });
+});
+
+it("leaves the composer-owned input unsent when reliable storage fails", async () => {
+  const data = backend();
+  data.sessions.push(session);
+  const source = localSourceFromClient(data.client);
+  source.submissionStorage = {
+    read: async () => [],
+    put: async () => {
+      throw new Error("disk full");
+    },
+    confirm: async () => {},
+    remove: async () => {},
+  };
+  const handle = createRuntime(
+    data.client,
+    { ...init, sessions: [session] },
+    source,
+  );
+  handles.push(handle);
+  await handle.initialize();
+  await handle.runtime.conversations.load(init.workspaceId, session.id);
+  const result = handle.runtime.prompts.submitPrompt({
+    agentSessionId: session.id,
+    clientSubmitId: "not-saved",
+    content: [{ type: "text", text: "Keep my draft" }],
+  });
+  expect(await result.ready).toBe(false);
+  expect(wasEnqueued(data.request)).toBe(false);
+  expect(handle.runtime.prompts.pending(session.id)).toHaveLength(0);
+});

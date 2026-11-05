@@ -175,9 +175,15 @@ func (r *CodexRunner) Send(ctx context.Context, req SendRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	admissionContext := ctx
 	ctx, cancel := detachSend(ctx)
 	defer cancel()
 	r.mu.Lock()
+	if err := admissionContext.Err(); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+
 	if r.gate.closed {
 		r.mu.Unlock()
 		return ErrClosing
@@ -501,9 +507,13 @@ func codexOutcomeUnknown(err error) bool {
 // Interrupt asks Codex to stop the running turn. A turn Codex has not
 // started yet is interrupted as soon as it starts. If Codex does not
 // confirm in time, the process is stopped and the turn ends as cancelled.
-func (r *CodexRunner) Interrupt(ctx context.Context) error {
+func (r *CodexRunner) Interrupt(ctx context.Context, expectedTurnID ...string) error {
 	r.mu.Lock()
 	turn, server := r.turn, r.server
+	if len(expectedTurnID) > 0 && (turn == nil || turn.id != expectedTurnID[0]) {
+		r.mu.Unlock()
+		return nil
+	}
 	if turn == nil || turn.cancelRequested {
 		r.mu.Unlock()
 		return nil

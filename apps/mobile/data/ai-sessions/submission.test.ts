@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { PendingSend } from "./drafts";
-import { aiSubmission } from "./submission";
+import { aiSubmission,canReplaySubmission } from "./submission";
 
 describe("reference submission ownership", () => {
   const request: PendingSend = { requestId: "same-request", text: "Review", attachments: ["file-1"], createdAt: 123,
@@ -19,4 +19,13 @@ describe("reference submission ownership", () => {
     expect(command).toMatchObject({ type: "queue_enqueue", paused: true, item: { requestId: request.requestId, content: request.prepared!.text, prompt: request.prepared!.prompt, references: request.prepared!.references, agents: request.prepared!.agents, attachmentIds: request.attachments } });
     expect(aiSubmission(JSON.parse(JSON.stringify(queued)))).toEqual(command);
   });
+});
+
+it("never replays an acknowledged mirror absent from the loaded body or an unproven executor history",()=>{
+ const record={confirmed:false,lifecycle:true,generation:"g"};const reply={known_history:true,store_generation:"g"};
+ expect(canReplaySubmission(record,reply)).toBe(true);
+ expect(canReplaySubmission({...record,confirmed:true},reply)).toBe(false);
+ expect(canReplaySubmission({...record,lifecycle:false},reply)).toBe(false);
+ expect(canReplaySubmission(record,{...reply,store_generation:"other"})).toBe(false);
+ expect(canReplaySubmission(record,{...reply,known_history:false})).toBe(false);
 });
