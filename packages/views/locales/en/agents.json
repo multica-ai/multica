@@ -849,6 +849,13 @@
       "cancel_task_tooltip": "Cancel run",
       "cancelling_tooltip": "Cancelling…",
       "cancel_failed_toast": "Failed to cancel run",
+      "move_up_aria": "Move task up in queue",
+      "move_up_tooltip": "Move up in queue",
+      "move_down_aria": "Move task down in queue",
+      "move_down_tooltip": "Move down in queue",
+      "move_front_toast": "This task is already at the front of the queue.",
+      "move_back_toast": "This task is already at the end of the queue.",
+      "move_failed_toast": "Couldn't move the task in the queue.",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"

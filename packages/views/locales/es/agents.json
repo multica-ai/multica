@@ -831,6 +831,13 @@
       "cancel_task_tooltip": "Cancelar ejecución",
       "cancelling_tooltip": "Cancelando…",
       "cancel_failed_toast": "No se ha podido cancelar la ejecución",
+      "move_up_aria": "Subir tarea en la cola",
+      "move_up_tooltip": "Subir en la cola",
+      "move_down_aria": "Bajar tarea en la cola",
+      "move_down_tooltip": "Bajar en la cola",
+      "move_front_toast": "Esta tarea ya está al frente de la cola.",
+      "move_back_toast": "Esta tarea ya está al final de la cola.",
+      "move_failed_toast": "No se pudo mover la tarea en la cola.",
       "started_prefix": "Iniciada {{when}}",
       "dispatched_prefix": "Enviada {{when}}",
       "queued_prefix": "En cola {{when}}"
