@@ -21,7 +21,6 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
 /**
@@ -90,7 +89,7 @@ export function CompanyFloorTabs({
     });
 
   return (
-    <div className={cn("flex min-h-9 shrink-0 items-center gap-1 pb-2", PAGE_GUTTER)}>
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <div role="tablist" aria-label={t(($) => $.company.floors)} className="flex min-w-0 items-center gap-1 overflow-x-auto">
         {floors.map((floor, index) => {
           const selected = floor.id === currentId;

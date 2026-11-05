@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { initiativeListOptions, type Initiative } from "@multica/core/pipeline";
@@ -43,6 +44,7 @@ import { CompanyProjectBacklogDialog } from "./company-project-backlog-dialog";
 import { CompanyDecisionsDialog } from "./company-decisions-dialog";
 import { CompanyFirstRun } from "./company-first-run";
 import { CompanyFloorTabs } from "./company-floor-tabs";
+import { useCompanyHeaderSlot } from "./company-header-slot";
 import { ownedOpenCount } from "../../pipeline/pipeline-filters";
 import { useCompanyAdmin } from "../lib/use-company-admin";
 import { useDecisionQueue } from "../lib/decision-queue";
@@ -185,6 +187,7 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
     ...proposalDetailOptions(wsId, decisionFocus ?? ""),
     enabled: !!wsId && !!decisionFocus && !linkedInBook,
   });
+  const headerSlot = useCompanyHeaderSlot();
   const decisionProposals = useMemo(
     () => (linkedProposal && !linkedInBook ? [...decisionBook, linkedProposal] : decisionBook),
     [decisionBook, linkedProposal, linkedInBook],
@@ -264,25 +267,29 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const loaded = squadsQuery.isSuccess && floorsQuery.isSuccess;
   const firstRun = loaded && noSquadSeated(squads, floors);
 
+  const floorTabs = (
+    <CompanyFloorTabs
+      floors={floors}
+      currentId={floor?.id ?? null}
+      occupied={occupied}
+      canManage={canManage}
+      onSelect={selectFloor}
+    >
+      <CompanySetupCard />
+      <CompanyBriefButton focusBriefId={briefFocus} />
+      <SecretaryDeskButton />
+      {pendingAll.length > 0 ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
+          {t(($) => $.company.decisions_open)}
+          {pending.length > 0 ? <span className="tabular-nums text-muted-foreground">{pending.length}</span> : null}
+        </Button>
+      ) : null}
+    </CompanyFloorTabs>
+  );
+
   return (
     <>
-      <CompanyFloorTabs
-        floors={floors}
-        currentId={floor?.id ?? null}
-        occupied={occupied}
-        canManage={canManage}
-        onSelect={selectFloor}
-      >
-        <CompanySetupCard />
-        <CompanyBriefButton focusBriefId={briefFocus} />
-        <SecretaryDeskButton />
-        {pendingAll.length > 0 ? (
-          <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
-            {t(($) => $.company.decisions_open)}
-            {pending.length > 0 ? <span className="tabular-nums text-muted-foreground">{pending.length}</span> : null}
-          </Button>
-        ) : null}
-      </CompanyFloorTabs>
+      {headerSlot ? createPortal(floorTabs, headerSlot) : floorTabs}
       {canManage && layout.unseatedSquads.length > 0 ? (
         <CompanySeatBanner count={layout.unseatedSquads.length} pending={seating} onSeatAll={seatAll} />
       ) : null}
