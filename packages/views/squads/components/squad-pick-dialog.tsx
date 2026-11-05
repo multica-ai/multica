@@ -127,12 +127,14 @@ export function SquadPickDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
-      <DialogContent className="max-w-md">
+      {/* The grid column must be bounded: an auto track sizes to the longest
+          unbroken skill or plugin name and pushes the dialog into a horizontal scroll. */}
+      <DialogContent className="max-w-md grid-cols-[minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle className="text-body">{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -150,7 +152,7 @@ export function SquadPickDialog({
             <p className="px-1 text-caption text-muted-foreground">{noMatchMessage}</p>
           ) : (
             <>
-              <label className="flex cursor-pointer items-center gap-2 px-1 text-caption font-medium">
+              <label className="flex min-w-0 cursor-pointer items-center gap-2 px-1 text-caption font-medium">
                 <Checkbox
                   checked={allVisibleSelected}
                   indeterminate={someVisibleSelected}
@@ -161,7 +163,7 @@ export function SquadPickDialog({
               <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
                 {visible.map((item) => (
                   <li key={item.key}>
-                    <label className="flex cursor-pointer items-center gap-3 px-3 py-2">
+                    <label className="flex min-w-0 cursor-pointer items-center gap-3 px-3 py-2">
                       <Checkbox
                         checked={selected.has(item.key)}
                         onCheckedChange={() => toggle(item.key)}
@@ -183,7 +185,7 @@ export function SquadPickDialog({
 
           {manual && (
             <div className="space-y-2 border-t pt-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid min-w-0 grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label htmlFor="squad-pick-manual-name" className="text-caption">{manual.nameLabel}</Label>
                   <Input
