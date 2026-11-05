@@ -1,10 +1,12 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const UnavailableChatIcon = observer(UnavailableChatIconRender);
 
 /**
  * Unavailable chat (25x25 viewBox). Fill uses `currentColor` so empty states can
  * inherit the semantic text color.
  */
-export function UnavailableChatIcon(
+function UnavailableChatIconRender(
   props: SVGProps<SVGSVGElement>
 ): JSX.Element {
   "use memo";

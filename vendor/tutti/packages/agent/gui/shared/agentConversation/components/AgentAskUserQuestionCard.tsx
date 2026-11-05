@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import { useState, type JSX } from "react";
 import type { AgentToolCallCardProps } from "./AgentToolCallCard";
@@ -25,14 +27,11 @@ export const AgentAskUserQuestionCard = observer(
     return (
       <div className="workspace-agents-status-panel__detail-tool-row workspace-agents-status-panel__detail-tool-row--ask-user">
         {hasDetail && !pinned ? (
-          <button
-            type="button"
-            className="workspace-agents-status-panel__detail-tool-row-head workspace-agents-status-panel__detail-tool-row-head--button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            <AgentToolCallHeader call={call} expanded={expanded} hasDetail />
-          </button>
+          <ButtonBinding1
+            expanded={expanded}
+            setExpanded={setExpanded}
+            call={call}
+          />
         ) : (
           <div className="workspace-agents-status-panel__detail-tool-row-head">
             <AgentToolCallHeader
@@ -59,3 +58,41 @@ export const AgentAskUserQuestionCard = observer(
     );
   }
 );
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  expanded,
+  setExpanded,
+  call,
+  ...slotProps
+}: {
+  expanded: boolean;
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  call: NonNullable<AgentToolCallCardProps>["call"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    expanded: boolean;
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    call: NonNullable<AgentToolCallCardProps>["call"];
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="workspace-agents-status-panel__detail-tool-row-head workspace-agents-status-panel__detail-tool-row-head--button"
+        aria-expanded={expanded}
+        onClick={onClickProp1}
+      >
+        <AgentToolCallHeader call={call} expanded={expanded} hasDetail />
+      </button>
+    </Slot.Root>
+  );
+});

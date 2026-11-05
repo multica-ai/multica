@@ -7,8 +7,10 @@ import {
 } from "./agentToolContentShared";
 import { AgentTaskStepList } from "../AgentTaskStepList";
 import { getTaskRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentTaskContent = observer(AgentTaskContentRender);
 
-export function AgentTaskContent({
+function AgentTaskContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element {

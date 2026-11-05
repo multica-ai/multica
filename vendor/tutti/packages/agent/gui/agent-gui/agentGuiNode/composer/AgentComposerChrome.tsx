@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Button,
   Popover,
@@ -36,6 +38,15 @@ import type {
   AgentComposerPromptTip,
   AgentComposerRenderProps as AgentComposerProps
 } from "./AgentComposer.types";
+import { observer } from "mobx-react-lite";
+export const AgentUsageChip = observer(AgentUsageChipRender);
+export const AgentComposerMaskIcon = observer(AgentComposerMaskIconRender);
+const AgentComposerHandoffAnimation = observer(
+  AgentComposerHandoffAnimationRender
+);
+export const AgentComposerHandoffIcon = observer(
+  AgentComposerHandoffIconRender
+);
 
 const USAGE_POPOVER_HOVER_DELAY_MS = 120;
 
@@ -61,7 +72,7 @@ function agentUsageRingColor(level: AgentUsageChipLevel): string {
   return "var(--text-secondary)";
 }
 
-export function AgentUsageChip({
+function AgentUsageChipRender({
   percentUsed,
   usedTokens,
   totalTokens,
@@ -70,23 +81,7 @@ export function AgentUsageChip({
   onCompact,
   compactSupported,
   compactDisabled
-}: {
-  percentUsed: number;
-  usedTokens: number | null;
-  totalTokens: number | null;
-  tooltipsEnabled?: boolean;
-  onCompact?: () => void;
-  compactSupported?: boolean;
-  compactDisabled?: boolean;
-  labels: Pick<
-    AgentComposerProps["labels"],
-    | "usageChipLabel"
-    | "usageTooltipLabel"
-    | "usagePopoverTitle"
-    | "usageContextWindowLabel"
-    | "usageCompactAction"
-  >;
-}): React.JSX.Element {
+}: AgentUsageChipProps): React.JSX.Element {
   "use memo";
 
   const [usagePopoverOpen, setUsagePopoverOpen] = useState(false);
@@ -119,6 +114,7 @@ export function AgentUsageChip({
     clearUsagePopoverCloseTimer();
     setUsagePopoverOpen(true);
   }, [clearUsagePopoverCloseTimer, clearUsagePopoverHoverTimer]);
+  const openUsagePopoverCallback = usePersistCallback(openUsagePopover);
   const openUsagePopoverAfterHoverDelay = useCallback(() => {
     clearUsagePopoverHoverTimer();
     clearUsagePopoverCloseTimer();
@@ -142,6 +138,9 @@ export function AgentUsageChip({
       setUsagePopoverOpen(false);
     }, 140);
   }, [clearUsagePopoverCloseTimer, clearUsagePopoverHoverTimer]);
+  const scheduleUsagePopoverCloseCallback = usePersistCallback(
+    scheduleUsagePopoverClose
+  );
   const handleUsagePopoverOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -151,6 +150,9 @@ export function AgentUsageChip({
       closeUsagePopover();
     },
     [closeUsagePopover, openUsagePopover]
+  );
+  const handleUsagePopoverOpenChangeCallback = usePersistCallback(
+    handleUsagePopoverOpenChange
   );
   const handleUsageTriggerBlur = useCallback(
     (event: ReactFocusEvent<HTMLButtonElement>) => {
@@ -179,6 +181,17 @@ export function AgentUsageChip({
     },
     [clearUsagePopoverCloseTimer, clearUsagePopoverHoverTimer]
   );
+  const onPointerEnterProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onPointerEnter"]>
+  >((event) => {
+    if (tooltipsEnabled && event.pointerType !== "touch") {
+      openUsagePopoverAfterHoverDelay();
+    }
+  });
+  const styleProp2Value1 = `conic-gradient(${ringColor} ${clampedPercent}%, color-mix(in srgb, ${ringColor} 16%, transparent) 0)`;
+  const styleProp2 = useMemo<
+    NonNullable<React.ComponentProps<"button">["style"]>
+  >(() => ({ background: styleProp2Value1 }), [styleProp2Value1]);
   const trigger = (
     <button
       type="button"
@@ -191,16 +204,10 @@ export function AgentUsageChip({
       data-usage-level={usageLevel}
       onBlur={tooltipsEnabled ? handleUsageTriggerBlur : undefined}
       onFocus={tooltipsEnabled ? openUsagePopoverAfterHoverDelay : undefined}
-      onPointerEnter={(event) => {
-        if (tooltipsEnabled && event.pointerType !== "touch") {
-          openUsagePopoverAfterHoverDelay();
-        }
-      }}
+      onPointerEnter={onPointerEnterProp1}
       onPointerLeave={tooltipsEnabled ? scheduleUsagePopoverClose : undefined}
       title={chipLabel}
-      style={{
-        background: `conic-gradient(${ringColor} ${clampedPercent}%, color-mix(in srgb, ${ringColor} 16%, transparent) 0)`
-      }}
+      style={styleProp2}
     >
       <span
         aria-hidden="true"
@@ -216,50 +223,23 @@ export function AgentUsageChip({
   return (
     <Popover
       open={usagePopoverOpen}
-      onOpenChange={handleUsagePopoverOpenChange}
+      onOpenChange={handleUsagePopoverOpenChangeCallback}
     >
       <PopoverAnchor asChild>{trigger}</PopoverAnchor>
       {usagePopoverOpen ? (
-        <PopoverContent
-          ref={usagePopoverContentRef}
-          side="top"
-          align="center"
-          sideOffset={8}
-          collisionPadding={16}
-          className="w-[320px] max-w-[calc(100vw-32px)] gap-3 text-xs"
-          data-testid="agent-gui-usage-popover"
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onPointerEnter={openUsagePopover}
-          onPointerLeave={scheduleUsagePopoverClose}
-        >
-          <div className="flex min-w-0 flex-col gap-3">
-            <span className="text-[13px] font-semibold leading-4">
-              {labels.usagePopoverTitle}
-            </span>
-            {showTokens ? (
-              <AgentUsageMeter
-                label={labels.usageContextWindowLabel}
-                value={`${formatSlashStatusTokenCount(usedTokens)} / ${formatSlashStatusTokenCount(totalTokens)} (${clampedPercent}%)`}
-                percent={clampedPercent}
-                barColor={agentUsageBarColor(clampedPercent)}
-                testId="agent-gui-usage-context-meter"
-              />
-            ) : null}
-            {compactSupported && onCompact ? (
-              <Button
-                type="button"
-                data-testid="agent-gui-compact-button"
-                disabled={compactDisabled}
-                className="nodrag w-full font-medium [-webkit-app-region:no-drag]"
-                size="sm"
-                variant="secondary"
-                onClick={onCompact}
-              >
-                {labels.usageCompactAction}
-              </Button>
-            ) : null}
-          </div>
-        </PopoverContent>
+        <PopoverContentBinding1
+          usagePopoverContentRef={usagePopoverContentRef}
+          openUsagePopover={openUsagePopoverCallback}
+          scheduleUsagePopoverClose={scheduleUsagePopoverCloseCallback}
+          labels={labels}
+          showTokens={showTokens}
+          usedTokens={usedTokens}
+          totalTokens={totalTokens}
+          clampedPercent={clampedPercent}
+          compactSupported={compactSupported}
+          onCompact={onCompact}
+          compactDisabled={compactDisabled}
+        />
       ) : null}
     </Popover>
   );
@@ -351,13 +331,30 @@ export function resolveMentionPaletteZIndex(
   return composerPaletteZIndex;
 }
 
-export function AgentComposerMaskIcon({
+function AgentComposerMaskIconRender({
   iconUrl,
   marker
 }: {
   iconUrl: string;
   marker?: "reference-add";
 }): JSX.Element {
+  const styleProp3Value1 = `url("${iconUrl}")`;
+  const styleProp3Value2 = `url("${iconUrl}")`;
+  const styleProp3 = useMemo<
+    NonNullable<React.ComponentProps<"span">["style"]>
+  >(
+    () => ({
+      WebkitMaskImage: styleProp3Value1,
+      WebkitMaskPosition: "center",
+      WebkitMaskRepeat: "no-repeat",
+      WebkitMaskSize: "contain",
+      maskImage: styleProp3Value2,
+      maskPosition: "center",
+      maskRepeat: "no-repeat",
+      maskSize: "contain"
+    }),
+    [styleProp3Value1, styleProp3Value2]
+  );
   return (
     <span
       aria-hidden
@@ -365,25 +362,21 @@ export function AgentComposerMaskIcon({
       data-agent-reference-add-icon={
         marker === "reference-add" ? "true" : undefined
       }
-      style={{
-        WebkitMaskImage: `url("${iconUrl}")`,
-        WebkitMaskPosition: "center",
-        WebkitMaskRepeat: "no-repeat",
-        WebkitMaskSize: "contain",
-        maskImage: `url("${iconUrl}")`,
-        maskPosition: "center",
-        maskRepeat: "no-repeat",
-        maskSize: "contain"
-      }}
+      style={styleProp3}
     />
   );
 }
 
 export const HANDOFF_SELECT_IDLE_VALUE = "__agent-handoff-idle__";
 
-function AgentComposerHandoffAnimation(): JSX.Element {
+function AgentComposerHandoffAnimationRender(): JSX.Element {
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const onLoadProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"img">["onLoad"]>
+  >(() => {
+    setIsLoaded(true);
+  });
   return (
     <img
       alt=""
@@ -393,14 +386,12 @@ function AgentComposerHandoffAnimation(): JSX.Element {
       decoding="async"
       draggable={false}
       src={handoffClapAnimationUrl}
-      onLoad={() => {
-        setIsLoaded(true);
-      }}
+      onLoad={onLoadProp4}
     />
   );
 }
 
-export function AgentComposerHandoffIcon({
+function AgentComposerHandoffIconRender({
   disabled,
   isPlaying
 }: {
@@ -409,6 +400,23 @@ export function AgentComposerHandoffIcon({
 }): JSX.Element {
   const shouldPlayAnimation = !disabled && isPlaying;
 
+  const styleProp5Value1 = `url("${handoffLinedIconUrl}")`;
+  const styleProp5Value2 = `url("${handoffLinedIconUrl}")`;
+  const styleProp5 = useMemo<
+    NonNullable<React.ComponentProps<"span">["style"]>
+  >(
+    () => ({
+      WebkitMaskImage: styleProp5Value1,
+      WebkitMaskPosition: "center",
+      WebkitMaskRepeat: "no-repeat",
+      WebkitMaskSize: "contain",
+      maskImage: styleProp5Value2,
+      maskPosition: "center",
+      maskRepeat: "no-repeat",
+      maskSize: "contain"
+    }),
+    [styleProp5Value1, styleProp5Value2]
+  );
   return (
     <span
       aria-hidden="true"
@@ -416,20 +424,128 @@ export function AgentComposerHandoffIcon({
       data-disabled={disabled ? "true" : undefined}
       data-playing={shouldPlayAnimation ? "true" : undefined}
     >
-      <span
-        className={styles.composerHandoffStaticIcon}
-        style={{
-          WebkitMaskImage: `url("${handoffLinedIconUrl}")`,
-          WebkitMaskPosition: "center",
-          WebkitMaskRepeat: "no-repeat",
-          WebkitMaskSize: "contain",
-          maskImage: `url("${handoffLinedIconUrl}")`,
-          maskPosition: "center",
-          maskRepeat: "no-repeat",
-          maskSize: "contain"
-        }}
-      />
+      <span className={styles.composerHandoffStaticIcon} style={styleProp5} />
       {shouldPlayAnimation ? <AgentComposerHandoffAnimation /> : null}
     </span>
   );
 }
+
+const PopoverContentBinding1 = observer(function PopoverContentBinding1({
+  usagePopoverContentRef,
+  openUsagePopover,
+  scheduleUsagePopoverClose,
+  labels,
+  showTokens,
+  usedTokens,
+  totalTokens,
+  clampedPercent,
+  compactSupported,
+  onCompact,
+  compactDisabled
+}: {
+  usagePopoverContentRef: import("react").RefObject<HTMLDivElement | null>;
+  openUsagePopover: () => void;
+  scheduleUsagePopoverClose: () => void;
+  labels: NonNullable<AgentUsageChipProps>["labels"];
+  showTokens: boolean;
+  usedTokens: NonNullable<AgentUsageChipProps>["usedTokens"];
+  totalTokens: NonNullable<AgentUsageChipProps>["totalTokens"];
+  clampedPercent: number;
+  compactSupported: NonNullable<AgentUsageChipProps>["compactSupported"];
+  onCompact: NonNullable<AgentUsageChipProps>["onCompact"];
+  compactDisabled: NonNullable<AgentUsageChipProps>["compactDisabled"];
+}) {
+  const onOpenAutoFocusProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof PopoverContent>["onOpenAutoFocus"]>
+  >((event) => event.preventDefault());
+  return (
+    <PopoverContent
+      ref={usagePopoverContentRef}
+      side="top"
+      align="center"
+      sideOffset={8}
+      collisionPadding={16}
+      className="w-[320px] max-w-[calc(100vw-32px)] gap-3 text-xs"
+      data-testid="agent-gui-usage-popover"
+      onOpenAutoFocus={onOpenAutoFocusProp6}
+      onPointerEnter={openUsagePopover}
+      onPointerLeave={scheduleUsagePopoverClose}
+    >
+      <div className="flex min-w-0 flex-col gap-3">
+        <span className="text-[13px] font-semibold leading-4">
+          {labels.usagePopoverTitle}
+        </span>
+        {showTokens ? (
+          <AgentUsageMeter
+            label={labels.usageContextWindowLabel}
+            value={`${formatSlashStatusTokenCount(usedTokens)} / ${formatSlashStatusTokenCount(totalTokens)} (${clampedPercent}%)`}
+            percent={clampedPercent}
+            barColor={agentUsageBarColor(clampedPercent)}
+            testId="agent-gui-usage-context-meter"
+          />
+        ) : null}
+        {compactSupported && onCompact ? (
+          <Button
+            type="button"
+            data-testid="agent-gui-compact-button"
+            disabled={compactDisabled}
+            className="nodrag w-full font-medium [-webkit-app-region:no-drag]"
+            size="sm"
+            variant="secondary"
+            onClick={onCompact}
+          >
+            {labels.usageCompactAction}
+          </Button>
+        ) : null}
+      </div>
+    </PopoverContent>
+  );
+});
+
+type AgentUsageChipProps = {
+  percentUsed: number;
+  usedTokens: number | null;
+  totalTokens: number | null;
+  tooltipsEnabled?: boolean;
+  onCompact?: () => void;
+  compactSupported?: boolean;
+  compactDisabled?: boolean;
+  labels: Pick<
+    AgentComposerProps["labels"],
+    | "usageChipLabel"
+    | "usageTooltipLabel"
+    | "usagePopoverTitle"
+    | "usageContextWindowLabel"
+    | "usageCompactAction"
+  >;
+};
+
+type PopoverContentBinding1Props = {
+  usagePopoverContentRef: import("react").RefObject<HTMLDivElement | null>;
+  openUsagePopover: () => void;
+  scheduleUsagePopoverClose: () => void;
+  labels: NonNullable<{
+    percentUsed: number;
+    usedTokens: number | null;
+    totalTokens: number | null;
+    tooltipsEnabled?: boolean;
+    onCompact?: () => void;
+    compactSupported?: boolean;
+    compactDisabled?: boolean;
+    labels: Pick<
+      AgentComposerProps["labels"],
+      | "usageChipLabel"
+      | "usageTooltipLabel"
+      | "usagePopoverTitle"
+      | "usageContextWindowLabel"
+      | "usageCompactAction"
+    >;
+  }>["labels"];
+  showTokens: boolean;
+  usedTokens: number | null;
+  totalTokens: number | null;
+  clampedPercent: number;
+  compactSupported: boolean | undefined;
+  onCompact: (() => void) | undefined;
+  compactDisabled: boolean | undefined;
+};

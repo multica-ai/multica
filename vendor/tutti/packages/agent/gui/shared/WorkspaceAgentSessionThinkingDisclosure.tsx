@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useState, type JSX } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { BrainIcon } from "../app/renderer/components/icons/BrainIcon";
@@ -6,6 +7,11 @@ import { CollapsibleReveal } from "./agentConversation/components/CollapsibleRev
 import { AgentMessageMarkdown } from "./AgentMessageMarkdown";
 import type { WorkspaceAgentSessionDetailThinking } from "./workspaceAgentSessionDetailViewModel";
 import { ToolActivityKindIcon } from "./toolActivityKindIcons";
+import { observer } from "mobx-react-lite";
+export const WorkspaceAgentSessionThinkingDisclosure = observer(
+  WorkspaceAgentSessionThinkingDisclosureRender
+);
+const LoadingEllipsis = observer(LoadingEllipsisRender);
 
 interface WorkspaceAgentSessionThinkingDisclosureProps {
   thinking: WorkspaceAgentSessionDetailThinking;
@@ -13,7 +19,7 @@ interface WorkspaceAgentSessionThinkingDisclosureProps {
   onLinkClick?: (href: string) => void;
 }
 
-export function WorkspaceAgentSessionThinkingDisclosure({
+function WorkspaceAgentSessionThinkingDisclosureRender({
   thinking,
   label,
   onLinkClick
@@ -27,6 +33,11 @@ export function WorkspaceAgentSessionThinkingDisclosure({
       ? null
       : thinkingStatusLabel(thinking.statusKind);
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => {
+    setExpanded((value) => !value);
+  });
   return (
     <div className="workspace-agents-status-panel__detail-thinking-disclosure flex w-full min-w-0 flex-col items-start gap-[7px]">
       <button
@@ -39,9 +50,7 @@ export function WorkspaceAgentSessionThinkingDisclosure({
           .join(" ")}
         aria-expanded={expanded}
         data-active={isActive ? "true" : undefined}
-        onClick={() => {
-          setExpanded((value) => !value);
-        }}
+        onClick={onClickProp1}
       >
         {isActive ? (
           <BrainIcon
@@ -98,7 +107,7 @@ export function WorkspaceAgentSessionThinkingDisclosure({
   );
 }
 
-function LoadingEllipsis(): JSX.Element {
+function LoadingEllipsisRender(): JSX.Element {
   "use memo";
   return (
     <span className="tsh-inline-loading-ellipsis" aria-hidden="true">

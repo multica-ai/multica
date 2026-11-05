@@ -13,6 +13,7 @@ import {
   getFileChangeRenderData,
   isFailedToolCall
 } from "./tool-renderers/render-data/agentToolRenderData";
+const LoadingEllipsis = observer(LoadingEllipsisRender);
 
 const TOOL_ROW_ICON_SIZE = 16;
 
@@ -211,7 +212,7 @@ function formatInlineTitleLabel(label: string): string {
   return changed ? normalized : label;
 }
 
-function LoadingEllipsis(): JSX.Element {
+function LoadingEllipsisRender(): JSX.Element {
   "use memo";
   return (
     <span className="tsh-inline-loading-ellipsis" aria-hidden="true">

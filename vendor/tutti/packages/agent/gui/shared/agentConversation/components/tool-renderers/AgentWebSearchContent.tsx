@@ -10,10 +10,12 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { getWebSearchRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentWebSearchContent = observer(AgentWebSearchContentRender);
 
 const MAX_SUMMARY_LENGTH = 3000;
 
-export function AgentWebSearchContent({
+function AgentWebSearchContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

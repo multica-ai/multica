@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Tooltip,
   TooltipContent,
@@ -40,6 +42,7 @@ import {
   isAgentUnifiedDiff
 } from "./tool-renderers/file-diff/agentUnifiedDiff";
 import { AgentUnifiedPatchViewer } from "./tool-renderers/file-diff/AgentUnifiedPatchViewer";
+const TurnSummaryFileCard = observer(TurnSummaryFileCardRender);
 
 interface AgentTurnSummaryRowProps {
   row: AgentTurnSummaryRowVM;
@@ -226,6 +229,7 @@ export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
       }
     }
   };
+  const handlePatchActionCallback = usePersistCallback(handlePatchAction);
 
   return (
     <section className="workspace-agents-status-panel__detail-turn-summary">
@@ -265,7 +269,7 @@ export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
                       aria-label={patchActionLabel}
                       className="w-auto min-w-0 gap-1.5 px-2 text-[12px] font-medium leading-4 disabled:pointer-events-none"
                       disabled={isPatchActionDisabled}
-                      onClick={handlePatchAction}
+                      onClick={handlePatchActionCallback}
                     >
                       {patchPending || isPatchSupportChecking ? (
                         <LoaderCircle
@@ -307,19 +311,15 @@ export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
           {visibleFiles.map((file) => {
             const key = `${file.path}:${file.messageId}`;
             return (
-              <TurnSummaryFileCard
+              <TurnSummaryFileCardBinding1
                 key={key}
+                bindingKey={key}
                 file={file}
                 workspaceRoot={workspaceRoot}
                 basePath={basePath}
-                expanded={Boolean(expandedFiles[key])}
+                expandedFiles={expandedFiles}
                 onLinkAction={onLinkAction}
-                onToggle={() =>
-                  setExpandedFiles((current) => ({
-                    ...current,
-                    [key]: !current[key]
-                  }))
-                }
+                setExpandedFiles={setExpandedFiles}
               />
             );
           })}
@@ -330,19 +330,15 @@ export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
                 {hiddenFiles.map((file) => {
                   const key = `${file.path}:${file.messageId}`;
                   return (
-                    <TurnSummaryFileCard
+                    <TurnSummaryFileCardBinding2
                       key={key}
+                      bindingKey={key}
                       file={file}
                       workspaceRoot={workspaceRoot}
                       basePath={basePath}
-                      expanded={Boolean(expandedFiles[key])}
+                      expandedFiles={expandedFiles}
                       onLinkAction={onLinkAction}
-                      onToggle={() =>
-                        setExpandedFiles((current) => ({
-                          ...current,
-                          [key]: !current[key]
-                        }))
-                      }
+                      setExpandedFiles={setExpandedFiles}
                     />
                   );
                 })}
@@ -351,34 +347,12 @@ export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
           ) : null}
 
           {hiddenFileCount > 0 && !showAllFiles ? (
-            <button
-              type="button"
-              className="agent-turn-summary-card__toggle-more flex w-full items-center gap-2 px-4 py-2.5 text-left text-[11px] font-semibold transition-colors"
-              onClick={() => setShowAllFiles(true)}
-            >
-              <span>
-                {translate("agentHost.agentGui.turnSummaryShowMoreFiles", {
-                  count: hiddenFileCount
-                })}
-              </span>
-              <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
-            </button>
+            <ButtonBinding3
+              setShowAllFiles={setShowAllFiles}
+              hiddenFileCount={hiddenFileCount}
+            />
           ) : hiddenFileCount > 0 ? (
-            <button
-              type="button"
-              className="agent-turn-summary-card__toggle-more flex w-full items-center gap-2 px-4 py-2.5 text-left text-[11px] font-semibold transition-colors"
-              onClick={() => setShowAllFiles(false)}
-            >
-              <span>
-                {translate("agentHost.agentGui.turnSummaryShowFewerFiles")}
-              </span>
-              <ChevronRight
-                size={16}
-                strokeWidth={2.2}
-                aria-hidden="true"
-                className="-rotate-90"
-              />
-            </button>
+            <ButtonBinding4 setShowAllFiles={setShowAllFiles} />
           ) : null}
         </div>
       </div>
@@ -402,21 +376,14 @@ function patchFailureMessage(
   }
 }
 
-function TurnSummaryFileCard({
+function TurnSummaryFileCardRender({
   file,
   workspaceRoot,
   basePath,
   expanded,
   onLinkAction,
   onToggle
-}: {
-  file: AgentTurnSummaryFileVM;
-  workspaceRoot?: string | null;
-  basePath?: string | null;
-  expanded: boolean;
-  onLinkAction?: (action: WorkspaceLinkAction) => void;
-  onToggle: () => void;
-}): JSX.Element {
+}: TurnSummaryFileCardProps): JSX.Element {
   "use memo";
   const action = resolveWorkspaceFileLinkAction({
     path: file.path,
@@ -479,24 +446,11 @@ function TurnSummaryFileCard({
         </div>
 
         {canOpen ? (
-          <CanvasNodeGhostIconButton
-            aria-label={translate(
-              "agentHost.workspaceAgentSessionDetailOpenFile",
-              {
-                path: file.path
-              }
-            )}
-            onClick={() => {
-              onLinkAction?.(action as WorkspaceLinkAction);
-            }}
-          >
-            <DirectLinedIcon
-              width={14}
-              height={14}
-              aria-hidden="true"
-              className="text-[var(--text-secondary)]"
-            />
-          </CanvasNodeGhostIconButton>
+          <CanvasNodeGhostIconButtonBinding5
+            file={file}
+            onLinkAction={onLinkAction}
+            action={action}
+          />
         ) : null}
       </div>
 
@@ -733,3 +687,250 @@ function summarizeFileDiff(file: AgentTurnSummaryFileVM): {
     newString: file.newString
   });
 }
+
+const TurnSummaryFileCardBinding1 = observer(
+  function TurnSummaryFileCardBinding1({
+    bindingKey: key,
+    file,
+    workspaceRoot,
+    basePath,
+    expandedFiles,
+    onLinkAction,
+    setExpandedFiles
+  }: TurnSummaryFileCardBinding1Props) {
+    const onToggleProp1 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof TurnSummaryFileCard>["onToggle"]>
+    >(() =>
+      setExpandedFiles((current) => ({
+        ...current,
+        [key]: !current[key]
+      }))
+    );
+    return (
+      <TurnSummaryFileCard
+        key={key}
+        file={file}
+        workspaceRoot={workspaceRoot}
+        basePath={basePath}
+        expanded={Boolean(expandedFiles[key])}
+        onLinkAction={onLinkAction}
+        onToggle={onToggleProp1}
+      />
+    );
+  }
+);
+
+const TurnSummaryFileCardBinding2 = observer(
+  function TurnSummaryFileCardBinding2({
+    bindingKey: key,
+    file,
+    workspaceRoot,
+    basePath,
+    expandedFiles,
+    onLinkAction,
+    setExpandedFiles
+  }: TurnSummaryFileCardBinding1Props) {
+    const onToggleProp2 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof TurnSummaryFileCard>["onToggle"]>
+    >(() =>
+      setExpandedFiles((current) => ({
+        ...current,
+        [key]: !current[key]
+      }))
+    );
+    return (
+      <TurnSummaryFileCard
+        key={key}
+        file={file}
+        workspaceRoot={workspaceRoot}
+        basePath={basePath}
+        expanded={Boolean(expandedFiles[key])}
+        onLinkAction={onLinkAction}
+        onToggle={onToggleProp2}
+      />
+    );
+  }
+);
+
+const ButtonBinding3 = observer(function ButtonBinding3({
+  setShowAllFiles,
+  hiddenFileCount,
+  ...slotProps
+}: {
+  setShowAllFiles: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  hiddenFileCount: number;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setShowAllFiles: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    hiddenFileCount: number;
+  }
+>) {
+  const onClickProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setShowAllFiles(true));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="agent-turn-summary-card__toggle-more flex w-full items-center gap-2 px-4 py-2.5 text-left text-[11px] font-semibold transition-colors"
+        onClick={onClickProp3}
+      >
+        <span>
+          {translate("agentHost.agentGui.turnSummaryShowMoreFiles", {
+            count: hiddenFileCount
+          })}
+        </span>
+        <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding4 = observer(function ButtonBinding4({
+  setShowAllFiles,
+  ...slotProps
+}: {
+  setShowAllFiles: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setShowAllFiles: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+  }
+>) {
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setShowAllFiles(false));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="agent-turn-summary-card__toggle-more flex w-full items-center gap-2 px-4 py-2.5 text-left text-[11px] font-semibold transition-colors"
+        onClick={onClickProp4}
+      >
+        <span>{translate("agentHost.agentGui.turnSummaryShowFewerFiles")}</span>
+        <ChevronRight
+          size={16}
+          strokeWidth={2.2}
+          aria-hidden="true"
+          className="-rotate-90"
+        />
+      </button>
+    </Slot.Root>
+  );
+});
+
+const CanvasNodeGhostIconButtonBinding5 = observer(
+  function CanvasNodeGhostIconButtonBinding5({
+    file,
+    onLinkAction,
+    action,
+    ...slotProps
+  }: {
+    file: NonNullable<TurnSummaryFileCardProps>["file"];
+    onLinkAction: NonNullable<TurnSummaryFileCardProps>["onLinkAction"];
+    action:
+      | import("../../../actions/workspaceLinkActions").OpenWorkspaceFileLinkAction
+      | null;
+  } & Omit<
+    React.ComponentProps<typeof Slot.Root>,
+    keyof {
+      file: NonNullable<TurnSummaryFileCardProps>["file"];
+      onLinkAction: NonNullable<TurnSummaryFileCardProps>["onLinkAction"];
+      action:
+        | import("../../../actions/workspaceLinkActions").OpenWorkspaceFileLinkAction
+        | null;
+    }
+  >) {
+    const onClickProp5 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof CanvasNodeGhostIconButton>["onClick"]
+      >
+    >(() => {
+      onLinkAction?.(action as WorkspaceLinkAction);
+    });
+    return (
+      <Slot.Root {...slotProps}>
+        <CanvasNodeGhostIconButton
+          aria-label={translate(
+            "agentHost.workspaceAgentSessionDetailOpenFile",
+            {
+              path: file.path
+            }
+          )}
+          onClick={onClickProp5}
+        >
+          <DirectLinedIcon
+            width={14}
+            height={14}
+            aria-hidden="true"
+            className="text-[var(--text-secondary)]"
+          />
+        </CanvasNodeGhostIconButton>
+      </Slot.Root>
+    );
+  }
+);
+
+type TurnSummaryFileCardProps = {
+  file: AgentTurnSummaryFileVM;
+  workspaceRoot?: string | null;
+  basePath?: string | null;
+  expanded: boolean;
+  onLinkAction?: (action: WorkspaceLinkAction) => void;
+  onToggle: () => void;
+};
+
+type TurnSummaryFileCardBinding1Props = {
+  bindingKey: string;
+  file: AgentTurnSummaryFileVM;
+  workspaceRoot: NonNullable<AgentTurnSummaryRowProps>["workspaceRoot"];
+  basePath: NonNullable<AgentTurnSummaryRowProps>["basePath"];
+  expandedFiles: Record<string, boolean>;
+  onLinkAction: NonNullable<AgentTurnSummaryRowProps>["onLinkAction"];
+  setExpandedFiles: import("react").Dispatch<
+    import("react").SetStateAction<Record<string, boolean>>
+  >;
+};
+
+type TurnSummaryFileCardBinding2Props = {
+  bindingKey: string;
+  file: AgentTurnSummaryFileVM;
+  workspaceRoot: NonNullable<AgentTurnSummaryRowProps>["workspaceRoot"];
+  basePath: NonNullable<AgentTurnSummaryRowProps>["basePath"];
+  expandedFiles: Record<string, boolean>;
+  onLinkAction: NonNullable<AgentTurnSummaryRowProps>["onLinkAction"];
+  setExpandedFiles: import("react").Dispatch<
+    import("react").SetStateAction<Record<string, boolean>>
+  >;
+};
+
+type CanvasNodeGhostIconButtonBinding5Props = {
+  file: NonNullable<{
+    file: AgentTurnSummaryFileVM;
+    workspaceRoot?: string | null;
+    basePath?: string | null;
+    expanded: boolean;
+    onLinkAction?: (action: WorkspaceLinkAction) => void;
+    onToggle: () => void;
+  }>["file"];
+  onLinkAction: NonNullable<{
+    file: AgentTurnSummaryFileVM;
+    workspaceRoot?: string | null;
+    basePath?: string | null;
+    expanded: boolean;
+    onLinkAction?: (action: WorkspaceLinkAction) => void;
+    onToggle: () => void;
+  }>["onLinkAction"];
+  action:
+    | import("../../../actions/workspaceLinkActions").OpenWorkspaceFileLinkAction
+    | null;
+};

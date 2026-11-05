@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useMemo, type JSX, type MouseEvent } from "react";
 import type { JSONContent } from "@tiptap/core";
 import { renderToReactElement } from "@tiptap/static-renderer";
@@ -13,6 +14,8 @@ import {
   type AgentMessageMarkdownAgentTarget
 } from "./AgentTargetPresentationContext";
 import { readParsedDocumentCache } from "./parsedDocumentCache";
+import { observer } from "mobx-react-lite";
+export const AgentRichTextReadonly = observer(AgentRichTextReadonlyRender);
 
 const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
@@ -29,7 +32,7 @@ interface AgentRichTextReadonlyProps {
   agentTargets?: readonly AgentMessageMarkdownAgentTarget[];
 }
 
-export function AgentRichTextReadonly({
+function AgentRichTextReadonlyRender({
   value,
   documentCacheKey,
   className,
@@ -80,9 +83,9 @@ export function AgentRichTextReadonly({
         options: {
           nodeMapping: {
             agentFileMention: ({ node }) => (
-              <AgentMentionReadonlyView
-                agentTargets={effectiveAgentTargets}
-                attrs={node.attrs ?? {}}
+              <AgentMentionReadonlyViewBinding1
+                effectiveAgentTargets={effectiveAgentTargets}
+                node={node}
               />
             )
           }
@@ -109,6 +112,7 @@ export function AgentRichTextReadonly({
     event.stopPropagation();
     onLinkClick(href);
   };
+  const handleClickCallback = usePersistCallback(handleClick);
 
   return (
     <div
@@ -121,7 +125,7 @@ export function AgentRichTextReadonly({
           editorClassName,
           "max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] [&_p]:m-0 [&_p]:min-h-[1.45em] [&_a[data-agent-file-mention=true]]:cursor-pointer [&_[data-agent-file-mention=true]]:overflow-hidden"
         )}
-        onClick={handleClick}
+        onClick={handleClickCallback}
       >
         {renderedContent}
       </div>
@@ -219,3 +223,27 @@ function resolveWorkspaceAppIconUrl(input: {
     exactMatch?.iconUrl?.trim() || fallbackMatch?.iconUrl?.trim() || undefined
   );
 }
+
+const AgentMentionReadonlyViewBinding1 = observer(
+  function AgentMentionReadonlyViewBinding1({
+    effectiveAgentTargets,
+    node
+  }: AgentMentionReadonlyViewBinding1Props) {
+    const attrsProp1 = useMemo<
+      NonNullable<
+        React.ComponentProps<typeof AgentMentionReadonlyView>["attrs"]
+      >
+    >(() => ({}), []);
+    return (
+      <AgentMentionReadonlyView
+        agentTargets={effectiveAgentTargets}
+        attrs={node.attrs ?? attrsProp1}
+      />
+    );
+  }
+);
+
+type AgentMentionReadonlyViewBinding1Props = {
+  effectiveAgentTargets: readonly AgentMessageMarkdownAgentTarget[];
+  node: import("@tiptap/pm/model").Node;
+};

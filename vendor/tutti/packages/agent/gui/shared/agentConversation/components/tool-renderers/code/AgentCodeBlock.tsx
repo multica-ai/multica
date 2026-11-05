@@ -1,11 +1,15 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useMemo, useState, type JSX } from "react";
 import { translate } from "../../../../../i18n/index";
 import { workspaceFilePathBasename } from "../../../../../actions/workspaceFilePathCandidate";
 import { AgentPathTailLabel } from "../AgentPathTailLabel";
+import { observer } from "mobx-react-lite";
+export const AgentCodeBlock = observer(AgentCodeBlockRender);
 
 const MAX_VISIBLE_LINES = 120;
 
-export function AgentCodeBlock({
+function AgentCodeBlockRender({
   path,
   content,
   language,
@@ -53,17 +57,11 @@ export function AgentCodeBlock({
   const fileLabel = fileNameFromPath(path) ?? path ?? "Code";
   const disclosureButton =
     collapsible && lineCount > MAX_VISIBLE_LINES ? (
-      <button
-        type="button"
-        className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-[var(--tutti-purple)] transition-colors"
-        onClick={() => setExpanded((value) => !value)}
-      >
-        {expanded
-          ? translate("agentHost.agentTool.details.collapseContent")
-          : translate("agentHost.agentTool.details.showFullContent", {
-              count: lineCount
-            })}
-      </button>
+      <ButtonBinding1
+        setExpanded={setExpanded}
+        expanded={expanded}
+        lineCount={lineCount}
+      />
     ) : null;
   return (
     <div
@@ -149,3 +147,44 @@ function fileNameFromPath(path: string | null | undefined): string | null {
   }
   return workspaceFilePathBasename(normalized) || normalized;
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  setExpanded,
+  expanded,
+  lineCount,
+  ...slotProps
+}: {
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+  expanded: boolean;
+  lineCount: number;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+    expanded: boolean;
+    lineCount: number;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-[var(--tutti-purple)] transition-colors"
+        onClick={onClickProp1}
+      >
+        {expanded
+          ? translate("agentHost.agentTool.details.collapseContent")
+          : translate("agentHost.agentTool.details.showFullContent", {
+              count: lineCount
+            })}
+      </button>
+    </Slot.Root>
+  );
+});

@@ -69,12 +69,18 @@ catalogs:
     mobx:
       specifier: ^6.15.0
       version: 6.16.1
+    mobx-react:
+      specifier: ^9.2.1
+      version: 9.2.2
     mobx-react-lite:
       specifier: ^4.1.1
       version: 4.1.1
     posthog-js:
       specifier: ^1.176.1
       version: 1.369.3
+    radix-ui:
+      specifier: 1.4.3
+      version: 1.4.3
     react:
       specifier: 19.2.3
       version: 19.2.3
@@ -210,6 +216,9 @@ importers:
 
   .:
     devDependencies:
+      '@multica/eslint-config':
+        specifier: workspace:*
+        version: link:packages/eslint-config
       '@multica/tutti-agent-gui-host':
         specifier: workspace:*
         version: link:packages/tutti-agent-gui-host
@@ -222,6 +231,9 @@ importers:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.4(jiti@2.7.0)
       knip:
         specifier: ^6.32.2
         version: 6.32.2
@@ -306,12 +318,18 @@ importers:
       mobx:
         specifier: 'catalog:'
         version: 6.16.1
+      mobx-react:
+        specifier: 'catalog:'
+        version: 9.2.2(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       mobx-react-lite:
         specifier: 'catalog:'
         version: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       motion:
         specifier: ^12.38.0
         version: 12.38.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      radix-ui:
+        specifier: 'catalog:'
+        version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -1028,9 +1046,15 @@ importers:
       mobx:
         specifier: 'catalog:'
         version: 6.16.1
+      mobx-react:
+        specifier: 'catalog:'
+        version: 9.2.2(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       mobx-react-lite:
         specifier: 'catalog:'
         version: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      radix-ui:
+        specifier: 'catalog:'
+        version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -1515,6 +1539,9 @@ importers:
       '@multica/conversation-client':
         specifier: workspace:*
         version: link:../../../../../packages/conversation-client
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../../../../../packages/ui
       '@tanstack/react-virtual':
         specifier: 3.14.8
         version: 3.14.8(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1605,12 +1632,18 @@ importers:
       mobx:
         specifier: 'catalog:'
         version: 6.16.1
+      mobx-react:
+        specifier: 'catalog:'
+        version: 9.2.2(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       mobx-react-lite:
         specifier: 'catalog:'
         version: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       monaco-editor:
         specifier: 0.55.1
         version: 0.55.1
+      radix-ui:
+        specifier: 'catalog:'
+        version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -11073,6 +11106,19 @@ packages:
 
   mobx-react-lite@4.1.1:
     resolution: {integrity: sha512-iUxiMpsvNraCKXU+yPotsOncNNmyeS2B5DKL+TL6Tar/xm+wwNJAubJmtRSeAoYawdZqwv8Z/+5nPRHeQxTiXg==}
+    peerDependencies:
+      mobx: ^6.9.0
+      react: ^16.8.0 || ^17 || ^18 || ^19
+      react-dom: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+      react-native:
+        optional: true
+
+  mobx-react@9.2.2:
+    resolution: {integrity: sha512-ShszmQzR/VrhU3M0cQ7DA/s8qNcLcF2emSuudJ/TnDILS3C1Im48mdaG6CpyjZHy8+WqgXUCC9mPqSRIwPPMuQ==}
     peerDependencies:
       mobx: ^6.9.0
       react: ^16.8.0 || ^17 || ^18 || ^19
@@ -24219,6 +24265,14 @@ snapshots:
       mobx: 6.16.1
       react: 19.2.3
       use-sync-external-store: 1.6.0(react@19.2.3)
+    optionalDependencies:
+      react-dom: 19.2.3(react@19.2.3)
+
+  mobx-react@9.2.2(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+    dependencies:
+      mobx: 6.16.1
+      mobx-react-lite: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react: 19.2.3
     optionalDependencies:
       react-dom: 19.2.3(react@19.2.3)
 

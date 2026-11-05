@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { observer } from "mobx-react-lite";
 import {
   useEffect,
@@ -40,14 +43,31 @@ export const AgentMessageLocatorRail = observer(
     label,
     onLocate,
     virtualSelectionSource
-  }: {
-    followEndMode?: AgentConversationFollowEndMode;
-    items: readonly AgentMessageLocatorItem[];
-    isVisible?: boolean;
-    label?: string;
-    onLocate: (item: AgentMessageLocatorItem) => void;
-    virtualSelectionSource?: AgentMessageLocatorVirtualSelectionSource;
-  }): JSX.Element | null {
+  }: AgentMessageLocatorRailProps): JSX.Element | null {
+    const handleLocateItemCallback = usePersistCallback<
+      typeof handleLocateItem
+    >((...args) => handleLocateItem(...args));
+
+    const handleViewportClickCallback = usePersistCallback<
+      typeof handleViewportClick
+    >((...args) => handleViewportClick(...args));
+
+    const handleViewportMouseMoveCallback = usePersistCallback<
+      typeof handleViewportMouseMove
+    >((...args) => handleViewportMouseMove(...args));
+
+    const openPanelCallback = usePersistCallback<typeof openPanel>((...args) =>
+      openPanel(...args)
+    );
+
+    const closePanelSoonCallback = usePersistCallback<typeof closePanelSoon>(
+      (...args) => closePanelSoon(...args)
+    );
+
+    const handleBlurCaptureCallback = usePersistCallback<
+      typeof handleBlurCapture
+    >((...args) => handleBlurCapture(...args));
+
     const locatorRef = useRef<HTMLElement | null>(null);
     const locatorViewportRef = useRef<HTMLDivElement | null>(null);
     const closePanelTimeoutRef = useRef<number | null>(null);
@@ -244,6 +264,7 @@ export const AgentMessageLocatorRail = observer(
       markItemRead(item.key);
       onLocate(item);
     };
+
     const itemFromPointerEvent = (
       event: MouseEvent<HTMLElement>
     ): AgentMessageLocatorItem | null => {
@@ -268,6 +289,7 @@ export const AgentMessageLocatorRail = observer(
         handleLocateItem(item);
       }
     };
+
     const handleViewportMouseMove = (
       event: MouseEvent<HTMLDivElement>
     ): void => {
@@ -276,6 +298,7 @@ export const AgentMessageLocatorRail = observer(
         setActiveKey(item.key);
       }
     };
+
     const openPanel = (): void => {
       if (closePanelTimeoutRef.current !== null) {
         window.clearTimeout(closePanelTimeoutRef.current);
@@ -283,6 +306,7 @@ export const AgentMessageLocatorRail = observer(
       }
       setIsPanelOpen(true);
     };
+
     const closePanelSoon = (): void => {
       if (closePanelTimeoutRef.current !== null) {
         window.clearTimeout(closePanelTimeoutRef.current);
@@ -294,6 +318,7 @@ export const AgentMessageLocatorRail = observer(
         setActiveKey(null);
       }, 120);
     };
+
     const closePanelNow = (): void => {
       if (closePanelTimeoutRef.current !== null) {
         window.clearTimeout(closePanelTimeoutRef.current);
@@ -314,126 +339,27 @@ export const AgentMessageLocatorRail = observer(
     };
 
     return (
-      <nav
-        ref={locatorRef}
-        className="agent-gui-message-locator"
-        aria-label={label ?? items[0]?.summary}
-        data-agent-transcript-scroll-away-intent
-        data-testid="agent-message-locator"
-        onBlurCapture={handleBlurCapture}
-        onFocusCapture={openPanel}
-        onMouseEnter={openPanel}
-        onMouseLeave={closePanelSoon}
-        style={
-          {
-            "--agent-message-locator-height": `${railHeight}px`,
-            "--agent-message-locator-viewport-height": `${viewportHeight}px`,
-            ...(visibleFrame !== null
-              ? {
-                  "--agent-message-locator-visible-height": `${visibleFrame.heightPx}px`,
-                  "--agent-message-locator-visible-top-offset": `${visibleFrame.topOffsetPx}px`
-                }
-              : {})
-          } as CSSProperties
-        }
-      >
-        <div
-          ref={locatorViewportRef}
-          className="agent-gui-message-locator__viewport"
-          data-testid="agent-message-locator-viewport"
-          onClick={handleViewportClick}
-          onMouseMove={handleViewportMouseMove}
-        >
-          <div
-            className="agent-gui-message-locator__content"
-            style={
-              {
-                "--agent-message-locator-height": `${railHeight}px`
-              } as CSSProperties
-            }
-          >
-            {items.slice(0, -1).map((item, index) => (
-              <div
-                key={`segment:${item.key}`}
-                className="agent-gui-message-locator__track-segment"
-                style={
-                  {
-                    "--agent-message-locator-segment-position": `${
-                      AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX / 2 +
-                      (index + 0.5) * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX
-                    }px`
-                  } as CSSProperties
-                }
-                aria-hidden="true"
-              />
-            ))}
-            {items.map((item, index) => (
-              <button
-                key={item.key}
-                type="button"
-                className="agent-gui-message-locator__tick nodrag tsh-desktop-no-drag"
-                style={
-                  {
-                    "--agent-message-locator-position": `${
-                      index * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX +
-                      AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX / 2
-                    }px`
-                  } as CSSProperties
-                }
-                aria-label={item.summary}
-                title={item.summary}
-                data-selected={item.key === selectedKey ? "true" : undefined}
-                data-agent-message-locator-turn-group-index={
-                  item.turnGroupIndex
-                }
-                data-multica-locator-turn-id={
-                  (item as { turnId?: string }).turnId
-                }
-                data-unread-agent-response={
-                  unreadAgentResponseKeys.has(item.key) ? "true" : undefined
-                }
-                onClick={() => handleLocateItem(item)}
-                onFocus={() => setActiveKey(item.key)}
-                onMouseEnter={() => setActiveKey(item.key)}
-              >
-                <span
-                  className="agent-gui-message-locator__dot"
-                  aria-hidden="true"
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-        {shouldRenderPanel ? (
-          <div
-            className="agent-gui-message-locator__panel"
-            role="tooltip"
-            data-open={isPanelOpen ? "true" : undefined}
-            data-testid="agent-message-locator-panel"
-            onMouseEnter={openPanel}
-            onMouseLeave={closePanelSoon}
-            onWheel={containMessageLocatorPanelWheel}
-          >
-            {items.map((item) => (
-              <button
-                key={`panel:${item.key}`}
-                type="button"
-                className="agent-gui-message-locator__panel-item nodrag tsh-desktop-no-drag"
-                data-active={
-                  item.key === activeOrSelectedKey ? "true" : undefined
-                }
-                onClick={() => handleLocateItem(item)}
-                onFocus={() => setActiveKey(item.key)}
-                onMouseEnter={() => setActiveKey(item.key)}
-              >
-                <span className="agent-gui-message-locator__panel-item-text">
-                  {item.summary}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </nav>
+      <NavBinding1
+        locatorRef={locatorRef}
+        label={label}
+        items={items}
+        handleBlurCaptureCallback={handleBlurCaptureCallback}
+        openPanelCallback={openPanelCallback}
+        closePanelSoonCallback={closePanelSoonCallback}
+        railHeight={railHeight}
+        viewportHeight={viewportHeight}
+        visibleFrame={visibleFrame}
+        locatorViewportRef={locatorViewportRef}
+        handleViewportClickCallback={handleViewportClickCallback}
+        handleViewportMouseMoveCallback={handleViewportMouseMoveCallback}
+        selectedKey={selectedKey}
+        unreadAgentResponseKeys={unreadAgentResponseKeys}
+        handleLocateItemCallback={handleLocateItemCallback}
+        setActiveKey={setActiveKey}
+        shouldRenderPanel={shouldRenderPanel}
+        isPanelOpen={isPanelOpen}
+        activeOrSelectedKey={activeOrSelectedKey}
+      />
     );
   }
 );
@@ -568,3 +494,336 @@ function containMessageLocatorPanelWheel(
   event.preventDefault();
   event.currentTarget.scrollTop += event.deltaY;
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  item,
+  index,
+  selectedKey,
+  unreadAgentResponseKeys,
+  handleLocateItem,
+  setActiveKey,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => handleLocateItem(item));
+  const onFocusProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onFocus"]>
+  >(() => setActiveKey(item.key));
+  const onMouseEnterProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onMouseEnter"]>
+  >(() => setActiveKey(item.key));
+  const styleProp1Value1 = `${
+    index * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX +
+    AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX / 2
+  }px`;
+  const styleProp1 = useMemo<
+    NonNullable<React.ComponentProps<"button">["style"]>
+  >(
+    () =>
+      ({
+        "--agent-message-locator-position": styleProp1Value1
+      }) as CSSProperties & Record<`--${string}`, string>,
+    [styleProp1Value1]
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={item.key}
+        type="button"
+        className="agent-gui-message-locator__tick nodrag tsh-desktop-no-drag"
+        style={styleProp1}
+        aria-label={item.summary}
+        title={item.summary}
+        data-selected={item.key === selectedKey ? "true" : undefined}
+        data-agent-message-locator-turn-group-index={item.turnGroupIndex}
+        data-multica-locator-turn-id={(item as { turnId?: string }).turnId}
+        data-unread-agent-response={
+          unreadAgentResponseKeys.has(item.key) ? "true" : undefined
+        }
+        onClick={onClickProp1}
+        onFocus={onFocusProp2}
+        onMouseEnter={onMouseEnterProp3}
+      >
+        <span className="agent-gui-message-locator__dot" aria-hidden="true" />
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  item,
+  activeOrSelectedKey,
+  handleLocateItem,
+  setActiveKey,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => handleLocateItem(item));
+  const onFocusProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onFocus"]>
+  >(() => setActiveKey(item.key));
+  const onMouseEnterProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onMouseEnter"]>
+  >(() => setActiveKey(item.key));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        key={`panel:${item.key}`}
+        type="button"
+        className="agent-gui-message-locator__panel-item nodrag tsh-desktop-no-drag"
+        data-active={item.key === activeOrSelectedKey ? "true" : undefined}
+        onClick={onClickProp4}
+        onFocus={onFocusProp5}
+        onMouseEnter={onMouseEnterProp6}
+      >
+        <span className="agent-gui-message-locator__panel-item-text">
+          {item.summary}
+        </span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+const DivBinding1 = observer(function DivBinding1({
+  item,
+  index,
+  ...slotProps
+}: {
+  item: AgentMessageLocatorItem;
+  index: number;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    item: AgentMessageLocatorItem;
+    index: number;
+  }
+>) {
+  const styleProp2Value1 = `${
+    AGENT_MESSAGE_LOCATOR_HIT_SIZE_PX / 2 +
+    (index + 0.5) * AGENT_MESSAGE_LOCATOR_ITEM_SPACING_PX
+  }px`;
+  const styleProp2 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () =>
+      ({
+        "--agent-message-locator-segment-position": styleProp2Value1
+      }) as CSSProperties & Record<`--${string}`, string>,
+    [styleProp2Value1]
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <div
+        key={`segment:${item.key}`}
+        className="agent-gui-message-locator__track-segment"
+        style={styleProp2}
+        aria-hidden="true"
+      />
+    </Slot.Root>
+  );
+});
+
+const DivBinding2 = observer(function DivBinding2({
+  railHeight,
+  items,
+  selectedKey,
+  unreadAgentResponseKeys,
+  handleLocateItemCallback,
+  setActiveKey,
+  ...slotProps
+}: DivBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof DivBinding2Props>) {
+  const styleProp3Value1 = `${railHeight}px`;
+  const styleProp3 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () =>
+      ({
+        "--agent-message-locator-height": styleProp3Value1
+      }) as CSSProperties & Record<`--${string}`, string>,
+    [styleProp3Value1]
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <div className="agent-gui-message-locator__content" style={styleProp3}>
+        {items.slice(0, -1).map((item, index) => (
+          <DivBinding1 key={`segment:${item.key}`} item={item} index={index} />
+        ))}
+        {items.map((item, index) => (
+          <ButtonBinding1
+            key={item.key}
+            item={item}
+            index={index}
+            selectedKey={selectedKey}
+            unreadAgentResponseKeys={unreadAgentResponseKeys}
+            handleLocateItem={handleLocateItemCallback}
+            setActiveKey={setActiveKey}
+          />
+        ))}
+      </div>
+    </Slot.Root>
+  );
+});
+
+const NavBinding1 = observer(function NavBinding1({
+  locatorRef,
+  label,
+  items,
+  handleBlurCaptureCallback,
+  openPanelCallback,
+  closePanelSoonCallback,
+  railHeight,
+  viewportHeight,
+  visibleFrame,
+  locatorViewportRef,
+  handleViewportClickCallback,
+  handleViewportMouseMoveCallback,
+  selectedKey,
+  unreadAgentResponseKeys,
+  handleLocateItemCallback,
+  setActiveKey,
+  shouldRenderPanel,
+  isPanelOpen,
+  activeOrSelectedKey
+}: NavBinding1Props) {
+  const styleProp4Value1 = `${railHeight}px`;
+  const styleProp4Value2 = `${viewportHeight}px`;
+  const hasVisibleFrame = visibleFrame !== null;
+  const visibleHeight = visibleFrame?.heightPx;
+  const visibleOffset = visibleFrame?.topOffsetPx;
+  const styleProp4Value3 = useMemo(
+    () =>
+      hasVisibleFrame
+        ? {
+            "--agent-message-locator-visible-height": `${visibleHeight}px`,
+            "--agent-message-locator-visible-top-offset": `${visibleOffset}px`
+          }
+        : {},
+    [hasVisibleFrame, visibleHeight, visibleOffset]
+  );
+  const styleProp4 = useMemo<NonNullable<React.ComponentProps<"nav">["style"]>>(
+    () =>
+      ({
+        "--agent-message-locator-height": styleProp4Value1,
+        "--agent-message-locator-viewport-height": styleProp4Value2,
+        ...styleProp4Value3
+      }) as CSSProperties & Record<`--${string}`, string>,
+    [styleProp4Value1, styleProp4Value2, styleProp4Value3]
+  );
+  return (
+    <nav
+      ref={locatorRef}
+      className="agent-gui-message-locator"
+      aria-label={label ?? items[0]?.summary}
+      data-agent-transcript-scroll-away-intent
+      data-testid="agent-message-locator"
+      onBlurCapture={handleBlurCaptureCallback}
+      onFocusCapture={openPanelCallback}
+      onMouseEnter={openPanelCallback}
+      onMouseLeave={closePanelSoonCallback}
+      style={styleProp4}
+    >
+      <div
+        ref={locatorViewportRef}
+        className="agent-gui-message-locator__viewport"
+        data-testid="agent-message-locator-viewport"
+        onClick={handleViewportClickCallback}
+        onMouseMove={handleViewportMouseMoveCallback}
+      >
+        <DivBinding2
+          railHeight={railHeight}
+          items={items}
+          selectedKey={selectedKey}
+          unreadAgentResponseKeys={unreadAgentResponseKeys}
+          handleLocateItemCallback={handleLocateItemCallback}
+          setActiveKey={setActiveKey}
+        />
+      </div>
+      {shouldRenderPanel ? (
+        <div
+          className="agent-gui-message-locator__panel"
+          role="tooltip"
+          data-open={isPanelOpen ? "true" : undefined}
+          data-testid="agent-message-locator-panel"
+          onMouseEnter={openPanelCallback}
+          onMouseLeave={closePanelSoonCallback}
+          onWheel={containMessageLocatorPanelWheel}
+        >
+          {items.map((item) => (
+            <ButtonBinding2
+              key={`panel:${item.key}`}
+              item={item}
+              activeOrSelectedKey={activeOrSelectedKey}
+              handleLocateItem={handleLocateItemCallback}
+              setActiveKey={setActiveKey}
+            />
+          ))}
+        </div>
+      ) : null}
+    </nav>
+  );
+});
+
+type AgentMessageLocatorRailProps = {
+  followEndMode?: AgentConversationFollowEndMode;
+  items: readonly AgentMessageLocatorItem[];
+  isVisible?: boolean;
+  label?: string;
+  onLocate: (item: AgentMessageLocatorItem) => void;
+  virtualSelectionSource?: AgentMessageLocatorVirtualSelectionSource;
+};
+
+type ButtonBinding1Props = {
+  item: AgentMessageLocatorItem;
+  index: number;
+  selectedKey: string | null;
+  unreadAgentResponseKeys: ReadonlySet<string>;
+  handleLocateItem: (item: AgentMessageLocatorItem) => void;
+  setActiveKey: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+};
+
+type ButtonBinding2Props = {
+  item: AgentMessageLocatorItem;
+  activeOrSelectedKey: string | null;
+  handleLocateItem: (item: AgentMessageLocatorItem) => void;
+  setActiveKey: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+};
+
+type DivBinding2Props = {
+  railHeight: number;
+  items: readonly AgentMessageLocatorItem[];
+  selectedKey: string | null;
+  unreadAgentResponseKeys: ReadonlySet<string>;
+  handleLocateItemCallback: (item: AgentMessageLocatorItem) => void;
+  setActiveKey: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+};
+
+type NavBinding1Props = {
+  locatorRef: import("react").RefObject<HTMLElement | null>;
+  label: string | undefined;
+  items: readonly AgentMessageLocatorItem[];
+  handleBlurCaptureCallback: (event: FocusEvent<HTMLElement>) => void;
+  openPanelCallback: () => void;
+  closePanelSoonCallback: () => void;
+  railHeight: number;
+  viewportHeight: number;
+  visibleFrame: AgentMessageLocatorVisibleFrame | null;
+  locatorViewportRef: import("react").RefObject<HTMLDivElement | null>;
+  handleViewportClickCallback: (event: MouseEvent<HTMLDivElement>) => void;
+  handleViewportMouseMoveCallback: (event: MouseEvent<HTMLDivElement>) => void;
+  selectedKey: string | null;
+  unreadAgentResponseKeys: ReadonlySet<string>;
+  handleLocateItemCallback: (item: AgentMessageLocatorItem) => void;
+  setActiveKey: import("react").Dispatch<
+    import("react").SetStateAction<string | null>
+  >;
+  shouldRenderPanel: boolean;
+  isPanelOpen: boolean;
+  activeOrSelectedKey: string | null;
+};

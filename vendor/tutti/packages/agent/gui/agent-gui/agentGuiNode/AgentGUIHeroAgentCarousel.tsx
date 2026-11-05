@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Component,
   createRef,
@@ -11,6 +13,7 @@ import { AgentGuiHeroCarouselScene } from "./agentGuiHeroCarouselScene";
 import { AgentGUIVinylPlayer } from "./AgentGUIVinylPlayer";
 import styles from "./AgentGUINode.styles";
 import { AgentGuiHeroCarouselImageLoad } from "./agentGuiHeroCarouselImageLoad";
+import { observer as observeClass } from "mobx-react";
 
 export interface AgentGUIHeroCarouselSelectInput {
   provider: AgentGUIProvider;
@@ -633,6 +636,17 @@ export class AgentGUIHeroAgentCarousel extends Component<
     }
   };
 
+  private readonly handleItemPointerDown = (
+    index: number,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void => {
+    this.activateOnPointerDown(index, event);
+  };
+
+  private readonly handleItemButtonClick = (index: number): void => {
+    this.activateOnClick(index);
+  };
+
   render(): React.JSX.Element {
     const interactive = this.interactive();
     return (
@@ -680,23 +694,15 @@ export class AgentGUIHeroAgentCarousel extends Component<
               ? `${this.props.providerSelectLabel}: ${itemLabel}`
               : itemLabel;
             return (
-              <button
+              <CarouselItemButton
                 key={key}
-                type="button"
-                className={styles.emptyHeroCarouselItem}
-                data-agent-target-id={item.agentTargetId}
-                data-provider={item.provider}
-                data-provider-active={isCenter}
-                aria-label={label}
-                aria-pressed={isCenter}
-                title={item.label}
-                onPointerDown={(event) =>
-                  this.activateOnPointerDown(index, event)
-                }
-                onClick={() => this.activateOnClick(index)}
-              >
-                {item.label}
-              </button>
+                item={item}
+                index={index}
+                isCenter={isCenter}
+                label={label}
+                onActivatePointerDown={this.handleItemPointerDown}
+                onActivateClick={this.handleItemButtonClick}
+              />
             );
           }
           return (
@@ -712,3 +718,47 @@ export class AgentGUIHeroAgentCarousel extends Component<
     );
   }
 }
+observeClass(AgentGUIHeroAgentCarousel);
+
+const CarouselItemButton = observer(function CarouselItemButton({
+  item,
+  index,
+  isCenter,
+  label,
+  onActivatePointerDown,
+  onActivateClick
+}: CarouselItemButtonProps) {
+  const handlePointerDown = usePersistCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) =>
+      onActivatePointerDown(index, event)
+  );
+  const handleClick = usePersistCallback(() => onActivateClick(index));
+  return (
+    <button
+      type="button"
+      className={styles.emptyHeroCarouselItem}
+      data-agent-target-id={item.agentTargetId}
+      data-provider={item.provider}
+      data-provider-active={isCenter}
+      aria-label={label}
+      aria-pressed={isCenter}
+      title={item.label}
+      onPointerDown={handlePointerDown}
+      onClick={handleClick}
+    >
+      {item.label}
+    </button>
+  );
+});
+
+type CarouselItemButtonProps = {
+  item: AgentGUIAgentAvatarPresentation;
+  index: number;
+  isCenter: boolean;
+  label: string;
+  onActivatePointerDown(
+    index: number,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void;
+  onActivateClick(index: number): void;
+};

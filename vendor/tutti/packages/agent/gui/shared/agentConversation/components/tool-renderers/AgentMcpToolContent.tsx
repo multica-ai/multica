@@ -9,8 +9,10 @@ import {
 } from "./agentToolContentShared";
 import { renderRegisteredMcp } from "./mcp-renderers/agentMcpRendererRegistry";
 import { normalizeMcpPayload } from "./mcp-renderers/agentMcpShared";
+import { observer } from "mobx-react-lite";
+export const AgentMcpToolContent = observer(AgentMcpToolContentRender);
 
-export function AgentMcpToolContent({
+function AgentMcpToolContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element {

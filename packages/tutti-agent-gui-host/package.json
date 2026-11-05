@@ -38,15 +38,12 @@
     "build:e2e-harness": "node scripts/build-e2e-harness.mjs"
   },
   "dependencies": {
-    "lucide-react": "catalog:",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource-variable/inter": "^5.2.5",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@multica/conversation-client": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "mobx": "catalog:",
-    "mobx-react-lite": "catalog:",
     "@tiptap/core": "3.23.6",
     "@tiptap/pm": "3.23.6",
     "@tiptap/react": "3.23.6",
@@ -60,21 +57,26 @@
     "@tutti-os/workbench-surface": "workspace:*",
     "chart.js": "4.6.1",
     "d3": "7.9.0",
+    "lucide-react": "catalog:",
+    "mobx": "catalog:",
+    "mobx-react": "catalog:",
+    "mobx-react-lite": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "zustand": "catalog:"
+    "zustand": "catalog:",
+    "radix-ui": "catalog:"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "postcss": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "^8.0.0",
-    "vitest": "catalog:",
-    "postcss": "catalog:",
-    "@tailwindcss/postcss": "catalog:"
+    "vitest": "catalog:"
   }
 }

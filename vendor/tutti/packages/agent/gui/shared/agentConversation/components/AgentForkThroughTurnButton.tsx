@@ -5,6 +5,9 @@ import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles"
 import { CanvasNodeGhostIconButton } from "../../../contexts/workspace/presentation/renderer/components/shared/CanvasNodeGhostIconButton";
 import { useOptionalConversationServices } from "../../../conversationServices";
 import { translate } from "../../../i18n/index";
+export const AgentForkThroughTurnFooter = observer(
+  AgentForkThroughTurnFooterRender
+);
 
 export const AgentForkThroughTurnButton = observer(
   function AgentForkThroughTurnButton({
@@ -56,7 +59,7 @@ export const AgentForkThroughTurnButton = observer(
   }
 );
 
-export function AgentForkThroughTurnFooter({
+function AgentForkThroughTurnFooterRender({
   agentSessionId,
   turnId,
   onFork

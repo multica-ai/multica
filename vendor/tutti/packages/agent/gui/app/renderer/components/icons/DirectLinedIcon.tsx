@@ -1,9 +1,11 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const DirectLinedIcon = observer(DirectLinedIconRender);
 
 /**
  * Lined direct/open glyph (24x24 viewBox). Fill uses `currentColor`.
  */
-export function DirectLinedIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+function DirectLinedIconRender(props: SVGProps<SVGSVGElement>): JSX.Element {
   "use memo";
   return (
     <svg

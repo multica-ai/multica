@@ -14,6 +14,14 @@ import {
   type PromptToolDetail
 } from "../promptToolDetails";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { observer } from "mobx-react-lite";
+export const InteractiveOptionSpinner = observer(
+  InteractiveOptionSpinnerRender
+);
+export const SendFilledIcon = observer(SendFilledIconRender);
+export const PromptDetailValue = observer(PromptDetailValueRender);
+export const CommandTextWithTooltip = observer(CommandTextWithTooltipRender);
+
 const COMMAND_TOOLTIP_DELAY_MS = 1000;
 
 export function isEnterLikeKey(event: KeyboardEvent): boolean {
@@ -71,7 +79,7 @@ export function isDarwinPlatform(platform: string | undefined): boolean {
   return /mac/i.test(navigatorPlatform);
 }
 
-export function InteractiveOptionSpinner(): JSX.Element {
+function InteractiveOptionSpinnerRender(): JSX.Element {
   "use memo";
   return (
     <Spinner
@@ -81,7 +89,7 @@ export function InteractiveOptionSpinner(): JSX.Element {
   );
 }
 
-export function SendFilledIcon(): JSX.Element {
+function SendFilledIconRender(): JSX.Element {
   "use memo";
   return (
     <svg
@@ -170,7 +178,7 @@ export function formatApprovalToolPresentation(
   };
 }
 
-export function PromptDetailValue({
+function PromptDetailValueRender({
   detail
 }: {
   detail: LabeledPromptToolDetail;
@@ -192,7 +200,7 @@ export function PromptDetailValue({
   );
 }
 
-export function CommandTextWithTooltip({
+function CommandTextWithTooltipRender({
   value,
   testId,
   tooltipsEnabled = true

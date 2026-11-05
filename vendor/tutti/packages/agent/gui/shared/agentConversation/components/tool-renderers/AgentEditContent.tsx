@@ -13,8 +13,10 @@ import {
   getFileChangeRenderData,
   getToolCallFailureText
 } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentEditContent = observer(AgentEditContentRender);
 
-export function AgentEditContent({
+function AgentEditContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

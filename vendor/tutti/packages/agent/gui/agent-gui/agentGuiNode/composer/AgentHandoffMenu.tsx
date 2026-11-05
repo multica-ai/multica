@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Select,
   SelectContent,
@@ -68,45 +69,54 @@ export const AgentHandoffMenu = observer(function AgentHandoffMenu({
   const menuDisabled = disabled || targets.length === 0;
   const tooltip = labels.tooltip.trim();
 
+  const onBlurProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onBlur"]>
+  >(() => {
+    setIsIconPlaying(false);
+  });
+  const onFocusProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onFocus"]>
+  >(() => {
+    setIsIconPlaying(true);
+  });
+  const onMouseEnterProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onMouseEnter"]>
+  >(() => {
+    setIsIconPlaying(true);
+  });
+  const onMouseLeaveProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onMouseLeave"]>
+  >(() => {
+    setIsIconPlaying(false);
+  });
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onClick"]>
+  >((event) => {
+    event.stopPropagation();
+  });
+  const onKeyDownProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onKeyDown"]>
+  >((event) => {
+    event.stopPropagation();
+  });
+  const onPointerDownProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof SelectTrigger>["onPointerDown"]>
+  >((event) => {
+    event.stopPropagation();
+  });
   const trigger = (
     <span className="inline-flex">
       <SelectTrigger
         size="sm"
         aria-label={labels.action}
         data-testid={testId}
-        onClick={
-          isolateTriggerEvents
-            ? (event) => {
-                event.stopPropagation();
-              }
-            : undefined
-        }
-        onKeyDown={
-          isolateTriggerEvents
-            ? (event) => {
-                event.stopPropagation();
-              }
-            : undefined
-        }
-        onPointerDown={
-          isolateTriggerEvents
-            ? (event) => {
-                event.stopPropagation();
-              }
-            : undefined
-        }
-        onBlur={() => {
-          setIsIconPlaying(false);
-        }}
-        onFocus={() => {
-          setIsIconPlaying(true);
-        }}
-        onMouseEnter={() => {
-          setIsIconPlaying(true);
-        }}
-        onMouseLeave={() => {
-          setIsIconPlaying(false);
-        }}
+        onClick={isolateTriggerEvents ? onClickProp1 : undefined}
+        onKeyDown={isolateTriggerEvents ? onKeyDownProp2 : undefined}
+        onPointerDown={isolateTriggerEvents ? onPointerDownProp3 : undefined}
+        onBlur={onBlurProp1}
+        onFocus={onFocusProp2}
+        onMouseEnter={onMouseEnterProp3}
+        onMouseLeave={onMouseLeaveProp4}
         className={cn(
           styles.composerMenuTrigger,
           styles.composerProviderSelect,
@@ -128,43 +138,43 @@ export const AgentHandoffMenu = observer(function AgentHandoffMenu({
     </span>
   );
 
+  const onValueChangeProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Select>["onValueChange"]>
+  >((nextTargetId) => {
+    const target = targets.find(
+      (candidate) => candidate.targetId === nextTargetId
+    );
+    if (!target || target.disabled === true) {
+      return;
+    }
+    onSelect(target);
+  });
+  const onClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"span">["onClick"]>
+  >((event) => {
+    event.stopPropagation();
+  });
+  const onKeyDownProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"span">["onKeyDown"]>
+  >((event) => {
+    event.stopPropagation();
+  });
+  const onPointerDownProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<"span">["onPointerDown"]>
+  >((event) => {
+    event.stopPropagation();
+  });
   return (
     <span
       className="contents"
-      onClick={
-        isolateTriggerEvents
-          ? (event) => {
-              event.stopPropagation();
-            }
-          : undefined
-      }
-      onKeyDown={
-        isolateTriggerEvents
-          ? (event) => {
-              event.stopPropagation();
-            }
-          : undefined
-      }
-      onPointerDown={
-        isolateTriggerEvents
-          ? (event) => {
-              event.stopPropagation();
-            }
-          : undefined
-      }
+      onClick={isolateTriggerEvents ? onClickProp4 : undefined}
+      onKeyDown={isolateTriggerEvents ? onKeyDownProp5 : undefined}
+      onPointerDown={isolateTriggerEvents ? onPointerDownProp6 : undefined}
     >
       <Select
         value={HANDOFF_SELECT_IDLE_VALUE}
         disabled={menuDisabled}
-        onValueChange={(nextTargetId) => {
-          const target = targets.find(
-            (candidate) => candidate.targetId === nextTargetId
-          );
-          if (!target || target.disabled === true) {
-            return;
-          }
-          onSelect(target);
-        }}
+        onValueChange={onValueChangeProp5}
       >
         {tooltip ? (
           <TooltipProvider delayDuration={120} disableHoverableContent>

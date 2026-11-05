@@ -1,19 +1,21 @@
 import {
-createContext,
-useContext,
-useState,
-useSyncExternalStore,
-type ReactNode
+  createContext,
+  useContext,
+  useState,
+  useSyncExternalStore,
+  type ReactNode
 } from "react";
 import {
-createComposerDraftStore,
-type ComposerDraftStore
+  createComposerDraftStore,
+  type ComposerDraftStore
 } from "./composer-draft-store";
 import type { AgentGuiInitSnapshot } from "./protocol";
+import { observer } from "mobx-react-lite";
+export const ComposerDraftProvider = observer(ComposerDraftProviderRender);
 
 const ComposerDraftContext = createContext<ComposerDraftStore | null>(null);
 
-export function ComposerDraftProvider({
+function ComposerDraftProviderRender({
   initial,
   children,
   legacyAliases = {}

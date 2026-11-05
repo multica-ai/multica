@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   useCallback,
   useEffect,
@@ -12,10 +13,16 @@ import { translate } from "../../../i18n";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
 import type { AgentMessageRowVM } from "../contracts/agentMessageRowVM";
 import { CanvasNodeGhostIconButton } from "../../../contexts/workspace/presentation/renderer/components/shared/CanvasNodeGhostIconButton";
+import { observer } from "mobx-react-lite";
+export const AgentCopyableMessageGroup = observer(
+  AgentCopyableMessageGroupRender
+);
+const AgentMessageEditButton = observer(AgentMessageEditButtonRender);
+const AgentMessageCopyButton = observer(AgentMessageCopyButtonRender);
 
 const MESSAGE_COPY_FEEDBACK_MS = 1400;
 
-export function AgentCopyableMessageGroup({
+function AgentCopyableMessageGroupRender({
   children,
   copyText,
   editAction,
@@ -23,19 +30,7 @@ export function AgentCopyableMessageGroup({
   occurredAtUnixMs,
   onCopyMessageText,
   speaker
-}: {
-  children: ReactNode;
-  copyText: string | null;
-  editAction: {
-    disabled: boolean;
-    label: string;
-    onClick: () => void;
-  } | null;
-  footerAction?: ReactNode;
-  occurredAtUnixMs: number | null;
-  onCopyMessageText: (text: string) => Promise<boolean>;
-  speaker: AgentMessageRowVM["speaker"];
-}): JSX.Element {
+}: AgentCopyableMessageGroupProps): JSX.Element {
   "use memo";
   const timestamp = formatAgentMessageTimestamp(occurredAtUnixMs);
   const hasFooter = Boolean(
@@ -74,7 +69,7 @@ export function AgentCopyableMessageGroup({
   );
 }
 
-function AgentMessageEditButton({
+function AgentMessageEditButtonRender({
   disabled,
   label,
   onClick
@@ -102,7 +97,7 @@ function AgentMessageEditButton({
   );
 }
 
-function AgentMessageCopyButton({
+function AgentMessageCopyButtonRender({
   copyText,
   onCopyMessageText
 }: {
@@ -126,6 +121,7 @@ function AgentMessageCopyButton({
       setCopied(true);
     }
   }, [copyText, onCopyMessageText]);
+  const handleClickCallback = usePersistCallback(handleClick);
   const label = copied
     ? translate("agentHost.agentGui.messageCopied")
     : translate("agentHost.agentGui.copyMessage");
@@ -135,7 +131,7 @@ function AgentMessageCopyButton({
       className={styles.messageCopyButton}
       aria-label={label}
       data-copied={copied ? "true" : "false"}
-      onClick={handleClick}
+      onClick={handleClickCallback}
     >
       {copied ? (
         <CheckIcon width={14} height={14} aria-hidden="true" />
@@ -145,3 +141,17 @@ function AgentMessageCopyButton({
     </CanvasNodeGhostIconButton>
   );
 }
+
+type AgentCopyableMessageGroupProps = {
+  children: ReactNode;
+  copyText: string | null;
+  editAction: {
+    disabled: boolean;
+    label: string;
+    onClick: () => void;
+  } | null;
+  footerAction?: ReactNode;
+  occurredAtUnixMs: number | null;
+  onCopyMessageText: (text: string) => Promise<boolean>;
+  speaker: AgentMessageRowVM["speaker"];
+};

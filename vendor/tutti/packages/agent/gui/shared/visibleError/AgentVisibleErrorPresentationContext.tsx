@@ -9,6 +9,10 @@ import type {
   AgentVisibleErrorOverrides,
   AgentVisibleErrorPresentationScope
 } from "../agentEnv/agentErrorPresentation";
+import { observer } from "mobx-react-lite";
+export const AgentVisibleErrorPresentationProvider = observer(
+  AgentVisibleErrorPresentationProviderRender
+);
 
 interface AgentVisibleErrorPresentationContextValue {
   overrides: AgentVisibleErrorOverrides | null;
@@ -21,7 +25,7 @@ const AgentVisibleErrorPresentationContext =
     scope: "local_owner"
   });
 
-export function AgentVisibleErrorPresentationProvider({
+function AgentVisibleErrorPresentationProviderRender({
   children,
   scope = "local_owner",
   value

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Button as UISystemButton, buttonVariants } from "@tutti-os/ui-system";
 import { cn } from "../../lib/utils";
+import { observer } from "mobx-react-lite";
 
 type UISystemButtonProps = React.ComponentProps<typeof UISystemButton>;
 type LegacyButtonSize =
@@ -45,14 +46,16 @@ function resolveButtonClassName(
   );
 }
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, size, ...props }, ref) => (
-    <UISystemButton
-      ref={ref}
-      className={resolveButtonClassName(size, className)}
-      size={resolveButtonSize(size)}
-      {...props}
-    />
+const Button = observer(
+  React.forwardRef<HTMLButtonElement, ButtonProps>(
+    ({ className, size, ...props }, ref) => (
+      <UISystemButton
+        ref={ref}
+        className={resolveButtonClassName(size, className)}
+        size={resolveButtonSize(size)}
+        {...props}
+      />
+    )
   )
 );
 

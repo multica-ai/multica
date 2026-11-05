@@ -1,8 +1,10 @@
 import { cn } from "@tutti-os/ui-system";
 import type { AgentGUIAgentTarget } from "../../../types";
 import { projectAgentGUIAgentTargetName } from "../model/agentGuiTargetName";
+import { observer } from "mobx-react-lite";
+export const AgentGUIAgentTargetName = observer(AgentGUIAgentTargetNameRender);
 
-export function AgentGUIAgentTargetName({
+function AgentGUIAgentTargetNameRender({
   className,
   ownerSeparator,
   target

@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { isValidElement, useId, useState, type ReactNode } from "react";
 import { Gauge, Wrench } from "lucide-react";
 import {
@@ -17,6 +20,8 @@ import { resolveAgentGuiSessionProviderFlatIconUrl } from "../../../agentGuiSess
 import styles from "../AgentGUINode.styles";
 import type { AgentComposerSlashStatusLimit } from "../AgentComposer";
 import type { AgentGUIViewLabels } from "../AgentGUINodeView";
+import { observer } from "mobx-react-lite";
+export const AgentGUIConfigMenu = observer(AgentGUIConfigMenuRender);
 
 interface AgentGUIConfigMenuProps {
   accountContent?: ReactNode;
@@ -44,11 +49,13 @@ interface AgentGUIConfigMenuProps {
   onOpenAgentSettings: () => void;
 }
 
-export function AgentGUIConfigAccountFallbackSuppressed(): null {
-  return null;
-}
+export const AgentGUIConfigAccountFallbackSuppressed = observer(
+  function AgentGUIConfigAccountFallbackSuppressed(): null {
+    return null;
+  }
+);
 
-export function AgentGUIConfigMenu({
+function AgentGUIConfigMenuRender({
   accountContent,
   systemActionsContent,
   environmentSetupVisible,
@@ -98,6 +105,37 @@ export function AgentGUIConfigMenu({
     typeof accountContent !== "boolean";
   const providerAccountFallbackVisible =
     !accountFallbackSuppressed && !hasAccountContent;
+  const labelsProp1Value1 = labels.slashStatusUsageJustUpdated;
+  const labelsProp1Value2 = labels.slashStatusUsageMinutesAgo;
+  const labelsProp1Value3 = labels.slashStatusUsageHoursAgo;
+  const labelsProp1Value4 = labels.slashStatusUsageUpdating;
+  const labelsProp1Value5 = labels.slashStatusUsageRefreshFailed;
+  const labelsProp1Value6 = labels.slashStatusUsageRefreshAria;
+  const labelsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentProbeUsageFreshness>["labels"]>
+  >(
+    () => ({
+      justUpdated: labelsProp1Value1,
+      minutesAgo: labelsProp1Value2,
+      hoursAgo: labelsProp1Value3,
+      updating: labelsProp1Value4,
+      refreshFailed: labelsProp1Value5,
+      refreshAria: labelsProp1Value6
+    }),
+    [
+      labelsProp1Value1,
+      labelsProp1Value2,
+      labelsProp1Value3,
+      labelsProp1Value4,
+      labelsProp1Value5,
+      labelsProp1Value6
+    ]
+  );
+  const onRefreshProp2 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentProbeUsageFreshness>["onRefresh"]
+    >
+  >(() => onAgentUsageRefresh?.());
   const usageFreshness = (
     <AgentProbeUsageFreshness
       ariaDescribedBy={usageDescriptionId}
@@ -105,34 +143,34 @@ export function AgentGUIConfigMenu({
       didFail={slashStatusUsageDidFail}
       disabled={!onAgentUsageRefresh}
       isLoading={slashStatusLimitsLoading}
-      labels={{
-        justUpdated: labels.slashStatusUsageJustUpdated,
-        minutesAgo: labels.slashStatusUsageMinutesAgo,
-        hoursAgo: labels.slashStatusUsageHoursAgo,
-        updating: labels.slashStatusUsageUpdating,
-        refreshFailed: labels.slashStatusUsageRefreshFailed,
-        refreshAria: labels.slashStatusUsageRefreshAria
-      }}
-      onRefresh={() => onAgentUsageRefresh?.()}
+      labels={labelsProp1}
+      onRefresh={onRefreshProp2}
       presentation={usageRefreshInline ? "button" : "menu-item"}
       testId="agent-gui-config-usage-refresh"
     />
   );
+  const onOpenChangeProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenu>["onOpenChange"]>
+  >((nextOpen) => {
+    setOpen(nextOpen);
+    // Refresh the underlying probe on open, the same way the window-title
+    // info tooltip does; otherwise a stale/empty fetch can sit here until
+    // something unrelated refreshes it.
+    if (nextOpen) {
+      onAgentConfigMenuOpen?.();
+    } else {
+      onAgentConfigMenuClose?.();
+    }
+  });
+
+  const styleProp4 = useMemo<
+    NonNullable<React.ComponentProps<typeof DropdownMenuContent>["style"]>
+  >(() => ({ zIndex: "var(--z-panel-popover)" }), []);
+  const onSelectProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(() => onOpenAgentSettings());
   return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        // Refresh the underlying probe on open, the same way the window-title
-        // info tooltip does; otherwise a stale/empty fetch can sit here until
-        // something unrelated refreshes it.
-        if (nextOpen) {
-          onAgentConfigMenuOpen?.();
-        } else {
-          onAgentConfigMenuClose?.();
-        }
-      }}
-    >
+    <DropdownMenu open={open} onOpenChange={onOpenChangeProp3}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -148,7 +186,7 @@ export function AgentGUIConfigMenu({
         align="end"
         className="nodrag w-[300px] max-w-[calc(100vw-32px)] p-1 text-xs [-webkit-app-region:no-drag]"
         data-testid="agent-gui-config-menu"
-        style={{ zIndex: "var(--z-panel-popover)" }}
+        style={styleProp4}
       >
         <DropdownMenuGroup className="min-w-0">
           {hasAccountContent ? (
@@ -164,14 +202,7 @@ export function AgentGUIConfigMenu({
               <DropdownMenuLabel className="flex min-w-0 flex-col gap-2 p-2 text-[var(--text-primary)]">
                 <div className="flex min-w-0 items-center gap-2">
                   {providerMaskIconUrl ? (
-                    <span
-                      aria-hidden="true"
-                      className="size-4 shrink-0 bg-current"
-                      style={{
-                        mask: `url("${providerMaskIconUrl}") center / contain no-repeat`,
-                        WebkitMask: `url("${providerMaskIconUrl}") center / contain no-repeat`
-                      }}
-                    />
+                    <SpanBinding1 providerMaskIconUrl={providerMaskIconUrl} />
                   ) : providerImageIconUrl ? (
                     <img
                       alt=""
@@ -265,19 +296,15 @@ export function AgentGUIConfigMenu({
           ) : null}
           <DropdownMenuGroup>
             {providerScopedActionsVisible && environmentSetupVisible ? (
-              <DropdownMenuItem
-                data-testid="agent-gui-config-env-setup"
-                className="h-7"
-                onSelect={() => onOpenAgentEnvSetup()}
-              >
-                <Wrench aria-hidden="true" size={16} strokeWidth={1.8} />
-                <span>{labels.agentEnvSetup}</span>
-              </DropdownMenuItem>
+              <DropdownMenuItemBinding2
+                onOpenAgentEnvSetup={onOpenAgentEnvSetup}
+                labels={labels}
+              />
             ) : null}
             <DropdownMenuItem
               data-testid="agent-gui-config-settings"
               className="h-7"
-              onSelect={() => onOpenAgentSettings()}
+              onSelect={onSelectProp5}
             >
               <SettingsLinedIcon aria-hidden="true" width={16} height={16} />
               <span>{labels.agentSettingsMenu}</span>
@@ -294,3 +321,64 @@ export function AgentGUIConfigMenu({
     </DropdownMenu>
   );
 }
+
+const SpanBinding1 = observer(function SpanBinding1({
+  providerMaskIconUrl,
+  ...slotProps
+}: {
+  providerMaskIconUrl: string;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    providerMaskIconUrl: string;
+  }
+>) {
+  const styleProp6Value1 = `url("${providerMaskIconUrl}") center / contain no-repeat`;
+  const styleProp6Value2 = `url("${providerMaskIconUrl}") center / contain no-repeat`;
+  const styleProp6 = useMemo<
+    NonNullable<React.ComponentProps<"span">["style"]>
+  >(
+    () => ({ mask: styleProp6Value1, WebkitMask: styleProp6Value2 }),
+    [styleProp6Value1, styleProp6Value2]
+  );
+  return (
+    <Slot.Root {...slotProps}>
+      <span
+        aria-hidden="true"
+        className="size-4 shrink-0 bg-current"
+        style={styleProp6}
+      />
+    </Slot.Root>
+  );
+});
+
+const DropdownMenuItemBinding2 = observer(function DropdownMenuItemBinding2({
+  onOpenAgentEnvSetup,
+  labels,
+  ...slotProps
+}: {
+  onOpenAgentEnvSetup: () => void;
+  labels: AgentGUIViewLabels;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    onOpenAgentEnvSetup: () => void;
+    labels: AgentGUIViewLabels;
+  }
+>) {
+  const onSelectProp7 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(() => onOpenAgentEnvSetup());
+  return (
+    <Slot.Root {...slotProps}>
+      <DropdownMenuItem
+        data-testid="agent-gui-config-env-setup"
+        className="h-7"
+        onSelect={onSelectProp7}
+      >
+        <Wrench aria-hidden="true" size={16} strokeWidth={1.8} />
+        <span>{labels.agentEnvSetup}</span>
+      </DropdownMenuItem>
+    </Slot.Root>
+  );
+});

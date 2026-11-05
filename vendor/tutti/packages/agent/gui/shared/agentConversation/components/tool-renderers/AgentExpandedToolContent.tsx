@@ -17,8 +17,12 @@ import { AgentDefaultToolContent } from "./agentToolContentShared";
 import { AgentWebFetchContent } from "./AgentWebFetchContent";
 import { AgentWebSearchContent } from "./AgentWebSearchContent";
 import { AgentWriteContent } from "./AgentWriteContent";
+import { observer } from "mobx-react-lite";
+export const AgentExpandedToolContent = observer(
+  AgentExpandedToolContentRender
+);
 
-export function AgentExpandedToolContent({
+function AgentExpandedToolContentRender({
   call,
   onLinkClick
 }: {

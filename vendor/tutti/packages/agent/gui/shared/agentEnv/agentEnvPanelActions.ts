@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import {
   createContext,
   createElement,
@@ -26,19 +27,21 @@ export type OpenAgentEnvPanelAction = (input?: OpenAgentEnvPanelInput) => void;
 const AgentEnvPanelActionContext =
   createContext<OpenAgentEnvPanelAction | null>(null);
 
-export function AgentEnvPanelActionProvider({
-  children,
-  openPanel
-}: {
-  children: ReactNode;
-  openPanel?: OpenAgentEnvPanelAction;
-}): ReactElement {
-  return createElement(
-    AgentEnvPanelActionContext.Provider,
-    { value: openPanel ?? null },
-    children
-  );
-}
+export const AgentEnvPanelActionProvider = observer(
+  function AgentEnvPanelActionProvider({
+    children,
+    openPanel
+  }: {
+    children: ReactNode;
+    openPanel?: OpenAgentEnvPanelAction;
+  }): ReactElement {
+    return createElement(
+      AgentEnvPanelActionContext.Provider,
+      { value: openPanel ?? null },
+      children
+    );
+  }
+);
 
 /** Host-injected command; AgentGUI never owns the panel workflow state. */
 export function useOpenAgentEnvPanel(): OpenAgentEnvPanelAction | null {

@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   useMemo,
   type CSSProperties,
@@ -16,6 +17,14 @@ import {
 } from "../../utils/nodeFrameResize";
 import type { NodeFrame, Point, WorkspaceNodeKind } from "../../types";
 import type { DesktopSize } from "../workspaceDesktop/types";
+import { observer } from "mobx-react-lite";
+export const WorkspaceNodeWindow = observer(WorkspaceNodeWindowRender);
+const WorkspaceNodeTrafficLightButton = observer(
+  WorkspaceNodeTrafficLightButtonRender
+);
+const WorkspaceNodeWindowTrafficLightIcon = observer(
+  WorkspaceNodeWindowTrafficLightIconRender
+);
 
 interface WorkspaceNodeWindowInteractionOptions {
   normalizeViewport?: boolean;
@@ -77,7 +86,7 @@ export interface WorkspaceNodeWindowProps {
   ) => (event: React.PointerEvent<HTMLElement>) => void;
 }
 
-export function WorkspaceNodeWindow({
+function WorkspaceNodeWindowRender({
   nodeId,
   kind,
   title,
@@ -147,34 +156,54 @@ export function WorkspaceNodeWindow({
   const resolvedStyle = sizeStyle ?? style;
   const renderedChildren =
     typeof children === "function" ? children(renderedFrame) : children;
-  const rootStyle: WorkspaceNodeWindowStyle =
-    appearance === "embedded"
-      ? {
-          "--node-header-padding-x": "16px",
-          "--node-header-traffic-light-title-offset": "64px",
-          ...resolvedStyle,
-          width: "100%",
-          height: "100%",
-          transform: undefined,
-          background: "transparent",
-          border: "0",
-          boxShadow: "none",
-          backdropFilter: "none",
-          WebkitBackdropFilter: "none"
-        }
-      : {
-          "--node-header-padding-x": "16px",
-          "--node-header-traffic-light-title-offset": "64px",
-          ...resolvedStyle,
-          background: "transparent",
-          border: "1px solid var(--node-window-border)",
-          boxShadow: "var(--window-drop-shadow)",
-          backdropFilter: "var(--node-window-backdrop-filter)",
-          WebkitBackdropFilter: "var(--node-window-backdrop-filter)"
-        };
+  const rootStyle: WorkspaceNodeWindowStyle = useMemo<WorkspaceNodeWindowStyle>(
+    () =>
+      appearance === "embedded"
+        ? {
+            "--node-header-padding-x": "16px",
+            "--node-header-traffic-light-title-offset": "64px",
+            ...resolvedStyle,
+            width: "100%",
+            height: "100%",
+            transform: undefined,
+            background: "transparent",
+            border: "0",
+            boxShadow: "none",
+            backdropFilter: "none",
+            WebkitBackdropFilter: "none"
+          }
+        : {
+            "--node-header-padding-x": "16px",
+            "--node-header-traffic-light-title-offset": "64px",
+            ...resolvedStyle,
+            background: "transparent",
+            border: "1px solid var(--node-window-border)",
+            boxShadow: "var(--window-drop-shadow)",
+            backdropFilter: "var(--node-window-backdrop-filter)",
+            WebkitBackdropFilter: "var(--node-window-backdrop-filter)"
+          },
+    [appearance, resolvedStyle]
+  );
   const resolvedResizeHandlePointerDown =
     resizeHandlePointerDown ?? handleResizePointerDown;
 
+  const onClickCaptureProp1Value1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onClickCapture"]>
+  >((event) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) {
+      return;
+    }
+
+    if (event.target.closest(".nodrag")) {
+      return;
+    }
+
+    event.stopPropagation();
+    onInteractionStart?.({ shiftKey: event.shiftKey });
+  });
+  const onClickCaptureProp1 = useMemo<
+    NonNullable<React.ComponentProps<"div">["onClickCapture"]>
+  >(() => onClickCaptureProp1Value1, [onClickCaptureProp1Value1]);
   return (
     <div
       {...restRootProps}
@@ -190,118 +219,27 @@ export function WorkspaceNodeWindow({
       data-workspace-node-window-kind={kind}
       data-workspace-node-window-maximized={isMaximized ? "true" : "false"}
       data-workspace-node-window-muted={isMuted ? "true" : "false"}
-      onClickCapture={
-        onClickCapture ??
-        ((event) => {
-          if (event.button !== 0 || !(event.target instanceof Element)) {
-            return;
-          }
-
-          if (event.target.closest(".nodrag")) {
-            return;
-          }
-
-          event.stopPropagation();
-          onInteractionStart?.({ shiftKey: event.shiftKey });
-        })
-      }
+      onClickCapture={onClickCapture ?? onClickCaptureProp1}
     >
       {hideHeader ? null : customHeader ? (
         customHeader
       ) : (
-        <header
-          className="workspace-node-window__header relative flex h-[var(--node-header-height)] min-h-[var(--node-header-height)] cursor-grab items-center gap-2 border-b border-[var(--node-header-border)] bg-[var(--node-header-surface)] px-2 pl-[calc(var(--node-header-padding-x)+var(--node-header-traffic-light-title-offset))] active:cursor-grabbing"
-          style={{
-            borderBottomColor: "var(--node-header-border)",
-            background: "var(--node-header-surface)"
-          }}
-          data-workspace-node-window-header="true"
-          data-node-drag-handle
-          data-window-header="top"
-          onDoubleClick={(event) => {
-            if (
-              event.target instanceof Element &&
-              event.target.closest(".nodrag")
-            ) {
-              return;
-            }
-            event.stopPropagation();
-            onToggleMaximize?.();
-          }}
-        >
-          <div
-            className="workspace-node-window__controls nodrag group/traffic-lights absolute left-4 top-1/2 inline-flex -translate-y-1/2 items-center gap-2"
-            data-workspace-node-window-controls="true"
-          >
-            <WorkspaceNodeTrafficLightButton
-              ariaLabel={t("common.close")}
-              onClick={onClose}
-              tone="close"
-            />
-            {onMinimize ? (
-              <WorkspaceNodeTrafficLightButton
-                ariaLabel={t("common.minimize")}
-                onClick={onMinimize}
-                testId={`${kind}-node-minimize`}
-                tone="minimize"
-              />
-            ) : null}
-            {onToggleMaximize && !hideMaximizeButton ? (
-              <WorkspaceNodeTrafficLightButton
-                ariaLabel={
-                  isMaximized ? t("common.restore") : t("common.maximize")
-                }
-                onClick={onToggleMaximize}
-                pressed={isMaximized}
-                tone="maximize"
-              />
-            ) : null}
-          </div>
-          <div
-            className="workspace-node-window__title flex min-w-0 max-w-[280px] flex-1 items-center gap-2 text-[15px] leading-5 font-semibold text-foreground"
-            // i18n-check-ignore: Test selector marker, not a tooltip.
-            data-workspace-node-window-title="true"
-            title={title}
-          >
-            {titleIcon ? (
-              <span
-                className="workspace-node-window__title-icon inline-flex flex-none items-center"
-                data-workspace-node-window-title-icon="true"
-              >
-                {titleIcon}
-              </span>
-            ) : null}
-            <span className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-              {title}
-            </span>
-            {titleAccessory ? (
-              <span
-                className="workspace-node-window__title-accessory nodrag inline-flex flex-none items-center"
-                data-workspace-node-window-title-accessory="true"
-              >
-                {titleAccessory}
-              </span>
-            ) : null}
-          </div>
-          {headerAccessory ? (
-            <div
-              className="workspace-node-window__header-accessory nodrag inline-flex min-w-0 flex-none items-center gap-2"
-              data-workspace-node-window-header-accessory="true"
-            >
-              {headerAccessory}
-            </div>
-          ) : null}
-          <div
-            className="workspace-node-window__header-tools nodrag inline-flex flex-none items-center gap-0.5"
-            data-workspace-node-window-header-tools="true"
-          >
-            {controlStartAccessory}
-            <WindowLayoutMenuButton
-              windowId={nodeId}
-              desktopSize={desktopSize}
-            />
-          </div>
-        </header>
+        <HeaderBinding1
+          onToggleMaximize={onToggleMaximize}
+          t={t}
+          onClose={onClose}
+          onMinimize={onMinimize}
+          kind={kind}
+          hideMaximizeButton={hideMaximizeButton}
+          isMaximized={isMaximized}
+          title={title}
+          titleIcon={titleIcon}
+          titleAccessory={titleAccessory}
+          headerAccessory={headerAccessory}
+          controlStartAccessory={controlStartAccessory}
+          nodeId={nodeId}
+          desktopSize={desktopSize}
+        />
       )}
 
       <div
@@ -326,7 +264,7 @@ export function WorkspaceNodeWindow({
   );
 }
 
-function WorkspaceNodeTrafficLightButton({
+function WorkspaceNodeTrafficLightButtonRender({
   ariaLabel,
   onClick,
   pressed,
@@ -343,10 +281,17 @@ function WorkspaceNodeTrafficLightButton({
     event.stopPropagation();
     onClick();
   };
+  const handleClickCallback = usePersistCallback(handleClick);
 
   const iconName =
     tone === "maximize" ? (pressed ? "unfullscreen" : "fullscreen") : tone;
 
+  const onDoubleClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onDoubleClick"]>
+  >((event) => event.stopPropagation());
+  const onPointerDownProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onPointerDown"]>
+  >((event) => event.stopPropagation());
   return (
     <button
       aria-label={ariaLabel}
@@ -365,9 +310,9 @@ function WorkspaceNodeTrafficLightButton({
       data-testid={testId}
       title={ariaLabel}
       type="button"
-      onClick={handleClick}
-      onDoubleClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
+      onClick={handleClickCallback}
+      onDoubleClick={onDoubleClickProp1}
+      onPointerDown={onPointerDownProp2}
     >
       <WorkspaceNodeWindowTrafficLightIcon
         aria-hidden="true"
@@ -379,7 +324,7 @@ function WorkspaceNodeTrafficLightButton({
   );
 }
 
-function WorkspaceNodeWindowTrafficLightIcon({
+function WorkspaceNodeWindowTrafficLightIconRender({
   className,
   iconName,
   ...props
@@ -409,3 +354,134 @@ const trafficLightIconPathByName = {
   unfullscreen:
     "M20.793 12C21.2384 12.0001 21.4614 12.5386 21.1465 12.8536L12.8536 21.1465C12.5386 21.4614 12.0001 21.2384 12.0001 20.793V12.5C12.0001 12.2239 12.2239 12 12.5001 12H20.793ZM11.1465 2.85356C11.4615 2.53864 12 2.76166 12.0001 3.20708V11.5C12 11.7761 11.7762 12 11.5001 12H3.20708C2.76166 12 2.53864 11.4615 2.85357 11.1465L11.1465 2.85356Z"
 } as const;
+
+const HeaderBinding1 = observer(function HeaderBinding1({
+  onToggleMaximize,
+  t,
+  onClose,
+  onMinimize,
+  kind,
+  hideMaximizeButton,
+  isMaximized,
+  title,
+  titleIcon,
+  titleAccessory,
+  headerAccessory,
+  controlStartAccessory,
+  nodeId,
+  desktopSize
+}: HeaderBinding1Props) {
+  const styleProp3 = useMemo<
+    NonNullable<React.ComponentProps<"header">["style"]>
+  >(
+    () => ({
+      borderBottomColor: "var(--node-header-border)",
+      background: "var(--node-header-surface)"
+    }),
+    []
+  );
+  const onDoubleClickProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<"header">["onDoubleClick"]>
+  >((event) => {
+    if (event.target instanceof Element && event.target.closest(".nodrag")) {
+      return;
+    }
+    event.stopPropagation();
+    onToggleMaximize?.();
+  });
+  return (
+    <header
+      className="workspace-node-window__header relative flex h-[var(--node-header-height)] min-h-[var(--node-header-height)] cursor-grab items-center gap-2 border-b border-[var(--node-header-border)] bg-[var(--node-header-surface)] px-2 pl-[calc(var(--node-header-padding-x)+var(--node-header-traffic-light-title-offset))] active:cursor-grabbing"
+      style={styleProp3}
+      data-workspace-node-window-header="true"
+      data-node-drag-handle
+      data-window-header="top"
+      onDoubleClick={onDoubleClickProp4}
+    >
+      <div
+        className="workspace-node-window__controls nodrag group/traffic-lights absolute left-4 top-1/2 inline-flex -translate-y-1/2 items-center gap-2"
+        data-workspace-node-window-controls="true"
+      >
+        <WorkspaceNodeTrafficLightButton
+          ariaLabel={t("common.close")}
+          onClick={onClose}
+          tone="close"
+        />
+        {onMinimize ? (
+          <WorkspaceNodeTrafficLightButton
+            ariaLabel={t("common.minimize")}
+            onClick={onMinimize}
+            testId={`${kind}-node-minimize`}
+            tone="minimize"
+          />
+        ) : null}
+        {onToggleMaximize && !hideMaximizeButton ? (
+          <WorkspaceNodeTrafficLightButton
+            ariaLabel={isMaximized ? t("common.restore") : t("common.maximize")}
+            onClick={onToggleMaximize}
+            pressed={isMaximized}
+            tone="maximize"
+          />
+        ) : null}
+      </div>
+      <div
+        className="workspace-node-window__title flex min-w-0 max-w-[280px] flex-1 items-center gap-2 text-[15px] leading-5 font-semibold text-foreground"
+        // i18n-check-ignore: Test selector marker, not a tooltip.
+        data-workspace-node-window-title="true"
+        title={title}
+      >
+        {titleIcon ? (
+          <span
+            className="workspace-node-window__title-icon inline-flex flex-none items-center"
+            data-workspace-node-window-title-icon="true"
+          >
+            {titleIcon}
+          </span>
+        ) : null}
+        <span className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+          {title}
+        </span>
+        {titleAccessory ? (
+          <span
+            className="workspace-node-window__title-accessory nodrag inline-flex flex-none items-center"
+            data-workspace-node-window-title-accessory="true"
+          >
+            {titleAccessory}
+          </span>
+        ) : null}
+      </div>
+      {headerAccessory ? (
+        <div
+          className="workspace-node-window__header-accessory nodrag inline-flex min-w-0 flex-none items-center gap-2"
+          data-workspace-node-window-header-accessory="true"
+        >
+          {headerAccessory}
+        </div>
+      ) : null}
+      <div
+        className="workspace-node-window__header-tools nodrag inline-flex flex-none items-center gap-0.5"
+        data-workspace-node-window-header-tools="true"
+      >
+        {controlStartAccessory}
+        <WindowLayoutMenuButton windowId={nodeId} desktopSize={desktopSize} />
+      </div>
+    </header>
+  );
+});
+
+type HeaderBinding1Props = {
+  onToggleMaximize: NonNullable<WorkspaceNodeWindowProps>["onToggleMaximize"];
+  t: import("../../i18n/runtime").TranslateFn;
+  onClose: NonNullable<WorkspaceNodeWindowProps>["onClose"];
+  onMinimize: NonNullable<WorkspaceNodeWindowProps>["onMinimize"];
+  kind: NonNullable<WorkspaceNodeWindowProps>["kind"];
+  hideMaximizeButton: boolean;
+  isMaximized: boolean;
+  title: NonNullable<WorkspaceNodeWindowProps>["title"];
+  titleIcon: NonNullable<WorkspaceNodeWindowProps>["titleIcon"];
+  titleAccessory: NonNullable<WorkspaceNodeWindowProps>["titleAccessory"];
+  headerAccessory: NonNullable<WorkspaceNodeWindowProps>["headerAccessory"];
+  controlStartAccessory: NonNullable<WorkspaceNodeWindowProps>["controlStartAccessory"];
+  nodeId: NonNullable<WorkspaceNodeWindowProps>["nodeId"];
+  desktopSize: NonNullable<WorkspaceNodeWindowProps>["desktopSize"];
+};

@@ -3,6 +3,10 @@ import {
   useExternalStoreSnapshot,
   type ExternalStoreSnapshotSource
 } from "@tutti-os/ui-react-hooks";
+import { observer } from "mobx-react-lite";
+export const AgentConversationClockProvider = observer(
+  AgentConversationClockProviderRender
+);
 
 const AgentConversationClockVisibilityContext = createContext(true);
 type ClockListener = () => void;
@@ -75,7 +79,7 @@ class AgentConversationClockStore {
 
 const agentConversationClock = new AgentConversationClockStore();
 
-export function AgentConversationClockProvider({
+function AgentConversationClockProviderRender({
   children,
   isVisible
 }: {

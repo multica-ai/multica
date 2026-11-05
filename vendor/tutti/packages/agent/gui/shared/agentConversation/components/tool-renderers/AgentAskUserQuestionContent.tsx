@@ -6,8 +6,12 @@ import {
   ToolSection,
   type AgentToolRendererProps
 } from "./agentToolContentShared";
+import { observer } from "mobx-react-lite";
+export const AgentAskUserQuestionContent = observer(
+  AgentAskUserQuestionContentRender
+);
 
-export function AgentAskUserQuestionContent({
+function AgentAskUserQuestionContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

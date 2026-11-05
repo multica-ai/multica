@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Popover,
   PopoverContent,
@@ -39,7 +42,10 @@ export const ComposerDraftAttachments = observer(
     onExpandLargeText: expandDraftLargeTextToPrompt,
     onRemoveQuotes
   }: Props) {
-    const labels = { removeMention: removeLabel };
+    const labels = useMemo(
+      () => ({ removeMention: removeLabel }),
+      [removeLabel]
+    );
     const quoteCountLabel = translate(
       draftQuotes.length === 1
         ? "agentHost.agentGui.selectionReferenceCountOne"
@@ -148,46 +154,19 @@ export const ComposerDraftAttachments = observer(
                   data-uploading={item.uploading ? "true" : undefined}
                   data-upload-error={item.uploadError ? "true" : undefined}
                 >
-                  <button
-                    type="button"
-                    className="flex min-w-0 items-center gap-2 rounded-[8px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)] disabled:cursor-default"
-                    disabled={!canRestore}
-                    aria-label={restoreLabel}
-                    title={
-                      item.uploadError ?? (canRestore ? restoreLabel : preview)
-                    }
-                    onClick={() => expandDraftLargeTextToPrompt(item.id)}
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--transparency-hover)] text-[var(--text-secondary)]">
-                      {item.uploading ? (
-                        <Spinner
-                          size={16}
-                          strokeWidth={2.4}
-                          trackColor="var(--transparency-hover)"
-                          testId="agent-gui-composer-large-text-upload-spinner"
-                        />
-                      ) : (
-                        <FileText size={16} strokeWidth={2} aria-hidden />
-                      )}
-                    </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="max-w-[200px] truncate font-medium text-[var(--text-primary)]">
-                        {preview}
-                      </span>
-                      <span className="max-w-[200px] truncate text-[11px] text-[var(--text-tertiary)]">
-                        {attachmentStatus}
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="absolute right-1.5 top-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[var(--text-secondary)] transition hover:bg-[var(--transparency-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)]"
-                    aria-label={labels.removeMention}
-                    title={labels.removeMention}
-                    onClick={() => removeDraftLargeText(item.id)}
-                  >
-                    <X size={12} strokeWidth={2.4} aria-hidden />
-                  </button>
+                  <ButtonBinding1
+                    canRestore={canRestore}
+                    restoreLabel={restoreLabel}
+                    item={item}
+                    preview={preview}
+                    expandDraftLargeTextToPrompt={expandDraftLargeTextToPrompt}
+                    attachmentStatus={attachmentStatus}
+                  />
+                  <ButtonBinding2
+                    labels={labels}
+                    removeDraftLargeText={removeDraftLargeText}
+                    item={item}
+                  />
                 </div>
               );
             })}
@@ -197,3 +176,95 @@ export const ComposerDraftAttachments = observer(
     );
   }
 );
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  canRestore,
+  restoreLabel,
+  item,
+  preview,
+  expandDraftLargeTextToPrompt,
+  attachmentStatus,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => expandDraftLargeTextToPrompt(item.id));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="flex min-w-0 items-center gap-2 rounded-[8px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)] disabled:cursor-default"
+        disabled={!canRestore}
+        aria-label={restoreLabel}
+        title={item.uploadError ?? (canRestore ? restoreLabel : preview)}
+        onClick={onClickProp1}
+      >
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--transparency-hover)] text-[var(--text-secondary)]">
+          {item.uploading ? (
+            <Spinner
+              size={16}
+              strokeWidth={2.4}
+              trackColor="var(--transparency-hover)"
+              testId="agent-gui-composer-large-text-upload-spinner"
+            />
+          ) : (
+            <FileText size={16} strokeWidth={2} aria-hidden />
+          )}
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span className="max-w-[200px] truncate font-medium text-[var(--text-primary)]">
+            {preview}
+          </span>
+          <span className="max-w-[200px] truncate text-[11px] text-[var(--text-tertiary)]">
+            {attachmentStatus}
+          </span>
+        </span>
+      </button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  labels,
+  removeDraftLargeText,
+  item,
+  ...slotProps
+}: {
+  labels: { removeMention: string };
+  removeDraftLargeText: NonNullable<Props>["onRemoveLargeText"];
+  item: AgentComposerDraftLargeText;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    labels: { removeMention: string };
+    removeDraftLargeText: NonNullable<Props>["onRemoveLargeText"];
+    item: AgentComposerDraftLargeText;
+  }
+>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => removeDraftLargeText(item.id));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="absolute right-1.5 top-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[var(--text-secondary)] transition hover:bg-[var(--transparency-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)]"
+        aria-label={labels.removeMention}
+        title={labels.removeMention}
+        onClick={onClickProp2}
+      >
+        <X size={12} strokeWidth={2.4} aria-hidden />
+      </button>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  canRestore: boolean;
+  restoreLabel: string;
+  item: AgentComposerDraftLargeText;
+  preview: string;
+  expandDraftLargeTextToPrompt: NonNullable<Props>["onExpandLargeText"];
+  attachmentStatus: string;
+};

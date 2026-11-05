@@ -22,6 +22,7 @@ import {
 } from "./AgentTranscriptView";
 import { AgentTurnDisclosureProvider } from "./AgentTurnDisclosureContext";
 import type { AgentTranscriptEditRetryControl } from "./useAgentTranscriptEditRetryProjection";
+const BoundTranscript = observer(BoundTranscriptRender);
 
 export interface AgentConversationFlowProps {
   conversation: AgentConversationVM | null;
@@ -60,7 +61,7 @@ export interface AgentConversationFlowProps {
   };
 }
 
-export const AgentConversationFlowContent = memo(
+export const AgentConversationFlowContent = observer(
   function AgentConversationFlowContent({
     conversation,
     agentSessionId,
@@ -144,7 +145,7 @@ export const AgentConversationFlowContent = memo(
   }
 );
 
-function BoundTranscript({
+function BoundTranscriptRender({
   agentSessionId,
   conversation,
   ...props

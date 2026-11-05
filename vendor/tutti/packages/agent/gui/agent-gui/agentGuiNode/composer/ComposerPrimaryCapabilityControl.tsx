@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import { ConnectorComposerMenu } from "@tutti-os/connector-renderer/ui";
 import { observer } from "mobx-react-lite";
 import { openWorkspaceSettingsPanel } from "../../../shared/workspaceSettingsPanel/workspaceSettingsPanelStore";
@@ -41,72 +43,152 @@ export const ComposerPrimaryCapabilityControl = observer(
     }
 
     return (
-      <ConnectorComposerMenu
+      <ConnectorComposerMenuBinding1
         disabled={disabled}
-        items={projectConnectorComposerItems(
+        availableSkills={availableSkills}
+        selectedConnectorKeys={selectedConnectorKeys}
+        labels={labels}
+        loading={loading}
+        connectorsReadOnly={connectorsReadOnly}
+        onCapabilitySettingsRequest={onCapabilitySettingsRequest}
+        onRetryComposerOptions={onRetryComposerOptions}
+        showConnectorViewMore={showConnectorViewMore}
+        onConnectorSelected={onConnectorSelected}
+      />
+    );
+  }
+);
+
+const ConnectorComposerMenuBinding1 = observer(
+  function ConnectorComposerMenuBinding1({
+    disabled,
+    availableSkills,
+    selectedConnectorKeys,
+    labels,
+    loading,
+    connectorsReadOnly,
+    onCapabilitySettingsRequest,
+    onRetryComposerOptions,
+    showConnectorViewMore,
+    onConnectorSelected
+  }: ConnectorComposerMenuBinding1Props) {
+    const connectorItems = useMemo(
+      () =>
+        projectConnectorComposerItems(
           availableSkills ?? [],
           selectedConnectorKeys
-        )}
-        labels={{
-          authorize: labels.addContentConnectorAuthorize,
-          connect: labels.addContentConnectorConnect,
-          connected: labels.addContentConnectorConnected,
-          connectors: labels.addContentConnectors,
-          empty: labels.addContentConnectorEmpty,
-          loading: labels.addContentConnectorLoading,
-          more: labels.addContentConnectorMore,
-          selected: labels.addContentConnectorSelected
-        }}
+        ),
+      [availableSkills, selectedConnectorKeys]
+    );
+    const labelsProp1Value1 = labels.addContentConnectorAuthorize;
+    const labelsProp1Value2 = labels.addContentConnectorConnect;
+    const labelsProp1Value3 = labels.addContentConnectorConnected;
+    const labelsProp1Value4 = labels.addContentConnectors;
+    const labelsProp1Value5 = labels.addContentConnectorEmpty;
+    const labelsProp1Value6 = labels.addContentConnectorLoading;
+    const labelsProp1Value7 = labels.addContentConnectorMore;
+    const labelsProp1Value8 = labels.addContentConnectorSelected;
+    const labelsProp1 = useMemo<
+      NonNullable<React.ComponentProps<typeof ConnectorComposerMenu>["labels"]>
+    >(
+      () => ({
+        authorize: labelsProp1Value1,
+        connect: labelsProp1Value2,
+        connected: labelsProp1Value3,
+        connectors: labelsProp1Value4,
+        empty: labelsProp1Value5,
+        loading: labelsProp1Value6,
+        more: labelsProp1Value7,
+        selected: labelsProp1Value8
+      }),
+      [
+        labelsProp1Value1,
+        labelsProp1Value2,
+        labelsProp1Value3,
+        labelsProp1Value4,
+        labelsProp1Value5,
+        labelsProp1Value6,
+        labelsProp1Value7,
+        labelsProp1Value8
+      ]
+    );
+    const onOpenChangeProp2 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ConnectorComposerMenu>["onOpenChange"]
+      >
+    >((open) => {
+      if (open) {
+        onRetryComposerOptions?.({ force: true, section: "connectors" });
+      }
+    });
+    const onInstallConnectorProp1 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ConnectorComposerMenu>["onInstallConnector"]
+      >
+    >(async (connectorKey) => {
+      await onCapabilitySettingsRequest!({
+        kind: "connector",
+        connectorKey,
+        action: "install"
+      });
+      onRetryComposerOptions?.({
+        force: true,
+        section: "connectors"
+      });
+    });
+    const onOpenConnectorProp2 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ConnectorComposerMenu>["onOpenConnector"]
+      >
+    >((connectorKey) =>
+      onCapabilitySettingsRequest?.({
+        kind: "connector",
+        connectorKey,
+        action: "open"
+      })
+    );
+    const onOpenMarketProp3 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof ConnectorComposerMenu>["onOpenMarket"]
+      >
+    >(() =>
+      openWorkspaceSettingsPanel({
+        section: "agent",
+        pane: "connectors"
+      })
+    );
+    const onRuntimeEnabledChangeProp4 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<
+          typeof ConnectorComposerMenu
+        >["onRuntimeEnabledChange"]
+      >
+    >((connectorKey, enabled) =>
+      onCapabilitySettingsRequest!({
+        kind: "connector",
+        connectorKey,
+        action: "set_runtime_enabled",
+        enabled
+      })
+    );
+    return (
+      <ConnectorComposerMenu
+        disabled={disabled}
+        items={connectorItems}
+        labels={labelsProp1}
         loading={loading}
         onInstallConnector={
           connectorsReadOnly || !onCapabilitySettingsRequest
             ? undefined
-            : async (connectorKey) => {
-                await onCapabilitySettingsRequest({
-                  kind: "connector",
-                  connectorKey,
-                  action: "install"
-                });
-                onRetryComposerOptions?.({
-                  force: true,
-                  section: "connectors"
-                });
-              }
+            : onInstallConnectorProp1
         }
-        onOpenChange={(open) => {
-          if (open) {
-            onRetryComposerOptions?.({ force: true, section: "connectors" });
-          }
-        }}
-        onOpenConnector={
-          connectorsReadOnly
-            ? undefined
-            : (connectorKey) =>
-                onCapabilitySettingsRequest?.({
-                  kind: "connector",
-                  connectorKey,
-                  action: "open"
-                })
-        }
-        onOpenMarket={
-          !showConnectorViewMore
-            ? undefined
-            : () =>
-                openWorkspaceSettingsPanel({
-                  section: "agent",
-                  pane: "connectors"
-                })
-        }
+        onOpenChange={onOpenChangeProp2}
+        onOpenConnector={connectorsReadOnly ? undefined : onOpenConnectorProp2}
+        onOpenMarket={!showConnectorViewMore ? undefined : onOpenMarketProp3}
         onRuntimeEnabledChange={
           connectorsReadOnly || !onCapabilitySettingsRequest
             ? undefined
-            : (connectorKey, enabled) =>
-                onCapabilitySettingsRequest({
-                  kind: "connector",
-                  connectorKey,
-                  action: "set_runtime_enabled",
-                  enabled
-                })
+            : onRuntimeEnabledChangeProp4
         }
         onSelectConnector={connectorsReadOnly ? undefined : onConnectorSelected}
         readOnly={connectorsReadOnly}
@@ -114,3 +196,16 @@ export const ComposerPrimaryCapabilityControl = observer(
     );
   }
 );
+
+type ConnectorComposerMenuBinding1Props = {
+  disabled: NonNullable<Props>["disabled"];
+  availableSkills: NonNullable<Props>["availableSkills"];
+  selectedConnectorKeys: NonNullable<Props>["selectedConnectorKeys"];
+  labels: NonNullable<Props>["labels"];
+  loading: NonNullable<Props>["loading"];
+  connectorsReadOnly: boolean;
+  onCapabilitySettingsRequest: NonNullable<Props>["onCapabilitySettingsRequest"];
+  onRetryComposerOptions: NonNullable<Props>["onRetryComposerOptions"];
+  showConnectorViewMore: boolean;
+  onConnectorSelected: NonNullable<Props>["onConnectorSelected"];
+};

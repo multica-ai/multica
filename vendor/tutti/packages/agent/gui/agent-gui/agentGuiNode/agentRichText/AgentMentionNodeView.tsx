@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import {
   createContext,
   useContext,
@@ -38,6 +40,22 @@ import {
 import { AGENT_RICH_TEXT_CARET_ANCHOR } from "./agentRichTextCaretAnchor";
 import { agentExternalPromptFileErrorI18nKey } from "../model/agentExternalPromptFiles";
 import { dirnameFromPath } from "./agentMentionMarkdown";
+import { observer } from "mobx-react-lite";
+const AgentMentionNodeWrapper = observer(AgentMentionNodeWrapperRender);
+const AgentMentionStaticWrapper = observer(AgentMentionStaticWrapperRender);
+export const AgentMentionTooltipProviderScope = observer(
+  AgentMentionTooltipProviderScopeRender
+);
+const AgentMentionLegacyFileView = observer(AgentMentionLegacyFileViewRender);
+const AgentMentionView = observer(AgentMentionViewRender);
+const AgentMentionResolvedView = observer(AgentMentionResolvedViewRender);
+const AgentMentionPresentationView = observer(
+  AgentMentionPresentationViewRender
+);
+export const AgentMentionReadonlyView = observer(
+  AgentMentionReadonlyViewRender
+);
+export const AgentMentionNodeView = observer(AgentMentionNodeViewRender);
 
 type AgentMentionNodeViewKind =
   | "file"
@@ -76,11 +94,13 @@ interface AgentMentionNodeViewModel {
 type AgentMentionWrapperProps = ComponentPropsWithoutRef<"span">;
 type AgentMentionWrapper = (props: AgentMentionWrapperProps) => JSX.Element;
 
-function AgentMentionNodeWrapper(props: AgentMentionWrapperProps): JSX.Element {
+function AgentMentionNodeWrapperRender(
+  props: AgentMentionWrapperProps
+): JSX.Element {
   return <NodeViewWrapper as="span" {...props} />;
 }
 
-function AgentMentionStaticWrapper(
+function AgentMentionStaticWrapperRender(
   props: AgentMentionWrapperProps
 ): JSX.Element {
   return <span {...props} />;
@@ -88,7 +108,7 @@ function AgentMentionStaticWrapper(
 
 const AgentMentionTooltipProviderContext = createContext(true);
 
-export function AgentMentionTooltipProviderScope({
+function AgentMentionTooltipProviderScopeRender({
   children,
   withTooltipProvider
 }: {
@@ -328,21 +348,14 @@ function hasPromptContentAfterMentionRemoval(
   return hasContent;
 }
 
-function AgentMentionLegacyFileView({
+function AgentMentionLegacyFileViewRender({
   isEditable,
   mention,
   onRemove,
   removeActionAriaLabel,
   selected,
   Wrapper
-}: {
-  isEditable: boolean;
-  mention: AgentMentionNodeViewModel;
-  onRemove?: MouseEventHandler<HTMLButtonElement>;
-  removeActionAriaLabel?: string;
-  selected: boolean;
-  Wrapper: AgentMentionWrapper;
-}): JSX.Element {
+}: AgentMentionLegacyFileViewProps): JSX.Element {
   return (
     <Wrapper
       aria-label={
@@ -461,7 +474,7 @@ interface AgentMentionViewProps {
   Wrapper: AgentMentionWrapper;
 }
 
-function AgentMentionView(props: AgentMentionViewProps): JSX.Element {
+function AgentMentionViewRender(props: AgentMentionViewProps): JSX.Element {
   const identity = parseResolvableAgentMentionIdentity(
     props.attrs,
     normalizeKind(attrString(props.attrs, "kind"))
@@ -473,7 +486,7 @@ function AgentMentionView(props: AgentMentionViewProps): JSX.Element {
   );
 }
 
-function AgentMentionResolvedView({
+function AgentMentionResolvedViewRender({
   identity,
   ...props
 }: AgentMentionViewProps & {
@@ -495,7 +508,7 @@ function AgentMentionResolvedView({
   );
 }
 
-function AgentMentionPresentationView({
+function AgentMentionPresentationViewRender({
   agentTargets,
   attrs,
   isEditable,
@@ -547,30 +560,11 @@ function AgentMentionPresentationView({
         data-agent-mention-icon-url={mention.iconUrl}
         data-agent-mention-kind={mention.kind}
       >
-        <MentionPill
-          aria-label={mention.ariaLabel}
-          className="top-0 h-6 max-w-[min(100%,var(--agent-mention-max-width,16rem))] py-0 align-middle leading-6"
-          data-agent-mention-kind={mention.kind}
-          iconUrl={mention.iconUrl}
-          iconContainerProps={{
-            "data-agent-mention-app-icon":
-              mention.kind === "agent-target" ? undefined : "true",
-            "data-agent-mention-session-icon":
-              mention.kind === "agent-target" ? "true" : undefined,
-            "data-workspace-app-icon":
-              mention.kind === "agent-target" ? undefined : "true"
-          }}
-          kind={mention.kind === "agent-target" ? "session" : "app"}
-          label={mention.label}
-          removable={isEditable}
-          removeButtonProps={
-            isEditable
-              ? {
-                  "aria-label": removeActionAriaLabel,
-                  onMouseDown: onRemove
-                }
-              : undefined
-          }
+        <MentionPillBinding1
+          mention={mention}
+          isEditable={isEditable}
+          removeActionAriaLabel={removeActionAriaLabel}
+          onRemove={onRemove}
           withTooltipProvider={withTooltipProvider}
         />
       </Wrapper>
@@ -658,31 +652,18 @@ function AgentMentionPresentationView({
       }`}
       contentEditable={false}
     >
-      <MentionPill
-        aria-label={mention.ariaLabel}
-        className="top-0 h-6 py-0 align-middle leading-6"
-        data-agent-mention-href={mention.href}
-        data-agent-mention-kind={mention.kind}
-        kind={mention.kind === "session" ? "session" : "issue"}
-        iconUrl={mention.iconUrl}
-        label={mention.label}
-        removable={isEditable}
-        removeButtonProps={
-          isEditable
-            ? {
-                "aria-label": removeActionAriaLabel,
-                onMouseDown: onRemove
-              }
-            : undefined
-        }
-        summary={mention.summary}
+      <MentionPillBinding2
+        mention={mention}
+        isEditable={isEditable}
+        removeActionAriaLabel={removeActionAriaLabel}
+        onRemove={onRemove}
         withTooltipProvider={withTooltipProvider}
       />
     </Wrapper>
   );
 }
 
-export function AgentMentionReadonlyView({
+function AgentMentionReadonlyViewRender({
   agentTargets,
   attrs
 }: {
@@ -700,7 +681,7 @@ export function AgentMentionReadonlyView({
   );
 }
 
-export function AgentMentionNodeView({
+function AgentMentionNodeViewRender({
   deleteNode,
   editor,
   extension,
@@ -741,15 +722,136 @@ export function AgentMentionNodeView({
       editor.commands.clearContent();
     }
   };
+  const handleRemoveCallback = usePersistCallback(handleRemove);
 
+  const attrsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof AgentMentionView>["attrs"]>
+  >(() => ({}), []);
   return (
     <AgentMentionView
-      attrs={node.attrs ?? {}}
+      attrs={node.attrs ?? attrsProp1}
       isEditable={isEditable}
-      onRemove={handleRemove}
+      onRemove={handleRemoveCallback}
       removeActionAriaLabel={removeActionAriaLabel}
       selected={selected}
       Wrapper={AgentMentionNodeWrapper}
     />
   );
 }
+
+const MentionPillBinding1 = observer(function MentionPillBinding1({
+  mention,
+  isEditable,
+  removeActionAriaLabel,
+  onRemove,
+  withTooltipProvider
+}: MentionPillBinding1Props) {
+  const iconContainerPropsProp1Value1 =
+    mention.kind === "agent-target" ? undefined : "true";
+  const iconContainerPropsProp1Value2 =
+    mention.kind === "agent-target" ? "true" : undefined;
+  const iconContainerPropsProp1Value3 =
+    mention.kind === "agent-target" ? undefined : "true";
+  const iconContainerPropsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["iconContainerProps"]>
+  >(
+    () => ({
+      "data-agent-mention-app-icon": iconContainerPropsProp1Value1,
+      "data-agent-mention-session-icon": iconContainerPropsProp1Value2,
+      "data-workspace-app-icon": iconContainerPropsProp1Value3
+    }),
+    [
+      iconContainerPropsProp1Value1,
+      iconContainerPropsProp1Value2,
+      iconContainerPropsProp1Value3
+    ]
+  );
+
+  const removeButtonPropsProp2 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["removeButtonProps"]>
+  >(
+    () => ({ "aria-label": removeActionAriaLabel, onMouseDown: onRemove }),
+    [removeActionAriaLabel, onRemove]
+  );
+  return (
+    <MentionPill
+      aria-label={mention.ariaLabel}
+      className="top-0 h-6 max-w-[min(100%,var(--agent-mention-max-width,16rem))] py-0 align-middle leading-6"
+      data-agent-mention-kind={mention.kind}
+      iconUrl={mention.iconUrl}
+      iconContainerProps={iconContainerPropsProp1}
+      kind={mention.kind === "agent-target" ? "session" : "app"}
+      label={mention.label}
+      removable={isEditable}
+      removeButtonProps={isEditable ? removeButtonPropsProp2 : undefined}
+      withTooltipProvider={withTooltipProvider}
+    />
+  );
+});
+
+const MentionPillBinding2 = observer(function MentionPillBinding2({
+  mention,
+  isEditable,
+  removeActionAriaLabel,
+  onRemove,
+  withTooltipProvider
+}: MentionPillBinding2Props) {
+  const removeButtonPropsProp3 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["removeButtonProps"]>
+  >(
+    () => ({ "aria-label": removeActionAriaLabel, onMouseDown: onRemove }),
+    [removeActionAriaLabel, onRemove]
+  );
+  return (
+    <MentionPill
+      aria-label={mention.ariaLabel}
+      className="top-0 h-6 py-0 align-middle leading-6"
+      data-agent-mention-href={mention.href}
+      data-agent-mention-kind={mention.kind}
+      kind={mention.kind === "session" ? "session" : "issue"}
+      iconUrl={mention.iconUrl}
+      label={mention.label}
+      removable={isEditable}
+      removeButtonProps={isEditable ? removeButtonPropsProp3 : undefined}
+      summary={mention.summary}
+      withTooltipProvider={withTooltipProvider}
+    />
+  );
+});
+
+type AgentMentionLegacyFileViewProps = {
+  isEditable: boolean;
+  mention: AgentMentionNodeViewModel;
+  onRemove?: MouseEventHandler<HTMLButtonElement>;
+  removeActionAriaLabel?: string;
+  selected: boolean;
+  Wrapper: AgentMentionWrapper;
+};
+
+type MentionPillBinding1Props = {
+  mention: AgentMentionNodeViewModel;
+  isEditable: NonNullable<
+    AgentMentionViewProps & {
+      resolvedPresentation?: AgentMentionResolvedPresentation;
+    }
+  >["isEditable"];
+  removeActionAriaLabel: NonNullable<
+    AgentMentionViewProps & {
+      resolvedPresentation?: AgentMentionResolvedPresentation;
+    }
+  >["removeActionAriaLabel"];
+  onRemove: NonNullable<
+    AgentMentionViewProps & {
+      resolvedPresentation?: AgentMentionResolvedPresentation;
+    }
+  >["onRemove"];
+  withTooltipProvider: boolean;
+};
+
+type MentionPillBinding2Props = {
+  mention: AgentMentionNodeViewModel;
+  isEditable: boolean;
+  removeActionAriaLabel: string | undefined;
+  onRemove: MouseEventHandler<HTMLButtonElement> | undefined;
+  withTooltipProvider: boolean;
+};

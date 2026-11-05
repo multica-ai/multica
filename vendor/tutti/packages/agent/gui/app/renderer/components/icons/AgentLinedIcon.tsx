@@ -1,6 +1,8 @@
 import type { SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const AgentLinedIcon = observer(AgentLinedIconRender);
 
-export function AgentLinedIcon(props: SVGProps<SVGSVGElement>) {
+function AgentLinedIconRender(props: SVGProps<SVGSVGElement>) {
   "use memo";
   return (
     <svg

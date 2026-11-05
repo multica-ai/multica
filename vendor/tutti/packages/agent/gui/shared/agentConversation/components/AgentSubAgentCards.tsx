@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { memo, useState, type JSX } from "react";
@@ -9,6 +10,10 @@ import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import { useAgentConversationNowUnixMs } from "./AgentConversationClock";
 import { CollapsibleReveal } from "./CollapsibleReveal";
 import { formatAgentToolDurationMs } from "./tool-renderers/render-data/agentToolRenderData";
+const AgentSubAgentCardImpl = observer(AgentSubAgentCardImplRender);
+const SubAgentHeader = observer(SubAgentHeaderRender);
+const SubAgentBody = observer(SubAgentBodyRender);
+const SubAgentProgress = observer(SubAgentProgressRender);
 
 // A delegated sub-agent renders as a first-class row aligned with tool rows:
 // header = "Sub-agent · <name> · <elapsed> · <status>" with a chevron, body =
@@ -74,7 +79,7 @@ function subAgentVMEquals(
   );
 }
 
-function AgentSubAgentCardImpl({
+function AgentSubAgentCardImplRender({
   subAgent,
   onLinkClick
 }: {
@@ -85,6 +90,9 @@ function AgentSubAgentCardImpl({
   // Expanded by default while running; always collapsible via the header.
   const [expanded, setExpanded] = useState(subAgent.status === "running");
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
   return (
     <div
       className="workspace-agents-status-panel__detail-tool-row workspace-agents-status-panel__detail-tool-row--subagent"
@@ -95,7 +103,7 @@ function AgentSubAgentCardImpl({
         className="workspace-agents-status-panel__detail-tool-row-head workspace-agents-status-panel__detail-tool-row-head--button"
         aria-expanded={expanded}
         aria-label={subAgentAriaLabel(subAgent)}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={onClickProp1}
       >
         <SubAgentHeader subAgent={subAgent} expanded={expanded} />
       </button>
@@ -108,7 +116,7 @@ function AgentSubAgentCardImpl({
   );
 }
 
-function SubAgentHeader({
+function SubAgentHeaderRender({
   subAgent,
   expanded
 }: {
@@ -171,7 +179,7 @@ function SubAgentHeader({
   );
 }
 
-function SubAgentBody({
+function SubAgentBodyRender({
   subAgent,
   onLinkClick
 }: {
@@ -206,7 +214,7 @@ function SubAgentBody({
   );
 }
 
-function SubAgentProgress({
+function SubAgentProgressRender({
   subAgent,
   onLinkClick
 }: {

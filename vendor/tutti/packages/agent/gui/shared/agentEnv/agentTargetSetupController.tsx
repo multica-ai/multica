@@ -23,6 +23,10 @@ import {
   type AgentTargetSetupFailureNotification
 } from "./agentTargetSetupNotificationController.ts";
 import { resolveAgentErrorPresentation } from "./agentErrorPresentation.ts";
+import { observer } from "mobx-react-lite";
+export const AgentTargetSetupControllerProvider = observer(
+  AgentTargetSetupControllerProviderRender
+);
 
 const DISABLED_SETUP_STATE: AgentHostAgentTargetSetupState = {
   snapshot: null,
@@ -62,7 +66,7 @@ export interface AgentTargetSetupController {
 const AgentTargetSetupControllerContext =
   createContext<AgentTargetSetupController | null>(null);
 
-export function AgentTargetSetupControllerProvider({
+function AgentTargetSetupControllerProviderRender({
   children,
   controller
 }: {
@@ -172,20 +176,9 @@ export function useCreateAgentTargetSetupController(
   return controllerEntry.controller;
 }
 
-function createAgentTargetSetupController(input: {
-  agentTarget: AgentGUIAgentTarget | null;
-  agentTargetId: string;
-  enabled: boolean;
-  initialDialogOpen: boolean;
-  initialSelectedAuthMethodId: string | null;
-  logCommandError: (
-    command: "authenticate" | "install",
-    error: unknown
-  ) => void;
-  onNotification: (notification: AgentTargetSetupFailureNotification) => void;
-  terminalLogin: AgentHostTerminalLoginApi | undefined;
-  watch: AgentHostAgentTargetSetupWatch | null;
-}): AgentTargetSetupController {
+function createAgentTargetSetupController(
+  input: createAgentTargetSetupControllerProps
+): AgentTargetSetupController {
   const listeners = new Set<() => void>();
   const initialSetup = input.watch?.getSnapshot() ?? DISABLED_SETUP_STATE;
   const notifications =
@@ -424,3 +417,18 @@ function createClientActionId(): string {
     `agent-setup-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
 }
+
+type createAgentTargetSetupControllerProps = {
+  agentTarget: AgentGUIAgentTarget | null;
+  agentTargetId: string;
+  enabled: boolean;
+  initialDialogOpen: boolean;
+  initialSelectedAuthMethodId: string | null;
+  logCommandError: (
+    command: "authenticate" | "install",
+    error: unknown
+  ) => void;
+  onNotification: (notification: AgentTargetSetupFailureNotification) => void;
+  terminalLogin: AgentHostTerminalLoginApi | undefined;
+  watch: AgentHostAgentTargetSetupWatch | null;
+};

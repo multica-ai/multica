@@ -1,21 +1,27 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@tutti-os/ui-system";
-import { Copy,MessagesSquare,PanelRightOpen } from "lucide-react";
+import { Copy, MessagesSquare, PanelRightOpen } from "lucide-react";
 import {
-createContext,
-useContext,
-useEffect,
-useLayoutEffect,
-useRef,
-useState,
-type ReactNode
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode
 } from "react";
 import {
-localResourceTarget,
-previewResourceHref
+  localResourceTarget,
+  previewResourceHref
 } from "./message-resource-links";
 import type { AgentGuiHostServices } from "./protocol";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
+import { observer } from "mobx-react-lite";
+export const SideEntryProvider = observer(SideEntryProviderRender);
+export const SideQueueAction = observer(SideQueueActionRender);
 
 type Entry = {
   client: AgentGuiHostServices;
@@ -35,7 +41,7 @@ export function useCanPreviewResources(): boolean {
   return useContext(SideEntryContext)?.enabled === true;
 }
 
-export function SideEntryProvider({
+function SideEntryProviderRender({
   children,
   root,
   ...entry
@@ -257,6 +263,7 @@ export function SideEntryProvider({
       tone: "success"
     });
   };
+  const copyCallback = usePersistCallback(copy);
   const start = async () => {
     if (!selection || !entry.sessionId || pending) return;
     const { text, turnId } = selection;
@@ -278,47 +285,25 @@ export function SideEntryProvider({
       setPending(false);
     }
   };
+  const startCallback = usePersistCallback(start);
   return (
     <SideEntryContext.Provider value={entry}>
       {children}
       {selection && (
-        <div
-          ref={toolbar}
-          role="toolbar"
-          aria-label={entry.chinese ? "选中文字操作" : "Selected text actions"}
-          className="multica-selection-toolbar nodrag fixed z-[100]"
-          style={{ left: selection.left, top: selection.top }}
-          onPointerDown={(event) => event.preventDefault()}
-        >
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => {
-              void copy();
-            }}
-          >
-            <Copy className="size-3.5" />
-            {entry.chinese ? "复制" : "Copy"}
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={pending}
-            aria-busy={pending}
-            onClick={() => {
-              void start();
-            }}
-          >
-            <MessagesSquare className="size-3.5" />
-            {entry.chinese ? "在旁支中询问" : "Ask in side"}
-          </Button>
-        </div>
+        <DivBinding1
+          toolbar={toolbar}
+          entry={entry}
+          selection={selection}
+          copy={copyCallback}
+          pending={pending}
+          start={startCallback}
+        />
       )}
     </SideEntryContext.Provider>
   );
 }
 
-export function SideQueueAction({
+function SideQueueActionRender({
   agentSessionId,
   promptId,
   disabled
@@ -331,33 +316,200 @@ export function SideQueueAction({
   const [pending, setPending] = useState(false);
   if (!entry?.enabled || !agentSessionId) return null;
   return (
-    <DropdownMenuItem
-      className="multica-queue-side-action nodrag"
-      disabled={disabled || pending}
-      onSelect={() => {
-        setPending(true);
-        void entry.handle
-          .moveQueuedToSide(agentSessionId, promptId)
-          .catch((error: unknown) =>
-            entry.client.hostApi.showMessage({
-              message: error instanceof Error ? error.message : String(error),
-              tone: "error"
-            })
-          )
-          .finally(() => setPending(false));
-      }}
-    >
-      <PanelRightOpen size={16} aria-hidden="true" />
-      <div className="multica-queue-action-copy">
-        <span className="multica-queue-action-title">
-          {entry.chinese ? "在旁支中执行" : "Run in side"}
-        </span>
-        <span className="text-caption text-muted-foreground">
-          {entry.chinese
-            ? "移出主队列，在右侧独立执行"
-            : "Move from this queue and run alongside"}
-        </span>
-      </div>
-    </DropdownMenuItem>
+    <DropdownMenuItemBinding3
+      disabled={disabled}
+      pending={pending}
+      setPending={setPending}
+      entry={entry}
+      agentSessionId={agentSessionId}
+      promptId={promptId}
+    />
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  copy,
+  entry,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    void copy();
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button size="xs" variant="ghost" onClick={onClickProp1}>
+        <Copy className="size-3.5" />
+        {entry.chinese ? "复制" : "Copy"}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  pending,
+  start,
+  entry,
+  ...slotProps
+}: ButtonBinding2Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding2Props>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    void start();
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={pending}
+        aria-busy={pending}
+        onClick={onClickProp2}
+      >
+        <MessagesSquare className="size-3.5" />
+        {entry.chinese ? "在旁支中询问" : "Ask in side"}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const DropdownMenuItemBinding3 = observer(function DropdownMenuItemBinding3({
+  disabled,
+  pending,
+  setPending,
+  entry,
+  agentSessionId,
+  promptId,
+  ...slotProps
+}: DropdownMenuItemBinding3Props &
+  Omit<
+    React.ComponentProps<typeof Slot.Root>,
+    keyof DropdownMenuItemBinding3Props
+  >) {
+  const onSelectProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(() => {
+    setPending(true);
+    void entry.handle
+      .moveQueuedToSide(agentSessionId, promptId)
+      .catch((error: unknown) =>
+        entry.client.hostApi.showMessage({
+          message: error instanceof Error ? error.message : String(error),
+          tone: "error"
+        })
+      )
+      .finally(() => setPending(false));
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <DropdownMenuItem
+        className="multica-queue-side-action nodrag"
+        disabled={disabled || pending}
+        onSelect={onSelectProp3}
+      >
+        <PanelRightOpen size={16} aria-hidden="true" />
+        <div className="multica-queue-action-copy">
+          <span className="multica-queue-action-title">
+            {entry.chinese ? "在旁支中执行" : "Run in side"}
+          </span>
+          <span className="text-caption text-muted-foreground">
+            {entry.chinese
+              ? "移出主队列，在右侧独立执行"
+              : "Move from this queue and run alongside"}
+          </span>
+        </div>
+      </DropdownMenuItem>
+    </Slot.Root>
+  );
+});
+
+const DivBinding1 = observer(function DivBinding1({
+  toolbar,
+  entry,
+  selection,
+  copy,
+  pending,
+  start,
+  ...slotProps
+}: DivBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof DivBinding1Props>) {
+  const styleProp4Value1 = selection.left;
+  const styleProp4Value2 = selection.top;
+  const styleProp4 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () => ({ left: styleProp4Value1, top: styleProp4Value2 }),
+    [styleProp4Value1, styleProp4Value2]
+  );
+  const onPointerDownProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onPointerDown"]>
+  >((event) => event.preventDefault());
+  return (
+    <Slot.Root {...slotProps}>
+      <div
+        ref={toolbar}
+        role="toolbar"
+        aria-label={entry.chinese ? "选中文字操作" : "Selected text actions"}
+        className="multica-selection-toolbar nodrag fixed z-[100]"
+        style={styleProp4}
+        onPointerDown={onPointerDownProp5}
+      >
+        <ButtonBinding1 copy={copy} entry={entry} />
+        <ButtonBinding2 pending={pending} start={start} entry={entry} />
+      </div>
+    </Slot.Root>
+  );
+});
+
+type ButtonBinding1Props = {
+  copy: () => Promise<void>;
+  entry: Omit<
+    Entry & { root: HTMLElement; children: ReactNode },
+    "children" | "root"
+  >;
+};
+
+type ButtonBinding2Props = {
+  pending: boolean;
+  start: () => Promise<void>;
+  entry: Omit<
+    Entry & { root: HTMLElement; children: ReactNode },
+    "children" | "root"
+  >;
+};
+
+type DropdownMenuItemBinding3Props = {
+  disabled: NonNullable<{
+    agentSessionId?: string | null;
+    promptId: string;
+    disabled?: boolean;
+  }>["disabled"];
+  pending: boolean;
+  setPending: import("react").Dispatch<import("react").SetStateAction<boolean>>;
+  entry: Entry;
+  agentSessionId: string;
+  promptId: NonNullable<{
+    agentSessionId?: string | null;
+    promptId: string;
+    disabled?: boolean;
+  }>["promptId"];
+};
+
+type DivBinding1Props = {
+  toolbar: import("react").RefObject<HTMLDivElement | null>;
+  entry: Omit<
+    Entry & { root: HTMLElement; children: ReactNode },
+    "children" | "root"
+  >;
+  selection: {
+    text: string;
+    turnId?: string;
+    left: number;
+    top: number;
+    bottom: number;
+  };
+  copy: () => Promise<void>;
+  pending: boolean;
+  start: () => Promise<void>;
+};

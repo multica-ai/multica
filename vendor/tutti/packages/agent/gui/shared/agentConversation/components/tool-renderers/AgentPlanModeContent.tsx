@@ -5,8 +5,10 @@ import {
 } from "./agentToolContentShared";
 import { getPlanModeRenderData } from "./render-data/agentToolRenderData";
 import { AgentPlanCard } from "../AgentPlanCard";
+import { observer } from "mobx-react-lite";
+export const AgentPlanModeContent = observer(AgentPlanModeContentRender);
 
-export function AgentPlanModeContent({
+function AgentPlanModeContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {

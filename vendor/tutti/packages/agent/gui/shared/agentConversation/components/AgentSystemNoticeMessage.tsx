@@ -6,6 +6,10 @@ import type { AgentMessageContentVM } from "../contracts/agentMessageRowVM";
 import { AgentMessageDetailsDisclosure } from "./AgentMessageDetailsDisclosure";
 import agentSystemNoticeStyles from "./agentSystemNoticeStyles";
 import { useElapsedSeconds } from "./useElapsedSeconds";
+const ContextCompactionDivider = observer(ContextCompactionDividerRender);
+const ContextCompactionProgressDivider = observer(
+  ContextCompactionProgressDividerRender
+);
 
 const TRANSPORT_RETRY_PROGRESS_PATTERN =
   /\b(reconnect(?:ing)?(?:\s*(?:\.\.\.|…|[.。]+|:|-))?\s*\(?\d+\s*\/\s*\d+\)?)/i;
@@ -178,7 +182,7 @@ function isContextHandoffRequiredNotice(
   return message.systemNotice?.semanticKind === "context-handoff-required";
 }
 
-function ContextCompactionDivider({
+function ContextCompactionDividerRender({
   text,
   detail = null
 }: {
@@ -214,7 +218,7 @@ function ContextCompactionDivider({
 // Live compaction banner: the daemon replaces this notice in place with the
 // "Context compacted." notice once the provider finishes, so the timer only
 // runs while compaction is actually in flight.
-function ContextCompactionProgressDivider({
+function ContextCompactionProgressDividerRender({
   startedAtUnixMs
 }: {
   startedAtUnixMs: number | null;

@@ -1,6 +1,8 @@
 import type { SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const ToolsLinedIcon = observer(ToolsLinedIconRender);
 
-export function ToolsLinedIcon(props: SVGProps<SVGSVGElement>) {
+function ToolsLinedIconRender(props: SVGProps<SVGSVGElement>) {
   "use memo";
   return (
     <svg

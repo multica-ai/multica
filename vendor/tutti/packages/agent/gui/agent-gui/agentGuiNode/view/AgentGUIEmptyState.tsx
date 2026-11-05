@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   Select,
   SelectContent,
@@ -49,6 +51,12 @@ import { AgentGUIAgentTargetName } from "./AgentGUIAgentTargetName";
 import { AgentGUIEmptyHeroCarouselStage } from "./AgentGUIEmptyHeroCarouselStage";
 import type { ChromeLabels } from "./AgentGUINodeView.types";
 import { AgentTargetSetupGate } from "./AgentTargetSetupGate.tsx";
+import { observer } from "mobx-react-lite";
+export const AgentGUIProviderIconVisual = observer(
+  AgentGUIProviderIconVisualRender
+);
+const AgentGUIAgentAvatarVisual = observer(AgentGUIAgentAvatarVisualRender);
+const EmptyHeroTitle = observer(EmptyHeroTitleRender);
 
 export interface AgentGUIProviderIconPresentation {
   iconUrl: string;
@@ -111,7 +119,7 @@ interface AgentGUIEmptyHomePaneProps {
   onSelectSuggestionAction?: (action: AgentHomeSuggestionAction) => void;
 }
 
-export const AgentGUIEmptyHomePane = memo(function AgentGUIEmptyHomePane({
+export const AgentGUIEmptyHomePane = observer(function AgentGUIEmptyHomePane({
   isActive,
   isVisible,
   provider,
@@ -248,7 +256,7 @@ interface AgentGUIEmptyHeroPaneProps {
   onSelectSuggestionAction?: (action: AgentHomeSuggestionAction) => void;
 }
 
-export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
+export const AgentGUIEmptyHeroPane = observer(function AgentGUIEmptyHeroPane({
   isActive = true,
   isVisible = true,
   provider,
@@ -275,15 +283,18 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
 }: AgentGUIEmptyHeroPaneProps): React.JSX.Element {
   "use memo";
 
-  const heroAvatarPresentations =
-    avatarPresentations.length > 0
-      ? avatarPresentations
-      : [
-          createFallbackAgentGUIAgentAvatar({
-            provider,
-            label: emptyProvider
-          })
-        ];
+  const heroAvatarPresentations = useMemo(
+    () =>
+      avatarPresentations.length > 0
+        ? avatarPresentations
+        : [
+            createFallbackAgentGUIAgentAvatar({
+              provider,
+              label: emptyProvider
+            })
+          ],
+    [avatarPresentations, provider, emptyProvider]
+  );
   const heroIconAnimationKey = heroAvatarPresentations
     .map(
       (avatar) =>
@@ -397,7 +408,7 @@ interface AgentGUIProviderReadinessGatePaneProps {
   >;
 }
 
-export const AgentGUIProviderReadinessGatePane = memo(
+export const AgentGUIProviderReadinessGatePane = observer(
   function AgentGUIProviderReadinessGatePane({
     isActive = true,
     isVisible = true,
@@ -416,17 +427,20 @@ export const AgentGUIProviderReadinessGatePane = memo(
   }: AgentGUIProviderReadinessGatePaneProps): React.JSX.Element {
     "use memo";
 
-    const heroAvatarPresentations =
-      avatarPresentations.length > 0
-        ? avatarPresentations
-        : [
-            selectedAgentTarget
-              ? projectAgentGUIAgentTargetAvatar(selectedAgentTarget)
-              : createFallbackAgentGUIAgentAvatar({
-                  provider,
-                  label: provider
-                })
-          ];
+    const heroAvatarPresentations = useMemo(
+      () =>
+        avatarPresentations.length > 0
+          ? avatarPresentations
+          : [
+              selectedAgentTarget
+                ? projectAgentGUIAgentTargetAvatar(selectedAgentTarget)
+                : createFallbackAgentGUIAgentAvatar({
+                    provider,
+                    label: provider
+                  })
+            ],
+      [avatarPresentations, selectedAgentTarget, provider]
+    );
     const pendingAction = gate.pendingAction ?? null;
     const isPending = pendingAction !== null;
     const showAllProvidersChecking =
@@ -517,54 +531,19 @@ export const AgentGUIProviderReadinessGatePane = memo(
               )}
             >
               {action ? (
-                <Button
-                  type="button"
-                  className={cn(
-                    styles.emptyProviderGateAction,
-                    "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
-                  )}
-                  data-testid="agent-gui-provider-readiness-gate-action"
-                  disabled={isPending}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => {
-                    if (isPending) {
-                      return;
-                    }
-                    gate.onAction?.(provider, action);
-                  }}
-                >
-                  {isPending && pendingLabel
-                    ? pendingLabel
-                    : content.actionLabel}
-                </Button>
+                <ButtonBinding1
+                  isPending={isPending}
+                  gate={gate}
+                  provider={provider}
+                  action={action}
+                  pendingLabel={pendingLabel}
+                  content={content}
+                />
               ) : content.actionLabel ? (
-                <Button
-                  type="button"
-                  className={cn(
-                    styles.emptyProviderGateAction,
-                    "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
-                  )}
-                  data-testid="agent-gui-provider-readiness-gate-action"
-                  disabled
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  {content.actionLabel}
-                </Button>
+                <ButtonBinding2 content={content} />
               ) : null}
               {modelPlanActionAvailable ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className={cn(
-                    styles.emptyProviderGateAction,
-                    "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
-                  )}
-                  data-testid="agent-gui-provider-readiness-model-plan-action"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => gate.onModelPlanSetup?.()}
-                >
-                  {labels.providerGateModelPlanAction}
-                </Button>
+                <ButtonBinding3 gate={gate} labels={labels} />
               ) : null}
             </div>
           ) : null}
@@ -574,7 +553,7 @@ export const AgentGUIProviderReadinessGatePane = memo(
   }
 );
 
-export function AgentGUIProviderIconVisual({
+function AgentGUIProviderIconVisualRender({
   ariaHidden = false,
   icon,
   imageClassName
@@ -594,7 +573,7 @@ export function AgentGUIProviderIconVisual({
   );
 }
 
-function AgentGUIAgentAvatarVisual({
+function AgentGUIAgentAvatarVisualRender({
   className,
   imageClassName,
   presentation
@@ -627,7 +606,7 @@ function AgentGUIAgentAvatarVisual({
   );
 }
 
-function EmptyHeroTitle({
+function EmptyHeroTitleRender({
   label,
   providerLabel,
   providerSelectLabel,
@@ -635,15 +614,7 @@ function EmptyHeroTitle({
   selectedAgentTarget = null,
   onProviderSelect,
   sharedAgentOwnerSeparator
-}: {
-  label: string;
-  providerLabel: string;
-  providerSelectLabel: string;
-  agentTargets?: readonly AgentGUIAgentTarget[];
-  selectedAgentTarget?: AgentGUIAgentTarget | null;
-  onProviderSelect?: AgentGUINodeViewProps["actions"]["selectHomeComposerAgentTarget"];
-  sharedAgentOwnerSeparator: string;
-}): React.JSX.Element {
+}: EmptyHeroTitleProps): React.JSX.Element {
   const providerStart = providerLabel ? label.indexOf(providerLabel) : -1;
 
   if (!shouldEmphasizeEmptyHeroProvider(label) || providerStart < 0) {
@@ -662,67 +633,14 @@ function EmptyHeroTitle({
     <>
       {label.slice(0, providerStart)}
       {canSwitchProvider ? (
-        <Select
-          value={selectedAgentTargetId}
-          onValueChange={(nextTargetId) => {
-            const target = agentTargets.find(
-              (candidate) => candidate.targetId === nextTargetId
-            );
-            if (!target) {
-              return;
-            }
-            onProviderSelect({
-              provider: target.provider,
-              agentTargetId: target.targetId
-            });
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label={providerSelectLabel}
-            title={providerSelectLabel}
-            className={styles.emptyHeroProviderSelect}
-          >
-            <AgentGUIAgentTargetName
-              className={cn(styles.emptyHeroProvider, "max-w-[240px]")}
-              ownerSeparator={sharedAgentOwnerSeparator}
-              target={selectedAgentTarget}
-            />
-          </SelectTrigger>
-          <SelectContent
-            align="center"
-            className={cn(
-              styles.composerMenuContent,
-              "min-w-[190px] max-w-[min(420px,calc(100vw-32px))]"
-            )}
-          >
-            {agentTargets.map((target) => (
-              <SelectItem
-                key={`${target.provider}:${target.targetId}`}
-                value={target.targetId}
-                className={cn(styles.composerMenuItem, "gap-2")}
-              >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <img
-                    alt=""
-                    aria-hidden="true"
-                    className="size-4 shrink-0 rounded-[4px]"
-                    src={
-                      agentGUIProviderRailIconPresentation(
-                        target.provider,
-                        target.iconUrl
-                      ).iconUrl
-                    }
-                  />
-                  <AgentGUIAgentTargetName
-                    ownerSeparator={sharedAgentOwnerSeparator}
-                    target={target}
-                  />
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SelectBinding4
+          selectedAgentTargetId={selectedAgentTargetId}
+          agentTargets={agentTargets}
+          onProviderSelect={onProviderSelect}
+          providerSelectLabel={providerSelectLabel}
+          sharedAgentOwnerSeparator={sharedAgentOwnerSeparator}
+          selectedAgentTarget={selectedAgentTarget}
+        />
       ) : selectedAgentTarget ? (
         <AgentGUIAgentTargetName
           className={cn(styles.emptyHeroProvider, "inline-flex max-w-[240px]")}
@@ -736,3 +654,228 @@ function EmptyHeroTitle({
     </>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  isPending,
+  gate,
+  provider,
+  action,
+  pendingLabel,
+  content,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onPointerDownProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onPointerDown"]>
+  >((event) => event.stopPropagation());
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => {
+    if (isPending) {
+      return;
+    }
+    gate.onAction?.(provider, action);
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        className={cn(
+          styles.emptyProviderGateAction,
+          "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
+        )}
+        data-testid="agent-gui-provider-readiness-gate-action"
+        disabled={isPending}
+        onPointerDown={onPointerDownProp1}
+        onClick={onClickProp2}
+      >
+        {isPending && pendingLabel ? pendingLabel : content.actionLabel}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  content,
+  ...slotProps
+}: {
+  content: { title: string; description: string; actionLabel?: string };
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    content: { title: string; description: string; actionLabel?: string };
+  }
+>) {
+  const onPointerDownProp3 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onPointerDown"]>
+  >((event) => event.stopPropagation());
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        className={cn(
+          styles.emptyProviderGateAction,
+          "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
+        )}
+        data-testid="agent-gui-provider-readiness-gate-action"
+        disabled
+        onPointerDown={onPointerDownProp3}
+      >
+        {content.actionLabel}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const ButtonBinding3 = observer(function ButtonBinding3({
+  gate,
+  labels,
+  ...slotProps
+}: {
+  gate: NonNullable<AgentGUIProviderReadinessGatePaneProps>["gate"];
+  labels: NonNullable<AgentGUIProviderReadinessGatePaneProps>["labels"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    gate: NonNullable<AgentGUIProviderReadinessGatePaneProps>["gate"];
+    labels: NonNullable<AgentGUIProviderReadinessGatePaneProps>["labels"];
+  }
+>) {
+  const onPointerDownProp4 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onPointerDown"]>
+  >((event) => event.stopPropagation());
+  const onClickProp5 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => gate.onModelPlanSetup?.());
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        type="button"
+        variant="secondary"
+        className={cn(
+          styles.emptyProviderGateAction,
+          "nodrag tsh-desktop-no-drag [-webkit-app-region:no-drag]"
+        )}
+        data-testid="agent-gui-provider-readiness-model-plan-action"
+        onPointerDown={onPointerDownProp4}
+        onClick={onClickProp5}
+      >
+        {labels.providerGateModelPlanAction}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+const SelectBinding4 = observer(function SelectBinding4({
+  selectedAgentTargetId,
+  agentTargets,
+  onProviderSelect,
+  providerSelectLabel,
+  sharedAgentOwnerSeparator,
+  selectedAgentTarget
+}: {
+  selectedAgentTargetId: string;
+  agentTargets: readonly AgentGUIAgentTarget[];
+  onProviderSelect: (input: {
+    provider: import("../../../types").AgentGUIProvider;
+    agentTargetId?: string | null;
+  }) => void;
+  providerSelectLabel: NonNullable<EmptyHeroTitleProps>["providerSelectLabel"];
+  sharedAgentOwnerSeparator: NonNullable<EmptyHeroTitleProps>["sharedAgentOwnerSeparator"];
+  selectedAgentTarget: AgentGUIAgentTarget;
+}) {
+  const onValueChangeProp6 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Select>["onValueChange"]>
+  >((nextTargetId) => {
+    const target = agentTargets.find(
+      (candidate) => candidate.targetId === nextTargetId
+    );
+    if (!target) {
+      return;
+    }
+    onProviderSelect({
+      provider: target.provider,
+      agentTargetId: target.targetId
+    });
+  });
+  return (
+    <Select value={selectedAgentTargetId} onValueChange={onValueChangeProp6}>
+      <SelectTrigger
+        size="sm"
+        aria-label={providerSelectLabel}
+        title={providerSelectLabel}
+        className={styles.emptyHeroProviderSelect}
+      >
+        <AgentGUIAgentTargetName
+          className={cn(styles.emptyHeroProvider, "max-w-[240px]")}
+          ownerSeparator={sharedAgentOwnerSeparator}
+          target={selectedAgentTarget}
+        />
+      </SelectTrigger>
+      <SelectContent
+        align="center"
+        className={cn(
+          styles.composerMenuContent,
+          "min-w-[190px] max-w-[min(420px,calc(100vw-32px))]"
+        )}
+      >
+        {agentTargets.map((target) => (
+          <SelectItem
+            key={`${target.provider}:${target.targetId}`}
+            value={target.targetId}
+            className={cn(styles.composerMenuItem, "gap-2")}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <img
+                alt=""
+                aria-hidden="true"
+                className="size-4 shrink-0 rounded-[4px]"
+                src={
+                  agentGUIProviderRailIconPresentation(
+                    target.provider,
+                    target.iconUrl
+                  ).iconUrl
+                }
+              />
+              <AgentGUIAgentTargetName
+                ownerSeparator={sharedAgentOwnerSeparator}
+                target={target}
+              />
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+});
+
+type EmptyHeroTitleProps = {
+  label: string;
+  providerLabel: string;
+  providerSelectLabel: string;
+  agentTargets?: readonly AgentGUIAgentTarget[];
+  selectedAgentTarget?: AgentGUIAgentTarget | null;
+  onProviderSelect?: AgentGUINodeViewProps["actions"]["selectHomeComposerAgentTarget"];
+  sharedAgentOwnerSeparator: string;
+};
+
+type ButtonBinding1Props = {
+  isPending: boolean;
+  gate: NonNullable<AgentGUIProviderReadinessGatePaneProps>["gate"];
+  provider: NonNullable<AgentGUIProviderReadinessGatePaneProps>["provider"];
+  action: import("../../../types").AgentGUIProviderReadinessGateAction;
+  pendingLabel: string | null;
+  content: { title: string; description: string; actionLabel?: string };
+};
+
+type SelectBinding4Props = {
+  selectedAgentTargetId: string;
+  agentTargets: readonly AgentGUIAgentTarget[];
+  onProviderSelect: (input: {
+    provider: import("../../../types").AgentGUIProvider;
+    agentTargetId?: string | null;
+  }) => void;
+  providerSelectLabel: string;
+  sharedAgentOwnerSeparator: string;
+  selectedAgentTarget: AgentGUIAgentTarget;
+};

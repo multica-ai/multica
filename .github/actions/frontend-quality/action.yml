@@ -15,6 +15,12 @@ runs:
         node --test scripts/check-ui-radius-tokens.test.mjs
         node scripts/check-ui-radius-tokens.mjs
 
+    - name: Check conversation render stability
+      shell: bash
+      run: |
+        pnpm test:conversation-lint
+        pnpm lint:conversations
+
     # Keep existing knip findings advisory in either caller.
     - name: Check for dead code and phantom dependencies (knip)
       continue-on-error: true

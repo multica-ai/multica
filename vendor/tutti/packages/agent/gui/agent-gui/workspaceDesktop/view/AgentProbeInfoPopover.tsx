@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Info } from "lucide-react";
 import {
   useCallback,
@@ -12,6 +14,8 @@ import {
 import { createPortal } from "react-dom";
 import type { DockAgentProbeTooltipLine } from "./desktopDockAgentProbeTooltipModel";
 import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
+import { observer } from "mobx-react-lite";
+export const AgentProbeInfoPopover = observer(AgentProbeInfoPopoverRender);
 
 const POPOVER_MIN_VIEWPORT_INSET_PX = 16;
 const POPOVER_DEFAULT_WIDTH_PX = 260;
@@ -52,7 +56,7 @@ function getDockAgentProbeLineLabel(line: DockAgentProbeTooltipLine): string {
   return typeof line === "string" ? "" : (line.label ?? "");
 }
 
-export function AgentProbeInfoPopover({
+function AgentProbeInfoPopoverRender({
   lines,
   testId = "agent-probe-info",
   className,
@@ -76,11 +80,13 @@ export function AgentProbeInfoPopover({
     }
     setIsOpen(true);
   }, [isOpen, onOpen]);
+  const openPopoverCallback = usePersistCallback(openPopover);
   const closePopover = useCallback((): void => {
     if (!isOpen) return;
     setIsOpen(false);
     onClose?.();
   }, [isOpen, onClose]);
+  const closePopoverCallback = usePersistCallback(closePopover);
   const closeIfPointerLeavesPopover = useCallback(
     (event: MouseEvent): void => {
       const nextTarget = event.relatedTarget;
@@ -94,6 +100,9 @@ export function AgentProbeInfoPopover({
       closePopover();
     },
     [closePopover]
+  );
+  const closeIfPointerLeavesPopoverCallback = usePersistCallback(
+    closeIfPointerLeavesPopover
   );
   const updatePopoverPosition = useCallback((): void => {
     const anchor = anchorRef.current;
@@ -124,6 +133,9 @@ export function AgentProbeInfoPopover({
       maxWidth: availableWidth
     });
   }, []);
+  const updatePopoverPositionCallback = usePersistCallback(
+    updatePopoverPosition
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -156,8 +168,8 @@ export function AgentProbeInfoPopover({
       className="desktop-dock-popup__agent-info-popover desktop-dock-popup__agent-info-popover--portal"
       role="status"
       style={popoverStyle ?? undefined}
-      onMouseEnter={openPopover}
-      onMouseLeave={closeIfPointerLeavesPopover}
+      onMouseEnter={openPopoverCallback}
+      onMouseLeave={closeIfPointerLeavesPopoverCallback}
     >
       <ul className="desktop-dock-popup__agent-info-list">
         {lines.map((line) => {
@@ -188,26 +200,89 @@ export function AgentProbeInfoPopover({
   );
 
   return (
-    <div
-      ref={anchorRef}
-      className={`desktop-dock-popup__agent-info${className ? ` ${className}` : ""}`}
-      tabIndex={0}
-      role="button"
-      aria-label={lines.map(formatDockAgentProbeLineText).join("，")}
-      data-testid={testId}
-      onMouseEnter={() => {
-        updatePopoverPosition();
-        openPopover();
-      }}
-      onMouseLeave={closeIfPointerLeavesPopover}
-      onFocus={() => {
-        updatePopoverPosition();
-        openPopover();
-      }}
-      onBlur={closePopover}
-    >
-      <Info size={15} strokeWidth={2.1} aria-hidden="true" />
-      {isOpen ? createPortal(popover, getPortalContainer()) : null}
-    </div>
+    <DivBinding1
+      anchorRef={anchorRef}
+      className={className}
+      lines={lines}
+      testId={testId}
+      updatePopoverPosition={updatePopoverPositionCallback}
+      openPopover={openPopoverCallback}
+      closeIfPointerLeavesPopover={closeIfPointerLeavesPopoverCallback}
+      closePopover={closePopoverCallback}
+      isOpen={isOpen}
+      popover={popover}
+    />
   );
 }
+
+const DivBinding1 = observer(function DivBinding1({
+  anchorRef,
+  className,
+  lines,
+  testId,
+  updatePopoverPosition,
+  openPopover,
+  closeIfPointerLeavesPopover,
+  closePopover,
+  isOpen,
+  popover,
+  ...slotProps
+}: DivBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof DivBinding1Props>) {
+  const onMouseEnterProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onMouseEnter"]>
+  >(() => {
+    updatePopoverPosition();
+    openPopover();
+  });
+  const onFocusProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"div">["onFocus"]>
+  >(() => {
+    updatePopoverPosition();
+    openPopover();
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <div
+        ref={anchorRef}
+        className={`desktop-dock-popup__agent-info${className ? ` ${className}` : ""}`}
+        tabIndex={0}
+        role="button"
+        aria-label={lines.map(formatDockAgentProbeLineText).join("，")}
+        data-testid={testId}
+        onMouseEnter={onMouseEnterProp1}
+        onMouseLeave={closeIfPointerLeavesPopover}
+        onFocus={onFocusProp2}
+        onBlur={closePopover}
+      >
+        <Info size={15} strokeWidth={2.1} aria-hidden="true" />
+        {isOpen ? createPortal(popover, getPortalContainer()) : null}
+      </div>
+    </Slot.Root>
+  );
+});
+
+type DivBinding1Props = {
+  anchorRef: import("react").RefObject<HTMLDivElement | null>;
+  className: NonNullable<{
+    lines: DockAgentProbeTooltipLine[];
+    testId?: string;
+    className?: string;
+    onOpen?: () => void;
+    onClose?: () => void;
+  }>["className"];
+  lines: NonNullable<{
+    lines: DockAgentProbeTooltipLine[];
+    testId?: string;
+    className?: string;
+    onOpen?: () => void;
+    onClose?: () => void;
+  }>["lines"];
+  testId: string;
+  updatePopoverPosition: () => void;
+  openPopover: () => void;
+  closeIfPointerLeavesPopover: (event: MouseEvent) => void;
+  closePopover: () => void;
+  isOpen: boolean;
+  popover: import("react").JSX.Element;
+};

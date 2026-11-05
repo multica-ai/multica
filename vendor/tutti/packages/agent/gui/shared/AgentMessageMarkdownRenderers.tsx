@@ -1,3 +1,5 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+import { useMemo } from "react";
 import {
   Children,
   isValidElement,
@@ -13,8 +15,15 @@ import { translate } from "../i18n/index";
 import { cn } from "../app/renderer/lib/utils";
 import type { MarkdownDomProps } from "./AgentMessageMarkdown";
 import { AgentMessageMermaid } from "./AgentMessageMermaid";
+import { observer } from "mobx-react-lite";
+export const MarkdownCode = observer(MarkdownCodeRender);
+export const MarkdownUnorderedList = observer(MarkdownUnorderedListRender);
+export const MarkdownOrderedList = observer(MarkdownOrderedListRender);
+export const MarkdownListItem = observer(MarkdownListItemRender);
+export const MarkdownParagraph = observer(MarkdownParagraphRender);
+export const MarkdownPre = observer(MarkdownPreRender);
 
-export function MarkdownCode({
+function MarkdownCodeRender({
   node: _node,
   children,
   className,
@@ -44,13 +53,18 @@ const MARKDOWN_LIST_ITEM_STYLE: CSSProperties = {
   margin: "4px 0"
 };
 
-export function MarkdownUnorderedList({
+function MarkdownUnorderedListRender({
   node: _node,
   className,
   style,
   ...props
 }: MarkdownDomProps<"ul">): JSX.Element {
   "use memo";
+
+  const styleProp1 = useMemo<NonNullable<React.ComponentProps<"ul">["style"]>>(
+    () => ({ ...MARKDOWN_UNORDERED_LIST_STYLE, ...style }),
+    [MARKDOWN_UNORDERED_LIST_STYLE, style]
+  );
   return (
     <ul
       {...props}
@@ -58,39 +72,44 @@ export function MarkdownUnorderedList({
         '[&_li]:relative [&_li]:list-none [&_li]:pl-[34px] [&_li::before]:absolute [&_li::before]:left-4 [&_li::before]:top-[0.78em] [&_li::before]:h-1.5 [&_li::before]:w-1.5 [&_li::before]:-translate-y-1/2 [&_li::before]:rounded-full [&_li::before]:bg-[var(--text-tertiary)] [&_li::before]:content-[""]',
         className
       )}
-      style={{ ...MARKDOWN_UNORDERED_LIST_STYLE, ...style }}
+      style={styleProp1}
     />
   );
 }
 
-export function MarkdownOrderedList({
+function MarkdownOrderedListRender({
   node: _node,
   style,
   ...props
 }: MarkdownDomProps<"ol">): JSX.Element {
   "use memo";
-  return (
-    <ol
-      {...props}
-      style={{
-        ...MARKDOWN_ORDERED_LIST_STYLE,
-        listStyleType: "decimal",
-        ...style
-      }}
-    />
+
+  const styleProp2 = useMemo<NonNullable<React.ComponentProps<"ol">["style"]>>(
+    () => ({
+      ...MARKDOWN_ORDERED_LIST_STYLE,
+      listStyleType: "decimal",
+      ...style
+    }),
+    [MARKDOWN_ORDERED_LIST_STYLE, style]
   );
+  return <ol {...props} style={styleProp2} />;
 }
 
-export function MarkdownListItem({
+function MarkdownListItemRender({
   node: _node,
   style,
   ...props
 }: MarkdownDomProps<"li">): JSX.Element {
   "use memo";
-  return <li {...props} style={{ ...MARKDOWN_LIST_ITEM_STYLE, ...style }} />;
+
+  const styleProp3 = useMemo<NonNullable<React.ComponentProps<"li">["style"]>>(
+    () => ({ ...MARKDOWN_LIST_ITEM_STYLE, ...style }),
+    [MARKDOWN_LIST_ITEM_STYLE, style]
+  );
+  return <li {...props} style={styleProp3} />;
 }
 
-export function MarkdownParagraph({
+function MarkdownParagraphRender({
   node: _node,
   inline,
   ...props
@@ -114,7 +133,7 @@ export function textFromReactNode(node: ReactNode): string {
   return "";
 }
 
-export function MarkdownPre({
+function MarkdownPreRender({
   children,
   mermaidEnabled = true,
   node: _node,
@@ -151,6 +170,7 @@ export function MarkdownPre({
       copyResetRef.current = setTimeout(() => setCopied(false), 1500);
     });
   }, []);
+  const handleCopyCallback = usePersistCallback(handleCopy);
 
   const codeBlock = (
     <div className="group relative">
@@ -160,7 +180,7 @@ export function MarkdownPre({
         className="absolute right-1.5 top-1.5 z-10 inline-flex size-5 items-center justify-center rounded-[4px] text-[var(--text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--transparency-hover)] hover:text-[var(--text-secondary)] group-hover:opacity-100"
         aria-label={translate("agentHost.agentGui.copyCode")}
         title={translate("agentHost.agentGui.copyCode")}
-        onClick={handleCopy}
+        onClick={handleCopyCallback}
       >
         {copied ? (
           <Check size={13} strokeWidth={2} aria-hidden="true" />

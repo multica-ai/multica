@@ -10,17 +10,12 @@ import {
 import { observer } from "mobx-react-lite";
 import styles from "../AgentGUINode.styles";
 import type { AgentGUISessionLaunchMode } from "../model/agentSessionLaunchMode";
+const LaunchModeIcon = observer(LaunchModeIconRender);
 
 export const AgentSessionLaunchModeSelect = observer(
-  function AgentSessionLaunchModeSelect(input: {
-    labels: {
-      launchMode: string;
-      local: string;
-      worktree: string;
-    };
-    mode: AgentGUISessionLaunchMode;
-    onModeChange: (mode: AgentGUISessionLaunchMode) => void;
-  }): React.JSX.Element {
+  function AgentSessionLaunchModeSelect(
+    input: AgentSessionLaunchModeSelectProps
+  ): React.JSX.Element {
     return (
       <Select value={input.mode} onValueChange={input.onModeChange}>
         <SelectTrigger
@@ -56,7 +51,7 @@ export const AgentSessionLaunchModeSelect = observer(
   }
 );
 
-function LaunchModeIcon({
+function LaunchModeIconRender({
   mode
 }: {
   mode: AgentGUISessionLaunchMode;
@@ -75,3 +70,13 @@ function LaunchModeIcon({
     />
   );
 }
+
+type AgentSessionLaunchModeSelectProps = {
+  labels: {
+    launchMode: string;
+    local: string;
+    worktree: string;
+  };
+  mode: AgentGUISessionLaunchMode;
+  onModeChange: (mode: AgentGUISessionLaunchMode) => void;
+};

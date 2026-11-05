@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { repairMentionPaletteHighlight } from "@tutti-os/ui-rich-text/at-panel";
 import { observer } from "mobx-react-lite";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -90,20 +92,47 @@ export const AgentComposer = observer(function AgentComposer(
     inputProps.agentSessionId ?? null
   );
   const state = inputProps.state;
-  const props = {
-    ...inputProps,
-    availableCommands: state.availableCommands,
-    availableSkills: state.availableSkills,
-    hasCompactableContext: state.hasCompactableContext,
-    compactSupported: state.compactSupported,
-    gate: state.gate,
-    composerSettings: state.composerSettings,
-    usage: state.usage,
-    promptImagesSupported: state.promptImagesSupported,
-    isSendingTurn: state.isSendingTurn,
-    isSubmittingPrompt: state.isSubmittingPrompt,
-    activeTurnId: state.activeTurnId
-  };
+  const propsAvailableCommandsValue1 = state.availableCommands;
+  const propsAvailableSkillsValue2 = state.availableSkills;
+  const propsHasCompactableContextValue3 = state.hasCompactableContext;
+  const propsCompactSupportedValue4 = state.compactSupported;
+  const propsGateValue5 = state.gate;
+  const propsComposerSettingsValue6 = state.composerSettings;
+  const propsUsageValue7 = state.usage;
+  const propsPromptImagesSupportedValue8 = state.promptImagesSupported;
+  const propsIsSendingTurnValue9 = state.isSendingTurn;
+  const propsIsSubmittingPromptValue10 = state.isSubmittingPrompt;
+  const propsActiveTurnIdValue11 = state.activeTurnId;
+  const props = useMemo(
+    () => ({
+      ...inputProps,
+      availableCommands: propsAvailableCommandsValue1,
+      availableSkills: propsAvailableSkillsValue2,
+      hasCompactableContext: propsHasCompactableContextValue3,
+      compactSupported: propsCompactSupportedValue4,
+      gate: propsGateValue5,
+      composerSettings: propsComposerSettingsValue6,
+      usage: propsUsageValue7,
+      promptImagesSupported: propsPromptImagesSupportedValue8,
+      isSendingTurn: propsIsSendingTurnValue9,
+      isSubmittingPrompt: propsIsSubmittingPromptValue10,
+      activeTurnId: propsActiveTurnIdValue11
+    }),
+    [
+      inputProps,
+      propsAvailableCommandsValue1,
+      propsAvailableSkillsValue2,
+      propsHasCompactableContextValue3,
+      propsCompactSupportedValue4,
+      propsGateValue5,
+      propsComposerSettingsValue6,
+      propsUsageValue7,
+      propsPromptImagesSupportedValue8,
+      propsIsSendingTurnValue9,
+      propsIsSubmittingPromptValue10,
+      propsActiveTurnIdValue11
+    ]
+  );
   const isInterrupting =
     nativeState.isInterrupting || nativeState.isCancelPending;
   const {
@@ -600,6 +629,9 @@ export const AgentComposer = observer(function AgentComposer(
     },
     [addDraftFiles, editorHandleRef, resolveExternalPromptEntries]
   );
+  const addExternalPromptEntriesCallback = usePersistCallback(
+    addExternalPromptEntries
+  );
 
   const providerState = useComposerProviderTargets({
     layoutMode,
@@ -640,6 +672,9 @@ export const AgentComposer = observer(function AgentComposer(
     }
     editorHandleRef.current?.focusAtEnd();
   };
+  const restoreComposerCaretAfterProjectMenuCallback = usePersistCallback(
+    restoreComposerCaretAfterProjectMenu
+  );
   const focusAndDrop = useComposerFocusAndDrop({
     composerControlsHardDisabled,
     inputDisabled,
@@ -715,6 +750,11 @@ export const AgentComposer = observer(function AgentComposer(
     canUploadAttachment,
     promptImagesSupported
   });
+  const onClearPlanModeProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof AgentComposerView>["onClearPlanMode"]
+    >
+  >(() => onSettingsChange({ planMode: false }));
   return (
     <AgentComposerView
       props={props}
@@ -735,8 +775,10 @@ export const AgentComposer = observer(function AgentComposer(
       editorHandleRef={editorHandleRef}
       mentionControllerRef={mentionControllerRef}
       externalPromptEntriesSupported={externalPromptEntriesSupported}
-      addExternalPromptEntries={addExternalPromptEntries}
-      onDismissProjectMenuAutoFocus={restoreComposerCaretAfterProjectMenu}
+      addExternalPromptEntries={addExternalPromptEntriesCallback}
+      onDismissProjectMenuAutoFocus={
+        restoreComposerCaretAfterProjectMenuCallback
+      }
       paletteDraftPrompt={paletteDraftPrompt}
       showFileMentionPalette={showFileMentionPalette}
       showSlashPalette={showSlashPalette}
@@ -752,7 +794,7 @@ export const AgentComposer = observer(function AgentComposer(
       setIsPaletteOpen={setIsPaletteOpen}
       setHighlightedIndex={setHighlightedIndex}
       isPlanModeActive={composerSettings.draftSettings.planMode}
-      onClearPlanMode={() => onSettingsChange({ planMode: false })}
+      onClearPlanMode={onClearPlanModeProp1}
       isPromptTipOverflowing={isPromptTipOverflowing}
       onHistoryNavigation={onHistoryNavigation}
       sessionWorktreeLaunch={sessionWorktreeLaunch}

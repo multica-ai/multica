@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { ConfirmationDialog, Input } from "@tutti-os/ui-system";
 import { observer } from "mobx-react-lite";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -13,8 +14,8 @@ interface AgentGUIRenameConversationDialogProps {
   onRename: (agentSessionId: string, title: string) => Promise<void>;
 }
 
-export const AgentGUIRenameConversationDialog = memo(
-  observer(function AgentGUIRenameConversationDialog({
+export const AgentGUIRenameConversationDialog = observer(
+  function AgentGUIRenameConversationDialog({
     conversation,
     open,
     labels,
@@ -53,6 +54,7 @@ export const AgentGUIRenameConversationDialog = memo(
         onOpenChange(false);
       }
     }, [onOpenChange]);
+    const closeRenameDialogCallback = usePersistCallback(closeRenameDialog);
     const confirmRename = useCallback(() => {
       if (!conversation || isSavingRef.current || !trimmedTitle) {
         return;
@@ -71,6 +73,108 @@ export const AgentGUIRenameConversationDialog = memo(
           setIsSaving(false);
         });
     }, [conversation, onOpenChange, onRename, trimmedTitle]);
+    const confirmRenameCallback = usePersistCallback(confirmRename);
+    const onLostPointerCaptureProp1 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onLostPointerCapture"]>
+    >(() => {
+      if (armedPointerActionRef.current === "cancel") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerCancelProp2 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerCancel"]>
+    >(() => {
+      if (armedPointerActionRef.current === "cancel") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerDownProp3 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerDown"]>
+    >((event) => {
+      if (event.button === 0) {
+        armedPointerActionRef.current = "cancel";
+      }
+    });
+    const onPointerLeaveProp4 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerLeave"]>
+    >(() => {
+      if (armedPointerActionRef.current === "cancel") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerUpProp5 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerUp"]>
+    >((event) => {
+      const isArmed = armedPointerActionRef.current === "cancel";
+      armedPointerActionRef.current = null;
+      if (event.button === 0 && isArmed) {
+        closeRenameDialog();
+      }
+    });
+    const onClickProp6 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+    >((event) => {
+      if (event.detail !== 0) {
+        return;
+      }
+      confirmRename();
+    });
+    const onKeyDownProp7 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onKeyDown"]>
+    >((event) => {
+      if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
+        event.preventDefault();
+        confirmRename();
+      }
+    });
+    const onLostPointerCaptureProp8 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onLostPointerCapture"]>
+    >(() => {
+      if (armedPointerActionRef.current === "confirm") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerCancelProp9 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerCancel"]>
+    >(() => {
+      if (armedPointerActionRef.current === "confirm") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerDownProp10 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerDown"]>
+    >((event) => {
+      if (event.button === 0) {
+        armedPointerActionRef.current = "confirm";
+      }
+    });
+    const onPointerLeaveProp11 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerLeave"]>
+    >(() => {
+      if (armedPointerActionRef.current === "confirm") {
+        armedPointerActionRef.current = null;
+      }
+    });
+    const onPointerUpProp12 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Button>["onPointerUp"]>
+    >((event) => {
+      const isArmed = armedPointerActionRef.current === "confirm";
+      armedPointerActionRef.current = null;
+      if (event.button === 0 && isArmed) {
+        confirmRename();
+      }
+    });
+    const onChangeProp13 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Input>["onChange"]>
+    >((event) => setTitle(event.currentTarget.value));
+    const onKeyDownProp14 = usePersistCallback<
+      NonNullable<React.ComponentProps<typeof Input>["onKeyDown"]>
+    >((event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmRename();
+      }
+    });
     return (
       <ConfirmationDialog
         cancelLabel={labels.cancel}
@@ -86,34 +190,12 @@ export const AgentGUIRenameConversationDialog = memo(
               size="dialog"
               type="button"
               variant="ghost"
-              onClick={closeRenameDialog}
-              onLostPointerCapture={() => {
-                if (armedPointerActionRef.current === "cancel") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerCancel={() => {
-                if (armedPointerActionRef.current === "cancel") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerDown={(event) => {
-                if (event.button === 0) {
-                  armedPointerActionRef.current = "cancel";
-                }
-              }}
-              onPointerLeave={() => {
-                if (armedPointerActionRef.current === "cancel") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerUp={(event) => {
-                const isArmed = armedPointerActionRef.current === "cancel";
-                armedPointerActionRef.current = null;
-                if (event.button === 0 && isArmed) {
-                  closeRenameDialog();
-                }
-              }}
+              onClick={closeRenameDialogCallback}
+              onLostPointerCapture={onLostPointerCaptureProp1}
+              onPointerCancel={onPointerCancelProp2}
+              onPointerDown={onPointerDownProp3}
+              onPointerLeave={onPointerLeaveProp4}
+              onPointerUp={onPointerUpProp5}
             >
               {labels.cancel}
             </Button>
@@ -123,48 +205,13 @@ export const AgentGUIRenameConversationDialog = memo(
               size="dialog"
               type="button"
               variant="default"
-              onClick={(event) => {
-                if (event.detail !== 0) {
-                  return;
-                }
-                confirmRename();
-              }}
-              onKeyDown={(event) => {
-                if (
-                  (event.key === "Enter" || event.key === " ") &&
-                  !event.repeat
-                ) {
-                  event.preventDefault();
-                  confirmRename();
-                }
-              }}
-              onLostPointerCapture={() => {
-                if (armedPointerActionRef.current === "confirm") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerCancel={() => {
-                if (armedPointerActionRef.current === "confirm") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerDown={(event) => {
-                if (event.button === 0) {
-                  armedPointerActionRef.current = "confirm";
-                }
-              }}
-              onPointerLeave={() => {
-                if (armedPointerActionRef.current === "confirm") {
-                  armedPointerActionRef.current = null;
-                }
-              }}
-              onPointerUp={(event) => {
-                const isArmed = armedPointerActionRef.current === "confirm";
-                armedPointerActionRef.current = null;
-                if (event.button === 0 && isArmed) {
-                  confirmRename();
-                }
-              }}
+              onClick={onClickProp6}
+              onKeyDown={onKeyDownProp7}
+              onLostPointerCapture={onLostPointerCaptureProp8}
+              onPointerCancel={onPointerCancelProp9}
+              onPointerDown={onPointerDownProp10}
+              onPointerLeave={onPointerLeaveProp11}
+              onPointerUp={onPointerUpProp12}
             >
               {labels.renameSessionSave}
             </Button>
@@ -172,7 +219,7 @@ export const AgentGUIRenameConversationDialog = memo(
         }
         open={open}
         title={labels.renameSessionTitle}
-        onConfirm={confirmRename}
+        onConfirm={confirmRenameCallback}
         onOpenChange={onOpenChange}
       >
         <Input
@@ -182,15 +229,10 @@ export const AgentGUIRenameConversationDialog = memo(
           variant="md"
           placeholder={labels.renameSessionPlaceholder}
           value={title}
-          onChange={(event) => setTitle(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              confirmRename();
-            }
-          }}
+          onChange={onChangeProp13}
+          onKeyDown={onKeyDownProp14}
         />
       </ConfirmationDialog>
     );
-  })
+  }
 );

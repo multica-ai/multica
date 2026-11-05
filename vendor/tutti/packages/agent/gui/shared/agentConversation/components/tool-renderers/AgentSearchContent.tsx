@@ -7,8 +7,10 @@ import {
   type AgentToolRendererProps
 } from "./agentToolContentShared";
 import { getSearchRenderData } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentSearchContent = observer(AgentSearchContentRender);
 
-export function AgentSearchContent({
+function AgentSearchContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element {

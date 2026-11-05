@@ -1,3 +1,4 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   useCallback,
   useImperativeHandle,
@@ -13,6 +14,10 @@ import {
   scrollTranscriptRowIntoView
 } from "./AgentMessageLocatorRail";
 import type { AgentTranscriptTurnGroup } from "./agentTranscriptModel";
+import { observer } from "mobx-react-lite";
+export const AgentTranscriptAttachmentView = observer(
+  AgentTranscriptAttachmentViewRender
+);
 
 export interface AgentTranscriptTurnAttachment {
   id: string;
@@ -31,15 +36,9 @@ interface TurnAttachmentVirtualizer {
   scrollToIndex(index: number, options: { align: "center" }): void;
 }
 
-export function useAgentTranscriptTurnAttachments(input: {
-  attachments: readonly AgentTranscriptTurnAttachment[];
-  locatorRef?: Ref<AgentTranscriptAttachmentLocator>;
-  onVisibilityChange?: (attachmentId: string, visible: boolean) => void;
-  rowVirtualizer: TurnAttachmentVirtualizer;
-  shouldVirtualize: boolean;
-  turnGroups: readonly AgentTranscriptTurnGroup[];
-  virtualizerHostRef: RefObject<HTMLDivElement | null>;
-}): {
+export function useAgentTranscriptTurnAttachments(
+  input: useAgentTranscriptTurnAttachmentsProps
+): {
   byGroupIndex: ReadonlyMap<number, readonly AgentTranscriptTurnAttachment[]>;
   onElementChange: (attachmentId: string, element: HTMLElement | null) => void;
   trailing: readonly AgentTranscriptTurnAttachment[];
@@ -158,7 +157,7 @@ export function useAgentTranscriptTurnAttachments(input: {
   };
 }
 
-export function AgentTranscriptAttachmentView({
+function AgentTranscriptAttachmentViewRender({
   attachment,
   onElementChange
 }: {
@@ -169,9 +168,10 @@ export function AgentTranscriptAttachmentView({
     (element: HTMLDivElement | null) => onElementChange(attachment.id, element),
     [attachment.id, onElementChange]
   );
+  const handleRefCallback = usePersistCallback(handleRef);
   return (
     <div
-      ref={handleRef}
+      ref={handleRefCallback}
       className="agent-gui-transcript-attachment"
       data-agent-transcript-attachment={attachment.id}
     >
@@ -179,3 +179,13 @@ export function AgentTranscriptAttachmentView({
     </div>
   );
 }
+
+type useAgentTranscriptTurnAttachmentsProps = {
+  attachments: readonly AgentTranscriptTurnAttachment[];
+  locatorRef?: Ref<AgentTranscriptAttachmentLocator>;
+  onVisibilityChange?: (attachmentId: string, visible: boolean) => void;
+  rowVirtualizer: TurnAttachmentVirtualizer;
+  shouldVirtualize: boolean;
+  turnGroups: readonly AgentTranscriptTurnGroup[];
+  virtualizerHostRef: RefObject<HTMLDivElement | null>;
+};

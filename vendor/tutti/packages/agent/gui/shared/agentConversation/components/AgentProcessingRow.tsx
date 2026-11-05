@@ -1,6 +1,7 @@
 import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import type { AgentProcessingRowVM } from "../contracts/agentProcessingRowVM";
+const LoadingEllipsis = observer(LoadingEllipsisRender);
 
 export const AgentProcessingRow = observer(function AgentProcessingRow({
   row,
@@ -33,7 +34,7 @@ function processingLabel(row: AgentProcessingRowVM, fallback: string): string {
   return fallback;
 }
 
-function LoadingEllipsis(): JSX.Element {
+function LoadingEllipsisRender(): JSX.Element {
   "use memo";
   return (
     <span

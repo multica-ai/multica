@@ -1,13 +1,18 @@
+import { useMemo } from "react";
 import { MentionPill } from "@tutti-os/ui-system/components";
-import { createContext,useContext,useEffect,type ReactNode } from "react";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { previewResourceHref } from "./message-resource-links";
-import type { AgentGuiHostServices,AgentGuiWorkspaceState } from "./protocol";
+import type { AgentGuiHostServices, AgentGuiWorkspaceState } from "./protocol";
 import {
-resolveResourceReference,
-type ResourceLinkScope
+  resolveResourceReference,
+  type ResourceLinkScope
 } from "./resource-reference";
 import { useCanPreviewResources } from "./side-entry";
 import { isTaskCreationMentionHref } from "./task-creation-mention";
+import { observer } from "mobx-react-lite";
+export const ResourceLinkProvider = observer(ResourceLinkProviderRender);
+export const ResourceMarkdownLink = observer(ResourceMarkdownLinkRender);
+
 export { remarkMessageResourceLinks } from "./message-resource-links";
 
 interface ResourceLinks {
@@ -17,7 +22,7 @@ interface ResourceLinks {
 }
 const ResourceLinkContext = createContext<ResourceLinks | null>(null);
 
-export function ResourceLinkProvider({
+function ResourceLinkProviderRender({
   children,
   ...context
 }: ResourceLinks & { children: ReactNode }) {
@@ -100,7 +105,7 @@ export function ResourceLinkProvider({
 }
 
 /** Upgrade authored links at the anchor boundary; code blocks and external links stay intact. */
-export function ResourceMarkdownLink({
+function ResourceMarkdownLinkRender({
   href,
   children,
   fallback
@@ -138,21 +143,63 @@ export function ResourceMarkdownLink({
       className="tsh-agent-object-token tsh-agent-object-token--entity"
       title={typeof label === "string" ? label : undefined}
     >
-      <MentionPill
-        kind={
-          resource.kind === "issue"
-            ? "issue"
-            : resource.kind === "agent"
-              ? "session"
-              : "file"
-        }
-        fileKind={resource.kind === "project" ? "folder" : "file"}
-        iconUrl={agent?.iconUrl}
-        label={label}
-        className="top-0 max-w-full cursor-pointer text-brand"
-        style={{ color: "var(--brand)" }}
-        removable={false}
-      />
+      <MentionPillBinding1 resource={resource} agent={agent} label={label} />
     </a>
   );
 }
+
+const MentionPillBinding1 = observer(function MentionPillBinding1({
+  resource,
+  agent,
+  label
+}: MentionPillBinding1Props) {
+  const styleProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof MentionPill>["style"]>
+  >(() => ({ color: "var(--brand)" }), []);
+  return (
+    <MentionPill
+      kind={
+        resource.kind === "issue"
+          ? "issue"
+          : resource.kind === "agent"
+            ? "session"
+            : "file"
+      }
+      fileKind={resource.kind === "project" ? "folder" : "file"}
+      iconUrl={agent?.iconUrl}
+      label={label}
+      className="top-0 max-w-full cursor-pointer text-brand"
+      style={styleProp1}
+      removable={false}
+    />
+  );
+});
+
+type MentionPillBinding1Props = {
+  resource: import("./resource-reference").ResourceReference;
+  agent: import("./protocol").AgentGuiAgentDescriptor | undefined;
+  label:
+    | string
+    | number
+    | bigint
+    | true
+    | import("react").ReactElement<
+        unknown,
+        string | import("react").JSXElementConstructor<any>
+      >
+    | Iterable<ReactNode>
+    | Promise<
+        | string
+        | number
+        | bigint
+        | boolean
+        | import("react").ReactPortal
+        | import("react").ReactElement<
+            unknown,
+            string | import("react").JSXElementConstructor<any>
+          >
+        | Iterable<ReactNode>
+        | null
+        | undefined
+      >;
+};

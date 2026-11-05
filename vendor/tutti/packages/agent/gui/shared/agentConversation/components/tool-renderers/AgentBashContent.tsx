@@ -5,10 +5,10 @@ import {
   getCommandRenderData,
   getToolCallFailureText
 } from "./render-data/agentToolRenderData";
+import { observer } from "mobx-react-lite";
+export const AgentBashContent = observer(AgentBashContentRender);
 
-export function AgentBashContent({
-  call
-}: AgentToolRendererProps): JSX.Element {
+function AgentBashContentRender({ call }: AgentToolRendererProps): JSX.Element {
   "use memo";
   const commandData = getCommandRenderData(call);
   const structuredFailureText =

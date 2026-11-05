@@ -1,9 +1,11 @@
 import { createContext, useContext, type PropsWithChildren } from "react";
 import type { AgentGUIShellViewModel } from "./model/agentGuiNodeTypes";
+import { observer } from "mobx-react-lite";
+export const AgentGUIShellProvider = observer(AgentGUIShellProviderRender);
 
 const AgentGUIShellContext = createContext<AgentGUIShellViewModel | null>(null);
 
-export function AgentGUIShellProvider({
+function AgentGUIShellProviderRender({
   value,
   children
 }: PropsWithChildren<{ value: AgentGUIShellViewModel }>) {

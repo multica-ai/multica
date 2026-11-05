@@ -1,6 +1,8 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const GridLeftLinedIcon = observer(GridLeftLinedIconRender);
 
-export function GridLeftLinedIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+function GridLeftLinedIconRender(props: SVGProps<SVGSVGElement>): JSX.Element {
   "use memo";
   return (
     <svg

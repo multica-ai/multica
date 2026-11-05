@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import React, {
   createContext,
   useCallback,
@@ -36,7 +37,7 @@ const AgentGuiI18nContext = createContext<{
   runtime: I18nRuntime<string>;
 } | null>(null);
 
-export function AgentGuiI18nProvider({
+export const AgentGuiI18nProvider = observer(function AgentGuiI18nProvider({
   children,
   locale = "en",
   runtime
@@ -57,7 +58,7 @@ export function AgentGuiI18nProvider({
   agentGuiI18nRuntime.setCurrentAgentGuiI18nRuntime(value);
 
   return React.createElement(AgentGuiI18nContext.Provider, { value }, children);
-}
+});
 
 export function useTranslation(): {
   i18n: I18nRuntime<string>;

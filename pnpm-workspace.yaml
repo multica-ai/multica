@@ -27,9 +27,11 @@ catalog:
   lucide-react: ^1.0.1
   mermaid: ^11.14.0
   mobx: ^6.15.0
+  mobx-react: ^9.2.1
   mobx-react-lite: ^4.1.1
   postcss: ^8
   posthog-js: ^1.176.1
+  radix-ui: 1.4.3
   react: 19.2.3
   react-dom: 19.2.3
   react-i18next: ^17.0.6

@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useState, type JSX, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { translate } from "../../../../i18n/index";
@@ -17,6 +19,11 @@ import { CollapsibleReveal } from "../CollapsibleReveal";
 import { fileRange } from "./AgentReadContent";
 import { structuredToolText } from "./render-data/structuredToolText";
 import { getPromptToolDetails } from "../../promptToolDetails";
+import { observer } from "mobx-react-lite";
+export const ToolSection = observer(ToolSectionRender);
+export const ToolMarkdownBlock = observer(ToolMarkdownBlockRender);
+export const AgentDefaultToolContent = observer(AgentDefaultToolContentRender);
+export const RawPayloadSection = observer(RawPayloadSectionRender);
 
 export interface AgentToolRendererProps {
   call: AgentToolCallVM;
@@ -32,7 +39,7 @@ export interface TaskStepView {
   payload: Record<string, unknown> | null;
 }
 
-export function ToolSection({
+function ToolSectionRender({
   title,
   children
 }: {
@@ -53,7 +60,7 @@ export function ToolSection({
   );
 }
 
-export function ToolMarkdownBlock({
+function ToolMarkdownBlockRender({
   content,
   onLinkClick,
   collapsible = false
@@ -78,7 +85,7 @@ export function ToolMarkdownBlock({
   );
 }
 
-export function AgentDefaultToolContent({
+function AgentDefaultToolContentRender({
   call,
   onLinkClick
 }: AgentToolRendererProps): JSX.Element | null {
@@ -166,8 +173,8 @@ export function hasAgentToolContent(call: AgentToolCallVM): boolean {
   if (call.rendererKind === "approval") {
     return Boolean(
       call.input?.toolCall ||
-      call.summary.trim() ||
-      getPromptToolDetails(call.input).length > 0
+        call.summary.trim() ||
+        getPromptToolDetails(call.input).length > 0
     );
   }
 
@@ -191,10 +198,10 @@ export function hasAgentToolContent(call: AgentToolCallVM): boolean {
       // that paints an empty terminal shell with no data-agent-terminal-command.
       return Boolean(
         command.command ||
-        command.stdout ||
-        command.stderr ||
-        call.error ||
-        stringValue(call.summary)
+          command.stdout ||
+          command.stderr ||
+          call.error ||
+          stringValue(call.summary)
       );
     }
     case "search":
@@ -222,13 +229,13 @@ export function hasAgentToolContent(call: AgentToolCallVM): boolean {
 function hasGenericStructuredContent(call: AgentToolCallVM): boolean {
   return Boolean(
     call.summary.trim() ||
-    call.compactSummary?.trim() ||
-    call.input ||
-    call.output ||
-    call.error ||
-    call.payload ||
-    call.metadata ||
-    call.locations?.length
+      call.compactSummary?.trim() ||
+      call.input ||
+      call.output ||
+      call.error ||
+      call.payload ||
+      call.metadata ||
+      call.locations?.length
   );
 }
 
@@ -244,10 +251,10 @@ function hasWebSearchContent(call: AgentToolCallVM): boolean {
   const web = getWebSearchRenderData(call);
   return Boolean(
     web.query ||
-    web.queries.length > 0 ||
-    web.output.trim() ||
-    web.error ||
-    arrayValue(call.output?.links)?.length
+      web.queries.length > 0 ||
+      web.output.trim() ||
+      web.error ||
+      arrayValue(call.output?.links)?.length
   );
 }
 
@@ -255,14 +262,14 @@ function hasReadContent(call: AgentToolCallVM): boolean {
   const file = objectValue(call.output?.file);
   return Boolean(
     stringValue(call.output?.text) ||
-    stringValue(call.output?.stdout) ||
-    (!file && call.summary.trim()) ||
-    stringValue(call.input?.path) ||
-    stringValue(call.input?.file_path) ||
-    stringValue(call.input?.filePath) ||
-    stringValue(call.input?.file) ||
-    fileRange(file) ||
-    numericValue(file?.totalLines) !== null
+      stringValue(call.output?.stdout) ||
+      (!file && call.summary.trim()) ||
+      stringValue(call.input?.path) ||
+      stringValue(call.input?.file_path) ||
+      stringValue(call.input?.filePath) ||
+      stringValue(call.input?.file) ||
+      fileRange(file) ||
+      numericValue(file?.totalLines) !== null
   );
 }
 
@@ -270,12 +277,14 @@ function hasWriteContent(call: AgentToolCallVM): boolean {
   const files = getFileChangeRenderData(call);
   return Boolean(
     getToolCallFailureText(call) ||
-    files.some((file) => file.content !== null || file.unifiedDiff !== null) ||
-    (files.length === 0 &&
-      (call.summary.trim() ||
-        stringValue(call.input?.path) ||
-        stringValue(call.input?.file_path) ||
-        stringValue(call.input?.filePath)))
+      files.some(
+        (file) => file.content !== null || file.unifiedDiff !== null
+      ) ||
+      (files.length === 0 &&
+        (call.summary.trim() ||
+          stringValue(call.input?.path) ||
+          stringValue(call.input?.file_path) ||
+          stringValue(call.input?.filePath)))
   );
 }
 
@@ -283,16 +292,16 @@ function hasEditContent(call: AgentToolCallVM): boolean {
   const files = getFileChangeRenderData(call);
   return Boolean(
     getToolCallFailureText(call) ||
-    files.some(
-      (file) =>
-        file.unifiedDiff !== null ||
-        (file.oldString !== null && file.newString !== null) ||
-        file.content !== null
-    ) ||
-    (files.length === 0 &&
-      (stringValue(call.input?.path) ||
-        stringValue(call.input?.file_path) ||
-        stringValue(call.input?.filePath)))
+      files.some(
+        (file) =>
+          file.unifiedDiff !== null ||
+          (file.oldString !== null && file.newString !== null) ||
+          file.content !== null
+      ) ||
+      (files.length === 0 &&
+        (stringValue(call.input?.path) ||
+          stringValue(call.input?.file_path) ||
+          stringValue(call.input?.filePath)))
   );
 }
 
@@ -407,7 +416,7 @@ function structuredText(value: unknown): string | null {
   return structuredToolText(value);
 }
 
-export function RawPayloadSection({
+function RawPayloadSectionRender({
   payload
 }: {
   payload: unknown;
@@ -420,29 +429,7 @@ export function RawPayloadSection({
   }
   return (
     <div className="workspace-agents-status-panel__detail-tool-raw">
-      <button
-        type="button"
-        className="group/raw-payload inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[11px] font-normal text-[var(--text-secondary)]"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span>{translate("agentHost.agentTool.details.rawPayload")}</span>
-        {expanded ? (
-          <ChevronDown
-            size={12}
-            strokeWidth={2.2}
-            aria-hidden="true"
-            className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/raw-payload:opacity-100 group-focus-visible/raw-payload:opacity-100"
-          />
-        ) : (
-          <ChevronRight
-            size={12}
-            strokeWidth={2.2}
-            aria-hidden="true"
-            className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/raw-payload:opacity-100 group-focus-visible/raw-payload:opacity-100"
-          />
-        )}
-      </button>
+      <ButtonBinding1 expanded={expanded} setExpanded={setExpanded} />
       <CollapsibleReveal expanded={expanded} preMountOnIdle>
         <pre className="workspace-agents-status-panel__detail-scroll-region mt-2 max-h-[320px] overflow-auto rounded-[8px] border border-[var(--line-2)] bg-[var(--transparency-block)] px-3 py-2 text-[11px] leading-[1.45] text-[var(--text-secondary)]">
           <code>{rawJson}</code>
@@ -617,3 +604,53 @@ export function humanizeToolLabel(name: string): string {
       return name;
   }
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  expanded,
+  setExpanded,
+  ...slotProps
+}: {
+  expanded: boolean;
+  setExpanded: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    expanded: boolean;
+    setExpanded: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+  }
+>) {
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setExpanded((value) => !value));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="group/raw-payload inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[11px] font-normal text-[var(--text-secondary)]"
+        aria-expanded={expanded}
+        onClick={onClickProp1}
+      >
+        <span>{translate("agentHost.agentTool.details.rawPayload")}</span>
+        {expanded ? (
+          <ChevronDown
+            size={12}
+            strokeWidth={2.2}
+            aria-hidden="true"
+            className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/raw-payload:opacity-100 group-focus-visible/raw-payload:opacity-100"
+          />
+        ) : (
+          <ChevronRight
+            size={12}
+            strokeWidth={2.2}
+            aria-hidden="true"
+            className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/raw-payload:opacity-100 group-focus-visible/raw-payload:opacity-100"
+          />
+        )}
+      </button>
+    </Slot.Root>
+  );
+});

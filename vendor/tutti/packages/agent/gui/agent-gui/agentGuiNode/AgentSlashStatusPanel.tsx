@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
 import { observer } from "mobx-react-lite";
 import { Fragment } from "react";
 import { AgentProbeUsageFreshness } from "./AgentProbeUsageFreshness";
@@ -116,20 +118,10 @@ export const AgentSlashStatusPanel = observer(function AgentSlashStatusPanel({
         </h3>
         <div className="flex min-w-0 items-center gap-1">
           {onRefresh ? (
-            <AgentProbeUsageFreshness
-              capturedAtUnixMs={status?.limitsCapturedAtUnixMs ?? null}
-              isLoading={status?.isRefreshing === true}
-              didFail={status?.refreshFailed === true}
+            <AgentProbeUsageFreshnessBinding1
+              status={status}
               onRefresh={onRefresh}
-              labels={{
-                justUpdated: labels.slashStatusUsageJustUpdated,
-                minutesAgo: labels.slashStatusUsageMinutesAgo,
-                hoursAgo: labels.slashStatusUsageHoursAgo,
-                updating: labels.slashStatusUsageUpdating,
-                refreshFailed: labels.slashStatusUsageRefreshFailed,
-                refreshAria: labels.slashStatusUsageRefreshAria
-              }}
-              testId="agent-gui-slash-status-refresh"
+              labels={labels}
             />
           ) : null}
           <button
@@ -172,15 +164,7 @@ export const AgentSlashStatusPanel = observer(function AgentSlashStatusPanel({
                     aria-hidden="true"
                     className="agent-gui-node__slash-status-limit-meter"
                   >
-                    <span
-                      className="agent-gui-node__slash-status-limit-meter-fill"
-                      style={{
-                        width: `${Math.max(
-                          0,
-                          Math.min(100, limit.percentRemaining)
-                        )}%`
-                      }}
-                    />
+                    <SpanBinding2 limit={limit} />
                   </span>
                 ) : null}
                 <span className="agent-gui-node__slash-status-limit-value">
@@ -217,3 +201,94 @@ export const AgentSlashStatusPanel = observer(function AgentSlashStatusPanel({
     </section>
   );
 });
+
+const AgentProbeUsageFreshnessBinding1 = observer(
+  function AgentProbeUsageFreshnessBinding1({
+    status,
+    onRefresh,
+    labels
+  }: AgentProbeUsageFreshnessBinding1Props) {
+    const labelsProp1Value1 = labels.slashStatusUsageJustUpdated;
+    const labelsProp1Value2 = labels.slashStatusUsageMinutesAgo;
+    const labelsProp1Value3 = labels.slashStatusUsageHoursAgo;
+    const labelsProp1Value4 = labels.slashStatusUsageUpdating;
+    const labelsProp1Value5 = labels.slashStatusUsageRefreshFailed;
+    const labelsProp1Value6 = labels.slashStatusUsageRefreshAria;
+    const labelsProp1 = useMemo<
+      NonNullable<
+        React.ComponentProps<typeof AgentProbeUsageFreshness>["labels"]
+      >
+    >(
+      () => ({
+        justUpdated: labelsProp1Value1,
+        minutesAgo: labelsProp1Value2,
+        hoursAgo: labelsProp1Value3,
+        updating: labelsProp1Value4,
+        refreshFailed: labelsProp1Value5,
+        refreshAria: labelsProp1Value6
+      }),
+      [
+        labelsProp1Value1,
+        labelsProp1Value2,
+        labelsProp1Value3,
+        labelsProp1Value4,
+        labelsProp1Value5,
+        labelsProp1Value6
+      ]
+    );
+    return (
+      <AgentProbeUsageFreshness
+        capturedAtUnixMs={status?.limitsCapturedAtUnixMs ?? null}
+        isLoading={status?.isRefreshing === true}
+        didFail={status?.refreshFailed === true}
+        onRefresh={onRefresh}
+        labels={labelsProp1}
+        testId="agent-gui-slash-status-refresh"
+      />
+    );
+  }
+);
+
+const SpanBinding2 = observer(function SpanBinding2({
+  limit,
+  ...slotProps
+}: {
+  limit: AgentSlashStatusPanelLimit;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    limit: AgentSlashStatusPanelLimit;
+  }
+>) {
+  const styleProp2Value1 = `${Math.max(
+    0,
+    Math.min(100, limit.percentRemaining!)
+  )}%`;
+  const styleProp2 = useMemo<
+    NonNullable<React.ComponentProps<"span">["style"]>
+  >(() => ({ width: styleProp2Value1 }), [styleProp2Value1]);
+  return (
+    <Slot.Root {...slotProps}>
+      <span
+        className="agent-gui-node__slash-status-limit-meter-fill"
+        style={styleProp2}
+      />
+    </Slot.Root>
+  );
+});
+
+type AgentProbeUsageFreshnessBinding1Props = {
+  status: NonNullable<{
+    status: AgentSlashStatusPanelStatus | null | undefined;
+    labels: AgentSlashStatusPanelLabels;
+    onClose: () => void;
+    onRefresh?: () => void;
+  }>["status"];
+  onRefresh: () => void;
+  labels: NonNullable<{
+    status: AgentSlashStatusPanelStatus | null | undefined;
+    labels: AgentSlashStatusPanelLabels;
+    onClose: () => void;
+    onRefresh?: () => void;
+  }>["labels"];
+};

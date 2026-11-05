@@ -1,6 +1,8 @@
 import type { JSX, SVGProps } from "react";
+import { observer } from "mobx-react-lite";
+export const SettingsLinedIcon = observer(SettingsLinedIconRender);
 
-export function SettingsLinedIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+function SettingsLinedIconRender(props: SVGProps<SVGSVGElement>): JSX.Element {
   "use memo";
   return (
     <svg

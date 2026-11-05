@@ -10,11 +10,15 @@ import type {
   AgentGUIObservationGapSource
 } from "../../types";
 import { useExternalStoreSelector } from "../useExternalStoreSelector";
+import { observer } from "mobx-react-lite";
+export const AgentObservationGapSourceProvider = observer(
+  AgentObservationGapSourceProviderRender
+);
 
 const AgentObservationGapSourceContext =
   createContext<AgentGUIObservationGapSource | null>(null);
 
-export function AgentObservationGapSourceProvider({
+function AgentObservationGapSourceProviderRender({
   children,
   source
 }: {

@@ -1,3 +1,6 @@
+import { Slot } from "radix-ui";
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Check, ChevronDown, ChevronUp, Copy, ListChecks } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useCallback, useRef, useState, type JSX, type ReactNode } from "react";
@@ -36,7 +39,16 @@ export const AgentPlanCard = observer(function AgentPlanCard({
       copyResetRef.current = setTimeout(() => setCopied(false), 1500);
     });
   }, [copyText]);
+  const handleCopyCallback = usePersistCallback(handleCopy);
 
+  const onClickProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setCollapsed((value) => !value));
+  const styleProp1Value1 = `${COLLAPSED_MAX_HEIGHT_PX}px`;
+  const styleProp1 = useMemo<NonNullable<React.ComponentProps<"div">["style"]>>(
+    () => ({ maxHeight: styleProp1Value1 }),
+    [styleProp1Value1]
+  );
   return (
     <section
       data-testid="agent-plan-card"
@@ -62,7 +74,7 @@ export const AgentPlanCard = observer(function AgentPlanCard({
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--transparency-hover)] hover:text-[var(--text-secondary)]"
           aria-label={translate("agentHost.agentGui.planCardCopy")}
           title={translate("agentHost.agentGui.planCardCopy")}
-          onClick={handleCopy}
+          onClick={handleCopyCallback}
         >
           {copied ? (
             <Check size={14} strokeWidth={2} aria-hidden="true" />
@@ -85,7 +97,7 @@ export const AgentPlanCard = observer(function AgentPlanCard({
               ? "agentHost.agentGui.planCardExpand"
               : "agentHost.agentGui.planCardCollapse"
           )}
-          onClick={() => setCollapsed((value) => !value)}
+          onClick={onClickProp1}
         >
           {collapsed ? (
             <ChevronDown size={15} strokeWidth={2} aria-hidden="true" />
@@ -98,27 +110,48 @@ export const AgentPlanCard = observer(function AgentPlanCard({
         <div
           data-testid="agent-plan-card-body"
           className="min-w-0 overflow-hidden"
-          style={
-            collapsed
-              ? { maxHeight: `${COLLAPSED_MAX_HEIGHT_PX}px` }
-              : undefined
-          }
+          style={collapsed ? styleProp1 : undefined}
         >
           {children}
         </div>
         {collapsed ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-[var(--tutti-purple-bg)] via-[color-mix(in_srgb,var(--tutti-purple-bg)_70%,transparent)] to-transparent pt-8 pb-1">
-            <button
-              type="button"
-              data-testid="agent-plan-card-expand"
-              className="pointer-events-auto inline-flex h-7 items-center rounded-full border border-[var(--line-2)] bg-[var(--background-fronted)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-              onClick={() => setCollapsed(false)}
-            >
-              {translate("agentHost.agentGui.planCardExpand")}
-            </button>
+            <ButtonBinding1 setCollapsed={setCollapsed} />
           </div>
         ) : null}
       </div>
     </section>
+  );
+});
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  setCollapsed,
+  ...slotProps
+}: {
+  setCollapsed: import("react").Dispatch<
+    import("react").SetStateAction<boolean>
+  >;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setCollapsed: import("react").Dispatch<
+      import("react").SetStateAction<boolean>
+    >;
+  }
+>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => setCollapsed(false));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        data-testid="agent-plan-card-expand"
+        className="pointer-events-auto inline-flex h-7 items-center rounded-full border border-[var(--line-2)] bg-[var(--background-fronted)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+        onClick={onClickProp2}
+      >
+        {translate("agentHost.agentGui.planCardExpand")}
+      </button>
+    </Slot.Root>
   );
 });

@@ -3,6 +3,7 @@ import type { AgentGUIAgentAvatarPresentation } from "../model/agentGuiAgentAvat
 import type { AgentGUINodeViewProps } from "../AgentGUINodeView";
 import { AgentGUIHeroAgentCarousel } from "../AgentGUIHeroAgentCarousel";
 import styles from "../AgentGUINode.styles";
+import { observer as observeClass } from "mobx-react";
 
 interface AgentGUIEmptyHeroCarouselStageProps {
   activeAgentTargetId?: string | null;
@@ -107,9 +108,9 @@ export class AgentGUIEmptyHeroCarouselStage extends Component<AgentGUIEmptyHeroC
   private canAlign(): boolean {
     return Boolean(
       this.props.isVisible &&
-      this.props.items.length > 1 &&
-      this.stage &&
-      this.layer
+        this.props.items.length > 1 &&
+        this.stage &&
+        this.layer
     );
   }
 
@@ -178,3 +179,4 @@ export class AgentGUIEmptyHeroCarouselStage extends Component<AgentGUIEmptyHeroC
     this.stage = element;
   };
 }
+observeClass(AgentGUIEmptyHeroCarouselStage);

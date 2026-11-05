@@ -7,6 +7,10 @@ import {
   type JSX,
   type ReactNode
 } from "react";
+import { observer } from "mobx-react-lite";
+export const AgentTurnDisclosureProvider = observer(
+  AgentTurnDisclosureProviderRender
+);
 
 export interface AgentTurnDisclosureStore {
   expandedOverrides: Readonly<Record<string, boolean>>;
@@ -16,7 +20,7 @@ export interface AgentTurnDisclosureStore {
 const AgentTurnDisclosureContext =
   createContext<AgentTurnDisclosureStore | null>(null);
 
-export function AgentTurnDisclosureProvider({
+function AgentTurnDisclosureProviderRender({
   children
 }: {
   children: ReactNode;

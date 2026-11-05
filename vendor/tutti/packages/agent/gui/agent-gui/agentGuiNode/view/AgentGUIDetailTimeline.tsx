@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import type { AgentActivitySessionForkLineage } from "@tutti-os/agent-activity-core";
 import { ScrollArea } from "@tutti-os/ui-system/components";
 import { GitFork } from "lucide-react";
@@ -26,6 +28,7 @@ import {
   readAgentGUITextSelection,
   type AgentGUITextSelectionSnapshot
 } from "./AgentGUITextSelectionActions";
+import { observer } from "mobx-react-lite";
 
 const TIMELINE_CONTENT_STYLE: CSSProperties = {
   width: "100%",
@@ -80,7 +83,7 @@ interface AgentGUIDetailTimelineProps {
   workspaceAppIcons: readonly AgentMessageMarkdownWorkspaceAppIcon[];
 }
 
-export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
+export const AgentGUIDetailTimeline = observer(function AgentGUIDetailTimeline({
   availableSkills,
   agentSessionId,
   editRetry,
@@ -129,16 +132,11 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
                     className="h-px min-w-0 flex-1 bg-[var(--line-2,var(--tutti-line-2))]"
                     aria-hidden="true"
                   />
-                  <button
-                    type="button"
-                    className="flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tutti-purple)]"
-                    onClick={() =>
-                      onOpenForkSourceSession?.(forkedFrom.sourceAgentSessionId)
-                    }
-                  >
-                    <GitFork width={16} height={16} aria-hidden="true" />
-                    {labels.continuedFromTask}
-                  </button>
+                  <ButtonBinding1
+                    onOpenForkSourceSession={onOpenForkSourceSession}
+                    forkedFrom={forkedFrom}
+                    labels={labels}
+                  />
                   <span
                     className="h-px min-w-0 flex-1 bg-[var(--line-2,var(--tutti-line-2))]"
                     aria-hidden="true"
@@ -154,6 +152,43 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
       forkedFrom?.targetTurnId,
       labels.continuedFromTask,
       onOpenForkSourceSession
+    ]
+  );
+  const viewportPropsProp1Value1 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof ScrollArea>["viewportProps"]
+      >["onMouseUp"]
+    >
+  >((event) =>
+    setTextSelection(readAgentGUITextSelection(event.currentTarget))
+  );
+  const viewportPropsProp1Value2 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof ScrollArea>["viewportProps"]
+      >["onPointerDown"]
+    >
+  >(() => setTextSelection(null));
+  const viewportPropsProp1Value3 = usePersistCallback<
+    NonNullable<
+      NonNullable<
+        React.ComponentProps<typeof ScrollArea>["viewportProps"]
+      >["onScroll"]
+    >
+  >(() => setTextSelection(null));
+  const viewportPropsProp1 = useMemo<
+    NonNullable<React.ComponentProps<typeof ScrollArea>["viewportProps"]>
+  >(
+    () => ({
+      onMouseUp: viewportPropsProp1Value1,
+      onPointerDown: viewportPropsProp1Value2,
+      onScroll: viewportPropsProp1Value3
+    }),
+    [
+      viewportPropsProp1Value1,
+      viewportPropsProp1Value2,
+      viewportPropsProp1Value3
     ]
   );
   return (
@@ -172,12 +207,7 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
           !isTimelineScrolledToTop ? styles.timelineScrolledFromTop : ""
         } ${showUnavailableChatEmpty ? styles.timelineUnavailableChatEmpty : ""}`.trim()}
         viewportContentStyle={TIMELINE_CONTENT_STYLE}
-        viewportProps={{
-          onMouseUp: (event) =>
-            setTextSelection(readAgentGUITextSelection(event.currentTarget)),
-          onPointerDown: () => setTextSelection(null),
-          onScroll: () => setTextSelection(null)
-        }}
+        viewportProps={viewportPropsProp1}
       >
         {hasActiveConversation ? (
           <>
@@ -214,18 +244,96 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
       hasActiveConversation &&
       textSelection &&
       timelineRef.current ? (
-        <AgentGUITextSelectionActions
-          labels={{
-            addToConversation: labels.selectionAddToConversation,
-            askInSide: labels.selectionAskInSide
-          }}
-          snapshot={textSelection}
-          portalTarget={timelineRef.current.ownerDocument.body}
-          onAddToConversation={onAddSelectionToConversation}
-          onAskInSide={onAskSelectionInSide}
-          onDismiss={() => setTextSelection(null)}
+        <AgentGUITextSelectionActionsBinding2
+          labels={labels}
+          textSelection={textSelection}
+          timelineRef={timelineRef}
+          onAddSelectionToConversation={onAddSelectionToConversation}
+          onAskSelectionInSide={onAskSelectionInSide}
+          setTextSelection={setTextSelection}
         />
       ) : null}
     </>
   );
 });
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  onOpenForkSourceSession,
+  forkedFrom,
+  labels,
+  ...slotProps
+}: ButtonBinding1Props &
+  Omit<React.ComponentProps<typeof Slot.Root>, keyof ButtonBinding1Props>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<"button">["onClick"]>
+  >(() => onOpenForkSourceSession?.(forkedFrom.sourceAgentSessionId));
+  return (
+    <Slot.Root {...slotProps}>
+      <button
+        type="button"
+        className="flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tutti-purple)]"
+        onClick={onClickProp2}
+      >
+        <GitFork width={16} height={16} aria-hidden="true" />
+        {labels.continuedFromTask}
+      </button>
+    </Slot.Root>
+  );
+});
+
+const AgentGUITextSelectionActionsBinding2 = observer(
+  function AgentGUITextSelectionActionsBinding2({
+    labels,
+    textSelection,
+    timelineRef,
+    onAddSelectionToConversation,
+    onAskSelectionInSide,
+    setTextSelection
+  }: AgentGUITextSelectionActionsBinding2Props) {
+    const labelsProp3Value1 = labels.selectionAddToConversation;
+    const labelsProp3Value2 = labels.selectionAskInSide;
+    const labelsProp3 = useMemo<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUITextSelectionActions>["labels"]
+      >
+    >(
+      () => ({
+        addToConversation: labelsProp3Value1,
+        askInSide: labelsProp3Value2
+      }),
+      [labelsProp3Value1, labelsProp3Value2]
+    );
+    const onDismissProp4 = usePersistCallback<
+      NonNullable<
+        React.ComponentProps<typeof AgentGUITextSelectionActions>["onDismiss"]
+      >
+    >(() => setTextSelection(null));
+    return (
+      <AgentGUITextSelectionActions
+        labels={labelsProp3}
+        snapshot={textSelection}
+        portalTarget={timelineRef.current!.ownerDocument.body}
+        onAddToConversation={onAddSelectionToConversation}
+        onAskInSide={onAskSelectionInSide}
+        onDismiss={onDismissProp4}
+      />
+    );
+  }
+);
+
+type ButtonBinding1Props = {
+  onOpenForkSourceSession: NonNullable<AgentGUIDetailTimelineProps>["onOpenForkSourceSession"];
+  forkedFrom: AgentActivitySessionForkLineage;
+  labels: NonNullable<AgentGUIDetailTimelineProps>["labels"];
+};
+
+type AgentGUITextSelectionActionsBinding2Props = {
+  labels: NonNullable<AgentGUIDetailTimelineProps>["labels"];
+  textSelection: AgentGUITextSelectionSnapshot;
+  timelineRef: NonNullable<AgentGUIDetailTimelineProps>["timelineRef"];
+  onAddSelectionToConversation: NonNullable<AgentGUIDetailTimelineProps>["onAddSelectionToConversation"];
+  onAskSelectionInSide: NonNullable<AgentGUIDetailTimelineProps>["onAskSelectionInSide"];
+  setTextSelection: import("react").Dispatch<
+    import("react").SetStateAction<AgentGUITextSelectionSnapshot | null>
+  >;
+};

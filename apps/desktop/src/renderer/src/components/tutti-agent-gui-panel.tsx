@@ -1,38 +1,44 @@
 "use client";
 
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+
 import { useAuthStore } from "@multica/core/auth";
-import { getCurrentSlug,getCurrentWsId } from "@multica/core/platform";
+import { getCurrentSlug, getCurrentWsId } from "@multica/core/platform";
 import { useWSReconnect } from "@multica/core/realtime";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { createHostServicesConnection } from "@multica/tutti-agent-gui-host/host-services-connection";
 import type {
-AgentGuiHostEvent,
-AgentGuiHostServices,
-AgentGuiInitSnapshot,
-LocalConversationSource
+  AgentGuiHostEvent,
+  AgentGuiHostServices,
+  AgentGuiInitSnapshot,
+  LocalConversationSource
 } from "@multica/tutti-agent-gui-host/protocol";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { Button } from "@multica/ui/components/ui/button";
 import type { RestoreDraftRequest } from "@multica/views/chat/use-chat-draft-restore";
 import { useAppForeground } from "@multica/views/common/use-app-foreground";
-import { useLocale,useT } from "@multica/views/i18n";
-import { useAppOrigin,useOptionalNavigation } from "@multica/views/navigation";
+import { useLocale, useT } from "@multica/views/i18n";
+import { useAppOrigin, useOptionalNavigation } from "@multica/views/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-Component,
-Suspense,
-lazy,
-useCallback,
-useEffect,
-useMemo,
-useRef,
-useState,
-type ReactNode
+  Component,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
 } from "react";
 import type {
-AgentGuiParentService,
-ParentServiceOptions
+  AgentGuiParentService,
+  ParentServiceOptions
 } from "../platform/agent-gui-parent-service";
+import { observer } from "mobx-react-lite";
+import { observer as observeClass } from "mobx-react";
+export const TuttiAgentGuiPanel = observer(TuttiAgentGuiPanelRender);
 
 interface Props {
   locateRequest?: {
@@ -74,9 +80,10 @@ class LoadBoundary extends Component<
     return this.state.failed ? null : this.props.children;
   }
 }
+observeClass(LoadBoundary);
 
 /** The imported GUI is loaded on demand: it is large, and it only runs in the browser. */
-export function TuttiAgentGuiPanel(props: Props) {
+function TuttiAgentGuiPanelRender(props: Props) {
   const appOrigin = useAppOrigin();
   const navigation = useOptionalNavigation();
   const resourceNavigation = useRef({ appOrigin, navigation });
@@ -332,6 +339,7 @@ export function TuttiAgentGuiPanel(props: Props) {
     clearTimeout(renderTimer.current);
     setStatus("ready");
   }, []);
+  const renderedCallback = usePersistCallback(rendered);
   return (
     <div
       ref={container}
@@ -339,16 +347,14 @@ export function TuttiAgentGuiPanel(props: Props) {
       data-testid="tutti-agent-gui-host"
     >
       {connection && (
-        <LoadBoundary key={attempt} onError={() => setStatus("error")}>
-          <Suspense fallback={null}>
-            <AgentGuiMount
-              client={connection.client}
-              initial={connection.initial}
-              localConversations={connection.localConversations}
-              onRendered={rendered}
-            />
-          </Suspense>
-        </LoadBoundary>
+        <LoadBoundaryBinding1
+          key={attempt}
+          attempt={attempt}
+          setStatus={setStatus}
+          AgentGuiMount={AgentGuiMount}
+          connection={connection}
+          rendered={renderedCallback}
+        />
       )}
       {status !== "ready" && (
         <div
@@ -361,15 +367,78 @@ export function TuttiAgentGuiPanel(props: Props) {
             )}
           </span>
           {status === "error" && (
-            <Button
-              variant="outline"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
-              {t(($) => $.workbench.retry)}
-            </Button>
+            <ButtonBinding2 setAttempt={setAttempt} t={t} />
           )}
         </div>
       )}
     </div>
   );
 }
+
+const LoadBoundaryBinding1 = observer(function LoadBoundaryBinding1({
+  attempt,
+  setStatus,
+  AgentGuiMount,
+  connection,
+  rendered
+}: {
+  attempt: number;
+  setStatus: import("react").Dispatch<
+    import("react").SetStateAction<"error" | "loading" | "ready">
+  >;
+  AgentGuiMount: import("react").LazyExoticComponent<
+    import("react").ComponentType<
+      import("@multica/tutti-agent-gui-host/mount").AgentGuiMountProps
+    >
+  >;
+  connection: {
+    client: AgentGuiHostServices;
+    initial: AgentGuiInitSnapshot;
+    localConversations: LocalConversationSource;
+  };
+  rendered: () => void;
+}) {
+  const onErrorProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof LoadBoundary>["onError"]>
+  >(() => setStatus("error"));
+  return (
+    <LoadBoundary key={attempt} onError={onErrorProp1}>
+      <Suspense fallback={null}>
+        <AgentGuiMount
+          client={connection.client}
+          initial={connection.initial}
+          localConversations={connection.localConversations}
+          onRendered={rendered}
+        />
+      </Suspense>
+    </LoadBoundary>
+  );
+});
+
+const ButtonBinding2 = observer(function ButtonBinding2({
+  setAttempt,
+  t,
+  ...slotProps
+}: {
+  setAttempt: import("react").Dispatch<import("react").SetStateAction<number>>;
+  t: ReturnType<typeof useT<"chat">>["t"];
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    setAttempt: import("react").Dispatch<
+      import("react").SetStateAction<number>
+    >;
+    t: ReturnType<typeof useT<"chat">>["t"];
+  }
+>) {
+  const onClickProp2 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onClick"]>
+  >(() => setAttempt((value) => value + 1));
+  return (
+    <Slot.Root {...slotProps}>
+      <Button variant="outline" onClick={onClickProp2}>
+        {t(($) => $.workbench.retry)}
+      </Button>
+    </Slot.Root>
+  );
+});

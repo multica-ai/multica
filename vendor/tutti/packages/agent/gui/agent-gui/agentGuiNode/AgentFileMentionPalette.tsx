@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { renderMulticaMentionRow } from "@multica/tutti-agent-gui-host/mention-row";
 import {
   normalizeAgentActivityDisplayStatus,
@@ -250,22 +252,27 @@ export const AgentFileMentionPalette = observer(
     // empty group list so it renders its (keyboard-icon) empty state with our
     // computed hint copy. Otherwise we map the real groups, decorating each with
     // the agent-specific label / empty / expand / spacing chrome.
-    const shellState: MentionPaletteState<AgentContextMentionItem> =
-      showBrowseHint
-        ? { ...state, categories, groups: [] }
-        : {
-            ...state,
-            categories,
-            groups: state.groups.map((group, index) =>
-              decorateMentionGroup(
-                group,
-                index,
-                state.groups,
-                filter,
-                state.query
+    const shellState: MentionPaletteState<AgentContextMentionItem> = useMemo<
+      MentionPaletteState<AgentContextMentionItem>
+    >(
+      () =>
+        showBrowseHint
+          ? { ...state, categories, groups: [] }
+          : {
+              ...state,
+              categories,
+              groups: state.groups.map((group, index) =>
+                decorateMentionGroup(
+                  group,
+                  index,
+                  state.groups,
+                  filter,
+                  state.query
+                )
               )
-            )
-          };
+            },
+      [showBrowseHint, state, categories, filter]
+    );
 
     const emptyLabelForShell = showBrowseHint
       ? browseHintForFilter(filter)
@@ -276,53 +283,127 @@ export const AgentFileMentionPalette = observer(
           query: state.query
         });
 
+    const renderItemProp1 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof MentionPaletteFromState<AgentContextMentionItem>
+        >["renderItem"]
+      >
+    >(
+      () => (item) =>
+        renderMulticaMentionRow(
+          item,
+          getActiveUiLanguage(),
+          agentMentionItemToRowItem(item),
+          {
+            classNames: AGENT_MENTION_ROW_CLASS_NAMES,
+            dataAttributeMode: "agent",
+            ...(onNavigateIntoItem && canNavigateIntoMentionItem(item)
+              ? {
+                  onNavigateInto: () => onNavigateIntoItem(item),
+                  navigateIntoLabel
+                }
+              : {}),
+            ...(onOpenReferences && isReferenceableMentionItem(item)
+              ? {
+                  onOpenReferences: () => onOpenReferences(item),
+                  openReferencesLabel
+                }
+              : {})
+          }
+        ),
+      [navigateIntoLabel, onNavigateIntoItem, onOpenReferences, openReferencesLabel]
+    );
+
+    const labelsProp2 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof MentionPaletteFromState<AgentContextMentionItem>
+        >["labels"]
+      >
+    >(
+      () => ({
+        loading: loadingLabel,
+        empty: emptyLabelForShell,
+        error: errorLabel,
+        tabHint: tabHintLabel,
+        listbox: label
+      }),
+      [loadingLabel, emptyLabelForShell, errorLabel, tabHintLabel, label]
+    );
+    const hintLabelsProp3Value1 = translate(
+      "agentHost.agentGui.fileMentionSwitchCategory"
+    );
+    const hintLabelsProp3Value2 = translate(
+      "agentHost.agentGui.fileMentionSwitchSelection"
+    );
+    const hintLabelsProp3Value3 = translate(
+      "agentHost.agentGui.fileMentionNavigateHierarchy"
+    );
+    const hintLabelsProp3 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof MentionPaletteFromState<AgentContextMentionItem>
+        >["hintLabels"]
+      >
+    >(
+      () => ({
+        cycleFilter: hintLabelsProp3Value1,
+        moveSelection: hintLabelsProp3Value2,
+        navigateHierarchy: hintLabelsProp3Value3
+      }),
+      [hintLabelsProp3Value1, hintLabelsProp3Value2, hintLabelsProp3Value3]
+    );
+    const callbacksProp4Value1 = usePersistCallback<
+      NonNullable<
+        NonNullable<
+          React.ComponentProps<
+            typeof MentionPaletteFromState<AgentContextMentionItem>
+          >["callbacks"]
+        >["onActiveCategoryIdChange"]
+      >
+    >((categoryId) => {
+      onSelectCategory(categoryId as AgentMentionBrowseCategory["id"]);
+      onSelectFilter(categoryId as AgentMentionFilterId);
+    });
+    const callbacksProp4Value2 = usePersistCallback<
+      NonNullable<
+        NonNullable<
+          React.ComponentProps<
+            typeof MentionPaletteFromState<AgentContextMentionItem>
+          >["callbacks"]
+        >["onExpandGroup"]
+      >
+    >((groupId) => onExpandGroup(groupId as AgentMentionGroupId));
+    const callbacksProp4 = useMemo<
+      NonNullable<
+        React.ComponentProps<
+          typeof MentionPaletteFromState<AgentContextMentionItem>
+        >["callbacks"]
+      >
+    >(
+      () => ({
+        onHighlightChange: onHighlightChange,
+        onActiveCategoryIdChange: callbacksProp4Value1,
+        onExpandGroup: callbacksProp4Value2,
+        onSelectItem: onSelectItem
+      }),
+      [
+        onHighlightChange,
+        callbacksProp4Value1,
+        callbacksProp4Value2,
+        onSelectItem
+      ]
+    );
     return (
       <MentionPaletteFromState<AgentContextMentionItem>
         state={shellState}
         highlightedKey={highlightedKey}
         getItemKey={agentMentionItemKey}
         isItemDisabled={isAgentMentionItemDisabled}
-        renderItem={(item) =>
-          renderMulticaMentionRow(
-            item,
-            getActiveUiLanguage(),
-            agentMentionItemToRowItem(item),
-            {
-              classNames: AGENT_MENTION_ROW_CLASS_NAMES,
-              dataAttributeMode: "agent",
-              ...(onNavigateIntoItem && canNavigateIntoMentionItem(item)
-                ? {
-                    onNavigateInto: () => onNavigateIntoItem(item),
-                    navigateIntoLabel
-                  }
-                : {}),
-              ...(onOpenReferences && isReferenceableMentionItem(item)
-                ? {
-                    onOpenReferences: () => onOpenReferences(item),
-                    openReferencesLabel
-                  }
-                : {})
-            }
-          )
-        }
-        labels={{
-          loading: loadingLabel,
-          empty: emptyLabelForShell,
-          error: errorLabel,
-          tabHint: tabHintLabel,
-          listbox: label
-        }}
-        hintLabels={{
-          cycleFilter: translate(
-            "agentHost.agentGui.fileMentionSwitchCategory"
-          ),
-          moveSelection: translate(
-            "agentHost.agentGui.fileMentionSwitchSelection"
-          ),
-          navigateHierarchy: translate(
-            "agentHost.agentGui.fileMentionNavigateHierarchy"
-          )
-        }}
+        renderItem={renderItemProp1}
+        labels={labelsProp2}
+        hintLabels={hintLabelsProp3}
         maxHeightPx={maxHeightPx}
         headerActions={
           filter === "session" || filter === "file" || filter === "issue"
@@ -331,16 +412,7 @@ export const AgentFileMentionPalette = observer(
         }
         scrollHighlightedIntoViewCentered={shouldCenterHighlightedItem}
         theme={AGENT_MENTION_PALETTE_THEME}
-        callbacks={{
-          onHighlightChange,
-          onActiveCategoryIdChange: (categoryId) => {
-            onSelectCategory(categoryId as AgentMentionBrowseCategory["id"]);
-            onSelectFilter(categoryId as AgentMentionFilterId);
-          },
-          onExpandGroup: (groupId) =>
-            onExpandGroup(groupId as AgentMentionGroupId),
-          onSelectItem
-        }}
+        callbacks={callbacksProp4}
         onNavigateHierarchy={onNavigateHierarchy}
       />
     );

@@ -1,3 +1,5 @@
+import { Slot } from "radix-ui";
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
   BareIconButton,
   Button,
@@ -14,8 +16,10 @@ import {
 import type { AgentHostQuickPrompt } from "../../../../host/agentHostApi";
 import type { AgentQuickPromptLibraryController } from "./useAgentQuickPromptLibrary";
 import { usePrimaryPointerAction } from "./usePrimaryPointerAction";
+import { observer } from "mobx-react-lite";
+export const AgentQuickPromptRow = observer(AgentQuickPromptRowRender);
 
-export function AgentQuickPromptRow({
+function AgentQuickPromptRowRender({
   handleRef,
   isSorting,
   labels,
@@ -28,20 +32,7 @@ export function AgentQuickPromptRow({
   reorderDisabled,
   selectionRef,
   showReorderHandle
-}: {
-  handleRef: (node: HTMLButtonElement | null) => void;
-  isSorting: boolean;
-  labels: AgentQuickPromptLibraryController["labels"];
-  onDelete: () => void;
-  onEdit: () => void;
-  onFocusNext: (offset: number) => void;
-  onSelect: () => void;
-  pending: boolean;
-  prompt: AgentHostQuickPrompt;
-  reorderDisabled: boolean;
-  selectionRef: (node: HTMLButtonElement | null) => void;
-  showReorderHandle: boolean;
-}): React.JSX.Element {
+}: AgentQuickPromptRowProps): React.JSX.Element {
   const selectionAction = usePrimaryPointerAction(onSelect);
   const editAction = usePrimaryPointerAction(onEdit);
   const deleteAction = usePrimaryPointerAction(onDelete);
@@ -89,22 +80,13 @@ export function AgentQuickPromptRow({
           {promptContent}
         </div>
       ) : (
-        <Button
-          {...selectionAction}
-          ref={selectionRef}
-          className="h-auto min-w-0 flex-1 justify-start px-1 py-2 text-left whitespace-normal hover:bg-transparent"
-          disabled={pending}
-          type="button"
-          variant="ghost"
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault();
-              onFocusNext(event.key === "ArrowDown" ? 1 : -1);
-            }
-          }}
-        >
-          {promptContent}
-        </Button>
+        <ButtonBinding1
+          selectionAction={selectionAction}
+          selectionRef={selectionRef}
+          pending={pending}
+          onFocusNext={onFocusNext}
+          promptContent={promptContent}
+        />
       )}
       {!isSorting ? (
         <>
@@ -143,3 +125,74 @@ export function AgentQuickPromptRow({
     </div>
   );
 }
+
+const ButtonBinding1 = observer(function ButtonBinding1({
+  selectionAction,
+  selectionRef,
+  pending,
+  onFocusNext,
+  promptContent,
+  ...slotProps
+}: {
+  selectionAction: import("./usePrimaryPointerAction").PrimaryPointerAction;
+  selectionRef: NonNullable<AgentQuickPromptRowProps>["selectionRef"];
+  pending: NonNullable<AgentQuickPromptRowProps>["pending"];
+  onFocusNext: NonNullable<AgentQuickPromptRowProps>["onFocusNext"];
+  promptContent: import("react").JSX.Element;
+} & Omit<
+  React.ComponentProps<typeof Slot.Root>,
+  keyof {
+    selectionAction: import("./usePrimaryPointerAction").PrimaryPointerAction;
+    selectionRef: NonNullable<AgentQuickPromptRowProps>["selectionRef"];
+    pending: NonNullable<AgentQuickPromptRowProps>["pending"];
+    onFocusNext: NonNullable<AgentQuickPromptRowProps>["onFocusNext"];
+    promptContent: import("react").JSX.Element;
+  }
+>) {
+  const onKeyDownProp1 = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof Button>["onKeyDown"]>
+  >((event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onFocusNext(event.key === "ArrowDown" ? 1 : -1);
+    }
+  });
+  return (
+    <Slot.Root {...slotProps}>
+      <Button
+        {...selectionAction}
+        ref={selectionRef}
+        className="h-auto min-w-0 flex-1 justify-start px-1 py-2 text-left whitespace-normal hover:bg-transparent"
+        disabled={pending}
+        type="button"
+        variant="ghost"
+        onKeyDown={onKeyDownProp1}
+      >
+        {promptContent}
+      </Button>
+    </Slot.Root>
+  );
+});
+
+type AgentQuickPromptRowProps = {
+  handleRef: (node: HTMLButtonElement | null) => void;
+  isSorting: boolean;
+  labels: AgentQuickPromptLibraryController["labels"];
+  onDelete: () => void;
+  onEdit: () => void;
+  onFocusNext: (offset: number) => void;
+  onSelect: () => void;
+  pending: boolean;
+  prompt: AgentHostQuickPrompt;
+  reorderDisabled: boolean;
+  selectionRef: (node: HTMLButtonElement | null) => void;
+  showReorderHandle: boolean;
+};
+
+type ButtonBinding1Props = {
+  selectionAction: import("./usePrimaryPointerAction").PrimaryPointerAction;
+  selectionRef: (node: HTMLButtonElement | null) => void;
+  pending: boolean;
+  onFocusNext: (offset: number) => void;
+  promptContent: import("react").JSX.Element;
+};

@@ -1,5 +1,7 @@
 "use client";
 
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
+
 import type { HTMLAttributes, MouseEvent } from "react";
 import {
   forwardRef,
@@ -15,6 +17,7 @@ import {
   type Variants
 } from "framer-motion";
 import { cn } from "../../lib/utils";
+import { observer } from "mobx-react-lite";
 
 export interface MessageSquareMoreIconHandle {
   startAnimation: () => void;
@@ -64,116 +67,117 @@ const DOT_VARIANTS: Variants = {
   })
 };
 
-const MessageSquareMoreIcon = forwardRef<
-  MessageSquareMoreIconHandle,
-  MessageSquareMoreIconProps
->(
-  (
-    {
-      active = false,
-      onMouseEnter,
-      onMouseLeave,
-      className,
-      size = 28,
-      ...props
-    },
-    ref
-  ) => {
-    const controls = useAnimation();
-    const reduceMotion = useReducedMotion();
-    const isControlledRef = useRef(false);
+const MessageSquareMoreIcon = observer(
+  forwardRef<MessageSquareMoreIconHandle, MessageSquareMoreIconProps>(
+    (
+      {
+        active = false,
+        onMouseEnter,
+        onMouseLeave,
+        className,
+        size = 28,
+        ...props
+      },
+      ref
+    ) => {
+      const controls = useAnimation();
+      const reduceMotion = useReducedMotion();
+      const isControlledRef = useRef(false);
 
-    const startAnimation = useCallback(() => {
-      if (reduceMotion) {
-        return;
-      }
-      void controls.start(active ? "active" : "animate");
-    }, [active, controls, reduceMotion]);
+      const startAnimation = useCallback(() => {
+        if (reduceMotion) {
+          return;
+        }
+        void controls.start(active ? "active" : "animate");
+      }, [active, controls, reduceMotion]);
 
-    const stopAnimation = useCallback(() => {
-      void controls.start("normal");
-    }, [controls]);
+      const stopAnimation = useCallback(() => {
+        void controls.start("normal");
+      }, [controls]);
 
-    useImperativeHandle(ref, () => {
-      isControlledRef.current = true;
+      useImperativeHandle(ref, () => {
+        isControlledRef.current = true;
 
-      return {
-        startAnimation,
-        stopAnimation
-      };
-    });
+        return {
+          startAnimation,
+          stopAnimation
+        };
+      });
 
-    useEffect(() => {
-      if (active) {
-        startAnimation();
-        return;
-      }
-      stopAnimation();
-    }, [active, startAnimation, stopAnimation]);
-
-    const handleMouseEnter = useCallback(
-      (event: MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) {
-          onMouseEnter?.(event);
-        } else {
+      useEffect(() => {
+        if (active) {
           startAnimation();
+          return;
         }
-      },
-      [onMouseEnter, startAnimation]
-    );
+        stopAnimation();
+      }, [active, startAnimation, stopAnimation]);
 
-    const handleMouseLeave = useCallback(
-      (event: MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) {
-          onMouseLeave?.(event);
-        } else {
-          stopAnimation();
-        }
-      },
-      [onMouseLeave, stopAnimation]
-    );
+      const handleMouseEnter = useCallback(
+        (event: MouseEvent<HTMLDivElement>) => {
+          if (isControlledRef.current) {
+            onMouseEnter?.(event);
+          } else {
+            startAnimation();
+          }
+        },
+        [onMouseEnter, startAnimation]
+      );
+      const handleMouseEnterCallback = usePersistCallback(handleMouseEnter);
 
-    return (
-      <div
-        className={cn("inline-flex items-center justify-center", className)}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        {...props}
-      >
-        <svg
-          fill="none"
-          height={size}
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width={size}
-          xmlns="http://www.w3.org/2000/svg"
+      const handleMouseLeave = useCallback(
+        (event: MouseEvent<HTMLDivElement>) => {
+          if (isControlledRef.current) {
+            onMouseLeave?.(event);
+          } else {
+            stopAnimation();
+          }
+        },
+        [onMouseLeave, stopAnimation]
+      );
+      const handleMouseLeaveCallback = usePersistCallback(handleMouseLeave);
+
+      return (
+        <div
+          className={cn("inline-flex items-center justify-center", className)}
+          onMouseEnter={handleMouseEnterCallback}
+          onMouseLeave={handleMouseLeaveCallback}
+          {...props}
         >
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          <motion.path
-            animate={controls}
-            custom={0}
-            d="M8 10h.01"
-            variants={DOT_VARIANTS}
-          />
-          <motion.path
-            animate={controls}
-            custom={1}
-            d="M12 10h.01"
-            variants={DOT_VARIANTS}
-          />
-          <motion.path
-            animate={controls}
-            custom={2}
-            d="M16 10h.01"
-            variants={DOT_VARIANTS}
-          />
-        </svg>
-      </div>
-    );
-  }
+          <svg
+            fill="none"
+            height={size}
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+            width={size}
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <motion.path
+              animate={controls}
+              custom={0}
+              d="M8 10h.01"
+              variants={DOT_VARIANTS}
+            />
+            <motion.path
+              animate={controls}
+              custom={1}
+              d="M12 10h.01"
+              variants={DOT_VARIANTS}
+            />
+            <motion.path
+              animate={controls}
+              custom={2}
+              d="M16 10h.01"
+              variants={DOT_VARIANTS}
+            />
+          </svg>
+        </div>
+      );
+    }
+  )
 );
 
 MessageSquareMoreIcon.displayName = "MessageSquareMoreIcon";

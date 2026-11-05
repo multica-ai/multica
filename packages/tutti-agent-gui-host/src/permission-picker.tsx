@@ -1,37 +1,33 @@
+import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import {
-isLocalPermissionMode,
-type LocalPermissionMode
+  isLocalPermissionMode,
+  type LocalPermissionMode
 } from "@multica/core/local-conversation/protocol";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-DropdownMenu,
-DropdownMenuContent,
-DropdownMenuGroup,
-DropdownMenuLabel,
-DropdownMenuRadioGroup,
-DropdownMenuRadioItem,
-DropdownMenuTrigger
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger
 } from "@multica/ui/components/ui/dropdown-menu";
-import { ChevronDown,ShieldCheck } from "lucide-react";
-import { useId,useState,useSyncExternalStore } from "react";
+import { ChevronDown, ShieldCheck } from "lucide-react";
+import { useId, useState, useSyncExternalStore } from "react";
 import type { AgentGuiHostServices } from "./protocol";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
+import { observer } from "mobx-react-lite";
+export const PermissionPicker = observer(PermissionPickerRender);
 
-export function PermissionPicker({
+function PermissionPickerRender({
   handle,
   client,
   agentId,
   sessionId,
   chinese,
   disabled
-}: {
-  handle: ReturnType<typeof createMulticaAgentGuiRuntime>;
-  client: AgentGuiHostServices;
-  agentId: string;
-  sessionId: string | null;
-  chinese: boolean;
-  disabled: boolean;
-}) {
+}: PermissionPickerProps) {
   useSyncExternalStore(
     handle.subscribePermissions,
     handle.getPermissionRevision
@@ -91,6 +87,13 @@ export function PermissionPicker({
       setSaving(false);
     }
   };
+  const onValueChangeProp1 = usePersistCallback<
+    NonNullable<
+      React.ComponentProps<typeof DropdownMenuRadioGroup>["onValueChange"]
+    >
+  >((value) => {
+    void select(value);
+  });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -125,9 +128,7 @@ export function PermissionPicker({
           <DropdownMenuLabel>{labels.title}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={mode}
-            onValueChange={(value) => {
-              void select(value);
-            }}
+            onValueChange={onValueChangeProp1}
           >
             {choices.map((choice) => (
               <DropdownMenuRadioItem
@@ -153,3 +154,12 @@ export function PermissionPicker({
     </DropdownMenu>
   );
 }
+
+type PermissionPickerProps = {
+  handle: ReturnType<typeof createMulticaAgentGuiRuntime>;
+  client: AgentGuiHostServices;
+  agentId: string;
+  sessionId: string | null;
+  chinese: boolean;
+  disabled: boolean;
+};
