@@ -114,6 +114,7 @@
   "theme": {
     "light": "Light",
     "dark": "Dark",
+    "blue-white": "Blue-White",
     "system": "System"
   },
   "toast": {

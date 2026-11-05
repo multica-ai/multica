@@ -111,6 +111,7 @@
   "theme": {
     "light": "ライト",
     "dark": "ダーク",
+    "blue-white": "ブルーホワイト",
     "system": "システム"
   },
   "toast": {

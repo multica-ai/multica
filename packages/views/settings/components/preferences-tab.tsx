@@ -124,7 +124,8 @@ export function PreferencesTab() {
 function ThemeRow() {
   const { t } = useT("settings");
   const { theme, setTheme } = useTheme();
-  const value = theme === "light" || theme === "dark" ? theme : "system";
+  const value =
+    theme === "light" || theme === "dark" || theme === "blue-white" ? theme : "system";
   return (
     <SettingsRow anchor="theme" label={t(($) => $.preferences.theme.title)}>
       <div role="group" aria-label={t(($) => $.preferences.theme.title)}>
@@ -135,6 +136,7 @@ function ThemeRow() {
           options={[
             ["light", t(($) => $.preferences.theme.light)],
             ["dark", t(($) => $.preferences.theme.dark)],
+            ["blue-white", t(($) => $.preferences.theme["blue-white"])],
             ["system", t(($) => $.preferences.theme.system)],
           ]}
         />

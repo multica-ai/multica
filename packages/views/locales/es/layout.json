@@ -171,6 +171,7 @@
     "themes": {
       "light": "Claro",
       "dark": "Oscuro",
+      "blue-white": "Azul-blanco",
       "system": "Sistema"
     },
     "language": "Idioma",

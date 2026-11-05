@@ -48,6 +48,7 @@ import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 const THEMES = [
   { value: "light", icon: Sun },
   { value: "dark", icon: Moon },
+  { value: "blue-white", icon: Sun },
   { value: "system", icon: Monitor },
 ] as const;
 

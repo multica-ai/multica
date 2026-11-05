@@ -340,3 +340,95 @@
     --find-match-active: oklch(0.76 0.18 60);
     --find-match-foreground: oklch(0.18 0.02 92);
 }
+
+/* Blue-White: sea-blue navigation on the left, white content with black text
+   on the right. The shell (app rail + nav column) is blue with white text;
+   the content card is white. Only tokens that differ from the default light
+   set are redefined; everything else falls back to :root. next-themes puts
+   this class on <html> instead of .dark, so dark-scoped rules never apply. */
+.blue-white {
+    color-scheme: light;
+    --app-shell: #0054a6;
+    --page-canvas: #ffffff;
+    --surface: #ffffff;
+    --surface-foreground: #111111;
+    --surface-raised: #ffffff;
+    --surface-hover: #f2f4f7;
+    --surface-selected: #e6f4ff;
+    --surface-selected-foreground: #0b0b0c;
+    --surface-border: #e5e5e5;
+    --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(0 0 0 / 0.14), 0 3px 10px rgb(0 0 0 / 0.08);
+    --menu-shadow: 0 8px 24px rgb(0 0 0 / 0.08), 0 2px 6px rgb(0 0 0 / 0.05);
+    --tooltip: #0054a6;
+    --tooltip-shadow: 0 4px 12px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12);
+    --background: var(--page-canvas);
+    --foreground: #111111;
+    --card: var(--surface);
+    --card-foreground: #111111;
+    --popover: var(--surface-raised);
+    --popover-foreground: #111111;
+    --primary: #0066d6;
+    --primary-foreground: #ffffff;
+    --secondary: #f2f4f7;
+    --secondary-foreground: #111111;
+    --muted: #f2f4f7;
+    /* Neutral grey text on white is 5.7:1; the nav-only overrides below
+       handle text on the blue shell. */
+    --muted-foreground: #5c5c5c;
+    --faint-foreground: #8a8a8a;
+    --accent: #f2f4f7;
+    --accent-foreground: #111111;
+    --border: #e5e5e5;
+    --input: #d9d9d9;
+    --ring: #0066d6;
+    --chart-1: #0066d6;
+    --chart-2: #3d8fe0;
+    --chart-3: #6fb0ea;
+    --chart-4: #a3cdf2;
+    --chart-5: #cfe5fa;
+    --sidebar: #0054a6;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #ffffff;
+    --sidebar-primary-foreground: #0054a6;
+    --sidebar-accent: rgb(255 255 255 / 0.14);
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: rgb(255 255 255 / 0.16);
+    --sidebar-ring: #ffffff;
+    --brand: #0066d6;
+    --brand-foreground: #ffffff;
+    --scrollbar-thumb: rgb(0 0 0 / 14%);
+    --scrollbar-thumb-hover: rgb(0 0 0 / 24%);
+}
+
+/* The rail and the nav column are the blue shell. Their inherited text tokens
+   are remapped to white so every existing muted/faint label inside them reads
+   on blue without per-component changes. Portalled menus and dialogs render
+   outside these elements and keep the white-content palette. */
+.blue-white [data-slot="app-rail"],
+.blue-white [data-slot="space-panel"] {
+    --foreground: #ffffff;
+    --surface-foreground: #ffffff;
+    --muted-foreground: rgb(255 255 255 / 0.8);
+    --faint-foreground: rgb(255 255 255 / 0.62);
+    --accent: rgb(255 255 255 / 0.14);
+    --accent-foreground: #ffffff;
+    --surface-hover: rgb(255 255 255 / 0.12);
+    --surface-selected: rgb(255 255 255 / 0.2);
+    --surface-selected-foreground: #ffffff;
+    --surface-border: rgb(255 255 255 / 0.16);
+    --border: rgb(255 255 255 / 0.16);
+    --input: rgb(255 255 255 / 0.3);
+    /* Solid badges in the rail are white tiles, so their text takes the shell colour. */
+    --background: #0054a6;
+    color: #ffffff;
+}
+
+/* The workspace tile is a white square with a dark letter, not a shell item. */
+.blue-white [data-slot="workspace-switcher"] {
+    --foreground: #111111;
+}
+
+.blue-white [data-slot="space-panel"] > div {
+    background-color: var(--sidebar);
+}

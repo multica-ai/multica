@@ -11,10 +11,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
   // can disagree with next-themes' `html.dark` class — that's why the toast
   // sometimes rendered light on a dark UI.
   const { resolvedTheme = "system" } = useTheme()
+  // Blue-White is a light palette; sonner only knows light and dark.
+  const toastTheme = resolvedTheme === "blue-white" ? "light" : resolvedTheme
 
   return (
     <Sonner
-      theme={resolvedTheme as ToasterProps["theme"]}
+      theme={toastTheme as ToasterProps["theme"]}
       className="toaster group"
       icons={{
         success: (

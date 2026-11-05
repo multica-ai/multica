@@ -28,7 +28,7 @@ import { useServerSearch } from "../use-server-search";
 import type { DelegateActor } from "../types";
 import { useDelegateCandidates } from "../delegate/use-delegate";
 
-type ThemeValue = "light" | "dark" | "system";
+type ThemeValue = "light" | "dark" | "blue-white" | "system";
 
 export function ThemePage({ query }: { query: string }) {
   const { t } = useT("search");
@@ -38,6 +38,7 @@ export function ThemePage({ query }: { query: string }) {
   const options: { value: ThemeValue; label: string; icon: typeof Sun; keywords: string[] }[] = [
     { value: "light", label: t(($) => $.theme.light), icon: Sun, keywords: ["light", "bright", "浅色"] },
     { value: "dark", label: t(($) => $.theme.dark), icon: Moon, keywords: ["dark", "night", "深色"] },
+    { value: "blue-white", label: t(($) => $.theme["blue-white"]), icon: Sun, keywords: ["blue", "white", "blue-white", "蓝白", "藍白"] },
     { value: "system", label: t(($) => $.theme.system), icon: Monitor, keywords: ["system", "auto", "系统"] },
   ];
   const visible = q ? options.filter((o) => scoreRow(o.label, o.keywords, q) > 0) : options;

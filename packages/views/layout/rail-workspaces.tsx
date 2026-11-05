@@ -214,6 +214,7 @@ export function RailWorkspaces() {
       <TooltipHint label={current.name} side="right">
         <DropdownMenuTrigger
           aria-label={label}
+          data-slot="workspace-switcher"
           className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <WorkspaceAvatar

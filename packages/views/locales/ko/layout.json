@@ -171,6 +171,7 @@
     "themes": {
       "light": "라이트",
       "dark": "다크",
+      "blue-white": "블루-화이트",
       "system": "시스템"
     },
     "language": "언어",

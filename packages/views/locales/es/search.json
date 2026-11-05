@@ -136,6 +136,7 @@
   "theme": {
     "light": "Claro",
     "dark": "Oscuro",
+    "blue-white": "Azul-blanco",
     "system": "Sistema"
   },
   "delegate": {

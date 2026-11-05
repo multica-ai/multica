@@ -71,7 +71,7 @@ const {
     mockOpenModal: vi.fn(),
     mockToast: toast,
     mockSetTheme: vi.fn(),
-    mockTheme: { current: "system" as "light" | "dark" | "system" },
+    mockTheme: { current: "system" as "light" | "dark" | "blue-white" | "system" },
     mockCommentCollapseAll: vi.fn(),
     mockCommentExpandAll: vi.fn(),
     mockResolvedCollapseAll: vi.fn(),
@@ -518,7 +518,7 @@ describe("SearchCommand", () => {
       await user.click(await rowText("Change theme..."));
 
       expect(within(screen.getByRole("navigation", { name: "Current menu" })).getByText("Change theme")).toBeInTheDocument();
-      expect(renderedValues()).toEqual(["theme:light", "theme:dark", "theme:system"]);
+      expect(renderedValues()).toEqual(["theme:light", "theme:dark", "theme:blue-white", "theme:system"]);
       expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
 
       await user.click(screen.getByText("Light"));
