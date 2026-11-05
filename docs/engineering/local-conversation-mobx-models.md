@@ -1,6 +1,6 @@
 # AI 会话状态迁移到 MobX 方案
 
-日期：2026-11-03。状态：实现完成，验证和人工验收边界见 [本地会话视图状态](conversation-view-state.md)。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
+日期：2026-11-03。状态：阶段 7 部分完成，剩余工作、验证和人工验收边界见 [本地会话视图状态](conversation-view-state.md)。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
 
 把 AI 会话模块的状态统一到 MobX：数据是带方法的 `XxxModel`，逻辑在维护它们的 `XxxService`，并替换 Tutti engine。Web 上的 AI 会话页面删除，Tutti GUI 只服务 Desktop 的本地会话，最终由我们自己管理，view 直接读 Model、调 Service。
 
@@ -277,12 +277,12 @@ class ItemModel {
 | 4. 写路径 | 第 6 节和 daemon 能力；提交、新建会话、队列、取消、交互、发送可用性一起迁；结束时迁出 `sessionLifecycle` | 数据存两份的主体 |
 | 5. 其余领域 | composer → detail，同时删除对应的 runtime 方法、controller hook、RPC 方法和 `useAgentHostApi` | |
 | 6. 删除 engine 和翻译层（完成） | 删除 engine、`useEngineSelector`、投影、ledger、`AgentGuiRpcClient`、`AgentGUIRuntime`、runtime | 只有 MobX |
-| 7. 收尾（完成） | 按第 2 节的规则拆完剩余 controller，用 provider 替换 view model，删除用不到的目录 | |
+| 7. 收尾（部分完成） | 按第 2 节的规则拆完剩余 controller，用 provider 替换 view model，删除用不到的目录 | |
 
 **controller 重写的主体在阶段 3 到 5，不在阶段 7**：删除 engine 前，controller 的 69 处 `useEngineSelector`、28 处 `getSnapshot`、18 处 `dispatch` 都要替换。
 
 阶段 6、7 的实际边界和验证入口见 [本地会话视图状态](conversation-view-state.md)。
-按轮转录、原生命令、直接宿主服务、身份与旧存储迁移均已落地。消费组件直接读原生服务或 GUI computed state，草稿保留原存储；无效 Side/Provider 界面和未启用的 Goal 文案已清理。真实用户会话的最终确认仍由用户负责。
+按轮转录、原生命令、直接宿主服务、身份与旧存储迁移均已落地。controller 尚未拆完，部分消费组件仍经 props 接收 GUI computed state，草稿保留原存储；无效 Side/Provider 界面和未启用的 Goal 文案已清理。真实用户会话的最终确认仍由用户负责。
 
 ### 阶段 3、4 的最终边界
 
