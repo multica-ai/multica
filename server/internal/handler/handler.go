@@ -305,6 +305,8 @@ type Handler struct {
 	// UI consults IsConfigured() to decide whether to surface install
 	// entry points.
 	LarkAPIClient lark.APIClient
+	// LarkIssueNotices delivers committed Issue transitions to their source group.
+	LarkIssueNotices *lark.IssueNoticeWorker
 	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
 	// the composio HTTP handlers return 403 in that case. Wired in
 	// cmd/server/router.go after handler.New.

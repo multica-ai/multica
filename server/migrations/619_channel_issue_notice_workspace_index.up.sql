@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_channel_issue_notice_workspace ON channel_issue_notice(workspace_id);
