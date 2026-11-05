@@ -221,7 +221,8 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock chat store with an in-memory implementation that supports both
 // (selector) calls and getState(). Draft attachments hold coordinator-owned
 // DraftUpload entries (MUL-5181 L2).
-vi.mock("@multica/core/chat", () => {
+vi.mock("@multica/core/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/chat")>();
   const state = {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
@@ -238,6 +239,7 @@ vi.mock("@multica/core/chat", () => {
     clearInputDraft: vi.fn(),
   };
   return {
+    ...actual,
     DRAFT_NEW_SESSION: "__draft_new__",
     useChatStore: Object.assign(
       (selector?: (s: typeof state) => unknown) =>
@@ -248,7 +250,7 @@ vi.mock("@multica/core/chat", () => {
 });
 
 import { ChatInput } from "./chat-input";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, useChatRunDraftStore } from "@multica/core/chat";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
@@ -256,6 +258,7 @@ type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
 type ChatInputCommit = Parameters<ChatInputOnSend>[2];
 
 beforeEach(() => {
+  useChatRunDraftStore.getState().clearDraft();
   dropHandlers.onDrop = null;
   editorProps.last = null;
   editorState.cleared = 0;
@@ -1941,4 +1944,20 @@ describe("ChatInput guidance while navigating", () => {
     expect(state.inputDrafts.destination).toBe("destination draft");
     expect(state.clearInputDraft).toHaveBeenCalledWith("source");
   });
+});
+
+
+it("requires an explicit choice to treat an ambiguous draft as a new instruction", () => {
+  const state = useChatStore.getState();
+  state.activeSessionId = "chat";
+  state.inputDrafts.chat = "same";
+  useChatRunDraftStore.getState().setDraft({ attempts: [{ id: "request", session: "chat", task: "original", content: "same" }] });
+  const onAddToRun = vi.fn();
+  renderInput({ onAddToRun });
+  expect(screen.getByRole("button", { name: enChat.input.retry_run })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: enChat.input.new_run_instruction }));
+  expect(useChatRunDraftStore.getState().draft.attempts).toEqual([]);
+  expect(screen.getByRole("button", { name: enChat.input.add_to_run })).toBeInTheDocument();
+  expect(screen.getByTestId("editor")).toHaveValue("same");
+  expect(onAddToRun).not.toHaveBeenCalled();
 });
