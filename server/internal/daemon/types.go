@@ -171,6 +171,11 @@ type Task struct {
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
 	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
+	// ParentIssue is the parent of the issue this run works on, for runs on a
+	// sub-issue; unrelated to the quick-create ParentIssueID above. Absent on
+	// old servers and for issues without a parent, and then no parent block is
+	// rendered.
+	ParentIssue *ParentIssueData `json:"parent_issue,omitempty"`
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -220,6 +225,15 @@ type CoalescedCommentData struct {
 	CreatedAt  string `json:"created_at,omitempty"`
 	EditedAt   string `json:"edited_at,omitempty"` // MUL-8218: set when this comment was edited after the resumed session's run started; empty on old servers / unedited comments
 	Revision   int64  `json:"revision,omitempty"`  // MUL-8218: current revision, sent alongside EditedAt
+}
+
+// ParentIssueData mirrors handler.ClaimParentIssue. Identifier is empty when
+// the server could not resolve the workspace prefix.
+type ParentIssueData struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

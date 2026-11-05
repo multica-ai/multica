@@ -1,5 +1,6 @@
 import type { Agent, AgentRuntime, MemberWithUser, SkillSummary } from "@multica/core/types";
 import type { SkillListFilters } from "@multica/core/skills/stores";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import type { OriginInfo } from "../lib/origin";
 
 export interface SkillRow {
@@ -9,6 +10,19 @@ export interface SkillRow {
   runtime: AgentRuntime | null;
   originType: OriginInfo["type"];
   canEdit: boolean;
+}
+
+export function matchesSkillSearch(row: SkillRow, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+  const { name, description } = row.skill;
+  return (
+    name.toLowerCase().includes(query) ||
+    matchesPinyin(name, query) ||
+    (!!description &&
+      (description.toLowerCase().includes(query) ||
+        matchesPinyin(description, query)))
+  );
 }
 
 /**

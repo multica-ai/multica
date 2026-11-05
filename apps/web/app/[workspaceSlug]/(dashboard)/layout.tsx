@@ -18,7 +18,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <WorkspaceDocumentTitle />
       </Suspense>
       <DashboardLayout
-        loadingIndicator={<MulticaIcon className="size-6" />}
+        loadingIndicator={<MulticaIcon mode="think" size={40} />}
         extra={
           <>
             <SearchCommand />

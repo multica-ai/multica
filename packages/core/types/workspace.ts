@@ -82,6 +82,12 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /**
+   * Newest release whose What's new highlights the user has dismissed.
+   * null = never dismissed; undefined = the server predates read tracking,
+   * so the client must not auto-open the card (it would reappear forever).
+   */
+  whats_new_seen_version?: string | null;
   created_at: string;
   updated_at: string;
 }

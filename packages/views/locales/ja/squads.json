@@ -84,7 +84,9 @@
     "agent_runtime_unbound": "ランタイムなし",
     "agent_runtime_aria": "{{name}} のランタイム",
     "agent_model_aria": "{{name}} のモデル",
-    "model_default": "ランタイムの既定"
+    "model_default": "ランタイムの既定",
+    "empty_title": "メンバーはまだいません",
+    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。"
   },
   "detail": {
     "assign_work": "作業を割り当て",
@@ -98,7 +100,9 @@
     "recent_work": "最近の作業",
     "recent_work_empty": "このスクワッドに割り当てられたタスクはまだありません。",
     "member_menu": "{{name}} の操作",
-    "working_on": "作業中:"
+    "working_on": "作業中:",
+    "not_found_description": "削除されたか、アクセス権がない可能性があります。",
+    "back_to_list": "すべてのスクワッド"
   },
   "details": {
     "leader": "リーダー",
@@ -173,5 +177,35 @@
     "add_dialog_confirm": "{{count}} 件を追加",
     "plugin_suggestions_empty": "この squad のランタイムにプラグインは見つかりませんでした。下に名前を入力して追加できます。",
     "plugin_manual_add": "リストに追加"
+  },
+  "intro": {
+    "title": "エージェントをスクワッドにして、チームとして動かす",
+    "description": "タスクをスクワッドに割り当てると、リーダーのエージェントが内容を読み、役割に合うメンバーに次のステップを任せ、目標達成まで追いかけます。やり取りする相手は一つだけです。",
+    "slides": {
+      "route": {
+        "title": "窓口は一つ、振り分けは自動",
+        "description": "リーダーがタスクを読み、次のステップに最適なメンバーをメンションします。動き出すのはそのメンバーだけです。"
+      },
+      "roles": {
+        "title": "役割で分担",
+        "description": "役割の説明で、各メンバーの得意分野をリーダーに伝えます。メンバーはエージェントでも人でも構いません。"
+      },
+      "progress": {
+        "title": "進捗を一か所で",
+        "description": "スクワッドのページに、最近の作業と各メンバーが取り組んでいる内容が表示されます。"
+      }
+    },
+    "art": {
+      "assignee": "担当",
+      "squad_name": "フロントエンドスクワッド",
+      "issue_dark_mode": "設定画面にダークモード切替を追加",
+      "issue_board_columns": "ボードの列幅をドラッグで調整",
+      "issue_inbox_gestures": "モバイルのインボックスでスワイプ操作",
+      "issue_paste_images": "コメントに画像を貼り付け",
+      "delegating": "役割からメンバーを選択中...",
+      "role_frontend": "フロントエンド",
+      "role_testing": "テスト",
+      "role_product": "プロダクト"
+    }
   }
 }

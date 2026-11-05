@@ -38,17 +38,8 @@ const TRIGGER_ICONS: Record<string, typeof Zap> = {
 };
 
 /** Last run failed on an autopilot that is still meant to run. */
-export function isAutopilotFailing(autopilot: Autopilot): boolean {
+function isAutopilotFailing(autopilot: Autopilot): boolean {
   return autopilot.status === "active" && autopilot.last_run_status === "failed";
-}
-
-/** Workspace autopilots that need attention, for the rail badge and the panel. */
-export function useFailingAutopilots(wsId: string | undefined) {
-  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({
-    ...autopilotListOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  return useMemo(() => autopilots.filter(isAutopilotFailing), [autopilots]);
 }
 
 function hasDescription(autopilot: Autopilot): boolean {

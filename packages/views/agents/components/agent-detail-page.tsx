@@ -489,6 +489,14 @@ export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
           <MessageSquare />
         </IconButton>
       )}
+      <IconButton
+        label={t(($) => $.detail.settings)}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        onClick={() => openAdvanced("general")}
+      >
+        <Settings2 />
+      </IconButton>
       {!isArchived && canAssign.allowed && (
         <Button type="button" size="sm" onClick={handleAssign}>
           <Plus />
@@ -510,7 +518,7 @@ export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
         <DropdownMenuContent align="end" className="w-auto min-w-48">
           <DropdownMenuItem onClick={() => openAdvanced("general")}>
             <Settings2 />
-            {t(($) => $.detail.advanced_settings)}
+            {t(($) => $.detail.settings)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -648,6 +656,7 @@ export function AgentDetailPage({ agentId, onArchived }: AgentDetailPageProps) {
             canEdit={canEdit.allowed}
             onUpdate={handleUpdate}
             onEditAccess={() => openAdvanced("access")}
+            onOpenSettings={() => openAdvanced("general")}
           />
         }
       >

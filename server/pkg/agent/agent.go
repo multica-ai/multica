@@ -29,6 +29,9 @@ type ExecOptions struct {
 	EnableTaskSupplement bool
 	Cwd                  string
 	Model                string
+	// PiSkillPaths contains only the SKILL.md files written for this task by
+	// the daemon. Pi loads them explicitly without trusting other project files.
+	PiSkillPaths []string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
@@ -148,6 +151,17 @@ type ExecOptions struct {
 	// EnableTaskSupplement, to accept additional messages; other providers
 	// ignore it.
 	CursorHookCommand []string
+	// OnUsage optionally receives the backend's cumulative usage snapshot while
+	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
+	// and the terminal report upsert the same (task, provider, model) rows
+	// instead of adding a second row the rollup would charge twice. Backends
+	// that cannot meter mid-run never call it.
+	//
+	// The callback runs on the backend's protocol reader goroutine and MUST NOT
+	// block: a daemon that reports from here holds the agent's stdout open and
+	// can trip its idle watchdog. Take the snapshot and report on your own
+	// goroutine.
+	OnUsage func(map[string]TokenUsage)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
@@ -413,6 +427,7 @@ var SupportedTypes = []string{
 	"dim",
 	"devin",
 	"zeroclaw",
+	"zcode",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -522,6 +537,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &museBackend{cfg: cfg}, nil
 	case "zeroclaw":
 		return &zeroclawBackend{cfg: cfg}, nil
+	case "zcode":
+		return &zcodeBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -571,6 +588,7 @@ var launchHeaders = map[string]string{
 	"mcode":       "mcode acp",
 	"muse":        "muse serve (msp)",
 	"zeroclaw":    "zeroclaw acp",
+	"zcode":       "zcode app-server",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

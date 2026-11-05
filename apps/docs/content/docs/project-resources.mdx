@@ -131,7 +131,7 @@ A merge that does not land never fails the run.
 
 `<agent>` comes from the agent's name: lowercased, with everything other than a–z and 0–9 turned into `-`, up to 30 characters. A name with no Latin letters or digits becomes `agent`. So Ops helper working on OPS-21 gets `agent/ops-helper/ops-21`, while an agent named 运营助手 gets `agent/agent/ops-21`. `<issue>` is the issue identifier in lowercase.
 
-A run that failed partway still reports its branch, because it still committed whatever the agent had produced.
+A run that failed partway still reports its branch: the agent's commits are on it, and what it left uncommitted is kept as described in [Nothing is silently dropped](#nothing-is-silently-lost).
 
 </Accordion>
 <Accordion title="A follow-up continues where the last run stopped" id="follow-ups-continue-the-branch">
@@ -166,9 +166,16 @@ A run that could not record its branch — it failed before finishing, the recor
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
 
-Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the run fails partway.
+Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
 
-In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
+- **The agent made no commit:** everything it left that is not gitignored is committed to the branch. Your repository's commit hooks do not run for this commit.
+- **The agent made commits of its own:** only those commits are delivered. Whatever it left uncommitted (generated output, scratch files, edits it did not commit) is saved under a hidden ref, `refs/multica/leftovers/<branch>/<task>`, and does not reach the branch. The agent is told this rule at the start of every run, so an agent that commits decides what is delivered.
+
+One exception: a run that starts by finishing a merge with your local edits (see [conflicts](#conflicts-are-resolved-by-the-agent)) commits everything it leaves, because those uncommitted changes include your edits.
+
+To see what a run saved, list the refs with `git for-each-ref refs/multica/leftovers` and inspect one with `git show --stat <ref>`. `git restore --source=<ref> -- <path>` brings a file back into your checkout.
+
+In the rare case that the commit or the save itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
 
 </Accordion>
 <Accordion title="A run that changes nothing leaves nothing behind" id="no-changes-leave-nothing">
@@ -176,9 +183,9 @@ In the rare case that commit itself cannot be made — for example a repo with `
 Its branch is deleted rather than left as an empty entry in `git branch`, unless it is the issue's branch carrying earlier runs' work, which always survives.
 
 </Accordion>
-<Accordion title="The branch and hidden ref left in your repo" id="what-stays-in-your-repo">
+<Accordion title="The branch and hidden refs left in your repo" id="what-stays-in-your-repo">
 
-The worktree lives in the runtime's workspace directory and is reclaimed on [the normal cleanup schedule](/daemon-runtimes#cleanup). Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued.
+The worktree lives in the runtime's workspace directory and is reclaimed on [the normal cleanup schedule](/daemon-runtimes#cleanup). What persists in your repo is the branch; one hidden ref per branch under `refs/multica/local-state/`, recording who owns it and what your directory looked like when it was last continued; and one hidden ref under `refs/multica/leftovers/` for each run that left uncommitted changes after making commits of its own.
 
 The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a run starts on that repo. You can also remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
 

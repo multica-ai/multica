@@ -42,6 +42,7 @@
     "input-otp": "^1.4.2",
     "linkify-it": "^5.0.0",
     "katex": "catalog:",
+    "mdast-util-from-markdown": "^2.0.3",
     "next-themes": "^0.4.6",
     "react-day-picker": "^9.14.0",
     "react-markdown": "^10.1.0",
@@ -55,8 +56,7 @@
     "remark-math": "catalog:",
     "shiki": "^3.21.0",
     "sonner": "^2.0.7",
-    "tailwind-merge": "catalog:",
-    "unicode-animations": "catalog:"
+    "tailwind-merge": "catalog:"
   },
   "peerDependencies": {
     "i18next": "catalog:",
@@ -67,11 +67,14 @@
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
+    "@multica/vitest-setup": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/linkify-it": "^5.0.0",
+    "@types/mdast": "^4.0.4",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "esbuild": "^0.25.12",
     "jsdom": "catalog:",

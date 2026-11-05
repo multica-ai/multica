@@ -72,6 +72,9 @@ export type {
   DisabledRuntimeSkill,
   SetAgentRuntimeSkillEnabledRequest,
   SkillFile,
+  SkillVersion,
+  SkillVersionSource,
+  SkillVersionSummary,
   CreateSkillRequest,
   SkillImportResult,
   UpdateSkillRequest,
@@ -170,6 +173,7 @@ export type { Attachment } from "./attachment";
 export {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromStorageURL,
   contentReferencesAttachment,
   stripChannelMediaMarkers,
 } from "./attachment-url";
@@ -272,6 +276,8 @@ export type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
 } from "./wecom";
 export type {
   TelegramInstallation,

@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => ({
       models: [] as string[],
       access: [] as string[],
     },
+    search: "",
+    setSearch: vi.fn(),
     setScope: vi.fn(),
     toggleSort: vi.fn(),
     setSortField: vi.fn(),
@@ -66,7 +68,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
     }
-    return { data: [], isLoading: false, isPending: false };
+    return { data: [], isLoading: false, isPending: false, isSuccess: true };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -130,6 +132,7 @@ vi.mock("@multica/core/paths", () => ({
     newAgent: () => "/test-workspace/agents/new",
     newAgentManual: () => "/test-workspace/agents/new/manual",
     agentDetail: (id: string) => `/test-workspace/agents/${id}`,
+    runtimes: () => "/test-workspace/runtimes",
   }),
 }));
 
@@ -254,6 +257,7 @@ beforeEach(() => {
   mocks.viewState.sortField = "lastActive";
   mocks.viewState.sortDirection = "desc";
   mocks.viewState.hiddenColumns = ["created"];
+  mocks.viewState.search = "";
   mocks.viewState.filters = {
     availability: [],
     runtimes: [],
@@ -341,10 +345,12 @@ describe("AgentsPage listReady gate", () => {
     const header = screen.getByRole("banner");
     expect(within(header).getByTestId("agent-list-filter")).toBeInTheDocument();
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
-    expect(screen.queryByText("No agents yet")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Hire your first AI teammate" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows the empty state without blocking on auxiliary queries when there are no agents", () => {
+  it("introduces agents without blocking on auxiliary queries when there are none", () => {
     mocks.agents = [];
     // All auxiliary queries pending — the empty state must not wait on them.
     mocks.activity = { byAgent: new Map(), loading: true };
@@ -353,7 +359,17 @@ describe("AgentsPage listReady gate", () => {
 
     renderPage();
 
-    expect(screen.getByText("No agents yet")).toBeInTheDocument();
+    const intro = screen.getByRole("region", { name: "Hire your first AI teammate" });
+    expect(within(intro).getByRole("button", { name: "New agent" })).toBeInTheDocument();
+    expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
+      "href",
+      "https://multica.ai/docs/agents",
+    );
+    const steps = within(intro).getByRole("list", { name: "Setup steps" });
+    expect(within(steps).getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/test-workspace/runtimes",
+    );
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });
 });
@@ -388,14 +404,6 @@ describe("AgentsPage header", () => {
     ).toHaveTextContent("Agents archivés");
   });
 
-  it("has no search in the header", () => {
-    renderPage();
-    expect(
-      within(screen.getByRole("banner")).queryByRole("textbox"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /search/i })).not.toBeInTheDocument();
-  });
-
   it("offers Reset only while a filter narrows the list", () => {
     renderPage();
     expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
@@ -418,6 +426,50 @@ describe("AgentsPage header", () => {
     ).toBeInTheDocument();
     fireEvent.click(within(header).getByRole("button", { name: "New agent" }));
     expect(adapter.push).toHaveBeenCalledWith("/test-workspace/agents/new");
+  });
+});
+
+describe("AgentsPage search (MUL-8490)", () => {
+  it("opens the search from an icon beside the filter and writes the query to the store", () => {
+    renderPage();
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(within(header).getByRole("button", { name: "Search agents" }));
+    const field = within(header).getByRole("textbox", { name: "Search agents" });
+    expect(field).toHaveFocus();
+
+    fireEvent.change(field, { target: { value: "beta" } });
+    expect(mocks.viewState.setSearch).toHaveBeenCalledWith("beta");
+  });
+
+  it("narrows the list by the store's query, so it is still applied on return", () => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.search = "beta";
+
+    renderPage();
+
+    expect(screen.getByRole("textbox", { name: "Search agents" })).toHaveValue("beta");
+    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
+  });
+
+  it("names the query when nothing matches", () => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.search = "zeta";
+
+    renderPage();
+
+    expect(screen.getByText('No agents match "zeta".')).toBeInTheDocument();
+  });
+
+  it("clears the search together with the filters on Reset", () => {
+    mocks.viewState.search = "beta";
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(mocks.viewState.clearFilters).toHaveBeenCalled();
+    expect(mocks.viewState.setSearch).toHaveBeenCalledWith("");
   });
 });
 

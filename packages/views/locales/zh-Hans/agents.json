@@ -12,7 +12,8 @@
       "mine": "我的智能体",
       "all": "全部智能体",
       "archived": "已归档智能体"
-    }
+    },
+    "search": "搜索智能体"
   },
   "scope": {
     "mine": "我的",
@@ -46,14 +47,25 @@
   },
   "empty": {
     "title": "还没有智能体",
-    "description": "创建智能体后，即可把任务分配给它。"
+    "description": "创建智能体后，即可把任务分配给它。",
+    "setup": {
+      "label": "配置步骤",
+      "runtime": "接入运行时",
+      "agent": "创建智能体",
+      "issue": "给它分配一个任务",
+      "done": "（已完成）",
+      "connect_runtime": "去接入"
+    }
   },
   "no_matches": {
     "title": "无匹配项",
     "no_archived": "还没有已归档智能体。",
     "no_filter_match": "该筛选下没有匹配的智能体。",
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
-    "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
+    "runtime_filtered": "\"{{machine}}\"上还没有智能体。",
+    "search_active": "没有智能体匹配\"{{query}}\"。",
+    "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
+    "search_archived": "没有已归档智能体匹配\"{{query}}\"。"
   },
   "runtime_filter": {
     "all": "全部运行时",
@@ -159,7 +171,8 @@
     "copy_link": "复制链接",
     "copy_id": "复制智能体 ID",
     "link_copied_toast": "链接已复制",
-    "id_copied_toast": "智能体 ID 已复制"
+    "id_copied_toast": "智能体 ID 已复制",
+    "settings": "设置"
   },
   "inspector": {
     "section_profile": "资料",
@@ -210,7 +223,8 @@
   "panel": {
     "status": "状态",
     "runs_7d": "运行（7 天）",
-    "edit_access_aria": "访问权限：{{value}}。更改访问权限"
+    "edit_access_aria": "访问权限：{{value}}。更改访问权限",
+    "all_settings": "全部设置"
   },
   "skill_attach": {
     "trigger_aria": "附加工作区 skill",
@@ -348,7 +362,8 @@
       "prompt_assistant": "帮助团队规划和撰写项目",
       "thinking": "正在更新草稿…",
       "placeholder": "描述你需要的智能体…",
-      "send": "发送消息"
+      "send": "发送消息",
+      "conversation_tab": "对话"
     },
     "live_draft": "智能体配置",
     "live_draft_hint": "可直接修改草稿。",
@@ -850,7 +865,8 @@
       "redacted_title": "已配置——对你隐藏",
       "redacted_hint": "只有该智能体的创建者才能查看或修改它可使用的应用。",
       "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
-      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
+      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。",
+      "open_settings": "打开设置"
     },
     "runtime_config": {
       "mode_label": "路由模式",
@@ -1198,5 +1214,29 @@
     "restored": "已恢复修订 {{revision}}",
     "restore_failed": "无法恢复此修订，请重试。",
     "restore_unchanged": "智能体已经使用这些指令。"
+  },
+  "intro": {
+    "title": "招第一位 AI 队友",
+    "description": "智能体像团队成员一样接任务：在你的运行时上用 Claude Code、Codex 等工具动手做，做完在评论里交付。",
+    "slides": {
+      "describe": {
+        "title": "一句话说清它做什么",
+        "description": "描述职责，选好运行时和模型，就能创建。之后随时改指令、加 skill。"
+      },
+      "assign": {
+        "title": "像同事一样分配任务",
+        "description": "在任何任务的负责人里选它。它会自己开工，不用盯着。"
+      },
+      "deliver": {
+        "title": "看它干活，在评论里交付",
+        "description": "执行过程实时可见；完成后在任务评论里交付结果和 PR。"
+      }
+    },
+    "art": {
+      "prompt": "审查前端 PR，重点看可访问性和性能，结论写在 PR 评论里。",
+      "issue_title": "定价页移动端排版错位",
+      "comment": "修好了：价格卡片在 375px 下改为单列。已开 PR，测试通过。",
+      "step_read": "读取 {{file}}"
+    }
   }
 }

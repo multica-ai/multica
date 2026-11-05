@@ -5,8 +5,6 @@
     "scope_all": "Tous les projets",
     "scope_active": "Projets actifs",
     "scope_closed": "Projets clos",
-    "empty": "Aucun projet pour l'instant",
-    "create_first": "Créez votre premier projet",
     "view_compact": "Compact",
     "view_comfortable": "Confortable",
     "no_search_results": "Aucun résultat ne correspond à votre recherche",
@@ -56,6 +54,8 @@
   },
   "detail": {
     "not_found": "Projet introuvable",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les projets",
     "breadcrumb_fallback": "Projets",
     "title_placeholder": "Titre du projet",
     "icon_tooltip": "Changer d'icône",
@@ -73,9 +73,10 @@
     "no_due_date": "Aucune date d'échéance",
     "description_placeholder": "Ajouter une description...",
     "description_hint": "Partagé avec les agents comme contexte à chaque exécution dans ce projet.",
-    "empty_issues_title": "Aucune tâche liée",
-    "empty_issues_hint": "Vous pouvez aussi ajouter des tâches existantes à ce projet.",
+    "empty_issues_title": "Aucune tâche dans ce projet pour l'instant",
+    "empty_issues_hint": "Créez-en une, ou déplacez ici une tâche existante.",
     "empty_issues_new_button": "Nouvelle tâche",
+    "empty_issues_add_existing": "Ajouter une tâche existante",
     "no_issues_yet": "Aucune tâche pour l'instant",
     "toast_link_copied": "Lien copié",
     "toast_project_deleted": "Projet supprimé",
@@ -177,5 +178,36 @@
     "section_priority": "Priorité",
     "section_lead": "Responsable",
     "view": "Vue"
+  },
+  "intro": {
+    "title": "Découpez les grands chantiers en projets",
+    "description": "Un projet regroupe des tâches liées pour suivre leur avancement ensemble. Sa description et ses dépôts liés accompagnent chaque exécution d'agent comme contexte.",
+    "slides": {
+      "progress": {
+        "title": "L'avancement en un coup d'œil",
+        "description": "Statut, responsable, échéance et taux d'achèvement tiennent sur une carte : inutile d'ouvrir chaque tâche."
+      },
+      "context": {
+        "title": "Le contexte suit chaque exécution",
+        "description": "Rédigez la description et liez les dépôts une seule fois. Chaque exécution sur les tâches du projet les reprend."
+      },
+      "sidebar": {
+        "title": "Épinglé dans la barre latérale",
+        "description": "Épinglez vos projets favoris dans la barre latérale et dépliez-en un pour voir ses tâches."
+      }
+    },
+    "art": {
+      "project_website": "Refonte du site",
+      "project_mobile": "Mobile 1.0",
+      "project_onboarding": "Onboarding",
+      "context_label": "Description du projet",
+      "context_body": "Nouveau site vitrine en Next.js et Tailwind. Les textes suivent docs/brand et chaque page gère le mode sombre.",
+      "run_started": "a lancé une exécution",
+      "context_loaded": "Contexte du projet et 2 dépôts chargés",
+      "issue_count": "{{done}} / {{total}} tâches",
+      "issue_hero": "Animer le hero de la page d'accueil",
+      "issue_pricing": "Tableau comparatif des tarifs",
+      "issue_blog": "Paginer la liste du blog"
+    }
   }
 }

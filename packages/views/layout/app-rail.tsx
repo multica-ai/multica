@@ -25,7 +25,6 @@ import { useAppShell } from "./app-shell-context";
 import { NewIssueButton, SearchButton } from "./global-actions";
 import { HelpLauncher } from "./help-launcher";
 import { isPathWithin } from "./panel-nav";
-import { useFailingAutopilots } from "./panels/autopilots-panel";
 import { useTeamAgentStatus } from "./panels/team-status";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
@@ -33,11 +32,12 @@ import { routeIconForPath } from "./route-icon-components";
 
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
-  | { kind: "dot"; tone: "warning" | "destructive" };
+  | { kind: "dot" };
 
 /**
- * Rail badges. Inbox and Chat count unread; Team and Autopilots only flag
- * that something needs a look — the panel says what.
+ * Rail badges. Inbox and Chat count unread; Team only flags that something
+ * needs a look — the panel says what. A dot must be something the user can
+ * clear, so a failed autopilot run is shown in the Autopilots panel only.
  */
 function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const wsId = useCurrentWorkspace()?.id;
@@ -68,13 +68,11 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   );
 
   const { stuck } = useTeamAgentStatus(wsId);
-  const failingAutopilots = useFailingAutopilots(wsId);
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
   if (inboxUnread > 0) badges.inbox = { kind: "count", value: inboxUnread, tone: "brand" };
   if (chatUnread > 0) badges.chat = { kind: "count", value: chatUnread, tone: "neutral" };
-  if (stuck.length > 0) badges.team = { kind: "dot", tone: "warning" };
-  if (failingAutopilots.length > 0) badges.autopilots = { kind: "dot", tone: "destructive" };
+  if (stuck.length > 0) badges.team = { kind: "dot" };
   return badges;
 }
 
@@ -86,9 +84,8 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       <span
         aria-hidden
         className={cn(
-          "absolute top-1.5 right-3.5 size-2 rounded-full",
+          "absolute top-1.5 right-3.5 size-2 rounded-full bg-warning",
           ring,
-          badge.tone === "warning" ? "bg-warning" : "bg-destructive",
         )}
       />
     );

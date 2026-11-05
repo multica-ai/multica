@@ -19,6 +19,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "@multica/ui/icons";
+import { CliCallbackError } from "@/features/auth/cli-callback-error";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
 
 const authLogger = createLogger("auth.callback");
@@ -69,21 +70,25 @@ function CallbackContent() {
     // Google auth completes.
     const cliCallbackPart = stateParts.find((p) => p.startsWith("cli_callback:"));
     const cliStatePart = stateParts.find((p) => p.startsWith("cli_state:"));
-    const cliCallbackRaw = cliCallbackPart
-      ? decodeURIComponent(cliCallbackPart.slice("cli_callback:".length))
-      : null;
-    const cliState = cliStatePart
-      ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
-      : "";
+    let cliCallback: string | null = null;
+    let cliState = "";
+    try {
+      if (cliCallbackPart !== undefined) {
+        cliCallback = decodeURIComponent(cliCallbackPart.slice("cli_callback:".length));
+        if (!validateCliCallback(cliCallback)) {
+          setError({ kind: "invalid_cli_callback" });
+          return;
+        }
+      }
+      if (cliStatePart !== undefined) {
+        cliState = decodeURIComponent(cliStatePart.slice("cli_state:".length));
+      }
+    } catch {
+      setError({ kind: "invalid_cli_callback" });
+      return;
+    }
 
     const redirectUri = `${window.location.origin}/auth/callback`;
-
-    // Validate the CLI callback URL before redirecting — the state parameter
-    // passes through Google OAuth and must be treated as attacker-controlled.
-    const cliCallback =
-      cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-        ? cliCallbackRaw
-        : null;
 
     if (cliCallback) {
       // CLI login flow: exchange the Google code for a JWT, then redirect the
@@ -166,6 +171,8 @@ function CallbackContent() {
   const errorDescription = (() => {
     if (!error) return null;
     switch (error.kind) {
+      case "invalid_cli_callback":
+        return null;
       case "raw":
         return error.text;
       case "missing_code":
@@ -213,6 +220,8 @@ function CallbackContent() {
       </div>
     );
   }
+
+  if (error?.kind === "invalid_cli_callback") return <CliCallbackError />;
 
   if (error) {
     return (

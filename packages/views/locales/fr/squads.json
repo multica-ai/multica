@@ -84,7 +84,9 @@
     "agent_runtime_unbound": "Aucun runtime",
     "agent_runtime_aria": "Runtime de {{name}}",
     "agent_model_aria": "Modèle de {{name}}",
-    "model_default": "Défaut du runtime"
+    "model_default": "Défaut du runtime",
+    "empty_title": "Aucun membre pour l'instant",
+    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront."
   },
   "detail": {
     "assign_work": "Assigner du travail",
@@ -98,7 +100,9 @@
     "recent_work": "Travail récent",
     "recent_work_empty": "Aucune tâche n'a encore été assignée à ce squad.",
     "member_menu": "Actions pour {{name}}",
-    "working_on": "Travaille sur"
+    "working_on": "Travaille sur",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les squads"
   },
   "details": {
     "leader": "Chef",
@@ -175,5 +179,35 @@
     "add_dialog_confirm": "Ajouter {{count}} sélectionné(s)",
     "plugin_suggestions_empty": "Aucun plugin trouvé sur les runtimes de ce squad. Ajoutez-en un par nom ci-dessous.",
     "plugin_manual_add": "Ajouter à la liste"
+  },
+  "intro": {
+    "title": "Réunissez vos agents en squad pour qu'ils travaillent en équipe",
+    "description": "Assignez une tâche au squad. Son agent chef la lit, confie chaque étape au membre dont le rôle correspond et suit le travail jusqu'à l'objectif. Vous n'avez qu'un seul interlocuteur.",
+    "slides": {
+      "route": {
+        "title": "Un seul interlocuteur, une répartition automatique",
+        "description": "Le chef lit la tâche et mentionne le membre le mieux placé pour l'étape suivante. Seul ce membre se met au travail."
+      },
+      "roles": {
+        "title": "Répartir le travail par rôle",
+        "description": "Les descriptions de rôle indiquent au chef les points forts de chaque membre. Les membres peuvent être des agents ou des personnes."
+      },
+      "progress": {
+        "title": "Suivre l'avancement au même endroit",
+        "description": "La page du squad affiche le travail récent et ce sur quoi chaque membre travaille."
+      }
+    },
+    "art": {
+      "assignee": "Assigné à",
+      "squad_name": "Squad frontend",
+      "issue_dark_mode": "Ajouter un mode sombre aux paramètres",
+      "issue_board_columns": "Colonnes du tableau redimensionnables",
+      "issue_inbox_gestures": "Gestes de balayage dans la boîte mobile",
+      "issue_paste_images": "Coller des images dans les commentaires",
+      "delegating": "Choix d'un membre selon son rôle...",
+      "role_frontend": "Frontend",
+      "role_testing": "Tests",
+      "role_product": "Produit"
+    }
   }
 }

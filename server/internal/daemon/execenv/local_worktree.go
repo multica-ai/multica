@@ -32,11 +32,13 @@ import (
 //  2. The user's directory is never written to. Everything — including the
 //     sidecar context files Prepare writes — lands inside the worktree, which
 //     is disposable. What lasts in the user's repo is the branch, plus one
-//     hidden ref per branch recording who owns it and what it carries.
-//  3. Nothing is silently discarded. Whatever the agent leaves uncommitted is
-//     committed to the branch before the worktree goes away, and an edit of the
-//     user's that could not be merged is offered again next turn rather than
-//     recorded as delivered.
+//     hidden ref per branch recording who owns it and what it carries, and one
+//     per turn that left uncommitted changes after committing its own work.
+//  3. Nothing is silently discarded. Whatever the agent leaves uncommitted
+//     outlives the worktree — committed to the branch when the agent made no
+//     commit of its own, saved under a hidden ref when it did (#9788) — and an
+//     edit of the user's that could not be merged is offered again next turn
+//     rather than recorded as delivered.
 
 const (
 	// localWorktreeDirName is the env-root-relative directory holding the
@@ -71,6 +73,18 @@ const (
 	// `git branch`, and a ref rather than a loose object so `git gc` in their
 	// repo cannot reclaim a snapshot between two turns.
 	localStateRefPrefix = "refs/multica/local-state/"
+
+	// leftoverRefPrefix namespaces what a turn left uncommitted after making
+	// commits of its own: refs/multica/leftovers/<branch>/<task>. Hidden for
+	// the same reasons as the local-state record, and kept in its own namespace
+	// because a branch's record is a single ref while a branch collects one of
+	// these per turn.
+	leftoverRefPrefix = "refs/multica/leftovers/"
+
+	// maxLeftoverPathsInMessage caps the file list written into a leftover
+	// commit's message. The commit itself always carries every file; the list
+	// is only there so `git log` on the ref is readable.
+	maxLeftoverPathsInMessage = 200
 )
 
 // LocalWorktreeParams describes the worktree Prepare should build for a
@@ -210,6 +224,9 @@ type LocalWorktree struct {
 	// worktree: the branch does not carry userState yet, and only a commit made
 	// after the agent resolves can put it there.
 	snapshotPending bool
+	// taskID names the hidden ref this turn's leftovers are saved under, so the
+	// user can tell which run they came from.
+	taskID string
 	// aborted, when set, makes Finalize refuse to commit or remove anything.
 	// Set by the daemon when a pre-commit step failed in a way that would make
 	// the committed branch wrong (see AbortWithReason).
@@ -240,6 +257,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		Owner           branchOwner `json:"owner"`
 		TracksState     bool        `json:"tracks_state"`
 		SnapshotPending bool        `json:"snapshot_pending"`
+		TaskID          string      `json:"task_id"`
 	}{
 		wire:            (*wire)(w),
 		CreatedBranch:   w.createdBranch,
@@ -248,6 +266,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		Owner:           w.owner,
 		TracksState:     w.tracksState,
 		SnapshotPending: w.snapshotPending,
+		TaskID:          w.taskID,
 	})
 }
 
@@ -261,6 +280,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 		Owner           branchOwner `json:"owner"`
 		TracksState     bool        `json:"tracks_state"`
 		SnapshotPending bool        `json:"snapshot_pending"`
+		TaskID          string      `json:"task_id"`
 	}{wire: (*wire)(w)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -271,6 +291,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	w.owner = aux.Owner
 	w.tracksState = aux.TracksState
 	w.snapshotPending = aux.SnapshotPending
+	w.taskID = aux.TaskID
 	return nil
 }
 
@@ -283,6 +304,11 @@ type LocalWorktreeOutcome struct {
 	// AutoCommitted is true when the agent left uncommitted changes that
 	// Finalize committed so they would survive the worktree's removal.
 	AutoCommitted bool
+	// LeftoverRef names the hidden ref holding what the agent left uncommitted
+	// after making commits of its own, which Finalize kept off the branch
+	// (#9788). Empty when nothing was left over, or when the leftovers were
+	// auto-committed because the agent made no commit.
+	LeftoverRef string
 	// PreservedPath is set only when Finalize could NOT commit the agent's
 	// changes. The worktree at this path was intentionally left on disk because
 	// it is the only remaining copy of that work.
@@ -410,6 +436,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		userState:     userState,
 		priorState:    plan.priorState,
 		owner:         plan.owner,
+		taskID:        params.TaskID,
 		// A branch a sibling task forked because the conversation's own branch
 		// was busy is delivered once and never continued, so it records nothing.
 		tracksState: plan.tracksState && actualBranch == plan.name,
@@ -529,13 +556,24 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 // have no way to get them back. Committing first turns "the agent edited files"
 // into "the branch has a commit", which is the delivery contract for this mode.
 //
-// If that commit cannot be made — a repo with commit.gpgSign and no signing key
-// available to the daemon, a full disk, a ref lock we lost — Finalize returns an
-// error and DELIBERATELY LEAVES THE WORKTREE IN PLACE. Removing it would be the
-// one operation in this file that destroys work with no way back, and a warning
-// in the daemon log is not an acceptable substitute for the user's changes. The
-// surviving worktree stays registered in the user's repo, so `git worktree list`
-// points straight at it.
+// That holds for an agent that never commits — its uncommitted files ARE its
+// work. An agent that made commits of its own this turn has already chosen
+// what to deliver, and what it left out is usually left out on purpose:
+// generated output, scratch files, a one-off helper. Committing those onto the
+// branch, past the repository's commit hooks, is how they used to reach the
+// user's main line on the next merge (#9788). So after the agent's own commits
+// the leftovers are saved under a hidden ref instead (saveLeftovers): still
+// recoverable, never delivered. The prompt states this rule to the agent
+// (buildWorktreeBranchBlock), so which side of it a turn lands on is the
+// agent's decision, not a guess made here.
+//
+// If that commit — or that save — cannot be made — a repo with commit.gpgSign
+// and no signing key available to the daemon, a full disk, a ref lock we lost —
+// Finalize returns an error and DELIBERATELY LEAVES THE WORKTREE IN PLACE.
+// Removing it would be the one operation in this file that destroys work with
+// no way back, and a warning in the daemon log is not an acceptable substitute
+// for the user's changes. The surviving worktree stays registered in the
+// user's repo, so `git worktree list` points straight at it.
 func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, error) {
 	if w == nil {
 		return LocalWorktreeOutcome{}, nil
@@ -609,7 +647,8 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 		}
 		dirty = true
 	}
-	if dirty {
+	keepOff := dirty && w.leftoversStayOffBranch()
+	if dirty && !keepOff {
 		committed, err := w.commitAll(logger)
 		if err != nil {
 			outcome.PreservedPath = w.Path
@@ -681,6 +720,25 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 					"recover the work from there, and let the run keep the commit the worktree started from instead of resetting past it",
 				w.Branch, verifyErr, w.Path, w.GitRoot)
 		}
+		// Saved only once the delivery is known to be recordable: a refused one
+		// keeps the whole worktree anyway, leftovers included, and a ref saved
+		// for it would only be a second copy. Saved BEFORE the record, so a save
+		// that fails leaves nothing recorded — the same position, and the same
+		// recovery, as an auto-commit that fails.
+		if keepOff {
+			ref, saveErr := w.saveLeftovers(tip, logger)
+			if saveErr != nil {
+				outcome.PreservedPath = w.Path
+				if logger != nil {
+					logger.Error("execenv: could not save the changes the agent left uncommitted; keeping the worktree so they are recoverable",
+						"path", w.Path, "branch", w.Branch, "git_root", w.GitRoot, "error", saveErr)
+				}
+				return outcome, fmt.Errorf(
+					"could not save the changes the agent left uncommitted on branch %s: %w; the work is preserved in the worktree at %s (listed by `git worktree list` in %s) — recover it before that directory is reclaimed",
+					w.Branch, saveErr, w.Path, w.GitRoot)
+			}
+			outcome.LeftoverRef = ref
+		}
 		if recErr := w.recordState(tip, logger); recErr != nil {
 			outcome.PreservedPath = w.Path
 			if logger != nil {
@@ -718,6 +776,7 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 			"git_root", w.GitRoot,
 			"branch", outcome.Branch,
 			"auto_committed", outcome.AutoCommitted,
+			"leftover_ref", outcome.LeftoverRef,
 			"produced_work", producedWork,
 			"continued", w.Continued,
 		)
@@ -815,6 +874,160 @@ func (w *LocalWorktree) commitAll(logger *slog.Logger) (bool, error) {
 	// Never --allow-empty here: an empty commit would make a read-only turn look
 	// like it produced work and leave its branch behind.
 	return commitEverything(w.Path, "chore(agent): uncommitted changes from task", false)
+}
+
+// agentCommitted reports whether head carries commits the agent made this
+// turn, which decides where its uncommitted changes go (see Finalize). "This
+// turn" is measured from BaseCommit, which already includes the baseline the
+// daemon committed in Prepare, so that commit never counts as the agent's.
+//
+// A head that is BaseCommit itself or one of its ancestors carries no commit
+// of the agent's: that is a run that reset backwards, not one that committed,
+// and it keeps the old rule. (On a branch that records its delivery,
+// verifyDeliveryPoint then refuses it anyway; on one that does not, its
+// uncommitted work is committed as before.)
+//
+// A turn that started on an unresolved merge never counts. Its BaseCommit is
+// the branch tip the user's edits are being merged into, and those edits sit
+// uncommitted in the worktree until something commits them. An agent that
+// committed only part of the resolution would otherwise have the user's edits
+// saved aside while the branch is recorded as carrying them; committing
+// everything, as before, is the side that cannot lose them.
+func (w *LocalWorktree) agentCommitted(head string) bool {
+	if w.CommitsAllLeftovers() || w.BaseCommit == "" || head == "" || head == w.BaseCommit {
+		return false
+	}
+	// --is-ancestor exits 1 for "no" and something else when git cannot
+	// answer; either way the agent is not shown to have committed.
+	_, err := runGit(w.Path, "merge-base", "--is-ancestor", head, w.BaseCommit)
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+// CommitsAllLeftovers reports that this turn is the exception to the #9788
+// rule: Finalize will commit everything it leaves uncommitted onto the branch
+// even after the agent's own commits, because the turn started on an
+// unresolved merge of the user's edits (see agentCommitted). Exported so the
+// prompt can tell the agent; a turn that is not told would leave generated
+// output behind expecting it to stay off the branch.
+func (w *LocalWorktree) CommitsAllLeftovers() bool {
+	return w != nil && w.snapshotPending
+}
+
+// leftoversStayOffBranch reports whether Finalize should save what the agent
+// left uncommitted under a hidden ref instead of committing it onto the branch.
+// HEAD that cannot be resolved counts as "no commits": the auto-commit is the
+// side that keeps the work.
+func (w *LocalWorktree) leftoversStayOffBranch() bool {
+	head, err := runGitTrimmed(w.Path, "rev-parse", "--verify", "HEAD")
+	return err == nil && w.agentCommitted(head)
+}
+
+// saveLeftovers records everything the worktree holds beyond tip — every change
+// `git add -A` would stage, tracked or untracked — as one commit whose parent is
+// tip, under a hidden ref, and returns the ref. The worktree, its index and the
+// branch are left as they are: the tree is built in a private index.
+//
+// With tip as the parent, `git show <ref>` is exactly the leftovers, and
+// `git restore --source=<ref> -- <path>` brings one back. The ref is created,
+// never moved: a task re-dispatched under the same id saves under a second name
+// rather than overwriting what the first attempt left.
+//
+// Returns "" and no error when `git add -A` would stage nothing beyond tip.
+func (w *LocalWorktree) saveLeftovers(tip string, logger *slog.Logger) (string, error) {
+	tree, err := stagedWorktreeTree(w.Path)
+	if err != nil {
+		return "", err
+	}
+	tipTree, err := runGitTrimmed(w.Path, "rev-parse", "--verify", tip+"^{tree}")
+	if err != nil {
+		return "", fmt.Errorf("resolve the tree of %s: %w", shortID(tip), err)
+	}
+	if tree == tipTree {
+		return "", nil
+	}
+	changed, err := runGitTrimmed(w.Path, "diff", "--name-status", "--no-renames", tipTree, tree)
+	if err != nil {
+		return "", fmt.Errorf("list the uncommitted changes: %w", err)
+	}
+	files := strings.Split(changed, "\n")
+	args := append(commitIdentityArgs(w.Path), "commit-tree", tree, "-p", tip, "-m", leftoverCommitMessage(w.Branch, files))
+	commit, err := runGitTrimmed(w.Path, args...)
+	if err != nil {
+		return "", fmt.Errorf("git commit-tree: %w", err)
+	}
+	if commit == "" {
+		return "", errors.New("git commit-tree returned no commit")
+	}
+	short := commit[:min(12, len(commit))]
+	key := taskKey(w.taskID)
+	if key == "" {
+		key = short
+	}
+	ref := leftoverRef(w.Branch, key)
+	// The empty old value makes update-ref refuse a ref that already exists.
+	if _, err := runGit(w.GitRoot, "update-ref", ref, commit, ""); err != nil {
+		ref = leftoverRef(w.Branch, key+"-"+short)
+		if out, err := runGit(w.GitRoot, "update-ref", ref, commit, ""); err != nil {
+			return "", fmt.Errorf("git update-ref %s: %s: %w", ref, strings.TrimSpace(out), err)
+		}
+	}
+	if logger != nil {
+		logger.Info("execenv: the agent committed its own work; kept what it left uncommitted off the branch",
+			"branch", w.Branch, "leftover_ref", ref, "files", len(files))
+	}
+	return ref, nil
+}
+
+// leftoverCommitMessage explains a leftover commit to whoever finds it with
+// `git log`. The list is capped; the commit itself always carries every file.
+func leftoverCommitMessage(branch string, files []string) string {
+	var b strings.Builder
+	b.WriteString("multica: changes the agent left uncommitted\n\n")
+	fmt.Fprintf(&b, "The agent made commits of its own on %s in this run, so these changes\n", branch)
+	b.WriteString("were kept off the branch instead of being committed onto it. This\n")
+	b.WriteString("commit's parent is what the run delivered: `git show --stat <this commit>`\n")
+	b.WriteString("lists the changes, and `git restore --source=<this commit> -- <path>`\n")
+	b.WriteString("brings one back.\n\n")
+	for i, file := range files {
+		if i == maxLeftoverPathsInMessage {
+			fmt.Fprintf(&b, "…and %d more\n", len(files)-i)
+			break
+		}
+		b.WriteString(file + "\n")
+	}
+	return b.String()
+}
+
+// leftoverRef is where one turn's leftovers on branch are kept.
+func leftoverRef(branch, key string) string {
+	return leftoverRefPrefix + branch + "/" + key
+}
+
+// deleteLeftoverRefs drops every leftover ref saved for branch. Only refs one
+// level below the branch's prefix are its own: a deeper one would belong to a
+// branch named <branch>/<something>, which git cannot hold alongside this one,
+// but a stale ref of that shape is still not this branch's to delete.
+func deleteLeftoverRefs(gitRoot, branch string, logger *slog.Logger) {
+	prefix := leftoverRefPrefix + branch + "/"
+	out, err := runGitTrimmed(gitRoot, "for-each-ref", "--format=%(refname)", prefix)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("execenv: could not list the leftover refs of a task branch", "branch", branch, "error", err)
+		}
+		return
+	}
+	for _, ref := range strings.Split(out, "\n") {
+		ref = strings.TrimSpace(ref)
+		key, ok := strings.CutPrefix(ref, prefix)
+		if !ok || key == "" || strings.Contains(key, "/") {
+			continue
+		}
+		if out, delErr := runGit(gitRoot, "update-ref", "-d", ref); delErr != nil && logger != nil {
+			logger.Warn("execenv: could not drop a leftover ref of a deleted task branch (non-fatal)",
+				"ref", ref, "output", strings.TrimSpace(out), "error", delErr)
+		}
+	}
 }
 
 // commitEverything returns (false, nil) for the benign "there was nothing to
@@ -1713,24 +1926,58 @@ type DeliveryProblem struct {
 	// Reason is verifyDeliveryPoint's own explanation, as Finalize would
 	// report it.
 	Reason string
+	// CommittedOnly is set when the agent made commits of its own this turn.
+	// Finalize keeps what such a turn leaves uncommitted off the branch
+	// (#9788), so the repair must not fold it in either: RepairSteps then puts
+	// Tip's tree on the branch and leaves the uncommitted changes where they
+	// are, for Finalize to save aside like any other turn's leftovers.
+	CommittedOnly bool
+	// LeftoverTree is the tree `git add -A` would stage in the worktree,
+	// captured when CommittedOnly is set: exactly what Finalize would save
+	// aside if this turn needed no repair. The repair has to load Tip's tree
+	// into the index to commit it, which discards the agent's index; the last
+	// step loads this tree in its place, so Finalize's own `git add -A` still
+	// finds every leftover. Restoring the agent's index as such is not enough:
+	// a tree cannot hold an intent-to-add entry (`git add -N`), and one for a
+	// file the repository ignores would turn back into an ignored untracked
+	// file that `git add -A` skips (#9870 review).
+	LeftoverTree string
 }
 
 // RepairCommitMessage is the commit message RepairSteps uses for the one
 // commit it makes.
 const RepairCommitMessage = "chore(agent): put this turn's work back on its task branch"
 
-// RepairSteps is one git sequence that resolves any DeliveryProblem while
-// keeping the worktree's files exactly as they are: stage everything, point
-// HEAD back at the task branch without touching files or index, move the
-// branch to BaseCommit, and commit the staged tree on top of it. The result is
-// a single commit whose parent is BaseCommit and whose tree is what the agent
-// left — so it passes verifyDeliveryPoint by construction, and the guard
-// itself is unchanged.
+// RepairSteps is one git sequence that resolves any DeliveryProblem without
+// touching the worktree's files: stage the tree to deliver, point HEAD back at
+// the task branch without touching files or index, move the branch to
+// BaseCommit, and commit the staged tree on top of it. The result is a single
+// commit whose parent is BaseCommit — so it passes verifyDeliveryPoint by
+// construction, and the guard itself is unchanged.
+//
+// The tree to deliver follows the rule Finalize applies to the same turn. An
+// agent that made no commit delivers everything it left, so the sequence
+// stages it all (`add -A`). One that did delivers its commits, so the sequence
+// loads Tip's tree into the index (`read-tree`, which leaves the files alone),
+// commits it, and then loads LeftoverTree, so everything the agent left
+// uncommitted ends up staged — untouched on disk, still off the branch — for
+// Finalize to save aside exactly as it would have without the repair.
+// --allow-empty there covers a turn whose commits add up to nothing: the
+// sequence must still end on the branch rather than fail halfway through.
 //
 // Each step is a git argv (without the leading "git"). Rendered into the
 // repair prompt and executed verbatim by the tests, so the instruction the
 // agent gets is the one that is proven to work.
 func (p *DeliveryProblem) RepairSteps() [][]string {
+	if p.CommittedOnly {
+		return [][]string{
+			{"read-tree", p.Tip},
+			{"symbolic-ref", "HEAD", "refs/heads/" + p.Branch},
+			{"reset", "--soft", p.BaseCommit},
+			{"commit", "--allow-empty", "-m", RepairCommitMessage},
+			{"read-tree", p.LeftoverTree},
+		}
+	}
 	return [][]string{
 		{"add", "-A"},
 		{"symbolic-ref", "HEAD", "refs/heads/" + p.Branch},
@@ -1739,15 +1986,17 @@ func (p *DeliveryProblem) RepairSteps() [][]string {
 	}
 }
 
-// CheckDelivery reports, without changing anything, whether Finalize would
-// refuse to record this turn's delivery because of where the run left its
-// history — and returns nil whenever it would not, or when it would refuse for
-// a reason a repair turn should not be asked to undo.
+// CheckDelivery reports, without changing the worktree, its index or any ref,
+// whether Finalize would refuse to record this turn's delivery because of where
+// the run left its history — and returns nil whenever it would not, or when it
+// would refuse for a reason a repair turn should not be asked to undo. (It
+// does write tree objects: the ones its checks compare.)
 //
-// It predicts the same verifyDeliveryPoint call Finalize makes, including the
-// auto-commit Finalize adds first: uncommitted leftovers are committed onto
-// whatever HEAD points at, so they only reach the task branch when HEAD is
-// attached to it.
+// It predicts the same verifyDeliveryPoint call Finalize makes, including what
+// Finalize does with uncommitted changes first. When the agent made no commit
+// they are auto-committed onto whatever HEAD points at, so they only reach the
+// task branch when HEAD is attached to it. When it did, they are never
+// committed, and only where its commits are matters.
 //
 // A tip that is an ancestor of BaseCommit is deliberately NOT offered for
 // repair. That is the run resetting back to where the turn started or earlier
@@ -1786,8 +2035,9 @@ func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 			return nil
 		}
 	}
-	if dirty && !headAttachedTo(w.Path, w.Branch) {
-		if w.repairWouldRevertBase(tip) {
+	committedOnly := w.agentCommitted(tip)
+	if dirty && !committedOnly && !headAttachedTo(w.Path, w.Branch) {
+		if w.repairWouldRevertBase(tip, false) {
 			return nil
 		}
 		return &DeliveryProblem{
@@ -1799,10 +2049,20 @@ func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 		}
 	}
 	if verifyErr := w.verifyDeliveryPoint(tip); verifyErr != nil {
-		if w.repairWouldRevertBase(tip) {
+		if w.repairWouldRevertBase(tip, committedOnly) {
 			return nil
 		}
-		return &DeliveryProblem{Branch: w.Branch, BaseCommit: w.BaseCommit, Tip: tip, Reason: verifyErr.Error()}
+		problem := &DeliveryProblem{Branch: w.Branch, BaseCommit: w.BaseCommit, Tip: tip, Reason: verifyErr.Error(), CommittedOnly: committedOnly}
+		if committedOnly {
+			// Nothing to hand to Finalize means no repair that keeps the
+			// leftovers: offer none, and Finalize keeps the whole worktree.
+			leftoverTree, err := stagedWorktreeTree(w.Path)
+			if err != nil {
+				return nil
+			}
+			problem.LeftoverTree = leftoverTree
+		}
+		return problem
 	}
 	return nil
 }
@@ -1832,15 +2092,15 @@ func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 //     only added to it. A merge that would change the agent's file means the
 //     change is missing; repairing would deliver its revert (MUL-8139 review).
 //
-// The agent's side is read from the tree `git add -A` would stage, i.e. what
-// RepairSteps actually commits. Anything else — a deletion on either side, a
-// symlink or submodule, a binary
+// The agent's side is read from the tree RepairSteps actually commits: Tip's
+// own tree when committedOnly, otherwise the tree `git add -A` would stage.
+// Anything else — a deletion on either side, a symlink or submodule, a binary
 // file, a conflict, git failing to answer — refuses the repair. That includes
 // an agent edit on a line touching one the baseline changed, which merge-file
 // reports as a conflict even when the agent did build on the baseline.
 // Conservative by design: Finalize then makes its usual refusal and nothing is
 // lost.
-func (w *LocalWorktree) repairWouldRevertBase(tip string) bool {
+func (w *LocalWorktree) repairWouldRevertBase(tip string, committedOnly bool) bool {
 	mergeBase, err := runGitTrimmed(w.GitRoot, "merge-base", tip, w.BaseCommit)
 	if err != nil || mergeBase == "" {
 		return true // Unrelated histories: nothing to prove against.
@@ -1852,13 +2112,17 @@ func (w *LocalWorktree) repairWouldRevertBase(tip string) bool {
 	if err != nil {
 		return true
 	}
-	// Judge the agent's side as the repair will commit it: RepairSteps starts
-	// with `git add -A`, so the tree that stages — content after filters, and
-	// the file mode git records (core.filemode decides whether the worktree's
-	// executable bit or the index's mode wins) — is what reaches the branch.
-	agentTree, err := stagedWorktreeTree(w.Path)
-	if err != nil {
-		return true
+	// Judge the agent's side as the repair will commit it. For a turn without
+	// commits RepairSteps starts with `git add -A`, so the tree that stages —
+	// content after filters, and the file mode git records (core.filemode
+	// decides whether the worktree's executable bit or the index's mode wins)
+	// — is what reaches the branch. For a turn with commits it is Tip's tree.
+	agentTree := tip
+	if !committedOnly {
+		agentTree, err = stagedWorktreeTree(w.Path)
+		if err != nil {
+			return true
+		}
 	}
 	scratch := ""
 	defer func() {
@@ -2054,7 +2318,8 @@ func (w *LocalWorktree) recordState(checkpoint string, logger *slog.Logger) erro
 }
 
 // dropBranch deletes a task branch that carries nothing worth keeping, together
-// with its recorded snapshot — the two are meaningless apart.
+// with its recorded snapshot and any leftovers saved on it — they are
+// meaningless apart.
 func dropBranch(gitRoot, branch string, logger *slog.Logger) {
 	if branch == "" {
 		return
@@ -2064,6 +2329,7 @@ func dropBranch(gitRoot, branch string, logger *slog.Logger) {
 		logger.Debug("execenv: no local-directory snapshot to drop for task branch",
 			"branch", branch, "output", strings.TrimSpace(out))
 	}
+	deleteLeftoverRefs(gitRoot, branch, logger)
 }
 
 // pruneOrphanedStateRefs drops the snapshot of any branch that is no longer
@@ -2103,6 +2369,48 @@ func pruneOrphanedStateRefs(gitRoot string, logger *slog.Logger) {
 		if logger != nil {
 			logger.Info("execenv: dropped the local-directory snapshot of a branch that no longer exists",
 				"git_root", gitRoot, "branch", branch)
+		}
+	}
+	pruneOrphanedLeftoverRefs(gitRoot, logger)
+}
+
+// pruneOrphanedLeftoverRefs is pruneOrphanedStateRefs for the leftovers saved
+// on a branch: once the user has deleted or merged the branch away, they go
+// with it, for the same reason — each one pins a whole tree against `git gc`.
+func pruneOrphanedLeftoverRefs(gitRoot string, logger *slog.Logger) {
+	out, err := runGitTrimmed(gitRoot, "for-each-ref", "--format=%(refname)", leftoverRefPrefix)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("execenv: could not list leftover refs", "git_root", gitRoot, "error", err)
+		}
+		return
+	}
+	for _, ref := range strings.Split(out, "\n") {
+		ref = strings.TrimSpace(ref)
+		rest, ok := strings.CutPrefix(ref, leftoverRefPrefix)
+		if !ok {
+			continue
+		}
+		// refs/multica/leftovers/<branch>/<key>: the branch is everything before
+		// the last segment.
+		cut := strings.LastIndex(rest, "/")
+		if cut <= 0 {
+			continue
+		}
+		branch := rest[:cut]
+		if _, headErr := runGit(gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); headErr == nil {
+			continue
+		}
+		if out, delErr := runGit(gitRoot, "update-ref", "-d", ref); delErr != nil {
+			if logger != nil {
+				logger.Warn("execenv: could not drop a leftover ref of a deleted task branch (non-fatal)",
+					"ref", ref, "output", strings.TrimSpace(out), "error", delErr)
+			}
+			continue
+		}
+		if logger != nil {
+			logger.Info("execenv: dropped the leftovers of a branch that no longer exists",
+				"git_root", gitRoot, "branch", branch, "ref", ref)
 		}
 	}
 }

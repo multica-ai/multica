@@ -364,7 +364,20 @@ describe("ProjectDetail project deletion", () => {
     expect(mocks.push).toHaveBeenCalledWith("/test-workspace/projects");
   });
 
-  it("does not offer project deletion to regular members", () => {
+  it("offers deletion to the project creator", () => {
+    mocks.role = "member";
+    PROJECT.creator_type = "member";
+    PROJECT.creator_id = "user-1";
+    try {
+      renderProjectDetail();
+      expect(screen.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
+    } finally {
+      delete PROJECT.creator_type;
+      delete PROJECT.creator_id;
+    }
+  });
+
+  it("does not offer project deletion to regular members with an unknown creator", () => {
     mocks.role = "member";
 
     renderProjectDetail();
