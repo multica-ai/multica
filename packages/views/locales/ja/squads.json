@@ -85,6 +85,8 @@
     "agent_runtime_aria": "{{name}} のランタイム",
     "agent_model_aria": "{{name}} のモデル",
     "model_default": "ランタイムの既定",
+    "agent_thinking_aria": "{{name}} の思考",
+    "thinking_default": "CLI 設定に従う",
     "empty_title": "メンバーはまだいません",
     "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。"
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "スキルとプラグインの保存に失敗しました",
     "model_updated": "モデルを更新しました",
     "model_update_failed": "モデルの更新に失敗しました",
+    "thinking_updated": "思考設定を更新しました",
+    "thinking_update_failed": "思考設定の更新に失敗しました",
     "squad_runtime_failed": "ランタイムの変更に失敗しました",
     "squad_runtime_skipped": "{{updated}} 件を移動、{{skipped}} 件をスキップ: {{reason}}"
   },

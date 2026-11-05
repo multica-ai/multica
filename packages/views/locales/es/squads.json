@@ -76,7 +76,9 @@
     "issue_status_blocked": "bloqueada",
     "active_issue_more": "y {{count}} más",
     "empty_title": "Aún no hay miembros",
-    "empty_description": "Añade agentes o miembros para que reciban las tareas asignadas a este squad."
+    "empty_description": "Añade agentes o miembros para que reciban las tareas asignadas a este squad.",
+    "agent_thinking_aria": "Razonamiento de {{name}}",
+    "thinking_default": "Seguir la config de la CLI"
   },
   "details": {
     "leader": "Líder",
@@ -97,7 +99,9 @@
     "leader_updated": "Líder actualizado",
     "leader_update_failed": "No se ha podido actualizar el líder",
     "archive_failed": "No se ha podido archivar el squad",
-    "instructions_saved": "Instrucciones guardadas"
+    "instructions_saved": "Instrucciones guardadas",
+    "thinking_updated": "Razonamiento actualizado",
+    "thinking_update_failed": "No se pudo actualizar el razonamiento"
   },
   "profile_card": {
     "unavailable": "Squad no disponible",

@@ -85,6 +85,8 @@
     "agent_runtime_aria": "{{name}} 的运行时",
     "agent_model_aria": "{{name}} 的模型",
     "model_default": "运行时默认",
+    "agent_thinking_aria": "{{name}} 的思考",
+    "thinking_default": "跟随 CLI 配置",
     "empty_title": "还没有成员",
     "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。"
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "保存技能和插件失败",
     "model_updated": "模型已更新",
     "model_update_failed": "更新模型失败",
+    "thinking_updated": "思考设置已更新",
+    "thinking_update_failed": "思考设置更新失败",
     "squad_runtime_failed": "更改运行时失败",
     "squad_runtime_skipped": "已移动 {{updated}} 个 Agent，跳过 {{skipped}} 个：{{reason}}"
   },

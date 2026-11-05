@@ -85,6 +85,8 @@
     "agent_runtime_aria": "{{name}} 的執行環境",
     "agent_model_aria": "{{name}} 的模型",
     "model_default": "執行環境預設",
+    "agent_thinking_aria": "{{name}} 的思考",
+    "thinking_default": "跟隨 CLI 配置",
     "empty_title": "還沒有成員",
     "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。"
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "儲存技能與外掛失敗",
     "model_updated": "模型已更新",
     "model_update_failed": "更新模型失敗",
+    "thinking_updated": "思考設定已更新",
+    "thinking_update_failed": "思考設定更新失敗",
     "squad_runtime_failed": "更改執行環境失敗",
     "squad_runtime_skipped": "已移動 {{updated}} 個 Agent，略過 {{skipped}} 個：{{reason}}"
   },

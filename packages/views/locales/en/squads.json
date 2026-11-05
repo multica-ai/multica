@@ -85,6 +85,8 @@
     "agent_runtime_aria": "Runtime for {{name}}",
     "agent_model_aria": "Model for {{name}}",
     "model_default": "Runtime default",
+    "agent_thinking_aria": "Thinking for {{name}}",
+    "thinking_default": "Follow CLI config",
     "empty_title": "No members yet",
     "empty_description": "Add agents or members, and issues assigned to this squad go to them."
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "Failed to save skills and plugins",
     "model_updated": "Model updated",
     "model_update_failed": "Failed to update model",
+    "thinking_updated": "Thinking updated",
+    "thinking_update_failed": "Failed to update thinking",
     "squad_runtime_failed": "Failed to change runtime",
     "squad_runtime_skipped": "{{updated}} agents moved, {{skipped}} skipped: {{reason}}"
   },

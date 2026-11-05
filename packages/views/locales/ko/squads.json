@@ -85,6 +85,8 @@
     "agent_runtime_aria": "{{name}}의 런타임",
     "agent_model_aria": "{{name}}의 모델",
     "model_default": "런타임 기본값",
+    "agent_thinking_aria": "{{name}}의 추론",
+    "thinking_default": "CLI 설정 따르기",
     "empty_title": "아직 멤버가 없습니다",
     "empty_description": "에이전트나 멤버를 추가하면 이 스쿼드에 할당된 태스크를 맡게 됩니다."
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "스킬과 플러그인을 저장하지 못했습니다",
     "model_updated": "모델을 업데이트했습니다",
     "model_update_failed": "모델 업데이트에 실패했습니다",
+    "thinking_updated": "추론 설정을 업데이트했습니다",
+    "thinking_update_failed": "추론 설정 업데이트에 실패했습니다",
     "squad_runtime_failed": "런타임 변경에 실패했습니다",
     "squad_runtime_skipped": "에이전트 {{updated}}개 이동, {{skipped}}개 건너뜀: {{reason}}"
   },

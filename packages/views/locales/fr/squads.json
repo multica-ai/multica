@@ -85,6 +85,8 @@
     "agent_runtime_aria": "Runtime de {{name}}",
     "agent_model_aria": "Modèle de {{name}}",
     "model_default": "Défaut du runtime",
+    "agent_thinking_aria": "Réflexion de {{name}}",
+    "thinking_default": "Suivre la configuration du CLI",
     "empty_title": "Aucun membre pour l'instant",
     "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront."
   },
@@ -131,6 +133,8 @@
     "capabilities_save_failed": "Échec de l’enregistrement des skills et plugins",
     "model_updated": "Modèle mis à jour",
     "model_update_failed": "Échec de la mise à jour du modèle",
+    "thinking_updated": "Réflexion mise à jour",
+    "thinking_update_failed": "Échec de la mise à jour de la réflexion",
     "squad_runtime_failed": "Échec du changement de runtime",
     "squad_runtime_skipped": "{{updated}} agents déplacés, {{skipped}} ignorés : {{reason}}"
   },

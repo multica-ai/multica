@@ -13,12 +13,11 @@ import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, skillListOptions, squadListOptions, squadMemberStatusOptions, squadPluginsOptions, squadSkillsOptions, workspaceKeys } from "@multica/core/workspace/queries";
-import { isRuntimeUsableForUser, runtimeCapabilitiesOptions, runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import { isRuntimeUsableForUser, runtimeCapabilitiesOptions, runtimeDisplayLabel, runtimeListOptions, runtimeModelsOptions } from "@multica/core/runtimes";
 import { companyFloorsOptions } from "@multica/core/company";
 import { useAddSquadToCompany } from "../../company/lib/use-add-squad-to-company";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import {
-  OBJECT_PAGE_BODY,
   ObjectIdentity,
   ObjectPage,
   ObjectPanelSection,
@@ -102,6 +101,8 @@ import { SquadRuntimeSelect } from "./squad-runtime-select";
 import { SquadCapabilitiesSection } from "./squad-capabilities-section";
 import { sharedSquadRuntimeId } from "../lib/squad-runtime";
 import { SquadModelSelect } from "./squad-model-select";
+import { SquadThinkingSelect } from "./squad-thinking-select";
+import { buildModelChangeUpdate, type ModelCatalog } from "../../agents/components/inspector/model-change-cleanup";
 import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser, RuntimeDevice, SquadPlugin } from "@multica/core/types";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -193,6 +194,10 @@ export function SquadDetailView({
   );
   const agentModelById = useMemo(
     () => new Map(agents.map((a: Agent) => [a.id, a.model ?? ""])),
+    [agents],
+  );
+  const agentThinkingById = useMemo(
+    () => new Map(agents.map((a: Agent) => [a.id, a.thinking_level ?? ""])),
     [agents],
   );
   const archivedAgentIds = useMemo(
@@ -308,14 +313,43 @@ export function SquadDetailView({
   });
 
   const setAgentModelMut = useMutation({
-    mutationFn: (input: { agentId: string; model: string }) =>
-      api.updateAgent(input.agentId, { model: input.model }),
+    mutationFn: async (input: { agentId: string; model: string }) => {
+      const agent = agents.find((a: Agent) => a.id === input.agentId);
+      const runtime = runtimeById.get(agent?.runtime_id ?? "") ?? null;
+      // Only an online runtime can answer the catalog. Without it the stored
+      // thinking level and service tier stay as they are, as in the agent inspector.
+      const catalog: ModelCatalog =
+        runtime?.status === "online"
+          ? await queryClient.fetchQuery(runtimeModelsOptions(runtime.id)).then((res) => res.models, () => null)
+          : null;
+      return api.updateAgent(
+        input.agentId,
+        buildModelChangeUpdate({
+          provider: runtime?.provider ?? "",
+          model: input.model,
+          thinkingLevel: agent?.thinking_level ?? "",
+          serviceTier: agent?.service_tier ?? "",
+          catalog,
+        }),
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       toast.success(t(($) => $.toasts.model_updated));
     },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.model_update_failed)),
+  });
+
+  const setAgentThinkingMut = useMutation({
+    mutationFn: (input: { agentId: string; thinkingLevel: string }) =>
+      api.updateAgent(input.agentId, { thinking_level: input.thinkingLevel }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.toasts.thinking_updated));
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.thinking_update_failed)),
   });
 
   // One request points every live agent at the runtime. The server reports
@@ -508,7 +542,7 @@ export function SquadDetailView({
         </ObjectPanelSection>
       }
     >
-      <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+      <div className={cn(SQUAD_PAGE_BODY, "space-y-8")}>
         <ObjectIdentity
           media={
             canManage ? (
@@ -570,8 +604,10 @@ export function SquadDetailView({
           runtimeById={runtimeById}
           agentRuntimeIdById={agentRuntimeIdById}
           agentModelById={agentModelById}
+          agentThinkingById={agentThinkingById}
           archivedAgentIds={archivedAgentIds}
           onSetAgentModel={(agentId, model) => setAgentModelMut.mutate({ agentId, model })}
+          onSetAgentThinking={(agentId, thinkingLevel) => setAgentThinkingMut.mutate({ agentId, thinkingLevel })}
           onSetAgentRuntime={(agentId, runtimeId) => setAgentRuntimeMut.mutate({ agentId, runtimeId })}
           onApplySquadRuntime={(runtimeId) => applySquadRuntimeMut.mutate(runtimeId)}
           runtimePending={setAgentRuntimeMut.isPending || applySquadRuntimeMut.isPending}
@@ -675,7 +711,7 @@ function IssueLink({
 
 function SquadBodySkeleton() {
   return (
-    <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+    <div className={cn(SQUAD_PAGE_BODY, "space-y-8")}>
       <div className="flex items-center gap-3">
         <Skeleton className="size-12 rounded-full" />
         <div className="space-y-2">
@@ -728,6 +764,10 @@ function SquadAvatar({ squad, size }: { squad: Squad; size: "xs" | "identity" })
   );
 }
 
+// Wider than OBJECT_PAGE_BODY: the member rows carry runtime, model, thinking
+// and status columns side by side, which need more room than the 760px column.
+const SQUAD_PAGE_BODY = "mx-auto w-full max-w-[1040px] px-6 py-8";
+
 const SQUAD_STATUS_LABEL_KEYS = {
   working: "status_working",
   idle: "status_idle",
@@ -754,9 +794,11 @@ function SquadMembersSection({
   runtimeById,
   agentRuntimeIdById,
   agentModelById,
+  agentThinkingById,
   archivedAgentIds,
   onSetAgentRuntime,
   onSetAgentModel,
+  onSetAgentThinking,
   onApplySquadRuntime,
   runtimePending,
 }: {
@@ -780,9 +822,11 @@ function SquadMembersSection({
   runtimeById: Map<string, RuntimeDevice>;
   agentRuntimeIdById: Map<string, string>;
   agentModelById: Map<string, string>;
+  agentThinkingById: Map<string, string>;
   archivedAgentIds: Set<string>;
   onSetAgentRuntime: (agentId: string, runtimeId: string) => void;
   onSetAgentModel: (agentId: string, model: string) => void;
+  onSetAgentThinking: (agentId: string, thinkingLevel: string) => void;
   onApplySquadRuntime: (runtimeId: string) => void;
   runtimePending: boolean;
 }) {
@@ -853,7 +897,7 @@ function SquadMembersSection({
                 ? t(($) => $.members_tab.runtime_unavailable)
                 : t(($) => $.members_tab.agent_runtime_unbound);
             return (
-              <div key={m.id} className="group/member flex min-h-11 items-center gap-3 px-3 py-1.5 text-body">
+              <div key={m.id} className="group/member flex min-h-12 items-center gap-3 px-4 py-2 text-body">
                 <ActorAvatar
                   actorType={m.member_type}
                   actorId={m.member_id}
@@ -916,6 +960,20 @@ function SquadMembersSection({
                     defaultLabel={t(($) => $.members_tab.model_default)}
                     disabled={!canManage || isArchived(m) || runtimePending}
                     onSelect={(model) => onSetAgentModel(m.member_id, model)}
+                  />
+                )}
+                {m.member_type === "agent" && (
+                  <SquadThinkingSelect
+                    className="max-w-40 shrink-0"
+                    runtimeId={runtime?.id ?? null}
+                    runtimeOnline={runtime?.status === "online"}
+                    provider={runtime?.provider ?? ""}
+                    model={agentModelById.get(m.member_id) ?? ""}
+                    value={agentThinkingById.get(m.member_id) ?? ""}
+                    ariaLabel={t(($) => $.members_tab.agent_thinking_aria, { name })}
+                    defaultLabel={t(($) => $.members_tab.thinking_default)}
+                    disabled={!canManage || isArchived(m) || runtimePending}
+                    onSelect={(thinkingLevel) => onSetAgentThinking(m.member_id, thinkingLevel)}
                   />
                 )}
                 {m.member_type === "agent" && (
