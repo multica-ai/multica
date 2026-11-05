@@ -86,6 +86,8 @@ function UsageRingRender({ value }: { value: number | null }) {
   );
 }
 interface Props {
+  openRequest?: number;
+  onReturnFocus?(): void;
   localConversations?: LocalConversationSource;
   client: AgentGuiHostServices;
   agentId: string;
@@ -100,6 +102,8 @@ interface Compaction {
   turnId: string;
 }
 function UsageIndicatorRender({
+  openRequest,
+  onReturnFocus,
   client,
   localConversations,
   agentId,
@@ -121,6 +125,8 @@ function UsageIndicatorRender({
   const compaction = useRef<Compaction | null>(null);
   const sequence = useRef(0);
   const hostDismissed = useRef(false);
+  const appliedOpenRequest = useRef(openRequest);
+  const openedFromCommand = useRef(false);
   const invalidatePending = useCallback(() => {
     sequence.current++;
   }, []);
@@ -284,6 +290,14 @@ function UsageIndicatorRender({
   };
   const wasBusy = useRef(busy);
   useEffect(() => {
+    if (!openRequest || appliedOpenRequest.current === openRequest) return;
+    appliedOpenRequest.current = openRequest;
+    openedFromCommand.current = true;
+    hostDismissed.current = false;
+    setOpen(true);
+    void load();
+  }, [openRequest, load]);
+  useEffect(() => {
     if (wasBusy.current && !busy && active) void load();
     wasBusy.current = busy;
   }, [busy, active, load]);
@@ -346,6 +360,7 @@ function UsageIndicatorRender({
   const onOpenChangeProp2 = usePersistCallback<
     NonNullable<React.ComponentProps<typeof Popover>["onOpenChange"]>
   >((value) => {
+    if (value) openedFromCommand.current = false;
     hostDismissed.current = false;
     setOpen(value);
     if (value) void load();
@@ -356,7 +371,11 @@ function UsageIndicatorRender({
     if (hostDismissed.current) {
       event.preventDefault();
       hostDismissed.current = false;
+    } else if (openedFromCommand.current) {
+      event.preventDefault();
+      onReturnFocus?.();
     }
+    openedFromCommand.current = false;
   });
   const onClickProp4 = usePersistCallback<
     NonNullable<React.ComponentProps<typeof Button>["onClick"]>
@@ -427,6 +446,7 @@ function UsageIndicatorRender({
             </Button>
           </div>
         </div>
+        {sessionId && <div className="multica-usage-detail break-all">{chinese ? "会话 ID" : "Conversation ID"}: {sessionId}</div>}
         {compactStatus && (
           <p
             className="multica-usage-detail"

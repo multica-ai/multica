@@ -28,6 +28,7 @@ import {
 } from "react";
 import type { AgentComposerProps } from "../../../vendor/tutti/packages/agent/gui/agent-gui/agentGuiNode/AgentComposer";
 import { PermissionPicker } from "./permission-picker";
+import type { ComposerCommandRequest } from "./composer-commands";
 import type {
   AgentGuiExecutionTarget,
   AgentGuiHostServices,
@@ -52,6 +53,8 @@ type FooterContext = Parameters<
   >;
 type Handle = ReturnType<typeof createMulticaAgentGuiRuntime>;
 interface Props {
+  commandRequest?: ComposerCommandRequest | null;
+  onCommandHandled?(): void;
   context: FooterContext;
   client: AgentGuiHostServices;
   handle: Handle;
@@ -78,6 +81,8 @@ interface Props {
 }
 
 function ComposerFooterControlsRender({
+  commandRequest,
+  onCommandHandled,
   context,
   client,
   handle,
@@ -191,6 +196,16 @@ function ComposerFooterControlsRender({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modelMenu, setModelMenu] = useState<"model" | "reasoning" | null>(null);
+  const modelMenuFromCommand = useRef(false);
+  const [statusRequest, setStatusRequest] = useState(0);
+  const appliedCommand = useRef<number | null>(null);
+  const sidePending = useRef(false);
+  const currentComposer = useRef({ sessionId, active: context.isActive });
+  currentComposer.current = { sessionId, active: context.isActive };
+  useEffect(() => {
+    setModelMenu(null);
+  }, [sessionId, agentId, context.isActive]);
   const request = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const busy = Boolean(
@@ -346,13 +361,71 @@ function ComposerFooterControlsRender({
     }
   };
   const changeEffortCallback = usePersistCallback(changeEffort);
+  useEffect(() => {
+    if (!commandRequest || appliedCommand.current === commandRequest.sequence)
+      return;
+    appliedCommand.current = commandRequest.sequence;
+    onCommandHandled?.();
+    if (!context.isActive || commandRequest.agentSessionId !== sessionId) return;
+    if (commandRequest.name === "status") {
+      setStatusRequest(commandRequest.sequence);
+      return;
+    }
+    const settingsCommand = commandRequest.name === "model" || commandRequest.name === "reasoning";
+    if (unavailable || (settingsCommand && (busy || saving))) {
+      void client.hostApi.showMessage({
+        message: unavailable ? labels.runtime : labels.running,
+        tone: "info"
+      });
+      return;
+    }
+    if (commandRequest.name === "model" || commandRequest.name === "reasoning") {
+      modelMenuFromCommand.current = true;
+      setModelMenu(commandRequest.name);
+      if (!catalog && !loading) void load();
+      return;
+    }
+    if (!snapshot.sideWorkspace || sidePending.current || !agentId) return;
+    sidePending.current = true;
+    const sourceId = serverSessionId;
+    if (sessionId && !sourceId) {
+      sidePending.current = false;
+      void client.hostApi.showMessage({ message: labels.running, tone: "info" });
+      return;
+    }
+    void (async () => {
+      const source = sourceId ?? (await client.session.create({
+          sessionId: crypto.randomUUID(),
+          agentId,
+          ...(context.composerSettings.selectedProjectPath
+            ? { cwd: context.composerSettings.selectedProjectPath }
+            : {})
+        })).id;
+      if (!sourceId && (
+        currentComposer.current.sessionId !== sessionId ||
+        !currentComposer.current.active
+      )) return;
+      await client.hostApi.openSide({
+        sessionId: source, requestId: crypto.randomUUID()
+      });
+      if (!sourceId) await client.hostApi.selectSession({ sessionId: source });
+    })().catch((failure: unknown) => client.hostApi.showMessage({
+      message: failure instanceof Error ? failure.message : String(failure),
+      tone: "error"
+    })).finally(() => {
+      sidePending.current = false;
+    });
+  });
   const configured = selected ?? agent?.model ?? null;
   const known = catalog?.models.find((entry) => entry.id === configured);
   const defaultModel =
     catalog?.models.find((entry) => entry.id === agent?.model)?.label ||
     agent?.model ||
-    catalog?.models.find((entry) => entry.default)?.label;
+    catalog?.models.find((entry) => entry.default || entry.isDefault)?.label;
   const levels = localReasoningLevels(catalog?.models ?? [], configured);
+  const noReasoningOptions = !configured && !defaultModel
+    ? chinese ? "未能识别默认模型，请选择模型" : "Default model unavailable; choose a model"
+    : chinese ? "此模型未提供可用强度" : "No effort options reported for this model";
   const effortLabel = (value: string, fallback: string) =>
     chinese
       ? ({
@@ -367,6 +440,17 @@ function ComposerFooterControlsRender({
         }[value] ?? fallback)
       : fallback;
   const effortLabelCallback = usePersistCallback(effortLabel);
+  const reasoningChoices = (
+    <DropdownMenuRadioGroupBinding1
+      selectedEffort={selectedEffort}
+      changeEffort={changeEffortCallback}
+      busy={busy}
+      saving={saving}
+      labels={labels}
+      levels={levels}
+      effortLabel={effortLabelCallback}
+    />
+  );
   const currentLabel = selected
     ? known?.label || selected
     : defaultModel
@@ -376,6 +460,8 @@ function ComposerFooterControlsRender({
   const onOpenChangeProp1 = usePersistCallback<
     NonNullable<React.ComponentProps<typeof DropdownMenu>["onOpenChange"]>
   >((open) => {
+    if (open) modelMenuFromCommand.current = false;
+    setModelMenu(open ? "model" : null);
     if (open && !catalog && !loading) void load();
   });
   const onValueChangeProp2 = usePersistCallback<
@@ -426,6 +512,8 @@ function ComposerFooterControlsRender({
       )}
       {snapshot.local && agentId && (
         <UsageIndicator
+          openRequest={statusRequest}
+          onReturnFocus={() => onReadyForFocus(Date.now())}
           client={client}
           localConversations={handle.localConversations}
           agentId={agentId}
@@ -442,7 +530,7 @@ function ComposerFooterControlsRender({
           }
         />
       )}
-      <DropdownMenu onOpenChange={onOpenChangeProp1}>
+      <DropdownMenu open={modelMenu !== null} onOpenChange={onOpenChangeProp1}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -468,13 +556,19 @@ function ComposerFooterControlsRender({
         </DropdownMenuTrigger>
         {/* Portals remain React descendants of the source window click-capture guard. */}
         <DropdownMenuContent
+          onCloseAutoFocus={(event) => {
+            if (!modelMenuFromCommand.current) return;
+            modelMenuFromCommand.current = false;
+            event.preventDefault();
+            onReadyForFocus(Date.now());
+          }}
           className="multica-composer-footer-menu multica-model-picker-menu nodrag"
           align="end"
           side="top"
           collisionPadding={16}
         >
-          <DropdownMenuLabel>{labels.model}</DropdownMenuLabel>
-          <div className="multica-model-picker-list">
+          <DropdownMenuLabel>{modelMenu === "reasoning" ? (chinese ? "推理" : "Reasoning") : labels.model}</DropdownMenuLabel>
+          {modelMenu !== "reasoning" && <div className="multica-model-picker-list">
             <DropdownMenuRadioGroup
               value={selected ?? ""}
               onValueChange={onValueChangeProp2}
@@ -524,8 +618,14 @@ function ComposerFooterControlsRender({
                 {labels.failed}: {error}
               </div>
             )}
-          </div>
-          {snapshot.local && catalog && (
+          </div>}
+          {modelMenu === "reasoning" && <div className="multica-model-picker-list">
+            {reasoningChoices}
+            {loading && <DropdownMenuItem disabled>{labels.loading}</DropdownMenuItem>}
+            {catalog && !levels.length && <DropdownMenuItem disabled>{noReasoningOptions}</DropdownMenuItem>}
+            {error && <div className="multica-composer-footer-error" role="alert">{labels.failed}: {error}</div>}
+          </div>}
+          {modelMenu !== "reasoning" && snapshot.local && catalog && (
             <>
               <DropdownMenuSeparator />
               {levels.length > 0 ? (
@@ -553,26 +653,12 @@ function ComposerFooterControlsRender({
                     <DropdownMenuLabel>
                       {chinese ? "思考强度" : "Thinking effort"}
                     </DropdownMenuLabel>
-                    <DropdownMenuRadioGroupBinding1
-                      selectedEffort={selectedEffort}
-                      changeEffort={changeEffortCallback}
-                      busy={busy}
-                      saving={saving}
-                      labels={labels}
-                      levels={levels}
-                      effortLabel={effortLabelCallback}
-                    />
+                    {reasoningChoices}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               ) : (
                 <DropdownMenuItem disabled>
-                  {configured
-                    ? chinese
-                      ? "此模型未提供可用强度"
-                      : "No effort options reported for this model"
-                    : chinese
-                      ? "选择模型后可调整思考强度"
-                      : "Choose a model to adjust thinking effort"}
+                  {noReasoningOptions}
                 </DropdownMenuItem>
               )}
             </>

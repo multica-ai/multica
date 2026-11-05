@@ -15,10 +15,40 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/procgroup"
+	"github.com/multica-ai/multica/server/internal/localconversation/provider/codex"
+	"github.com/multica-ai/multica/server/pkg/codexappserver"
 )
 
 // errNoAnswer is returned when the CLI exits or times out before answering.
 var errNoAnswer = errors.New("catalog: the provider did not answer")
+
+// probeCodexDefault follows the same config-before-catalog resolution as a
+// conversation. Reading the model cache alone cannot identify the default.
+func probeCodexDefault(ctx context.Context, req probeRequest) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, req.timeout)
+	defer cancel()
+	server, err := codex.Start(ctx, codex.Command{Path: req.executable, Dir: req.dir, Env: req.env}, func(codexappserver.Frame) {}, nil)
+	if err != nil {
+		return "", err
+	}
+	defer server.Stop()
+	raw, err := server.Request(ctx, "config/read", map[string]any{"cwd": req.dir, "includeLayers": false})
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		Config *struct {
+			Model string `json:"model"`
+		} `json:"config"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.Config == nil {
+		return "", errors.New("catalog: invalid Codex configuration response")
+	}
+	if result.Config.Model != "" {
+		return result.Config.Model, nil
+	}
+	return codexappserver.CatalogDefaultModel(ctx, server.Request)
+}
 
 // probeRequest names what a probe asks after initializing.
 type probeRequest struct {

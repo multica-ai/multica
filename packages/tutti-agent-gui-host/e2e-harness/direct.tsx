@@ -39,6 +39,7 @@ function snapshot(
     locale: "en",
     theme,
     sidePane,
+    sideWorkspace: true,
     local: true,
     hostActive: true,
     hostVisible: true,
@@ -60,12 +61,15 @@ function snapshot(
   } as unknown as AgentGuiInitSnapshot;
 }
 const storage = new Map<string, string>();
+const hostActions: { instance: string; method: string; params: unknown }[] = [];
+Object.assign(window, { hostActions });
 function service(id: string, theme: "light" | "dark", sidePane: boolean) {
   const session = snapshot(id, theme, sidePane).sessions[0]!;
   const request = async (
     method: string,
     params: { key?: string; value?: string }
   ) => {
+    hostActions.push({ instance: id, method, params });
     switch (method) {
       case "workspace.load":
         return snapshot(id, theme, sidePane);
@@ -104,26 +108,28 @@ function service(id: string, theme: "light" | "dark", sidePane: boolean) {
           runtime_id: "local:codex",
           status: "completed",
           supported: true,
-          models: []
+          models: [{ id: "fixture-model", label: "Fixture model", thinking: { supported_levels: [{ value: "low", label: "Low" }, { value: "high", label: "High" }] } }]
         };
       case "usage.read":
         return {
           provider: "codex",
           context: {
-            usedTokens: null,
-            limitTokens: null,
+            usedTokens: 100,
+            limitTokens: 1000,
             model: null,
             updatedAt: null
           },
           account: {
-            status: "unavailable",
-            windows: [],
+            status: "available",
+            windows: [{ id: "codex:five_hour", label: "5h", usedPercent: 20 }],
             plan: null,
             updatedAt: null
           }
         };
       case "context.tasks":
         return [];
+      case "host.openSide":
+        return { ...session, id: `${id}-side` };
       default:
         return undefined;
     }

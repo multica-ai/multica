@@ -1,4 +1,5 @@
 import { useMemo, type RefObject } from "react";
+import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
 import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
@@ -71,6 +72,7 @@ export function useComposerPaletteCatalog({
   uiLanguage,
   editorHandleRef
 }: UseComposerPaletteCatalogInput) {
+  const hostCommands = useOptionalAgentHostApi()?.composerCommands?.commands;
   // Desktop status is refreshed independently from Composer options. Prefer a
   // fresh, authorized host probe when an older Composer snapshot still says
   // the driver is unavailable; launch remains protected by the daemon clamp.
@@ -100,18 +102,22 @@ export function useComposerPaletteCatalog({
   );
   const resolvedSlashCommands = useMemo(
     () =>
-      resolveSlashCommandsForProvider({
-        provider,
-        policy: slashCommandPolicy,
-        commands: availableCommands,
-        hasCompactableContext,
-        compactSupported,
-        planSupported: composerSettings.supportsPlanMode,
-        browserSupported: Boolean(composerSettings.supportsBrowser),
-        computerSupported: computerPresentationSupported
-      }),
+      [
+        ...(hostCommands ?? []),
+        ...resolveSlashCommandsForProvider({
+          provider,
+          policy: slashCommandPolicy,
+          commands: availableCommands,
+          hasCompactableContext,
+          compactSupported,
+          planSupported: composerSettings.supportsPlanMode,
+          browserSupported: Boolean(composerSettings.supportsBrowser),
+          computerSupported: computerPresentationSupported
+        }).filter((command) => !hostCommands?.some((host) => host.name === command.name))
+      ],
     [
       availableCommands,
+      hostCommands,
       compactSupported,
       composerSettings.supportsPlanMode,
       composerSettings.supportsBrowser,
@@ -233,6 +239,12 @@ export function useComposerPaletteCatalog({
           ...(commandDescription ? { description: commandDescription } : {}),
           command
         };
+        const hostCommand = hostCommands?.find((entry) => entry.name === command.name);
+        if (hostCommand) {
+          commandEntry.primaryLabel = hostCommand.label;
+          commandEntry.secondaryLabel = command.name;
+          commandEntry.description = hostCommand.description;
+        }
         return [commandEntry];
       });
     const skillEntries: AgentSlashPaletteEntry[] = filteredSkills.map(
@@ -264,6 +276,7 @@ export function useComposerPaletteCatalog({
       ...nonConnectorSkillEntries
     ];
   }, [
+    hostCommands,
     capabilityMenuState?.browserUse?.connectionMode,
     capabilityMenuState?.computerUse?.authorization,
     capabilityMenuState?.computerUse?.installed,

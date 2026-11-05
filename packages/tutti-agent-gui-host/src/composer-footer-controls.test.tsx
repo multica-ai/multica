@@ -136,9 +136,14 @@ it("applies a new conversation directory only to its active home composer, witho
   ).toBe(false);
 });
 
-it.each(["codex", "claude"] as const)(
-  "selects and displays %s thinking effort, then removes incompatible options on a model change",
-  async (provider) => {
+it.each([
+  { provider: "codex", followDefault: false },
+  { provider: "claude", followDefault: false },
+  { provider: "codex", followDefault: true },
+  { provider: "claude", followDefault: true }
+] as const)(
+  "selects $provider thinking effort (following default: $followDefault), then removes incompatible options on a model change",
+  async ({ provider, followDefault }) => {
     const target = {
       id: `local:${provider}`,
       name: provider,
@@ -176,6 +181,7 @@ it.each(["codex", "claude"] as const)(
               {
                 id: "reasoning",
                 label: "Reasoning",
+                isDefault: true,
                 thinking: {
                   supported_levels: [
                     { value: "low", label: "Low" },
@@ -195,7 +201,7 @@ it.each(["codex", "claude"] as const)(
     );
     handle = createMulticaAgentGuiRuntime(client, snapshot);
     await handle.initialize();
-    await handle.setModelSelection(target.id, null, "reasoning");
+    if (!followDefault) await handle.setModelSelection(target.id, null, "reasoning");
     await act(async () =>
       root.render(
         <ComposerFooterControls
@@ -236,10 +242,14 @@ it.each(["codex", "claude"] as const)(
           );
       });
     await open();
+    if (followDefault) {
+      expect(container.querySelector('[data-testid="multica-model-picker"]')?.textContent).toContain("Default · Reasoning");
+    }
     expect(document.body.textContent).toContain("Thinking effort");
     await openEffort();
     await act(async () => option("High").click());
     expect(handle.getReasoningSelection(target.id)).toBe("high");
+    expect(handle.getModelSelection(target.id)).toBe(followDefault ? null : "reasoning");
     expect(
       container.querySelector('[data-testid="multica-model-picker"]')
         ?.textContent
@@ -376,3 +386,38 @@ it.each([{ locale: "en" }, { locale: "zh-CN" }] as const)(
     ).not.toBeNull();
   }
 );
+
+it.each([false, true])("opens a Side without sending a prompt (new source: %s)", async (newSource) => {
+  const target = { id: "local:codex", name: "Codex", provider: "codex", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true };
+  const sessionId = newSource ? null : "source";
+  const snapshot: AgentGuiInitSnapshot = { workspaceId: "ws", workspaceSlug: "ws", userId: "user", theme: "dark", locale: "en", local: true, sideWorkspace: true, activeSessionId: sessionId, selectedAgentId: target.id, agents: [], executionTargets: [target], sessions: [] };
+  if (sessionId) snapshot.sessions = [{ id: sessionId, agent_id: target.id, status: "active", workspace_id: "ws", creator_id: "user", title: "Source", created_at: "2026-11-05T00:00:00Z", updated_at: "2026-11-05T00:00:00Z" } as never];
+  const request = vi.fn(async (method: string) => {
+    if (method === "workspace.load") return snapshot;
+    if (method === "session.create") return { id: "created-source" };
+    if (method === "host.openSide") return { id: "side" };
+    return null;
+  });
+  const client = fakeHostServices(request as AgentGuiOperationInvoker, () => () => {});
+  handle = createMulticaAgentGuiRuntime(client, snapshot);
+  await handle.initialize();
+  const handled = vi.fn();
+  const render = () => root.render(<ComposerFooterControls
+    context={{ agentSessionId: sessionId, isActive: true, isSendingTurn: !newSource, selectedAgentTarget: { agentTargetId: target.id }, composerSettings: { selectedProjectPath: "/project" } } as ComponentProps<typeof ComposerFooterControls>["context"]}
+    commandRequest={{ name: "side", sequence: 1, agentSessionId: sessionId }} onCommandHandled={handled}
+    client={client} handle={handle} targets={[target]} snapshot={snapshot}
+    onLeaveSession={vi.fn()} onCancelTargetSwitch={vi.fn()} onSelectAgent={vi.fn()} onReadyForFocus={vi.fn()}
+  />);
+  await act(async () => render());
+  await act(async () => render());
+  const calls = request.mock.calls as unknown as [string, Record<string, unknown>][];
+  const source = newSource ? "created-source" : "source";
+  expect(calls.filter(([method]) => method === "host.openSide")).toEqual([["host.openSide", { sessionId: source, requestId: expect.any(String) }]]);
+  expect(calls.filter(([method]) => method === "session.create")).toHaveLength(newSource ? 1 : 0);
+  if (newSource) {
+    expect(calls.find(([method]) => method === "session.create")?.[1]).toMatchObject({ sessionId: expect.any(String), agentId: target.id, cwd: "/project" });
+    expect(calls.find(([method]) => method === "host.selectSession")?.[1]).toEqual({ sessionId: source });
+  }
+  expect(calls.some(([method]) => method === "session.send")).toBe(false);
+  expect(handled).toHaveBeenCalledTimes(1);
+});

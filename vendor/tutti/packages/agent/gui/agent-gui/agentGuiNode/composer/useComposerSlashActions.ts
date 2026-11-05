@@ -8,6 +8,7 @@ import {
   type SetStateAction
 } from "react";
 import { useOptionalConversationServices } from "../../../conversationServices";
+import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
 import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
 import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
@@ -40,7 +41,7 @@ import {
   resolveSlashCommandSelectionEffect,
   resolveSlashCommandSubmitEffect
 } from "../model/agentSlashCommandProviderPolicy";
-import { moveSlashCommandHighlight } from "../model/agentSlashCommands";
+import { moveSlashCommandHighlight, parseSlashCommandInvocation } from "../model/agentSlashCommands";
 import { resolvePermissionModeControlsDisabled } from "../model/composerModeSelection";
 import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
@@ -110,6 +111,7 @@ function useStableEventCallback<Args extends unknown[], Result>(
 }
 
 export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
+  const hostApi = useOptionalAgentHostApi();
   const agentActivityRuntime = useOptionalConversationServices();
   const {
     workspaceId,
@@ -342,6 +344,21 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
 
   const selectCommand = useCallback(
     (command: AgentSessionCommand): void => {
+      if (hostApi?.composerCommands?.commands.some((entry) => entry.name === command.name)) {
+        draftPromptRef.current = "";
+        setPaletteDraftPrompt("");
+        setIsPaletteOpen(false);
+        onDraftContentChange(
+          updateAgentComposerDraft(draftContent, { prompt: "" })
+        );
+        void Promise.resolve().then(() => hostApi.composerCommands!.execute({
+          name: command.name,
+          agentSessionId: slashStatusAgentSessionId
+        })).catch((error: unknown) => hostApi.toast?.error?.(
+          error instanceof Error ? error.message : String(error)
+        ));
+        return;
+      }
       const selectionEffect = resolveSlashCommandSelectionEffect({
         provider,
         policy: slashCommandPolicy,
@@ -352,7 +369,15 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
         executeSlashCommandEffect(selectionEffect);
       }
     },
-    [executeSlashCommandEffect, provider, slashCommandPolicy]
+    [
+      draftContent,
+      onDraftContentChange,
+      hostApi,
+      slashStatusAgentSessionId,
+      executeSlashCommandEffect,
+      provider,
+      slashCommandPolicy
+    ]
   );
 
   const selectCapability = useCallback(
@@ -491,6 +516,14 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
         return;
       }
       if (options?.guidance !== true) {
+        const invocation = parseSlashCommandInvocation(nextPrompt);
+        const hostCommand = invocation?.args.trim() === ""
+          ? hostApi?.composerCommands?.commands.find((entry) => entry.name === invocation.commandName)
+          : undefined;
+        if (hostCommand) {
+          selectCommand(hostCommand);
+          return;
+        }
         const slashCommandEffect = resolveSlashCommandSubmitEffect({
           browserSupported: Boolean(composerSettings.supportsBrowser),
           computerSupported: computerExecutable,

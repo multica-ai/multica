@@ -5,6 +5,8 @@ import { ConnectorPaletteItem } from "@tutti-os/connector-renderer/ui";
 import { Spinner } from "@tutti-os/ui-system";
 import {
   Globe,
+  Brain,
+  Box,
   Info,
   ListChecks,
   MessageCirclePlus,
@@ -77,27 +79,25 @@ interface AgentSlashCommandPaletteProps {
 
 const paletteStyles = {
   palette:
-    "nodrag agent-gui-node__mention-palette flex h-full min-h-0 flex-col gap-0.5 overflow-y-auto px-1 pb-1 pt-2 [-webkit-app-region:no-drag]",
+    "nodrag agent-gui-node__mention-palette flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1 [-webkit-app-region:no-drag]",
   option:
-    "nodrag relative flex h-7 min-h-7 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-[6px] border-0 bg-transparent px-2.5 py-0 text-left text-[13px] text-[var(--text-primary)] outline-hidden transition-colors duration-200 [-webkit-app-region:no-drag] hover:bg-[var(--transparency-block)] focus-visible:bg-[var(--transparency-block)] focus-visible:outline-none active:bg-[var(--transparency-active)] data-[highlighted]:bg-[var(--transparency-block)] data-[highlighted]:text-[var(--text-primary)] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-  icon: "flex w-4 shrink-0 items-center justify-center self-center text-[var(--text-secondary)]",
-  copy: "flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden leading-[16px]",
-  name: "flex min-w-0 max-w-[48%] shrink-0 items-center gap-[8px] overflow-hidden",
+    "nodrag group relative flex min-h-8 w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-sm border-0 bg-transparent px-2 py-1.5 text-left text-body text-foreground outline-hidden transition-colors duration-100 [-webkit-app-region:no-drag] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none active:bg-accent data-[highlighted]:bg-muted data-[highlighted]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  icon: "flex size-4 shrink-0 items-center justify-center text-muted-foreground group-data-[highlighted]:text-foreground",
+  copy: "flex min-w-0 flex-1 items-center gap-2 overflow-hidden",
+  name: "flex min-w-0 max-w-full items-center overflow-hidden",
   primaryName:
-    "min-w-0 truncate text-[13px] font-semibold text-[var(--text-primary)]",
-  secondaryName:
-    "shrink-0 text-[13px] font-normal text-[var(--text-secondary)]",
+    "min-w-0 truncate text-body font-normal",
   descriptionText:
-    "min-w-0 flex-1 truncate text-[13px] font-normal text-[var(--text-secondary)]",
+    "min-w-0 flex-1 truncate text-caption font-normal text-muted-foreground",
   groupHeader:
-    "select-none px-2.5 pb-0.5 text-[11px] font-normal text-[var(--text-secondary)]",
+    "select-none px-2 py-1.5 text-caption font-medium text-muted-foreground",
   groupHeaderFirst: "pt-1.5",
   groupHeaderSeparated:
-    "relative mt-3 pt-3 before:absolute before:inset-x-3 before:top-0 before:border-t before:border-[var(--border-1)] before:content-['']",
+    "relative mt-1 pt-3 before:absolute before:inset-x-2 before:top-0 before:border-t before:border-border before:content-['']",
   settingsButton:
-    "nodrag ml-1 flex h-5 min-h-5 shrink-0 items-center rounded-[4px] border-0 bg-[var(--transparency-hover)] px-2 py-0 text-[11px] font-semibold leading-[14px] text-[var(--text-secondary)] outline-none transition-colors duration-150 hover:bg-[var(--transparency-active)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--agent-gui-focus-ring,var(--border-focus))]",
+    "nodrag ml-1 flex h-5 min-h-5 shrink-0 items-center rounded-sm border-0 bg-muted px-2 py-0 text-caption font-medium text-muted-foreground outline-none transition-colors duration-100 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
   loading:
-    "flex min-h-9 w-full items-center gap-2 px-2.5 py-2 text-[11px] text-[var(--text-secondary)]"
+    "flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-caption text-muted-foreground"
 };
 
 export const AgentSlashCommandPalette = observer(
@@ -132,16 +132,18 @@ export const AgentSlashCommandPalette = observer(
     if (entries.length === 0 && !capabilitiesLoading) {
       return null;
     }
-    // Headers render only when multiple sections are present, except
-    // capabilities always keep their category label for discoverability. They are
-    // plain separators outside the option list, so keyboard navigation indices
-    // are untouched.
+    // The top bar names a single section. Mixed catalogs keep category headers
+    // inside the list; neither kind of header participates in keyboard selection.
     const entryTypes = new Set(entries.map((entry) => entryGroupType(entry)));
+    const headingGroup = entryTypes.size === 1 ? entryTypes.values().next().value : undefined;
+    const groupLabels = {
+      commandsGroupLabel, capabilitiesGroupLabel, skillsGroupLabel,
+      pluginsGroupLabel, connectorsGroupLabel, mcpGroupLabel
+    };
     if (capabilitiesLoading) {
       entryTypes.add("capability");
     }
-    const showGroupHeaders =
-      entryTypes.size > 1 || entryTypes.has("capability");
+    const showGroupHeaders = entryTypes.size > 1;
     const firstEntryIndexByType = new Map<
       AgentSlashPaletteEntryGroup,
       number
@@ -182,6 +184,14 @@ export const AgentSlashCommandPalette = observer(
       </Fragment>
     ) : null;
     return (
+      <div className="flex min-h-0 flex-col">
+        <div
+          className="shrink-0 select-none border-b border-border px-2 py-1.5 text-caption font-medium text-muted-foreground"
+          data-testid="agent-gui-slash-palette-heading"
+          aria-hidden="true"
+        >
+          <span>{headingGroup ? labelForEntryGroupType(headingGroup, groupLabels) : label}</span>
+        </div>
       <div className={paletteStyles.palette} role="listbox" aria-label={label}>
         {entries.map((entry, index) => {
           const isHighlighted = index === highlightedIndex;
@@ -212,14 +222,7 @@ export const AgentSlashCommandPalette = observer(
                     : paletteStyles.groupHeaderSeparated
                 )}
               >
-                {labelForEntryGroupType(groupType, {
-                  commandsGroupLabel,
-                  capabilitiesGroupLabel,
-                  skillsGroupLabel,
-                  pluginsGroupLabel,
-                  connectorsGroupLabel,
-                  mcpGroupLabel
-                })}
+                {labelForEntryGroupType(groupType, groupLabels)}
               </div>
             ) : null;
           return (
@@ -251,6 +254,7 @@ export const AgentSlashCommandPalette = observer(
         {capabilityLoadingInsertIndex === entries.length
           ? capabilityLoadingNode
           : null}
+      </div>
       </div>
     );
   }
@@ -342,6 +346,10 @@ function slashPaletteEntryIcon(entry: AgentSlashPaletteEntry): ReactNode {
     return null;
   }
   switch (entry.command.name.trim().toLowerCase()) {
+    case "reasoning":
+      return <Brain className={SLASH_PALETTE_ICON_CLASS} />;
+    case "model":
+      return <Box className={SLASH_PALETTE_ICON_CLASS} />;
     case "compact":
       return <Minimize2 className={SLASH_PALETTE_ICON_CLASS} />;
     case "fast":
@@ -484,9 +492,8 @@ const DivBinding1 = observer(function DivBinding1({
         ref={isHighlighted ? highlightedOptionRef : null}
         className={cn(
           paletteStyles.option,
-          isHighlighted && "bg-[var(--transparency-block)]",
           isDisabled &&
-            "cursor-not-allowed text-[var(--agent-gui-text-tertiary)] opacity-60 hover:bg-transparent active:bg-transparent"
+            "cursor-not-allowed text-muted-foreground opacity-50 hover:bg-transparent active:bg-transparent"
         )}
         role="option"
         aria-selected={isHighlighted}
@@ -524,11 +531,6 @@ const DivBinding1 = observer(function DivBinding1({
                     ? (entry.primaryLabel ?? entry.label)
                     : entry.label}
                 </span>
-                {entry.type === "command" && entry.secondaryLabel ? (
-                  <span className={paletteStyles.secondaryName}>
-                    {entry.secondaryLabel}
-                  </span>
-                ) : null}
               </span>
               {entry.description ? (
                 <span className={paletteStyles.descriptionText}>
