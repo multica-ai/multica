@@ -89,6 +89,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 import mermaid from "mermaid";
 import { ReadonlyContent } from "./readonly-content";
 import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
+import { guardedContent } from "../test/guarded-preview";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -598,7 +599,7 @@ describe("ReadonlyContent HTML block rendering", () => {
     const frame = container.querySelector<HTMLIFrameElement>("iframe");
     expect(frame).not.toBeNull();
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame?.getAttribute("srcdoc")).toContain('<h1 id="x">hi</h1>');
+    expect(guardedContent(frame)).toContain('<h1 id="x">hi</h1>');
     expect(container.querySelector("pre")).toBeNull();
   });
 

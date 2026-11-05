@@ -38,6 +38,7 @@ import {
   type HtmlFrameRenderer,
 } from "../editor/attachment-preview-modal";
 import type { HtmlPreviewLocation } from "../editor/hooks/use-html-preview-location";
+import { buildGuardedPreviewDocument } from "../editor/utils/html-egress-guard";
 import { normalizeHtmlPreviewAddress } from "../editor/utils/iframe-location-bridge";
 import { useHtmlPreviewScrollRestore } from "./use-html-preview-scroll-restore";
 
@@ -142,7 +143,7 @@ function PageHtmlFrame({
       key={`${contentKey}:${location.frameKey}`}
       ref={setFrame}
       onLoad={onLoad}
-      srcDoc={location.withAddress(buildSrcDoc(html))}
+      srcDoc={buildGuardedPreviewDocument(location.withAddress(buildSrcDoc(html)), title)}
       sandbox="allow-scripts"
       title={title}
       className="h-full w-full border-0 bg-background"

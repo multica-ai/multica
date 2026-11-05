@@ -16,6 +16,9 @@
  *     remain blocked. This is the standard "preview untrusted HTML" model
  *     (HTML spec §iframe sandbox, MDN, Claude artifacts, v0.dev preview).
  *
+ * The document runs one frame further in, behind html-egress-guard: no
+ * network of its own, and no navigating its frame away with data in the URL.
+ *
  * The server-side `text/plain` + `nosniff` defense at
  * /api/attachments/{id}/content remains untouched — we only feed iframe.srcDoc
  * the text body we fetched, never point iframe.src at the proxy URL.
@@ -23,6 +26,7 @@
 
 import type { CSSProperties, Ref } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import { buildGuardedPreviewDocument } from "./utils/html-egress-guard";
 
 interface CodeBlockIframeProps {
   /** Document source for srcDoc. Empty string renders a blank frame. */
@@ -53,7 +57,7 @@ export function CodeBlockIframe({
       // opaque origin via sandbox. Critical that we never combine
       // `allow-scripts` with `allow-same-origin` — that pairing defeats the
       // sandbox per the HTML spec (notes on the sandbox attribute).
-      srcDoc={html}
+      srcDoc={buildGuardedPreviewDocument(html, title)}
       sandbox="allow-scripts"
       title={title}
       className={cn(

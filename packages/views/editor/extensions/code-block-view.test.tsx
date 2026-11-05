@@ -50,6 +50,7 @@ vi.mock("../../i18n", () => ({
 }));
 
 import { CodeBlockView } from "./code-block-view";
+import { guardedContent } from "../../test/guarded-preview";
 
 function makeProps(language: string, text: string) {
   return {
@@ -129,7 +130,7 @@ describe("CodeBlockView — html language toggle", () => {
     const frame = dialog.querySelector("iframe");
     expect(frame).toBe(original);
     expect(document.querySelectorAll("iframe")).toHaveLength(1);
-    expect(frame?.getAttribute("srcdoc")).toBe("<p>latest</p>");
+    expect(guardedContent(frame)).toBe("<p>latest</p>");
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
     expect(screen.getByTestId("nvc")).toBe(editorContent);
     expect(document.querySelector("iframe")).toBe(original);
@@ -164,7 +165,7 @@ describe("CodeBlockView — html language toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     const inline = document.querySelector("iframe");
     expect(inline).not.toBe(original);
-    expect(inline?.getAttribute("srcdoc")).toBe("<p>hello</p>");
+    expect(guardedContent(inline)).toBe("<p>hello</p>");
     expect(screen.getByTestId("nvc")).toBe(content);
 
     fireEvent.click(screen.getByRole("button", { name: "Show source" }));
@@ -193,23 +194,23 @@ describe("CodeBlockView — html language toggle", () => {
     rerender(<CodeBlockView {...makeProps("html", "<p>pending</p>")} />);
     fireEvent.click(screen.getByRole("button", { name: "Show source" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+    expect(guardedContent(frame)).toBe("<p>initial</p>");
     rerender(<CodeBlockView {...makeProps("html", "<p>edited</p>")} />);
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+    expect(guardedContent(frame)).toBe("<p>initial</p>");
 
     fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    expect(guardedContent(frame)).toBe("<p>edited</p>");
     expect(screen.getByRole("dialog").querySelector("iframe")).toBe(frame);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     rerender(<CodeBlockView {...makeProps("html", "<p>latest</p>")} />);
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    expect(guardedContent(frame)).toBe("<p>edited</p>");
     fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>latest</p>");
+    expect(guardedContent(frame)).toBe("<p>latest</p>");
     expect(document.querySelector("iframe")).toBe(frame);
     expect(screen.getByTestId("nvc")).toBe(editorContent);
   });

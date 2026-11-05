@@ -178,6 +178,7 @@ import {
 import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
 import { withLocationBridge } from "./utils/iframe-location-bridge";
 import { renderHook, act as hookAct } from "@testing-library/react";
+import { guardedContent } from "../test/guarded-preview";
 
 // Fresh QueryClient per render — no retries (preview errors are typed,
 // not transient) and no caching across tests so each scenario is hermetic.
@@ -338,7 +339,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
       // srcdoc carries the original HTML between the address bridge in
       // front (utils/iframe-location-bridge.ts) and the fragment-nav shim
       // appended at the end (utils/iframe-fragment-nav.ts).
-      expect(frame?.getAttribute("srcdoc")).toBe(
+      expect(guardedContent(frame)).toBe(
         withLocationBridge(withFragmentNavShim("<p>hi</p>"), ""),
       );
     });
@@ -357,7 +358,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
     fireEvent.submit(input.closest("form")!);
 
     const frame = document.querySelector("iframe[sandbox]") as HTMLIFrameElement;
-    expect(frame.getAttribute("srcdoc")).toBe(
+    expect(guardedContent(frame)).toBe(
       withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=overview"),
     );
     expect((input as HTMLInputElement).value).toBe("?s=overview");
@@ -382,7 +383,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
     fireEvent.click(screen.getByRole("button", { name: "View source" }));
 
     expect(screen.getByLabelText("Address")).toHaveValue("?s=ia");
-    expect(document.querySelector("iframe[sandbox]")?.getAttribute("srcdoc")).toBe(
+    expect(guardedContent(document.querySelector("iframe[sandbox]"))).toBe(
       withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=ia"),
     );
   });

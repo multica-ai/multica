@@ -30,6 +30,7 @@ vi.mock("./code-block-static", () => ({
 
 import { HtmlBlockPreview } from "./html-block-preview";
 import { HTML_BLOCK_MESSAGE_KEY } from "./utils/html-block-document";
+import { guardedContent } from "../test/guarded-preview";
 
 let restoreDialog: () => void;
 beforeEach(() => {
@@ -80,7 +81,7 @@ describe("HtmlBlockPreview — frame", () => {
     const frame = inlineFrame();
     expect(frame.getAttribute("title")).toBe("HTML preview");
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    const srcdoc = guardedContent(frame) ?? "";
     expect(srcdoc.startsWith("<style>:root{")).toBe(true);
     expect(srcdoc).toContain(HTML_BLOCK_MESSAGE_KEY);
     expect(srcdoc).toContain("<p>hi</p>");

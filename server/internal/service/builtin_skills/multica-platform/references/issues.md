@@ -344,8 +344,11 @@ Where content goes decides how it shows:
   block in the comment content. It renders inside the comment with a title
   bar (Preview / Source, fullscreen, copy) and takes its content's height;
   anything taller than 480px collapses behind "Show all". Name it with
-  `title="..."` on the fence line. HTML runs in a scripts-only sandbox (no
-  cookies, storage or parent access; CDN `<script src>` works).
+  `title="..."` on the fence line. HTML runs in a scripts-only sandbox with
+  no network: no cookies, storage or parent access, no `fetch`, and no images,
+  fonts or pages from other sites. Put the data in the HTML and images as
+  `data:` URLs; load libraries only from `https://cdn.jsdelivr.net/npm/`.
+  Attached HTML files open under the same rules.
 - **An attached file** — `--attachment <path>`. Every non-image file shows as
   a file card that opens in the viewer, **HTML included**: an uploaded
   `report.html` is a deliverable to open, not an inline chart. Use it for
