@@ -1553,6 +1553,12 @@ var detectVersionTimeout = 10 * time.Second
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
+	probeCmd, cleanup, err := runtimeCmd.withProbeDirectory()
+	if err != nil {
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+	}
+	defer cleanup()
+	runtimeCmd = probeCmd
 	if runtime.GOOS == "windows" {
 		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
 			runtimeCmd.Path = native

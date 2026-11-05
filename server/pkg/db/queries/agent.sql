@@ -646,6 +646,32 @@ WHERE issue_id = $1 AND agent_id = $2
   AND comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(sqlc.narg('thread_comment_id')::uuid)
 RETURNING *;
 
+-- name: ReassignPendingAgentTasksToRuntime :one
+-- Moves an agent's not-yet-dispatched tasks to the runtime it was just rebound
+-- to. Claims fence on agent.runtime_id = task.runtime_id (MUL-6697), so a
+-- queued or deferred row left on the old runtime is claimable by neither
+-- daemon. Deferred rows move too: promotion is per runtime and would otherwise
+-- strand them later. Dispatched, running and waiting rows are already held by
+-- the old runtime's daemon and stay. Callers hold the agent row FOR UPDATE.
+--
+-- Same fence-verdict shape as ReassignTasksToRuntime: FenceOk = false must
+-- abort the rebind rather than commit a binding with stranded rows.
+WITH fence AS MATERIALIZED (
+    SELECT lock_task_owner_rows(@agent_id, NULL, @new_runtime_id) AS ok
+),
+reassigned AS (
+    UPDATE agent_task_queue
+    SET runtime_id = @new_runtime_id
+    WHERE agent_id = @agent_id
+      AND status IN ('queued', 'deferred')
+      AND runtime_id IS DISTINCT FROM @new_runtime_id
+      AND (SELECT ok FROM fence)
+    RETURNING id
+)
+SELECT
+    (SELECT ok FROM fence) AS fence_ok,
+    (SELECT count(*) FROM reassigned) AS reassigned_tasks;
+
 -- name: CancelAgentTasksByAgent :many
 -- Bulk-cancel every active (queued/dispatched/running) task for an agent.
 -- Returns the affected rows so callers can broadcast task:cancelled events.

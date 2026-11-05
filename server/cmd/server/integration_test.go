@@ -1373,8 +1373,9 @@ func TestUnarchiveInboxRejectsForeignItem(t *testing.T) {
 	}
 }
 
-// An issue's inbox notifications are deduplicated per issue: opening the issue
-// marks only the NEWEST item read, leaving older siblings unread. The summary
+// An issue's inbox notifications are deduplicated per issue. Opening the issue
+// used to mark only the NEWEST item read, leaving older siblings unread, and
+// rows from then are still in the database (MUL-8618 reads them lazily). The summary
 // must mirror the inbox UI (issue is read when its newest item is read), so a
 // read-newest / unread-older issue must NOT light the switcher dot (MUL-3695).
 func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
