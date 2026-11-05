@@ -301,11 +301,14 @@ The daemon auto-detects these AI CLIs on your PATH:
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
-On macOS, Pi and Oh-My-Pi require kernel support for process identity signalling
-to clean up detached tools safely. Each run checks this operation before launching
-the runtime. An unsupported or denied operation fails startup with a compatibility
-error instead of allowing work to start without the required cleanup capability.
-This is a capability check, not a macOS version check. Existing runs blocked by
+Pi and Oh-My-Pi require kernel support for process identity signalling to clean
+up detached tools safely: on Linux, `pidfd_open` and `pidfd_send_signal` (kernel
+5.3 or newer); on macOS, kernel-checked process identity signalling. Each run
+checks these operations before launching the runtime. An unsupported or denied
+probe operation, including one blocked by a sandbox, fails startup with a
+compatibility error instead of allowing work to start without the required cleanup
+capability. This is a capability check, not a kernel version check, and a passing
+probe does not guarantee permission to signal every descendant process. Existing runs blocked by
 unconfirmed cleanup still require inspection and a manual rerun; the startup check
 does not clear those blocks or establish that earlier background processes exited.
 
