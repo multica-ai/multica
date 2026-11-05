@@ -24,8 +24,9 @@ import (
 // built without it deliberately carries no pointer at all.
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
+		Name:        "multica-platform",
+		BuiltinName: "multica-platform",
+		Content:     "---\nname: multica-platform\n---\n\nbody",
 	}
 }
 
@@ -2410,7 +2411,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2480,14 +2481,11 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // gives an agent one name to guess instead of eight. This line is what pays
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {

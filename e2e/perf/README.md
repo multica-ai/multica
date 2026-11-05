@@ -27,6 +27,30 @@ CHAT_LIST_BASELINE=1 PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm exec playwri
 its report format and comparisons are unchanged. Session data is still fetched
 in full: these checks measure rendering, not API pagination or network savings.
 
+## Agent recent work
+
+`agent-recent-work.spec.ts` opens the real agent detail page, reveals 1,000
+synthetic terminal runs using the existing Show more action and 200-run API
+pages, then verifies a bounded mounted window, the last run's transcript,
+Escape dismissal, and dialog survival when its opener is recycled. It covers
+wide and compact layouts with the page's existing scroll owner. HTTP and
+WebSocket traffic are intercepted; unexpected requests and page errors fail
+the scenario. No server, daemon or real agent runs are involved.
+
+Build with a same-origin API URL so all requests reach the synthetic boundary:
+
+```bash
+NEXT_PUBLIC_API_URL='' pnpm --filter @multica/web build
+NEXT_PUBLIC_API_URL='' pnpm --filter @multica/web exec next start --port 3000
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm exec playwright test --config=playwright.perf.config.ts agent-recent-work.spec.ts
+```
+
+For a comparison, run the same test against an unmodified main production
+build with `AGENT_WORK_BASELINE=1`. Both sides keep API pagination; the baseline
+asserts that all 1,000 revealed rows stay mounted while the new renderer keeps
+fewer than 50. JSON attachments report the observed row counts and cursors;
+these are rendering checks, not backend or network-throughput benchmarks.
+
 ## What it runs against
 
 The real Next.js production build, the real page, the real shell and CSS, the

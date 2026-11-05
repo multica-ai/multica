@@ -96,6 +96,7 @@
     "./search/cancelled-rank": "./search/cancelled-rank.ts",
     "./search-index": "./search-index/index.ts",
     "./projects": "./projects/index.ts",
+    "./projects/deletion-permissions": "./projects/deletion-permissions.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/config": "./projects/config.ts",
