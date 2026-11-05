@@ -41,10 +41,28 @@ test("direct chat adds guidance explicitly and preserves a rejected draft", asyn
     await editor.fill("Use the second test instead. MARKER_BROWSER");
     await expect(add).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath("guidance-composer.png") });
-    const posted = page.waitForResponse((response) => response.request().method()==="POST" && response.url().endsWith(`/tasks/${taskId}/supplements`));
+    // The server commits, but the browser loses the response. Reloading must
+    // retain the original request identity; no automatic retry is permitted.
+    let originalRequestId: string | undefined;
+    await page.route(`**/tasks/${taskId}/supplements`, async (route) => {
+      originalRequestId = route.request().postDataJSON().client_request_id;
+      const committed = await route.fetch();
+      expect(committed.status()).toBe(201);
+      await route.abort("failed");
+    }, { times: 1 });
     await add.click();
+    await expect(page.getByText("Could not confirm the addition.", { exact: false })).toBeVisible();
+    await expect(editor).toHaveText("Use the second test instead. MARKER_BROWSER");
+    await page.screenshot({ path: testInfo.outputPath("guidance-response-lost.png") });
+    expect((await db.query(`SELECT count(*) FROM chat_supplement WHERE task_id=$1`, [taskId])).rows[0].count).toBe("1");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const retry = page.getByRole("button", { name: "Retry original request", exact: true });
+    await expect(retry).toBeVisible({ timeout: 30_000 });
+    const posted = page.waitForResponse((response) => response.request().method()==="POST" && response.url().endsWith(`/tasks/${taskId}/supplements`));
+    await retry.click();
     const response = await posted;
-    expect(response.status()).toBe(201);
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON().client_request_id).toBe(originalRequestId);
     const message = await response.json();
     expect(message.supplement).toMatchObject({ task_id: taskId, status: "pending" });
     await expect(editor).toBeEmpty();
@@ -55,8 +73,8 @@ test("direct chat adds guidance explicitly and preserves a rejected draft", asyn
     const claim = await page.request.post(`${base}/api/daemon/tasks/${taskId}/supplements/claim`, { headers, data: {} });
     expect(claim.status()).toBe(200);
     expect((await claim.json()).comment_id).toBe(message.id);
-    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText("Delivery uncertain")).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: testInfo.outputPath("guidance-uncertain-live.png") });
     const ack = await page.request.post(`${base}/api/daemon/tasks/${taskId}/supplements/${message.id}/ack`, { headers, data: { delivered: true } });
     expect(ack.status()).toBe(200);
     await expect(page.getByText("Accepted by engine")).toBeVisible({ timeout: 15_000 });

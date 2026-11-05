@@ -129,6 +129,17 @@ func TestChatSupplementEndToEnd(t *testing.T) {
 	if response.StatusCode != 201 {
 		t.Fatalf("send=%d %s", response.StatusCode, responseBody)
 	}
+	// Ignore the first response as if HTTP delivery was lost. An explicit
+	// retry of the persisted request must not create or inject another input.
+	retried, err := http.Post(fmt.Sprintf("%s/api/chat/sessions/%s/tasks/%s/supplements", server.URL, sessionID, taskID), "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryBody, _ := io.ReadAll(retried.Body)
+	retried.Body.Close()
+	if retried.StatusCode != 200 {
+		t.Fatalf("retry=%d %s", retried.StatusCode, retryBody)
+	}
 	d.taskSupplementSignals.notify(taskID)
 	var result agent.Result
 	select {

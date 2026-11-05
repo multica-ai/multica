@@ -156,7 +156,7 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	if err := qtx.DeleteAgentLabelAssignmentsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up agent label assignments: %w", err)
 	}
-	if err := pruneRuntimeSystemAgentChatDraftRestores(ctx, qtx, runtimeID); err != nil {
+	if err := pruneRuntimeSystemAgentChatDependents(ctx, qtx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up chat draft restores: %w", err)
 	}
 	if err := qtx.DeleteSystemAgentsByRuntime(ctx, runtimeID); err != nil {
@@ -165,11 +165,17 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	return out, nil
 }
 
-// pruneRuntimeSystemAgentChatDraftRestores removes rows without a database FK
+// pruneRuntimeSystemAgentChatDependents removes rows without a database FK
 // before the system agents and their chat sessions cascade away.
-func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
-	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+func pruneRuntimeSystemAgentChatDependents(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
+	sessions, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID)
+	if err != nil {
 		return err
+	}
+	for _, sessionID := range sessions {
+		if err := q.DeleteChatSupplementsBySession(ctx, sessionID); err != nil {
+			return err
+		}
 	}
 	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
