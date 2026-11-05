@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useChatRunDraftStore, forgetChatRunDraft } from "./run-draft-store";
+import { getCurrentSlug } from "../platform/workspace-storage";
 import { chatKeys } from "./queries";
 
 export function useAddToChatRun(sessionId: string | null, taskId: string | undefined) {
@@ -19,6 +20,7 @@ export function useAddToChatRun(sessionId: string | null, taskId: string | undef
   });
   const send = useCallback(async (content: string) => {
     if (!sessionId) throw new Error("run unavailable");
+    const workspaceSlug = getCurrentSlug();
     const store = useChatRunDraftStore.getState();
     let current = store.draft.attempts.find((a) => a.session === sessionId && a.content === content);
     if (!current) {
@@ -27,7 +29,7 @@ export function useAddToChatRun(sessionId: string | null, taskId: string | undef
       store.setDraft({ attempts: [...store.draft.attempts, current] });
     }
     await mutateAsync(current);
-    forgetChatRunDraft(current.id);
+    forgetChatRunDraft(current.id, workspaceSlug);
   }, [sessionId, taskId, mutateAsync]);
   return sessionId && (taskId || hasRetry) ? send : undefined;
 }

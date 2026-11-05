@@ -55,6 +55,11 @@ ended or a successor has started. The server can return the existing receipt
 before testing current availability. A different text gets its own request;
 it cannot overwrite an unresolved one. Success removes only that request, and
 the composer’s existing snapshot guard preserves newer edits and other sessions.
+A successful response retains the originating workspace slug for cleanup: it
+removes only that UUID from the latest persisted draft in that workspace, even
+when another workspace is active. Missing storage after logout or workspace
+deletion is never recreated; an ambiguous failure leaves the original identity
+intact. The store also registers with cold-start draft cleanup before Chat mounts.
 No request is sent on mount, rehydration or reconnect.
 
 The retry action is labelled **Retry original request**. **Treat as a new
