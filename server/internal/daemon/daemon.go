@@ -2096,6 +2096,12 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	// Sweep orphaned ZCode provider credential snapshots left by a prior
+	// crash/SIGKILL (prepareZcodeRuntimeEnv writes 0600 files under
+	// $TMPDIR/multica-zcode-providers-*; normal exits remove them in defer).
+	if n := agent.CleanupStaleZcodeProviderSnapshots(); n > 0 {
+		d.logger.Info("removed stale ZCode provider credential snapshots", "count", n)
+	}
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -6528,6 +6534,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
+	"zcode":      "ZCode",
 	"zeroclaw":   "ZeroClaw",
 }
 
@@ -8678,6 +8685,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the daemon cannot record either (#9404).
 	if env.LocalWorktree != nil {
 		promptOptions = append(promptOptions, WithWorktreeBranch(env.LocalWorktree.Branch, env.LocalWorktree.BaseCommit))
+		// The branch block's rule for uncommitted files has one exception,
+		// decided by the same predicate Finalize uses (#9788 review).
+		if env.LocalWorktree.CommitsAllLeftovers() {
+			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
+		}
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
@@ -8718,13 +8730,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	if err := configureTaskCLIEnvironment(agentEnv); err != nil {
+		return TaskResult{}, err
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -10714,6 +10721,11 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+		}
+		// Legacy full-skill responses omit Source and give only workspace
+		// skills an ID, matching the server's bundle source classification.
+		if s.Source == skillbundle.SourceBuiltin || (s.Source == "" && s.ID == "") {
+			result[i].BuiltinName = s.Name
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

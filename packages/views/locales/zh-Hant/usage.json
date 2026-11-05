@@ -76,7 +76,7 @@
     "header_rate": "失敗率",
     "other_agents": "其他 AI 代理",
     "low_sample": "所選時間範圍內執行不足 {{count}} 次，失敗率參考價值有限。",
-    "no_data": "所選時間範圍內沒有失敗的執行。",
+    "no_data": "所選時間範圍內沒有失敗的執行",
     "show_reasons": "展開錯誤碼",
     "hide_reasons": "收起錯誤碼",
     "show_all": "展開全部 {{count}} 個",
@@ -103,7 +103,7 @@
   },
   "empty": {
     "title": "暫無消耗資料",
-    "body": "執行 AI 代理後可檢視 token 用量和耗時。"
+    "body": "AI 代理開始執行後，這裡會顯示 token、費用和失敗率。"
   },
   "duration": {
     "less_than_minute": "<1分鐘"

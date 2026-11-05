@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -14,6 +15,7 @@ import (
 // ids it was asked for, so tests can assert both the rendered body and
 // the network fan-out (e.g. "no call when nothing to enrich").
 type enricherFakeClient struct {
+	mu         sync.Mutex
 	configured bool
 	byID       map[string][]LarkMessage
 	errByID    map[string]error
@@ -46,6 +48,8 @@ func newEnricherFake() *enricherFakeClient {
 
 func (f *enricherFakeClient) IsConfigured() bool { return f.configured }
 func (f *enricherFakeClient) GetMessage(ctx context.Context, creds InstallationCredentials, id string) ([]LarkMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, id)
 	if e, ok := f.errByID[id]; ok {
 		return nil, e
@@ -173,7 +177,7 @@ func TestEnrichMergeForward(t *testing.T) {
 [User 1]: 你们线上的 Multica 能用吗
 [User 1]: 我这边无法登录
 [User 2]: 我这边 web 和 desktop 都能登陆
-[User 1]: [Image]
+[User 1]: [Image 1: unavailable]
 </forwarded_messages>`
 	if out.Body != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)

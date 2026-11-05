@@ -121,7 +121,7 @@ export function createJaDict(
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という28種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode という29種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -142,7 +142,7 @@ export function createJaDict(
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、28種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、29種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw, ZCode)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -197,7 +197,7 @@ export function createJaDict(
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の28種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw, ZCode の29種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -279,6 +279,58 @@ export function createJaDict(
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.8.0",
+          date: "2026-11-03",
+          title: "新しいワークスペースのレイアウト、作り直したビュー、デスクトップのワークスペースごとのウィンドウ",
+          changes: [],
+          features: [
+            "ワークスペースのレイアウトが新しくなりました。アプリバーに作業、チーム、チャット、受信トレイ、オートパイロットが並び、サイドパネルは折りたたみや幅の変更ができます。",
+            "ビューを作り直しました。お気に入りに保存し、フィルターを組み合わせたり除外したりでき、エージェントの状態や「自分と自分のエージェント」で絞り込めます。",
+            "作業のサイドバーから、Issue のステータスと担当者を直接変更できます。",
+            "デスクトップ版では、ワークスペースごとに別のウィンドウで開きます。",
+            "QR コードを読み取るだけで WeCom のボットを作れ、エージェントの返信中に進み具合が見えます。",
+            "Qoder Cloud Agents でチャット、クイック作成、Issue の添付ファイルが使え、実行ごとに Qoder のクレジットが表示されます。",
+            "ZCode でタスクを実行できます。",
+            "実行中の Pi に指示を追加で送れます。Pi は Multica がインストールしたスキルも読み込みます。",
+            "ランタイムが同時に実行するタスクの数を制限できます。",
+            "CLI でワークフローを管理できます。",
+            "Hermes の実行中にトークンと費用を確認できます。",
+            "解決済みのスレッドには結論が表示され、エージェントが決着した議論を開き直さなくなります。",
+          ],
+          improvements: [
+            "Multica のロゴ、アイコン、配色が新しくなりました。",
+            "エージェントの一覧で検索が戻り、より多くの場所からエージェントの設定を開けます。",
+            "空のページの見た目がそろい、次にできることが表示されます。",
+            "添付ファイルのプレビューの下にページ送りが付きました。",
+            "スキルに最大 512 個のファイルを含められ、インポートに失敗すると本当の理由が表示されます。",
+            "MiniMax-M3、Cursor、GPT-5.6 の価格を更新しました。",
+            "エージェントは既定で 1 つの Issue に 1 つの PR とし、子 Issue の実行では親 Issue を読みます。",
+            "繁体字中国語で、エージェントを「AI 代理」に統一しました。",
+            "オートパイロットの「編集」ボタンが「今すぐ実行」の隣に移りました。",
+          ],
+          fixes: [
+            "コメントが待機中の実行にまとめられても、そのスレッドの返信は正しいエージェントに届きます。",
+            "Cmd+J でフローティングチャットを開いても空白が表示されなくなりました。",
+            "Lark で連携の状態とメッセージの確認を分けて表示します。",
+            "Telegram の個別チャットで、本文の @bot が消されなくなりました。",
+            "CLI の添付ファイルのパスで特殊文字が保たれ、repo checkout が古いキャッシュを使うときは警告が出ます。",
+            "スキルの最新の変更と正しい名前がエージェントに届きます。",
+            "デーモンの再起動で中断したタスクが復旧し、Claude の実行が終了時に止まらなくなりました。",
+            "接続の案内でコンピューターの数が正しく数えられ、幅の狭い画面でもエージェントを作れます。",
+            "Codex の新しいカタログのモデルが、サブエージェントを勝手に起動しなくなりました。",
+            "カスタムのランタイム設定を削除できるようになりました。",
+            "Hermes の実行が失敗したとき、本当の理由が表示されます。",
+            "クイック作成で、選んだエージェントやスクワッドに割り当てられます。",
+            "高度なフィルターの値を空にしても、一覧がエラーにならなくなりました。",
+            "オートパイロットのナビゲーションに、消せない赤い点が出なくなりました。",
+            "API キーを使うとき、Devin のモデルが一覧に表示されます。",
+            "古い取り消し済みの実行のせいで、PR のチェックが失敗と表示されなくなりました。",
+            "変更履歴のタイムラインで、現在のリリースの強調表示が欠けなくなりました。",
+            "設定の検索に、使えない通知設定が表示されなくなりました。",
+            "ダークモードで、選択中のタブが枠線で囲まれたように見えなくなりました。",
+          ],
+        },
         {
           version: "0.7.2",
           date: "2026-10-30",

@@ -3955,6 +3955,8 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee", "", "")
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("updated-since", "", "")
+	cmd.Flags().String("updated-until", "", "")
 	cmd.Flags().StringArray("metadata", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
@@ -5647,6 +5649,114 @@ func TestRunIssueListRejectsOutOfRangeLimitAndOffset(t *testing.T) {
 			}
 			if *requests != 0 {
 				t.Fatalf("server received %d request(s); a rejected flag must not reach the API", *requests)
+			}
+		})
+	}
+}
+
+func TestRunIssueListUpdatedRange(t *testing.T) {
+	const (
+		since   = "2026-11-05T10:00:00.123456789+08:00"
+		until   = "2026-11-05T02:01:00.987654321Z"
+		project = "12345678-1234-4234-8234-123456789abc"
+	)
+	for _, filtered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("filtered=%t", filtered), func(t *testing.T) {
+			srv, requests, query := newFakeIssueListServer(t, fakeIssueRows(1), 1)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			flags := []string{
+				"--output", "json", "--project", project, "--fields", "id,title",
+				"--limit", "100", "--offset", "200", "--sort", "created_at", "--direction", "asc",
+			}
+			if filtered {
+				flags = append(flags, "--updated-since", since, "--updated-until", until)
+			}
+			if err := cmd.ParseFlags(flags); err != nil {
+				t.Fatal(err)
+			}
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+			if *requests != 1 {
+				t.Fatalf("list requests = %d, want 1", *requests)
+			}
+			want := url.Values{
+				"workspace_id": {"ws-1"}, "project_id": {project},
+				"limit": {"100"}, "offset": {"200"}, "sort": {"created_at"}, "direction": {"asc"},
+			}
+			if filtered {
+				want.Set("date_field", "updated_at")
+				want.Set("date_start", since)
+				want.Set("date_end", until)
+			}
+			if !reflect.DeepEqual(*query, want) {
+				t.Fatalf("query = %v, want %v", *query, want)
+			}
+			var envelope struct {
+				Issues  []map[string]any `json:"issues"`
+				Total   int              `json:"total"`
+				Limit   int              `json:"limit"`
+				Offset  int              `json:"offset"`
+				HasMore bool             `json:"has_more"`
+			}
+			if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if len(envelope.Issues) != 1 || len(envelope.Issues[0]) != 2 || envelope.Issues[0]["id"] == nil || envelope.Issues[0]["title"] == nil {
+				t.Fatalf("projected issues = %v, want one issue with id and title", envelope.Issues)
+			}
+			if envelope.Total != 1 || envelope.Limit != 100 || envelope.Offset != 200 || envelope.HasMore {
+				t.Fatalf("unexpected pagination envelope: %+v", envelope)
+			}
+		})
+	}
+}
+
+func TestRunIssueListRejectsInvalidUpdatedRange(t *testing.T) {
+	const since = "2026-11-05T10:00:00Z"
+	const until = "2026-11-05T10:01:00Z"
+	cases := []struct {
+		name    string
+		flags   []string
+		wantErr string
+	}{
+		{"missing until", []string{"--updated-since", since}, "--updated-since and --updated-until must be set together"},
+		{"missing since", []string{"--updated-until", until}, "--updated-since and --updated-until must be set together"},
+		{"empty since", []string{"--updated-since=", "--updated-until", until}, "invalid --updated-since"},
+		{"empty until", []string{"--updated-since", since, "--updated-until="}, "invalid --updated-until"},
+		{"both empty", []string{"--updated-since=", "--updated-until="}, "invalid --updated-since"},
+		{"invalid since", []string{"--updated-since", "yesterday", "--updated-until", until}, "invalid --updated-since"},
+		{"invalid until", []string{"--updated-since", since, "--updated-until", "2026-11-05"}, "invalid --updated-until"},
+		{"equal bounds", []string{"--updated-since", since, "--updated-until", since}, "--updated-since must be before --updated-until"},
+		{"reversed bounds", []string{"--updated-since", until, "--updated-until", since}, "--updated-since must be before --updated-until"},
+		{"reversed across timezones", []string{"--updated-since", since, "--updated-until", "2026-11-05T11:00:00+02:00"}, "--updated-since must be before --updated-until"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			cmd := newIssueListTestCmd()
+			if err := cmd.ParseFlags(append(tc.flags, "--assignee", "someone")); err != nil {
+				t.Fatal(err)
+			}
+			err := runIssueList(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			if requests != 0 {
+				t.Fatalf("received %d requests; invalid bounds must fail before resolving filters", requests)
 			}
 		})
 	}

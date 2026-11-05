@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"reflect"
@@ -35,15 +36,19 @@ func TestIssueMetadataFilterArgvProcess(t *testing.T) {
 }
 
 func TestIssueMetadataFilterLiteralArgv(t *testing.T) {
+	const since = "2026-11-05T10:00:00.123456789+08:00"
+	const until = "2026-11-05T02:01:00.987654321Z"
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name    string
-		flags   []string
-		want    map[string]any
-		wantErr string
+		name           string
+		flags          []string
+		want           map[string]any
+		wantErr        string
+		wantQuery      url.Values
+		wantProperties map[string][]any
 	}{
 		{name: "numeric string", flags: []string{"--metadata", `external_id="42"`}, want: map[string]any{"external_id": "42"}},
 		{name: "literal comma", flags: []string{"--metadata", "note=Smith, John"}, want: map[string]any{"note": "Smith, John"}},
@@ -58,11 +63,29 @@ func TestIssueMetadataFilterLiteralArgv(t *testing.T) {
 		{name: "duplicate key", flags: []string{"--metadata", "phase=ready", "--metadata", "phase=waiting"}, wantErr: `key "phase" given more than once`},
 		{name: "missing equals", flags: []string{"--metadata", "phase"}, wantErr: "must be in key=value form"},
 		{name: "empty key", flags: []string{"--metadata", "=ready"}, wantErr: "must be in key=value form"},
+		{
+			name:           "literal metadata with updated range and property filters",
+			flags:          []string{"--metadata", `external_id="42"`, "--metadata", "note=a,b=c", "--metadata", "empty=null", "--updated-since", since, "--updated-until", until, "--property", "Notes=Smith, John", "--property", "Score>=3"},
+			want:           map[string]any{"external_id": "42", "note": "a,b=c", "empty": "null"},
+			wantQuery:      url.Values{"date_field": {"updated_at"}, "date_start": {since}, "date_end": {until}},
+			wantProperties: map[string][]any{testNotesDefID: {"Smith, John"}, testScoreDefID: {opMember("gte", "3")}},
+		},
+		{name: "literal metadata with missing updated bound", flags: []string{"--metadata", "note=a,b=c", "--updated-since", since}, wantErr: "--updated-since and --updated-until must be set together"},
+		{name: "literal metadata with reversed updated bounds", flags: []string{"--metadata", "note=a,b=c", "--updated-since", until, "--updated-until", since}, wantErr: "--updated-since must be before --updated-until"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
 			var filters []map[string]any
+			var queries []url.Values
+			var propertyCalls int
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/properties" && tc.wantProperties != nil {
+					mu.Lock()
+					propertyCalls++
+					mu.Unlock()
+					_ = json.NewEncoder(w).Encode(map[string]any{"properties": propertyFilterTestCatalog()})
+					return
+				}
 				if r.Method != http.MethodGet || r.URL.Path != "/api/issues" {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 					http.NotFound(w, r)
@@ -74,6 +97,7 @@ func TestIssueMetadataFilterLiteralArgv(t *testing.T) {
 				}
 				mu.Lock()
 				filters = append(filters, filter)
+				queries = append(queries, r.URL.Query())
 				mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"issues":[],"total":0}`))
@@ -109,6 +133,27 @@ func TestIssueMetadataFilterLiteralArgv(t *testing.T) {
 			}
 			if !reflect.DeepEqual(filters, want) {
 				t.Errorf("sent metadata filters = %#v, want %#v", filters, want)
+			}
+			wantPropertyCalls := 0
+			if tc.wantProperties != nil {
+				wantPropertyCalls = 1
+				if got := decodePropertiesParam(t, queries); !reflect.DeepEqual(got, tc.wantProperties) {
+					t.Errorf("sent property filters = %#v, want %#v", got, tc.wantProperties)
+				}
+			}
+			if propertyCalls != wantPropertyCalls {
+				t.Errorf("property catalog calls = %d, want %d", propertyCalls, wantPropertyCalls)
+			}
+			for _, query := range queries {
+				query.Del("metadata")
+				query.Del("properties")
+				wantQuery := url.Values{"workspace_id": {"11111111-1111-4111-8111-111111111111"}, "limit": {"50"}}
+				for key, values := range tc.wantQuery {
+					wantQuery[key] = values
+				}
+				if !reflect.DeepEqual(query, wantQuery) {
+					t.Errorf("other query parameters = %v, want %v", query, wantQuery)
+				}
 			}
 		})
 	}

@@ -83,6 +83,45 @@ export function attachmentIdFromDownloadURL(rawURL: string): string | undefined 
   return id;
 }
 
+// Storage object path the upload handler writes for workspace files:
+// `workspaces/<workspace-id>/<attachment-id><ext>` (server/internal/handler/file.go
+// uses the attachment id as the object name).
+const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const WORKSPACE_STORAGE_PATH_RE = new RegExp(
+  `^/workspaces/${UUID_PATTERN}/(${UUID_PATTERN})(?:\\.[A-Za-z0-9]+)?$`,
+  "i",
+);
+
+/**
+ * Extract the attachment id from a raw storage URL on the configured CDN
+ * domain, e.g. `https://static.multica.ai/workspaces/<ws>/<id>.jpg`.
+ *
+ * Markdown can embed a storage URL whose attachment record is not in the
+ * surrounding surface's attachment list (an agent quoting an image from
+ * another comment). On a signed CDN that bare URL only loads with the
+ * in-app CloudFront cookies, so download handlers use this id to re-sign
+ * through the API instead of opening the unsigned URL externally.
+ *
+ * Returns `undefined` when the URL is not on `cdnDomain` or the path is not
+ * a workspace storage object.
+ */
+export function attachmentIdFromStorageURL(
+  rawURL: string,
+  cdnDomain: string,
+): string | undefined {
+  const expectedHost = cdnDomain.trim().toLowerCase().replace(/\.$/, "");
+  if (!rawURL || !expectedHost || !/^https?:\/\//i.test(rawURL)) return undefined;
+  let u: URL;
+  try {
+    u = new URL(rawURL);
+  } catch {
+    return undefined;
+  }
+  if (u.hostname.toLowerCase().replace(/\.$/, "") !== expectedHost) return undefined;
+  const match = WORKSPACE_STORAGE_PATH_RE.exec(u.pathname);
+  return match?.[1];
+}
+
 function stripQueryAndFragment(url: string): string {
   return url.split(/[?#]/, 1)[0] ?? "";
 }

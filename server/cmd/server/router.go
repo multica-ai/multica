@@ -21,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -109,6 +110,7 @@ func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
 	r.Patch(publicapiv1.PathIssue, h.PatchPluginIssue)
 	r.Get(publicapiv1.PathIssueComments, h.ListPluginComments)
 	r.Post(publicapiv1.PathIssueComments, h.CreatePluginComment)
+	r.Get(publicapiv1.PathTaskMessages, h.ListPluginTaskMessages)
 	r.Get(publicapiv1.PathStorageScope, h.ListPluginStorage)
 	r.Get(publicapiv1.PathStorageValue, h.GetPluginStorage)
 	r.Put(publicapiv1.PathStorageValue, h.PutPluginStorage)
@@ -440,6 +442,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudTimeout:                   35 * time.Second,
 		AttachmentDownloadMode:         os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL:       envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		MaxPreviewSizeBytes:            attachmentpreview.ConfiguredMaxSizeBytes(os.Getenv("MULTICA_MAX_PREVIEW_SIZE")),
 		AttachmentFrameAncestors:       origins,
 		PluginSurfaceOrigin:            strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
 		LLMAPIKey:                      strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
@@ -1719,6 +1722,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
+		r.Post("/api/me/whats-new/seen", h.MarkWhatsNewSeen)
 		// Credential minting is human-only (MUL-8154): an agent task token
 		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
 		// without this guard a prompt-injected agent could trade its scoped,
@@ -2094,6 +2098,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The caller's issues with an agent result they have not seen
 				// yet; backs the sidebar's unread dot.
 				r.Get("/unread", h.ListIssueUnread)
+				// The caller's subscribed issue ids; backs the "subscribed"
+				// relation filter on client-filtered surfaces.
+				r.Get("/subscribed", h.ListSubscribedIssueIDs)
 				r.Get("/", h.ListIssues)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.
@@ -2305,6 +2312,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateIssueView)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssueViewByID)
+					r.Get("/issues", h.ListIssueViewIssues)
 					r.Patch("/", h.UpdateIssueView)
 					r.Delete("/", h.DeleteIssueView)
 				})
@@ -2411,6 +2419,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+					r.Get("/versions", h.ListSkillVersions)
+					r.Get("/versions/{version}", h.GetSkillVersion)
+					r.Post("/versions/{version}/restore", h.RestoreSkillVersion)
 				})
 			})
 
@@ -2564,6 +2575,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
+				// Every unread notification on one issue, for reading the issue
+				// outside the inbox (MUL-8588).
+				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)

@@ -67,7 +67,7 @@ function IssueWindowRoute() {
     return (
       <IssueWindowFrame>
         <div className="flex min-h-0 flex-1 items-center justify-center">
-          <MulticaIcon className="size-6 animate-pulse" />
+          <MulticaIcon mode="launch" size={40} />
         </div>
       </IssueWindowFrame>
     );

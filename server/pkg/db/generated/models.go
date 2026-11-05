@@ -821,6 +821,7 @@ type InboxItem struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	Section       pgtype.Text        `json:"section"`
 }
 
 type InstanceTelemetryState struct {
@@ -1381,6 +1382,8 @@ type Project struct {
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	CreatorType pgtype.Text        `json:"creator_type"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
 }
 
 type ProjectResource struct {
@@ -1488,6 +1491,22 @@ type SkillToLabel struct {
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillVersion struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Content             string             `json:"content"`
+	Files               []byte             `json:"files"`
+	ContentHash         string             `json:"content_hash"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type Squad struct {
@@ -1599,7 +1618,8 @@ type TaskUsage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	// Provider-reported cost in 1e-10 USD. NULL when the provider reports none; those rows are priced client-side from the static rate table.
-	CostUsdTicks pgtype.Int8 `json:"cost_usd_ticks"`
+	CostUsdTicks  pgtype.Int8 `json:"cost_usd_ticks"`
+	CreditsMicros pgtype.Int8 `json:"credits_micros"`
 }
 
 type TaskUsageHourly struct {
@@ -1661,7 +1681,8 @@ type User struct {
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone pgtype.Text `json:"timezone"`
+	Timezone            pgtype.Text `json:"timezone"`
+	WhatsNewSeenVersion pgtype.Text `json:"whats_new_seen_version"`
 }
 
 type UserComposioConnection struct {

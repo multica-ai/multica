@@ -2802,6 +2802,31 @@ func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskRespon
 	resp.PriorSessionResumeUnavailable = true
 }
 
+// loadClaimParentIssue reads a sub-issue's parent for the claim payload. The
+// parent is context, not a precondition, so a failed read only drops it.
+func (h *Handler) loadClaimParentIssue(ctx context.Context, task *db.AgentTaskQueue, issue db.Issue) (*ClaimParentIssue, int32) {
+	parent, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          issue.ParentIssueID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("task claim: failed to load parent issue",
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+				"parent_issue_id", uuidToString(issue.ParentIssueID),
+				"error", err,
+			)
+		}
+		return nil, 0
+	}
+	return &ClaimParentIssue{
+		ID:     uuidToString(parent.ID),
+		Title:  parent.Title,
+		Status: parent.Status,
+	}, parent.Number
+}
+
 func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
@@ -2830,7 +2855,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.DispatchedAt = &generation
 		resp.StartClaimSupported = true
 	}
-	var issueNumber int32
+	var issueNumber, parentIssueNumber int32
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -3109,6 +3134,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		if issue.AssigneeID.Valid {
 			resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
+		}
+		if issue.ParentIssueID.Valid {
+			resp.ParentIssue, parentIssueNumber = h.loadClaimParentIssue(r.Context(), task, issue)
 		}
 		// This claim's own snapshot, recorded by FinalizeTaskClaim so a LATER
 		// run that resumes this one's session can compare against what THIS run
@@ -3626,6 +3654,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
+		resp.ChatNoticeLocale = h.qoderChatNoticeLocale(r.Context(), runtime, *task, cs, resp.ChatChannelType, resp.ChatType)
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
@@ -4063,6 +4092,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+		}
+		if resp.ParentIssue != nil && parentIssueNumber > 0 {
+			resp.ParentIssue.Identifier = service.IssueIdentifier(ws.IssuePrefix, parentIssueNumber)
 		}
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
@@ -5432,6 +5464,20 @@ type TaskUsagePayload struct {
 	// every provider except Grok today) — stored as NULL so the reader knows
 	// to fall back to rate-table estimation rather than reading a real $0.
 	CostUSDTicks int64 `json:"cost_usd_ticks"`
+	// CreditsMicros is the provider's own charge in millionths of its credit
+	// unit, for providers that bill in credits instead of exposing tokens
+	// (Qoder Cloud Agents). A pointer because 0 credits is a real answer that
+	// must stay distinct from "this provider does not report credits".
+	CreditsMicros *int64 `json:"credits_micros,omitempty"`
+}
+
+// reportedCredits converts a reported credit charge into the nullable column.
+// Negative is nonsense from a malformed report and is dropped.
+func reportedCredits(micros *int64) pgtype.Int8 {
+	if micros == nil || *micros < 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *micros, Valid: true}
 }
 
 // authoritativeCostTicks converts a reported cost into the nullable column.
@@ -5500,6 +5546,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
 			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
+			CreditsMicros:    reportedCredits(u.CreditsMicros),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
@@ -6379,7 +6426,7 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
 }
@@ -6408,7 +6455,7 @@ func (h *Handler) hydrateAgentTaskUsage(ctx context.Context, agentID pgtype.UUID
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
 	return nil
@@ -6424,11 +6471,17 @@ func appendTaskUsage(
 	cacheReadTokens int64,
 	cacheWriteTokens int64,
 	costUsdTicks pgtype.Int8,
+	creditsMicros pgtype.Int8,
 ) {
 	var cost *int64
 	if costUsdTicks.Valid {
 		value := costUsdTicks.Int64
 		cost = &value
+	}
+	var credits *int64
+	if creditsMicros.Valid {
+		value := creditsMicros.Int64
+		credits = &value
 	}
 	id := uuidToString(taskID)
 	byTask[id] = append(byTask[id], TaskUsageData{
@@ -6439,6 +6492,7 @@ func appendTaskUsage(
 		CacheReadTokens:  cacheReadTokens,
 		CacheWriteTokens: cacheWriteTokens,
 		CostUsdTicks:     cost,
+		CreditsMicros:    credits,
 	})
 }
 

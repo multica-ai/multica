@@ -161,6 +161,20 @@ func TestIssueTableRowsAdvancedFilter(t *testing.T) {
 			cond("label_ids", false, label),
 		}},
 		bugInProject)
+	// A value that is empty after normalization drops out like an empty
+	// condition: it used to compile to the invalid predicate "()" and failed
+	// the whole query with a syntax error.
+	assertTree("whitespace-only values drop out",
+		issueTableFilterNode{Children: []issueTableFilterNode{
+			cond("priorities", false, ""),
+		}},
+		urgentInProject, bugInProject, quietInProject, urgentElsewhere)
+	assertTree("whitespace-only values drop out in ors-style fields",
+		issueTableFilterNode{Children: []issueTableFilterNode{
+			cond("relations", false, ""),
+			cond("priorities", false, "urgent"),
+		}},
+		urgentInProject, urgentElsewhere)
 	assertTree("an empty tree constrains nothing",
 		issueTableFilterNode{Match: "any"},
 		urgentInProject, bugInProject, quietInProject, urgentElsewhere)

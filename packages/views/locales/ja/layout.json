@@ -38,6 +38,21 @@
     "feedback": "フィードバック",
     "server_version": "サーバーバージョン {{version}}"
   },
+  "whats_new": {
+    "trigger": "新機能",
+    "panel": {
+      "title": "新機能",
+      "close": "閉じる",
+      "new": "未読",
+      "release_notes": "v{{version}} の変更ログ",
+      "full_changelog": "すべての変更ログ"
+    },
+    "action": {
+      "try": "試してみる",
+      "open": "開く",
+      "learn_more": "詳しく見る"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
     "loading_named_prefix": "読み込み中"
@@ -87,6 +102,7 @@
     "work": {
       "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
+      "unread": "未読",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",
@@ -94,6 +110,7 @@
       "project_issues": "{{name}} のタスク",
       "project_issues_empty": "タスクはありません",
       "project_issues_error": "タスクを読み込めませんでした",
+      "project_issues_retry": "再試行",
       "project_issues_settings": "プロジェクトのタスク",
       "settings_status": "ステータス",
       "settings_assignee": "担当者",
@@ -133,7 +150,7 @@
       "squads_and_members": "スクワッドとメンバー",
       "members_other": "メンバー {{count}} 人",
       "resources": "リソース",
-      "runtimes_offline_other": "{{count}} 件オフライン",
+      "runtimes_online_other": "{{count}} 台オンライン",
       "invite_member": "メンバーを招待"
     },
     "autopilots": {
@@ -159,6 +176,8 @@
     "filter_count_other": "{{count}} 件のフィルター",
     "reset": "リセット",
     "clear_search": "検索をクリア",
+    "clear_filters": "フィルターをクリア",
+    "clear_filters_and_search": "フィルターと検索をクリア",
     "display": "表示設定",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除",
@@ -175,5 +194,14 @@
   "object_page": {
     "toggle_panel": "右サイドバーを切り替え",
     "properties": "プロパティ"
+  },
+  "feature_intro": {
+    "read_docs": "ドキュメントを読む",
+    "carousel": "カルーセル",
+    "slide": "スライド",
+    "slide_position": "{{total}} 枚中 {{current}} 枚目",
+    "go_to_slide": "{{index}} 枚目に移動",
+    "previous": "前へ",
+    "next": "次へ"
   }
 }
