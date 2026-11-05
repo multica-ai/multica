@@ -95,6 +95,42 @@ func TestQueueRunsAfterTheCurrentTurn(t *testing.T) {
 	}
 }
 
+func TestQueueWaitsBeforeApplyingNextTurnSettings(t *testing.T) {
+	t.Parallel()
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r0", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.svc.Store().Conversation(ctx, "conv-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"requestId":"q1","content":"second","permissionMode":"auto","display":{"id":"q1"}}`)
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", raw, false, TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	// Join a dispatch attempt through the same queue lock without waiting for the active turn.
+	f.svc.dispatchQueue("conv-1")
+	after, err := f.svc.Store().Conversation(ctx, "conv-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.PermissionMode != before.PermissionMode {
+		t.Fatalf("queued settings changed the running turn: %q -> %q", before.PermissionMode, after.PermissionMode)
+	}
+	if got := f.sends(t); fmt.Sprint(got) != "[first]" {
+		t.Fatalf("sent while the first turn was running: %v", got)
+	}
+	f.adapters[0].emit(t, turnDone)
+	eventually(t, "the queued message", func() bool { return fmt.Sprint(f.sends(t)) == "[first second]" })
+	after, err = f.svc.Store().Conversation(ctx, "conv-1")
+	if err != nil || after.PermissionMode != "auto" {
+		t.Fatalf("queued turn settings = %q, %v", after.PermissionMode, err)
+	}
+}
+
 func TestQueueActions(t *testing.T) {
 	t.Parallel()
 

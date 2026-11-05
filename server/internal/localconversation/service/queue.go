@@ -394,6 +394,9 @@ func (s *Service) dispatchQueue(conversationID string) {
 	if err != nil || conv.Archived == 1 {
 		return
 	}
+	if busy, err := s.conversationBusy(ctx, conversationID); err != nil || busy {
+		return
+	}
 	first := state.Items[0]
 	item, err := parseQueueItem(first.Item)
 	var trace *timing.Trace

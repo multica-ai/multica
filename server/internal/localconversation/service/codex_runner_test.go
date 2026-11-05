@@ -998,12 +998,14 @@ func TestCodexQueuedSettingsChangeRestartsTheProcess(t *testing.T) {
 	if _, err := svc.Enqueue(ctx, scopeID, "conv-c", item, false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
-	// The dispatch that finds the turn running applies the settings first.
-	eventually(t, "queued settings", func() bool {
-		conv, err := svc.Store().Conversation(ctx, "conv-c")
-		return err == nil && conv.PermissionMode == "auto"
-	})
-	eventually(t, "the dispatch to end", func() bool { return svc.queues.dispatchingFor("conv-c") == "" })
+	svc.dispatchQueue("conv-c")
+	conv, err := svc.Store().Conversation(ctx, "conv-c")
+	if err != nil || conv.PermissionMode != "full-access" {
+		t.Fatalf("the running turn's settings changed: %q, %v", conv.PermissionMode, err)
+	}
+	if svc.queues.dispatchingFor("conv-c") != "" {
+		t.Fatal("the queued message is dispatching under the running turn")
+	}
 	if serverAt(1) != nil {
 		t.Fatal("the process restarted under the running turn")
 	}

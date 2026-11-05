@@ -2731,6 +2731,54 @@ describe("local conversations over protocol v2", () => {
     events
   });
 
+  it("keeps a prompt submitted during a streamed reply in the queue until its own turn starts", async () => {
+    const { data, handle, release } = await localRuntime();
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "queue.enqueue")
+        return { revision: 1, paused: false, dispatchingRequestId: "queued-111", items: [params.item] };
+      return original(method, params);
+    });
+    const rows = new ConversationRowsModel(handle.runtime, session.id, {
+      workspaceId: init.workspaceId,
+      userId: init.userId
+    });
+    try {
+      data.emit({
+        type: "local.events", sessionId: session.id,
+        message: batch([
+          event(1, "user.message", { message_id: "m1", content: "hi", request_id: "r1" }),
+          event(2, "turn.started", { request_id: "r1" }),
+          event(3, "item.delta", { kind: "assistant_text", field: "text", text: "Still replying" }, { item_id: "it-1" })
+        ])
+      });
+      await vi.waitFor(() => expect(handle.runtime.sessions.activeTurn(session.id)?.phase).toBe("running"));
+      expect(handle.runtime.prompts.submitPrompt({
+        agentSessionId: session.id, clientSubmitId: "queued-111",
+        content: [{ type: "text", text: "111" }]
+      })).toEqual({ accepted: true, queued: true });
+      await vi.waitFor(() => expect(wasEnqueued(data.request)).toBe(true));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(handle.runtime.prompts.visibleQueuedPrompts(session.id).map((item) => item.clientSubmitId)).toEqual(["queued-111"]);
+      expect(handle.runtime.prompts.pendingSubmits(session.id)).toEqual([]);
+      expect(JSON.stringify(rows.conversation?.rows)).not.toContain('"111"');
+      data.emit({
+        type: "local.events", sessionId: session.id,
+        message: batch([
+          event(4, "turn.completed", { status: "completed" }),
+          event(5, "user.message", { message_id: "m2", content: "111", request_id: "queued-111" }, { turn_id: "turn-2", turn_seq: 1 }),
+          event(6, "turn.started", { request_id: "queued-111" }, { turn_id: "turn-2", turn_seq: 2 })
+        ])
+      });
+      await vi.waitFor(() => expect(handle.runtime.transcript.messages(session.id).filter((message) => message.payload.content === "111")).toHaveLength(1));
+      expect(handle.runtime.prompts.visibleQueuedPrompts(session.id)).toEqual([]);
+      expect(handle.runtime.prompts.pendingSubmits(session.id)).toEqual([]);
+      expect(data.request.mock.calls.filter(([method]) => method === "queue.enqueue")).toHaveLength(1);
+    } finally {
+      release();
+    }
+  });
+
   it("projects streamed events of a subscribed conversation", async () => {
     const { data, messages } = await localRuntime();
     expect(

@@ -189,6 +189,7 @@ describe("desktop queue presentation", () => {
         "next"
       );
       expect(visible(engine)).toEqual(["next", "later"]);
+      engine.sessions.upsertSession({ ...engine.sessions.presentedSession("session")!, activeTurnId: null, activeTurn: null });
       receive("session", {
         revision: 4,
         paused: false,
@@ -532,6 +533,7 @@ describe("desktop queue presentation", () => {
     );
     submit(engine, "dispatching");
     sendNow(engine, "dispatching");
+    engine.sessions.upsertSession({ ...engine.sessions.presentedSession("session")!, activeTurnId: null, activeTurn: null });
     accept({
       revision: 1,
       paused: false,
