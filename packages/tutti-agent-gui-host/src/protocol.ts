@@ -170,6 +170,10 @@ export interface AgentGuiOperations {
       import("@multica/conversation-client/services").PromptStatus
     >;
   };
+  "queue.prepare": {
+    params:AgentGuiOperations["queue.enqueue"]["params"];
+    result:AgentGuiOperations["queue.enqueue"]["params"];
+  };
   "queue.update": {
     params: {
       sessionId: string;

@@ -73,3 +73,20 @@ describe("direct host service lifetime", () => {
     }
   });
 });
+
+it("forwards preparation so durable submissions freeze recipients before network delivery",async()=>{
+ const service=fakeHostServices(vi.fn());
+ const prepare=vi.fn(async(params:import("./protocol").AgentGuiOperations["queue.prepare"]["params"])=>({...params,item:{...params.item,agents:[{id:"agent-original",name:"Original recipient"}]}}));
+ service.queue.prepare=prepare;
+ const connection=createHostServicesConnection(service,{current:()=>true,interactive:()=>false});
+ const params={sessionId:"s",queued:true as const,item:{requestId:"r",content:"hello",display:{id:"r",createdAtUnixMs:1,content:[{type:"text" as const,text:"hello"}]}}};
+ const frozen=await connection.client.queue.prepare!(params);
+ expect(frozen.item.agents).toEqual([{id:"agent-original",name:"Original recipient"}]);
+ expect(prepare).toHaveBeenCalledWith(params);
+ connection.dispose();
+});
+
+it("does not advertise a preparation operation an older host cannot supply",()=>{
+ const connection=createHostServicesConnection(fakeHostServices(vi.fn()),{current:()=>true,interactive:()=>true});
+ expect(connection.client.queue.prepare).toBeUndefined();connection.dispose();
+});

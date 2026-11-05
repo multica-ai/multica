@@ -43,7 +43,7 @@ function allowedInBackground(method: string, params: unknown): boolean {
     return true;
   // A prompt admitted to the queue must survive focus and tab changes.
   return (
-    ["session.send", "queue.enqueue", "host.openSide"].includes(method) &&
+    ["session.send", "queue.enqueue", "queue.prepare", "host.openSide"].includes(method) &&
     (params as { queued?: unknown } | null)?.queued === true
   );
 }
@@ -174,6 +174,7 @@ export function createHostServicesConnection(
   };
   const client: AgentGuiHostServices = {
     queue: {
+      ...(service.queue.prepare?{prepare:(params:AgentGuiOperations["queue.prepare"]["params"])=>invoke("queue.prepare",params,()=>service.queue.prepare!(params))}:{}),
       enqueue: (params, options) =>
         invoke(
           "queue.enqueue",
