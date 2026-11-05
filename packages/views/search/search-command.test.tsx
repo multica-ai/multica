@@ -1047,6 +1047,42 @@ describe("SearchCommand", () => {
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 
+    it.each([
+      { isComposing: true, keyCode: 13 },
+      { isComposing: false, keyCode: 229 },
+    ])("preserves delegation during IME Shift+Enter ($isComposing, $keyCode)", async (ime) => {
+      const user = userEvent.setup();
+      const prompt = "fix the Safari login callback 500";
+      renderSearch();
+      await user.type(input(), prompt);
+      await waitFor(() => expect(selectedValue()).toBe("delegate:submit"));
+
+      fireEvent.compositionStart(input());
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        shiftKey: true,
+        ...ime,
+        bubbles: true,
+        cancelable: true,
+      });
+      fireEvent(input(), event);
+
+      expect.soft(event.defaultPrevented).toBe(false);
+      expect.soft(renderedValues()).toContain("delegate:submit");
+      expect(input()).toHaveValue(prompt);
+      expect(useSearchStore.getState().open).toBe(true);
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+      expect(mockOpenModal).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+
+      fireEvent.compositionEnd(input());
+      fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
+      await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
+      expect(input()).toHaveValue(prompt);
+      expect(useSearchStore.getState().open).toBe(true);
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+    });
+
     it("does not read a plain keyword as an instruction", async () => {
       const user = userEvent.setup();
       renderSearch();
