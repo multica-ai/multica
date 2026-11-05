@@ -4,6 +4,7 @@ import { forwardRef, memo, useCallback, useLayoutEffect, useState } from "react"
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -135,19 +136,21 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
       ) : (
         icon
       )}
-      <AppLink
-        ref={linkRef}
-        href={href}
-        newTabTitle={label}
-        draggable={false}
-        aria-current={active ? "page" : undefined}
-        onKeyDown={onKeyDown}
-        onClick={onNavigate}
-        onNavigateInPlace={onNavigateInPlace}
-        className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
-      >
-        {label}
-      </AppLink>
+      <TruncatedTooltip content={label} side="right">
+        <AppLink
+          ref={linkRef}
+          href={href}
+          newTabTitle={label}
+          draggable={false}
+          aria-current={active ? "page" : undefined}
+          onKeyDown={onKeyDown}
+          onClick={onNavigate}
+          onNavigateInPlace={onNavigateInPlace}
+          className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
+        >
+          {label}
+        </AppLink>
+      </TruncatedTooltip>
       {trailing}
     </div>
   );
@@ -494,21 +497,23 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           label={statusLabel}
           className="size-3"
         />
-        <AppLink
-          href={unreadIssueHref(href, unread)}
-          newTabTitle={issue.title}
-          aria-current={active ? "page" : undefined}
-          onKeyDown={onKeyDown}
-          className={ISSUE_ROW_LINK_CLASS}
-        >
-          <ShimmerText
-            active={!!agents?.running}
-            className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
+        <TruncatedTooltip content={issue.title} side="right">
+          <AppLink
+            href={unreadIssueHref(href, unread)}
+            newTabTitle={issue.title}
+            aria-current={active ? "page" : undefined}
+            onKeyDown={onKeyDown}
+            className={ISSUE_ROW_LINK_CLASS}
           >
-            {issue.title}
-          </ShimmerText>
-          {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
-        </AppLink>
+            <ShimmerText
+              active={!!agents?.running}
+              className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
+            >
+              {issue.title}
+            </ShimmerText>
+            {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
+          </AppLink>
+        </TruncatedTooltip>
       </div>
     </IssueActionsContextMenu>
   );
