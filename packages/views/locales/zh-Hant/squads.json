@@ -79,7 +79,6 @@
     "active_issue_more": "還有 {{count}} 個",
     "squad_runtime_aria": "整個 squad 的執行環境",
     "squad_runtime_placeholder": "設定執行環境",
-    "squad_runtime_mixed": "執行環境不一致",
     "runtime_unavailable": "無法使用的執行環境",
     "agent_runtime_unbound": "未設定執行環境",
     "agent_runtime_aria": "{{name}} 的執行環境",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "{{name}} 的思考",
     "thinking_default": "跟隨 CLI 配置",
     "empty_title": "還沒有成員",
-    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。"
+    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。",
+    "squad_custom": "自訂",
+    "squad_model_aria": "所有 Agent 的模型",
+    "squad_thinking_aria": "所有 Agent 的思考",
+    "bulk_field_runtime": "執行環境",
+    "bulk_field_model": "模型",
+    "bulk_field_thinking": "思考",
+    "bulk_confirm_title": "套用到所有 Agent？",
+    "bulk_confirm_description": "將 {{count}} 個 Agent 的{{field}}設為 {{value}}，並取代每個 Agent 目前的設定。",
+    "bulk_confirm_cancel": "取消",
+    "bulk_confirm_action": "套用到全部"
   },
   "detail": {
     "assign_work": "指派工作",
@@ -136,7 +145,9 @@
     "thinking_updated": "思考設定已更新",
     "thinking_update_failed": "思考設定更新失敗",
     "squad_runtime_failed": "更改執行環境失敗",
-    "squad_runtime_skipped": "已移動 {{updated}} 個 Agent，略過 {{skipped}} 個：{{reason}}"
+    "squad_runtime_skipped": "已移動 {{updated}} 個 Agent，略過 {{skipped}} 個：{{reason}}",
+    "bulk_applied": "已為 {{count}} 個 Agent 套用{{field}}",
+    "bulk_partial": "{{total}} 個 Agent 中有 {{failed}} 個無法更新"
   },
   "profile_card": {
     "unavailable": "小隊不可用",

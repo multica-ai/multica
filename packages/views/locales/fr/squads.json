@@ -79,7 +79,6 @@
     "active_issue_more": "et {{count}} de plus",
     "squad_runtime_aria": "Runtime de tout le squad",
     "squad_runtime_placeholder": "Choisir un runtime",
-    "squad_runtime_mixed": "Runtimes mélangés",
     "runtime_unavailable": "Runtime indisponible",
     "agent_runtime_unbound": "Aucun runtime",
     "agent_runtime_aria": "Runtime de {{name}}",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "Réflexion de {{name}}",
     "thinking_default": "Suivre la configuration du CLI",
     "empty_title": "Aucun membre pour l'instant",
-    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront."
+    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront.",
+    "squad_custom": "Personnalisé",
+    "squad_model_aria": "Modèle pour tous les agents",
+    "squad_thinking_aria": "Réflexion pour tous les agents",
+    "bulk_field_runtime": "Runtime",
+    "bulk_field_model": "Modèle",
+    "bulk_field_thinking": "Réflexion",
+    "bulk_confirm_title": "Appliquer à tous les agents ?",
+    "bulk_confirm_description": "{{field}} sera défini sur {{value}} pour {{count}} agents, en remplaçant le réglage actuel de chacun.",
+    "bulk_confirm_cancel": "Annuler",
+    "bulk_confirm_action": "Appliquer à tous"
   },
   "detail": {
     "assign_work": "Assigner du travail",
@@ -136,7 +145,9 @@
     "thinking_updated": "Réflexion mise à jour",
     "thinking_update_failed": "Échec de la mise à jour de la réflexion",
     "squad_runtime_failed": "Échec du changement de runtime",
-    "squad_runtime_skipped": "{{updated}} agents déplacés, {{skipped}} ignorés : {{reason}}"
+    "squad_runtime_skipped": "{{updated}} agents déplacés, {{skipped}} ignorés : {{reason}}",
+    "bulk_applied": "{{field}} appliqué à {{count}} agents",
+    "bulk_partial": "{{failed}} agents sur {{total}} n'ont pas pu être mis à jour"
   },
   "profile_card": {
     "unavailable": "Squad indisponible",

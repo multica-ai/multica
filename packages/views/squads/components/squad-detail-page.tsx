@@ -30,6 +30,7 @@ import {
 import { CollectionPageState } from "../../layout/collection-page";
 import {
   Bot,
+  Brain,
   ChevronDown,
   Crown,
   FileQuestion,
@@ -102,8 +103,10 @@ import { SquadCapabilitiesSection } from "./squad-capabilities-section";
 import { sharedSquadRuntimeId } from "../lib/squad-runtime";
 import { SquadModelSelect } from "./squad-model-select";
 import { SquadThinkingSelect } from "./squad-thinking-select";
+import { SquadBulkSelect } from "./squad-bulk-select";
+import { commonModels, commonThinkingLevels, settleAgentWrites, sharedValue, thinkingLevelsFor } from "../lib/squad-bulk-execution";
 import { buildModelChangeUpdate, type ModelCatalog } from "../../agents/components/inspector/model-change-cleanup";
-import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser, RuntimeDevice, SquadPlugin } from "@multica/core/types";
+import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser, RuntimeDevice, RuntimeModel, SquadPlugin } from "@multica/core/types";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 const RECENT_WORK_LIMIT = 5;
@@ -233,6 +236,28 @@ export function SquadDetailView({
       ),
     ),
   ].sort();
+  // The squad-wide model and thinking controls need each live agent's runtime
+  // model catalog. An offline runtime's catalog is not requested.
+  const liveAgentRuntimeIds = useMemo(
+    () => [
+      ...new Set(
+        members
+          .filter((m) => m.member_type === "agent" && !archivedAgentIds.has(m.member_id))
+          .map((m) => agentRuntimeIdById.get(m.member_id))
+          .filter((id): id is string => !!id),
+      ),
+    ],
+    [members, archivedAgentIds, agentRuntimeIdById],
+  );
+  const runtimeModelCatalogs = useQueries({
+    queries: liveAgentRuntimeIds.map((id) =>
+      runtimeModelsOptions(runtimeById.get(id)?.status === "online" ? id : null),
+    ),
+  });
+  const catalogByRuntimeId = new Map<string, RuntimeModel[] | undefined>(
+    liveAgentRuntimeIds.map((id, i) => [id, runtimeModelCatalogs[i]?.data?.models]),
+  );
+
   const myRole = useMemo(() => {
     if (!currentUser) return null;
     return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
@@ -312,27 +337,36 @@ export function SquadDetailView({
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.runtime_update_failed)),
   });
 
+  // Saves one agent's model. buildModelChangeUpdate also clears a stored thinking
+  // level the new model does not support, using the agent inspector's rules.
+  const saveAgentModel = async (agentId: string, model: string) => {
+    const agent = agents.find((a: Agent) => a.id === agentId);
+    const runtime = runtimeById.get(agent?.runtime_id ?? "") ?? null;
+    // Only an online runtime can answer the catalog. Without it the stored
+    // thinking level and service tier stay as they are, as in the agent inspector.
+    const catalog: ModelCatalog =
+      runtime?.status === "online"
+        ? await queryClient.fetchQuery(runtimeModelsOptions(runtime.id)).then((res) => res.models, () => null)
+        : null;
+    return api.updateAgent(
+      agentId,
+      buildModelChangeUpdate({
+        provider: runtime?.provider ?? "",
+        model,
+        thinkingLevel: agent?.thinking_level ?? "",
+        serviceTier: agent?.service_tier ?? "",
+        catalog,
+      }),
+    );
+  };
+
+  const liveAgentIds = () =>
+    members
+      .filter((m) => m.member_type === "agent" && !archivedAgentIds.has(m.member_id))
+      .map((m) => m.member_id);
+
   const setAgentModelMut = useMutation({
-    mutationFn: async (input: { agentId: string; model: string }) => {
-      const agent = agents.find((a: Agent) => a.id === input.agentId);
-      const runtime = runtimeById.get(agent?.runtime_id ?? "") ?? null;
-      // Only an online runtime can answer the catalog. Without it the stored
-      // thinking level and service tier stay as they are, as in the agent inspector.
-      const catalog: ModelCatalog =
-        runtime?.status === "online"
-          ? await queryClient.fetchQuery(runtimeModelsOptions(runtime.id)).then((res) => res.models, () => null)
-          : null;
-      return api.updateAgent(
-        input.agentId,
-        buildModelChangeUpdate({
-          provider: runtime?.provider ?? "",
-          model: input.model,
-          thinkingLevel: agent?.thinking_level ?? "",
-          serviceTier: agent?.service_tier ?? "",
-          catalog,
-        }),
-      );
-    },
+    mutationFn: (input: { agentId: string; model: string }) => saveAgentModel(input.agentId, input.model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       toast.success(t(($) => $.toasts.model_updated));
@@ -350,6 +384,33 @@ export function SquadDetailView({
     },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.thinking_update_failed)),
+  });
+
+  // Squad-wide model and thinking writes. Each agent saves on its own, so one
+  // failure does not stop the others; the toast reports how many failed.
+  const reportBulkResult = (field: string, res: { total: number; failed: number }) => {
+    if (res.failed === 0) toast.success(t(($) => $.toasts.bulk_applied, { field, count: res.total }));
+    else toast.error(t(($) => $.toasts.bulk_partial, { failed: res.failed, total: res.total }));
+  };
+
+  const applyModelToAllMut = useMutation({
+    mutationFn: async (input: { model: string; field: string }) =>
+      settleAgentWrites(liveAgentIds().map((id) => saveAgentModel(id, input.model))),
+    onSuccess: (res, input) => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      reportBulkResult(input.field, res);
+    },
+  });
+
+  const applyThinkingToAllMut = useMutation({
+    mutationFn: async (input: { thinkingLevel: string; field: string }) =>
+      settleAgentWrites(
+        liveAgentIds().map((id) => api.updateAgent(id, { thinking_level: input.thinkingLevel })),
+      ),
+    onSuccess: (res, input) => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      reportBulkResult(input.field, res);
+    },
   });
 
   // One request points every live agent at the runtime. The server reports
@@ -605,9 +666,12 @@ export function SquadDetailView({
           agentRuntimeIdById={agentRuntimeIdById}
           agentModelById={agentModelById}
           agentThinkingById={agentThinkingById}
+          catalogByRuntimeId={catalogByRuntimeId}
           archivedAgentIds={archivedAgentIds}
           onSetAgentModel={(agentId, model) => setAgentModelMut.mutate({ agentId, model })}
           onSetAgentThinking={(agentId, thinkingLevel) => setAgentThinkingMut.mutate({ agentId, thinkingLevel })}
+          onApplyModelToAll={(model, field) => applyModelToAllMut.mutate({ model, field })}
+          onApplyThinkingToAll={(thinkingLevel, field) => applyThinkingToAllMut.mutate({ thinkingLevel, field })}
           onSetAgentRuntime={(agentId, runtimeId) => setAgentRuntimeMut.mutate({ agentId, runtimeId })}
           onApplySquadRuntime={(runtimeId) => applySquadRuntimeMut.mutate(runtimeId)}
           runtimePending={setAgentRuntimeMut.isPending || applySquadRuntimeMut.isPending}
@@ -768,6 +832,9 @@ function SquadAvatar({ squad, size }: { squad: Squad; size: "xs" | "identity" })
 // and status columns side by side, which need more room than the 760px column.
 const SQUAD_PAGE_BODY = "mx-auto w-full max-w-[1040px] px-6 py-8";
 
+// A squad-wide change waiting for the user to confirm before it is saved.
+type PendingApply = { field: string; valueLabel: string; apply: () => void };
+
 const SQUAD_STATUS_LABEL_KEYS = {
   working: "status_working",
   idle: "status_idle",
@@ -795,10 +862,13 @@ function SquadMembersSection({
   agentRuntimeIdById,
   agentModelById,
   agentThinkingById,
+  catalogByRuntimeId,
   archivedAgentIds,
   onSetAgentRuntime,
   onSetAgentModel,
   onSetAgentThinking,
+  onApplyModelToAll,
+  onApplyThinkingToAll,
   onApplySquadRuntime,
   runtimePending,
 }: {
@@ -823,10 +893,13 @@ function SquadMembersSection({
   agentRuntimeIdById: Map<string, string>;
   agentModelById: Map<string, string>;
   agentThinkingById: Map<string, string>;
+  catalogByRuntimeId: Map<string, RuntimeModel[] | undefined>;
   archivedAgentIds: Set<string>;
   onSetAgentRuntime: (agentId: string, runtimeId: string) => void;
   onSetAgentModel: (agentId: string, model: string) => void;
   onSetAgentThinking: (agentId: string, thinkingLevel: string) => void;
+  onApplyModelToAll: (model: string, field: string) => void;
+  onApplyThinkingToAll: (thinkingLevel: string, field: string) => void;
   onApplySquadRuntime: (runtimeId: string) => void;
   runtimePending: boolean;
 }) {
@@ -835,18 +908,50 @@ function SquadMembersSection({
   const p = useWorkspacePaths();
   const { push } = useNavigation();
 
-  // The squad-wide runtime shows the runtime all live agents share, or "mixed".
+  // Shown by every squad-wide control when the live agents do not all agree.
+  const customLabel = t(($) => $.members_tab.squad_custom);
+  // The squad-wide runtime shows the runtime all live agents share, or Custom when they differ.
   const activeAgentMembers = members.filter((m) => m.member_type === "agent" && !isArchived(m));
   const sharedRuntimeId = sharedSquadRuntimeId(members, agentRuntimeIdById, archivedAgentIds);
   const sharedRuntime = sharedRuntimeId ? (runtimeById.get(sharedRuntimeId) ?? null) : null;
   const squadRuntimeLabel =
     sharedRuntimeId === null
-      ? t(($) => $.members_tab.squad_runtime_mixed)
+      ? customLabel
       : sharedRuntime
         ? runtimeDisplayLabel(sharedRuntime)
         : sharedRuntimeId
           ? t(($) => $.members_tab.runtime_unavailable)
           : t(($) => $.members_tab.squad_runtime_placeholder);
+
+  // Squad-wide controls show the value every live agent shares, or Custom when
+  // they differ. Their options are what every live agent can use.
+  const liveAgentIdList = activeAgentMembers.map((m) => m.member_id);
+  const runtimeIdsInUse = [...new Set(liveAgentIdList.map((id) => agentRuntimeIdById.get(id) ?? ""))];
+  const modelOptions = commonModels(
+    runtimeIdsInUse.map((id) => (id ? catalogByRuntimeId.get(id) : undefined)),
+  ).map((m) => ({ value: m.id, label: m.label || m.id }));
+  const sharedModel = sharedValue(liveAgentIdList.map((id) => agentModelById.get(id) ?? ""));
+  const thinkingOptions = commonThinkingLevels(
+    liveAgentIdList.map((id) => {
+      const runtimeId = agentRuntimeIdById.get(id) ?? "";
+      return thinkingLevelsFor(
+        runtimeId ? catalogByRuntimeId.get(runtimeId) : undefined,
+        agentModelById.get(id) ?? "",
+        runtimeById.get(runtimeId)?.provider ?? "",
+      );
+    }),
+  ).map((l) => ({ value: l.value, label: l.label || l.value }));
+  const sharedThinking = sharedValue(liveAgentIdList.map((id) => agentThinkingById.get(id) ?? ""));
+  const modelDefaultLabel = t(($) => $.members_tab.model_default);
+  const thinkingDefaultLabel = t(($) => $.members_tab.thinking_default);
+  const fieldRuntime = t(($) => $.members_tab.bulk_field_runtime);
+  const fieldModel = t(($) => $.members_tab.bulk_field_model);
+  const fieldThinking = t(($) => $.members_tab.bulk_field_thinking);
+  const runtimeNameOf = (id: string) => {
+    const runtime = runtimeById.get(id);
+    return runtime ? runtimeDisplayLabel(runtime) : id;
+  };
+  const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
 
   return (
     <ObjectSection
@@ -856,14 +961,62 @@ function SquadMembersSection({
         canManage ? (
           <div className="flex items-center gap-2">
             {activeAgentMembers.length > 0 && (
-              <SquadRuntimeSelect
-                options={runtimeOptions}
-                value={sharedRuntime}
-                valueLabel={squadRuntimeLabel}
-                ariaLabel={t(($) => $.members_tab.squad_runtime_aria)}
-                disabled={runtimePending || runtimeOptions.length === 0}
-                onSelect={onApplySquadRuntime}
-              />
+              <>
+                <SquadRuntimeSelect
+                  options={runtimeOptions}
+                  value={sharedRuntime}
+                  valueLabel={squadRuntimeLabel}
+                  ariaLabel={t(($) => $.members_tab.squad_runtime_aria)}
+                  disabled={runtimePending || runtimeOptions.length === 0}
+                  onSelect={(runtimeId) => {
+                    if (runtimeId === sharedRuntimeId) return;
+                    setPendingApply({
+                      field: fieldRuntime,
+                      valueLabel: runtimeNameOf(runtimeId),
+                      apply: () => onApplySquadRuntime(runtimeId),
+                    });
+                  }}
+                />
+                <SquadBulkSelect
+                  options={modelOptions}
+                  value={sharedModel}
+                  customLabel={customLabel}
+                  defaultLabel={modelDefaultLabel}
+                  ariaLabel={t(($) => $.members_tab.squad_model_aria)}
+                  disabled={runtimePending || modelOptions.length === 0}
+                  onSelect={(model) => {
+                    if (model === sharedModel) return;
+                    const valueLabel =
+                      model === "" ? modelDefaultLabel : (modelOptions.find((o) => o.value === model)?.label ?? model);
+                    setPendingApply({
+                      field: fieldModel,
+                      valueLabel,
+                      apply: () => onApplyModelToAll(model, fieldModel),
+                    });
+                  }}
+                />
+                <SquadBulkSelect
+                  icon={Brain}
+                  options={thinkingOptions}
+                  value={sharedThinking}
+                  customLabel={customLabel}
+                  defaultLabel={thinkingDefaultLabel}
+                  ariaLabel={t(($) => $.members_tab.squad_thinking_aria)}
+                  disabled={runtimePending || thinkingOptions.length === 0}
+                  onSelect={(level) => {
+                    if (level === sharedThinking) return;
+                    const valueLabel =
+                      level === ""
+                        ? thinkingDefaultLabel
+                        : (thinkingOptions.find((o) => o.value === level)?.label ?? level);
+                    setPendingApply({
+                      field: fieldThinking,
+                      valueLabel,
+                      apply: () => onApplyThinkingToAll(level, fieldThinking),
+                    });
+                  }}
+                />
+              </>
             )}
             <ObjectSectionAction icon={UserPlus} onClick={onAddMemberClick}>
               {t(($) => $.members_tab.add_member_button)}
@@ -1069,6 +1222,33 @@ function SquadMembersSection({
           }
         />
       )}
+      <AlertDialog open={pendingApply !== null} onOpenChange={(open) => { if (!open) setPendingApply(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.members_tab.bulk_confirm_title)}</AlertDialogTitle>
+            {pendingApply && (
+              <AlertDialogDescription>
+                {t(($) => $.members_tab.bulk_confirm_description, {
+                  field: pendingApply.field,
+                  value: pendingApply.valueLabel,
+                  count: liveAgentIdList.length,
+                })}
+              </AlertDialogDescription>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.members_tab.bulk_confirm_cancel)}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                pendingApply?.apply();
+                setPendingApply(null);
+              }}
+            >
+              {t(($) => $.members_tab.bulk_confirm_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ObjectSection>
   );
 }

@@ -79,7 +79,6 @@
     "active_issue_more": "외 {{count}}개",
     "squad_runtime_aria": "squad 전체 런타임",
     "squad_runtime_placeholder": "런타임 설정",
-    "squad_runtime_mixed": "런타임 혼합",
     "runtime_unavailable": "사용할 수 없는 런타임",
     "agent_runtime_unbound": "런타임 없음",
     "agent_runtime_aria": "{{name}}의 런타임",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "{{name}}의 추론",
     "thinking_default": "CLI 설정 따르기",
     "empty_title": "아직 멤버가 없습니다",
-    "empty_description": "에이전트나 멤버를 추가하면 이 스쿼드에 할당된 태스크를 맡게 됩니다."
+    "empty_description": "에이전트나 멤버를 추가하면 이 스쿼드에 할당된 태스크를 맡게 됩니다.",
+    "squad_custom": "사용자 지정",
+    "squad_model_aria": "모든 에이전트의 모델",
+    "squad_thinking_aria": "모든 에이전트의 추론",
+    "bulk_field_runtime": "런타임",
+    "bulk_field_model": "모델",
+    "bulk_field_thinking": "추론",
+    "bulk_confirm_title": "모든 에이전트에 적용할까요?",
+    "bulk_confirm_description": "{{count}}개 에이전트의 {{field}}을(를) {{value}}(으)로 설정하며, 각 에이전트의 현재 설정을 대체합니다.",
+    "bulk_confirm_cancel": "취소",
+    "bulk_confirm_action": "모두에 적용"
   },
   "detail": {
     "assign_work": "작업 할당",
@@ -136,7 +145,9 @@
     "thinking_updated": "추론 설정을 업데이트했습니다",
     "thinking_update_failed": "추론 설정 업데이트에 실패했습니다",
     "squad_runtime_failed": "런타임 변경에 실패했습니다",
-    "squad_runtime_skipped": "에이전트 {{updated}}개 이동, {{skipped}}개 건너뜀: {{reason}}"
+    "squad_runtime_skipped": "에이전트 {{updated}}개 이동, {{skipped}}개 건너뜀: {{reason}}",
+    "bulk_applied": "{{count}}개 에이전트에 {{field}} 적용됨",
+    "bulk_partial": "{{total}}개 중 {{failed}}개 에이전트를 업데이트하지 못했습니다"
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",

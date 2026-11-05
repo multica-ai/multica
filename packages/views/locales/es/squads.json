@@ -78,7 +78,17 @@
     "empty_title": "Aún no hay miembros",
     "empty_description": "Añade agentes o miembros para que reciban las tareas asignadas a este squad.",
     "agent_thinking_aria": "Razonamiento de {{name}}",
-    "thinking_default": "Seguir la config de la CLI"
+    "thinking_default": "Seguir la config de la CLI",
+    "squad_custom": "Personalizado",
+    "squad_model_aria": "Modelo para todos los agentes",
+    "squad_thinking_aria": "Razonamiento para todos los agentes",
+    "bulk_field_runtime": "Runtime",
+    "bulk_field_model": "Modelo",
+    "bulk_field_thinking": "Razonamiento",
+    "bulk_confirm_title": "¿Aplicar a todos los agentes?",
+    "bulk_confirm_description": "{{field}} se cambiará a {{value}} en {{count}} agentes, reemplazando la configuración actual de cada uno.",
+    "bulk_confirm_cancel": "Cancelar",
+    "bulk_confirm_action": "Aplicar a todos"
   },
   "details": {
     "leader": "Líder",
@@ -101,7 +111,9 @@
     "archive_failed": "No se ha podido archivar el squad",
     "instructions_saved": "Instrucciones guardadas",
     "thinking_updated": "Razonamiento actualizado",
-    "thinking_update_failed": "No se pudo actualizar el razonamiento"
+    "thinking_update_failed": "No se pudo actualizar el razonamiento",
+    "bulk_applied": "{{field}} aplicado a {{count}} agentes",
+    "bulk_partial": "{{failed}} de {{total}} agentes no se pudieron actualizar"
   },
   "profile_card": {
     "unavailable": "Squad no disponible",

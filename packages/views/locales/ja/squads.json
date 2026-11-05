@@ -79,7 +79,6 @@
     "status_archived": "アーカイブ済み",
     "squad_runtime_aria": "squad全体のランタイム",
     "squad_runtime_placeholder": "ランタイムを設定",
-    "squad_runtime_mixed": "ランタイムが混在",
     "runtime_unavailable": "利用できないランタイム",
     "agent_runtime_unbound": "ランタイムなし",
     "agent_runtime_aria": "{{name}} のランタイム",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "{{name}} の思考",
     "thinking_default": "CLI 設定に従う",
     "empty_title": "メンバーはまだいません",
-    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。"
+    "empty_description": "エージェントやメンバーを追加すると、このスクワッドに割り当てたタスクを引き受けます。",
+    "squad_custom": "カスタム",
+    "squad_model_aria": "すべてのエージェントのモデル",
+    "squad_thinking_aria": "すべてのエージェントの思考",
+    "bulk_field_runtime": "ランタイム",
+    "bulk_field_model": "モデル",
+    "bulk_field_thinking": "思考",
+    "bulk_confirm_title": "すべてのエージェントに適用しますか？",
+    "bulk_confirm_description": "{{count}} 件のエージェントの {{field}} を {{value}} に設定し、各エージェントの現在の設定を置き換えます。",
+    "bulk_confirm_cancel": "キャンセル",
+    "bulk_confirm_action": "すべてに適用"
   },
   "detail": {
     "assign_work": "作業を割り当て",
@@ -136,7 +145,9 @@
     "thinking_updated": "思考設定を更新しました",
     "thinking_update_failed": "思考設定の更新に失敗しました",
     "squad_runtime_failed": "ランタイムの変更に失敗しました",
-    "squad_runtime_skipped": "{{updated}} 件を移動、{{skipped}} 件をスキップ: {{reason}}"
+    "squad_runtime_skipped": "{{updated}} 件を移動、{{skipped}} 件をスキップ: {{reason}}",
+    "bulk_applied": "{{count}} 件のエージェントに {{field}} を適用しました",
+    "bulk_partial": "{{total}} 件中 {{failed}} 件のエージェントを更新できませんでした"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",

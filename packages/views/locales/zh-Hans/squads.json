@@ -79,7 +79,6 @@
     "active_issue_more": "还有 {{count}} 个",
     "squad_runtime_aria": "整个 squad 的运行时",
     "squad_runtime_placeholder": "设置运行时",
-    "squad_runtime_mixed": "运行时不统一",
     "runtime_unavailable": "无法使用的运行时",
     "agent_runtime_unbound": "未设置运行时",
     "agent_runtime_aria": "{{name}} 的运行时",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "{{name}} 的思考",
     "thinking_default": "跟随 CLI 配置",
     "empty_title": "还没有成员",
-    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。"
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。",
+    "squad_custom": "自定义",
+    "squad_model_aria": "所有 Agent 的模型",
+    "squad_thinking_aria": "所有 Agent 的思考",
+    "bulk_field_runtime": "运行时",
+    "bulk_field_model": "模型",
+    "bulk_field_thinking": "思考",
+    "bulk_confirm_title": "应用到所有 Agent？",
+    "bulk_confirm_description": "将 {{count}} 个 Agent 的{{field}}设为 {{value}}，并替换每个 Agent 当前的设置。",
+    "bulk_confirm_cancel": "取消",
+    "bulk_confirm_action": "应用到全部"
   },
   "detail": {
     "assign_work": "分配工作",
@@ -136,7 +145,9 @@
     "thinking_updated": "思考设置已更新",
     "thinking_update_failed": "思考设置更新失败",
     "squad_runtime_failed": "更改运行时失败",
-    "squad_runtime_skipped": "已移动 {{updated}} 个 Agent，跳过 {{skipped}} 个：{{reason}}"
+    "squad_runtime_skipped": "已移动 {{updated}} 个 Agent，跳过 {{skipped}} 个：{{reason}}",
+    "bulk_applied": "已为 {{count}} 个 Agent 应用{{field}}",
+    "bulk_partial": "{{total}} 个 Agent 中有 {{failed}} 个无法更新"
   },
   "profile_card": {
     "unavailable": "小队不可用",

@@ -338,16 +338,46 @@ describe("SquadDetailPage", () => {
     expect(mocks.api.updateAgent).toHaveBeenCalledWith("agent-2", { runtime_id: "rt-2" });
   });
 
-  it("applies one runtime to every agent from the squad dropdown in one request", async () => {
+  it("applies one runtime to every agent from the squad dropdown only after confirmation", async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole("button", { name: "Runtime for the whole squad" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Workstation" }));
 
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Apply to all agents?");
+    expect(mocks.api.setSquadRuntime).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Apply to all" }));
+
     expect(mocks.api.setSquadRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.api.setSquadRuntime).toHaveBeenCalledWith("sq-1", "rt-2");
     expect(mocks.api.updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a squad-wide change when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Runtime for the whole squad" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Workstation" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(mocks.api.setSquadRuntime).not.toHaveBeenCalled();
+  });
+
+  it("shows Custom in the squad header when agents run different runtimes", () => {
+    seed(SQUAD, {
+      agents: {
+        data: [
+          { id: "agent-lead", name: "Lambda", archived_at: null, runtime_id: "rt-1", model: "" },
+          { id: "agent-2", name: "Kappa", archived_at: null, runtime_id: "rt-2", model: "" },
+        ],
+      },
+    });
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "Runtime for the whole squad" })).toHaveTextContent("Custom");
   });
 
   it("keeps the model control empty and disabled until the agent has a runtime", () => {

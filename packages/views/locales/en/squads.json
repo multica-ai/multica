@@ -79,7 +79,6 @@
     "active_issue_more": "and {{count}} more",
     "squad_runtime_aria": "Runtime for the whole squad",
     "squad_runtime_placeholder": "Set runtime",
-    "squad_runtime_mixed": "Mixed runtimes",
     "runtime_unavailable": "Unavailable runtime",
     "agent_runtime_unbound": "No runtime",
     "agent_runtime_aria": "Runtime for {{name}}",
@@ -88,7 +87,17 @@
     "agent_thinking_aria": "Thinking for {{name}}",
     "thinking_default": "Follow CLI config",
     "empty_title": "No members yet",
-    "empty_description": "Add agents or members, and issues assigned to this squad go to them."
+    "empty_description": "Add agents or members, and issues assigned to this squad go to them.",
+    "squad_custom": "Custom",
+    "squad_model_aria": "Model for all agents",
+    "squad_thinking_aria": "Thinking for all agents",
+    "bulk_field_runtime": "Runtime",
+    "bulk_field_model": "Model",
+    "bulk_field_thinking": "Thinking",
+    "bulk_confirm_title": "Apply to all agents?",
+    "bulk_confirm_description": "{{field}} will be set to {{value}} for {{count}} agents, replacing each agent's current setting.",
+    "bulk_confirm_cancel": "Cancel",
+    "bulk_confirm_action": "Apply to all"
   },
   "detail": {
     "assign_work": "Assign work",
@@ -136,7 +145,9 @@
     "thinking_updated": "Thinking updated",
     "thinking_update_failed": "Failed to update thinking",
     "squad_runtime_failed": "Failed to change runtime",
-    "squad_runtime_skipped": "{{updated}} agents moved, {{skipped}} skipped: {{reason}}"
+    "squad_runtime_skipped": "{{updated}} agents moved, {{skipped}} skipped: {{reason}}",
+    "bulk_applied": "{{field}} applied to {{count}} agents",
+    "bulk_partial": "{{failed}} of {{total}} agents could not be updated"
   },
   "profile_card": {
     "unavailable": "Squad unavailable",
