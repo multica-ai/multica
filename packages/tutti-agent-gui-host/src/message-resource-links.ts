@@ -69,6 +69,8 @@ function proseLinks(value: string): MarkdownNode[] {
       if (label.split(close).length <= label.split(open).length) break;
       label = label.slice(0, -1);
     }
+    // A lone "/word" in prose is a slash command far more often than a root-level path.
+    if (/^\/[\p{L}\p{N}_-]+$/u.test(label)) continue;
     const href = previewResourceHref(label);
     if (!href) continue;
     if (start > end) nodes.push({ type: "text", value: value.slice(end, start) });

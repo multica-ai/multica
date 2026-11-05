@@ -43,3 +43,10 @@ it("links prose and standalone inline paths, preserves punctuation, and leaves c
   expect(nodes.filter((node) => node.type === "text").map((node) => node.value).join("")).toBe("确认：。 源码（）。 , javascript:/project/no.html");
   expect(nodes).toContainEqual(command); expect(nodes).toContainEqual(image); expect(tree.children!.at(-1)).toBe(code);
 });
+
+it("leaves bare slash commands as text while linking rooted paths", () => {
+  const paragraph = { type: "paragraph", children: [{ type: "text", value: "Please run /login, then open /etc/hosts or /note.txt." }] };
+  remarkMessageResourceLinks()({ type: "root", children: [paragraph] });
+  expect(paragraph.children.filter((node) => node.type === "link").map((node) => (node as { url?: string }).url)).toEqual(["/etc/hosts", "/note.txt"]);
+  expect(previewResourceHref("/login")).toBe("/login");
+});
