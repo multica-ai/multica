@@ -455,4 +455,67 @@ describe("autopilot run log URL", () => {
     },
   );
 
+  it.each([403, 404, 503])(
+    "hides invalidated terminal cache while reopening and retrying (%i)",
+    async (status) => {
+      const write: TaskMessagePayload = {
+        task_id: taskA,
+        issue_id: "",
+        seq: 2,
+        type: "tool_use",
+        tool: "Write",
+        input: {
+          file_path: "synthetic-denied-cache.txt",
+          content: "Synthetic cached file content",
+        },
+      };
+      getMessages = () => response([message(), write]);
+      mount();
+      const key = autopilotKeys.transcript("ws", "ap", "old-run", taskA);
+      client.setQueryDefaults(key, { gcTime: Infinity, staleTime: Infinity });
+      await screen.findByText("2 steps");
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: autopilotKeys.all("ws") });
+      });
+      let release!: (r: Response) => void;
+      getMessages = () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        });
+      act(() => navigate.push("/ws/autopilots/ap?run=old-run"));
+      await waitFor(() => expect(release).toBeDefined());
+      expect(client.getQueryState(key)).toMatchObject({
+        status: "success",
+        fetchStatus: "fetching",
+        isInvalidated: true,
+      });
+      expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
+      expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+      expect(screen.queryByText("1 file")).toBeNull();
+      expect(client.getQueryData(key)).toEqual([message(), write]);
+      await act(async () => release(response({ error: "private transcript detail" }, status)));
+      await screen.findByText(status === 503 ? "Could not load execution log." : "Execution log unavailable");
+      expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic cached file content");
+      expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+      expect(client.getQueryData(key)).toEqual([message(), write]);
+      if (status === 503) {
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        await waitFor(() => expect(client.getQueryState(key)?.fetchStatus).toBe("fetching"));
+        expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
+        expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+        await act(async () => release(response([message(), write])));
+        await screen.findByText("2 steps");
+        expect(screen.getByTitle("synthetic-denied-cache.txt")).toBeInTheDocument();
+        const reads = calls.filter((path) => path.endsWith("/messages")).length;
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        act(() => navigate.push("/ws/autopilots/ap?run=old-run"));
+        await screen.findByText("2 steps");
+        expect(calls.filter((path) => path.endsWith("/messages"))).toHaveLength(reads);
+      }
+    },
+  );
+
 });

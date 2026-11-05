@@ -157,7 +157,13 @@ function RunTranscript({
     ),
     enabled: !startedLive,
   });
-  const items = useMemo(() => buildTimeline(query.data ?? []), [query.data]);
+  // Invalidated success data stays cached while the current read is pending.
+  // Every dialog surface must use only the confirmed terminal transcript.
+  const messages =
+    query.isSuccess && query.fetchStatus === "idle"
+      ? query.data
+      : undefined;
+  const items = useMemo(() => buildTimeline(messages ?? []), [messages]);
   const task: AgentTask = {
     id: run.task_id!,
     agent_id: agentId,
