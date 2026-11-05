@@ -7,7 +7,8 @@
 /** The department key for squads that sit on no floor. */
 export const UNSEATED_DEPARTMENT = "unseated";
 
-export type CompanyView = "overview" | "plan";
+/** The floor plan is the default view; the org chart is opened with `view=overview`. */
+export type CompanyView = "plan" | "overview";
 
 export interface CompanySelection {
   view: CompanyView;
@@ -19,7 +20,7 @@ export interface CompanySelection {
 /** Reads the selection from the page's query string; unknown values fall back to the top level. */
 export function readCompanySelection(params: { get(name: string): string | null }): CompanySelection {
   return {
-    view: params.get("view") === "plan" ? "plan" : "overview",
+    view: params.get("view") === "overview" ? "overview" : "plan",
     department: params.get("dept") || null,
     squad: params.get("squad") || null,
     agent: params.get("agent") || null,
@@ -29,7 +30,7 @@ export function readCompanySelection(params: { get(name: string): string | null 
 /** The query string for a selection. The default view and empty levels are left out. */
 export function companySelectionQuery(selection: CompanySelection): string {
   const params = new URLSearchParams();
-  if (selection.view === "plan") params.set("view", "plan");
+  if (selection.view === "overview") params.set("view", "overview");
   if (selection.department) params.set("dept", selection.department);
   if (selection.squad) params.set("squad", selection.squad);
   if (selection.agent) params.set("agent", selection.agent);

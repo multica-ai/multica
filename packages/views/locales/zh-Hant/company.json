@@ -1,6 +1,6 @@
 {
   "title": "公司",
-  "tab_overview": "總覽",
+  "tab_org_chart": "組織架構",
   "tab_plan": "平面圖",
   "summary_departments_other": "{{count}} 個部門",
   "summary_squads_other": "{{count}} 個小隊",

@@ -1,6 +1,6 @@
 {
   "title": "会社",
-  "tab_overview": "概要",
+  "tab_org_chart": "組織図",
   "tab_plan": "フロアプラン",
   "summary_departments_other": "{{count}} 部門",
   "summary_squads_other": "{{count}} スクワッド",

@@ -15,8 +15,8 @@ import {
 import { CompanyOverview } from "./company-overview";
 
 /**
- * The company's one page: the overview to drill through the departments,
- * squads and agents, and the floor plan of the same company.
+ * The company's one page: the floor plan by default, and the org chart to drill
+ * through the departments, squads and agents of the same company.
  */
 export function CompanyPage() {
   const { t } = useT("company");
@@ -39,12 +39,12 @@ export function CompanyPage() {
             className="ml-auto"
           >
             <TabsList>
-              <TabsTrigger value="overview">{t(($) => $.tab_overview)}</TabsTrigger>
               <TabsTrigger value="plan">{t(($) => $.tab_plan)}</TabsTrigger>
+              <TabsTrigger value="overview">{t(($) => $.tab_org_chart)}</TabsTrigger>
             </TabsList>
           </Tabs>
         </PageHeader>
-        {selection.view === "plan" ? <CompanyFloorPlan /> : <CompanyOverview selection={selection} />}
+        {selection.view === "overview" ? <CompanyOverview selection={selection} /> : <CompanyFloorPlan />}
       </div>
     </IssuePeekHost>
   );

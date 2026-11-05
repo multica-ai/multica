@@ -1,6 +1,6 @@
 {
   "title": "Company",
-  "tab_overview": "Overview",
+  "tab_org_chart": "Org chart",
   "tab_plan": "Floor plan",
   "summary_departments_one": "{{count}} department",
   "summary_departments_other": "{{count}} departments",

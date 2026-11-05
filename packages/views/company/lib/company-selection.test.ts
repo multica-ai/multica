@@ -7,32 +7,32 @@ import {
   type CompanySelection,
 } from "./company-selection";
 
-const none: CompanySelection = { view: "overview", department: null, squad: null, agent: null };
+const none: CompanySelection = { view: "plan", department: null, squad: null, agent: null };
 
 describe("readCompanySelection", () => {
   it("reads every level from the query string", () => {
-    const params = new URLSearchParams("view=plan&dept=f-1&squad=s-1&agent=a-1");
+    const params = new URLSearchParams("view=overview&dept=f-1&squad=s-1&agent=a-1");
     expect(readCompanySelection(params)).toEqual({
-      view: "plan",
+      view: "overview",
       department: "f-1",
       squad: "s-1",
       agent: "a-1",
     });
   });
 
-  it("falls back to the top level for an empty or unknown view", () => {
+  it("opens the floor plan for an empty or unknown view", () => {
     expect(readCompanySelection(new URLSearchParams("view=company"))).toEqual(none);
     expect(readCompanySelection(new URLSearchParams("dept="))).toEqual(none);
   });
 });
 
 describe("companySelectionQuery", () => {
-  it("writes nothing for the top level", () => {
+  it("writes nothing for the default floor plan", () => {
     expect(companySelectionQuery(none)).toBe("");
   });
 
   it("round-trips a selection", () => {
-    const selection: CompanySelection = { view: "plan", department: "unseated", squad: "s-1", agent: "a-2" };
+    const selection: CompanySelection = { view: "overview", department: "unseated", squad: "s-1", agent: "a-2" };
     const query = companySelectionQuery(selection);
     expect(readCompanySelection(new URLSearchParams(query.slice(1)))).toEqual(selection);
   });

@@ -1,6 +1,6 @@
 {
   "title": "Entreprise",
-  "tab_overview": "Vue d'ensemble",
+  "tab_org_chart": "Organigramme",
   "tab_plan": "Plan",
   "summary_departments_one": "{{count}} département",
   "summary_departments_other": "{{count}} départements",

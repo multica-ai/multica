@@ -1,6 +1,6 @@
 {
   "title": "회사",
-  "tab_overview": "개요",
+  "tab_org_chart": "조직도",
   "tab_plan": "평면도",
   "summary_departments_other": "부서 {{count}}개",
   "summary_squads_other": "스쿼드 {{count}}개",
