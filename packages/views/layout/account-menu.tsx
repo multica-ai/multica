@@ -79,7 +79,7 @@ export function AccountMenu() {
   const logout = useLogout();
   const { theme, setTheme } = useTheme();
   const language = useLanguageSwitch();
-  const themeValue = (theme ?? "system") as (typeof THEMES)[number]["value"];
+  const themeValue = (theme ?? "blue-white") as (typeof THEMES)[number]["value"];
   const name = user?.name ?? "";
   const avatar = (size: "md" | "lg") => (
     <ActorAvatar
