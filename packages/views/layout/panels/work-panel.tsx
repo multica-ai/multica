@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
+import { sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
-import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useSidebarTreeStore, type SidebarProjectSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
@@ -24,6 +24,17 @@ import { ViewsSection } from "./views-section";
 const EMPTY_PROJECTS: Project[] = [];
 /** The Projects section's key in the kept-rows store, apart from every sidebar source. */
 const PROJECTS_LIST = "projects";
+
+/** The section's own order, over every project the filter would leave out. */
+const SEARCH_ALL_SETTINGS = (settings: SidebarProjectSettings): SidebarProjectSettings => ({
+  ...settings,
+  statuses: ["planned", "in_progress", "paused", "completed", "cancelled"],
+  onlyMine: false,
+});
+
+function matchesQuery(title: string, query: string) {
+  return title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
 
 /**
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
@@ -101,28 +112,54 @@ export function WorkPanel() {
     const segment = routeSegment(path, p.issues());
     setClickedIssue(segment ? { segment, fromPins: !!link.closest("[data-pinned-section]") } : null);
   };
-  // A lit pin already marks the issue; opening its project would only push
-  // the rest of the panel down.
+  // The open issue's project is listed (even past the filter) but never
+  // opened for it: expanding every visited project pushed the rest of the
+  // section down. A lit pin already marks the issue.
   const revealProjectId =
     issueSegment && !pins.isActivePinnedRoute ? (currentIssue?.project_id ?? null) : null;
 
-  const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
-  useEffect(() => {
-    if (revealProjectId) setExpanded(projectSidebarSource(revealProjectId), true);
-  }, [revealProjectId, setExpanded]);
-
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
+  const [projectQuery, setProjectQuery] = useState("");
+  const [searchAllProjects, setSearchAllProjects] = useState(false);
+  const searching = projectQuery.trim() !== "";
   const filteredProjects = useMemo(
-    () => sidebarProjects(projects, projectSettings, projectOrder, userId),
-    [projects, projectSettings, projectOrder, userId],
+    () =>
+      sidebarProjects(
+        projects,
+        searching && searchAllProjects ? SEARCH_ALL_SETTINGS(projectSettings) : projectSettings,
+        projectOrder,
+        userId,
+      ),
+    [projects, projectSettings, projectOrder, userId, searching, searchAllProjects],
   );
   const openProject = projects.find((project) => isPathWithin(pathname, p.projectDetail(project.id)));
   const keptProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
-  const shownProjects = useMemo(() => {
+  const listedProjects = useMemo(() => {
     const revealed = projects.find((project) => project.id === revealProjectId);
     return revealed && !keptProjects.includes(revealed) ? [...keptProjects, revealed] : [...keptProjects];
   }, [projects, keptProjects, revealProjectId]);
+  const shownProjects = useMemo(
+    () => (searching ? listedProjects.filter((project) => matchesQuery(project.title, projectQuery)) : listedProjects),
+    [listedProjects, searching, projectQuery],
+  );
+  // Matches the projects filter leaves out, offered while searching.
+  const hiddenMatches = useMemo(() => {
+    if (!searching || searchAllProjects) return 0;
+    const shown = new Set(shownProjects.map((project) => project.id));
+    return projects.filter((project) => !shown.has(project.id) && matchesQuery(project.title, projectQuery)).length;
+  }, [projects, shownProjects, searching, searchAllProjects, projectQuery]);
+
+  const projectsCollapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const issueLitInTree = treeIssueId !== null;
+  // The open issue's project row takes a faint mark when the tree does not
+  // list the issue itself; while the row shows, "All issues" stays unlit.
+  const hintedProjectId =
+    revealProjectId &&
+    !issueLitInTree &&
+    !projectsCollapsed &&
+    shownProjects.some((project) => project.id === revealProjectId)
+      ? revealProjectId
+      : null;
   const plainRowsLit = !pins.isActivePinnedRoute;
 
   return (
@@ -137,7 +174,7 @@ export function WorkPanel() {
               wsId={wsId}
               pathname={pathname}
               plainRowsLit={plainRowsLit}
-              issueLitInTree={issueLitInTree}
+              issueLitInTree={issueLitInTree || hintedProjectId !== null}
               activeIssueId={plainRowsLit ? currentIssueId : null}
             />
           )}
@@ -157,6 +194,17 @@ export function WorkPanel() {
               totalProjects={projects.length}
               plainRowsLit={plainRowsLit}
               activeIssueId={plainRowsLit ? currentIssueId : null}
+              hintedProjectId={hintedProjectId}
+              search={{
+                query: projectQuery,
+                onQueryChange: (query) => {
+                  setProjectQuery(query);
+                  if (!query.trim()) setSearchAllProjects(false);
+                },
+                hiddenMatches,
+                searchAll: searchAllProjects,
+                onSearchAllChange: setSearchAllProjects,
+              }}
             />
           )}
         </PanelBody>

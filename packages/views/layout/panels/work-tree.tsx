@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Folder, Plus } from "@multica/ui/icons";
+import { ListChevronsDownUp, Folder, Plus, Search, X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -91,16 +91,32 @@ export function useIssueIdInTree(wsId: string, ref: string | null): string | nul
   });
 }
 
+/** Filtering the section by name; the owner keeps the query. */
+export interface ProjectsSearch {
+  query: string;
+  onQueryChange: (query: string) => void;
+  /** Projects matching the query that the section's filter leaves out. */
+  hiddenMatches: number;
+  /** Whether the query also covers the projects the filter leaves out. */
+  searchAll: boolean;
+  onSearchAllChange: (searchAll: boolean) => void;
+}
+
 interface ProjectsSectionProps {
   wsId: string;
   userId: string | undefined;
   pathname: string;
-  /** Already filtered and ordered by the section's settings. */
+  /** Already filtered, searched and ordered by the section's settings. */
   projects: Project[];
   totalProjects: number;
   plainRowsLit: boolean;
   activeIssueId: string | null;
+  /** The project holding the open issue its row does not list. */
+  hintedProjectId?: string | null;
+  search?: ProjectsSearch;
 }
+
+const PROJECT_PREFIX = projectSidebarSource("");
 
 export function ProjectsSection({
   wsId,
@@ -110,18 +126,28 @@ export function ProjectsSection({
   totalProjects,
   plainRowsLit,
   activeIssueId,
+  hintedProjectId = null,
+  search,
 }: ProjectsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const collapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setProjectsCollapsed);
+  const anyExpanded = useSidebarTreeStore((s) => s.expanded.some((key) => key.startsWith(PROJECT_PREFIX)));
+  const collapseAll = useSidebarTreeStore((s) => s.collapseAll);
   const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
   const updatePrefs = useUpdateSidebarProjectPrefs(wsId);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searching = !!search && search.query.trim() !== "";
+  const closeSearch = () => {
+    search?.onQueryChange("");
+    setSearchOpen(false);
+  };
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
-      if (!over || active.id === over.id) return;
+      if (searching || !over || active.id === over.id) return;
       const ids = projects.map((project) => project.id);
       const from = ids.indexOf(String(active.id));
       const to = ids.indexOf(String(over.id));
@@ -133,7 +159,7 @@ export function ProjectsSection({
         projectSettings: { ordering: "manual" },
       });
     },
-    [projects, projectOrder, updatePrefs],
+    [projects, projectOrder, updatePrefs, searching],
   );
 
   return (
@@ -143,7 +169,32 @@ export function ProjectsSection({
       onCollapsedChange={setCollapsed}
       action={
         <>
+          {anyExpanded && (
+            <IconButton
+              label={t(($) => $.panels.work.collapse_projects)}
+              size="icon-xs"
+              className="text-muted-foreground opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              onClick={() => collapseAll(PROJECT_PREFIX)}
+            >
+              <ListChevronsDownUp />
+            </IconButton>
+          )}
           <ProjectsSectionSettings wsId={wsId} className="opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(pointer:coarse)]:opacity-100" />
+          {search && totalProjects > 0 && (
+            <IconButton
+              label={t(($) => $.panels.work.search_projects)}
+              size="icon-xs"
+              aria-expanded={searchOpen && !collapsed}
+              className={cn("text-muted-foreground", searchOpen && !collapsed && "bg-surface-selected text-foreground")}
+              onClick={() => {
+                if (searchOpen) return closeSearch();
+                setCollapsed(false);
+                setSearchOpen(true);
+              }}
+            >
+              <Search />
+            </IconButton>
+          )}
           <IconButton
             label={t(($) => $.panels.work.new_project)}
             size="icon-xs"
@@ -155,6 +206,7 @@ export function ProjectsSection({
         </>
       }
     >
+      {search && searchOpen && <ProjectSearchField search={search} onClose={closeSearch} />}
       <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
         <SortableContext items={projects.map((project) => project.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
@@ -165,14 +217,20 @@ export function ProjectsSection({
                 userId={userId}
                 project={project}
                 active={plainRowsLit && isPathWithin(pathname, p.projectDetail(project.id))}
+                hinted={plainRowsLit && project.id === hintedProjectId}
                 showCount={projectSettings.showCount}
                 issueSettings={issueSettings}
                 activeIssueId={activeIssueId}
+                // A drop in a searched list would move projects the search hides.
+                dragDisabled={searching}
               />
             ))}
           </PanelList>
         </SortableContext>
       </DndContext>
+      {search && searching && (
+        <ProjectSearchStatus search={search} empty={projects.length === 0} />
+      )}
       <PanelList className="mt-px">
         {totalProjects === 0 ? (
           <li>
@@ -205,22 +263,84 @@ export function ProjectsSection({
   );
 }
 
+function ProjectSearchField({ search, onClose }: { search: ProjectsSearch; onClose: () => void }) {
+  const { t } = useT("layout");
+  return (
+    <div className="relative mx-1 mb-1 flex h-7 items-center rounded-md bg-surface-hover pl-2 pr-1 focus-within:outline-2 focus-within:outline-ring">
+      <Search aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <input
+        autoFocus
+        type="search"
+        value={search.query}
+        aria-label={t(($) => $.panels.work.search_projects)}
+        placeholder={t(($) => $.panels.work.search_projects_placeholder)}
+        onChange={(event) => search.onQueryChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent px-1.5 text-caption text-foreground outline-none placeholder:text-faint-foreground [&::-webkit-search-cancel-button]:hidden"
+      />
+      {search.query && (
+        <IconButton
+          label={t(($) => $.panels.work.clear_search)}
+          size="icon-xs"
+          className="text-muted-foreground"
+          onClick={() => search.onQueryChange("")}
+        >
+          <X />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+
+/** Under a searched list: what it found, and the projects the filter keeps out. */
+function ProjectSearchStatus({ search, empty }: { search: ProjectsSearch; empty: boolean }) {
+  const { t } = useT("layout");
+  const toggle = search.searchAll
+    ? t(($) => $.panels.work.search_shown_only)
+    : search.hiddenMatches > 0
+      ? t(($) => $.panels.work.search_include_hidden, { count: search.hiddenMatches })
+      : null;
+  return (
+    <div className="space-y-0.5 px-3 py-1 text-caption text-faint-foreground">
+      {empty && <p>{t(($) => $.panels.work.search_no_projects)}</p>}
+      {toggle && (
+        <button
+          type="button"
+          className="rounded-sm text-left text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={() => search.onSearchAllChange(!search.searchAll)}
+        >
+          {toggle}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ProjectTreeItem({
   wsId,
   userId,
   project,
   active,
+  hinted,
   showCount,
   issueSettings,
   activeIssueId,
+  dragDisabled,
 }: {
   wsId: string;
   userId: string | undefined;
   project: Project;
   active: boolean;
+  hinted: boolean;
   showCount: boolean;
   issueSettings: SidebarIssueSettings;
   activeIssueId: string | null;
+  dragDisabled: boolean;
 }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -235,7 +355,10 @@ function ProjectTreeItem({
     : projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId);
   const prefetch = usePrefetch(wsId, source, params);
 
-  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.id,
+    disabled: dragDisabled,
+  });
   const wasDragged = useRef(false);
   useEffect(() => {
     if (isDragging) wasDragged.current = true;
@@ -258,6 +381,7 @@ function ProjectTreeItem({
         label={project.title}
         icon={<Folder className="size-4 shrink-0" />}
         active={active}
+        hint={hinted ? t(($) => $.panels.work.project_has_open_issue) : undefined}
         expanded={expanded}
         onExpandedChange={setExpanded}
         listId={listId}
