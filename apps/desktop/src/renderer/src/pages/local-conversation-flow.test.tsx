@@ -425,7 +425,8 @@ describe("restoring the selected conversation after a tab switch", () => {
     source.messages = [{ id: "image-message", role: "user", content: "Can you see it?\n\n[Image attachment: screen.png]", attachmentIds: ["image"], turnId: "turn", createdAt: source.createdAt }];
     render(page());
     const entry = await screen.findByRole("link", { name: /Original/ });
-    expect(entry).toHaveTextContent("Codex · Can you see it?");
+    expect(entry.querySelector(".text-caption")).toHaveTextContent(/^Can you see it\?$/);
+    expect(within(entry).getByRole("img", { name: "Codex" })).toBeVisible();
     expect(entry).not.toHaveTextContent("Image attachment");
     expect(source.messages[0]?.content).toContain("[Image attachment:");
   });
@@ -493,7 +494,8 @@ describe("local conversation execution indicators", () => {
     await updateQuestions(["answered", "answered"]);
     expect(await screen.findByRole("status", { name: "会话运行中：Original" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "等待你的回答：Original" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Original/ })).toHaveTextContent(`${provider === "codex" ? "Codex" : "Claude Code"} · Result`);
+    expect(row.querySelector(".text-caption")).toHaveTextContent(/^Result$/);
+    expect(within(row).getByRole("img", { name: provider === "codex" ? "Codex" : "Claude Code" })).toBeVisible();
     await updateQuestions(["answered", "pending"]);
     expect(screen.getByRole("button", { name: "等待你的回答：Original" })).toBeVisible();
     await updateQuestions(["answered", "cancelled"]);
@@ -510,7 +512,7 @@ describe("local conversation execution indicators", () => {
     render(page());
     expect(await screen.findByRole("status", { name: "后台运行中：Original（1）" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "等待你的回答：Original" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Original/ })).toHaveTextContent("Codex · Result");
+    expect(screen.getByRole("link", { name: /Original/ }).querySelector(".text-caption")).toHaveTextContent(/^Result$/);
   });
 
   it("distinguishes background monitoring from a foreground reply and can stop it from the session menu", async () => {
