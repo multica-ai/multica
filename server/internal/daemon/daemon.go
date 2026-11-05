@@ -8856,7 +8856,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		OpenclawMode:           openclawMode,
 		OpenclawModelOverride:  openclawModelOverride,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
-		QwenpawWorkspace:       env.QwenpawWorkspace,
+		// A squad leader delegates the build to its members; it must not run
+		// the build skill itself (see claudeBuildSkillDenyRules).
+		DenyBuildSkills:  taskIsSquadLeader(task),
+		QwenpawWorkspace: env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

@@ -36,6 +36,12 @@ describe("AGENT_INSTRUCTION_TEMPLATES", () => {
     expect(fullstack?.instructions).toContain("bmad-retrospective");
   });
 
+  it("runs bmad-build-auto only for the epic its sub-issue names, and re-runs it per iteration", () => {
+    expect(fullstack?.instructions).toContain("Epic builds:");
+    expect(fullstack?.instructions).toContain("run bmad-build-auto for that epic");
+    expect(fullstack?.instructions).toContain("re-run it until every story of the epic is done or it HALTs blocked");
+  });
+
   it("builds a missing backend to unblock a user path instead of stopping", () => {
     expect(fullstack?.instructions).toContain("Backend unreachable or missing");
     expect(fullstack?.instructions).toContain("added to unblock");
@@ -111,6 +117,12 @@ describe("specialist templates", () => {
 
     expect(devops).toContain("without a person's explicit approval");
     expect(devops).toContain("the same digest in every environment");
+  });
+
+  it("keeps the tech lead from running a build skill or implementing an epic", () => {
+    expect(instructionsOf("tech_lead")).toContain(
+      "Run a build skill such as bmad-build or bmad-build-auto, or implement an epic or story yourself",
+    );
   });
 
   it("makes the tech lead check evidence instead of trusting a report", () => {

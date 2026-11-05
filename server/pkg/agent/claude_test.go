@@ -1321,3 +1321,40 @@ func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
 		t.Fatalf("unrelated custom arg was dropped: %v", args)
 	}
 }
+
+func TestBuildClaudeArgsDeniesBuildSkillsForSquadLeader(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{DenyBuildSkills: true}, slog.Default())
+	idx := -1
+	for i, a := range args {
+		if a == "--disallowedTools" {
+			idx = i
+		}
+	}
+	if idx < 0 || idx+1 >= len(args) {
+		t.Fatalf("missing --disallowedTools: %v", args)
+	}
+	got := args[idx+1]
+	for _, want := range []string{
+		"AskUserQuestion",
+		"Skill(bmad-build)",
+		"Skill(bmad-build-auto)",
+		"Skill(bmad-method:bmad-build-auto)",
+	} {
+		if !strings.Contains(","+got+",", ","+want+",") {
+			t.Fatalf("disallowedTools %q is missing %q", got, want)
+		}
+	}
+}
+
+func TestBuildClaudeArgsKeepsBuildSkillsForMembers(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	for i, a := range args {
+		if a == "--disallowedTools" && args[i+1] != "AskUserQuestion" {
+			t.Fatalf("member run denies %q, want only AskUserQuestion", args[i+1])
+		}
+	}
+}

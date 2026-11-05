@@ -111,6 +111,21 @@ describe("squad instructions", () => {
     }
   });
 
+  it("keep the leader from building, and route a build skill request to the developer", () => {
+    for (const t of SQUAD_TEMPLATES) {
+      expect(t.instructions, t.id).toContain("You never build");
+      expect(t.instructions, t.id).toContain("do not run it yourself");
+      expect(t.instructions, t.id).toContain('"/bmad-build-auto Implement epic 01"');
+      expect(t.instructions, t.id).toContain('building an epic or story goes to "SDLC Developer"');
+    }
+  });
+
+  it("say that the squad's sub-issue rule overrides the protocol's mention rule", () => {
+    for (const t of SQUAD_TEMPLATES) {
+      expect(t.instructions, t.id).toContain("They override the squad protocol's mention rule");
+    }
+  });
+
   it("never let the squad deploy to production or delete on its own", () => {
     for (const t of SQUAD_TEMPLATES) {
       expect(t.instructions, t.id).toContain(
@@ -156,6 +171,8 @@ describe("squad instructions", () => {
   it("only name BMAD skills that exist", () => {
     const shipped = new Set([
       "bmad-architecture",
+      "bmad-build",
+      "bmad-build-auto",
       "bmad-correct-course",
       "bmad-create-epics-and-stories",
       "bmad-prd",

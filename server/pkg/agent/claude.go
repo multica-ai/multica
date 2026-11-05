@@ -1124,20 +1124,34 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--effort": blockedWithValue,
 }
 
+// claudeBuildSkillDenyRules are the permission rules that stop a squad leader
+// from running a build skill itself. The plugin's skills are invoked under
+// their namespaced name as well as the bare one, so both forms are denied.
+var claudeBuildSkillDenyRules = []string{
+	"Skill(bmad-build)",
+	"Skill(bmad-build-auto)",
+	"Skill(bmad-method:bmad-build)",
+	"Skill(bmad-method:bmad-build-auto)",
+}
+
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+	// AskUserQuestion is Claude Code's built-in interactive question tool.
+	// The daemon runs Claude in non-interactive stream-json mode and has
+	// no UI for the prompt to render in, so a call returns an empty
+	// answer and the agent ends up "inferring" silently — the user
+	// never sees the question (see GitHub #2588). User-facing
+	// clarification belongs in an issue comment instead.
+	disallowed := []string{"AskUserQuestion"}
+	if opts.DenyBuildSkills {
+		disallowed = append(disallowed, claudeBuildSkillDenyRules...)
+	}
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
-		// AskUserQuestion is Claude Code's built-in interactive question tool.
-		// The daemon runs Claude in non-interactive stream-json mode and has
-		// no UI for the prompt to render in, so a call returns an empty
-		// answer and the agent ends up "inferring" silently — the user
-		// never sees the question (see GitHub #2588). User-facing
-		// clarification belongs in an issue comment instead.
-		"--disallowedTools", "AskUserQuestion",
+		"--disallowedTools", strings.Join(disallowed, ","),
 	}
 	if hasManagedMcpConfig(opts.McpConfig) {
 		// A saved agent-level config is authoritative, including an explicitly

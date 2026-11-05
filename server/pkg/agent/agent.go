@@ -139,6 +139,10 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// DenyBuildSkills makes Claude Code refuse the build skills (bmad-build,
+	// bmad-build-auto). Set for squad leader runs, which delegate the build to
+	// members instead of building themselves. Other providers ignore it.
+	DenyBuildSkills bool
 	// CursorHookCommand is the argv of the multica hook relay (the daemon's own
 	// binary followed by CursorHookHelperArg). The cursor backend needs it, with
 	// EnableTaskSupplement, to accept additional messages; other providers
