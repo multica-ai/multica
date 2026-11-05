@@ -25,7 +25,7 @@ export function InboxProjectLabel({ item }: { item: InboxItem }) {
     <span
       data-inbox-project
       title={project.title}
-      className="inline-flex max-w-32 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 text-micro font-medium text-foreground/80"
+      className="inline-flex max-w-32 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 text-micro font-medium text-muted-foreground"
     >
       {project.icon && <span aria-hidden>{project.icon}</span>}
       <span className="truncate">{project.title}</span>
