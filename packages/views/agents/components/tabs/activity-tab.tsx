@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { forwardRef, memo, useCallback, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleHelp,
@@ -11,7 +11,7 @@ import {
   X,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type ListProps } from "react-virtuoso";
 import {
   Tooltip,
   TooltipContent,
@@ -54,7 +54,20 @@ const RECENT_SCROLL_SEEK = {
   enter: (velocity: number) => Math.abs(velocity) > 2000,
   exit: (velocity: number) => Math.abs(velocity) < 300,
 };
-const RECENT_LIST_COMPONENTS = { ScrollSeekPlaceholder: RecentWorkScrollPlaceholder };
+const RecentWorkList = forwardRef<HTMLDivElement, ListProps>(function RecentWorkList(
+  { children, style, "data-testid": testId },
+  ref,
+) {
+  return (
+    <div ref={ref} style={style} data-testid={testId} className="divide-y">
+      {children}
+    </div>
+  );
+});
+const RECENT_LIST_COMPONENTS = {
+  List: RecentWorkList,
+  ScrollSeekPlaceholder: RecentWorkScrollPlaceholder,
+};
 const recentTaskKey = (_index: number, task: AgentTask) => task.id;
 
 // Placeholder rows shown while the lazily-loaded per-agent task list is
@@ -450,10 +463,10 @@ function RecentWorkSection({
 
 function RecentWorkScrollPlaceholder({ height }: { height: number }) {
   return (
-    <div style={{ height }} aria-hidden="true" className="flex items-center gap-3 border-b px-3">
+    <div style={{ height }} aria-hidden="true" className="flex items-center gap-3 px-3">
       <div className="size-4 shrink-0 rounded-full bg-muted" />
-      <div className="h-3 w-3/5 rounded bg-muted" />
-      <div className="ml-auto h-3 w-24 rounded bg-muted" />
+      <div className="h-3 w-3/5 rounded-xs bg-muted" />
+      <div className="ml-auto h-3 w-24 rounded-xs bg-muted" />
     </div>
   );
 }
@@ -743,7 +756,7 @@ const RecentTaskRow = memo(function RecentTaskRow({
   }
 
   return (
-    <div className="group flex min-h-10 items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-accent/40">
+    <div className="group flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-accent/40">
       <Icon className={cn("size-4 shrink-0", cfg.color)} aria-hidden="true" />
       {issue ? (
         <span className="shrink-0 font-mono text-caption text-muted-foreground">
