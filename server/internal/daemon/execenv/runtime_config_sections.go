@@ -726,18 +726,11 @@ func subIssueContractsSkill(skills []SkillContextForEnv) (string, bool) {
 	return "", false
 }
 
-// builtinSlug finds a built-in by name.
-//
-// Stated assumption: `multica-` is the platform namespace, and no workspace
-// skill in the batch shares a built-in's name. If one ever did, it would be
-// listed first, take the bare slug, and this pointer would name it instead of
-// the platform skill. That is accepted rather than handled — it needs a user to
-// author a skill that sanitizes to exactly `multica-platform`, and the fix when
-// it happens is to reject the prefix at skill create/import, not to make every
-// pointer defensive.
+// builtinSlug finds a built-in by its original identity and returns its
+// allocated directory name, which may differ after collision resolution.
 func builtinSlug(skills []SkillContextForEnv, name string) (string, bool) {
 	for _, skill := range skills {
-		if skill.Name == name {
+		if skill.BuiltinName == name {
 			return skill.Name, true
 		}
 	}
@@ -794,11 +787,6 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 			fmt.Fprintf(b, " — %s", desc)
 		}
 		fmt.Fprintf(b, " (file: `%s`)\n", skillPath(skill.Name))
-		// Prepared names may have a collision suffix; Content retains the
-		// original frontmatter identifying the built-in platform skill.
-		if platformSlug == "" && frontmatterNameIs(skill.Content, platformSkillName) {
-			platformSlug = skill.Name
-		}
 	}
 	b.WriteString("\n")
 	if platformSlug != "" {
