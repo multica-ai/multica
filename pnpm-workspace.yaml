@@ -14,6 +14,7 @@ catalog:
   '@testing-library/react': ^16.3.2
   '@testing-library/user-event': ^14.6.1
   '@types/node': ^25.0.10
+  '@types/ws': ^8.18.1
   '@types/react': ^19.2.0
   '@types/react-dom': ^19.2.0
   '@vitejs/plugin-react': ^6.0.1
@@ -41,6 +42,7 @@ catalog:
   typescript: ^5.9.3
   unicode-animations: ^1.0.3
   vitest: ^4.1.0
+  ws: 8.21.0
   yaml: ^2.6.0
   zod: ^4.3.6
   zustand: ^5.0.0

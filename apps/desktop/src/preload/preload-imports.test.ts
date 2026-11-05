@@ -5,7 +5,8 @@ import { expect, it } from "vitest";
 
 // The sandboxed preload can require only electron; electron-vite externalizes
 // every other package except the ones bundled in electron.vite.config.ts.
-const bundled = new Set(["electron", "@electron-toolkit/preload"]);
+// The verification virtual module is bundled in dev and resolved to undefined in builds.
+const bundled = new Set(["electron", "@electron-toolkit/preload", "#verification-dev/preload"]);
 
 function runtimeImports(file: string, seen = new Set<string>()): string[] {
   if (seen.has(file)) return [];

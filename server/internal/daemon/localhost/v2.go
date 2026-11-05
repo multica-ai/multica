@@ -259,6 +259,9 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		return
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if v.verificationRoute(w, r, c, scopeID, path) {
+		return
+	}
 	switch {
 	case path == "/preview/services" || strings.HasPrefix(path, "/preview/services/"):
 		if v.servicePreview == nil {

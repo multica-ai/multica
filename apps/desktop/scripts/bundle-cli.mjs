@@ -119,6 +119,8 @@ if (hasGo()) {
     "go",
     [
       "build",
+      "-tags",
+      process.argv.includes("--verification-dev") ? "verificationdev" : "",
       "-ldflags",
       ldflags,
       "-o",

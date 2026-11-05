@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/verificationenv"
 	"io"
 	"net/url"
 	"os"
@@ -67,7 +68,7 @@ type Store struct{ home string }
 func New(home string) Store { return Store{home: home} }
 func Default() (Store, error) {
 	home, err := os.UserHomeDir()
-	return New(home), err
+	return New(verificationenv.Home(home)), err
 }
 func ValidID(id string) bool  { return id == InstanceID }
 func Profile(_ string) string { return ProfileName }

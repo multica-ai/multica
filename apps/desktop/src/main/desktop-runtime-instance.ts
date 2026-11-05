@@ -1,3 +1,4 @@
+import { verificationDev } from "#verification-dev/main";
 import { app } from "electron";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ let registry: RuntimeInstanceRegistry | undefined;
 export function desktopRuntimeRegistry(): RuntimeInstanceRegistry {
   if (registry) return registry;
   const appPath = app.getAppPath();
-  registry = new RuntimeInstanceRegistry(homedir(), {
+  registry = new RuntimeInstanceRegistry((verificationDev?.runtimeHome ?? homedir()), {
     kind: app.isPackaged ? "packaged" : "development", appPath,
     cliPath: bundledCliPath(), electronPath: process.execPath,
     claudeEntryPath: app.isPackaged

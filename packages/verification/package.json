@@ -1,0 +1,43 @@
+{
+  "name": "@multica/verification",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js"
+    }
+  },
+  "scripts": {
+    "build:manual": "tsc -p tsconfig.build.json",
+    "check:types": "tsc --noEmit",
+    "check:lint": "eslint .",
+    "test:manual": "pnpm run build:manual && vitest run",
+    "test:integration": "pnpm run build:manual && vitest run --config vitest.integration.config.ts",
+    "mcp": "node dist/mcp/stdio.js",
+    "test:desktop": "pnpm run build:manual && MULTICA_RUN_DESKTOP_VERIFICATION=1 node dist/desktop.acceptance.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.27.1",
+    "playwright": "1.58.2",
+    "ws": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
+    "@multica/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/ws": "catalog:",
+    "eslint": "^9.28.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

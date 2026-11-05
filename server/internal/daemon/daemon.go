@@ -2176,6 +2176,9 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// preflight is never misreported as a started daemon. resolveAuth has
 	// already run, so a missing token still fails fast before we begin serving.
 	go d.serveHealth(ctx, healthLn, time.Now())
+	if handled, err := d.runVerification(ctx); handled {
+		return err
+	}
 
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering

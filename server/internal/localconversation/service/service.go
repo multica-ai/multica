@@ -157,6 +157,7 @@ type Service struct {
 // Open opens the store, closes turns a previous daemon left running, removes
 // unreferenced attachment files, and starts the write path.
 func Open(ctx context.Context, opts Options) (*Service, error) {
+	opts = verificationOptions(opts)
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -236,6 +237,7 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 
 // Close stops every runner, commits pending output and closes the store.
 func (s *Service) Close(ctx context.Context) error {
+	defer s.verificationClose()
 	s.mu.Lock()
 	if !s.closing {
 		close(s.closed)
@@ -582,6 +584,9 @@ func (s *Service) runner(ctx context.Context, conv sqlitedb.Conversation) (runne
 	}
 	if r != nil {
 		return r, nil
+	}
+	if candidate, handled, err := s.verificationRunner(ctx, conv); handled || err != nil {
+		return candidate, err
 	}
 	switch {
 	case conv.Provider == "codex" && s.opts.Codex != nil:

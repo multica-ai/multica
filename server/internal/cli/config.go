@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/verificationenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,7 +290,7 @@ func multicaConfigRoot() (root string, taskLocal bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	return home, false, nil
+	return verificationenv.Home(home), false, nil
 }
 
 func validateTaskLocalProfile(profile string) error {
