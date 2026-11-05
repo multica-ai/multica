@@ -148,6 +148,9 @@ func (h *Handler) claimChatSupplement(w http.ResponseWriter, r *http.Request, ta
 		writeError(w, http.StatusInternalServerError, "failed to claim additional message")
 		return
 	}
+	if session, loadErr := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); loadErr == nil {
+		h.publishChat(protocol.EventChatSupplement, uuidToString(session.WorkspaceID), "member", uuidToString(session.CreatorID), uuidToString(session.ID), map[string]string{"chat_session_id": uuidToString(session.ID)})
+	}
 	// The existing daemon transport calls the opaque receipt ID comment_id.
 	writeJSON(w, http.StatusOK, map[string]any{"comment_id": uuidToString(row.MessageID), "content": row.Content, "author_type": "member", "author_name": row.AuthorName})
 }
