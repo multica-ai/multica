@@ -101,6 +101,7 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+import { CopyParentFields } from "./copy-parent-fields";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
@@ -866,6 +867,7 @@ export function ManualCreatePanel({
     // project) that was never written through a picker, so a plain flip would
     // otherwise drop it.
     setShared({ projectId, priority, dueDate });
+    setManual({ assigneeType, assigneeId });
     const existingPrompt = draft.agent.prompt;
     if (!existingPrompt.trim()) {
       const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
@@ -957,13 +959,31 @@ export function ManualCreatePanel({
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-y-1 px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
                 <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="ml-auto flex min-w-0 items-center gap-1">
+                {parentIssue && (
+                  <CopyParentFields
+                    key={parentIssue.id}
+                    parent={parentIssue}
+                    properties={workspaceProperties}
+                    disabled={submitBusy}
+                    onCopy={(copy) => {
+                      if (copy.priority !== undefined) updatePriority(copy.priority);
+                      if (copy.label_ids !== undefined) updateLabelIds(copy.label_ids);
+                      if (copy.start_date !== undefined) updateStartDate(copy.start_date);
+                      if (copy.due_date !== undefined) updateDueDate(copy.due_date);
+                      if (copy.properties) {
+                        setPropertyValues((current) => ({ ...current, ...copy.properties }));
+                        setManual({ propertyValues: { ...useIssueDraftStore.getState().draft.manual.propertyValues, ...copy.properties } });
+                      }
+                    }}
+                  />
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={
