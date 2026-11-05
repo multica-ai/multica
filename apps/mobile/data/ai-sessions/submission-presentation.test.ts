@@ -2,7 +2,7 @@
 import {expect,it} from "vitest";
 import {localV2SnapshotSchema} from "@multica/core/local-conversation/v2";
 import {localSubmissionSchema} from "@multica/core/local-conversation/submission";
-import {submissionPresentation} from "./submission-presentation";
+import {submissionPresentation,submissionStopTarget} from "./submission-presentation";
 import type {MobileSubmission} from "./submission-outbox";
 const record:MobileSubmission={request:{requestId:"r",text:"hello",attachments:[],queued:false,createdAt:1},body:{},generation:"g",lifecycle:true,confirmed:false};
 const snapshot=localV2SnapshotSchema.parse({version:2,store_generation:"g",snapshot_seq:1,conversation:{conversation_id:"s",provider:"claude",title:"",summary_seq:1,status:"idle",pinned:false,archived:false,updated_at:"2026-11-05T00:00:00Z"},turns:[]});
@@ -21,4 +21,14 @@ it("retains queued retries beside an older failed formal turn and restores daemo
  expect(submissionPresentation([{...record,confirmed:true,authority}],failed).queued).toHaveLength(1);
  const other={...record,request:{...record.request,requestId:"other",queued:true},position:0};
  expect(submissionPresentation([{...record,request:{...record.request,queued:true},position:1},other],snapshot).queued.map((value)=>value.request.requestId)).toEqual(["other","r"]);
+});
+
+it("exposes a targeted stop during optimistic preparation without treating queued or legacy work as running",()=>{
+ expect(submissionStopTarget([record],snapshot,true)).toEqual({requestId:"r"});
+ expect(submissionStopTarget([record],snapshot,false)).toBeNull();
+ expect(submissionStopTarget([{...record,request:{...record.request,queued:true}}],snapshot,true)).toBeNull();
+ const started=localSubmissionSchema.parse({request_id:"r",revision:1,state:"starting",attempt:null});
+ expect(submissionStopTarget([],{...snapshot,submissions:[started]},true)).toEqual({requestId:"r"});
+ expect(submissionStopTarget([{...record,confirmed:true,authority:started}],snapshot,true)).toEqual({requestId:"r"});
+ expect(submissionStopTarget([],{...snapshot,turns:[{id:"observed",turn_index:0,request_id:"r",status:"running",started_at:"2026-11-05T00:00:00Z",messages:[],events:[]}]},true)).toEqual({turnId:"observed"});
 });

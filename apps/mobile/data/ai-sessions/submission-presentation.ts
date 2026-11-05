@@ -17,3 +17,12 @@ export function submissionPresentation(records:readonly MobileSubmission[],snaps
  queued.sort((a,b)=>(a.position??Number.MAX_SAFE_INTEGER)-(b.position??Number.MAX_SAFE_INTEGER));
  return {body,queued};
 }
+
+/** A stop names the observed execution; preparation is active before a formal turn appears. */
+export function submissionStopTarget(records:readonly MobileSubmission[],snapshot:LocalV2Snapshot|undefined,lifecycle:boolean):{requestId?:string;turnId?:string}|null{
+ const turn=snapshot?.turns.find((value)=>value.status==="running");if(turn)return {turnId:turn.id};
+ if(!lifecycle)return null;
+ const starting=snapshot?.submissions.find((value)=>value.state==="starting");if(starting)return {requestId:starting.request_id};
+ const pending=submissionPresentation(records,snapshot).body.find((record)=>(!record.confirmed||record.authority?.state==="starting")&&record.lifecycle&&record.generation===snapshot?.store_generation);
+ return pending?{requestId:pending.request.requestId}:null;
+}

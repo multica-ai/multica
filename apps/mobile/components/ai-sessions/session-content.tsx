@@ -1,5 +1,5 @@
 import { deliverSubmission } from "@/data/ai-sessions/submission-delivery";
-import { submissionPresentation } from "@/data/ai-sessions/submission-presentation";
+import { submissionPresentation,submissionStopTarget } from "@/data/ai-sessions/submission-presentation";
 import {
   submissionOutbox,
   useSubmissionOutbox,
@@ -80,6 +80,7 @@ import {
   historySchema,
   providersSchema,
   queueItemSchema,
+  queueSchema,
 } from "@/data/ai-sessions/schemas";
 import {
   groupTranscriptActivities,
@@ -245,8 +246,8 @@ export function AISessionContent({
     ? history.hasNextPage
     : snapshot?.has_older_turns;
   const [readingHistory, setReadingHistory] = useState(false);
-  const running =
-    snapshot?.turns.some((turn) => turn.status === "running") ?? false;
+  const stopTarget=submissionStopTarget(outbox,snapshot,client?.submissionLifecycle===true);
+  const running=stopTarget!==null;
   const submissionView = submissionPresentation(outbox, snapshot);
   const queuedCount = Math.max(
     snapshot?.queue.items.filter((item) => {
@@ -483,7 +484,8 @@ export function AISessionContent({
     if (!client || !connected || !running || busy) return;
     setBusy(true);
     try {
-      await client.command(session, { type: "interrupt" }, commandResultSchema);
+      if(client.submissionLifecycle)await client.command(session,{type:"queue_update",action:"stop",request_id:stopTarget?.requestId,turn_id:stopTarget?.turnId},queueSchema);
+      else await client.command(session, { type: "interrupt" }, commandResultSchema);
       await query.refetch();
     } catch {
       showError();
