@@ -76,7 +76,15 @@
     "status_unstable": "不穩定",
     "status_archived": "已歸檔",
     "issue_status_blocked": "已阻塞",
-    "active_issue_more": "還有 {{count}} 個"
+    "active_issue_more": "還有 {{count}} 個",
+    "squad_runtime_aria": "整個 squad 的執行環境",
+    "squad_runtime_placeholder": "設定執行環境",
+    "squad_runtime_mixed": "執行環境不一致",
+    "runtime_unavailable": "無法使用的執行環境",
+    "agent_runtime_unbound": "未設定執行環境",
+    "agent_runtime_aria": "{{name}} 的執行環境",
+    "agent_model_aria": "{{name}} 的模型",
+    "model_default": "執行環境預設"
   },
   "detail": {
     "assign_work": "指派工作",
@@ -111,7 +119,16 @@
     "leader_updated": "隊長已更新",
     "leader_update_failed": "更新隊長失敗",
     "archive_failed": "歸檔小隊失敗",
-    "instructions_saved": "指引已儲存"
+    "instructions_saved": "指引已儲存",
+    "runtime_updated": "執行環境已更新",
+    "runtime_update_failed": "更新執行環境失敗",
+    "squad_runtime_applied": "已將執行環境套用到 {{count}} 個 Agent",
+    "squad_runtime_unchanged": "所有 Agent 已在使用此執行環境",
+    "capabilities_save_failed": "儲存技能與外掛失敗",
+    "model_updated": "模型已更新",
+    "model_update_failed": "更新模型失敗",
+    "squad_runtime_failed": "更改執行環境失敗",
+    "squad_runtime_skipped": "已移動 {{updated}} 個 Agent，略過 {{skipped}} 個：{{reason}}"
   },
   "profile_card": {
     "unavailable": "小隊不可用",
@@ -131,5 +148,30 @@
     "mine": "我的小隊",
     "all": "全部小隊"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "capabilities": {
+    "section_title": "技能與外掛",
+    "skills_title": "技能",
+    "plugins_title": "外掛",
+    "add_skill_button": "新增技能",
+    "add_plugin_button": "新增外掛",
+    "skills_empty": "尚未套用技能。這裡新增的技能會用於每位成員的每個任務。",
+    "plugins_empty": "未設定必需外掛。這裡新增的外掛若缺少，負責人會在專案的執行環境上自動安裝。",
+    "remove_aria": "移除 {{name}}",
+    "add_skill_dialog_title": "為 squad 新增技能",
+    "add_skill_dialog_no_skills": "此工作區還沒有技能",
+    "add_skill_dialog_all_applied": "工作區中的技能已全部套用",
+    "add_plugin_dialog_title": "新增外掛",
+    "plugin_name_label": "外掛名稱",
+    "plugin_name_placeholder": "例如 bmad-method",
+    "plugin_duplicate": "此外掛已在必需列表中",
+    "plugin_hint_label": "安裝來源（選填）",
+    "plugin_hint_placeholder": "例如 npx bmad-method install",
+    "search_placeholder": "搜尋",
+    "no_match": "沒有符合的項目",
+    "select_all": "全選（{{count}}）",
+    "add_dialog_confirm": "新增已選 {{count}} 項",
+    "plugin_suggestions_empty": "在此 squad 的執行環境上找不到外掛。可在下方輸入名稱新增。",
+    "plugin_manual_add": "加入清單"
+  }
 }

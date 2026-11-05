@@ -240,6 +240,9 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadSkill,
+  SquadPlugin,
+  SetSquadRuntimeResponse,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -590,6 +593,12 @@ import {
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
+  EMPTY_SQUAD_SKILL_LIST,
+  EMPTY_SQUAD_PLUGIN_LIST,
+  EMPTY_SET_SQUAD_RUNTIME_RESPONSE,
+  SetSquadRuntimeResponseSchema,
+  SquadSkillListSchema,
+  SquadPluginListSchema,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
@@ -5127,6 +5136,53 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  async listSquadSkills(squadId: string): Promise<SquadSkill[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/skills`);
+    return parseWithFallback(raw, SquadSkillListSchema, EMPTY_SQUAD_SKILL_LIST, {
+      endpoint: "GET /api/squads/:id/skills",
+    }) as SquadSkill[];
+  }
+
+  async setSquadSkills(squadId: string, skillIds: string[]): Promise<SquadSkill[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/skills`, {
+      method: "PUT",
+      body: JSON.stringify({ skill_ids: skillIds }),
+    });
+    return parseWithFallback(raw, SquadSkillListSchema, EMPTY_SQUAD_SKILL_LIST, {
+      endpoint: "PUT /api/squads/:id/skills",
+    }) as SquadSkill[];
+  }
+
+  async listSquadPlugins(squadId: string): Promise<SquadPlugin[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/plugins`);
+    return parseWithFallback(raw, SquadPluginListSchema, EMPTY_SQUAD_PLUGIN_LIST, {
+      endpoint: "GET /api/squads/:id/plugins",
+    }) as SquadPlugin[];
+  }
+
+  // Points every live agent member at one runtime in one request. The
+  // response says which agents moved, which were already there, and which were
+  // skipped with a reason.
+  async setSquadRuntime(squadId: string, runtimeId: string): Promise<SetSquadRuntimeResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/runtime`, {
+      method: "PUT",
+      body: JSON.stringify({ runtime_id: runtimeId }),
+    });
+    return parseWithFallback(raw, SetSquadRuntimeResponseSchema, EMPTY_SET_SQUAD_RUNTIME_RESPONSE, {
+      endpoint: "PUT /api/squads/:id/runtime",
+    }) as SetSquadRuntimeResponse;
+  }
+
+  async setSquadPlugins(squadId: string, plugins: SquadPlugin[]): Promise<SquadPlugin[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/plugins`, {
+      method: "PUT",
+      body: JSON.stringify({ plugins }),
+    });
+    return parseWithFallback(raw, SquadPluginListSchema, EMPTY_SQUAD_PLUGIN_LIST, {
+      endpoint: "PUT /api/squads/:id/plugins",
+    }) as SquadPlugin[];
   }
 
   // The org map: floors, squads, leaders and open work (any member may read it).

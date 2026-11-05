@@ -76,7 +76,15 @@
     "status_unstable": "불안정",
     "status_archived": "보관됨",
     "issue_status_blocked": "막힘",
-    "active_issue_more": "외 {{count}}개"
+    "active_issue_more": "외 {{count}}개",
+    "squad_runtime_aria": "squad 전체 런타임",
+    "squad_runtime_placeholder": "런타임 설정",
+    "squad_runtime_mixed": "런타임 혼합",
+    "runtime_unavailable": "사용할 수 없는 런타임",
+    "agent_runtime_unbound": "런타임 없음",
+    "agent_runtime_aria": "{{name}}의 런타임",
+    "agent_model_aria": "{{name}}의 모델",
+    "model_default": "런타임 기본값"
   },
   "detail": {
     "assign_work": "작업 할당",
@@ -111,7 +119,16 @@
     "leader_updated": "리더를 업데이트했습니다",
     "leader_update_failed": "리더를 업데이트하지 못했습니다",
     "archive_failed": "스쿼드를 보관하지 못했습니다",
-    "instructions_saved": "지침을 저장했습니다"
+    "instructions_saved": "지침을 저장했습니다",
+    "runtime_updated": "런타임을 업데이트했습니다",
+    "runtime_update_failed": "런타임 업데이트에 실패했습니다",
+    "squad_runtime_applied": "에이전트 {{count}}개에 런타임을 적용했습니다",
+    "squad_runtime_unchanged": "모든 에이전트가 이미 이 런타임을 사용 중입니다",
+    "capabilities_save_failed": "스킬과 플러그인을 저장하지 못했습니다",
+    "model_updated": "모델을 업데이트했습니다",
+    "model_update_failed": "모델 업데이트에 실패했습니다",
+    "squad_runtime_failed": "런타임 변경에 실패했습니다",
+    "squad_runtime_skipped": "에이전트 {{updated}}개 이동, {{skipped}}개 건너뜀: {{reason}}"
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
@@ -131,5 +148,30 @@
     "mine": "내 스쿼드",
     "all": "전체 스쿼드"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "capabilities": {
+    "section_title": "스킬 및 플러그인",
+    "skills_title": "스킬",
+    "plugins_title": "플러그인",
+    "add_skill_button": "스킬 추가",
+    "add_plugin_button": "플러그인 추가",
+    "skills_empty": "적용된 스킬이 없습니다. 여기에 추가한 스킬은 모든 멤버가 사용합니다.",
+    "plugins_empty": "필요한 플러그인이 없습니다. 여기에 추가한 플러그인은 없을 때 리더가 프로젝트 런타임에 설치합니다.",
+    "remove_aria": "{{name}} 제거",
+    "add_skill_dialog_title": "squad에 스킬 추가",
+    "add_skill_dialog_no_skills": "이 워크스페이스에 아직 스킬이 없습니다",
+    "add_skill_dialog_all_applied": "워크스페이스의 모든 스킬이 이미 적용되었습니다",
+    "add_plugin_dialog_title": "플러그인 추가",
+    "plugin_name_label": "플러그인 이름",
+    "plugin_name_placeholder": "예: bmad-method",
+    "plugin_duplicate": "이 플러그인은 이미 필요하도록 설정되어 있습니다",
+    "plugin_hint_label": "설치 소스(선택)",
+    "plugin_hint_placeholder": "예: npx bmad-method install",
+    "search_placeholder": "검색",
+    "no_match": "일치하는 항목이 없습니다",
+    "select_all": "모두 선택 ({{count}})",
+    "add_dialog_confirm": "선택한 {{count}}개 추가",
+    "plugin_suggestions_empty": "이 squad의 런타임에서 플러그인을 찾지 못했습니다. 아래에 이름을 입력해 추가하세요.",
+    "plugin_manual_add": "목록에 추가"
+  }
 }

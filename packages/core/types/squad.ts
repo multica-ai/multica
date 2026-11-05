@@ -40,6 +40,22 @@ export interface SquadMember {
   created_at: string;
 }
 
+/** A workspace skill applied to a squad: every member runs with it on every task. */
+export interface SquadSkill {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/**
+ * A plugin the squad leader must have on the runtime of each project the squad
+ * works on. `install_hint` is an optional source or command for installing it.
+ */
+export interface SquadPlugin {
+  name: string;
+  install_hint: string;
+}
+
 export interface SquadActivityLog {
   id: string;
   squad_id: string;
@@ -128,4 +144,26 @@ export interface SquadMemberStatus {
 
 export interface SquadMemberStatusListResponse {
   members: SquadMemberStatus[];
+}
+
+export interface SetSquadSkillsRequest {
+  skill_ids: string[];
+}
+
+export interface SetSquadPluginsRequest {
+  plugins: SquadPlugin[];
+}
+
+/** Result of a squad-wide runtime change. Each agent lands in exactly one list. */
+export interface SquadRuntimeAgentResult {
+  agent_id: string;
+  agent_name: string;
+  reason: string;
+}
+
+export interface SetSquadRuntimeResponse {
+  runtime_id: string;
+  updated: SquadRuntimeAgentResult[];
+  unchanged: SquadRuntimeAgentResult[];
+  skipped: SquadRuntimeAgentResult[];
 }

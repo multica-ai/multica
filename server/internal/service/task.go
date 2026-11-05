@@ -7155,7 +7155,9 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 // starts on rules it is missing. Callers must settle the failure (preserve the
 // claim for redelivery, or 5xx the resolve) instead of dispatching that.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, error) {
-	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
+	// Effective skills include the skills of every squad the agent is in, so a
+	// squad skill reaches every member's task (see ListEffectiveAgentSkills).
+	skills, err := s.Queries.ListEffectiveAgentSkills(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("list agent skills: %w", err)
 	}
@@ -7272,7 +7274,7 @@ func (s *TaskService) LoadRequestedAgentSkillBundles(ctx context.Context, agentI
 
 	var requested []AgentSkillData
 	if len(requestedIDs) > 0 {
-		skills, err := s.Queries.ListAgentSkillsByIDs(ctx, db.ListAgentSkillsByIDsParams{
+		skills, err := s.Queries.ListEffectiveAgentSkillsByIDs(ctx, db.ListEffectiveAgentSkillsByIDsParams{
 			AgentID:  agentID,
 			SkillIds: requestedIDs,
 		})

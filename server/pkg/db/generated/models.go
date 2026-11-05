@@ -2153,6 +2153,16 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type SquadPlugin struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+	PluginName  string             `json:"plugin_name"`
+	InstallHint string             `json:"install_hint"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type SquadRoutine struct {
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -2162,6 +2172,15 @@ type SquadRoutine struct {
 	Required       bool               `json:"required"`
 	GraceHours     int32              `json:"grace_hours"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type SquadSkill struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type SysCronExecution struct {

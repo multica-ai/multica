@@ -76,7 +76,15 @@
     "status_unstable": "Instable",
     "status_archived": "Archivé",
     "issue_status_blocked": "bloqué",
-    "active_issue_more": "et {{count}} de plus"
+    "active_issue_more": "et {{count}} de plus",
+    "squad_runtime_aria": "Runtime de tout le squad",
+    "squad_runtime_placeholder": "Choisir un runtime",
+    "squad_runtime_mixed": "Runtimes mélangés",
+    "runtime_unavailable": "Runtime indisponible",
+    "agent_runtime_unbound": "Aucun runtime",
+    "agent_runtime_aria": "Runtime de {{name}}",
+    "agent_model_aria": "Modèle de {{name}}",
+    "model_default": "Défaut du runtime"
   },
   "detail": {
     "assign_work": "Assigner du travail",
@@ -111,7 +119,16 @@
     "leader_updated": "Responsable mis à jour",
     "leader_update_failed": "Échec de la mise à jour du responsable",
     "archive_failed": "Échec de l'archivage du squad",
-    "instructions_saved": "Instructions enregistrées"
+    "instructions_saved": "Instructions enregistrées",
+    "runtime_updated": "Runtime mis à jour",
+    "runtime_update_failed": "Échec de la mise à jour du runtime",
+    "squad_runtime_applied": "Runtime appliqué à {{count}} agents",
+    "squad_runtime_unchanged": "Tous les agents utilisent déjà ce runtime",
+    "capabilities_save_failed": "Échec de l’enregistrement des skills et plugins",
+    "model_updated": "Modèle mis à jour",
+    "model_update_failed": "Échec de la mise à jour du modèle",
+    "squad_runtime_failed": "Échec du changement de runtime",
+    "squad_runtime_skipped": "{{updated}} agents déplacés, {{skipped}} ignorés : {{reason}}"
   },
   "profile_card": {
     "unavailable": "Squad indisponible",
@@ -133,5 +150,30 @@
     "mine": "Mes squads",
     "all": "Tous les squads"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "capabilities": {
+    "section_title": "Skills et plugins",
+    "skills_title": "Skills",
+    "plugins_title": "Plugins",
+    "add_skill_button": "Ajouter un skill",
+    "add_plugin_button": "Ajouter un plugin",
+    "skills_empty": "Aucun skill appliqué. Chaque membre utilise les skills ajoutés ici.",
+    "plugins_empty": "Aucun plugin requis. Le lead installe tout plugin ajouté ici sur le runtime du projet s’il manque.",
+    "remove_aria": "Retirer {{name}}",
+    "add_skill_dialog_title": "Ajouter des skills au squad",
+    "add_skill_dialog_no_skills": "Aucun skill dans cet espace de travail",
+    "add_skill_dialog_all_applied": "Tous les skills de l’espace de travail sont déjà appliqués",
+    "add_plugin_dialog_title": "Ajouter un plugin",
+    "plugin_name_label": "Nom du plugin",
+    "plugin_name_placeholder": "ex. bmad-method",
+    "plugin_duplicate": "Ce plugin est déjà requis",
+    "plugin_hint_label": "Source d’installation (facultatif)",
+    "plugin_hint_placeholder": "ex. npx bmad-method install",
+    "search_placeholder": "Rechercher",
+    "no_match": "Aucun résultat",
+    "select_all": "Tout sélectionner ({{count}})",
+    "add_dialog_confirm": "Ajouter {{count}} sélectionné(s)",
+    "plugin_suggestions_empty": "Aucun plugin trouvé sur les runtimes de ce squad. Ajoutez-en un par nom ci-dessous.",
+    "plugin_manual_add": "Ajouter à la liste"
+  }
 }

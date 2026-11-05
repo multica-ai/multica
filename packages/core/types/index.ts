@@ -325,6 +325,12 @@ export type {
   SquadActiveIssueBrief,
   SquadMemberStatus,
   SquadMemberStatusListResponse,
+  SquadSkill,
+  SquadPlugin,
+  SetSquadSkillsRequest,
+  SetSquadPluginsRequest,
+  SetSquadRuntimeResponse,
+  SquadRuntimeAgentResult,
 } from "./squad";
 export type {
   BillingBalance,

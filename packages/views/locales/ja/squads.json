@@ -76,7 +76,15 @@
     "status_unstable": "不安定",
     "issue_status_blocked": "ブロック中",
     "active_issue_more": "他 {{count}}件",
-    "status_archived": "アーカイブ済み"
+    "status_archived": "アーカイブ済み",
+    "squad_runtime_aria": "squad全体のランタイム",
+    "squad_runtime_placeholder": "ランタイムを設定",
+    "squad_runtime_mixed": "ランタイムが混在",
+    "runtime_unavailable": "利用できないランタイム",
+    "agent_runtime_unbound": "ランタイムなし",
+    "agent_runtime_aria": "{{name}} のランタイム",
+    "agent_model_aria": "{{name}} のモデル",
+    "model_default": "ランタイムの既定"
   },
   "detail": {
     "assign_work": "作業を割り当て",
@@ -111,7 +119,16 @@
     "leader_updated": "リーダーを更新しました",
     "leader_update_failed": "リーダーを更新できませんでした",
     "archive_failed": "スクワッドをアーカイブできませんでした",
-    "instructions_saved": "指示を保存しました"
+    "instructions_saved": "指示を保存しました",
+    "runtime_updated": "ランタイムを更新しました",
+    "runtime_update_failed": "ランタイムの更新に失敗しました",
+    "squad_runtime_applied": "{{count}} 件のエージェントにランタイムを適用しました",
+    "squad_runtime_unchanged": "すべてのエージェントが既にこのランタイムを使用しています",
+    "capabilities_save_failed": "スキルとプラグインの保存に失敗しました",
+    "model_updated": "モデルを更新しました",
+    "model_update_failed": "モデルの更新に失敗しました",
+    "squad_runtime_failed": "ランタイムの変更に失敗しました",
+    "squad_runtime_skipped": "{{updated}} 件を移動、{{skipped}} 件をスキップ: {{reason}}"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
@@ -131,5 +148,30 @@
     "mine": "自分のスクワッド",
     "all": "すべてのスクワッド"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "capabilities": {
+    "section_title": "スキルとプラグイン",
+    "skills_title": "スキル",
+    "plugins_title": "プラグイン",
+    "add_skill_button": "スキルを追加",
+    "add_plugin_button": "プラグインを追加",
+    "skills_empty": "適用中のスキルはありません。ここで追加したスキルは全メンバーが使用します。",
+    "plugins_empty": "必要なプラグインはありません。ここで追加したプラグインは、不足している場合にリーダーがプロジェクトのランタイムへインストールします。",
+    "remove_aria": "{{name}} を削除",
+    "add_skill_dialog_title": "squad にスキルを追加",
+    "add_skill_dialog_no_skills": "このワークスペースにはまだスキルがありません",
+    "add_skill_dialog_all_applied": "ワークスペースのスキルはすべて適用済みです",
+    "add_plugin_dialog_title": "プラグインを追加",
+    "plugin_name_label": "プラグイン名",
+    "plugin_name_placeholder": "例: bmad-method",
+    "plugin_duplicate": "このプラグインは既に必須に設定されています",
+    "plugin_hint_label": "インストール元（任意）",
+    "plugin_hint_placeholder": "例: npx bmad-method install",
+    "search_placeholder": "検索",
+    "no_match": "一致する項目はありません",
+    "select_all": "すべて選択（{{count}}）",
+    "add_dialog_confirm": "{{count}} 件を追加",
+    "plugin_suggestions_empty": "この squad のランタイムにプラグインは見つかりませんでした。下に名前を入力して追加できます。",
+    "plugin_manual_add": "リストに追加"
+  }
 }

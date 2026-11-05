@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
     updateSquad: vi.fn(),
     deleteSquad: vi.fn(),
     removeSquadMember: vi.fn(),
+    updateAgent: vi.fn(),
+    setSquadRuntime: vi.fn(),
+    setSquadSkills: vi.fn(),
+    setSquadPlugins: vi.fn(),
   },
 }));
 
@@ -29,6 +33,7 @@ vi.mock("@tanstack/react-query", () => ({
     ...mocks.queries[(options.queryKey ?? []).join("/")],
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueries: () => [],
   useMutation: ({ mutationFn }: { mutationFn: (input?: unknown) => Promise<unknown> }) => ({
     mutate: (input?: unknown) => void mutationFn(input),
     mutateAsync: (input?: unknown) => mutationFn(input),
@@ -46,7 +51,16 @@ vi.mock("@multica/core/workspace/queries", () => ({
   squadListOptions: () => ({ queryKey: ["squads-list"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   squadMemberStatusOptions: () => ({ queryKey: ["member-status"] }),
-  workspaceKeys: { squads: () => ["squads"] },
+  skillListOptions: () => ({ queryKey: ["skills"] }),
+  squadSkillsOptions: () => ({ queryKey: ["squad-skills"] }),
+  squadPluginsOptions: () => ({ queryKey: ["squad-plugins"] }),
+  workspaceKeys: { squads: () => ["squads"], agents: () => ["agents"] },
+}));
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
+  runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+  runtimeCapabilitiesOptions: () => ({ queryKey: ["capabilities"] }),
+  runtimeModelsOptions: () => ({ queryKey: ["models"] }),
 }));
 vi.mock("@multica/core/api", () => ({ api: mocks.api }));
 vi.mock("@multica/core/auth", () => ({
@@ -62,6 +76,8 @@ vi.mock("@multica/core/paths", () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
+// The skill picker pulls in workspace route icons this suite does not mock.
+vi.mock("../../agents/components/skill-picker-list", () => ({ SkillPickerList: () => null }));
 vi.mock("@multica/core/modals", () => ({
   useModalStore: { getState: () => ({ open: mocks.openModal }) },
 }));
@@ -138,6 +154,12 @@ const STATUSES: SquadMemberStatus[] = [
   } as SquadMemberStatus,
 ];
 
+const RUNTIMES = [
+  { id: "rt-1", name: "Laptop", owner_id: "creator", status: "online", visibility: "private", shared_with: [] },
+  { id: "rt-2", name: "Workstation", owner_id: "creator", status: "offline", visibility: "private", shared_with: [] },
+  { id: "rt-other", name: "Not mine", owner_id: "someone-else", status: "online", visibility: "private", shared_with: [] },
+] as unknown as import("@multica/core/types").RuntimeDevice[];
+
 const ISSUE = {
   id: "i-1",
   identifier: "ARIE-2",
@@ -154,10 +176,11 @@ function seed(squad: Squad | undefined = SQUAD, extra: Record<string, QueryResul
     "squads/sq-1/recent-issues": { data: { issues: [ISSUE], total: 1 } },
     agents: {
       data: [
-        { id: "agent-lead", name: "Lambda", archived_at: null },
-        { id: "agent-2", name: "Kappa", archived_at: null },
+        { id: "agent-lead", name: "Lambda", archived_at: null, runtime_id: "rt-1" },
+        { id: "agent-2", name: "Kappa", archived_at: null, runtime_id: "rt-1" },
       ],
     },
+    runtimes: { data: RUNTIMES },
     members: {
       data: [
         { user_id: "creator", name: "Jiayuan", role: "member" },
@@ -198,6 +221,8 @@ beforeEach(() => {
   mocks.api.updateSquad.mockReset().mockResolvedValue(SQUAD);
   mocks.api.deleteSquad.mockReset().mockResolvedValue(undefined);
   mocks.api.removeSquadMember.mockReset().mockResolvedValue(undefined);
+  mocks.api.updateAgent.mockReset().mockResolvedValue({});
+  mocks.api.setSquadRuntime.mockReset().mockResolvedValue({ runtime_id: "rt-2", updated: [], unchanged: [], skipped: [] });
 });
 
 describe("SquadDetailPage", () => {
@@ -300,6 +325,95 @@ describe("SquadDetailPage", () => {
     expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("3 members")).toBeInTheDocument();
     expect(screen.getByText("Created by")).toBeInTheDocument();
+  });
+
+  it("switches one agent's runtime from its row", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Runtime for Kappa" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Workstation" }));
+
+    expect(mocks.api.updateAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.api.updateAgent).toHaveBeenCalledWith("agent-2", { runtime_id: "rt-2" });
+  });
+
+  it("applies one runtime to every agent from the squad dropdown in one request", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Runtime for the whole squad" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Workstation" }));
+
+    expect(mocks.api.setSquadRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.api.setSquadRuntime).toHaveBeenCalledWith("sq-1", "rt-2");
+    expect(mocks.api.updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the model control empty and disabled until the agent has a runtime", () => {
+    seed(SQUAD, {
+      agents: {
+        data: [
+          { id: "agent-lead", name: "Lambda", archived_at: null, runtime_id: "rt-1", model: "" },
+          { id: "agent-2", name: "Kappa", archived_at: null, runtime_id: "", model: "" },
+        ],
+      },
+    });
+    renderPage();
+
+    const control = screen.getByRole("button", { name: "Model for Kappa" });
+    expect(control).toBeDisabled();
+    expect(control).toHaveTextContent("");
+  });
+
+  it("picks several skills at once, with select-all acting on the filtered rows", async () => {
+    const user = userEvent.setup();
+    seed(SQUAD, {
+      skills: {
+        data: [
+          { id: "sk-2", name: "lint-rules", description: "Lint" },
+          { id: "sk-3", name: "deploy-notes", description: "Ship" },
+        ],
+      },
+    });
+    renderPage();
+
+    await user.click(within(section("Skills & plugins")).getByRole("button", { name: "Add skill" }));
+    await user.type(screen.getByRole("textbox", { name: "Search" }), "lint");
+
+    // The filter leaves one row, so select-all reads 1 and picks just that row.
+    await user.click(screen.getByRole("checkbox", { name: "Select all (1)" }));
+    await user.click(screen.getByRole("button", { name: "Add 1 selected" }));
+
+    expect(mocks.api.setSquadSkills).toHaveBeenCalledWith("sq-1", ["sk-2"]);
+  });
+
+  it("offers only runtimes the viewer can bind", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Runtime for Kappa" }));
+
+    expect(await screen.findByRole("menuitemradio", { name: "Laptop" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Not mine" })).not.toBeInTheDocument();
+  });
+
+  it("lists the squad's skills and plugins and removes a skill", async () => {
+    const user = userEvent.setup();
+    seed(SQUAD, {
+      "squad-skills": { data: [{ id: "sk-1", name: "code-style", description: "House style" }] },
+      "squad-plugins": { data: [{ name: "bmad-method", install_hint: "npx bmad-method install" }] },
+    });
+    renderPage();
+
+    const capabilities = section("Skills & plugins");
+    expect(within(capabilities).getByText("code-style")).toBeInTheDocument();
+    expect(within(capabilities).getByText("bmad-method")).toBeInTheDocument();
+    expect(within(capabilities).getByText("npx bmad-method install")).toBeInTheDocument();
+
+    await user.click(within(capabilities).getByRole("button", { name: "Remove code-style" }));
+
+    expect(mocks.api.setSquadSkills).toHaveBeenCalledWith("sq-1", []);
   });
 
   it("gives viewers who cannot manage the squad a read-only page", async () => {

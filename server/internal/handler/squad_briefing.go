@@ -459,6 +459,13 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 
+	// A failed lookup leaves the block out: the leader works as before, without
+	// the plugin install duty, which is the narrower failure.
+	if block := loadSquadCapabilitiesBriefing(ctx, q, squad); block != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(block)
+	}
+
 	// A failed lookup leaves the charter out: the leader works as before, with
 	// its protocol and roster, and no charter is a narrower job, not a wrong one.
 	if charter, err := q.GetSquadCharter(ctx, db.GetSquadCharterParams{
@@ -507,6 +514,83 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 		sb.WriteString(trimmed)
 	}
 	return sb.String()
+}
+
+// loadSquadCapabilitiesBriefing reads the skills and plugins applied to the
+// squad and renders them. A failed read returns "" so the leader runs without
+// the block rather than with a partial one.
+func loadSquadCapabilitiesBriefing(ctx context.Context, q *db.Queries, squad db.Squad) string {
+	skills, err := q.ListSquadSkills(ctx, db.ListSquadSkillsParams{
+		WorkspaceID: squad.WorkspaceID, SquadID: squad.ID,
+	})
+	if err != nil {
+		return ""
+	}
+	plugins, err := q.ListSquadPlugins(ctx, db.ListSquadPluginsParams{
+		WorkspaceID: squad.WorkspaceID, SquadID: squad.ID,
+	})
+	if err != nil {
+		return ""
+	}
+	return squadCapabilitiesBriefing(skills, plugins)
+}
+
+// squadCapabilitiesBriefing renders "## Squad Skills and Plugins". Skills reach
+// every member through the task claim, so the leader only needs to know about
+// them. Plugins are not delivered by Multica: the leader checks for each one on
+// the project it is working on and installs it when missing. Returns "" for a
+// squad with neither, so its briefing is unchanged.
+func squadCapabilitiesBriefing(skills []db.ListSquadSkillsRow, plugins []db.ListSquadPluginsRow) string {
+	if len(skills) == 0 && len(plugins) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Squad Skills and Plugins\n\n")
+	sb.WriteString("Every member of this squad runs with the skills listed below on every task, on any project it works on.\n")
+	if len(skills) > 0 {
+		sb.WriteString("\nSkills (already delivered to every member, nothing to install):\n")
+		for _, s := range skills {
+			sb.WriteString("- ")
+			sb.WriteString(oneLineBriefingText(s.Name))
+			if d := strings.TrimSpace(s.Description); d != "" {
+				sb.WriteString(": ")
+				sb.WriteString(oneLineBriefingText(d))
+			}
+			sb.WriteString("\n")
+		}
+	}
+	if len(plugins) > 0 {
+		sb.WriteString("\nPlugins (must be installed for the project before the squad works on it):\n")
+		for _, p := range plugins {
+			sb.WriteString("- ")
+			sb.WriteString(oneLineBriefingText(p.PluginName))
+			if hint := strings.TrimSpace(p.InstallHint); hint != "" {
+				sb.WriteString(" (install: ")
+				sb.WriteString(oneLineBriefingText(hint))
+				sb.WriteString(")")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(squadPluginInstallRule)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// squadPluginInstallRule is the leader's duty for each plugin requirement. The
+// leader runs the install itself, in the project's working directory, so the
+// plugin is present for the workers that run there next.
+const squadPluginInstallRule = `
+Before you delegate work on an issue, check that each plugin above is installed for that issue's project on its runtime. If one is missing:
+1. Find the install method: use the install hint when one is given, otherwise the plugin's official documentation.
+2. Install it for that project and confirm it works.
+3. Record what was installed, or the error, in a comment on the parent issue.
+If the plugin cannot be installed, do not delegate the work that needs it. Report the blocker on the parent issue and stop there.
+`
+
+// oneLineBriefingText keeps user-entered names and hints from breaking the
+// bullet list they are rendered into.
+func oneLineBriefingText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // buildSquadRoster renders the "## Squad Roster" section: a leader self-row

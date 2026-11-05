@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -12,7 +12,8 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
-import { agentListOptions, memberListOptions, squadListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, skillListOptions, squadListOptions, squadMemberStatusOptions, squadPluginsOptions, squadSkillsOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { isRuntimeUsableForUser, runtimeCapabilitiesOptions, runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { companyFloorsOptions } from "@multica/core/company";
 import { useAddSquadToCompany } from "../../company/lib/use-add-squad-to-company";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
@@ -94,7 +95,11 @@ import {
   PickerEmpty,
 } from "../../issues/components/pickers/property-picker";
 import { toast } from "sonner";
-import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser } from "@multica/core/types";
+import { SquadRuntimeSelect } from "./squad-runtime-select";
+import { SquadCapabilitiesSection } from "./squad-capabilities-section";
+import { sharedSquadRuntimeId } from "../lib/squad-runtime";
+import { SquadModelSelect } from "./squad-model-select";
+import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser, RuntimeDevice, SquadPlugin } from "@multica/core/types";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 const RECENT_WORK_LIMIT = 5;
@@ -173,9 +178,53 @@ export function SquadDetailView({
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
   const { data: allSquads = [] } = useQuery(squadListOptions(wsId));
   const { data: floors = [] } = useQuery(companyFloorsOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: squadSkills = [] } = useQuery(squadSkillsOptions(wsId, squadId));
+  const { data: squadPlugins = [] } = useQuery(squadPluginsOptions(wsId, squadId));
   const { addSquad, pending: addingToCompany } = useAddSquadToCompany(floors, allSquads);
+  const runtimeById = useMemo(() => new Map(runtimes.map((r) => [r.id, r])), [runtimes]);
+  const agentRuntimeIdById = useMemo(
+    () => new Map(agents.map((a: Agent) => [a.id, a.runtime_id])),
+    [agents],
+  );
+  const agentModelById = useMemo(
+    () => new Map(agents.map((a: Agent) => [a.id, a.model ?? ""])),
+    [agents],
+  );
+  const archivedAgentIds = useMemo(
+    () => new Set(agents.filter((a: Agent) => a.archived_at).map((a: Agent) => a.id)),
+    [agents],
+  );
 
   const currentUser = useAuthStore((s) => s.user);
+  // The server rejects runtimes the viewer cannot bind, so only offer usable ones.
+  const runtimeOptions = useMemo(
+    () => runtimes.filter((r) => isRuntimeUsableForUser(r, currentUser?.id ?? null)),
+    [runtimes, currentUser],
+  );
+  // Plugin suggestions come from the local runtimes the squad's agents use.
+  // Only online local runtimes can answer the discovery request.
+  const pluginSourceRuntimeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of members) {
+      if (m.member_type !== "agent") continue;
+      const runtimeId = agentRuntimeIdById.get(m.member_id);
+      const runtime = runtimeId ? runtimeById.get(runtimeId) : undefined;
+      if (runtime && runtime.runtime_mode === "local" && runtime.status === "online") ids.add(runtime.id);
+    }
+    return [...ids];
+  }, [members, agentRuntimeIdById, runtimeById]);
+  const pluginDiscovery = useQueries({
+    queries: pluginSourceRuntimeIds.map((id) => runtimeCapabilitiesOptions(id)),
+  });
+  const pluginSuggestions = [
+    ...new Set(
+      pluginDiscovery.flatMap((q) =>
+        (q.data?.skills ?? []).map((skill) => skill.plugin).filter((name): name is string => !!name),
+      ),
+    ),
+  ].sort();
   const myRole = useMemo(() => {
     if (!currentUser) return null;
     return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
@@ -242,6 +291,72 @@ export function SquadDetailView({
     },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.leader_update_failed)),
+  });
+
+  const setAgentRuntimeMut = useMutation({
+    mutationFn: (input: { agentId: string; runtimeId: string }) =>
+      api.updateAgent(input.agentId, { runtime_id: input.runtimeId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.toasts.runtime_updated));
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.runtime_update_failed)),
+  });
+
+  const setAgentModelMut = useMutation({
+    mutationFn: (input: { agentId: string; model: string }) =>
+      api.updateAgent(input.agentId, { model: input.model }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.toasts.model_updated));
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.model_update_failed)),
+  });
+
+  // One request points every live agent at the runtime. The server reports
+  // which agents moved and which it skipped, with a reason for each.
+  const applySquadRuntimeMut = useMutation({
+    mutationFn: (runtimeId: string) => api.setSquadRuntime(squadId, runtimeId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      if (res.skipped.length > 0) {
+        toast.error(
+          t(($) => $.toasts.squad_runtime_skipped, {
+            updated: res.updated.length,
+            skipped: res.skipped.length,
+            reason: res.skipped[0]?.reason ?? "",
+          }),
+        );
+        return;
+      }
+      toast.success(
+        res.updated.length === 0
+          ? t(($) => $.toasts.squad_runtime_unchanged)
+          : t(($) => $.toasts.squad_runtime_applied, { count: res.updated.length }),
+      );
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.squad_runtime_failed)),
+  });
+
+  const setSquadSkillsMut = useMutation({
+    mutationFn: (skillIds: string[]) => api.setSquadSkills(squadId, skillIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.squadSkills(wsId, squadId) });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.capabilities_save_failed)),
+  });
+
+  const setSquadPluginsMut = useMutation({
+    mutationFn: (plugins: SquadPlugin[]) => api.setSquadPlugins(squadId, plugins),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.squadPlugins(wsId, squadId) });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.capabilities_save_failed)),
   });
 
   const deleteMut = useMutation({
@@ -428,6 +543,27 @@ export function SquadDetailView({
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
           setLeaderPending={setLeaderMut.isPending}
+          runtimeOptions={runtimeOptions}
+          runtimeById={runtimeById}
+          agentRuntimeIdById={agentRuntimeIdById}
+          agentModelById={agentModelById}
+          archivedAgentIds={archivedAgentIds}
+          onSetAgentModel={(agentId, model) => setAgentModelMut.mutate({ agentId, model })}
+          onSetAgentRuntime={(agentId, runtimeId) => setAgentRuntimeMut.mutate({ agentId, runtimeId })}
+          onApplySquadRuntime={(runtimeId) => applySquadRuntimeMut.mutate(runtimeId)}
+          runtimePending={setAgentRuntimeMut.isPending || applySquadRuntimeMut.isPending}
+        />
+
+        <SquadCapabilitiesSection
+          skills={squadSkills}
+          plugins={squadPlugins}
+          workspaceSkills={workspaceSkills}
+          pluginSuggestions={pluginSuggestions}
+          canManage={canManage && !archived}
+          savingSkills={setSquadSkillsMut.isPending}
+          savingPlugins={setSquadPluginsMut.isPending}
+          onSetSkills={async (skillIds) => { await setSquadSkillsMut.mutateAsync(skillIds); }}
+          onSetPlugins={async (plugins) => { await setSquadPluginsMut.mutateAsync(plugins); }}
         />
 
         <SquadInstructionsSection
@@ -591,6 +727,15 @@ function SquadMembersSection({
   onRemoveMember,
   onUpdateRole,
   setLeaderPending,
+  runtimeOptions,
+  runtimeById,
+  agentRuntimeIdById,
+  agentModelById,
+  archivedAgentIds,
+  onSetAgentRuntime,
+  onSetAgentModel,
+  onApplySquadRuntime,
+  runtimePending,
 }: {
   onOpenAgent?: (agentId: string) => void;
   onOpenIssue?: (issueId: string) => void;
@@ -608,11 +753,33 @@ function SquadMembersSection({
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
   setLeaderPending: boolean;
+  runtimeOptions: RuntimeDevice[];
+  runtimeById: Map<string, RuntimeDevice>;
+  agentRuntimeIdById: Map<string, string>;
+  agentModelById: Map<string, string>;
+  archivedAgentIds: Set<string>;
+  onSetAgentRuntime: (agentId: string, runtimeId: string) => void;
+  onSetAgentModel: (agentId: string, model: string) => void;
+  onApplySquadRuntime: (runtimeId: string) => void;
+  runtimePending: boolean;
 }) {
   const { t } = useT("squads");
   const timeAgo = useTimeAgo();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
+
+  // The squad-wide runtime shows the runtime all live agents share, or "mixed".
+  const activeAgentMembers = members.filter((m) => m.member_type === "agent" && !isArchived(m));
+  const sharedRuntimeId = sharedSquadRuntimeId(members, agentRuntimeIdById, archivedAgentIds);
+  const sharedRuntime = sharedRuntimeId ? (runtimeById.get(sharedRuntimeId) ?? null) : null;
+  const squadRuntimeLabel =
+    sharedRuntimeId === null
+      ? t(($) => $.members_tab.squad_runtime_mixed)
+      : sharedRuntime
+        ? runtimeDisplayLabel(sharedRuntime)
+        : sharedRuntimeId
+          ? t(($) => $.members_tab.runtime_unavailable)
+          : t(($) => $.members_tab.squad_runtime_placeholder);
 
   return (
     <ObjectSection
@@ -620,9 +787,21 @@ function SquadMembersSection({
       count={members.length}
       action={
         canManage ? (
-          <ObjectSectionAction icon={UserPlus} onClick={onAddMemberClick}>
-            {t(($) => $.members_tab.add_member_button)}
-          </ObjectSectionAction>
+          <div className="flex items-center gap-2">
+            {activeAgentMembers.length > 0 && (
+              <SquadRuntimeSelect
+                options={runtimeOptions}
+                value={sharedRuntime}
+                valueLabel={squadRuntimeLabel}
+                ariaLabel={t(($) => $.members_tab.squad_runtime_aria)}
+                disabled={runtimePending || runtimeOptions.length === 0}
+                onSelect={onApplySquadRuntime}
+              />
+            )}
+            <ObjectSectionAction icon={UserPlus} onClick={onAddMemberClick}>
+              {t(($) => $.members_tab.add_member_button)}
+            </ObjectSectionAction>
+          </div>
         ) : null
       }
     >
@@ -643,6 +822,13 @@ function SquadMembersSection({
             const canMakeLeader = canManage && m.member_type === "agent" && !leader && !isArchived(m);
             const canRemove = canManage && !leader;
             const hasMenu = m.member_type === "agent" || canMakeLeader || canRemove;
+            const runtimeId = agentRuntimeIdById.get(m.member_id) ?? "";
+            const runtime = runtimeById.get(runtimeId) ?? null;
+            const runtimeLabel = runtime
+              ? runtimeDisplayLabel(runtime)
+              : runtimeId
+                ? t(($) => $.members_tab.runtime_unavailable)
+                : t(($) => $.members_tab.agent_runtime_unbound);
             return (
               <div key={m.id} className="group/member flex min-h-11 items-center gap-3 px-3 py-1.5 text-body">
                 <ActorAvatar
@@ -683,6 +869,32 @@ function SquadMembersSection({
                     <span className="min-w-0 truncate text-caption text-muted-foreground">· {m.role}</span>
                   ) : null}
                 </div>
+                {m.member_type === "agent" &&
+                  (canManage && !isArchived(m) ? (
+                    <SquadRuntimeSelect
+                      className="max-w-44 shrink-0"
+                      options={runtimeOptions}
+                      value={runtime}
+                      valueLabel={runtimeLabel}
+                      ariaLabel={t(($) => $.members_tab.agent_runtime_aria, { name })}
+                      disabled={runtimePending}
+                      onSelect={(next) => onSetAgentRuntime(m.member_id, next)}
+                    />
+                  ) : (
+                    <span className="max-w-44 shrink-0 truncate text-caption text-muted-foreground">{runtimeLabel}</span>
+                  ))}
+                {m.member_type === "agent" && (
+                  <SquadModelSelect
+                    className="max-w-44 shrink-0"
+                    runtimeId={runtime?.id ?? null}
+                    runtimeOnline={runtime?.status === "online"}
+                    value={agentModelById.get(m.member_id) ?? ""}
+                    ariaLabel={t(($) => $.members_tab.agent_model_aria, { name })}
+                    defaultLabel={t(($) => $.members_tab.model_default)}
+                    disabled={!canManage || isArchived(m) || runtimePending}
+                    onSelect={(model) => onSetAgentModel(m.member_id, model)}
+                  />
+                )}
                 {m.member_type === "agent" && (
                   <div className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 text-caption text-muted-foreground">
                     {statusValue === "working" && primaryIssue ? (

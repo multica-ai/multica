@@ -92,6 +92,9 @@ import type {
   SkillImportResult,
   SkillSummary,
   Squad,
+  SquadSkill,
+  SquadPlugin,
+  SetSquadRuntimeResponse,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -2439,6 +2442,40 @@ export const SquadSchema = z.object({
 
 export const SquadListSchema = z.array(SquadSchema);
 export const EMPTY_SQUAD_LIST: Squad[] = [];
+
+export const SquadSkillSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+}).loose();
+export const SquadSkillListSchema = z.array(SquadSkillSchema);
+export const EMPTY_SQUAD_SKILL_LIST: SquadSkill[] = [];
+
+export const SquadPluginSchema = z.object({
+  name: z.string(),
+  install_hint: z.string().default(""),
+}).loose();
+export const SquadPluginListSchema = z.array(SquadPluginSchema);
+export const EMPTY_SQUAD_PLUGIN_LIST: SquadPlugin[] = [];
+
+const SquadRuntimeAgentResultSchema = z.object({
+  agent_id: z.string(),
+  agent_name: z.string().default(""),
+  reason: z.string().default(""),
+}).loose();
+
+export const SetSquadRuntimeResponseSchema = z.object({
+  runtime_id: z.string().default(""),
+  updated: z.array(SquadRuntimeAgentResultSchema).default([]),
+  unchanged: z.array(SquadRuntimeAgentResultSchema).default([]),
+  skipped: z.array(SquadRuntimeAgentResultSchema).default([]),
+}).loose();
+export const EMPTY_SET_SQUAD_RUNTIME_RESPONSE: SetSquadRuntimeResponse = {
+  runtime_id: "",
+  updated: [],
+  unchanged: [],
+  skipped: [],
+};
 export const EMPTY_SQUAD: Squad = {
   id: "",
   workspace_id: "",
