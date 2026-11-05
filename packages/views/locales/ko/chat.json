@@ -36,7 +36,9 @@
     "no_projects": "아직 프로젝트가 없습니다",
     "project_context_unsupported": "프로젝트 설명이 적용되지 않습니다 — 이 에이전트의 데몬 업그레이드가 필요합니다",
     "add_to_run": "현재 실행에 추가",
-    "add_to_run_error": "추가하지 못했습니다. 초안은 유지됩니다."
+    "add_to_run_error": "추가를 확인하지 못했습니다. 초안은 보존됩니다. 재시도하면 원래 요청을 확인합니다.",
+    "retry_run": "원래 요청 재시도",
+    "new_run_instruction": "새 지시로 처리 (중복 가능)"
   },
   "queue": {
     "title_other": "대기 중인 메시지 {{count}}개",

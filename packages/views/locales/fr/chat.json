@@ -36,8 +36,10 @@
     "remove_project_context": "Retirer le contexte de projet",
     "no_projects": "Aucun projet pour l'instant",
     "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
-    "add_to_run": "Ajouter au run actuel",
-    "add_to_run_error": "Ajout impossible. Le brouillon est conservé."
+    "add_to_run": "Ajouter à l’exécution actuelle",
+    "add_to_run_error": "L’ajout n’a pas pu être confirmé. Le brouillon est conservé ; réessayer vérifie la demande d’origine.",
+    "retry_run": "Réessayer la demande d’origine",
+    "new_run_instruction": "Traiter comme une nouvelle instruction (doublon possible)"
   },
   "queue": {
     "title_one": "{{count}} message en file d'attente",
@@ -259,7 +261,7 @@
     "delete": "Supprimer la discussion"
   },
   "supplement": {
-    "pending": "En attente d’envoi au run actuel",
+    "pending": "En attente d’envoi à l’exécution actuelle",
     "delivered": "Accepté par le moteur",
     "failed": "Non livré",
     "unknown": "Livraison indéterminée"

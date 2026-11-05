@@ -37,7 +37,9 @@
     "no_projects": "No projects yet",
     "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade",
     "add_to_run": "Add to current run",
-    "add_to_run_error": "Could not add the message. Your draft is preserved."
+    "add_to_run_error": "Could not confirm the addition. Your draft is preserved; retry checks the original request.",
+    "retry_run": "Retry original request",
+    "new_run_instruction": "Treat as a new instruction (may duplicate)"
   },
   "queue": {
     "title_one": "{{count}} queued message",

@@ -22,7 +22,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
-import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useChatStore, DRAFT_NEW_SESSION, useChatRunDraftStore, forgetChatRunDraft } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
 import { useShortcut } from "@multica/core/shortcuts";
@@ -216,6 +216,9 @@ export function ChatInput({
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
+  const retryDraft = useChatRunDraftStore((s) => s.draft.attempts.find(
+    (a) => a.session === draftKey && a.content === inputDraft.trim(),
+  ));
   const storeUploads = useChatStore(
     (s) => s.inputDraftAttachments[draftKey] ?? EMPTY_UPLOADS,
   );
@@ -772,6 +775,12 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
+        {retryDraft && (
+          <Button type="button" size="xs" variant="ghost" disabled={submitting}
+            onClick={() => forgetChatRunDraft(retryDraft.id)}>
+            {t(($) => $.input.new_run_instruction)}
+          </Button>
+        )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           {onAddToRun && (
             <Button
@@ -785,7 +794,7 @@ export function ChatInput({
                 try { await submit(); } finally { addToRunRef.current = false; }
               }}
             >
-              {t(($) => $.input.add_to_run)}
+              {retryDraft ? t(($) => $.input.retry_run) : t(($) => $.input.add_to_run)}
             </Button>
           )}
           <SubmitButton
