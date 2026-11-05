@@ -45,6 +45,54 @@ export interface WorkspaceMcpServer {
   updated_at: string;
 }
 
+export type CodeGraphRepositoryStatus = "pending" | "processing" | "ready" | "failed";
+
+export interface CodeGraphRepository {
+ auth_mode?:"token"|"anonymous";
+ credential_id?:string;
+  progress?: { id: string; status: string; phase: string; cancel_requested: boolean; created_at: string; started_at?: string; finished_at?: string; phase_started_at: string; error?: string };
+	builds?: { id: string; status: string; commit: string; created_at: string; error?: string }[];
+	active_build_id?: string;
+	public_read_enabled?: boolean;
+	symbol_count?: number;
+	edge_count?: number;
+  agents?: { id: string; name: string; created_at: string }[];
+  id: string;
+  workspace_id: string;
+  repo_url: string;
+  repo_name: string;
+  branch: string;
+  status: CodeGraphRepositoryStatus;
+  internal_status?: string;
+  commit_hash?: string;
+  file_count: number;
+  sync_error?: string;
+  last_indexed_at?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CodeGraphStats {
+  total: number;
+  ready: number;
+  processing: number;
+  pending: number;
+  failed: number;
+  files: number;
+}
+
+export interface CodeGraphRepositoryListResponse {
+  items: CodeGraphRepository[];
+  stats: CodeGraphStats;
+}
+
+export interface CodeGraphRepositoryAssignment {
+  repository_id: string;
+  agent_id: string;
+  created_at: string;
+}
+
 export interface Member {
   id: string;
   workspace_id: string;

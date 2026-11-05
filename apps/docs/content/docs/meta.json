@@ -17,6 +17,7 @@
     "projects",
     "workflows",
     "project-resources",
+    "codegraph",
     "---Agents---",
     "agents",
     "agents-create",

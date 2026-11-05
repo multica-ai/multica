@@ -611,6 +611,21 @@ deleted_runtimes AS (
 ),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
+),
+deleted_code_graph_assignments AS (
+    DELETE FROM agent_code_graph_repository
+    WHERE repository_id IN (
+        SELECT id FROM code_graph_repository WHERE code_graph_repository.workspace_id = $1
+    )
+       OR agent_id IN (
+        SELECT id FROM agent WHERE agent.workspace_id = $1
+    )
+),
+deleted_code_graph_builds AS (
+    DELETE FROM code_graph_build WHERE code_graph_build.workspace_id = $1
+),
+deleted_code_graph_repositories AS (
+    DELETE FROM code_graph_repository WHERE code_graph_repository.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1
 `

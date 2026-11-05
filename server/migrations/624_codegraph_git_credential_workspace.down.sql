@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS code_graph_git_credential_workspace_idx;

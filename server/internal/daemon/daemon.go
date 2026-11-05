@@ -8134,6 +8134,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		if providerSupportsCodeGraphMCP(provider) {
+			// Opt into task-local merging so inherited runtime servers survive.
+			if raw := strings.TrimSpace(string(agentMcpConfig)); raw == "" || raw == "null" {
+				agentMcpConfig = json.RawMessage(`{"mcpServers":{}}`)
+			}
+		}
 		effectiveMcpConfig = agentMcpConfig
 		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
 			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
@@ -8142,6 +8148,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			)
 		} else {
 			effectiveMcpConfig = merged
+		}
+		if providerSupportsCodeGraphMCP(provider) {
+			codeGraphConfig, configErr := codeGraphMCPConfig(d.cfg.ServerBaseURL, task.AuthToken)
+			if configErr != nil {
+				return TaskResult{}, configErr
+			}
+			// Always preload the tools, even before any repository is assigned.
+			effectiveMcpConfig, configErr = mergeTaskRemoteMCPConfig(effectiveMcpConfig, codeGraphConfig)
+			if configErr != nil {
+				return TaskResult{}, fmt.Errorf("merge CodeGraph MCP configuration: %w", configErr)
+			}
 		}
 		if len(remoteMCPConfig) > 0 {
 			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)

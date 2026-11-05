@@ -1,0 +1,5 @@
+{
+  "allowed_hidden_directories": [".agents", ".github"],
+  "denied_names": ["node_modules", "vendor", "id_rsa", "id_ed25519"],
+  "denied_extensions": [".pem", ".key", ".p12"]
+}

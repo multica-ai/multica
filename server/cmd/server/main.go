@@ -754,6 +754,7 @@ func main() {
 	// backlog, and a departed one retires everything it owned at once.
 	go h.RunQoderConnections(sweepCtx, pool, "http://localhost:"+port)
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	go h.RunCodeGraphBuilds(sweepCtx, pool)
 	if telemetryWorker != nil {
 		go telemetryWorker.Run(sweepCtx)
 	}

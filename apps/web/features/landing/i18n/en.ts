@@ -194,6 +194,11 @@ export function createEnDict(
     headline: "Questions & answers.",
     items: [
       {
+        question: "Can agents query repository context without a local checkout?",
+        answer:
+          "With CodeGraph enabled, supported agents can search assigned repository snapshots, inspect call relationships, and read source lines tied to a Git commit. Workspace owners and administrators control repository imports and assignments. See the [CodeGraph guide](/docs/codegraph) for setup and access rules.",
+      },
+      {
         question: "What coding agents does Multica support?",
         answer:
           "Multica supports 29 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",

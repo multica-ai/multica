@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS code_graph_git_credential_workspace_idx ON code_graph_git_credential(workspace_id);

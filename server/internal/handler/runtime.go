@@ -20,15 +20,17 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/codegraph"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type AgentRuntimeResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	DaemonID    *string `json:"daemon_id"`
-	Name        string  `json:"name"`
+	SupportsCodeGraph bool    `json:"supports_code_graph"`
+	ID                string  `json:"id"`
+	WorkspaceID       string  `json:"workspace_id"`
+	DaemonID          *string `json:"daemon_id"`
+	Name              string  `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.
@@ -66,6 +68,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 
 	return AgentRuntimeResponse{
+		SupportsCodeGraph:  codegraph.SupportsLocalTools(rt.RuntimeMode, rt.Provider),
 		ID:                 uuidToString(rt.ID),
 		WorkspaceID:        uuidToString(rt.WorkspaceID),
 		DaemonID:           textToPtr(rt.DaemonID),

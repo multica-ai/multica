@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AgentRuntime } from "../types";
 
 export const AgentRuntimeSchema = z.object({
+  supports_code_graph: z.boolean().default(false).catch(false),
   id: z.string(),
   workspace_id: z.string(),
   daemon_id: z.string().nullable().catch(null),

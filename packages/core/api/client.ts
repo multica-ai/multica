@@ -1,4 +1,8 @@
 import type { ZodType } from "zod";
+import { z } from "zod";
+import { GraphCredentialsSchema, GraphSavedSchema, GraphReadableSchema, GraphAuthSavedSchema, type GraphAuthInput } from "./codegraph-auth";
+import { CodeGraphRepositoryAssignmentSchema, CodeGraphRepositoryListResponseSchema, CodeGraphRepositorySchema, CodeGraphQuerySchema, EMPTY_CODE_GRAPH_REPOSITORY, EMPTY_CODE_GRAPH_REPOSITORY_LIST_RESPONSE } from "./schemas";
+import type { CodeGraphRepository, CodeGraphRepositoryAssignment, CodeGraphRepositoryListResponse } from "../types";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -796,6 +800,142 @@ function isReplayableBody(body: BodyInit | null | undefined): boolean {
 }
 
 export class ApiClient {
+  async listCodeGraphRepositories(
+    workspaceId: string,
+    params: { status?: string; search?: string } = {},
+  ): Promise<CodeGraphRepositoryListResponse> {
+    const query = new URLSearchParams();
+    if (params.status) query.set("status", params.status);
+    if (params.search) query.set("search", params.search);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs${suffix}`);
+    return parseWithFallback(
+      raw,
+      CodeGraphRepositoryListResponseSchema,
+      EMPTY_CODE_GRAPH_REPOSITORY_LIST_RESPONSE,
+      { endpoint: "GET /api/workspaces/{id}/code-graphs" },
+    );
+  }
+
+
+  async createCodeGraphRepository(
+    workspaceId: string,
+    body: { repo_url: string; branch?: string; repo_name?: string;auth_mode?:"token"|"anonymous";credential_id?:string },
+  ): Promise<CodeGraphRepository> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const repository=parseWithFallback(raw, CodeGraphRepositorySchema, EMPTY_CODE_GRAPH_REPOSITORY, {
+      endpoint: "POST /api/workspaces/{id}/code-graphs",
+    });
+    if(body.auth_mode&&(repository.auth_mode!==body.auth_mode||(body.auth_mode==="token"&&repository.credential_id!==body.credential_id))){
+      throw new Error("Repository authentication was not confirmed. Refresh the repository and check the server version.");
+    }
+    return repository;
+  }
+
+
+  async syncCodeGraphRepository(
+    workspaceId: string,
+    repositoryId: string,
+  ): Promise<CodeGraphRepository> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${repositoryId}/sync`, {method:"POST"});
+    return parseWithFallback(raw,CodeGraphRepositorySchema,EMPTY_CODE_GRAPH_REPOSITORY,{endpoint:"POST code-graph sync"});
+  }
+
+
+  async listGraphCredentials(wsId:string){
+    const endpoint=`/api/workspaces/${wsId}/code-graphs/git-credentials`;
+    const result=parseWithFallback<z.infer<typeof GraphCredentialsSchema>|null>(await this.fetch<unknown>(endpoint),GraphCredentialsSchema,null,{endpoint});
+    if(!result)throw new Error("Git credential response is incomplete");return result;
+  }
+
+  async saveGraphCredential(wsId:string,body:{name:string;service_url:string;token:string},id?:string){
+    const endpoint=`/api/workspaces/${wsId}/code-graphs/git-credentials${id?"/"+id:""}`;
+    const result=parseWithFallback<z.infer<typeof GraphSavedSchema>|null>(await this.fetch<unknown>(endpoint,{method:id?"PUT":"POST",body:JSON.stringify(body)}),GraphSavedSchema,null,{endpoint});
+    if(!result)throw new Error("Git credential response is incomplete");return result;
+  }
+
+  async deleteGraphCredential(wsId:string,id:string){await this.fetch(`/api/workspaces/${wsId}/code-graphs/git-credentials/${id}`,{method:"DELETE"});}
+
+  async verifyGraphAccess(wsId:string,body:GraphAuthInput){
+    const endpoint=`/api/workspaces/${wsId}/code-graphs/verify-access`;
+    const result=parseWithFallback<z.infer<typeof GraphReadableSchema>|null>(await this.fetch<unknown>(endpoint,{method:"POST",body:JSON.stringify(body)}),GraphReadableSchema,null,{endpoint});
+    if(!result)throw new Error("Git access verification is incomplete");return result;
+  }
+
+  async updateGraphAuth(wsId:string,id:string,body:GraphAuthInput){
+    const endpoint=`/api/workspaces/${wsId}/code-graphs/${id}/authentication`;
+    const result=parseWithFallback<z.infer<typeof GraphAuthSavedSchema>|null>(await this.fetch<unknown>(endpoint,{method:"PATCH",body:JSON.stringify(body)}),GraphAuthSavedSchema,null,{endpoint});
+    if(!result)throw new Error("Git authentication was not confirmed");return result;
+  }
+
+
+  async cancelCodeGraphRepository(workspaceId: string, repositoryId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/cancel`, { method: "POST" });
+  }
+
+
+  async deleteCodeGraphRepository(workspaceId: string, repositoryId: string): Promise<void> {
+    await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+
+  async assignCodeGraphRepositoryToAgent(
+    workspaceId: string,
+    repositoryId: string,
+    agentId: string,
+  ): Promise<CodeGraphRepositoryAssignment> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/agents`,
+      {
+        method: "POST",
+        body: JSON.stringify({ agent_id: agentId }),
+      },
+    );
+    return parseWithFallback(raw, CodeGraphRepositoryAssignmentSchema, {
+      repository_id: repositoryId,
+      agent_id: agentId,
+      created_at: "",
+    }, {
+      endpoint: "POST /api/workspaces/{id}/code-graphs/{codeGraphId}/agents",
+    });
+  }
+
+
+  async getCodeGraphRepository(workspaceId: string, repositoryId: string): Promise<CodeGraphRepository> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}`);
+    return parseWithFallback(raw, CodeGraphRepositorySchema, EMPTY_CODE_GRAPH_REPOSITORY, {
+      endpoint: "GET /api/workspaces/{id}/code-graphs/{codeGraphId}",
+    });
+  }
+
+
+  async unassignCodeGraphRepositoryAgent(workspaceId: string, repositoryId: string, agentId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+  }
+
+
+  async queryCodeGraph(workspaceId: string, repositoryId: string, params: Record<string, string>) {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/query?${new URLSearchParams(params)}`);
+    const result = parseWithFallback(raw, CodeGraphQuerySchema, { repository_id: "", repository_name: "", build_id: "", commit: "", engine_commit: "", operation: "", data: null as unknown }, { endpoint: "GET /api/workspaces/{id}/code-graphs/{id}/query" });
+    if (!result.build_id) throw new Error("Invalid CodeGraph query response");
+    return result;
+  }
+
+
+  async setCodeGraphSharing(workspaceId: string, repositoryId: string, enabled: boolean) {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/sharing`, { method: "PATCH", body: JSON.stringify({ enabled }) });
+    return parseWithFallback(raw, CodeGraphRepositorySchema, EMPTY_CODE_GRAPH_REPOSITORY, { endpoint: "PATCH /api/workspaces/{id}/code-graphs/{id}/sharing" });
+  }
+
+
+
+
   private baseUrl: string;
   private token: string | null = null;
   private logger: Logger;

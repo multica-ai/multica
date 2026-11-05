@@ -195,6 +195,11 @@ export function createKoDict(
       headline: "자주 묻는 질문.",
       items: [
         {
+          question: "로컬에 복제하지 않고 저장소를 검색할 수 있나요?",
+          answer:
+            "CodeGraph를 활성화하면 지원되는 에이전트가 할당된 저장소 스냅샷을 검색하고 호출 관계와 Git 커밋에 해당하는 소스 코드를 확인할 수 있습니다. 저장소 가져오기와 할당은 워크스페이스 소유자와 관리자가 관리합니다. 자세한 내용은 [CodeGraph 가이드](/docs/codegraph)를 참고하세요.",
+        },
+        {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
             "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode 등 29개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 Qoder PAT와 Qoder Cloud Agents의 기존 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agents를 설정할 수 있습니다.",

@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_code_graph_repository_repository ON agent_code_graph_repository(repository_id);

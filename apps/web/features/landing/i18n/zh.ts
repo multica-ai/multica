@@ -194,6 +194,11 @@ export function createZhDict(
     headline: "\u95ee\u4e0e\u7b54\u3002",
     items: [
       {
+        question: "智能体不在本地克隆仓库，也能查询代码吗？",
+        answer:
+          "启用 CodeGraph 后，支持图谱工具的智能体可以搜索已分配的仓库快照、查看调用关系，并按 Git 提交读取源码行。工作区所有者和管理员管理仓库导入与分配。部署和权限说明见 [CodeGraph 指南](/docs/zh/codegraph)。",
+      },
+      {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
           "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 29 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Devin CLI\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw、ZCode\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。 自托管部署还可以使用 Qoder PAT 和 Qoder Cloud Agents 中已有的智能体，将 Qoder Cloud Agents 配置为执行任务的托管远端运行时。",

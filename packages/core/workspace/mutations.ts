@@ -138,6 +138,64 @@ export function useDeleteWorkspaceMcpServer(wsId: string) {
   });
 }
 
+export function useCreateCodeGraphRepository(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { repo_url: string; branch?: string; repo_name?: string;auth_mode?:"token"|"anonymous";credential_id?:string }) =>
+      api.createCodeGraphRepository(wsId, body),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+  });
+}
+
+export function useSyncCodeGraphRepository(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (repositoryId: string) => api.syncCodeGraphRepository(wsId, repositoryId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+  });
+}
+
+export function useDeleteCodeGraphRepository(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (repositoryId: string) => api.deleteCodeGraphRepository(wsId, repositoryId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+  });
+}
+
+export function useCancelCodeGraphRepository(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (repositoryId: string) => api.cancelCodeGraphRepository(wsId, repositoryId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+  });
+}
+
+export function useAssignCodeGraphRepositoryToAgent(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repositoryId, agentId }: { repositoryId: string; agentId: string }) =>
+      api.assignCodeGraphRepositoryToAgent(wsId, repositoryId, agentId),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+        queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+      ]),
+  });
+}
+
+export function useUnassignCodeGraphRepositoryAgent(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repositoryId, agentId }: { repositoryId: string; agentId: string }) =>
+      api.unassignCodeGraphRepositoryAgent(wsId, repositoryId, agentId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["workspaces", wsId, "code-graphs"] }),
+  });
+}
+
 /**
  * Assignment writes all return the agent's resulting list, so the cache is
  * updated from the server's answer rather than a guess.

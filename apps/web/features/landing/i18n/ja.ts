@@ -195,6 +195,11 @@ export function createJaDict(
       headline: "よくある質問。",
       items: [
         {
+          question: "ローカルにクローンせずにリポジトリを検索できますか?",
+          answer:
+            "CodeGraph を有効にすると、対応エージェントは割り当てられたスナップショットの検索、呼び出し関係の確認、Git コミットに対応するソース行の読み取りができます。リポジトリの取り込みと割り当てはワークスペースのオーナーと管理者が管理します。詳細は [CodeGraph ガイド](/docs/codegraph)をご覧ください。",
+        },
+        {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
             "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw, ZCode の29種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",

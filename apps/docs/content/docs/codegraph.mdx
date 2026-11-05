@@ -1,0 +1,64 @@
+---
+title: CodeGraph
+description: Give agents read-only access to indexed repository snapshots.
+---
+
+CodeGraph indexes source code and Markdown/YAML documents from a Git repository.
+Agents can search symbols, inspect call relationships, and read source lines
+without checking out the repository on their own computer.
+
+## Add a repository
+
+Open **Work → CodeGraph → Register repository**. Enter an HTTPS Git URL and branch.
+Choose a saved Git credential for a private repository, or explicitly choose
+anonymous access for a public one. Verify access, then register.
+
+Owners and workspace administrators manage repositories and Git credentials.
+Members can view repository details and query successful snapshots.
+A repository's indexed content is shared within its workspace; the Git token
+only controls fetching. Import only code you may share with that workspace.
+
+Git credentials belong to the workspace. Their tokens are encrypted and never
+returned after saving. Use a read-only token scoped to the required repositories.
+Revoking a token prevents future fetches; it does not remove previously indexed
+content. Delete the repository if that content should no longer be available.
+
+## Build and query
+
+Build progress distinguishes queue waiting, fetching, parsing, and publication.
+Queue waiting does not consume the execution timeout. You can cancel a pending
+or running build, or rebuild after a source change. A failed rebuild leaves the
+last successful snapshot available.
+
+Open **Details → Query** to search symbols or documents, inspect callers,
+callees and impact, or read source lines. Results identify the build and Git
+commit. Pin the returned build ID when comparing several results; inspect the
+source before treating a relationship as evidence. Missing results do not prove
+that code or behavior is absent.
+
+## Connect an agent
+
+In repository details, open **Agents** and assign a tool-capable runtime's agent.
+You can also manage assignments from that agent's configuration.
+The daemon injects CodeGraph MCP tools into supported local providers.
+Use a CLI/daemon build that includes this integration and restart older daemons
+after upgrading; backend support alone does not inject tools into older CLIs.
+Cloud providers that cannot receive local tools are not supported by this path.
+
+Each tool call checks the current repository assignment. Removing an assignment
+revokes future calls, including calls from an already running task. This does
+not erase source content already included in a conversation.
+
+## Optional anonymous queries
+
+Anonymous access is off by default. Enabling it exposes indexed source and
+document content to anyone who has the query URL, including content fetched
+from a private repository. Only enable it for content approved for public access.
+Disabling it prevents further anonymous queries. Skill export is not included.
+
+## Self-hosting
+
+CodeGraph needs the optional engine sidecar, shared snapshot storage and Git on
+the API host. See the repository's
+[`services/codegraph/README.md`](https://github.com/multica-ai/multica/blob/main/services/codegraph/README.md)
+for setup, resource settings and encryption-key requirements.

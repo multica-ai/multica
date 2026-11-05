@@ -21,6 +21,8 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  codeGraphs: (wsId: string, filters?: { status?: string; search?: string }) =>
+    ["workspaces", wsId, "code-graphs", filters?.status ?? "", filters?.search ?? ""] as const,
 };
 
 export function workspaceListOptions() {
@@ -225,6 +227,30 @@ export function workspaceMcpServersOptions(wsId: string) {
     queryKey: workspaceKeys.mcpServers(wsId),
     queryFn: () => api.listWorkspaceMcpServers(wsId),
     enabled: wsId !== "",
+  });
+}
+
+export function codeGraphRepositoriesOptions(
+  wsId: string,
+  filters: { status?: string; search?: string } = {},
+) {
+  return queryOptions({
+    queryKey: workspaceKeys.codeGraphs(wsId, filters),
+    queryFn: () => api.listCodeGraphRepositories(wsId, filters),
+    enabled: wsId !== "",
+    // Discover repositories registered by another client, including when this
+    // page's last snapshot was empty or contained only completed builds.
+    refetchInterval: 5_000,
+  });
+}
+
+export function codeGraphRepositoryOptions(wsId: string, repositoryId: string) {
+  return queryOptions({
+    queryKey: ["workspaces", wsId, "code-graphs", "detail", repositoryId],
+    queryFn: () => api.getCodeGraphRepository(wsId, repositoryId),
+    enabled: wsId !== "" && repositoryId !== "",
+    staleTime: 0,
+    refetchInterval: 5_000,
   });
 }
 

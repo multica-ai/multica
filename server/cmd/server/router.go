@@ -1499,6 +1499,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Health / readiness checks
 	r.Get("/health", health.liveHandler)
+	r.Get("/api/codegraphs/public/{codeGraphId}/query", h.QueryPublicCodeGraph)
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
@@ -1718,6 +1719,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// no workspace in the path to gate on.
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
+		r.Handle("/api/codegraph/mcp", http.HandlerFunc(h.CodeGraphMCP))
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
@@ -1792,6 +1794,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The payload is names and transports only; the stored
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
+					r.Get("/code-graphs", h.ListWorkspaceCodeGraphs)
+					r.Get("/code-graphs/{codeGraphId}", h.GetWorkspaceCodeGraph)
+					r.Get("/code-graphs/{codeGraphId}/query", h.QueryWorkspaceCodeGraph)
 					// Installed Plugins are member-visible so a member can
 					// see what is mounted in their workspace and which scopes
 					// it holds; install / configure / remove stay admin-only.
@@ -1818,6 +1823,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
 					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
 					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
+					r.Post("/code-graphs", h.CreateWorkspaceCodeGraph)
+					r.Get("/code-graphs/git-credentials", h.ListCodeGraphCredentials)
+					r.Post("/code-graphs/git-credentials", h.SaveCodeGraphCredential)
+					r.Put("/code-graphs/git-credentials/{credentialId}", h.SaveCodeGraphCredential)
+					r.Delete("/code-graphs/git-credentials/{credentialId}", h.DeleteCodeGraphCredential)
+					r.Post("/code-graphs/verify-access", h.VerifyCodeGraphGitAccess)
+					r.Patch("/code-graphs/{codeGraphId}/authentication", h.UpdateCodeGraphAuth)
+					r.Post("/code-graphs/{codeGraphId}/sync", h.SyncWorkspaceCodeGraph)
+					r.Post("/code-graphs/{codeGraphId}/cancel", h.CancelWorkspaceCodeGraph)
+					r.Patch("/code-graphs/{codeGraphId}/sharing", h.SetCodeGraphSharing)
+					r.Post("/code-graphs/{codeGraphId}/agents", h.AssignWorkspaceCodeGraphToAgent)
+					r.Delete("/code-graphs/{codeGraphId}/agents/{agentId}", h.UnassignWorkspaceCodeGraphAgent)
+					r.Delete("/code-graphs/{codeGraphId}", h.DeleteWorkspaceCodeGraph)
 					r.Post("/share-links", h.CreateShareLink)
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
 					r.Get("/share-links", h.ListShareLinks)

@@ -100,6 +100,9 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  CodeGraphRepositoryAssignment,
+  CodeGraphRepository,
+  CodeGraphRepositoryListResponse,
   WorkspaceMcpServer,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
@@ -3820,6 +3823,96 @@ export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
   created_at: "",
   updated_at: "",
 };
+
+export const CodeGraphQuerySchema = z.object({
+  repository_id: z.string(), repository_name: z.string(), build_id: z.string(), commit: z.string(),
+  engine_commit: z.string(), operation: z.string(), data: z.unknown(),
+  truncated: z.boolean().optional(),
+});
+
+export const CodeGraphBuildSchema = z.object({
+  id:z.string(), status:z.string(), commit:z.string().default(""), created_at:z.string(), error:z.string().optional(),
+  phase:z.string().default("unknown"), cancel_requested:z.boolean().default(false),
+  started_at:z.string().optional(), finished_at:z.string().optional(), phase_started_at:z.string().default(""),
+});
+export const CodeGraphRepositorySchema = z.object({
+ auth_mode:z.enum(["token","anonymous"]).optional().catch(undefined),
+ credential_id:z.string().nullish().transform(value=>value??undefined),
+	builds: z.array(CodeGraphBuildSchema).default([]),
+  progress: CodeGraphBuildSchema.optional(),
+	active_build_id: z.string().optional(),
+	public_read_enabled: z.boolean().default(false),
+	symbol_count: z.number().default(0),
+	edge_count: z.number().default(0),
+  agents: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    created_at: z.string(),
+  })).default([]),
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  repo_url: z.string().default(""),
+  repo_name: z.string().default(""),
+  branch: z.string().default("main"),
+  status: z.enum(["pending", "processing", "ready", "failed"]).catch("pending"),
+  internal_status: z.string().optional(),
+  commit_hash: z.string().optional(),
+  file_count: z.number().default(0),
+  sync_error: z.string().optional(),
+  last_indexed_at: z.string().optional(),
+  created_by: z.string().optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const CodeGraphRepositoryListResponseSchema = z.object({
+  items: z.array(CodeGraphRepositorySchema).default([]),
+  stats: z.object({
+    total: z.number().default(0),
+    ready: z.number().default(0),
+    processing: z.number().default(0),
+    pending: z.number().default(0),
+    failed: z.number().default(0),
+    files: z.number().default(0),
+  }).loose().default({
+    total: 0,
+    ready: 0,
+    processing: 0,
+    pending: 0,
+    failed: 0,
+    files: 0,
+  }),
+}).loose();
+
+export const EMPTY_CODE_GRAPH_REPOSITORY: CodeGraphRepository = {
+  id: "",
+  workspace_id: "",
+  repo_url: "",
+  repo_name: "",
+  branch: "main",
+  status: "pending",
+  file_count: 0,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_CODE_GRAPH_REPOSITORY_LIST_RESPONSE: CodeGraphRepositoryListResponse = {
+  items: [],
+  stats: {
+    total: 0,
+    ready: 0,
+    processing: 0,
+    pending: 0,
+    failed: 0,
+    files: 0,
+  },
+};
+
+export const CodeGraphRepositoryAssignmentSchema: z.ZodType<CodeGraphRepositoryAssignment> = z.object({
+  repository_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
 
 // Share links. Introduced with the workspace share-link invite flow; schemas
 // mirror the API responses so malformed payloads fall back to safe defaults.

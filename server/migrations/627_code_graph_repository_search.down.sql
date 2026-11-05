@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS code_graph_repository_workspace_search_idx;

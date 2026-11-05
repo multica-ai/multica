@@ -63,6 +63,13 @@ type AgentBuilderDraft struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AgentCodeGraphRepository struct {
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	RepositoryID pgtype.UUID        `json:"repository_id"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -600,6 +607,60 @@ type CloudAgentConnection struct {
 	LastError        string             `json:"last_error"`
 	BusyUntil        pgtype.Timestamptz `json:"busy_until"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CodeGraphBuild struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RepositoryID    pgtype.UUID        `json:"repository_id"`
+	Status          string             `json:"status"`
+	Error           pgtype.Text        `json:"error"`
+	CommitHash      string             `json:"commit_hash"`
+	FileCount       int32              `json:"file_count"`
+	SymbolCount     int32              `json:"symbol_count"`
+	EdgeCount       int32              `json:"edge_count"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+	CancelRequested bool               `json:"cancel_requested"`
+	Phase           string             `json:"phase"`
+	PhaseStartedAt  pgtype.Timestamptz `json:"phase_started_at"`
+}
+
+type CodeGraphGitCredential struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	ServiceUrl     string             `json:"service_url"`
+	Username       string             `json:"username"`
+	TokenEncrypted string             `json:"token_encrypted"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	UpdatedBy      pgtype.UUID        `json:"updated_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CodeGraphRepository struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RepoUrl           string             `json:"repo_url"`
+	RepoName          string             `json:"repo_name"`
+	Branch            string             `json:"branch"`
+	Status            string             `json:"status"`
+	InternalStatus    pgtype.Text        `json:"internal_status"`
+	CommitHash        pgtype.Text        `json:"commit_hash"`
+	FileCount         int32              `json:"file_count"`
+	SyncError         pgtype.Text        `json:"sync_error"`
+	LastIndexedAt     pgtype.Timestamptz `json:"last_indexed_at"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ActiveBuildID     pgtype.UUID        `json:"active_build_id"`
+	PublicReadEnabled bool               `json:"public_read_enabled"`
+	SymbolCount       int32              `json:"symbol_count"`
+	EdgeCount         int32              `json:"edge_count"`
+	AuthMode          string             `json:"auth_mode"`
+	CredentialID      pgtype.UUID        `json:"credential_id"`
 }
 
 type Comment struct {

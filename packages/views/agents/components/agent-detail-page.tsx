@@ -1,4 +1,5 @@
 "use client";
+import { AgentCodeGraphsTab } from "../../code-graph/components/agent-code-graphs-tab";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
@@ -690,6 +691,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           />
 
           {/* Qoder agents take their skills from Qoder Cloud Agents. */}
+          {runtime?.supports_code_graph && <AgentCodeGraphsTab agent={agent} runtime={runtime} />}
           {runtime?.provider === "qoder_cloud" ? null : (
             <AgentSkillsSection
               agent={agent}
