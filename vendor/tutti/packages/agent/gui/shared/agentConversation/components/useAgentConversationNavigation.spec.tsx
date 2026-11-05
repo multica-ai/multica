@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { ConversationModel } from "@multica/conversation-client/models";
 import { ConversationNavigation } from "@multica/conversation-client/services";
 import { localV2SnapshotSchema, type LocalV2NavigationQuery } from "@multica/core/local-conversation/v2";
@@ -13,6 +13,34 @@ beforeEach(() => { vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockRe
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const at = "2026-11-05T00:00:00Z";
 const turn = (index: number) => ({ id: `t${index}`, turn_index: index, request_id: `r${index}`, status: "completed", started_at: at, messages: [{ id: `m${index}`, role: "user", content: `Prompt ${index}`, created_at: at }], events: [] });
+
+it("lets the first page paint before supplementing and cancels the scheduled read when hidden", async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let sequence = 0;
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => { frames.set(++sequence, callback); return sequence; });
+  vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+  const complete = vi.fn(async () => {});
+  const navigation = new ConversationNavigation({ model: () => undefined, request: vi.fn(), changed: () => {},
+    initialWindow: { pending: () => true, complete } });
+  const nextFrame = () => act(() => {
+    const pending = [...frames.values()]; frames.clear();
+    pending.forEach((callback) => callback(performance.now()));
+  });
+  const app = renderHook(({ visible }) => useAgentConversationNavigation({
+    navigation, loadedItems: [], turnGroups: [{ key: "t", turnId: "t" }],
+    virtualizer: {} as ReactVirtualizer<HTMLElement, Element>, shouldVirtualize: false, isVisible: visible,
+  }), { initialProps: { visible: true } });
+  nextFrame();
+  expect(complete).not.toHaveBeenCalled();
+  app.rerender({ visible: false });
+  nextFrame();
+  expect(complete).not.toHaveBeenCalled();
+  app.rerender({ visible: true });
+  nextFrame();
+  expect(complete).not.toHaveBeenCalled();
+  nextFrame();
+  await waitFor(() => expect(complete).toHaveBeenCalledOnce());
+});
 
 it("shows the full directory before history is loaded, prefetches on hover, and locates only on click", async () => {
   const model = ConversationModel.fromSnapshot(localV2SnapshotSchema.parse({ version: 2, store_generation: "g", snapshot_seq: 100, conversation: { conversation_id: "c", summary_seq: 1, provider: "claude", title: "c", status: "idle", pinned: false, archived: false, updated_at: at, turn_count: 100 }, turns: Array.from({ length: 10 }, (_, i) => turn(i + 90)), has_older_turns: true }));

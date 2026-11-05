@@ -1,3 +1,4 @@
+import { GLOBAL_EXECUTION_PERMISSION_KEY } from "@multica/conversation-client/models";
 import {
 deriveAgentPresenceDetail,
 isAgentRuntimeBound
@@ -88,6 +89,12 @@ export interface AgentGuiWorkspaceService extends AgentGuiHostServices {
   dispose(): void;
 }
 
+const preferenceListeners = new Set<{
+  storage: StorageAdapter;
+  key: string;
+  listener(value: string | null): void;
+}>();
+
 export function createAgentGuiWorkspaceService(
   options: ParentServiceOptions
 ): AgentGuiWorkspaceService {
@@ -97,6 +104,12 @@ export function createAgentGuiWorkspaceService(
   const cleanup: Array<() => void> = [];
   let disposed = false;
   let workspaceNotificationPending = false;
+
+  function preferenceKey(key: string) {
+    return key === GLOBAL_EXECUTION_PERMISSION_KEY
+      ? `multica:tutti-gui:${userId}:${key}`
+      : `multica:tutti-gui:${userId}:${workspaceId}:${encodeURIComponent(key)}`;
+  }
 
   function assertCurrent() {
     if (disposed || !options.isCurrent()) {
@@ -280,21 +293,40 @@ export function createAgentGuiWorkspaceService(
       read: unsupported
     },
     storage: {
+      subscribe({ key }, listener) {
+        assertCurrent();
+        const storedKey = preferenceKey(key);
+        const subscription = { storage, key: storedKey, listener };
+        preferenceListeners.add(subscription);
+        const onStorage = (event: StorageEvent) => {
+          if (event.key === storedKey || event.key === null) listener(event.newValue);
+        };
+        if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
+        const release = () => {
+          preferenceListeners.delete(subscription);
+          if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+        };
+        cleanup.push(release);
+        return release;
+      },
       read: async (params) => {
         assertCurrent();
-        const key = `multica:tutti-gui:${userId}:${workspaceId}:${encodeURIComponent(stringField(record(params), "key"))}`;
+        const key = preferenceKey(stringField(record(params), "key"));
         return storage.getItem(key);
       },
       write: async (params) => {
         assertCurrent();
-        const key = `multica:tutti-gui:${userId}:${workspaceId}:${encodeURIComponent(stringField(record(params), "key"))}`;
+        const key = preferenceKey(stringField(record(params), "key"));
         if (typeof params.value !== "string")
           throw new AgentGuiBridgeError(
             "Invalid stored value",
             "invalid_request",
             400
           );
-        storage.setItem(key, params.value);
+        await storage.setItem(key, params.value);
+        for (const subscription of preferenceListeners) {
+          if (subscription.storage === storage && subscription.key === key) subscription.listener(params.value);
+        }
       }
     },
     hostApi: {

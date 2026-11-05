@@ -163,6 +163,19 @@ const scroller = (page: Page) =>
     return false;
   });
 
+test("shows five turns before supplementing a seven-turn conversation without virtualization", async ({ page }) => {
+  await page.goto("/tutti-agent-gui/direct.html?small=1");
+  await page.evaluate(() => { (window as unknown as { paging: { historyDelay: number } }).paging.historyDelay = 1_000; });
+  await page.locator("#paged").click();
+  await expect(page.getByText("Answer 6", { exact: false })).toBeVisible();
+  const first = page.getByRole("paragraph").filter({ hasText: /^Question 0$/ });
+  await expect(first).toHaveCount(0);
+  await expect(first).toBeAttached();
+  expect((await paging(page)).started).toEqual([2]);
+  expect((await paging(page)).reads).toBe(1);
+  await expect(page.locator('[data-agent-transcript-virtualized="true"]')).toHaveCount(0);
+});
+
 test("a long conversation opens at its end with three screens of history above, and pages to its start", async ({
   page
 }) => {

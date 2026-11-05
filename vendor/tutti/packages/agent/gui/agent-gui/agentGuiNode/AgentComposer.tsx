@@ -210,6 +210,8 @@ export const AgentComposer = observer(function AgentComposer(
   const slashCapabilitiesRefreshedSessionRef = useRef<string | null>(null);
   const handleDraftContentChange = useComposerDraftCapabilitiesRequest({
     agentSessionId,
+    draftScopeKey,
+    isActive,
     onDraftContentChange,
     onRetryComposerOptions,
     provider

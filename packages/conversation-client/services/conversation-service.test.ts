@@ -159,12 +159,66 @@ function daemon(routes: Record<string, unknown> = {}) {
 const settle = () => new Promise((resolve) => setTimeout(resolve));
 
 describe("ConversationService content", () => {
+  it.each([4, 5, 6, 7, 8, 9, 10, 100])("fills the rendered first page up to min(%i, 10) without rereading its five turns", async (total) => {
+    const count = Math.min(total, 5);
+    const target = Math.min(total, 10);
+    const start = total - count;
+    const targetStart = total - target;
+    const d = daemon({
+      "/sessions/a/snapshot": snapshotOf("a", 9, {
+        conversation: { ...summary("a", 1), turn_count: total },
+        turns: Array.from({ length: count }, (_, index) => turnOf(`t${start + index}`, start + index)),
+        has_older_turns: start > 0,
+      }),
+      "/sessions/a/history": { store_generation: "g1", has_older_turns: targetStart > 0,
+        turns: Array.from({ length: target - count }, (_, index) => turnOf(`t${targetStart + index}`, targetStart + index)) },
+    });
+    const store = newStore(d.t);
+    const leave = store.open("a");
+    await store.ensure("a");
+    const navigation = store.navigation("a");
+    expect(d.reads).toEqual(["/sessions/a/snapshot?turn_limit=5"]);
+    expect(store.conversation("a")!.turns.size).toBe(count);
+    await navigation.completeInitialWindow();
+    await navigation.completeInitialWindow();
+    expect(d.reads.filter((path) => path.includes("history"))).toEqual(target > count
+      ? [`/sessions/a/history?before_index=${start}&turn_limit=${target - count}`] : []);
+    expect(store.conversation("a")!.turns.size).toBe(target);
+    leave();
+  });
+
+  it("does not start the initial supplement after the conversation is left", async () => {
+    const d = daemon({ "/sessions/a/snapshot": snapshotOf("a", 1, {
+      conversation: { ...summary("a", 1), turn_count: 100 },
+      turns: Array.from({ length: 5 }, (_, i) => turnOf(`t${i + 95}`, i + 95)), has_older_turns: true,
+    }) });
+    const store = newStore(d.t);
+    const leave = store.open("a");
+    await store.ensure("a");
+    const navigation = store.navigation("a");
+    leave();
+    await navigation.completeInitialWindow();
+    expect(d.reads).toHaveLength(1);
+  });
+
+  it("does not infer a supplement size when an older response omits the total count", async () => {
+    const d = daemon({ "/sessions/a/snapshot": snapshotOf("a", 1, {
+      turns: Array.from({ length: 5 }, (_, i) => turnOf(`t${i + 95}`, i + 95)), has_older_turns: true,
+    }) });
+    const store = newStore(d.t);
+    const leave = store.open("a");
+    await store.ensure("a");
+    await store.navigation("a").completeInitialWindow();
+    expect(d.reads).toEqual(["/sessions/a/snapshot?turn_limit=5"]);
+    leave();
+  });
+
   it("reads the first turns once and asks only for later events when reopened", async () => {
     const d = daemon({ "/sessions/a/snapshot": snapshotOf("a", 4) });
     const store = newStore(d.t);
     const leave = store.open("a");
     await settle();
-    expect(d.reads).toEqual(["/sessions/a/snapshot?turn_limit=10"]);
+    expect(d.reads).toEqual(["/sessions/a/snapshot?turn_limit=5"]);
     expect(d.subscribes().at(-1)).toMatchObject({ conversation_id: "a", after_seq: 4 });
     store.receive(status("a", "subscribed", 4));
     store.receive(events("a", event(5)));
@@ -330,6 +384,7 @@ describe("ConversationService content", () => {
     const loading = store.ensure("a");
     await settle();
     expect(store.conversation("a")?.seq).toBe(2);
+    expect(d.reads).toEqual(["/sessions/a/snapshot?turn_limit=5"]);
     answer(snapshotOf("a", 8));
     await loading;
     expect(store.conversation("a")?.seq).toBe(8);

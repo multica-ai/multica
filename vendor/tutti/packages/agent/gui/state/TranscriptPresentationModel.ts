@@ -16,6 +16,7 @@ import {
   findParticipantHeaderRenderKeys
 } from "../shared/agentConversation/components/agentTurnWorkSectionModel";
 import { assessAgentTranscriptComplexity } from "../shared/agentConversation/components/agentTranscriptComplexity";
+import { measureConversationWork } from "./conversationWorkProfile";
 
 type Row = AgentConversationVM["rows"][number];
 type Section = ReturnType<typeof buildAgentTurnWorkSectionModel>;
@@ -86,7 +87,10 @@ export class TranscriptPresentationModel {
 
   constructor(private readonly source: PresentationSource, readonly sessionId: string, readonly participantMode: boolean, private readonly state = new TranscriptPresentationState()) {
     this.expandedTools = state.expandedTools;
-    this.partition = computed(() => this.partitionParts(source.parts()));
+    this.partition = computed(() => {
+      const parts = source.parts();
+      return measureConversationWork(sessionId, "partition", () => this.partitionParts(parts));
+    });
     this.ordered = computed(() => [...this.partition.get().groups.values()].map((group) => {
       let identity = this.identities.get(group.key);
       if (!identity || identity.turnId !== group.turnId) {
@@ -107,12 +111,14 @@ export class TranscriptPresentationModel {
     }, { equals: comparer.shallow });
     this.locations = computed(() => {
       const partition = this.partition.get();
-      const indexes = new Map<number, number>();
-      [...partition.groups.values()].forEach((group, groupIndex) => {
-        const offset = partition.offsets.get(group.key)!;
-        group.rows.forEach(({ rowIndex }) => indexes.set(offset + rowIndex, groupIndex));
+      return measureConversationWork(sessionId, "locator", () => {
+        const indexes = new Map<number, number>();
+        [...partition.groups.values()].forEach((group, groupIndex) => {
+          const offset = partition.offsets.get(group.key)!;
+          group.rows.forEach(({ rowIndex }) => indexes.set(offset + rowIndex, groupIndex));
+        });
+        return buildUserMessageLocatorItems(partition.rows, partition.rows.map(transcriptRowKey), indexes);
       });
-      return buildUserMessageLocatorItems(partition.rows, partition.rows.map(transcriptRowKey), indexes);
     }, { equals: comparer.structural });
     this.dividerIndexes = computed(() => {
       const { rows, turns } = this.partition.get();
@@ -124,10 +130,10 @@ export class TranscriptPresentationModel {
       if (!participantMode) return new Set<string>();
       const partition = this.partition.get();
       const sections = new Map([...partition.groups.keys()].map((key) => [key, this.workSection(key)]));
-      return findParticipantHeaderRenderKeys(
+      return measureConversationWork(sessionId, "participant_headers", () => findParticipantHeaderRenderKeys(
         [...partition.groups.values()], partition.rows.map(transcriptRowKey), sections,
         buildAgentParticipantTurnProjection(partition.rows).turnIndexByRowIndex, partition.offsets
-      );
+      ));
     }, { equals: comparer.shallow });
   }
 
@@ -160,7 +166,7 @@ export class TranscriptPresentationModel {
         }, sameTiming);
         return [this.group(key), turn, this.isActive(key), this.context.imported] as const;
       }, comparer.shallow);
-      return group ? buildAgentTurnWorkSectionModel(group, turn, active, { collapseIntermediateAssistantReplies: !imported }) : null;
+      return group ? measureConversationWork(this.sessionId, "work_section", () => buildAgentTurnWorkSectionModel(group, turn, active, { collapseIntermediateAssistantReplies: !imported })) : null;
     });
   }
   showDivider(key: string) {

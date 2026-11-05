@@ -60,6 +60,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
   const historyRange = historyNavigation?.window;
   const historyPaging = historyNavigation?.paging;
   const historyLocating = historyNavigation?.locating;
+  const historyStartIndex = historyNavigation?.historyStartIndex ?? conversation?.sourceDetail?.turns?.[0]?.id;
+  const initialWindowPending = historyNavigation?.initialWindowPending;
   const [isTimelineScrolledToTop, setIsTimelineScrolledToTop] = useState(true);
   const followEndControllerRef = useRef(
     createAgentConversationFollowEndController()
@@ -97,6 +99,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
   const lastShowTimelineSkeletonRef = useRef(showTimelineSkeleton);
   const bottomDockSafeAreaRef = useRef<BottomDockSafeArea | null>(null);
   const lastHistoryPrefetchRef = useRef<string | null>(null);
+  const historyUserScrollRef = useRef(false);
   const [virtualScrollControllerRevision, setVirtualScrollControllerRevision] =
     useState(0);
   const setVirtualScrollController = useCallback(
@@ -145,6 +148,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     const conversationChanged =
       !anchor || anchor.conversationId !== activeConversationId;
     if (conversationChanged) {
+      historyUserScrollRef.current = false;
       if (anchor) {
         conversationScrollMemoryRef.current.write(
           anchor,
@@ -510,13 +514,15 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         !hasOlderMessages ||
         isLoadingOlderMessages ||
         showTimelineSkeleton ||
+        initialWindowPending ||
         scrollTop >= AGENT_GUI_TOP_HISTORY_PREFETCH_VIEWPORTS * clientHeight
       ) {
         return;
       }
-      // Only new geometry or the user asks again. A page that failed or added
-      // nothing would otherwise be requested in a loop when loading settles.
-      const geometryKey = `${activeConversationId}:${scrollHeight}:${clientHeight}`;
+      // Measurement changes do not advance the history cursor or retry a failed page.
+      const geometryKey = historyStartIndex === null || historyStartIndex === undefined
+        ? `${activeConversationId}:${scrollHeight}:${clientHeight}`
+        : `${activeConversationId}:before:${historyStartIndex}`;
       if (!userScrolled && lastHistoryPrefetchRef.current === geometryKey) {
         return;
       }
@@ -530,6 +536,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     };
 
     const captureScrollAnchor = (): void => {
+      const userScrolled = historyUserScrollRef.current;
+      historyUserScrollRef.current = false;
       const previousAnchor = timelineScrollAnchorRef.current;
       if (
         !previousAnchor ||
@@ -595,7 +603,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         scrollTop,
         previousAnchor.scrollHeight,
         previousAnchor.clientHeight,
-        true
+        userScrolled
       );
     };
 
@@ -633,7 +641,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         setIsTimelineScrolledToTop(
           scrollTop <= AGENT_GUI_TOP_MASK_SCROLL_EPSILON_PX
         );
-        loadOlderMessagesNearTop(scrollTop, scrollHeight, clientHeight, true);
+        loadOlderMessagesNearTop(scrollTop, scrollHeight, clientHeight);
         return;
       }
       const geometry = readTimelineGeometry(timeline);
@@ -658,6 +666,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     };
 
     const captureWheelIntent = (event: WheelEvent): void => {
+      if (!historyNavigation?.window && event.deltaY !== 0) historyUserScrollRef.current = true;
       if (event.deltaY < 0) {
         userScrollDirectionRef.current = "away";
         dispatchFollowEnd("user-scrolled-away");
@@ -679,6 +688,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         event.key === "Home" ||
         event.key === "PageUp"
       ) {
+        historyUserScrollRef.current = true;
         userScrollDirectionRef.current = "away";
         dispatchFollowEnd("user-scrolled-away");
       } else if (
@@ -687,6 +697,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
         event.key === "PageDown" ||
         (event.key === " " && !event.shiftKey)
       ) {
+        historyUserScrollRef.current = true;
         userScrollDirectionRef.current = "toward-end";
       }
     };
@@ -700,6 +711,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       }
     };
     const capturePointerIntent = (): void => {
+      historyUserScrollRef.current = true;
       pointerScrollConversationRef.current = activeConversationId;
     };
     const clearPointerIntent = (): void => {
@@ -708,6 +720,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       }
     };
     const clearScrollDirection = (): void => {
+      historyUserScrollRef.current = false;
       userScrollDirectionRef.current = null;
     };
 
@@ -764,6 +777,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     historyRange,
     historyPaging,
     historyLocating,
+    historyStartIndex,
+    initialWindowPending,
     writeTimelineScrollAnchor
   ]);
 

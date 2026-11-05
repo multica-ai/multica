@@ -11,6 +11,8 @@ import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
 import type { LocalPromptQueue } from "@multica/core/local-conversation/protocol";
 import { reaction, runInAction } from "mobx";
 import { ConversationRowsModel } from "../../../../vendor/tutti/packages/agent/gui/state/ConversationRowsModel";
+import { ConversationModel } from "@multica/conversation-client/models";
+import { localV2SnapshotSchema } from "@multica/core/local-conversation/v2";
 import { afterEach,describe,expect,it,vi } from "vitest";
 import { fakeHostServices } from "../../e2e-harness/fake-host-services";
 import { LOCAL_TIMING_PREFIX } from "../local-timing";
@@ -245,6 +247,25 @@ async function setup(data = backend()) {
 }
 
 describe("Multica Agent GUI runtime with native conversation services", () => {
+  it("passes the source's total turn count to transcript virtualization", () => {
+    const data = backend();
+    const conversation = ConversationModel.fromSnapshot(localV2SnapshotSchema.parse({
+      version: 2, store_generation: "g", snapshot_seq: 1,
+      conversation: { conversation_id: session.id, summary_seq: 1, provider: "codex", title: "Test", status: "idle",
+        pinned: false, archived: false, updated_at: time, turn_count: 100 },
+      turns: [], has_older_turns: true,
+    }));
+    const handle = createRuntime(data.client, { ...init, sessions: [session] }, {
+      ...localSourceFromClient(data.client),
+      conversation: () => conversation,
+    });
+    handles.push(handle);
+    const rows = handle.runtime.conversationRows(session.id);
+    expect(rows.shouldVirtualize).toBe(true);
+    runInAction(() => conversation.setSummary({ ...conversation.summary, turn_count: 7 }));
+    expect(rows.shouldVirtualize).toBe(false);
+  });
+
   it.each([false, true])(
     "queues ordinary desktop messages and sends them now without guidance (agent mention: %s)",
     async (mentioned) => {
@@ -1164,191 +1185,81 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
       data.request.mock.calls.filter(([method]) => method === "queue.update")
     ).toHaveLength(0);
   });
-  it("remembers an already selected permission on upgrade without replacing a saved provider default", async () => {
-    const data = backend(
-      new Map([
-        [
-          "permission-preferences-v1",
-          JSON.stringify([[`session:${session.id}`, "auto"]])
-        ]
-      ])
-    );
+  it("ignores old per-session permissions instead of overriding the global default", async () => {
+    const data = backend(new Map([["permission-preferences-v1", JSON.stringify([[`session:${session.id}`, "auto"]])]]));
     data.sessions.push(session);
-    const localInit = { ...init, local: true, activeSessionId: session.id };
-    const handle = createMulticaAgentGuiRuntime(data.client, localInit);
+    const handle = createMulticaAgentGuiRuntime(data.client, { ...init, activeSessionId: session.id });
     handles.push(handle);
     await handle.initialize();
-    expect(handle.getPermissionSelection(agent.id)).toBe("auto");
-    const restarted = createMulticaAgentGuiRuntime(data.client, {
-      ...localInit,
-      activeSessionId: null
-    });
-    handles.push(restarted);
-    await restarted.initialize();
-    expect(restarted.getPermissionSelection(agent.id)).toBe("auto");
-    await restarted.setPermissionSelection(agent.id, null, "default");
-    const reopened = createMulticaAgentGuiRuntime(data.client, localInit);
-    handles.push(reopened);
-    await reopened.initialize();
-    expect(reopened.getPermissionSelection(agent.id)).toBe("default");
-    expect(reopened.getPermissionSelection(agent.id, session.id)).toBe("auto");
+    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("default");
+    expect(handle.getPermissionSelection("other-provider")).toBe("default");
   });
-  it("remembers the last local permission choice for new conversations without replacing existing permissions", async () => {
+
+  it("shares the global permission across existing sessions, providers and restarts", async () => {
     const data = backend();
     data.sessions.push(session);
-    const handle = createMulticaAgentGuiRuntime(data.client, {
-      ...init,
-      local: true
-    });
-    handles.push(handle);
-    await handle.initialize();
+    const { handle } = await setup(data);
     await handle.runtime.conversations.load(init.workspaceId, session.id);
     await handle.setPermissionSelection(agent.id, session.id, "auto");
     expect(handle.getPermissionSelection(agent.id)).toBe("auto");
-    expect(handle.getPermissionSelection("other-provider")).toBe("default");
-    const restored = createMulticaAgentGuiRuntime(data.client, {
-      ...init,
-      local: true
-    });
+    expect(handle.getPermissionSelection("other-provider", "another-session")).toBe("auto");
+    const restored = createMulticaAgentGuiRuntime(data.client, init);
     handles.push(restored);
     await restored.initialize();
-    expect(restored.getPermissionSelection(agent.id)).toBe("auto");
     expect(restored.getPermissionSelection(agent.id, session.id)).toBe("auto");
     await restored.setPermissionSelection(agent.id, null, "default");
-    expect(restored.getPermissionSelection(agent.id)).toBe("default");
-    expect(restored.getPermissionSelection(agent.id, session.id)).toBe("auto");
+    expect(restored.getPermissionSelection(agent.id, session.id)).toBe("default");
+    expect(restored.getPermissionSelection("other-provider")).toBe("default");
   });
-  it("applies remembered permissions to empty conversations while retaining legacy history and explicit defaults", async () => {
-    const data = backend(
-      new Map([
-        [
-          "permission-preferences-v1",
-          JSON.stringify([["draft:agent-1", "auto"]])
-        ]
-      ])
-    );
-    const fresh = { ...session, id: "new-empty-conversation" };
-    const historical = { ...session, id: "existing-history" };
-    data.sessions.push(session, fresh, historical);
+
+  it("does not let historical session settings replace the global permission", async () => {
+    const data = backend(new Map([["global-execution-permission-v1", JSON.stringify("auto")]]));
+    data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
     data.request.mockImplementation(async (method, params) => {
       const result = await original(method, params);
-      if (method !== "session.load") return result;
-      return {
-        ...result,
-        session: data.sessions.find((item) => item.id === params.sessionId),
-        ...(params.sessionId === session.id
-          ? { permissionMode: "default" }
-          : {}),
-        messages:
-          params.sessionId === historical.id
-            ? [
-                {
-                  id: "history-message",
-                  chat_session_id: historical.id,
-                  role: "user",
-                  content: "Saved history",
-                  created_at: time
-                }
-              ]
-            : []
-      };
+      return method === "session.load" ? { ...result, permissionMode: "full-access" } : result;
     });
-    const handle = createMulticaAgentGuiRuntime(data.client, {
-      ...init,
-      local: true
-    });
-    handles.push(handle);
-    await handle.initialize();
-    expect(handle.getPermissionSelection(agent.id, fresh.id)).toBe("default");
-    await handle.runtime.conversations.load(init.workspaceId, fresh.id);
-    expect(handle.getPermissionSelection(agent.id, fresh.id)).toBe("auto");
-    await handle.runtime.conversations.load(init.workspaceId, historical.id);
-    expect(handle.getPermissionSelection(agent.id, historical.id)).toBe(
-      "default"
-    );
+    const { handle } = await setup(data);
+    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("auto");
     await handle.runtime.conversations.load(init.workspaceId, session.id);
-    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("default");
+    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("auto");
   });
-  it("hydrates local draft permissions before sending, binds them to the new session and prevents changes during execution", async () => {
-    const data = backend(
-      new Map([
-        [
-          "permission-preferences-v1",
-          JSON.stringify([["draft:agent-1", "auto"]])
-        ]
-      ])
-    );
-    const localInit = { ...init, local: true };
-    const handle = createMulticaAgentGuiRuntime(data.client, localInit);
-    handles.push(handle);
-    await handle.initialize();
-    const engine = handle.runtime;
-    engine.activations.request({
-      mode: "new",
-      agentSessionId: "permission-draft",
-      agentTargetId: agent.id,
-      requestId: "permission-activation",
-      clientSubmitId: "permission-submit",
+
+  it("hydrates the global permission before sending and leaves admitted messages unchanged", async () => {
+    const data = backend(new Map([["global-execution-permission-v1", JSON.stringify("auto")]]));
+    const { handle } = await setup(data);
+    handle.runtime.activations.request({
+      mode: "new", agentSessionId: "permission-draft", agentTargetId: agent.id,
+      requestId: "permission-activation", clientSubmitId: "permission-submit",
       initialContent: [{ type: "text", text: "Use Auto" }]
     });
-    await vi.waitFor(() =>
-      expect(enqueuedItem(data.request)).toMatchObject({
-        permissionMode: "auto"
-      })
-    );
-    await handle.runtime.conversations.load(
-      init.workspaceId,
-      "permission-draft"
-    );
-    await expect(
-      handle.setPermissionSelection(agent.id, "permission-draft", "full-access")
-    ).rejects.toMatchObject({ code: "run_in_progress" });
-    const restored = createMulticaAgentGuiRuntime(data.client, localInit);
-    handles.push(restored);
-    await restored.initialize();
-    expect(restored.getPermissionSelection(agent.id, "permission-draft")).toBe(
-      "auto"
-    );
-    expect(restored.getPermissionSelection("other-provider")).toBe("default");
+    await vi.waitFor(() => expect(enqueuedItem(data.request)).toMatchObject({ permissionMode: "auto" }));
+    await handle.runtime.conversations.load(init.workspaceId, "permission-draft");
+    await expect(handle.setPermissionSelection(agent.id, "permission-draft", "full-access")).rejects.toMatchObject({ code: "run_in_progress" });
+    await handle.setPermissionSelection(agent.id, null, "full-access");
+    expect(handle.getPermissionSelection(agent.id, "permission-draft")).toBe("full-access");
+    expect(enqueuedItem(data.request)).toMatchObject({ permissionMode: "auto" });
   });
-  it("preserves inherited permissions until explicitly changed, and retains them after save failure", async () => {
+
+  it("keeps the global permission unchanged when persistence fails", async () => {
     const data = backend();
     data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
     let failSave = false;
     data.request.mockImplementation(async (method, params) => {
-      if (
-        failSave &&
-        method === "storage.write" &&
-        params.key === "permission-preferences-v1"
-      )
+      if (failSave && method === "storage.write" && params.key === "global-execution-permission-v1")
         throw new Error("storage full");
-      const result = await original(method, params);
-      return method === "session.load"
-        ? { ...result, permissionMode: "auto" }
-        : result;
+      return original(method, params);
     });
-    const handle = createMulticaAgentGuiRuntime(data.client, {
-      ...init,
-      local: true
-    });
-    handles.push(handle);
-    await handle.initialize();
+    const { handle } = await setup(data);
     await handle.runtime.conversations.load(init.workspaceId, session.id);
-    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("auto");
+    await handle.setPermissionSelection(agent.id, session.id, "auto");
     failSave = true;
-    await expect(
-      handle.setPermissionSelection(agent.id, session.id, "full-access")
-    ).rejects.toThrow("storage full");
+    await expect(handle.setPermissionSelection(agent.id, session.id, "full-access")).rejects.toThrow("storage full");
     expect(handle.getPermissionSelection(agent.id, session.id)).toBe("auto");
-    expect(handle.getPermissionSelection(agent.id)).toBe("default");
-    failSave = false;
-    await handle.setPermissionSelection(agent.id, session.id, "default");
-    expect(handle.getPermissionSelection(agent.id, session.id)).toBe("default");
-    await expect(
-      handle.setPermissionSelection("other-provider", session.id, "auto")
-    ).rejects.toThrow();
+    expect(handle.getPermissionSelection("other-provider")).toBe("auto");
+    await expect(handle.setPermissionSelection("other-provider", session.id, "auto")).rejects.toThrow();
   });
 
   it("moves a queued message to Side through its own queue, and keeps it if that fails", async () => {

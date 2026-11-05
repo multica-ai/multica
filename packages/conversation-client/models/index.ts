@@ -1,4 +1,4 @@
-export { ModelPreferences, PermissionPreferences, ReasoningPreferences } from "./composer-preferences";
+export { GLOBAL_EXECUTION_PERMISSION_KEY, ModelPreferences, PermissionPreferences, ReasoningPreferences } from "./composer-preferences";
 export { ActivationModel, type ActivationRequest, type ActivationSettingsStatus, type ActivationStatus } from "./activation-model";
 export { ConversationListModel } from "./conversation-list-model";
 export { WorkspaceLoadModel, type WorkspaceLoadStatus } from "./workspace-load-model";

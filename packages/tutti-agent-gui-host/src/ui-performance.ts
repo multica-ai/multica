@@ -1,11 +1,15 @@
 import { reaction } from "mobx";
+import { observeConversationWork, type ConversationWorkStage } from "@tutti-os/agent-gui";
 import type { AgentGuiHostServices, AgentGuiInitSnapshot } from "./protocol";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
 
 const WINDOW_MS = 2_000;
+const SWITCH_WINDOW_MS = 10_000;
+const QUIET_MS = 250;
 const PREFIX = "[ui-performance] ";
 type Action = "first_send" | "switch_conversation";
-type Outcome = "window_complete" | "superseded" | "hidden" | "unmounted" | "stopped";
+type Outcome = "window_complete" | "screen_quiet" | "superseded" | "hidden" | "unmounted" | "stopped";
+type WorkStages = Partial<Record<ConversationWorkStage, { count: number; totalMs: number; maxMs: number }>>;
 interface SlowScript {
   file: string;
   functionName: string;
@@ -21,6 +25,9 @@ interface LongAnimationFrame extends PerformanceEntry {
 }
 
 interface UiSample {
+  conversationId: string;
+  firstVisit: boolean;
+  dataCachedAtStart: boolean | null;
   action: Action;
   surface: "main" | "side";
   at: string;
@@ -34,6 +41,14 @@ interface UiSample {
   maxReactDurationMs: number;
   selectedSessionFrameMs: number | null;
   firstMessageFrameMs: number | null;
+  firstTranscriptFrameMs: number | null;
+  firstQuietFrameMs: number | null;
+  firstFrameRows: number;
+  mountedRowsAtEnd: number;
+  loadedTurns: number;
+  totalTurns: number | null;
+  loadedItems: number;
+  workStages: WorkStages;
   messageDisappearances: number;
   welcomeReentries: number;
   composerReplacements: number;
@@ -73,7 +88,10 @@ export function installConversationUiProfile(
   const browserEntryTypes = typeof PerformanceObserver === "undefined" ? [] :
     ["longtask", "layout-shift", "event", "long-animation-frame"].filter((type) => PerformanceObserver.supportedEntryTypes.includes(type));
   let capture: { sample: UiSample; sessionId: string; started: number; lastFrame: number | null;
+    lastChange: number; stopWork?: () => void;
     userMessage: boolean; welcome: boolean; editor: Element | null } | undefined;
+  const visited = new Set(initial.activeSessionId ? [initial.activeSessionId] : []);
+  let mutations: MutationObserver | undefined;
   let frame = 0;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const now = () => performance.now();
@@ -82,7 +100,17 @@ export function installConversationUiProfile(
     if (!capture) return;
     cancelAnimationFrame(frame);
     clearTimeout(timeout);
-    const result = { ...capture.sample, outcome, durationMs: round(now() - capture.started) };
+    capture.stopWork?.();
+    mutations?.disconnect();
+    mutations = undefined;
+    const context = handle.profileContext?.(capture.sessionId);
+    const result = { ...capture.sample, outcome, durationMs: round(now() - capture.started),
+      workStages: Object.fromEntries(Object.entries(capture.sample.workStages).map(([stage, value]) => [stage, {
+        count: value.count, totalMs: round(value.totalMs), maxMs: round(value.maxMs),
+      }])),
+      loadedTurns: context?.loadedTurns ?? 0, totalTurns: context?.totalTurns ?? null,
+      loadedItems: context?.loadedItems ?? 0,
+      mountedRowsAtEnd: root.querySelectorAll("[data-agent-transcript-row]").length };
     capture = undefined;
     samples.push(result);
     if (samples.length > 100) samples.shift();
@@ -92,7 +120,7 @@ export function installConversationUiProfile(
     if (!capture) return;
     if (!visible || document.visibilityState !== "visible") { finish("hidden"); return; }
     const { sample } = capture;
-    const interval = capture.lastFrame === null ? 0 : time - capture.lastFrame;
+    const interval = time - (capture.lastFrame ?? capture.started);
     capture.lastFrame = time;
     sample.sampledFrames++;
     sample.maxFrameIntervalMs = Math.max(sample.maxFrameIntervalMs, round(interval));
@@ -100,6 +128,14 @@ export function installConversationUiProfile(
     const pane = root.querySelector("[data-agent-session-id]");
     if (pane?.getAttribute("data-agent-session-id") === capture.sessionId) {
       sample.selectedSessionFrameMs ??= round(time - capture.started);
+      const transcript = pane.querySelector("[data-agent-transcript-session-id]");
+      if (sample.firstTranscriptFrameMs === null &&
+          transcript?.getAttribute("data-agent-transcript-session-id") === capture.sessionId &&
+          transcript.querySelector("[data-agent-transcript-row]")) {
+        sample.firstTranscriptFrameMs = round(time - capture.started);
+        sample.firstFrameRows = transcript.querySelectorAll("[data-agent-transcript-row]").length;
+        capture.lastChange = time;
+      }
       const userMessage = !!pane.querySelector('[data-agent-message-speaker="user"]');
       const welcome = !!pane.querySelector(".multica-empty-conversation-welcome");
       if (sample.action === "first_send") {
@@ -115,33 +151,60 @@ export function installConversationUiProfile(
       if (capture.editor && capture.editor !== editor) sample.composerReplacements++;
       capture.editor = editor;
     }
+    if (sample.firstTranscriptFrameMs !== null && time - capture.lastChange >= QUIET_MS) {
+      sample.firstQuietFrameMs ??= round(time - capture.started);
+      if (sample.action === "switch_conversation" && time - capture.started >= WINDOW_MS) {
+        finish("screen_quiet");
+        return;
+      }
+    }
     frame = requestAnimationFrame(tick);
   };
   const begin = (action: Action, sessionId: string, started = now()) => {
     if (!enabled || !visible || document.visibilityState !== "visible") return;
     finish("superseded");
+    const context = handle.profileContext?.(sessionId);
     capture = {
-      sessionId, started, lastFrame: null, userMessage: false, welcome: false,
+      sessionId, started, lastFrame: null, lastChange: now(), userMessage: false, welcome: false,
       editor: root.querySelector('[contenteditable="true"]'),
       sample: {
+        conversationId: sessionId, firstVisit: !visited.has(sessionId), dataCachedAtStart: context?.dataCached ?? null,
         action, surface: initial.sidePane ? "side" : "main", at: new Date().toISOString(),
         outcome: "window_complete", durationMs: 0, sampledFrames: 0, maxFrameIntervalMs: 0,
         frameIntervalsOver50Ms: 0, reactCommits: 0, reactDurationMs: 0, maxReactDurationMs: 0,
         selectedSessionFrameMs: null, firstMessageFrameMs: null, messageDisappearances: 0,
+        firstTranscriptFrameMs: null, firstQuietFrameMs: null, firstFrameRows: 0,
+        mountedRowsAtEnd: 0, loadedTurns: 0, totalTurns: null, loadedItems: 0, workStages: {},
         welcomeReentries: 0, composerReplacements: 0, browserEntryTypes, maxEventResponseMs: null,
         pageLongTasks: 0, pageLongTaskMs: 0, layoutShiftScore: 0,
         pageLongAnimationFrames: 0, pageAnimationBlockingMs: 0, pageRenderPhaseMs: 0, slowScripts: [],
       },
     };
+    visited.add(sessionId);
+    const current = capture;
+    capture.stopWork = observeConversationWork(sessionId, ({ stage, durationMs }) => {
+      if (capture !== current) return;
+      const previous = current.sample.workStages[stage] ?? { count: 0, totalMs: 0, maxMs: 0 };
+      current.sample.workStages[stage] = {
+        count: previous.count + 1, totalMs: previous.totalMs + durationMs,
+        maxMs: Math.max(previous.maxMs, durationMs),
+      };
+    });
+    if (typeof MutationObserver !== "undefined") {
+      mutations = new MutationObserver(() => { if (capture === current) current.lastChange = now(); });
+      mutations.observe(root, { childList: true, characterData: true, attributes: true, subtree: true });
+    }
     frame = requestAnimationFrame(tick);
-    timeout = setTimeout(() => finish("window_complete"), WINDOW_MS);
+    timeout = setTimeout(() => finish("window_complete"), action === "switch_conversation" ? SWITCH_WINDOW_MS : WINDOW_MS);
   };
   const stop = () => finish("stopped");
   stopCaptures.add(stop);
   window.multicaUiPerformance = {
     start: () => { samples.length = 0; enabled = true; },
     stop: () => { enabled = false; for (const stop of stopCaptures) stop(); },
-    snapshot: () => samples.map((sample) => ({ ...sample, browserEntryTypes: [...sample.browserEntryTypes], slowScripts: sample.slowScripts.map((script) => ({ ...script })) })),
+    snapshot: () => samples.map((sample) => ({ ...sample,
+      workStages: Object.fromEntries(Object.entries(sample.workStages).map(([stage, value]) => [stage, { ...value }])),
+      browserEntryTypes: [...sample.browserEntryTypes], slowScripts: sample.slowScripts.map((script) => ({ ...script })) })),
   };
   const known = new Set(handle.runtime.activations.pending().map((item) => item.requestId));
   const stopActivation = reaction(
@@ -213,10 +276,11 @@ export function installConversationUiProfile(
     observer.observe({ type, durationThreshold: 16 } as PerformanceObserverInit & { durationThreshold: number });
     observers.push(observer);
   }
-  console.info(PREFIX + JSON.stringify({ event: "ready", surface: initial.sidePane ? "side" : "main", windowMs: WINDOW_MS, browserEntryTypes }));
+  console.info(PREFIX + JSON.stringify({ event: "ready", surface: initial.sidePane ? "side" : "main", windowMs: WINDOW_MS, switchWindowMs: SWITCH_WINDOW_MS, quietMs: QUIET_MS, browserEntryTypes }));
   return {
     rendered(duration: number) {
       if (!capture) return;
+      capture.lastChange = now();
       capture.sample.reactCommits++;
       capture.sample.reactDurationMs = round(capture.sample.reactDurationMs + duration);
       capture.sample.maxReactDurationMs = Math.max(capture.sample.maxReactDurationMs, round(duration));

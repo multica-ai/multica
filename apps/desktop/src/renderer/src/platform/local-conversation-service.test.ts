@@ -804,6 +804,25 @@ describe("file menu", () => {
   });
 });
 
+it("shares the global permission between main, Side and remote-device conversations", async () => {
+  const records = new Map<string, string>();
+  const storage: StorageAdapter = {
+    getItem: (key) => records.get(key) ?? null,
+    setItem: (key, value) => { records.set(key, value); },
+    removeItem: (key) => { records.delete(key); }
+  };
+  const main = setup({ storage }).service;
+  const side = setup({ storage, storagePrefix: "side:c1:" }).service;
+  const remote = setup({ storage, workspaceId: "another-ws" }, "peer-1").service;
+  const key = "global-execution-permission-v1";
+  const changed = vi.fn();
+  side.storage.subscribe!({ key }, changed);
+  await main.storage.write({ key, value: '"auto"' });
+  expect(await side.storage.read({ key })).toBe('"auto"');
+  expect(await remote.storage.read({ key })).toBe('"auto"');
+  expect(changed).toHaveBeenCalledExactlyOnceWith('"auto"');
+});
+
 it("shares agent selection counts across main and Side while isolating API, user and workspace", async () => {
   const records = new Map<string, string>();
   const storage = {

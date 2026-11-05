@@ -47,7 +47,7 @@ function PermissionPickerRender({
         autoHelp: "由运行器自动判断审批，仍可能拒绝操作。",
         fullHelp: "不再询问权限；可执行命令并访问工作目录之外的文件。",
         scope:
-          "记住此运行器的选择，新会话默认沿用；已有会话单独保存。@ 智能体使用自身权限。"
+          "当前账号在本机的所有会话共用并保存此权限。运行中的请求不受影响；@ 智能体使用自身权限。"
       }
     : {
         title: "Execution permissions",
@@ -63,7 +63,7 @@ function PermissionPickerRender({
         fullHelp:
           "Skip permission prompts. Commands can access files outside the working directory.",
         scope:
-          "Remembered for new conversations with this provider. Existing conversations keep their permissions. Mentioned agents use their own permissions."
+          "Saved for all conversations on this device for this account. Running requests keep their permissions. Mentioned agents use their own permissions."
       };
   const choices: { value: LocalPermissionMode; help: string }[] = [
     { value: "default", help: labels.defaultHelp },

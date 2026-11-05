@@ -20,7 +20,6 @@ export function refreshComposerSlashCapabilities(input: {
   }
   input.refreshedSessionRef.current = refreshKey;
   input.onRetryComposerOptions?.({
-    force: true,
     section: "capabilities"
   });
 }

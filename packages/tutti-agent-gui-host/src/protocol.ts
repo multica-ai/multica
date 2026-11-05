@@ -517,6 +517,7 @@ export interface AgentGuiHostServices {
     ): Promise<AgentGuiOperations["image.read"]["result"]>;
   };
   storage: {
+    subscribe?(params: { key: string }, listener: (value: string | null) => void): () => void;
     read(
       params: AgentGuiOperations["storage.read"]["params"],
       options?: AgentGuiCallOptions
