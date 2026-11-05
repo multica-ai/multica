@@ -230,10 +230,11 @@ type CountUnreadInboxByWorkspaceRow struct {
 // Per-workspace unread inbox counts for a recipient member, matching the
 // inbox UI's deduplicated view: notifications are grouped per issue
 // (Linear-style, one row per issue) and an issue counts as unread only when
-// its NEWEST non-archived item is unread. Opening an issue marks just that
-// newest item read, so counting raw unread rows would keep older siblings
-// alive and light the switcher dot for a workspace whose inbox the user sees
-// as empty (MUL-3695). Items without an issue group on their own id. The
+// its NEWEST non-archived item is unread. Opening an issue reads the whole
+// group now (MUL-8618), but rows read before that read only the newest item,
+// so counting raw unread rows would keep those older siblings alive and light
+// the switcher dot for a workspace whose inbox the user sees as empty
+// (MUL-3695). Items without an issue group on their own id. The
 // member join keeps counts scoped to workspaces the user still belongs to,
 // so a stale item left behind in a workspace the user has since left cannot
 // light the dot.
@@ -625,11 +626,34 @@ func (q *Queries) MarkAllInboxRead(ctx context.Context, arg MarkAllInboxReadPara
 }
 
 const markInboxRead = `-- name: MarkInboxRead :one
-UPDATE inbox_item SET read = true
-WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section
+WITH target AS (
+    SELECT t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id
+    FROM inbox_item t
+    WHERE t.id = $1 AND t.issue_id IS NOT NULL
+), siblings AS (
+    UPDATE inbox_item s SET read = true
+    FROM target
+    WHERE s.workspace_id = target.workspace_id
+      AND s.recipient_type = target.recipient_type
+      AND s.recipient_id = target.recipient_id
+      AND s.issue_id = target.issue_id
+      AND s.archived = false AND s.read = false
+      AND s.id <> $1
+)
+UPDATE inbox_item AS item SET read = true
+WHERE item.id = $1
+RETURNING item.id, item.workspace_id, item.recipient_type, item.recipient_id, item.type, item.severity, item.issue_id, item.title, item.body, item.read, item.archived, item.created_at, item.actor_type, item.actor_id, item.details, item.section
 `
 
+// Opening a row in the inbox opens its issue, so it reads every active unread
+// row on that issue, not just the one shown (MUL-8618). The inbox renders one
+// row per issue carrying its newest item; reading only that item left older
+// unread siblings (an assignment under a later comment) unread for good, out of
+// sight. This is the same rule as MarkInboxReadByIssue, which reads an issue
+// opened outside the inbox. The item itself is read whether or not it is
+// archived; its siblings only while active, as in MarkInboxReadByIssue, which
+// keeps the probe on the partial index idx_inbox_active_by_issue. Items without
+// an issue are their own group.
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
 	var i InboxItem
@@ -668,11 +692,13 @@ type MarkInboxReadByIssueParams struct {
 
 // Reading an issue outside the inbox (its page, a side peek, the Unread view)
 // reads its notifications too, so the inbox does not ask about the same issue
-// again (MUL-8588). Every unread row in the issue's group, not just the newest:
-// the group the inbox renders is read once its newest row is, and older unread
-// siblings would otherwise stay in CountUnreadInbox. Archived rows are left as
-// they are, as in MarkAllInboxRead, which also keeps the lookup on the partial
-// index idx_inbox_active_by_issue.
+// again (MUL-8588). Every unread row in the issue's group, not just the newest,
+// whatever its severity: opening the issue shows all of it, so an assignment,
+// review request or mention on it counts as seen (MUL-8618; this replaces the
+// MUL-8596 rule that kept those unread). Opening the row in the inbox does the
+// same through MarkInboxRead. Archived rows are left as they are, as in
+// MarkAllInboxRead, which also keeps the lookup on the partial index
+// idx_inbox_active_by_issue.
 func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markInboxReadByIssue, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
 	if err != nil {
@@ -687,12 +713,12 @@ WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section
 `
 
-// Exact inverse of MarkInboxRead, and item-level for the same reason it is:
-// the inbox renders one row per issue carrying that group's NEWEST item, and
-// the group's read state is that item's read state. Flipping the whole group
-// unread would resurrect older siblings the user already dealt with and
-// inflate CountUnreadInbox (which counts raw rows), while changing nothing the
-// UI shows.
+// Item-level, unlike MarkInboxRead: the inbox renders one row per issue
+// carrying that group's NEWEST item, and the group's read state is that item's
+// read state, so flipping the newest item is enough to make the row unread.
+// Flipping the whole group unread would resurrect older siblings the user
+// already dealt with and inflate CountUnreadInbox (which counts raw rows),
+// while changing nothing the UI shows.
 func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxUnread, id)
 	var i InboxItem

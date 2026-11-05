@@ -602,6 +602,15 @@ describe("TabBar locale", () => {
       newTab: "Nouvel onglet",
       pinned: "Issues (épinglé)",
     },
+    es: {
+      pin: "Fijar pestaña",
+      unpin: "Dejar de fijar pestaña",
+      close: "Cerrar pestaña",
+      closeOthers: "Cerrar las demás pestañas",
+      openWindow: "Abrir en ventana nueva",
+      newTab: "Pestaña nueva",
+      pinned: "Issues (fijada)",
+    },
   } as const satisfies Record<
     Exclude<SupportedLocale, "en">,
     {

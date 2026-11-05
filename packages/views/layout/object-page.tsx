@@ -7,6 +7,7 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
+  type Ref,
 } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
@@ -53,6 +54,8 @@ interface ObjectPageProps {
    * keeps its place while the body changes.
    */
   children: ReactNode;
+  /** The body scroll owner, for sections that virtualize their rows. */
+  scrollRef?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -61,7 +64,7 @@ interface ObjectPageProps {
  * right panel the header toggles — the layout the issue page already uses.
  * There are no tabs: what a tab would hold is a section of the body.
  */
-export function ObjectPage({ segments, leaf, actions, panel, layoutId, children }: ObjectPageProps) {
+export function ObjectPage({ segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
   const { t } = useT("layout");
   const isMobile = useIsMobile();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: layoutId });
@@ -126,7 +129,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children 
     />
   );
 
-  const body = <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
+  const body = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
 
   if (!panel) {
     return (

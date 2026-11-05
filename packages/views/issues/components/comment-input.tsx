@@ -166,7 +166,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
     },
     // A top-level comment ends a turn: the caret is dropped rather than kept,
     // so the composer stops reading as "still writing" once the comment is
-    // posted above it. Thread replies are the opposite — see ReplyInput.
+    // posted above it. Thread replies do the same — see ReplyInput.
     afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;

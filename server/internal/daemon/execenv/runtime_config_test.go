@@ -24,8 +24,9 @@ import (
 // built without it deliberately carries no pointer at all.
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
+		Name:        "multica-platform",
+		BuiltinName: "multica-platform",
+		Content:     "---\nname: multica-platform\n---\n\nbody",
 	}
 }
 
@@ -2342,18 +2343,8 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	}
 }
 
-// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
-// index of invocable names, with no descriptions and no per-provider branch.
-//
-// Descriptions were removed because every runtime CLI already builds its own
-// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
-// was the same routing signal paid for twice — ~3,100 tokens per brief on a
-// real task, 40% of the whole brief (MUL-5529).
-//
-// The provider branch was removed because its fallback was wrong: it told
-// providers outside a hardcoded list to look in `.agent_context/skills/`, but
-// the only providers that ever reached it — grok and traecli — have their files
-// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+// TestBriefSkillsListIsNamesOnly pins the native-discovery Skills section
+// byte-for-byte. TRAE's file-loading index has separate coverage.
 func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2370,24 +2361,19 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		},
 	}
 
-	// grok and traecli are the providers that used to take the removed branch;
-	// the rest are a spread across the native-discovery list.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "some-unknown-provider"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			_, section, ok := strings.Cut(out, "## Skills\n\n")
+			if !ok {
+				t.Fatal("brief has no Skills section")
 			}
-			if strings.Contains(out, "Use when reviewing a pull request") {
-				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
-			}
-			if strings.Contains(out, ".agent_context/skills/") {
-				t.Errorf("brief still points at the removed fallback path:\n%s", out)
-			}
-			if !strings.Contains(out, "discovered automatically") {
-				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			section, _, _ = strings.Cut(section, "## Mentions\n\n")
+			const want = "You have the following skills installed (discovered automatically):\n\n- **pr-review**\n\n"
+			if section != want {
+				t.Errorf("native-discovery Skills section changed:\ngot  %q\nwant %q", section, want)
 			}
 		})
 	}
@@ -2425,7 +2411,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2495,14 +2481,11 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // gives an agent one name to guess instead of eight. This line is what pays
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {

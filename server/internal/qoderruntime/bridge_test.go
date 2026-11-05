@@ -108,6 +108,7 @@ type harness struct {
 	usageStatus             int
 	cancelAcks              int
 	cancelAckStatus         int
+	comments, evaluations   []map[string]any
 }
 
 func setup(t *testing.T) *harness {
@@ -144,6 +145,16 @@ func setup(t *testing.T) *harness {
 			} else {
 				io.WriteString(w, `{"identifier":"MUL-7"}`)
 			}
+		case r.URL.Path == "/api/issues/issue-1/comments" && r.Method == http.MethodPost:
+			var c map[string]any
+			json.NewDecoder(r.Body).Decode(&c)
+			h.comments = append(h.comments, c)
+			io.WriteString(w, `{}`)
+		case r.URL.Path == "/api/issues/issue-1/squad-evaluated" && r.Method == http.MethodPost:
+			var e map[string]any
+			json.NewDecoder(r.Body).Decode(&e)
+			h.evaluations = append(h.evaluations, e)
+			io.WriteString(w, `{}`)
 		case strings.HasPrefix(r.URL.Path, "/api/issues/"):
 			if h.issueGet != "" {
 				io.WriteString(w, h.issueGet)
@@ -647,6 +658,65 @@ func TestChatRun(t *testing.T) {
 	}
 	if h.complete["session_id"] != "sess_1" || !strings.Contains(fmt.Sprint(h.complete["output"]), "Tests passed") {
 		t.Fatalf("result: %#v", h.complete)
+	}
+}
+func leaderRun(t *testing.T, reply string) *harness {
+	t.Helper()
+	h := setup(t)
+	h.task.IsLeaderTask = true
+	h.task.TriggerCommentID = "comment-1"
+	h.task.Agent.Instructions = "## Squad Operating Protocol\nDelegate."
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(h.prompt, "Squad Operating Protocol") || !strings.Contains(h.prompt, "OUTCOME:") || strings.Contains(h.prompt, "pull request whose title") {
+		t.Fatalf("incorrect leader prompt: %s (failure %#v)", h.prompt, h.failure)
+	}
+	h.draft(reply)
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+func TestSquadLeaderRunDelegates(t *testing.T) {
+	h := leaderRun(t, "OUTCOME: action\nREASON: Bob owns the API\n[@Bob](mention://agent/bob) please fix the handler.")
+	if len(h.comments) != 1 || h.comments[0]["content"] != "[@Bob](mention://agent/bob) please fix the handler." || h.comments[0]["parent_id"] != "comment-1" {
+		t.Fatalf("comments: %#v", h.comments)
+	}
+	if len(h.evaluations) != 1 || h.evaluations[0]["outcome"] != "action" || h.evaluations[0]["reason"] != "Bob owns the API" {
+		t.Fatalf("evaluations: %#v", h.evaluations)
+	}
+	if h.complete == nil || h.failure != nil {
+		t.Fatalf("result: %#v %#v", h.complete, h.failure)
+	}
+}
+func TestSquadLeaderNoActionPostsNoComment(t *testing.T) {
+	h := leaderRun(t, "**OUTCOME:** no_action\n**REASON:** progress update only\nNothing to do.")
+	if len(h.comments) != 0 || len(h.evaluations) != 1 || h.evaluations[0]["outcome"] != "no_action" || h.evaluations[0]["reason"] != "progress update only" {
+		t.Fatalf("comments %#v evaluations %#v", h.comments, h.evaluations)
+	}
+	if h.complete == nil {
+		t.Fatalf("not completed: %#v", h.failure)
+	}
+}
+func TestSquadLeaderUnformattedReplyStillDelegates(t *testing.T) {
+	h := leaderRun(t, "[@Bob](mention://agent/bob) take this one.")
+	if len(h.comments) != 1 || len(h.evaluations) != 1 || h.evaluations[0]["outcome"] != "action" {
+		t.Fatalf("comments %#v evaluations %#v", h.comments, h.evaluations)
+	}
+}
+func TestSquadLeaderWithoutIssueFails(t *testing.T) {
+	h := setup(t)
+	h.task.IsLeaderTask = true
+	h.task.IssueID = ""
+	h.task.ChatSessionID = "chat-1"
+	h.task.ChatMessage = "hi"
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure == nil || h.creates != 0 {
+		t.Fatalf("expected failure before execution: %#v", h.failure)
 	}
 }
 func TestChatAudience(t *testing.T) {

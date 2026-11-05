@@ -296,7 +296,7 @@ export function normalizeSortForGrouping(
   sortDirection: SortDirection,
 ): Pick<IssueViewState, "sortBy" | "sortDirection"> {
   return grouping !== "status" && sortBy === "position"
-    ? { sortBy: "created_at", sortDirection: "desc" }
+    ? { sortBy: "updated_at", sortDirection: "desc" }
     : { sortBy, sortDirection };
 }
 
@@ -479,9 +479,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   dateFilter: null,
   agentRunningFilter: false,
   unreadFilter: false,
-  sortBy: "created_at",
+  sortBy: "updated_at",
   sortDirection: "desc",
-  sortDirections: { created_at: "desc" },
+  sortDirections: { updated_at: "desc" },
   cardProperties: { ...DEFAULT_CARD_PROPERTIES },
   cardPropertyIds: [],
   showSubIssues: true,

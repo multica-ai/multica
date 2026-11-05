@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "새 기능",
-    "card": {
-      "eyebrow": "Multica 업데이트 · {{range}}",
-      "title_other": "마지막 방문 이후 새 기능 {{count}}개가 추가되었습니다",
-      "dismiss": "닫기",
-      "view_details": "자세히 보기",
-      "got_it": "확인"
-    },
     "panel": {
       "title": "새 기능",
       "close": "닫기",
@@ -157,7 +150,7 @@
       "squads_and_members": "스쿼드 및 멤버",
       "members_other": "멤버 {{count}}명",
       "resources": "리소스",
-      "runtimes_offline_other": "{{count}}개 오프라인",
+      "runtimes_online_other": "{{count}}대 온라인",
       "invite_member": "멤버 초대"
     },
     "autopilots": {

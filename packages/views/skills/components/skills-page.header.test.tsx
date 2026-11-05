@@ -4,29 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SkillSummary } from "@multica/core/types";
+import {
+  EMPTY_SKILL_FILTERS,
+  useSkillsViewStore,
+} from "@multica/core/skills/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const mocks = vi.hoisted(() => ({
   skills: [] as SkillSummary[],
-  viewState: {
-    sortField: "name",
-    sortDirection: "asc" as string,
-    hiddenColumns: [] as string[],
-    filters: {
-      usage: [] as string[],
-      origins: [] as string[],
-      agents: [] as string[],
-      creators: [] as string[],
-      labels: [] as string[],
-    },
-    toggleSort: vi.fn(),
-    setSortField: vi.fn(),
-    setSortDirection: vi.fn(),
-    toggleColumn: vi.fn(),
-    toggleFilter: vi.fn(),
-    clearFilters: vi.fn(),
-  },
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -80,12 +66,6 @@ vi.mock("@multica/core/runtimes", () => ({
 vi.mock("@multica/core/workspace/avatar-url", () => ({
   resolvePublicFileUrl: (u: string | null) => u,
 }));
-vi.mock("@multica/core/skills/stores", () => ({
-  useSkillsViewStore: (selector: (state: unknown) => unknown) =>
-    selector(mocks.viewState),
-  DEFAULT_HIDDEN_COLUMNS: [],
-}));
-
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
@@ -135,6 +115,13 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useSkillsViewStore.setState({
+    sortField: "name",
+    sortDirection: "asc",
+    hiddenColumns: [],
+    filters: EMPTY_SKILL_FILTERS,
+    search: "",
+  });
   mocks.skills = [
     skill("skill-1", "mine-skill", "user-1"),
     skill("skill-2", "team-skill", "user-2"),
@@ -173,23 +160,65 @@ describe("SkillsPage header", () => {
     expect(screen.queryByText("team-skill")).toBeNull();
   });
 
-  it("has no search, and offers Reset only while a filter narrows the list", () => {
+  it("offers search and hides Reset until the list is narrowed", () => {
     const header = renderPage();
     expect(within(header).queryByRole("textbox")).toBeNull();
-    expect(within(header).queryByRole("button", { name: /search/i })).toBeNull();
+    expect(within(header).getByRole("button", { name: "Search skills" })).toBeInTheDocument();
     expect(within(header).queryByRole("button", { name: "Reset" })).toBeNull();
   });
 
   it("resets the filters", async () => {
     const user = userEvent.setup();
-    mocks.viewState.filters.usage = ["used"];
-    try {
-      const header = renderPage();
-      await user.click(within(header).getByRole("button", { name: "Reset" }));
-      expect(mocks.viewState.clearFilters).toHaveBeenCalled();
-    } finally {
-      mocks.viewState.filters.usage = [];
-    }
+    useSkillsViewStore.getState().toggleFilter("usage", "used");
+    const header = renderPage();
+    await user.click(within(header).getByRole("button", { name: "Reset" }));
+    expect(useSkillsViewStore.getState().filters).toEqual(EMPTY_SKILL_FILTERS);
+    expect(screen.getByText("mine-skill")).toBeInTheDocument();
+    expect(screen.getByText("team-skill")).toBeInTheDocument();
+  });
+
+  it("searches the list and resets the query from the header", async () => {
+    const user = userEvent.setup();
+    const header = renderPage();
+    await user.click(within(header).getByRole("button", { name: "Search skills" }));
+    await user.type(within(header).getByRole("textbox", { name: "Search skills" }), "mine");
+    expect(screen.getByText("mine-skill")).toBeInTheDocument();
+    expect(screen.queryByText("team-skill")).toBeNull();
+
+    await user.click(within(header).getByRole("button", { name: "Reset" }));
+    expect(useSkillsViewStore.getState().search).toBe("");
+    expect(screen.getByText("team-skill")).toBeInTheDocument();
+  });
+
+  it("combines search with scope and offers to clear a search with no matches", async () => {
+    const user = userEvent.setup();
+    const header = renderPage();
+    await user.click(within(header).getByRole("button", { name: "Search skills" }));
+    await user.type(within(header).getByRole("textbox", { name: "Search skills" }), "team");
+    await user.click(within(header).getByRole("button", { name: /All skills/ }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /My skills/ }));
+    expect(screen.queryByText("team-skill")).toBeNull();
+    expect(screen.queryByText("mine-skill")).toBeNull();
+    expect(screen.getByText('No skills match "team".')).toBeInTheDocument();
+
+    await user.click(screen.getByText("Clear search", { selector: "button" }));
+    expect(screen.getByText("mine-skill")).toBeInTheDocument();
+    expect(screen.queryByText("team-skill")).toBeNull();
+  });
+
+  it("combines search with filters and clears both from the empty state", async () => {
+    const user = userEvent.setup();
+    useSkillsViewStore.getState().toggleFilter("usage", "used");
+    useSkillsViewStore.getState().setSearch("mine");
+    renderPage();
+    expect(screen.queryByText("mine-skill")).toBeNull();
+    expect(screen.getByText('No skills match "mine" in this filter.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters and search" }));
+    expect(useSkillsViewStore.getState().search).toBe("");
+    expect(useSkillsViewStore.getState().filters).toEqual(EMPTY_SKILL_FILTERS);
+    expect(screen.getByText("mine-skill")).toBeInTheDocument();
+    expect(screen.getByText("team-skill")).toBeInTheDocument();
   });
 
   it("offers every way to add a skill from the + menu and opens the dialog on it", async () => {

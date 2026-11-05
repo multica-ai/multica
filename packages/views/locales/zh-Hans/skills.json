@@ -1,5 +1,6 @@
 {
   "page": {
+    "search": "搜索 skill",
     "title": "Skills",
     "new_skill": "新建 skill",
     "scopes": {

@@ -25,6 +25,7 @@ import {
   Unlink,
   UserMinus,
 } from "@multica/ui/icons";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
@@ -133,6 +134,7 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const { canDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -505,6 +507,8 @@ export function IssueActionsMenuItems({
           <P.Separator />
 
           <P.Item
+            disabled={!canDelete(issue)}
+            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
             variant="destructive"
             onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
           >
