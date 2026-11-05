@@ -656,6 +656,8 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("updated-since", "", "Include issues updated at or after this RFC3339 timestamp; requires --updated-until (keep both bounds fixed across pages)")
+	issueListCmd.Flags().String("updated-until", "", "Include issues updated before this RFC3339 timestamp; requires --updated-since")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" or as a comparison such as "Score>=3", "Ship Date<2026-01-01" or "Notes~=review" (repeatable, one member per flag; quote it so the shell does not read < and > as redirection). Name is a property name (case-insensitive) or its UUID; a name containing =, <, >, ! or ~ has to be given by UUID. Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id. Repeating a property matches ANY of its members; different properties must ALL match. The per-type value forms and comparisons are in the command description above.`)
 	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
@@ -852,6 +854,27 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
+	since, _ := cmd.Flags().GetString("updated-since")
+	until, _ := cmd.Flags().GetString("updated-until")
+	if cmd.Flags().Changed("updated-since") != cmd.Flags().Changed("updated-until") {
+		return fmt.Errorf("--updated-since and --updated-until must be set together")
+	}
+	if cmd.Flags().Changed("updated-since") {
+		start, err := time.Parse(time.RFC3339Nano, since)
+		if err != nil {
+			return fmt.Errorf("invalid --updated-since; expected an RFC3339 timestamp: %w", err)
+		}
+		end, err := time.Parse(time.RFC3339Nano, until)
+		if err != nil {
+			return fmt.Errorf("invalid --updated-until; expected an RFC3339 timestamp: %w", err)
+		}
+		if !start.Before(end) {
+			return fmt.Errorf("--updated-since must be before --updated-until")
+		}
+		params.Set("date_field", "updated_at")
+		params.Set("date_start", since)
+		params.Set("date_end", until)
+	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
 	}
