@@ -313,3 +313,150 @@ func (h *Handler) RetrySourceContextQuickCreate(w http.ResponseWriter, r *http.R
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
 	writeJSON(w, http.StatusAccepted, resp)
 }
+
+// MoveTaskResponse reports the outcome of a manual queue reorder. Moved is
+// false when the task was already at the edge of its agent's queue, or could
+// not gain a position within the coarse 0–4 priority scale; Priority is then
+// unchanged.
+type MoveTaskResponse struct {
+	TaskID   string `json:"task_id"`
+	Priority int32  `json:"priority"`
+	Moved    bool   `json:"moved"`
+}
+
+// MoveTaskByUser moves one queued task one step up or down in its agent's
+// claim order (priority DESC, created_at ASC, id ASC — the order
+// ClaimAgentTask uses), letting a member hand-reorder the queue.
+//
+// Tenancy and privacy mirror CancelTaskByUser exactly: the task is loaded
+// through GetAgentTaskInWorkspace (the single tenant guard regardless of which
+// optional source FK is set), a chat task is private to the member who opened
+// the conversation, and every other task passes canAccessPrivateAgent so the
+// id-only endpoint is never more permissive than the Activity tab that
+// exposes it. The move runs under the agent's claim lock (the same row lock
+// ClaimTask takes before selecting work), so the reorder cannot race a claim
+// in flight; the broadcast on commit lets every client re-sort its queue from
+// the existing task:queued event.
+func (h *Handler) MoveTaskByUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	taskID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "taskId"), "task id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Direction string `json:"direction"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Direction != "up" && req.Direction != "down" {
+		writeError(w, http.StatusBadRequest, "direction must be up or down")
+		return
+	}
+
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID:          taskID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	if task.ChatSessionID.Valid {
+		// Chat privacy: only the member who opened the conversation may
+		// reorder its tasks, even though the workspace is shared.
+		cs, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+			ID:          task.ChatSessionID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		if uuidToString(cs.CreatorID) != userID {
+			writeError(w, http.StatusForbidden, "not your task")
+			return
+		}
+	} else {
+		// Issue / autopilot / quick_create tasks all surface on the agent
+		// Activity tab, which gates private agents. Mirror that gate here.
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          task.AgentID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+			writeError(w, http.StatusForbidden, "you do not have access to this agent")
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start move transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// ClaimTask takes this same row lock before selecting work. Holding it
+	// here makes "reorder" one server-authoritative decision instead of a
+	// priority write racing an in-flight claim.
+	if _, err := qtx.GetAgentForClaimUpdate(r.Context(), task.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock agent")
+		return
+	}
+
+	var (
+		movedID   pgtype.UUID
+		movedPrio int32
+		moveErr   error
+	)
+	if req.Direction == "up" {
+		var row db.MoveQueuedTaskUpRow
+		row, moveErr = qtx.MoveQueuedTaskUp(r.Context(), taskID)
+		movedID, movedPrio = row.ID, row.Priority
+	} else {
+		var row db.MoveQueuedTaskDownRow
+		row, moveErr = qtx.MoveQueuedTaskDown(r.Context(), taskID)
+		movedID, movedPrio = row.ID, row.Priority
+	}
+	if errors.Is(moveErr, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "task is no longer queued")
+		return
+	}
+	if moveErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to move queued task")
+		return
+	}
+	queuedTask, err := qtx.GetAgentTask(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load moved task")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit queued task move")
+		return
+	}
+	h.TaskService.BroadcastTaskQueued(r.Context(), queuedTask)
+
+	writeJSON(w, http.StatusOK, MoveTaskResponse{
+		TaskID:   uuidToString(movedID),
+		Priority: movedPrio,
+		Moved:    movedPrio != task.Priority,
+	})
+}
