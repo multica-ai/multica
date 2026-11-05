@@ -153,7 +153,8 @@ vi.mock("@tiptap/react", () => ({
   ),
 }));
 
-vi.mock("@multica/core/chat", () => {
+vi.mock("@multica/core/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/chat")>();
   const state = {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
@@ -175,6 +176,7 @@ vi.mock("@multica/core/chat", () => {
     clearInputDraft: vi.fn(),
   };
   return {
+    ...actual,
     DRAFT_NEW_SESSION: "__new__",
     useChatStore: Object.assign(
       (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
