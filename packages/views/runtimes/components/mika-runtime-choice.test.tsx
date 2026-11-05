@@ -62,3 +62,14 @@ describe("MikaRuntimeChoice list layout", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe("MikaRuntimeChoice layout", () => {
+  // Regression: the Mika setup dialog's content is a CSS grid. A grid item
+  // without min-w-0 grows to its content width, so an overlong model id
+  // (e.g. a hex-encoded Claude Code custom model) stretched the dialog
+  // instead of being ellipsized by the pickers.
+  it("lets its root shrink inside a grid parent so long labels can truncate", () => {
+    const { container } = renderChoice({ layout: "dropdown" });
+    expect(container.firstElementChild?.className).toContain("min-w-0");
+  });
+});
