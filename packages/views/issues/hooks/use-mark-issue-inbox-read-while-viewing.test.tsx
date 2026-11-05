@@ -79,13 +79,19 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
     expect(api.markIssueInboxRead).toHaveBeenCalledWith("issue-1");
   });
 
-  it("sends nothing while the workspace has no unread notifications", async () => {
+  it("clears hidden legacy unread notifications even when the badge is zero", async () => {
     setUnreadSummary(0);
+    client.setQueryData(inboxKeys.list("ws-1"), [
+      { id: "comment", issue_id: "issue-1", read: true, archived: false },
+      { id: "assigned", issue_id: "issue-1", read: false, archived: false },
+    ]);
 
-    renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+    const { rerender } = renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
+    await settle();
+    rerender();
     await settle();
 
-    expect(api.markIssueInboxRead).not.toHaveBeenCalled();
+    expect(api.markIssueInboxRead).toHaveBeenCalledExactlyOnceWith("issue-1");
   });
 
   it("reads a notification on the open issue as it arrives, and ignores other issues", async () => {
@@ -111,7 +117,7 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
     expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
   });
 
-  it("holds an arrival until the unread count reflects it", async () => {
+  it("reads an arrival before the unread count reflects it", async () => {
     setUnreadSummary(1);
 
     renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
@@ -120,7 +126,7 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
 
     deliver(notification("issue-1"));
     await settle();
-    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
 
     act(() => setUnreadSummary(1));
     await settle();
@@ -142,9 +148,9 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
     expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
   });
 
-  it("reads again after a reconnect, once the refreshed count shows unread", async () => {
+  it("reads again after a reconnect even before the unread summary refreshes", async () => {
     // An inbox:new sent while the socket was down is never replayed. Realtime
-    // sync refetches the unread summary on reconnect; the write follows it.
+    // sync also refreshes the summary, but the read need not wait for it.
     setUnreadSummary(1);
 
     renderHook(() => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1"), { wrapper });
@@ -154,7 +160,7 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
 
     reconnect();
     await settle();
-    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(1);
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
 
     act(() => setUnreadSummary(1));
     await settle();
@@ -189,6 +195,40 @@ describe("useMarkIssueInboxReadWhileViewing", () => {
     await settle();
 
     expect(api.markIssueInboxRead).not.toHaveBeenCalled();
+  });
+
+  it("reads once per opening when navigating back to an issue at inbox zero", async () => {
+    setUnreadSummary(0);
+    const { rerender } = renderHook(
+      ({ issueId }) => useMarkIssueInboxReadWhileViewing("ws-1", issueId),
+      { wrapper, initialProps: { issueId: "issue-1" } },
+    );
+    await settle();
+    rerender({ issueId: "issue-2" });
+    await settle();
+    rerender({ issueId: "issue-1" });
+    await settle();
+    rerender({ issueId: "issue-1" });
+    await settle();
+
+    expect(vi.mocked(api.markIssueInboxRead).mock.calls.map(([id]) => id)).toEqual([
+      "issue-1", "issue-2", "issue-1",
+    ]);
+  });
+
+  it("reads when an issue becomes enabled after its host stopped reading it", async () => {
+    setUnreadSummary(0);
+    const { rerender } = renderHook(
+      ({ enabled }) => useMarkIssueInboxReadWhileViewing("ws-1", "issue-1", enabled),
+      { wrapper, initialProps: { enabled: true } },
+    );
+    await settle();
+    rerender({ enabled: false });
+    await settle();
+    rerender({ enabled: true });
+    await settle();
+
+    expect(api.markIssueInboxRead).toHaveBeenCalledTimes(2);
   });
 
   it("does not resubmit after a failed write", async () => {
