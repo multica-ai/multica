@@ -97,6 +97,7 @@ import {
   CustomPropertyValueDisplay,
   CustomPropertyValueInput,
 } from "../issues/components/pickers/custom-property-picker";
+import { useParentIssueRecents } from "@multica/core/issues/use-parent-issue-recents";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
@@ -346,6 +347,7 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const recentParentIssues = useParentIssueRecents(wsId, parentPickerOpen);
   const queryClient = useQueryClient();
   const { categoryOf: draftStatusCategory, colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
@@ -1442,6 +1444,11 @@ export function ManualCreatePanel({
                 modal instead of replacing it via useModalStore. */}
             <IssuePickerModal
               open={parentPickerOpen}
+              suggestions={[{
+                key: "recent",
+                heading: t(($) => $.issue_picker.suggested_recent),
+                issues: recentParentIssues,
+              }]}
               onOpenChange={setParentPickerOpen}
               title={t(($) => $.create_issue.set_parent_picker.title)}
               description={t(($) => $.create_issue.set_parent_picker.description)}

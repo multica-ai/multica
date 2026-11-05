@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useRecentIssuesStore } from "@multica/core/issues/stores/recent-issues-store";
+import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
@@ -30,6 +32,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
+const parentPickerFixture = vi.hoisted(() => ({ enabled: false, getIssue: vi.fn() }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
@@ -344,6 +347,7 @@ vi.mock("@multica/core/api", async () => {
   >("@multica/core/api/schemas");
   return {
     api: {
+      getIssue: parentPickerFixture.getIssue,
       createCommentSubIssue: mockCreateCommentSubIssue,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
@@ -524,15 +528,18 @@ vi.mock("../projects/components/project-picker", () => ({
   ),
 }));
 
-vi.mock("@multica/ui/components/ui/dialog", () => ({
-  Dialog: ({ children }: { children: React.ReactNode }) => <div data-testid="dialog-root">{children}</div>,
-  DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
-  ),
-  DialogTitle: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
-  ),
-}));
+vi.mock("@multica/ui/components/ui/dialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/ui/components/ui/dialog")>();
+  return {
+    ...actual,
+    Dialog: (props: React.ComponentProps<typeof actual.Dialog>) => parentPickerFixture.enabled
+      ? <actual.Dialog {...props} /> : <div data-testid="dialog-root">{props.children as ReactNode}</div>,
+    DialogContent: (props: React.ComponentProps<typeof actual.DialogContent>) => parentPickerFixture.enabled
+      ? <actual.DialogContent {...props} /> : <div className={typeof props.className === "string" ? props.className : undefined}>{props.children}</div>,
+    DialogTitle: (props: React.ComponentProps<typeof actual.DialogTitle>) => parentPickerFixture.enabled
+      ? <actual.DialogTitle {...props} /> : <div className={typeof props.className === "string" ? props.className : undefined}>{props.children}</div>,
+  };
+});
 
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -561,9 +568,11 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("./issue-picker-modal", () => ({
-  IssuePickerModal: () => null,
-}));
+vi.mock("./issue-picker-modal", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./issue-picker-modal")>();
+  return { IssuePickerModal: (props: React.ComponentProps<typeof actual.IssuePickerModal>) =>
+    parentPickerFixture.enabled ? <actual.IssuePickerModal {...props} /> : null };
+});
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -648,8 +657,30 @@ function renderModal(element: React.ReactElement) {
 }
 
 describe("CreateIssueModal", () => {
+  it("selects a recently viewed parent in the real picker and submits that parent with the new issue", async () => {
+    parentPickerFixture.enabled = true;
+    const parent = { id: "recent-parent", workspace_id: "ws-test", identifier: "TES-99", title: "Recently viewed parent", status: "done" } as Issue;
+    parentPickerFixture.getIssue.mockResolvedValue(parent);
+    useRecentIssuesStore.getState().recordVisit("ws-test", parent.id);
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={null} />);
+    expect(parentPickerFixture.getIssue).not.toHaveBeenCalled();
+    await user.type(screen.getByPlaceholderText("Issue title"), "New child task");
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    await user.click(screen.getByText("Set parent issue..."));
+    await screen.findByText("Recently viewed parent");
+    expect(screen.getByText("Recently viewed")).toBeInTheDocument();
+    await user.click(screen.getByText("Recently viewed parent"));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "New child task", parent_issue_id: "recent-parent" }),
+    ));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    parentPickerFixture.enabled = false;
+    useRecentIssuesStore.setState({ byWorkspace: {} });
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
