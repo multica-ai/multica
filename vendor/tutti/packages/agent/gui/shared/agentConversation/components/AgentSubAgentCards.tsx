@@ -1,19 +1,20 @@
-import { memo, useState, type JSX } from "react";
 import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { memo, useState, type JSX } from "react";
 import { AgentLinedIcon } from "../../../app/renderer/components/icons/AgentLinedIcon";
 import { translate } from "../../../i18n/index";
+import { AgentMessageMarkdown } from "../../AgentMessageMarkdown";
 import type { AgentTaskSubAgentVM } from "../contracts/agentTaskItemVM";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
-import { CollapsibleReveal } from "./CollapsibleReveal";
 import { useAgentConversationNowUnixMs } from "./AgentConversationClock";
+import { CollapsibleReveal } from "./CollapsibleReveal";
 import { formatAgentToolDurationMs } from "./tool-renderers/render-data/agentToolRenderData";
-import { AgentMessageMarkdown } from "../../AgentMessageMarkdown";
 
 // A delegated sub-agent renders as a first-class row aligned with tool rows:
 // header = "Sub-agent · <name> · <elapsed> · <status>" with a chevron, body =
 // the indented detail panel (TASK / PROGRESS). Identity and status are the
 // sub-agent's own (child thread nickname + lifecycle), never the spawn tool's.
-export function AgentSubAgentCards({
+export const AgentSubAgentCards = observer(function AgentSubAgentCards({
   call,
   onLinkClick
 }: {
@@ -38,7 +39,7 @@ export function AgentSubAgentCards({
       ))}
     </>
   );
-}
+});
 
 // Field-level memo: streaming updates elsewhere in the transcript must not
 // re-render settled cards; a collapsed card renders only its header row

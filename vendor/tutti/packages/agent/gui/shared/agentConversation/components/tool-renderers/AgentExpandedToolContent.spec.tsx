@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setAgentGuiI18nTestLocale } from "../../../../i18n/testUtils";
 import { type WorkspaceAgentSessionDetailToolCall } from "../../../workspaceAgentSessionDetailViewModel";
 import { projectAgentToolCall } from "../../projection/agentToolProjection";
-import { AgentExpandedToolContent } from "./AgentExpandedToolContent";
 import { AgentSubAgentCard } from "../AgentSubAgentCards";
+import { AgentExpandedToolContent } from "./AgentExpandedToolContent";
 
 describe("AgentExpandedToolContent", () => {
   afterEach(async () => {
@@ -64,9 +64,9 @@ describe("AgentExpandedToolContent", () => {
 
     expect(screen.getByText("Input")).toBeTruthy();
     expect(screen.getByText(/Command[\s\S]*node relay\.js/)).toBeTruthy();
-    expect(
-      screen.getByText(/Path[\s\S]*\/workspace\/scripts\/relay\.js/)
-    ).toBeTruthy();
+    expect(screen.getByText("Path").parentElement).toHaveTextContent(
+      /Path[\s\S]*\/workspace\/scripts\/relay\.js/
+    );
   });
 
   it("renders approval file previews from nested toolCall edit payloads", async () => {

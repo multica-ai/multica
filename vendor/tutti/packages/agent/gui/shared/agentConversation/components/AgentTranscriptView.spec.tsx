@@ -6,17 +6,22 @@ import {
   waitFor,
   within
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
-import type { WorkspaceAgentSessionDetailViewModel } from "../../workspaceAgentSessionDetailViewModel";
+import { observable, runInAction } from "mobx";
+import { describe, expect, it, vi } from "vitest";
 import {
-  AgentTranscriptView,
+  ConversationServicesProvider,
+  type ConversationServices
+} from "../../../conversationServices";
+import type { WorkspaceAgentSessionDetailViewModel } from "../../workspaceAgentSessionDetailViewModel";
+import { AgentObservationGapSourceProvider } from "../AgentObservationGapContext";
+import { projectAgentConversationVM } from "../projection/agentConversationProjection";
+import { AgentConversationFlowContent as AgentConversationFlow } from "./AgentConversationFlow";
+import {
+  AgentTranscriptLayout as AgentTranscriptView,
   areAgentTranscriptViewPropsEqual
 } from "./AgentTranscriptView";
-import { AgentConversationFlow } from "./AgentConversationFlow";
-import { AgentObservationGapSourceProvider } from "../AgentObservationGapContext";
 import { AgentTurnDisclosureProvider } from "./AgentTurnDisclosureContext";
-import { projectAgentConversationVM } from "../projection/agentConversationProjection";
 
 vi.mock("../../../i18n/index", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../i18n/index")>();
@@ -651,7 +656,13 @@ describe("AgentTranscriptView", () => {
     ).toHaveLength(2);
   });
 
-  it("disables only the Engine-owned in-flight Fork boundary", () => {
+  it("observes the native in-flight Fork boundary without rerendering its transcript", () => {
+    const pending = observable.box<readonly string[]>(["turn-1"], {
+      deep: false
+    });
+    const runtime = {
+      mutations: { pendingForkTurnIds: () => pending.get() }
+    } as unknown as ConversationServices;
     const detail = detailViewModel();
     const conversation = projectAgentConversationVM(
       detailViewModel({
@@ -677,13 +688,14 @@ describe("AgentTranscriptView", () => {
       processing: "Planning next moves",
       turnSummary: "Changed files"
     };
-    const { rerender } = render(
-      <AgentTranscriptView
-        conversation={conversation}
-        forkThroughTurnPendingTurnIds={["turn-1"]}
-        labels={labels}
-        onForkThroughTurn={vi.fn()}
-      />
+    render(
+      <ConversationServicesProvider runtime={runtime}>
+        <AgentTranscriptView
+          conversation={conversation}
+          labels={labels}
+          onForkThroughTurn={vi.fn()}
+        />
+      </ConversationServicesProvider>
     );
     const button = screen.getByRole("button", {
       name: "agentHost.agentGui.forkThroughTurnPending"
@@ -692,14 +704,7 @@ describe("AgentTranscriptView", () => {
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button).toHaveAttribute("data-pending", "true");
 
-    rerender(
-      <AgentTranscriptView
-        conversation={conversation}
-        forkThroughTurnPendingTurnIds={[]}
-        labels={labels}
-        onForkThroughTurn={vi.fn()}
-      />
-    );
+    act(() => runInAction(() => pending.set([])));
     const availableButton = screen.getByRole("button", {
       name: "agentHost.agentGui.forkThroughTurn"
     });
@@ -1389,7 +1394,7 @@ describe("AgentTranscriptView", () => {
     );
 
     const directRows = container.querySelectorAll(
-      ":scope > .agent-gui-transcript-row"
+      "[data-multica-turn-id] > .agent-gui-transcript-row"
     );
     const allRows = container.querySelectorAll(".agent-gui-transcript-row");
     expect(directRows).toHaveLength(allRows.length);

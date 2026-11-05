@@ -1,9 +1,5 @@
-import {
-  selectEngineSessionDetailHydrated,
-  selectEngineSessionDetailLoading,
-  type AgentActivityDurableMessage,
-  type AgentSessionEngine
-} from "@tutti-os/agent-activity-core";
+import { type AgentActivityDurableMessage } from "@tutti-os/agent-activity-core";
+import type { AgentConversationServices } from "./state/conversation-services";
 
 export type AgentConversationMessagePagePhase = "error" | "idle" | "loading";
 
@@ -33,12 +29,18 @@ export interface AgentConversationMessageControllerDiagnostics {
 }
 
 export interface CreateAgentConversationMessageControllerInput {
-  /** See AgentGUIRuntime.loadOlderSessionMessages. */
-  loadOlderSessionMessages(input: { workspaceId: string; agentSessionId: string }): Promise<void>;
+  /** See ConversationServices.loadOlderSessionMessages. */
+  loadOlderSessionMessages(input: {
+    workspaceId: string;
+    agentSessionId: string;
+  }): Promise<void>;
   /** The active conversation's position in its history. */
-  olderMessages(agentSessionId: string): { hasOlderMessages: boolean; oldestLoadedVersion: number | null };
+  olderMessages(agentSessionId: string): {
+    hasOlderMessages: boolean;
+    oldestLoadedVersion: number | null;
+  };
   diagnostics?: AgentConversationMessageControllerDiagnostics;
-  engine: Pick<AgentSessionEngine, "dispatch" | "getSnapshot">;
+  engine: AgentConversationServices;
   ensureSessionSynchronized?(input: {
     agentSessionId: string;
     onError(error: unknown): void;
@@ -171,12 +173,9 @@ export function createAgentConversationMessageController(
       activeSessionId !== normalized
     )
       return;
-    input.engine.dispatch({
-      agentSessionId: normalized,
-      needsMessages: true,
-      needsState,
-      type: "session/reconcileRequested",
-      workspaceId: input.workspaceId
+    input.engine.sessionLoads.request(normalized, {
+      state: needsState,
+      messages: true
     });
   };
 
@@ -261,20 +260,40 @@ export function createAgentConversationMessageController(
         generation: requestGeneration,
         promise: Promise.resolve()
       };
-      const promise = input.loadOlderSessionMessages({ agentSessionId: normalized, workspaceId: input.workspaceId }).then(() => {
-        if (!isCurrentRequest(request)) return;
-        input.onOlderPageApplied?.(normalized);
-        publish({ agentSessionId: normalized, error: null, olderPagePhase: "idle" });
-      }).catch((error: unknown) => {
-        if (!isCurrentRequest(request)) return;
-        input.diagnostics?.error?.({ agentSessionId: normalized, beforeVersion, error });
-        input.onOlderPageFailed?.(error);
-        publish({ agentSessionId: normalized, error, olderPagePhase: "error" });
-      }).finally(() => {
-        if (olderRequest?.promise !== promise) return;
-        olderRequest = null;
-        if (!disposed && generation === requestGeneration) input.onOlderPageSettled?.();
-      });
+      const promise = input
+        .loadOlderSessionMessages({
+          agentSessionId: normalized,
+          workspaceId: input.workspaceId
+        })
+        .then(() => {
+          if (!isCurrentRequest(request)) return;
+          input.onOlderPageApplied?.(normalized);
+          publish({
+            agentSessionId: normalized,
+            error: null,
+            olderPagePhase: "idle"
+          });
+        })
+        .catch((error: unknown) => {
+          if (!isCurrentRequest(request)) return;
+          input.diagnostics?.error?.({
+            agentSessionId: normalized,
+            beforeVersion,
+            error
+          });
+          input.onOlderPageFailed?.(error);
+          publish({
+            agentSessionId: normalized,
+            error,
+            olderPagePhase: "error"
+          });
+        })
+        .finally(() => {
+          if (olderRequest?.promise !== promise) return;
+          olderRequest = null;
+          if (!disposed && generation === requestGeneration)
+            input.onOlderPageSettled?.();
+        });
       request.promise = promise;
       olderRequest = request;
       return promise;
@@ -283,11 +302,11 @@ export function createAgentConversationMessageController(
       const normalized = normalizeSessionId(agentSessionId);
       if (!normalized) return;
       setActiveSession(normalized);
-      const state = input.engine.getSnapshot();
+      const state = input.engine;
       if (
         options?.force !== true &&
-        (selectEngineSessionDetailHydrated(state, normalized) ||
-          selectEngineSessionDetailLoading(state, normalized))
+        (state.sessionLoads.isDetailHydrated(normalized) ||
+          state.sessionLoads.isDetailLoading(normalized))
       ) {
         return;
       }

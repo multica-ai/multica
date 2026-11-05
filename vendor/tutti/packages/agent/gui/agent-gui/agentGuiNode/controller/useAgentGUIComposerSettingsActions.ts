@@ -1,24 +1,36 @@
 import {
-  selectEngineSession,
   type AgentActivityComposerOptions,
-  type AgentActivityTurn,
-  type AgentSessionEngine
+  type AgentActivityTurn
 } from "@tutti-os/agent-activity-core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useRef } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import { translate } from "../../../i18n/index";
-import type {
-  AgentSessionComposerSettings,
-  AgentSessionReasoningEffort
-} from "../../../shared/agentSessionTypes";
-import type { AgentGUINodeData } from "../../../types";
 import {
   normalizePlanIssueBudgetPreset,
   planIssueBudgetPresetsEqual,
   type PlanIssueBudgetPreset
 } from "../../../shared/agentConversation/planImplementationPresentation";
-import { useStableControllerEventCallback } from "./agentGuiController.stableHelpers";
+import type {
+  AgentSessionComposerSettings,
+  AgentSessionReasoningEffort
+} from "../../../shared/agentSessionTypes";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+import type { AgentGUINodeData } from "../../../types";
+import {
+  acknowledgeAgentGUIComposerDefaultsMutation,
+  createAgentGUIComposerDefaultsLedger,
+  prepareAcknowledgedComposerDefaultsAuthorityRead,
+  preserveAcknowledgedComposerDefaultsForReconciliation,
+  registerAgentGUIComposerDefaultsMutation,
+  removeRetiredComposerDefaults,
+  retireAcknowledgedComposerDefaultsForRead,
+  type AgentGUIComposerDefaultsAuthorityReadReceipt,
+  type AgentGUIComposerDefaultsAuthorityReconciler,
+  type AgentGUIComposerDefaultsLedger,
+  type AgentGUIComposerDefaultsMutation,
+  type AgentGUIRetiredComposerDefault
+} from "./agentGuiComposerDefaultsReconciliation";
 import {
   cloneComposerSettings,
   nodeDataFromComposerSettings,
@@ -29,26 +41,12 @@ import {
   sameComposerSettings
 } from "./agentGuiController.composerHelpers";
 import {
-  enforceComposerModelBindingForHomeDefaults,
   effectiveComposerSettingsFromOptions,
+  enforceComposerModelBindingForHomeDefaults,
   nodeDataMatchesComposerTarget,
   sanitizeComposerSettingsForTarget,
   type AgentGUIComposerTargetData
 } from "./agentGuiController.composerPresentation";
-import {
-  acknowledgeAgentGUIComposerDefaultsMutation,
-  createAgentGUIComposerDefaultsLedger,
-  prepareAcknowledgedComposerDefaultsAuthorityRead,
-  preserveAcknowledgedComposerDefaultsForReconciliation,
-  registerAgentGUIComposerDefaultsMutation,
-  removeRetiredComposerDefaults,
-  retireAcknowledgedComposerDefaultsForRead,
-  type AgentGUIComposerDefaultsLedger,
-  type AgentGUIComposerDefaultsAuthorityReconciler,
-  type AgentGUIComposerDefaultsAuthorityReadReceipt,
-  type AgentGUIComposerDefaultsMutation,
-  type AgentGUIRetiredComposerDefault
-} from "./agentGuiComposerDefaultsReconciliation";
 import { normalizeOptionalText } from "./agentGuiController.promptHelpers";
 import {
   composerDefaultsPatchFromSettings,
@@ -57,6 +55,7 @@ import {
   type AgentGUIRememberComposerDefaultsInput,
   type AgentGUIRememberComposerDefaultsResult
 } from "./agentGuiController.providerHelpers";
+import { useStableControllerEventCallback } from "./agentGuiController.stableHelpers";
 import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 
 interface UseAgentGUIComposerSettingsActionsInput {
@@ -64,7 +63,7 @@ interface UseAgentGUIComposerSettingsActionsInput {
   activeCanonicalComposerSettings: AgentSessionComposerSettings;
   activeConversationIdRef: RefObject<string | null>;
   activeEngineActiveTurn: AgentActivityTurn | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   composerSupportPermissionModeChangeDeferred: boolean;
   dataRef: RefObject<AgentGUINodeData>;
   defaultReasoningEffort: AgentSessionReasoningEffort | null;
@@ -95,7 +94,7 @@ interface UseAgentGUIComposerSettingsActionsInput {
     target: AgentGUIComposerTargetData;
   }): Promise<void>;
   selectedComposerTargetDataRef: RefObject<AgentGUIComposerTargetData>;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   setDraftSettingsBySessionId: Dispatch<
     SetStateAction<Record<string, AgentSessionComposerSettings>>
   >;
@@ -126,7 +125,7 @@ export function useAgentGUIComposerSettingsActions(
     onShowMessageRef,
     reloadComposerOptionsForTarget,
     selectedComposerTargetDataRef,
-    sessionEngine,
+    conversationServices,
     setDraftSettingsBySessionId,
     setDetailError,
     updateComposerSettingsRef,
@@ -338,14 +337,16 @@ export function useAgentGUIComposerSettingsActions(
             }).catch(() => undefined);
           }
         }
-        void agentActivityRuntime.trackDraftComposerSettingsChange?.({
-          workspaceId,
-          provider: targetData.provider,
-          previousSettings,
-          nextSettings: resolveEffectiveComposerSettings({
-            settings: mergedIntent
-          })
-        });
+        void agentActivityRuntime.diagnostics?.trackDraftComposerSettingsChange?.(
+          {
+            workspaceId,
+            provider: targetData.provider,
+            previousSettings,
+            nextSettings: resolveEffectiveComposerSettings({
+              settings: mergedIntent
+            })
+          }
+        );
         loadDraftComposerOptions(
           snapshotComposerOptions?.behavior
             ?.refreshModelOptionsAfterSettings === true
@@ -354,10 +355,8 @@ export function useAgentGUIComposerSettingsActions(
         );
         return;
       }
-      const canonicalSession = selectEngineSession(
-        sessionEngine.getSnapshot(),
-        agentSessionId
-      );
+      const canonicalSession =
+        conversationServices.sessions.session(agentSessionId);
       // The optimistic pre-activation window (see startConversation): the id
       // is already the active conversation but the backend session has not
       // attached yet, so there is no control state to read settings from or
@@ -477,10 +476,8 @@ export function useAgentGUIComposerSettingsActions(
         (canonicalSession !== null || isPreActivationSession)
       ) {
         if (isPreActivationSession) {
-          sessionEngine.dispatch({
-            type: "activation/settingsPatched",
-            agentSessionId,
-            settings: { ...sessionSettingsPatch }
+          conversationServices.activations.patchSettings(agentSessionId, {
+            ...sessionSettingsPatch
           });
         } else {
           agentActivityRuntime.composer.updateSettings({
@@ -498,7 +495,7 @@ export function useAgentGUIComposerSettingsActions(
       composerSupport.permissionModeChangeDeferred,
       loadDraftComposerOptions,
       reloadComposerOptionsForTarget,
-      sessionEngine,
+      conversationServices,
       workspaceId,
       setDetailError
     ]

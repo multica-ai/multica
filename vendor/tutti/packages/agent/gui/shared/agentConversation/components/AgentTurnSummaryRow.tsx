@@ -1,11 +1,3 @@
-import { useEffect, useMemo, useState, type JSX, type MouseEvent } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  LoaderCircle,
-  Redo2,
-  Undo2
-} from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -13,12 +5,21 @@ import {
   TooltipTrigger,
   toast
 } from "@tutti-os/ui-system";
-import { DirectLinedIcon } from "../../../app/renderer/components/icons/DirectLinedIcon";
-import { translate } from "../../../i18n/index";
+import {
+  ChevronDown,
+  ChevronRight,
+  LoaderCircle,
+  Redo2,
+  Undo2
+} from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { useEffect, useMemo, useState, type JSX, type MouseEvent } from "react";
 import { useOptionalAgentHostApi } from "../../../agentActivityHost";
+import { DirectLinedIcon } from "../../../app/renderer/components/icons/DirectLinedIcon";
 import type { WorkspaceLinkAction } from "../../../contexts/workspace/presentation/renderer/actions/workspaceLinkActions";
 import { resolveWorkspaceFileLinkAction } from "../../../contexts/workspace/presentation/renderer/actions/workspaceLinkActions";
 import { CanvasNodeGhostIconButton } from "../../../contexts/workspace/presentation/renderer/components/shared/CanvasNodeGhostIconButton";
+import { translate } from "../../../i18n/index";
 import type {
   AgentTurnSummaryFileVM,
   AgentTurnSummaryPatchBatchVM,
@@ -31,8 +32,8 @@ import {
   resolvePatchDiffCwd,
   resolvePatchExecutionCwd
 } from "../rules/agentTurnSummaryPatchRuntime";
-import { AgentCodeBlock } from "./tool-renderers/code/AgentCodeBlock";
 import { CollapsibleReveal } from "./CollapsibleReveal";
+import { AgentCodeBlock } from "./tool-renderers/code/AgentCodeBlock";
 import { AgentMonacoDiffViewer } from "./tool-renderers/file-diff/AgentMonacoDiffViewer";
 import {
   agentFileChangeStats,
@@ -53,7 +54,7 @@ type PatchSupportState =
   | { key: string; status: "supported" }
   | { key: string; status: "unsupported" };
 
-export function AgentTurnSummaryRow({
+export const AgentTurnSummaryRow = observer(function AgentTurnSummaryRow({
   row,
   workspaceRoot,
   basePath,
@@ -155,13 +156,13 @@ export function AgentTurnSummaryRow({
       : translate("agentHost.agentGui.turnSummaryReapply");
   const isPatchSupportChecking = Boolean(
     resolveGitPatchSupport &&
-    patchSupportCwds.length > 0 &&
-    (patchSupportState?.key !== patchSupportKey ||
-      patchSupportState.status === "checking")
+      patchSupportCwds.length > 0 &&
+      (patchSupportState?.key !== patchSupportKey ||
+        patchSupportState.status === "checking")
   );
   const isPatchUnsupported = Boolean(
     patchSupportState?.key === patchSupportKey &&
-    patchSupportState.status === "unsupported"
+      patchSupportState.status === "unsupported"
   );
   const patchDisabledReason = isPatchUnsupported
     ? translate("agentHost.agentGui.turnSummaryGitRequired")
@@ -172,9 +173,9 @@ export function AgentTurnSummaryRow({
         : null;
   const isPatchActionDisabled = Boolean(
     patchPending ||
-    isPatchSupportChecking ||
-    isPatchUnsupported ||
-    !canApplyPatch
+      isPatchSupportChecking ||
+      isPatchUnsupported ||
+      !canApplyPatch
   );
 
   const handlePatchAction = async (event: MouseEvent<HTMLButtonElement>) => {
@@ -383,7 +384,7 @@ export function AgentTurnSummaryRow({
       </div>
     </section>
   );
-}
+});
 
 function patchFailureMessage(
   errorCode: string | undefined,

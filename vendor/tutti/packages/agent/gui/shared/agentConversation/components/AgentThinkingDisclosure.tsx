@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import { WorkspaceAgentSessionThinkingDisclosure } from "../../WorkspaceAgentSessionThinkingDisclosure";
 import type { AgentThinkingContentVM } from "../contracts/agentMessageRowVM";
@@ -11,28 +12,30 @@ interface AgentThinkingDisclosureProps {
   rawTimelineJsonLabel?: string;
 }
 
-export function AgentThinkingDisclosure({
-  thinking,
-  label,
-  onLinkClick,
-  showRawTimelineJson = false,
-  rawTimelineJsonLabel = ""
-}: AgentThinkingDisclosureProps): JSX.Element {
-  "use memo";
+export const AgentThinkingDisclosure = observer(
+  function AgentThinkingDisclosure({
+    thinking,
+    label,
+    onLinkClick,
+    showRawTimelineJson = false,
+    rawTimelineJsonLabel = ""
+  }: AgentThinkingDisclosureProps): JSX.Element {
+    "use memo";
 
-  return (
-    <>
-      <WorkspaceAgentSessionThinkingDisclosure
-        thinking={thinking}
-        label={label}
-        onLinkClick={onLinkClick}
-      />
-      {showRawTimelineJson && rawTimelineJsonLabel ? (
-        <RawTimelineJsonDisclosure
-          items={thinking.sourceTimelineItems}
-          label={rawTimelineJsonLabel}
+    return (
+      <>
+        <WorkspaceAgentSessionThinkingDisclosure
+          thinking={thinking}
+          label={label}
+          onLinkClick={onLinkClick}
         />
-      ) : null}
-    </>
-  );
-}
+        {showRawTimelineJson && rawTimelineJsonLabel ? (
+          <RawTimelineJsonDisclosure
+            items={thinking.sourceTimelineItems}
+            label={rawTimelineJsonLabel}
+          />
+        ) : null}
+      </>
+    );
+  }
+);

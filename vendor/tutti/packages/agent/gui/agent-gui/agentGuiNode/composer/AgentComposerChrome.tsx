@@ -1,41 +1,41 @@
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FocusEvent as ReactFocusEvent,
-  type JSX
-} from "react";
-import {
   Button,
   Popover,
   PopoverAnchor,
   PopoverContent
 } from "@tutti-os/ui-system";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type JSX,
+  type FocusEvent as ReactFocusEvent
+} from "react";
+import handoffClapAnimationUrl from "../../../app/renderer/assets/animations/handoff-clap.png";
+import handoffLinedIconUrl from "../../../app/renderer/assets/icons/handoff-lined.svg";
 import { cn } from "../../../app/renderer/lib/utils";
-import { AgentUsageMeter, agentUsageBarColor } from "../AgentUsageMeter";
-import styles from "../AgentGUINode.styles";
-import type {
-  AgentComposerPromptTip,
-  AgentComposerProps
-} from "./AgentComposer.types";
-import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
+import { resolveProviderIconAsset } from "../../../providerIconAssets";
+import { resolveAgentGUIProviderCatalogIdentity } from "../../../providerIdentityCatalog";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
-import { formatSlashStatusTokenCount } from "../AgentSlashStatusPanel";
-import type { AgentGUIProvider, AgentGUIAgentTarget } from "../../../types";
-import { normalizeManagedAgentProvider } from "../../../shared/managedAgentProviders";
 import {
   MANAGED_AGENT_ICON_FALLBACK_URL,
   MANAGED_AGENT_ICON_URLS
 } from "../../../shared/managedAgentIcons";
-import { resolveAgentGUIProviderCatalogIdentity } from "../../../providerIdentityCatalog";
-import { resolveProviderIconAsset } from "../../../providerIconAssets";
-import handoffClapAnimationUrl from "../../../app/renderer/assets/animations/handoff-clap.png";
-import handoffLinedIconUrl from "../../../app/renderer/assets/icons/handoff-lined.svg";
+import { normalizeManagedAgentProvider } from "../../../shared/managedAgentProviders";
+import type { AgentGUIAgentTarget, AgentGUIProvider } from "../../../types";
+import styles from "../AgentGUINode.styles";
+import { formatSlashStatusTokenCount } from "../AgentSlashStatusPanel";
+import { AgentUsageMeter, agentUsageBarColor } from "../AgentUsageMeter";
+import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
 import {
   USAGE_CRITICAL_PERCENT,
   USAGE_WARN_PERCENT
 } from "../model/agentUsageThresholds";
+import type {
+  AgentComposerPromptTip,
+  AgentComposerRenderProps as AgentComposerProps
+} from "./AgentComposer.types";
 
 const USAGE_POPOVER_HOVER_DELAY_MS = 120;
 

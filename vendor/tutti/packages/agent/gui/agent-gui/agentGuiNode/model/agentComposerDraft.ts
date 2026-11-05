@@ -1,39 +1,8 @@
 import { createRichTextMentionMarkdown } from "@tutti-os/ui-rich-text/core";
-import type { AgentActivityRuntimeStagePastedTextResult } from "../../../agentActivityRuntime";
+import type { AgentActivityRuntimeStagePastedTextResult } from "../../../conversationServices";
 import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
-import type {
-  AgentComposerDraft,
-  AgentComposerDraftConnector,
-  AgentComposerFileBlock,
-  AgentComposerDraftFile,
-  AgentComposerDraftLargeText,
-  AgentComposerDraftImage,
-  AgentComposerQuoteBlock,
-  AgentComposerDraftContent,
-  AgentGUIProviderSkillOption
-} from "./agentGuiNodeTypes";
-import {
-  agentComposerDraftQuotes,
-  agentComposerQuotePromptContent
-} from "./agentComposerDraftQuotes";
-
-export {
-  agentComposerDraftQuotes,
-  appendAgentComposerDraftQuote
-} from "./agentComposerDraftQuotes";
-import {
-  AGENT_PASTED_TEXT_BLOCK_KIND,
-  AGENT_PASTED_TEXT_MENTION_KIND
-} from "./agentGuiNodeTypes";
-import {
-  agentPromptContentToComposerPrompt,
-  agentPromptFileBlocks,
-  agentPromptPastedTextBlocks,
-  agentPreparedPromptFileToDraftFile,
-  materializeAgentComposerFileMentions
-} from "./agentExternalPromptFiles";
-import { agentComposerFileMentionReferences } from "../agentRichText/agentMentionMarkdown";
 import { pastedTextDraftDisplayName } from "../../../shared/pastedTextReferenceProjection";
+import { agentComposerFileMentionReferences } from "../agentRichText/agentMentionMarkdown";
 import {
   agentComposerDraftConnectorBlocks,
   agentComposerDraftConnectors,
@@ -45,10 +14,41 @@ import {
   type AgentPromptImageContentBlock
 } from "./agentComposerDraftImages";
 import {
+  agentComposerDraftQuotes,
+  agentComposerQuotePromptContent
+} from "./agentComposerDraftQuotes";
+import {
+  agentPreparedPromptFileToDraftFile,
+  agentPromptContentToComposerPrompt,
+  agentPromptFileBlocks,
+  agentPromptPastedTextBlocks,
+  materializeAgentComposerFileMentions
+} from "./agentExternalPromptFiles";
+import type {
+  AgentComposerDraft,
+  AgentComposerDraftConnector,
+  AgentComposerDraftContent,
+  AgentComposerDraftFile,
+  AgentComposerDraftImage,
+  AgentComposerDraftLargeText,
+  AgentComposerFileBlock,
+  AgentComposerQuoteBlock,
+  AgentGUIProviderSkillOption
+} from "./agentGuiNodeTypes";
+import {
+  AGENT_PASTED_TEXT_BLOCK_KIND,
+  AGENT_PASTED_TEXT_MENTION_KIND
+} from "./agentGuiNodeTypes";
+import {
   projectLocalConnectorPrompt,
   promptForProviderSkills,
   skillTriggerForPrefix
 } from "./agentSkillOptions";
+
+export {
+  agentComposerDraftQuotes,
+  appendAgentComposerDraftQuote
+} from "./agentComposerDraftQuotes";
 
 export {
   agentComposerDraftConnectors,
@@ -331,7 +331,10 @@ export function normalizeAgentPromptContentBlocks(
       const mimeType = block.mimeType?.trim();
       const attachmentId = block.attachmentId?.trim();
       const data = block.data?.trim();
-      const url = attachmentId && block.url?.startsWith("data:") ? undefined : block.url?.trim();
+      const url =
+        attachmentId && block.url?.startsWith("data:")
+          ? undefined
+          : block.url?.trim();
       const imagePath = block.path?.trim();
       if (
         (!attachmentId && !data && !url && !imagePath) ||

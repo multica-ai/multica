@@ -2,11 +2,8 @@ import type {
   AgentActivityMessage,
   AgentPromptContentBlock
 } from "@tutti-os/agent-activity-core";
+import type { ConversationServices } from "../../../conversationServices";
 import { isLocalImagePath } from "../../../shared/imageGenerationTool";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-
-const COPY_PAGE_SIZE = 200;
-const MAX_COPY_PAGES = 1_000;
 
 // Per-image cap (binary bytes) for embedding into the hydrated text/html
 // variant. Larger images keep the lean reference instead and are surfaced to
@@ -46,45 +43,14 @@ export interface AgentGUIConversationSerializedTranscript {
 
 export async function loadCompleteAgentConversationMessages(input: {
   agentSessionId: string;
-  runtime: Pick<AgentGUIRuntime, "listSessionMessages">;
+  runtime: Pick<ConversationServices, "conversations">;
   workspaceId: string;
 }): Promise<AgentActivityMessage[]> {
-  const messagesById = new Map<string, AgentActivityMessage>();
-  let beforeVersion: number | undefined;
-
-  for (let pageIndex = 0; pageIndex < MAX_COPY_PAGES; pageIndex += 1) {
-    const page = await input.runtime.listSessionMessages({
-      agentSessionId: input.agentSessionId,
-      ...(beforeVersion === undefined ? {} : { beforeVersion }),
-      cache: false,
-      limit: COPY_PAGE_SIZE,
-      order: "desc",
-      workspaceId: input.workspaceId
-    });
-
-    for (const message of page.messages) {
-      const key = message.messageId.trim() || `${message.version}`;
-      const existing = messagesById.get(key);
-      if (!existing || message.version >= existing.version) {
-        messagesById.set(key, message);
-      }
-    }
-
-    if (!page.hasMore) {
-      return [...messagesById.values()].sort(compareMessagesAscending);
-    }
-
-    const nextBeforeVersion = minimumPositiveVersion(page.messages);
-    if (
-      nextBeforeVersion === null ||
-      (beforeVersion !== undefined && nextBeforeVersion >= beforeVersion)
-    ) {
-      throw new Error("Conversation message pagination did not advance.");
-    }
-    beforeVersion = nextBeforeVersion;
-  }
-
-  throw new Error("Conversation message pagination exceeded the safety limit.");
+  const messages = await input.runtime.conversations.loadAll({
+    workspaceId: input.workspaceId,
+    agentSessionId: input.agentSessionId
+  });
+  return [...messages].sort(compareMessagesAscending);
 }
 
 // Lean Codex-export-style transcript: user inputs and per-turn final agent
@@ -551,18 +517,6 @@ function compareMessagesAscending(
     left.version - right.version ||
     left.messageId.localeCompare(right.messageId)
   );
-}
-
-function minimumPositiveVersion(
-  messages: readonly AgentActivityMessage[]
-): number | null {
-  let minimum = Number.POSITIVE_INFINITY;
-  for (const message of messages) {
-    if (Number.isFinite(message.version) && message.version > 0) {
-      minimum = Math.min(minimum, message.version);
-    }
-  }
-  return Number.isFinite(minimum) ? minimum : null;
 }
 
 function normalizedRole(role: string): string {

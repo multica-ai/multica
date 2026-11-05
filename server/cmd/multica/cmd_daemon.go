@@ -300,6 +300,14 @@ func openBoundedErrLog(path string) (*os.File, error) {
 // Default profile uses the standard port (19514). Named profiles get a
 // deterministic offset derived from the profile name.
 func healthPortForProfile(profile string) int {
+	if os.Getenv("MULTICA_DEV_ISOLATED") == "1" {
+		port, err := strconv.Atoi(os.Getenv("MULTICA_DEV_HEALTH_PORT"))
+		if err == nil && port > 0 && port <= 65535 {
+			return port
+		}
+		// Fail closed: the daemon must not probe an installed profile's port.
+		return 0
+	}
 	if profile == "" {
 		return daemon.DefaultHealthPort
 	}
@@ -577,6 +585,9 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 }
 
 func runDaemonBackground(cmd *cobra.Command) error {
+	if os.Getenv("MULTICA_DEV_ISOLATED") == "1" && healthPortForProfile("") == 0 {
+		return fmt.Errorf("MULTICA_DEV_HEALTH_PORT must be an integer between 1 and 65535 in isolated development")
+	}
 	profile := resolveProfile(cmd)
 	healthPort := resolveHealthPort(profile)
 
@@ -953,6 +964,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	if os.Getenv("MULTICA_DEV_ISOLATED") == "1" && healthPortForProfile("") == 0 {
+		return fmt.Errorf("MULTICA_DEV_HEALTH_PORT must be an integer between 1 and 65535 in isolated development")
+	}
 	util.EnsureHiddenConsole()
 
 	profile := resolveProfile(cmd)

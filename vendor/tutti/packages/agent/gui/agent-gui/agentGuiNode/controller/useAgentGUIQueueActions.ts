@@ -4,25 +4,22 @@ import {
   type RefObject,
   type SetStateAction
 } from "react";
-import {
-  selectEngineQueuedPrompt,
-  type AgentSessionEngine
-} from "@tutti-os/agent-activity-core";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+
+import type { ConversationServices } from "../../../conversationServices";
 import {
   agentComposerDraftImages,
   agentPromptContentToComposerDraft,
   updateAgentComposerDraft
 } from "../model/agentComposerDraft";
 import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { QueuedPromptImageLoadOwner } from "../queuedPromptImageLoadOwner";
-import { createAgentGUIConversationId } from "./agentGuiController.promptHelpers";
 
 export interface UseAgentGUIQueueActionsInput {
   activeConversationIdRef: RefObject<string | null>;
-  agentActivityRuntime: AgentGUIRuntime;
-  sessionEngine: AgentSessionEngine;
+  agentActivityRuntime: ConversationServices;
+  conversationServices: AgentConversationServices;
   setDraftByScopeKey: Dispatch<
     SetStateAction<Record<string, AgentComposerDraft>>
   >;
@@ -33,7 +30,7 @@ export interface UseAgentGUIQueueActionsInput {
 export function useAgentGUIQueueActions({
   activeConversationIdRef,
   agentActivityRuntime,
-  sessionEngine,
+  conversationServices,
   setDraftByScopeKey,
   workspaceId
 }: UseAgentGUIQueueActionsInput) {
@@ -44,26 +41,23 @@ export function useAgentGUIQueueActions({
       if (!agentSessionId || !normalizedQueuedPromptId) {
         return;
       }
-      const queuedPrompt = selectEngineQueuedPrompt(
-        sessionEngine.getSnapshot(),
+      const queuedPrompt = conversationServices.prompts.queuedPrompt(
         agentSessionId,
         normalizedQueuedPromptId
       );
-      sessionEngine.dispatch(
-        queuedPrompt?.clientSubmitId
-          ? {
-              agentSessionId,
-              clientSubmitId: queuedPrompt.clientSubmitId,
-              type: "submit/canceled"
-            }
-          : {
-              agentSessionId,
-              promptId: normalizedQueuedPromptId,
-              type: "queue/removed"
-            }
-      );
+      queuedPrompt?.clientSubmitId
+        ? conversationServices.prompts.update(
+            agentSessionId,
+            "remove",
+            queuedPrompt.clientSubmitId
+          )
+        : conversationServices.prompts.update(
+            agentSessionId,
+            "remove",
+            normalizedQueuedPromptId
+          );
     },
-    [activeConversationIdRef, sessionEngine]
+    [activeConversationIdRef, conversationServices]
   );
 
   const editQueuedPrompt = useCallback(
@@ -73,8 +67,7 @@ export function useAgentGUIQueueActions({
       if (!agentSessionId || !normalizedQueuedPromptId) {
         return;
       }
-      const queuedPrompt = selectEngineQueuedPrompt(
-        sessionEngine.getSnapshot(),
+      const queuedPrompt = conversationServices.prompts.queuedPrompt(
         agentSessionId,
         normalizedQueuedPromptId
       );
@@ -88,19 +81,17 @@ export function useAgentGUIQueueActions({
         queuedPrompt.content,
         `restore-${queuedPrompt.id}`
       );
-      sessionEngine.dispatch(
-        queuedPrompt.clientSubmitId
-          ? {
-              agentSessionId,
-              clientSubmitId: queuedPrompt.clientSubmitId,
-              type: "submit/canceled"
-            }
-          : {
-              agentSessionId,
-              promptId: normalizedQueuedPromptId,
-              type: "queue/removed"
-            }
-      );
+      queuedPrompt.clientSubmitId
+        ? conversationServices.prompts.update(
+            agentSessionId,
+            "remove",
+            queuedPrompt.clientSubmitId
+          )
+        : conversationServices.prompts.update(
+            agentSessionId,
+            "remove",
+            normalizedQueuedPromptId
+          );
       setDraftByScopeKey((current) => ({
         ...current,
         [draftScopeKey]: restoredDraft
@@ -165,7 +156,7 @@ export function useAgentGUIQueueActions({
     [
       activeConversationIdRef,
       agentActivityRuntime,
-      sessionEngine,
+      conversationServices,
       setDraftByScopeKey,
       workspaceId
     ]
@@ -178,16 +169,13 @@ export function useAgentGUIQueueActions({
       if (!agentSessionId || !normalizedQueuedPromptId) {
         return;
       }
-      sessionEngine.dispatch({
+      conversationServices.prompts.update(
         agentSessionId,
-        awaitingTurnExpiresAtUnixMs: Date.now() + 30_000,
-        cancelCommandId: createAgentGUIConversationId(),
-        promptId: normalizedQueuedPromptId,
-        timeoutMs: 30_000,
-        type: "queue/sendNowRequested"
-      });
+        "sendNow",
+        normalizedQueuedPromptId
+      );
     },
-    [activeConversationIdRef, sessionEngine]
+    [activeConversationIdRef, conversationServices]
   );
 
   return {

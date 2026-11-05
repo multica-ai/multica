@@ -68,35 +68,8 @@ html.multica-agent-gui :is(.agent-gui-node__shell, [data-slot="dialog-content"],
   outline-color: var(--destructive);
 }
 
-html.multica-agent-gui :is(.agent-gui-node__provider-rail-config-button, .agent-gui-node__activity-toggle-button, .agent-gui-node__new-conversation-icon-button) {
+html.multica-agent-gui :is(.agent-gui-node__activity-toggle-button, .agent-gui-node__new-conversation-icon-button) {
   border-radius: var(--radius-lg);
-}
-
-html.multica-agent-gui .agent-gui-node__provider-rail-tile-label {
-  color: var(--muted-foreground);
-  font-size: var(--text-micro);
-  line-height: var(--text-micro--line-height);
-  font-weight: 500;
-}
-
-html.multica-agent-gui .agent-gui-node__provider-rail-tile:hover:not(:disabled) .agent-gui-node__provider-rail-avatar {
-  background: var(--surface-hover);
-  color: var(--foreground);
-}
-
-html.multica-agent-gui .agent-gui-node__provider-rail-tile[data-selected="true"] .agent-gui-node__provider-rail-avatar,
-html.multica-agent-gui .agent-gui-node__provider-rail-tile[data-selected="true"]:hover:not(:disabled) .agent-gui-node__provider-rail-avatar {
-  outline: none;
-  background: var(--surface-selected);
-  color: var(--surface-selected-foreground);
-}
-
-html.multica-agent-gui .agent-gui-node__provider-rail-tile[data-selected="true"] .agent-gui-node__provider-rail-tile-label {
-  color: var(--surface-selected-foreground);
-}
-
-html.multica-agent-gui .agent-gui-node__provider-rail-tile:focus-visible .agent-gui-node__provider-rail-avatar {
-  box-shadow: 0 0 0 2px var(--ring);
 }
 
 html.multica-agent-gui .agent-gui-node__conversation-item {
@@ -368,7 +341,7 @@ html.multica-agent-gui .agent-gui-node__rail-toolbar .room-issue-node__search-in
 }
 
 /* Multica owns conversation navigation; the intact source detail fills this document. */
-html.multica-agent-gui[data-multica-presentation="conversation"] :is(.agent-gui-node__provider-rail-panel, .agent-gui-node__rail-panel, .agent-gui-node__rail-resize-handle) {
+html.multica-agent-gui[data-multica-presentation="conversation"] :is(.agent-gui-node__rail-panel, .agent-gui-node__rail-resize-handle) {
   display: none;
 }
 

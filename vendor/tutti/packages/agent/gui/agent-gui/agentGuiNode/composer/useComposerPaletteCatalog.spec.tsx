@@ -1,9 +1,9 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { translateInUiLanguage } from "../../../i18n/index";
 import type { AgentGUIComposerSettingsVM } from "../model/agentGuiNodeTypes";
 import { resolveSlashCommandSubmitEffect } from "../model/agentSlashCommandProviderPolicy";
-import { translateInUiLanguage } from "../../../i18n/index";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 import { agentSlashPaletteLabels } from "./agentSlashPaletteLabels";
 import { useComposerPaletteCatalog } from "./useComposerPaletteCatalog";
 
@@ -234,5 +234,4 @@ describe("useComposerPaletteCatalog", () => {
         .map((entry) => entry.label)
     ).toEqual(["review"]);
   });
-
 });

@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
 import {
   afterAll,
   afterEach,
@@ -79,11 +80,11 @@ describe("AgentMessageMermaid", () => {
     mermaidMocks.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 320 180"><text>Rendered diagram</text></svg>'
     });
-    document.documentElement.dataset.theme = "light";
+    getPortalContainer().dataset.theme = "light";
   });
 
   afterEach(() => {
-    document.documentElement.removeAttribute("data-theme");
+    getPortalContainer().removeAttribute("data-theme");
     vi.restoreAllMocks();
   });
 
@@ -180,7 +181,7 @@ describe("AgentMessageMermaid", () => {
     const { rerender } = render(<AgentMessageMarkdown content={content} />);
     await screen.findByText("Rendered diagram");
 
-    document.documentElement.dataset.theme = "dark";
+    getPortalContainer().dataset.theme = "dark";
     rerender(<AgentMessageMarkdown content={content} />);
 
     expect(screen.getByText("Rendered diagram")).toBeInTheDocument();

@@ -75,7 +75,9 @@
     "three": "0.185.1",
     "use-sync-external-store": "1.6.0",
     "valtio": "2.3.2",
-    "zustand": "5.0.14"
+    "zustand": "5.0.14",
+    "@multica/conversation-client": "workspace:*",
+    "mobx-react-lite": "catalog:"
   },
   "peerDependencies": {
     "@tiptap/core": "^3.11.1",
@@ -97,7 +99,6 @@
     "@types/react-dom": "19.2.3",
     "@types/three": "0.185.1",
     "@types/use-sync-external-store": "0.0.6",
-    "mobx-react-lite": "catalog:",
     "vitest": "catalog:"
   }
 }

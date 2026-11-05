@@ -1,8 +1,6 @@
-import {
-  selectWorkspaceAgentConsumerSessions,
-  type AgentActivitySession,
-  type AgentSessionEngineState
-} from "@tutti-os/agent-activity-core";
+import { type AgentActivitySession } from "@tutti-os/agent-activity-core";
+import type { AgentConversationServices } from "../state/conversation-services";
+import type { AgentGUIConversationRailTitlePromptsBySessionId } from "./agentConversationRailTitlePromptSelector.ts";
 import {
   isAgentGUIProviderUnresolved,
   resolveAgentGUIConversationBrowserFreeTitle,
@@ -14,12 +12,10 @@ import {
   type AgentGUIConversationTitleLeadingMentionKind,
   type AgentGUIResolvedProvider
 } from "./agentConversationTitleProjection.ts";
-import type { AgentGUIConversationRailTitlePromptsBySessionId } from "./agentConversationRailTitlePromptSelector.ts";
 import { resolveWorkspaceAgentSessionSortTimeUnixMs } from "./workspaceAgentSessionSortTime.ts";
 
-export type AgentGUIConsumerSessions = ReturnType<
-  typeof selectWorkspaceAgentConsumerSessions
->;
+export type AgentGUIConsumerSessions =
+  AgentConversationServices["sessions"]["consumerSessions"];
 
 export type AgentConversationRailStatus =
   | "working"
@@ -103,7 +99,7 @@ export function projectCanonicalAgentGUIConversationSummaries(
 }
 
 export function projectCanonicalAgentGUIConversationSummariesFromState(
-  state: AgentSessionEngineState,
+  state: AgentConversationServices,
   input: {
     firstUserDisplayPromptsBySessionId?: AgentGUIConversationRailTitlePromptsBySessionId;
     provider?: string | null;
@@ -113,7 +109,7 @@ export function projectCanonicalAgentGUIConversationSummariesFromState(
 ): AgentConversationRailSummary[] {
   const provider = input.provider?.trim().toLowerCase() ?? "";
   return projectCanonicalAgentGUIConversationSummaries(
-    selectWorkspaceAgentConsumerSessions(state).filter(
+    state.sessions.consumerSessions.filter(
       (item) => item.session.workspaceId === input.workspaceId
     ),
     input.firstUserDisplayPromptsBySessionId,

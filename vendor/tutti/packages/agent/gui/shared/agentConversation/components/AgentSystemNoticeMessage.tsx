@@ -1,5 +1,6 @@
-import type { JSX } from "react";
 import { SubagentTranscript } from "@multica/tutti-agent-gui-host/subagent-transcript";
+import { observer } from "mobx-react-lite";
+import type { JSX } from "react";
 import { translate } from "../../../i18n/index";
 import type { AgentMessageContentVM } from "../contracts/agentMessageRowVM";
 import { AgentMessageDetailsDisclosure } from "./AgentMessageDetailsDisclosure";
@@ -9,87 +10,101 @@ import { useElapsedSeconds } from "./useElapsedSeconds";
 const TRANSPORT_RETRY_PROGRESS_PATTERN =
   /\b(reconnect(?:ing)?(?:\s*(?:\.\.\.|…|[.。]+|:|-))?\s*\(?\d+\s*\/\s*\d+\)?)/i;
 
-export function AgentSystemNoticeMessage({
-  message
-}: {
-  message: AgentMessageContentVM;
-}): JSX.Element {
-  "use memo";
-  const notice = message.systemNotice;
-  const detail = notice?.detail?.trim() ?? "";
-  const title = systemNoticeTitle(message);
-  if (notice?.noticeKind === "transport_retry") {
-    const retryText = transportRetryNoticeText(message);
-    return (
-      <div
-        role="status"
-        className="box-border w-full min-w-0 py-1 text-[13px] leading-5 text-[var(--text-secondary)]"
-      >
-        {retryText}
-      </div>
-    );
-  }
-  if (isContextCompactionProgressNotice(message)) {
-    return (
-      <ContextCompactionProgressDivider
-        startedAtUnixMs={message.occurredAtUnixMs}
-      />
-    );
-  }
-  if (isContextCompactionNotice(message)) {
-    return (
-      <ContextCompactionDivider
-        text={translate("agentHost.agentGui.contextCompactionCompleted")}
-      />
-    );
-  }
-  if (isContextHandoffRequiredNotice(message)) {
+export const AgentSystemNoticeMessage = observer(
+  function AgentSystemNoticeMessage({
+    message
+  }: {
+    message: AgentMessageContentVM;
+  }): JSX.Element {
+    "use memo";
+    const notice = message.systemNotice;
+    const detail = notice?.detail?.trim() ?? "";
+    const title = systemNoticeTitle(message);
+    if (notice?.noticeKind === "transport_retry") {
+      const retryText = transportRetryNoticeText(message);
+      return (
+        <div
+          role="status"
+          className="box-border w-full min-w-0 py-1 text-[13px] leading-5 text-[var(--text-secondary)]"
+        >
+          {retryText}
+        </div>
+      );
+    }
+    if (isContextCompactionProgressNotice(message)) {
+      return (
+        <ContextCompactionProgressDivider
+          startedAtUnixMs={message.occurredAtUnixMs}
+        />
+      );
+    }
+    if (isContextCompactionNotice(message)) {
+      return (
+        <ContextCompactionDivider
+          text={translate("agentHost.agentGui.contextCompactionCompleted")}
+        />
+      );
+    }
+    if (isContextHandoffRequiredNotice(message)) {
+      return (
+        <section
+          role="alert"
+          className={`box-border w-full min-w-0 rounded-[8px] border p-3 text-[13px] leading-5 text-[var(--text-primary)] ${agentSystemNoticeStyles.contextHandoff}`}
+        >
+          <div className="font-medium text-[var(--state-danger)]">
+            {translate("agentHost.agentGui.contextHandoffRequired")}
+          </div>
+          <div className="mt-1 text-[var(--text-secondary)]">
+            {translate("agentHost.agentGui.contextHandoffRequiredDetail")}
+          </div>
+          {detail ? (
+            <AgentMessageDetailsDisclosure detail={detail} className="mt-2" />
+          ) : null}
+        </section>
+      );
+    }
+    if (isContextCompactionInterruptedNotice(message)) {
+      return (
+        <ContextCompactionDivider
+          text={translate("agentHost.agentGui.contextCompactionInterrupted")}
+          detail={detail || null}
+        />
+      );
+    }
+    const isStatusNotice = systemNoticeIsStatus(message);
     return (
       <section
-        role="alert"
-        className={`box-border w-full min-w-0 rounded-[8px] border p-3 text-[13px] leading-5 text-[var(--text-primary)] ${agentSystemNoticeStyles.contextHandoff}`}
+        role={isStatusNotice ? "status" : undefined}
+        className={`box-border w-full min-w-0 rounded-[8px] border p-3 text-[13px] leading-5 text-[var(--text-secondary)] ${agentSystemNoticeStyles.routine}`}
       >
-        <div className="font-medium text-[var(--state-danger)]">
-          {translate("agentHost.agentGui.contextHandoffRequired")}
+        <div className="min-w-0">
+          <div className="font-medium text-[var(--text-secondary)]">
+            {title}
+          </div>
+          {notice?.noticeKind === "background_task" &&
+          message.body.trim() !== title ? (
+            <div
+              role="status"
+              className="mt-1 whitespace-pre-line break-words text-[12px] leading-5"
+            >
+              {message.body}
+            </div>
+          ) : null}
+          {notice?.noticeKind === "background_task" ? (
+            <SubagentTranscript message={message} />
+          ) : null}
+          {detail ? (
+            <AgentMessageDetailsDisclosure
+              detail={detail}
+              className="mt-1"
+              tone="muted"
+            />
+          ) : null}
         </div>
-        <div className="mt-1 text-[var(--text-secondary)]">
-          {translate("agentHost.agentGui.contextHandoffRequiredDetail")}
-        </div>
-        {detail ? (
-          <AgentMessageDetailsDisclosure detail={detail} className="mt-2" />
-        ) : null}
       </section>
     );
   }
-  if (isContextCompactionInterruptedNotice(message)) {
-    return (
-      <ContextCompactionDivider
-        text={translate("agentHost.agentGui.contextCompactionInterrupted")}
-        detail={detail || null}
-      />
-    );
-  }
-  const isStatusNotice = systemNoticeIsStatus(message);
-  return (
-    <section
-      role={isStatusNotice ? "status" : undefined}
-      className={`box-border w-full min-w-0 rounded-[8px] border p-3 text-[13px] leading-5 text-[var(--text-secondary)] ${agentSystemNoticeStyles.routine}`}
-    >
-      <div className="min-w-0">
-        <div className="font-medium text-[var(--text-secondary)]">{title}</div>
-        {notice?.noticeKind === "background_task" && message.body.trim() !== title ? <div role="status" className="mt-1 whitespace-pre-line break-words text-[12px] leading-5">{message.body}</div> : null}
-        {notice?.noticeKind === "background_task" ? <SubagentTranscript message={message} /> : null}
-        {detail ? (
-          <AgentMessageDetailsDisclosure
-            detail={detail}
-            className="mt-1"
-            tone="muted"
-          />
-        ) : null}
-      </div>
-    </section>
-  );
-}
+);
 
 function systemNoticeIsStatus(message: AgentMessageContentVM): boolean {
   const notice = message.systemNotice;

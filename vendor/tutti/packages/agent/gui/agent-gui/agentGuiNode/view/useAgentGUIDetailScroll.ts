@@ -11,10 +11,9 @@ import {
 } from "../../../shared/agentConversation/agentConversationFollowEndController";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import {
-  AgentGUIConversationScrollMemory,
-  type TimelineScrollAnchor
-} from "./agentGUIScrollMemory";
-import type { AgentGUIDetailScrollInput } from "./agentGUIDetailScrollTypes";
+  setTimelineScrollTopInstantly,
+  setTimelineScrollTopWithUserTransition
+} from "./AgentGUIConversationTimelinePane";
 import {
   hasStaleVirtualScrollController,
   matchingVirtualScrollController,
@@ -24,10 +23,11 @@ import {
   writeBottomDockSafeArea,
   type BottomDockSafeArea
 } from "./agentGUIDetailScrollHelpers";
+import type { AgentGUIDetailScrollInput } from "./agentGUIDetailScrollTypes";
 import {
-  setTimelineScrollTopInstantly,
-  setTimelineScrollTopWithUserTransition
-} from "./AgentGUIConversationTimelinePane";
+  AgentGUIConversationScrollMemory,
+  type TimelineScrollAnchor
+} from "./agentGUIScrollMemory";
 
 import { useTimelineEndPosition } from "@multica/tutti-agent-gui-host/timeline-end-position";
 
@@ -51,7 +51,9 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     timelineRef,
     timelineScrollAnchorRef,
     virtualScrollControllerRef,
-    viewModel
+    activeConversationId: selectedConversationId,
+    hasOlderMessages,
+    isLoadingOlderMessages
   } = input;
   const [isTimelineScrolledToTop, setIsTimelineScrolledToTop] = useState(true);
   const followEndControllerRef = useRef(
@@ -128,7 +130,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       setIsTimelineScrolledToTop(true);
       return;
     }
-    if (activeConversationId !== viewModel.rail.activeConversationId) {
+    if (activeConversationId !== selectedConversationId) {
       return;
     }
     let anchor = timelineScrollAnchorRef.current;
@@ -232,10 +234,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
           behavior: "auto"
         });
       }
-      if (
-        shouldRestorePrependAnchor &&
-        !viewModel.detail.isLoadingOlderMessages
-      ) {
+      if (shouldRestorePrependAnchor && !isLoadingOlderMessages) {
         pendingPrependScrollAnchorRef.current = null;
       }
       const virtualAnchor = anchor;
@@ -270,7 +269,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       pendingPrependScrollAnchorRef.current = null;
     } else if (shouldRestorePrependAnchor && prependAnchor) {
       const nextScrollHeight = geometry.scrollHeight;
-      if (viewModel.detail.isLoadingOlderMessages) {
+      if (isLoadingOlderMessages) {
         // Nothing has been prepended yet: growth now is output streaming below.
         nextScrollTop = Math.min(maxScrollTop, anchor.scrollTop);
         timeline.scrollTop = nextScrollTop;
@@ -307,8 +306,8 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     showTimelineSkeleton,
     timelineConversationId,
     virtualScrollControllerRevision,
-    viewModel.rail.activeConversationId,
-    viewModel.detail.isLoadingOlderMessages,
+    selectedConversationId,
+    isLoadingOlderMessages,
     writeTimelineScrollAnchor
   ]);
 
@@ -484,9 +483,9 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
       userScrolled = false
     ): void => {
       if (
-        activeConversationId !== viewModel.rail.activeConversationId ||
-        !viewModel.detail.hasOlderMessages ||
-        viewModel.detail.isLoadingOlderMessages ||
+        activeConversationId !== selectedConversationId ||
+        !hasOlderMessages ||
+        isLoadingOlderMessages ||
         showTimelineSkeleton ||
         scrollTop >= AGENT_GUI_TOP_HISTORY_PREFETCH_VIEWPORTS * clientHeight
       ) {
@@ -727,9 +726,9 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     isVisible,
     timelineConversationId,
     showTimelineSkeleton,
-    viewModel.rail.activeConversationId,
-    viewModel.detail.hasOlderMessages,
-    viewModel.detail.isLoadingOlderMessages,
+    selectedConversationId,
+    hasOlderMessages,
+    isLoadingOlderMessages,
     writeTimelineScrollAnchor
   ]);
 
@@ -739,7 +738,7 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     if (!isVisible || !timeline || !activeConversationId) {
       return;
     }
-    if (activeConversationId !== viewModel.rail.activeConversationId) {
+    if (activeConversationId !== selectedConversationId) {
       return;
     }
     if (
@@ -779,12 +778,15 @@ export function useAgentGUIDetailScroll(input: AgentGUIDetailScrollInput) {
     dispatchFollowEnd,
     isVisible,
     timelineConversationId,
-    viewModel.rail.activeConversationId,
+    selectedConversationId,
     virtualScrollControllerRef,
     writeTimelineScrollAnchor
   ]);
 
-  const isTimelineScrolledToBottom = useTimelineEndPosition(input, virtualScrollControllerRevision);
+  const isTimelineScrolledToBottom = useTimelineEndPosition(
+    input,
+    virtualScrollControllerRevision
+  );
   return {
     followEndMode,
     isTimelineScrolledToBottom,

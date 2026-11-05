@@ -47,9 +47,9 @@ function createAgentGUIProps(locale: AgentGUIProps["locale"]): AgentGUIProps {
 vi.mock("./agent-gui/agentGuiNode/AgentGUINode", async () => {
   const { useTranslation } =
     await vi.importActual<typeof import("./i18n/index")>("./i18n/index");
-  const { useOptionalAgentGUIRuntime } = await vi.importActual<
-    typeof import("./agentActivityRuntime")
-  >("./agentActivityRuntime");
+  const { useOptionalConversationServices } = await vi.importActual<
+    typeof import("./conversationServices")
+  >("./conversationServices");
   const { Tooltip, TooltipContent, TooltipTrigger } = await vi.importActual<
     typeof import("@tutti-os/ui-system")
   >("@tutti-os/ui-system");
@@ -58,7 +58,7 @@ vi.mock("./agent-gui/agentGuiNode/AgentGUINode", async () => {
     AgentGUINode: (props: AgentGUINodeProbeProps) => {
       agentGuiNodeSpy(props);
       const { t } = useTranslation();
-      const activityRuntime = useOptionalAgentGUIRuntime();
+      const activityRuntime = useOptionalConversationServices();
       return (
         <>
           <div data-testid="agent-gui-language-probe">

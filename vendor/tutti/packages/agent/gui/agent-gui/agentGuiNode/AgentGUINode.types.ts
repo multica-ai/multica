@@ -1,66 +1,63 @@
-import type { ReactNode } from "react";
+import type { RichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { WorkspaceFileEntry } from "@tutti-os/workspace-file-manager/services";
 import type {
-  WorkspaceFileReferenceAdapter,
+  ReferenceProvenanceCatalog,
   WorkspaceFileReference,
-  ReferenceProvenanceCatalog
+  WorkspaceFileReferenceAdapter
 } from "@tutti-os/workspace-file-reference/contracts";
 import type { ReferenceSourceAggregator } from "@tutti-os/workspace-file-reference/core";
 import type { ReferenceSourcePickerProps } from "@tutti-os/workspace-file-reference/ui";
-import type { AgentProjectDropdownOptions } from "./AgentComposerProjectMenu";
-import type { AgentGuiWorkbenchCommandBridge } from "../../workbench/commands";
-import type { AgentSettings } from "../../contexts/settings/domain/agentSettings";
+import type { ReactNode } from "react";
 import type { WorkspaceLinkAction } from "../../actions/workspaceLinkActions";
-import type {
-  AgentGUINodeData,
-  AgentGUIProvider,
-  AgentGUIProviderRailAllPresentation,
-  AgentGUIProviderRailMode,
-  AgentGUIProviderReadinessGate,
-  AgentGUIInteractionReadinessSource,
-  AgentGUIObservationGapSource,
-  AgentGUITargetConnectionSource,
-  AgentGUIHomeSuggestionId,
-  AgentGUIAgentTarget,
-  AgentGUIAgentTargetInfoRenderer,
-  AgentGUIAgentOwnership,
-  NodeFrame,
-  Point
-} from "../../types";
-import type { DesktopSize } from "../workspaceDesktop/types";
-import type {
-  AgentGUIOpenSessionRequest,
-  AgentGUIPrefillPromptRequest,
-  AgentGUIRememberComposerDefaultsInput,
-  AgentGUIRememberComposerDefaultsResult
-} from "./controller/useAgentGUINodeController";
-import type { AgentStatusController } from "./controller/AgentStatusController";
-import type {
-  AgentGUISidebarFooterContext,
-  AgentGUIConversationRailLayout,
-  AgentGUIAgentsEmptyRenderer,
-  AgentGUIComposerEmptySubmit,
-  AgentGUIComposerFooterAccessoryRenderer,
-  AgentMentionReferenceTargetResolver,
-  AgentWorkspaceReferenceInitialTargetResolver
-} from "./AgentGUINodeView";
+import type { AgentSettings } from "../../contexts/settings/domain/agentSettings";
+import type { OpenAgentEnvPanelInput } from "../../shared/agentEnv";
 import type {
   AgentVisibleErrorOverrides,
   AgentVisibleErrorPresentationScope
 } from "../../shared/agentEnv/agentErrorPresentation";
+import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../shared/AgentMessageMarkdown";
+import type {
+  AgentGUIAgentOwnership,
+  AgentGUIAgentTarget,
+  AgentGUIAgentTargetInfoRenderer,
+  AgentGUIHomeSuggestionId,
+  AgentGUIInteractionReadinessSource,
+  AgentGUINodeData,
+  AgentGUIObservationGapSource,
+  AgentGUIProvider,
+  AgentGUIProviderRailMode,
+  AgentGUIProviderReadinessGate,
+  AgentGUITargetConnectionSource,
+  NodeFrame,
+  Point
+} from "../../types";
+import type { AgentGuiWorkbenchCommandBridge } from "../../workbench/commands";
+import type { DesktopSize } from "../workspaceDesktop/types";
 import type {
   AgentComposerCapabilityMenuState,
   AgentComposerCapabilitySettingsTarget,
   AgentComposerGitBranchLoader,
   AgentComposerProps
 } from "./AgentComposer";
-import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../shared/AgentMessageMarkdown";
-import type { RichTextMentionService } from "@tutti-os/ui-rich-text/service";
-import type { AgentGUIEngagementEventSink } from "./engagement/agentGUIEngagement.types";
+import type { AgentProjectDropdownOptions } from "./AgentComposerProjectMenu";
+import type {
+  AgentGUIComposerEmptySubmit,
+  AgentGUIComposerFooterAccessoryRenderer,
+  AgentGUIConversationRailLayout,
+  AgentGUISidebarFooterContext,
+  AgentMentionReferenceTargetResolver,
+  AgentWorkspaceReferenceInitialTargetResolver
+} from "./AgentGUINodeView";
+import type {
+  AgentGUIOpenSessionRequest,
+  AgentGUIPrefillPromptRequest,
+  AgentGUIRememberComposerDefaultsInput,
+  AgentGUIRememberComposerDefaultsResult
+} from "./controller/agentGuiController";
+import type { AgentStatusController } from "./controller/AgentStatusController";
 import type { AgentGUIComposerAppendRequest } from "./controller/useAgentGUIComposerAppendRequest";
-import type { OpenAgentEnvPanelInput } from "../../shared/agentEnv";
+import type { AgentGUIEngagementEventSink } from "./engagement/agentGUIEngagement.types";
 import type { AgentGUISessionLaunchMode } from "./model/agentSessionLaunchMode";
-import type { AgentGUISideConversationPresentation } from "../../agentSideConversationPresentation";
 
 export interface AgentGUINodeIdentity {
   nodeId: string;
@@ -134,9 +131,7 @@ export interface AgentGUINodeHostCapabilities {
   /** Host-owned experimental opt-in for current-Session composer history. */
   sessionInputHistoryEnabled?: boolean;
   /** Host-owned experimental opt-in for Side and transcript selection actions. */
-  sideConversationEnabled?: boolean;
   /** Optional presentation-only bridge for rendering Side outside AgentGUI. */
-  sideConversationPresentation?: AgentGUISideConversationPresentation | null;
   /** Host-owned opt-in for launching self-owned local Sessions in git worktrees. */
   sessionWorktreeEnabled?: boolean;
   /** Host-owned durable launch preference projection for this workspace. */
@@ -174,7 +169,6 @@ export interface AgentGUINodeHostCapabilities {
   handoffAgentTargetsLoading?: boolean;
   /** Hidden by default; hosts may opt into ownership copy for collaborative products. */
   showHandoffTargetOwnershipLabels?: boolean;
-  providerRailAllPresentation?: AgentGUIProviderRailAllPresentation | null;
   providerRailMode?: AgentGUIProviderRailMode;
   comingSoonProviders?: readonly AgentGUIProvider[];
   providerReadinessGates?: Partial<
@@ -295,7 +289,6 @@ export interface AgentGUINodeRenderSlots {
       NonNullable<ReferenceSourcePickerProps["renderSidebarActions"]>
     >[0] & { purpose: "directory" | "reference" }
   ) => ReactNode;
-  providerRailEmpty?: AgentGUIAgentsEmptyRenderer;
   sidebarFooter?: (ctx: AgentGUISidebarFooterContext) => ReactNode;
 }
 
@@ -467,8 +460,6 @@ export function areAgentGUINodePropsEqual(
       nc.referenceProvenanceFilterEnabled &&
     pc.hiddenMentionFilterIds === nc.hiddenMentionFilterIds &&
     pc.sessionInputHistoryEnabled === nc.sessionInputHistoryEnabled &&
-    pc.sideConversationEnabled === nc.sideConversationEnabled &&
-    pc.sideConversationPresentation === nc.sideConversationPresentation &&
     pc.sessionWorktreeEnabled === nc.sessionWorktreeEnabled &&
     pc.sessionLaunchModesByProjectSectionKey ===
       nc.sessionLaunchModesByProjectSectionKey &&
@@ -503,8 +494,6 @@ export function areAgentGUINodePropsEqual(
     pc.handoffAgentTargetsLoading === nc.handoffAgentTargetsLoading &&
     pc.showHandoffTargetOwnershipLabels ===
       nc.showHandoffTargetOwnershipLabels &&
-    pc.providerRailAllPresentation?.iconUrl ===
-      nc.providerRailAllPresentation?.iconUrl &&
     pc.providerRailMode === nc.providerRailMode &&
     pc.comingSoonProviders === nc.comingSoonProviders &&
     pc.providerReadinessGates === nc.providerReadinessGates &&
@@ -542,7 +531,6 @@ export function areAgentGUINodePropsEqual(
     ps.agentTargetInfo === ns.agentTargetInfo &&
     ps.composerFooterAccessory === ns.composerFooterAccessory &&
     ps.composerEmptySubmit === ns.composerEmptySubmit &&
-    ps.providerRailEmpty === ns.providerRailEmpty &&
     ps.projectDirectoryPickerHeaderActions ===
       ns.projectDirectoryPickerHeaderActions &&
     ps.projectSelectOptions === ns.projectSelectOptions &&

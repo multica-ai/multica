@@ -50,8 +50,7 @@ describe("AgentGUIEmptyHeroPane notices", () => {
             sharedAgentOwnerSeparator: "的"
           } as unknown as AgentGUIViewLabels
         }
-        noticeChrome={null}
-        isRespondingApproval={false}
+        noticeSource={{ chrome: null, isRespondingApproval: false }}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={vi.fn()}
         onContinueInNewConversation={vi.fn()}
@@ -90,17 +89,19 @@ describe("AgentGUIEmptyHeroPane notices", () => {
             sharedAgentOwnerSeparator: "'s"
           } as unknown as AgentGUIViewLabels
         }
-        noticeChrome={{
-          auth: null,
-          approval: null,
-          recovery: {
-            kind: "agent-sharing-revoked",
-            message: "Jackson stopped sharing this agent",
-            canRetry: false
+        noticeSource={{
+          chrome: {
+            auth: null,
+            approval: null,
+            recovery: {
+              kind: "agent-sharing-revoked",
+              message: "Jackson stopped sharing this agent",
+              canRetry: false
+            },
+            rawState: null
           },
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={vi.fn()}
         onContinueInNewConversation={vi.fn()}

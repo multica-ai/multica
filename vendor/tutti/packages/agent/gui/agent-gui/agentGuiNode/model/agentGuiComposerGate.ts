@@ -3,7 +3,7 @@ import type {
   AgentGUIComposerEditorBlockedReason,
   AgentGUIComposerGate,
   AgentGUIComposerSubmissionBlockedReason,
-  AgentGUIRuntimeBlockedReason
+  ConversationServicesBlockedReason
 } from "./agentGuiNodeTypes";
 
 export interface ResolveAgentGUIComposerGateInput {
@@ -30,7 +30,7 @@ export interface ResolveAgentGUIComposerGateInput {
    * cannot race UpdateSettings on the daemon settings lock.
    */
   settingsUpdatePending: boolean;
-  sessionRuntimeBlockedReason: AgentGUIRuntimeBlockedReason | null;
+  sessionRuntimeBlockedReason: ConversationServicesBlockedReason | null;
   targetConnectionBlocked: boolean;
 }
 

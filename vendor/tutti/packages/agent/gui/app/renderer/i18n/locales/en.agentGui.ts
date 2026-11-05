@@ -1,18 +1,18 @@
-import { enAgentGuiOrchestration } from "./en.agentGuiOrchestration.ts";
 import { enAgentGuiAddContent } from "./en.agentGuiAddContent.ts";
+import { enAgentGuiCollaboration } from "./en.agentGuiCollaboration.ts";
+import { enAgentGuiComposer } from "./en.agentGuiComposer.ts";
+import { enAgentGuiHomeSuggestions } from "./en.agentGuiHomeSuggestions.ts";
+import { enAgentGuiModelPlans } from "./en.agentGuiModelPlans.ts";
+import { enAgentGuiOrchestration } from "./en.agentGuiOrchestration.ts";
+import { enAgentGuiProjectLaunch } from "./en.agentGuiProjectLaunch.ts";
 import { enAgentGuiProviderIdentity } from "./en.agentGuiProviderIdentity.ts";
 import { enAgentGuiQuickPrompts } from "./en.agentGuiQuickPrompts.ts";
 import { enAgentGuiReferencePicker } from "./en.agentGuiReferencePicker.ts";
 import { enAgentGuiRuntimeNotices } from "./en.agentGuiRuntimeNotices.ts";
-import { enAgentGuiModelPlans } from "./en.agentGuiModelPlans.ts";
-import { enAgentGuiSlashPalette } from "./en.agentGuiSlashPalette.ts";
 import { enAgentGuiSessionActions } from "./en.agentGuiSessionActions.ts";
-import { enAgentGuiCollaboration } from "./en.agentGuiCollaboration.ts";
-import { enAgentGuiUsageStatus } from "./en.agentGuiUsageStatus.ts";
-import { enAgentGuiComposer } from "./en.agentGuiComposer.ts";
-import { enAgentGuiProjectLaunch } from "./en.agentGuiProjectLaunch.ts";
 import { enAgentGuiSide } from "./en.agentGuiSide.ts";
-import { enAgentGuiHomeSuggestions } from "./en.agentGuiHomeSuggestions.ts";
+import { enAgentGuiSlashPalette } from "./en.agentGuiSlashPalette.ts";
+import { enAgentGuiUsageStatus } from "./en.agentGuiUsageStatus.ts";
 
 export const enAgentGui = {
   imageDownloaded: "Image downloaded",
@@ -294,8 +294,7 @@ export const enAgentGui = {
   permissionLabel: "Run permissions",
   ...enAgentGuiOrchestration,
   queuedLabel: "Queued",
-  queuePausedByUserLabel:
-    "Queue paused",
+  queuePausedByUserLabel: "Queue paused",
   sendQueuedPromptNext: "Send next",
   editQueuedPrompt: "Edit",
   deleteQueuedPrompt: "Delete",
@@ -614,7 +613,7 @@ export const enAgentGui = {
   slashCommandCompactLabel: "compact",
   slashCommandContextLabel: "context",
   slashCommandFastLabel: "fast",
-  slashCommandGoalLabel: "goal",
+
   slashCommandInitLabel: "init",
   slashCommandPlanLabel: "plan",
   slashCommandReviewLabel: "review",
@@ -623,7 +622,7 @@ export const enAgentGui = {
   slashCommandCompactDescription: "Compact the conversation context.",
   slashCommandContextDescription: "Show the current context snapshot.",
   slashCommandFastDescription: "Toggle fast response mode.",
-  slashCommandGoalDescription: "Set, inspect, or clear the current goal.",
+
   slashCommandInitDescription: "Initialize repository guidance files.",
   slashCommandPlanDescription: "Toggle plan mode.",
   slashCommandReviewDescription: "Run a code review.",
@@ -654,8 +653,7 @@ export const enAgentGui = {
   fileMentionLoading: "Searching...",
   fileMentionEmpty: "Search workspace files based on your input",
   fileMentionError: "Unable to search Files.",
-  fileMentionTabHint:
-    "Tab / ←→ switch category | ↑↓ switch selection",
+  fileMentionTabHint: "Tab / ←→ switch category | ↑↓ switch selection",
   fileDropHint: "Drop files to add them to the session",
   composerFileFolderUnsupported: "Folders cannot be attached here",
   composerFileTooLarge: "File is too large",

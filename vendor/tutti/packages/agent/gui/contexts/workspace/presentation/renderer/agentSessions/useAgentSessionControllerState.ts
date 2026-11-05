@@ -1,11 +1,13 @@
-import { useCallback } from "react";
 import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
-import { type AgentSessionViewRef } from "./useAgentSessionPagingState";
-import { useAgentSessionPagingState } from "./useAgentSessionPagingState";
+import { useCallback } from "react";
+import {
+  useAgentSessionPagingState,
+  type AgentSessionViewRef
+} from "./useAgentSessionPagingState";
 
 export function useAgentSessionControllerState(
   activeRef: AgentSessionViewRef,
-  messages: readonly AgentActivityMessage[] = [],
+  oldestLoadedVersion: number | null = null,
   hasOlderMessages = false
 ) {
   const paging = useAgentSessionPagingState();
@@ -38,7 +40,6 @@ export function useAgentSessionControllerState(
   );
   void paging.entries;
   const storedActiveView = getAgentSessionView(activeRef);
-  const oldestLoadedVersion = oldestVersion(messages);
   const activeSessionView =
     storedActiveView === null && oldestLoadedVersion === null
       ? null
@@ -64,7 +65,8 @@ export function useAgentSessionControllerState(
 export function oldestVersion(messages: readonly AgentActivityMessage[]) {
   let oldest: number | null = null;
   for (const { version } of messages) {
-    if (Number.isFinite(version) && (oldest === null || version < oldest)) oldest = version;
+    if (Number.isFinite(version) && (oldest === null || version < oldest))
+      oldest = version;
   }
   return oldest;
 }

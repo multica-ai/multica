@@ -1,15 +1,33 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import {
   dispatchAgentGuiWorkbenchCommand,
   type AgentGuiWorkbenchSessionAction
 } from "../../../workbench/commands";
 import { AGENT_CONVERSATION_COPY_MAX_EMBEDDED_IMAGE_BYTES } from "../model/agentConversationCopy";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel,
+  AgentGUIViewFixture
+} from "../model/agentGuiNodeTypes";
 import { useAgentGUIExternalRequests } from "./useAgentGUIExternalRequests";
+type AgentGUIViewFixture = {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
+};
 
-type Conversation = AgentGUINodeViewModel["rail"]["conversations"][number];
+type Conversation = AgentGUIRailViewModel["conversations"][number];
 
 const LABELS = {
   conversationCopyFile: "File",
@@ -27,13 +45,13 @@ const LABELS = {
 
 const originalAgentHostApi = window.agentHostApi;
 const runtimeWindow = window as unknown as {
-  agentGUIRuntime?: AgentGUIRuntime;
+  agentGUIRuntime?: ConversationServices;
 };
-const originalAgentGUIRuntime = runtimeWindow.agentGUIRuntime;
+const originalConversationServices = runtimeWindow.agentGUIRuntime;
 
 afterEach(() => {
   window.agentHostApi = originalAgentHostApi;
-  runtimeWindow.agentGUIRuntime = originalAgentGUIRuntime;
+  runtimeWindow.agentGUIRuntime = originalConversationServices;
   vi.unstubAllGlobals();
   delete (window.navigator as { clipboard?: unknown }).clipboard;
 });
@@ -58,7 +76,7 @@ function makeViewModel(input: {
       conversations: input.conversations ?? []
     },
     shell: { workspaceId: "workspace-1" }
-  } as unknown as AgentGUINodeViewModel;
+  } as unknown as AgentGUIViewFixture;
 }
 
 // Mirrors the desktop Toast.Loading contract: opens one toast and returns a
@@ -112,11 +130,13 @@ function installHostApiWithoutLoadingToast() {
 function installRuntime(
   options: {
     messages?: unknown[];
-    readSessionAttachment?: (input: {
-      agentSessionId: string;
-      attachmentId: string;
-      workspaceId: string;
-    }) => Promise<{ data: string; mimeType: string }>;
+    attachments?: {
+      readSessionAttachment?: (input: {
+        agentSessionId: string;
+        attachmentId: string;
+        workspaceId: string;
+      }) => Promise<{ data: string; mimeType: string }>;
+    };
     reject?: boolean;
   } = {}
 ) {
@@ -140,11 +160,12 @@ function installRuntime(
         ]
       });
   runtimeWindow.agentGUIRuntime = {
-    listSessionMessages,
-    ...(options.readSessionAttachment
-      ? { readSessionAttachment: options.readSessionAttachment }
-      : {})
-  } as unknown as AgentGUIRuntime;
+    conversations: {
+      loadAll: async (input: unknown) =>
+        (await listSessionMessages(input)).messages
+    },
+    ...(options.attachments ? { attachments: options.attachments } : {})
+  } as unknown as ConversationServices;
   return { listSessionMessages };
 }
 
@@ -183,7 +204,7 @@ function baseProps(
     requestCreateConversation: vi.fn(),
     requestRenameConversation: vi.fn(),
     uiLanguage: "en",
-    viewModel: makeViewModel({}),
+    ...makeViewModel({}),
     workbenchCommandBridge: { instanceId: "instance-1" },
     ...overrides
   };
@@ -291,7 +312,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     const requestRenameConversation = vi.fn();
     const props = baseProps({
       requestRenameConversation,
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active, other]
       })
@@ -312,7 +333,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     const requestRenameConversation = vi.fn();
     const props = baseProps({
       requestRenameConversation,
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -332,7 +353,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     const requestRenameConversation = vi.fn();
     const props = baseProps({
       requestRenameConversation,
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -351,7 +372,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime();
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -373,7 +394,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime();
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -392,7 +413,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime();
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -440,7 +461,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     });
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -480,6 +501,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
       mimeType: "image/png"
     });
     installRuntime({
+      attachments: { readSessionAttachment },
       messages: [
         {
           agentSessionId: "session-1",
@@ -502,12 +524,11 @@ describe("useAgentGUIExternalRequests session actions", () => {
           turnId: "turn-1",
           version: 1
         }
-      ],
-      readSessionAttachment
+      ]
     });
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -544,6 +565,12 @@ describe("useAgentGUIExternalRequests session actions", () => {
       4 * Math.ceil((AGENT_CONVERSATION_COPY_MAX_EMBEDDED_IMAGE_BYTES + 1) / 3)
     );
     installRuntime({
+      attachments: {
+        readSessionAttachment: vi.fn().mockResolvedValue({
+          data: oversized,
+          mimeType: "image/png"
+        })
+      },
       messages: [
         {
           agentSessionId: "session-1",
@@ -566,15 +593,11 @@ describe("useAgentGUIExternalRequests session actions", () => {
           turnId: "turn-1",
           version: 1
         }
-      ],
-      readSessionAttachment: vi.fn().mockResolvedValue({
-        data: oversized,
-        mimeType: "image/png"
-      })
+      ]
     });
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -604,7 +627,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime();
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -628,7 +651,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     const { listSessionMessages } = installRuntime();
     const active = makeConversation({ id: "session-1" });
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -653,7 +676,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime({ reject: true });
     const active = makeConversation();
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })
@@ -681,7 +704,7 @@ describe("useAgentGUIExternalRequests session actions", () => {
     installRuntime();
     const active = makeConversation();
     const props = baseProps({
-      viewModel: makeViewModel({
+      ...makeViewModel({
         activeConversation: active,
         conversations: [active]
       })

@@ -1,8 +1,9 @@
-import { useState, type JSX } from "react";
 import { canonicalInteractionKey } from "@tutti-os/agent-activity-core";
 import { Button } from "@tutti-os/ui-system";
-import { MessageSquareMoreIcon } from "../../../app/renderer/components/icons/MessageSquareMoreIcon";
+import { observer } from "mobx-react-lite";
+import { useState, type JSX } from "react";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { MessageSquareMoreIcon } from "../../../app/renderer/components/icons/MessageSquareMoreIcon";
 import type { AgentConversationPromptVM } from "../contracts/agentConversationVM";
 import { buildAskUserAnswerPayload } from "../interactiveAnswerPayload";
 import type {
@@ -28,47 +29,49 @@ type SharedAskUserSurfaceProps = Pick<
   prompt: AskUserPrompt;
 };
 
-export function AgentAskUserPromptSurface({
-  prompt,
-  variant,
-  conversationReturn,
-  ...props
-}: SharedAskUserSurfaceProps & {
-  variant: AgentInteractivePromptVariant;
-  conversationReturn?: AgentInteractivePromptConversationReturn;
-}): JSX.Element {
-  "use memo";
-  const question = prompt.questions[0] ?? null;
-  const useCompactQuickAnswer =
-    variant === "compact" &&
-    prompt.questions.length === 1 &&
-    question !== null &&
-    !question.multiSelect &&
-    question.options.length > 0;
+export const AgentAskUserPromptSurface = observer(
+  function AgentAskUserPromptSurface({
+    prompt,
+    variant,
+    conversationReturn,
+    ...props
+  }: SharedAskUserSurfaceProps & {
+    variant: AgentInteractivePromptVariant;
+    conversationReturn?: AgentInteractivePromptConversationReturn;
+  }): JSX.Element {
+    "use memo";
+    const question = prompt.questions[0] ?? null;
+    const useCompactQuickAnswer =
+      variant === "compact" &&
+      prompt.questions.length === 1 &&
+      question !== null &&
+      !question.multiSelect &&
+      question.options.length > 0;
 
-  if (useCompactQuickAnswer) {
+    if (useCompactQuickAnswer) {
+      return (
+        <CompactQuickAnswerSurface
+          {...props}
+          prompt={prompt}
+          question={question}
+        />
+      );
+    }
+
     return (
-      <CompactQuickAnswerSurface
+      <AskUserAnswerFlowSurface
+        key={canonicalInteractionKey(
+          prompt.agentSessionId ?? "",
+          prompt.turnId ?? "",
+          prompt.requestId
+        )}
         {...props}
         prompt={prompt}
-        question={question}
+        conversationReturn={variant === "full" ? conversationReturn : undefined}
       />
     );
   }
-
-  return (
-    <AskUserAnswerFlowSurface
-      key={canonicalInteractionKey(
-        prompt.agentSessionId ?? "",
-        prompt.turnId ?? "",
-        prompt.requestId
-      )}
-      {...props}
-      prompt={prompt}
-      conversationReturn={variant === "full" ? conversationReturn : undefined}
-    />
-  );
-}
+);
 
 function CompactQuickAnswerSurface({
   prompt,

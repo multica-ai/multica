@@ -1,19 +1,19 @@
 // @vitest-environment node
 import { homedir } from "os";
 import { join } from "path";
-import { describe, expect, it } from "vitest";
+import { afterEach,describe,expect,it,vi } from "vitest";
 
 import {
-  DEFAULT_HEALTH_PORT,
-  deriveProfileName,
-  healthPortForProfile,
-  profileArgs,
-  profileConfigPath,
-  profileDir,
-  profileLogPath,
-  profilePidPath,
-  profilePortPath,
-  profileUserIdPath,
+DEFAULT_HEALTH_PORT,
+deriveProfileName,
+healthPortForProfile,
+profileArgs,
+profileConfigPath,
+profileDir,
+profileLogPath,
+profilePidPath,
+profilePortPath,
+profileUserIdPath
 } from "./daemon-profile";
 
 const MULTICA_DIR = join(homedir(), ".multica");
@@ -22,13 +22,13 @@ const DEFAULT_CLI_CONFIG = join(MULTICA_DIR, "config.json");
 describe("deriveProfileName", () => {
   it("names the profile after the target host", () => {
     expect(deriveProfileName("https://api.multica.ai")).toBe(
-      "desktop-api.multica.ai",
+      "desktop-api.multica.ai"
     );
   });
 
   it("replaces the port colon so the name is path-safe", () => {
     expect(deriveProfileName("http://localhost:8080")).toBe(
-      "desktop-localhost-8080",
+      "desktop-localhost-8080"
     );
   });
 
@@ -39,25 +39,33 @@ describe("deriveProfileName", () => {
 
 describe("profile paths", () => {
   it("shares one Desktop runtime directory while keeping credentials in a named profile", () => {
-    expect(profileLogPath("desktop-runtime")).toBe(join(MULTICA_DIR, "desktop-runtime", "daemon.log"));
-    expect(profilePidPath("desktop-runtime")).toBe(join(MULTICA_DIR, "desktop-runtime", "daemon.pid"));
-    expect(profilePortPath("desktop-runtime")).toBe(join(MULTICA_DIR, "desktop-runtime", "runtime.json"));
-    expect(profileConfigPath("desktop-runtime")).toBe(join(MULTICA_DIR, "profiles", "desktop-runtime", "config.json"));
+    expect(profileLogPath("desktop-runtime")).toBe(
+      join(MULTICA_DIR, "desktop-runtime", "daemon.log")
+    );
+    expect(profilePidPath("desktop-runtime")).toBe(
+      join(MULTICA_DIR, "desktop-runtime", "daemon.pid")
+    );
+    expect(profilePortPath("desktop-runtime")).toBe(
+      join(MULTICA_DIR, "desktop-runtime", "runtime.json")
+    );
+    expect(profileConfigPath("desktop-runtime")).toBe(
+      join(MULTICA_DIR, "profiles", "desktop-runtime", "config.json")
+    );
   });
   it("always resolves under profiles/<name>", () => {
     const dir = join(MULTICA_DIR, "profiles", "desktop-api.multica.ai");
     expect(profileDir("desktop-api.multica.ai")).toBe(dir);
     expect(profileConfigPath("desktop-api.multica.ai")).toBe(
-      join(dir, "config.json"),
+      join(dir, "config.json")
     );
     expect(profileLogPath("desktop-api.multica.ai")).toBe(
-      join(dir, "daemon.log"),
+      join(dir, "daemon.log")
     );
     expect(profilePidPath("desktop-api.multica.ai")).toBe(
-      join(dir, "daemon.pid"),
+      join(dir, "daemon.pid")
     );
     expect(profileUserIdPath("desktop-api.multica.ai")).toBe(
-      join(dir, ".desktop-user-id"),
+      join(dir, ".desktop-user-id")
     );
   });
 
@@ -83,7 +91,7 @@ describe("profileArgs", () => {
   it("selects the Desktop-owned profile", () => {
     expect(profileArgs("desktop-api.multica.ai")).toEqual([
       "--profile",
-      "desktop-api.multica.ai",
+      "desktop-api.multica.ai"
     ]);
   });
 
@@ -95,6 +103,23 @@ describe("profileArgs", () => {
 });
 
 describe("healthPortForProfile", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses an explicit port only inside isolated development", () => {
+    vi.stubEnv("MULTICA_DEV_HEALTH_PORT", "32123");
+    expect(healthPortForProfile("desktop-runtime")).not.toBe(32123);
+    vi.stubEnv("MULTICA_DEV_ISOLATED", "1");
+    expect(healthPortForProfile("desktop-runtime")).toBe(32123);
+  });
+
+  it.each(["", "0", "65536", "12.5", "abc"])(
+    "refuses invalid isolated port %s",
+    (value) => {
+      vi.stubEnv("MULTICA_DEV_ISOLATED", "1");
+      vi.stubEnv("MULTICA_DEV_HEALTH_PORT", value);
+      expect(() => healthPortForProfile("desktop-runtime")).toThrow(/valid/);
+    }
+  );
   // Regression: this returned 19514 — the default profile's port — for an
   // unresolved profile, so Desktop would probe the user's own CLI daemon and
   // report it as its own. #6399.
@@ -103,7 +128,12 @@ describe("healthPortForProfile", () => {
   });
 
   it("never derives the default profile's port", () => {
-    for (const name of ["desktop-api.multica.ai", "desktop", "x", "a".repeat(50)]) {
+    for (const name of [
+      "desktop-api.multica.ai",
+      "desktop",
+      "x",
+      "a".repeat(50)
+    ]) {
       expect(healthPortForProfile(name)).not.toBe(DEFAULT_HEALTH_PORT);
     }
   });

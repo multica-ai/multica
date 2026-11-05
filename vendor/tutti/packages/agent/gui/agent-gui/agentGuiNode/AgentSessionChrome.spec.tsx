@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentSessionChrome } from "./AgentSessionChrome";
 import { setAgentGuiI18nTestLocale } from "../../i18n/testUtils";
+import { AgentSessionChrome } from "./AgentSessionChrome";
 import type { AgentGUISessionChrome } from "./model/agentGuiNodeTypes";
 
 describe("AgentSessionChrome", () => {
@@ -15,8 +15,7 @@ describe("AgentSessionChrome", () => {
 
     render(
       <AgentSessionChrome
-        chrome={chromeState()}
-        isRespondingApproval={false}
+        source={{ chrome: chromeState(), isRespondingApproval: false }}
         onSubmitApprovalOption={onSubmitApprovalOption}
         onRetryActivation={onRetryActivation}
         onContinueInNewConversation={vi.fn()}
@@ -59,15 +58,17 @@ describe("AgentSessionChrome", () => {
     const onAuthLogin = vi.fn();
     render(
       <AgentSessionChrome
-        chrome={{
-          auth: {
-            message: "Please sign in to continue this session."
+        source={{
+          chrome: {
+            auth: {
+              message: "Please sign in to continue this session."
+            },
+            approval: null,
+            recovery: null,
+            rawState: null
           },
-          approval: null,
-          recovery: null,
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onAuthLogin={onAuthLogin}
         onRetryActivation={vi.fn()}
@@ -92,9 +93,11 @@ describe("AgentSessionChrome", () => {
     const reason = "The shared Agent owner is offline";
     render(
       <AgentSessionChrome
-        approvalDisabledReason={reason}
-        chrome={chromeState()}
-        isRespondingApproval
+        source={{
+          approvalDisabledReason: reason,
+          chrome: chromeState(),
+          isRespondingApproval: true
+        }}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={vi.fn()}
         onContinueInNewConversation={vi.fn()}
@@ -121,15 +124,17 @@ describe("AgentSessionChrome", () => {
     const onRetryActivation = vi.fn();
     render(
       <AgentSessionChrome
-        chrome={{
-          auth: {
-            message: "Please sign in before starting a new conversation."
+        source={{
+          chrome: {
+            auth: {
+              message: "Please sign in before starting a new conversation."
+            },
+            approval: null,
+            recovery: null,
+            rawState: null
           },
-          approval: null,
-          recovery: null,
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onAuthLogin={onAuthLogin}
         onRetryActivation={onRetryActivation}
@@ -158,15 +163,17 @@ describe("AgentSessionChrome", () => {
 
     render(
       <AgentSessionChrome
-        chrome={{
-          auth: {
-            message
+        source={{
+          chrome: {
+            auth: {
+              message
+            },
+            approval: null,
+            recovery: null,
+            rawState: null
           },
-          approval: null,
-          recovery: null,
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={onRetryActivation}
         onContinueInNewConversation={vi.fn()}
@@ -200,17 +207,19 @@ describe("AgentSessionChrome", () => {
 
     const { container } = render(
       <AgentSessionChrome
-        chrome={{
-          auth: null,
-          approval: null,
-          recovery: {
-            kind: "resume-unavailable",
-            message: "This session is not recoverable on this machine.",
-            followupAction: "continue-in-new-conversation"
+        source={{
+          chrome: {
+            auth: null,
+            approval: null,
+            recovery: {
+              kind: "resume-unavailable",
+              message: "This session is not recoverable on this machine.",
+              followupAction: "continue-in-new-conversation"
+            },
+            rawState: null
           },
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={vi.fn()}
         onContinueInNewConversation={onContinueInNewConversation}
@@ -260,17 +269,19 @@ describe("AgentSessionChrome", () => {
   it("renders revoked sharing as a terminal notice without a retry action", () => {
     render(
       <AgentSessionChrome
-        chrome={{
-          auth: null,
-          approval: null,
-          recovery: {
-            kind: "agent-sharing-revoked",
-            message: "riceballmama stopped sharing this agent",
-            canRetry: false
+        source={{
+          chrome: {
+            auth: null,
+            approval: null,
+            recovery: {
+              kind: "agent-sharing-revoked",
+              message: "riceballmama stopped sharing this agent",
+              canRetry: false
+            },
+            rawState: null
           },
-          rawState: null
+          isRespondingApproval: false
         }}
-        isRespondingApproval={false}
         onSubmitApprovalOption={vi.fn()}
         onRetryActivation={vi.fn()}
         onContinueInNewConversation={vi.fn()}

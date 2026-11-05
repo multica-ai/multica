@@ -1,16 +1,16 @@
-import { zhCNAgentGuiProviderIdentity } from "./zh-CN.agentGuiProviderIdentity.ts";
 import { zhCNAgentGuiAddContent } from "./zh-CN.agentGuiAddContent.ts";
-import { zhCNAgentGuiQuickPrompts } from "./zh-CN.agentGuiQuickPrompts.ts";
-import { zhCNAgentGuiReferencePicker } from "./zh-CN.agentGuiReferencePicker.ts";
-import { zhCNAgentGuiModelPlans } from "./zh-CN.agentGuiModelPlans.ts";
-import { zhCNAgentGuiRuntimeNotices } from "./zh-CN.agentGuiRuntimeNotices.ts";
-import { zhCNAgentGuiSlashPalette } from "./zh-CN.agentGuiSlashPalette.ts";
-import { zhCNAgentGuiSessionActions } from "./zh-CN.agentGuiSessionActions.ts";
 import { zhCNAgentGuiCollaboration } from "./zh-CN.agentGuiCollaboration.ts";
 import { zhCNAgentGuiComposer } from "./zh-CN.agentGuiComposer.ts";
-import { zhCNAgentGuiProjectLaunch } from "./zh-CN.agentGuiProjectLaunch.ts";
-import { zhCNAgentGuiSide } from "./zh-CN.agentGuiSide.ts";
 import { zhCNAgentGuiHomeSuggestions } from "./zh-CN.agentGuiHomeSuggestions.ts";
+import { zhCNAgentGuiModelPlans } from "./zh-CN.agentGuiModelPlans.ts";
+import { zhCNAgentGuiProjectLaunch } from "./zh-CN.agentGuiProjectLaunch.ts";
+import { zhCNAgentGuiProviderIdentity } from "./zh-CN.agentGuiProviderIdentity.ts";
+import { zhCNAgentGuiQuickPrompts } from "./zh-CN.agentGuiQuickPrompts.ts";
+import { zhCNAgentGuiReferencePicker } from "./zh-CN.agentGuiReferencePicker.ts";
+import { zhCNAgentGuiRuntimeNotices } from "./zh-CN.agentGuiRuntimeNotices.ts";
+import { zhCNAgentGuiSessionActions } from "./zh-CN.agentGuiSessionActions.ts";
+import { zhCNAgentGuiSide } from "./zh-CN.agentGuiSide.ts";
+import { zhCNAgentGuiSlashPalette } from "./zh-CN.agentGuiSlashPalette.ts";
 export const zhCNAgentGui = {
   imageDownloaded: "图片已下载",
   imageLoadFailed: "图片加载失败",
@@ -611,7 +611,7 @@ export const zhCNAgentGui = {
   slashCommandCompactLabel: "压缩",
   slashCommandContextLabel: "上下文",
   slashCommandFastLabel: "快速",
-  slashCommandGoalLabel: "目标",
+
   slashCommandInitLabel: "初始化",
   slashCommandPlanLabel: "计划",
   slashCommandReviewLabel: "审查",
@@ -620,7 +620,7 @@ export const zhCNAgentGui = {
   slashCommandCompactDescription: "压缩当前对话上下文。",
   slashCommandContextDescription: "查看当前上下文快照。",
   slashCommandFastDescription: "切换快速响应模式。",
-  slashCommandGoalDescription: "设置、查看或清除当前目标。",
+
   slashCommandInitDescription: "初始化仓库说明文件。",
   slashCommandPlanDescription: "切换计划模式。",
   slashCommandReviewDescription: "发起代码审查。",

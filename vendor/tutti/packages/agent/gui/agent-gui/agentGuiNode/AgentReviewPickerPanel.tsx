@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { menuItemClassName } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../app/renderer/lib/utils";
 import {
   AgentReviewBranchController,
@@ -55,7 +56,7 @@ const reviewMenuStyles = {
     "select-none px-2.5 py-2 text-[11px] leading-4 text-[var(--text-secondary)]"
 };
 
-export function AgentReviewPickerPanel({
+export const AgentReviewPickerPanel = observer(function AgentReviewPickerPanel({
   labels,
   onRequestGitBranches,
   onSubmitReview,
@@ -334,4 +335,4 @@ export function AgentReviewPickerPanel({
       </div>
     </section>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { renderMulticaMentionRow } from "@multica/tutti-agent-gui-host/mention-row";
 import {
   normalizeAgentActivityDisplayStatus,
   type AgentActivityDisplayStatus
@@ -15,13 +16,13 @@ import {
   type MentionRowStatusTone
 } from "@tutti-os/ui-rich-text/at-panel";
 import { resolveIssueManagerStatusPresentation } from "@tutti-os/workspace-issue-manager/ui";
-import { userAvatarPlaceholderUrl } from "../../shared/userAvatarPlaceholder";
-import { getActiveUiLanguage } from "../../i18n/index";
-import { renderMulticaMentionRow } from "@multica/tutti-agent-gui-host/mention-row";
-import { translate } from "../../i18n/index";
+import { observer } from "mobx-react-lite";
+import type { ReactNode } from "react";
+import { getActiveUiLanguage, translate } from "../../i18n/index";
 import { managedAgentRoundedIconUrl } from "../../shared/managedAgentIcons";
-import { workspaceAgentActivityStatusLabel } from "../../shared/workspaceAgentActivityStatusLabel";
 import { roomIssueStatusLabel } from "../../shared/roomIssueStatusLabel";
+import { userAvatarPlaceholderUrl } from "../../shared/userAvatarPlaceholder";
+import { workspaceAgentActivityStatusLabel } from "../../shared/workspaceAgentActivityStatusLabel";
 import {
   resolveAgentMentionFileThumbnailUrl,
   resolveAgentMentionFileVisualKind
@@ -32,19 +33,18 @@ import {
   agentMentionGroupLabel
 } from "./AgentMentionLabels";
 import {
-  AGENT_MENTION_FILTER_TAB_ORDER,
-  mentionGroupExpandCount
-} from "./agentMentionSearchHelpers";
-import {
-  type AgentMentionGroup,
   type AgentMentionBrowseCategory,
   type AgentMentionFilterId,
+  type AgentMentionGroup,
   type AgentMentionGroupId,
   type AgentMentionSearchState
 } from "./AgentMentionSearchController";
 import { agentGeneratedMentionItemKey } from "./agentMentionAgentGeneratedFilesPresentation";
+import {
+  AGENT_MENTION_FILTER_TAB_ORDER,
+  mentionGroupExpandCount
+} from "./agentMentionSearchHelpers";
 import type { AgentContextMentionItem } from "./agentRichText/agentFileMentionExtension";
-import type { ReactNode } from "react";
 
 export interface AgentMentionPaletteEntry {
   key: string;
@@ -196,147 +196,156 @@ export function groupStartKeys(state: AgentMentionSearchState): string[] {
     .filter((key): key is string => key !== null);
 }
 
-export function AgentFileMentionPalette({
-  state,
-  highlightedKey,
-  label,
-  loadingLabel,
-  emptyLabel,
-  errorLabel,
-  tabHintLabel,
-  maxHeightPx,
-  shouldCenterHighlightedItem = false,
-  onHighlightChange,
-  onSelectItem,
-  onSelectCategory,
-  onSelectFilter,
-  onExpandGroup,
-  onNavigateHierarchy,
-  onNavigateIntoItem,
-  onOpenReferences,
-  provenanceFilterControl
-}: AgentFileMentionPaletteProps): React.JSX.Element {
-  "use memo";
-  const openReferencesLabel = translate(
-    "agentHost.agentGui.mentionOpenReferences"
-  );
-  const navigateIntoLabel = translate(
-    "agentHost.agentGui.fileMentionEnterFolder"
-  );
-  const filter = state.filter as AgentMentionFilterId;
-  const highlightedBrowseCategory = highlightedKey?.startsWith("category:")
-    ? highlightedKey.slice("category:".length)
-    : null;
-  const showBrowseHint = shouldShowBrowseSearchHint({
-    browseFilter: filter,
-    groups: state.groups,
-    highlightedBrowseCategory,
-    mode: state.mode
-  });
+export const AgentFileMentionPalette = observer(
+  function AgentFileMentionPalette({
+    state,
+    highlightedKey,
+    label,
+    loadingLabel,
+    emptyLabel,
+    errorLabel,
+    tabHintLabel,
+    maxHeightPx,
+    shouldCenterHighlightedItem = false,
+    onHighlightChange,
+    onSelectItem,
+    onSelectCategory,
+    onSelectFilter,
+    onExpandGroup,
+    onNavigateHierarchy,
+    onNavigateIntoItem,
+    onOpenReferences,
+    provenanceFilterControl
+  }: AgentFileMentionPaletteProps): React.JSX.Element {
+    "use memo";
+    const openReferencesLabel = translate(
+      "agentHost.agentGui.mentionOpenReferences"
+    );
+    const navigateIntoLabel = translate(
+      "agentHost.agentGui.fileMentionEnterFolder"
+    );
+    const filter = state.filter as AgentMentionFilterId;
+    const highlightedBrowseCategory = highlightedKey?.startsWith("category:")
+      ? highlightedKey.slice("category:".length)
+      : null;
+    const showBrowseHint = shouldShowBrowseSearchHint({
+      browseFilter: filter,
+      groups: state.groups,
+      highlightedBrowseCategory,
+      mode: state.mode
+    });
 
-  // Browse mode carries its own category list (with labels); results mode tabs
-  // are the fixed agent filter order. The shared shell renders a single tab
-  // source, so resolve the right one here.
-  const categories =
-    state.mode === "browse"
-      ? state.categories
-      : AGENT_MENTION_FILTER_TAB_ORDER.map((id) => ({
-          id,
-          label: agentMentionFilterLabel(id)
-        }));
+    // Browse mode carries its own category list (with labels); results mode tabs
+    // are the fixed agent filter order. The shared shell renders a single tab
+    // source, so resolve the right one here.
+    const categories =
+      state.mode === "browse"
+        ? state.categories
+        : AGENT_MENTION_FILTER_TAB_ORDER.map((id) => ({
+            id,
+            label: agentMentionFilterLabel(id)
+          }));
 
-  // When the agent wants the single keyboard browse hint we hand the shell an
-  // empty group list so it renders its (keyboard-icon) empty state with our
-  // computed hint copy. Otherwise we map the real groups, decorating each with
-  // the agent-specific label / empty / expand / spacing chrome.
-  const shellState: MentionPaletteState<AgentContextMentionItem> =
-    showBrowseHint
-      ? { ...state, categories, groups: [] }
-      : {
-          ...state,
-          categories,
-          groups: state.groups.map((group, index) =>
-            decorateMentionGroup(
-              group,
-              index,
-              state.groups,
-              filter,
-              state.query
+    // When the agent wants the single keyboard browse hint we hand the shell an
+    // empty group list so it renders its (keyboard-icon) empty state with our
+    // computed hint copy. Otherwise we map the real groups, decorating each with
+    // the agent-specific label / empty / expand / spacing chrome.
+    const shellState: MentionPaletteState<AgentContextMentionItem> =
+      showBrowseHint
+        ? { ...state, categories, groups: [] }
+        : {
+            ...state,
+            categories,
+            groups: state.groups.map((group, index) =>
+              decorateMentionGroup(
+                group,
+                index,
+                state.groups,
+                filter,
+                state.query
+              )
             )
+          };
+
+    const emptyLabelForShell = showBrowseHint
+      ? browseHintForFilter(filter)
+      : resolveMentionPaletteEmptyLabel({
+          emptyLabel,
+          filter,
+          mode: state.mode,
+          query: state.query
+        });
+
+    return (
+      <MentionPaletteFromState<AgentContextMentionItem>
+        state={shellState}
+        highlightedKey={highlightedKey}
+        getItemKey={agentMentionItemKey}
+        isItemDisabled={isAgentMentionItemDisabled}
+        renderItem={(item) =>
+          renderMulticaMentionRow(
+            item,
+            getActiveUiLanguage(),
+            agentMentionItemToRowItem(item),
+            {
+              classNames: AGENT_MENTION_ROW_CLASS_NAMES,
+              dataAttributeMode: "agent",
+              ...(onNavigateIntoItem && canNavigateIntoMentionItem(item)
+                ? {
+                    onNavigateInto: () => onNavigateIntoItem(item),
+                    navigateIntoLabel
+                  }
+                : {}),
+              ...(onOpenReferences && isReferenceableMentionItem(item)
+                ? {
+                    onOpenReferences: () => onOpenReferences(item),
+                    openReferencesLabel
+                  }
+                : {})
+            }
           )
-        };
-
-  const emptyLabelForShell = showBrowseHint
-    ? browseHintForFilter(filter)
-    : resolveMentionPaletteEmptyLabel({
-        emptyLabel,
-        filter,
-        mode: state.mode,
-        query: state.query
-      });
-
-  return (
-    <MentionPaletteFromState<AgentContextMentionItem>
-      state={shellState}
-      highlightedKey={highlightedKey}
-      getItemKey={agentMentionItemKey}
-      isItemDisabled={isAgentMentionItemDisabled}
-      renderItem={(item) =>
-        renderMulticaMentionRow(item, getActiveUiLanguage(), agentMentionItemToRowItem(item), {
-          classNames: AGENT_MENTION_ROW_CLASS_NAMES,
-          dataAttributeMode: "agent",
-          ...(onNavigateIntoItem && canNavigateIntoMentionItem(item)
-            ? {
-                onNavigateInto: () => onNavigateIntoItem(item),
-                navigateIntoLabel
-              }
-            : {}),
-          ...(onOpenReferences && isReferenceableMentionItem(item)
-            ? {
-                onOpenReferences: () => onOpenReferences(item),
-                openReferencesLabel
-              }
-            : {})
-        })
-      }
-      labels={{
-        loading: loadingLabel,
-        empty: emptyLabelForShell,
-        error: errorLabel,
-        tabHint: tabHintLabel,
-        listbox: label
-      }}
-      hintLabels={{
-        cycleFilter: translate("agentHost.agentGui.fileMentionSwitchCategory"),
-        moveSelection: translate(
-          "agentHost.agentGui.fileMentionSwitchSelection"
-        ),
-        navigateHierarchy: translate(
-          "agentHost.agentGui.fileMentionNavigateHierarchy"
-        )
-      }}
-      maxHeightPx={maxHeightPx}
-      headerActions={
-        filter === "session" || filter === "file" || filter === "issue"
-          ? provenanceFilterControl
-          : undefined
-      }
-      scrollHighlightedIntoViewCentered={shouldCenterHighlightedItem}
-      theme={AGENT_MENTION_PALETTE_THEME}
-      callbacks={{
-        onHighlightChange,
-        onActiveCategoryIdChange: (categoryId) => {
-          onSelectCategory(categoryId as AgentMentionBrowseCategory["id"]);
-          onSelectFilter(categoryId as AgentMentionFilterId);
-        },
-        onExpandGroup: (groupId) =>
-          onExpandGroup(groupId as AgentMentionGroupId),
-        onSelectItem
-      }}
-      onNavigateHierarchy={onNavigateHierarchy}
-    />
-  );
-}
+        }
+        labels={{
+          loading: loadingLabel,
+          empty: emptyLabelForShell,
+          error: errorLabel,
+          tabHint: tabHintLabel,
+          listbox: label
+        }}
+        hintLabels={{
+          cycleFilter: translate(
+            "agentHost.agentGui.fileMentionSwitchCategory"
+          ),
+          moveSelection: translate(
+            "agentHost.agentGui.fileMentionSwitchSelection"
+          ),
+          navigateHierarchy: translate(
+            "agentHost.agentGui.fileMentionNavigateHierarchy"
+          )
+        }}
+        maxHeightPx={maxHeightPx}
+        headerActions={
+          filter === "session" || filter === "file" || filter === "issue"
+            ? provenanceFilterControl
+            : undefined
+        }
+        scrollHighlightedIntoViewCentered={shouldCenterHighlightedItem}
+        theme={AGENT_MENTION_PALETTE_THEME}
+        callbacks={{
+          onHighlightChange,
+          onActiveCategoryIdChange: (categoryId) => {
+            onSelectCategory(categoryId as AgentMentionBrowseCategory["id"]);
+            onSelectFilter(categoryId as AgentMentionFilterId);
+          },
+          onExpandGroup: (groupId) =>
+            onExpandGroup(groupId as AgentMentionGroupId),
+          onSelectItem
+        }}
+        onNavigateHierarchy={onNavigateHierarchy}
+      />
+    );
+  }
+);
 
 export const AgentContextMentionPalette = AgentFileMentionPalette;
 export type AgentContextMentionPaletteProps = AgentFileMentionPaletteProps;

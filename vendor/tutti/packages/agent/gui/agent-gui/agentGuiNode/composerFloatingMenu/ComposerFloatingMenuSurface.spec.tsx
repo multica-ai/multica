@@ -55,7 +55,10 @@ describe("ComposerFloatingMenuSurface", () => {
     const surface = screen.getByTestId(
       "composer-floating-menu-surface-workbench"
     );
-    expect(surface.parentElement).toBe(document.body);
+    expect(surface.parentElement).toHaveAttribute(
+      "data-tutti-portal-root",
+      "true"
+    );
     expect(surface.style.left).toBe("312px");
 
     boundary.remove();

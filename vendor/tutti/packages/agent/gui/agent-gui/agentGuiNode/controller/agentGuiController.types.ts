@@ -3,24 +3,24 @@
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
 import type {
   AgentGUIAgentTarget,
+  AgentGUIInteractionReadinessSource,
   AgentGUINodeData,
+  AgentGUIObservationGapSource,
   AgentGUIProvider,
   AgentGUIProviderRailMode,
   AgentGUIProviderReadinessGate,
-  AgentGUIInteractionReadinessSource,
-  AgentGUIObservationGapSource,
   AgentGUITargetConnectionSource
 } from "../../../types";
 import type { AgentGUIComposerSettingOption } from "../model/agentGuiNodeTypes";
+import type { AgentGUIOpenSessionRequest } from "./agentGuiController.draftMessageHelpers";
 import type {
   AgentGUIRememberComposerDefaultsInput,
   AgentGUIRememberComposerDefaultsResult
 } from "./agentGuiController.providerHelpers";
 import type { AgentGUIComposerAppendRequest } from "./useAgentGUIComposerAppendRequest";
 import type { AgentGUIPrefillPromptRequest } from "./useAgentGUIConversationHome";
-import type { AgentGUIOpenSessionRequest } from "./agentGuiController.draftMessageHelpers";
 
-export type AgentGUIRuntimeErrorPhase =
+export type ConversationServicesErrorPhase =
   | "create_conversation"
   | "interrupt_current_turn"
   | "load_session_state"
@@ -47,7 +47,7 @@ export interface ACPConfigOptionSelection {
   options: AgentGUIComposerSettingOption[];
   currentValue: string | null;
 }
-export interface UseAgentGUINodeControllerInput {
+export interface AgentGUIPageInput {
   nodeId?: string;
   isSurfaceActive: boolean;
   isSurfaceVisible: boolean;

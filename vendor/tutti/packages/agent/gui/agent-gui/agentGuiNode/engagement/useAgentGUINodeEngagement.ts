@@ -1,5 +1,13 @@
 import { useRef, type RefObject } from "react";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import type {
   AgentGUIComposerEngagement,
   AgentGUIEngagementEventSink
@@ -12,14 +20,20 @@ export function useAgentGUINodeEngagement(input: {
   isActive: boolean;
   isVisible: boolean;
   onEvent?: AgentGUIEngagementEventSink;
-  viewModel: AgentGUINodeViewModel;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
 }): {
   composerEngagement: AgentGUIComposerEngagement | undefined;
   layoutElementRef: RefObject<HTMLDivElement | null>;
 } {
   const layoutElementRef = useRef<HTMLDivElement | null>(null);
   const projected = projectAgentGUIEngagementContext(
-    input.viewModel,
+    input,
     input.composerReady
   );
   return {

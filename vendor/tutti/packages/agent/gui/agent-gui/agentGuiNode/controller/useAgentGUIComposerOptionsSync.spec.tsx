@@ -1,11 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { AgentGUIProvider, AgentGUINodeData } from "../../../types";
 import { setAgentHostApiForTests } from "../../../agentActivityHost";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentHostRuntimeApi } from "../../../host/agentHostApi";
-import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
+import type { AgentGUINodeData, AgentGUIProvider } from "../../../types";
 import type { AgentGUIComposerDefaultsAuthorityReconciler } from "./agentGuiComposerDefaultsReconciliation";
+import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
 import { useAgentGUIComposerOptionsSync } from "./useAgentGUIComposerOptionsSync";
 
 describe("useAgentGUIComposerOptionsSync", () => {
@@ -19,9 +19,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: null,
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => null,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: target,
         conversationFilter: null,
         currentUserId: "user-1",
@@ -53,7 +56,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
       await waitFor(() =>
         expect(getComposerOptions).toHaveBeenCalledWith(
           expect.objectContaining({
-            agentTargetId: "local:opencode",
+            targetKey: "local:opencode",
             force: true,
             waitForFreshModelCatalog: true
           })
@@ -86,9 +89,15 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationId: null,
           activeConversationIdRef,
           agentActivityRuntime: {
-            getComposerOptions,
-            composer: { options: (key: string) => composerOptionsByTargetKey[key as keyof typeof composerOptionsByTargetKey] ?? null, status: () => undefined }
-          } as unknown as AgentGUIRuntime,
+            composer: {
+              load: getComposerOptions,
+              options: (key: string) =>
+                composerOptionsByTargetKey[
+                  key as keyof typeof composerOptionsByTargetKey
+                ] ?? null,
+              status: () => undefined
+            }
+          } as unknown as ConversationServices,
           composerTargetData: target,
           conversationFilter: null,
           currentUserId: "user-1",
@@ -134,7 +143,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
     await waitFor(() => expect(getComposerOptions).toHaveBeenCalledTimes(1));
     expect(getComposerOptions).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentTargetId: "local:claude-code",
+        targetKey: "local:claude-code",
         force: undefined,
         provider: "claude-code"
       })
@@ -153,7 +162,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
     });
     expect(getComposerOptions).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentTargetId: "local:claude-code",
+        targetKey: "local:claude-code",
         force: true,
         settings: { planMode: false }
       })
@@ -185,9 +194,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationId: null,
           activeConversationIdRef,
           agentActivityRuntime: {
-            getComposerOptions,
-            composer: { options: () => null, status: () => undefined }
-          } as unknown as AgentGUIRuntime,
+            composer: {
+              load: getComposerOptions,
+              options: () => null,
+              status: () => undefined
+            }
+          } as unknown as ConversationServices,
           composerTargetData: target,
           conversationFilter: null,
           currentUserId: "user-1",
@@ -220,11 +232,10 @@ describe("useAgentGUIComposerOptionsSync", () => {
     await waitFor(() => {
       expect(getComposerOptions).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentTargetId: "local:codex",
+          targetKey: "local:codex",
           cwd: "/workspace/project",
           force: true,
-          provider: "codex",
-          workspaceId: "workspace-1"
+          provider: "codex"
         })
       );
     });
@@ -247,9 +258,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
           activeConversationId,
           activeConversationIdRef,
           agentActivityRuntime: {
-            getComposerOptions,
-            composer: { options: () => null, status: () => undefined }
-          } as unknown as AgentGUIRuntime,
+            composer: {
+              load: getComposerOptions,
+              options: () => null,
+              status: () => undefined
+            }
+          } as unknown as ConversationServices,
           composerTargetData: target,
           conversationFilter: null,
           currentUserId: "user-1",
@@ -312,9 +326,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: "session-1",
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => null,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: selectedTarget,
         conversationFilter: null,
         currentUserId: "user-1",
@@ -342,7 +359,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
     await waitFor(() =>
       expect(getComposerOptions).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentTargetId: "extension:hermes",
+          targetKey: "extension:hermes",
           provider
         })
       )
@@ -371,9 +388,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: "session-1",
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => null,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: target,
         conversationFilter: null,
         currentUserId: "user-1",
@@ -411,7 +431,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
       });
       expect(getComposerOptions).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentTargetId: "local:codex",
+          targetKey: "local:codex",
           force: true,
           provider: "codex",
           section: "connectors"
@@ -455,9 +475,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: null,
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => null,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: target,
         conversationFilter: null,
         currentUserId: "user-1",
@@ -515,7 +538,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
       await waitFor(() =>
         expect(getComposerOptions).toHaveBeenCalledWith(
           expect.objectContaining({
-            agentTargetId: "local:opencode",
+            targetKey: "local:opencode",
             force: true,
             settings: { planMode: false }
           })
@@ -577,9 +600,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: null,
         activeConversationIdRef: { current: null },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => cachedOptions, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => cachedOptions,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: target,
         conversationFilter: null,
         currentUserId: "user-1",
@@ -613,7 +639,7 @@ describe("useAgentGUIComposerOptionsSync", () => {
     await waitFor(() =>
       expect(getComposerOptions).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentTargetId: "local:opencode",
+          targetKey: "local:opencode",
           force: true,
           settings: { planMode: false }
         })
@@ -648,9 +674,12 @@ describe("useAgentGUIComposerOptionsSync", () => {
         activeConversationId: "session-1",
         activeConversationIdRef: { current: "session-1" },
         agentActivityRuntime: {
-          getComposerOptions,
-          composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            load: getComposerOptions,
+            options: () => null,
+            status: () => undefined
+          }
+        } as unknown as ConversationServices,
         composerTargetData: target,
         conversationFilter: null,
         currentUserId: "user-1",

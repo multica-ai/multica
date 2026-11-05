@@ -1,11 +1,11 @@
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 
 export interface AgentGUIProjectChangeMetadata {
   action: "clear" | "create_new" | "import_directory" | "select_existing";
 }
 
 export function trackAgentGUISettingsProjectChange(input: {
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   agentSessionId: string | null;
   metadata?: AgentGUIProjectChangeMetadata;
   provider?: string | null;
@@ -14,11 +14,12 @@ export function trackAgentGUISettingsProjectChange(input: {
   if (!input.metadata) {
     return;
   }
-  const tracking = input.agentActivityRuntime.trackSettingsProjectChange?.({
-    action: input.metadata.action,
-    agentSessionId: input.agentSessionId,
-    provider: input.provider,
-    workspaceId: input.workspaceId
-  });
+  const tracking =
+    input.agentActivityRuntime.diagnostics?.trackSettingsProjectChange?.({
+      action: input.metadata.action,
+      agentSessionId: input.agentSessionId,
+      provider: input.provider,
+      workspaceId: input.workspaceId
+    });
   void tracking?.catch(() => {});
 }

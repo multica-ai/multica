@@ -1,19 +1,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { AgentSessionEngine } from "@tutti-os/agent-activity-core";
+
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
+import type { ConversationServices } from "../../../conversationServices";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
-import {
-  clearRolledBackAgentGUISelection,
-  shouldClearMissingAgentGUISelection
-} from "./useAgentGUIConversationSelectionController";
-import { useAgentGUIConversationSelectionController } from "./useAgentGUIConversationSelectionController";
-import { useAgentGUIConversationRouting } from "./useAgentGUIConversationRouting";
 import type { ConversationIntent } from "./useAgentConversationSelection";
 import type { useAgentGUIActivation } from "./useAgentGUIActivation";
+import { useAgentGUIConversationRouting } from "./useAgentGUIConversationRouting";
+import {
+  clearRolledBackAgentGUISelection,
+  shouldClearMissingAgentGUISelection,
+  useAgentGUIConversationSelectionController
+} from "./useAgentGUIConversationSelectionController";
 
 describe("clearRolledBackAgentGUISelection", () => {
   it("does not clear a newer external selection", () => {
@@ -70,7 +70,7 @@ describe("clearRolledBackAgentGUISelection", () => {
         activeConversationIdRef,
         activePendingActivation,
         activeSessionReconcileErrorCode: null,
-        agentActivityRuntime: {} as AgentGUIRuntime,
+        agentActivityRuntime: {} as ConversationServices,
         conversationIdsRef: { current: new Set() },
         conversationsRef: { current: [] },
         conversationListQuery: {},
@@ -85,12 +85,7 @@ describe("clearRolledBackAgentGUISelection", () => {
         loadSessionState: vi.fn(),
         markSelectedConversationDetailPending: vi.fn(() => null),
         onDataChangeRef: { current: onDataChange },
-        sessionEngine: {
-          dispatch: vi.fn(),
-          getSnapshot: vi.fn(() => ({
-            pendingIntents: { activationsByRequestId: {} }
-          }))
-        } as unknown as AgentSessionEngine,
+        conversationServices: createTestRuntimeState("workspace-1"),
         setActiveConversationId,
         setDetailError: vi.fn(),
         setIntent,
@@ -180,7 +175,7 @@ describe("clearRolledBackAgentGUISelection", () => {
         activeConversationIdRef,
         activePendingActivation: null,
         activeSessionReconcileErrorCode: "session.not_found",
-        agentActivityRuntime: {} as AgentGUIRuntime,
+        agentActivityRuntime: {} as ConversationServices,
         conversationIdsRef: { current: new Set() },
         conversationsRef: { current: [] },
         conversationListQuery: {},
@@ -195,12 +190,7 @@ describe("clearRolledBackAgentGUISelection", () => {
         loadSessionState: vi.fn(),
         markSelectedConversationDetailPending: vi.fn(() => null),
         onDataChangeRef: { current: onDataChange },
-        sessionEngine: {
-          dispatch: vi.fn(),
-          getSnapshot: vi.fn(() => ({
-            pendingIntents: { activationsByRequestId: {} }
-          }))
-        } as unknown as AgentSessionEngine,
+        conversationServices: createTestRuntimeState("workspace-1"),
         setActiveConversationId,
         setDetailError,
         setIntent,
@@ -262,31 +252,17 @@ describe("clearRolledBackAgentGUISelection", () => {
     const transientConversation = {
       id: failedAgentSessionId
     } as AgentGUIConversationSummary;
-    const failedActivationSnapshot = {
-      pendingIntents: {
-        activationsByRequestId: {
-          "activation-1": {
-            agentSessionId: failedAgentSessionId,
-            agentTargetId: "target-1",
-            clientSubmitId: "submit-1",
-            content: [],
-            cwd: "/workspace",
-            errorCode: null,
-            errorMessage: "create failed",
-            expiresAtUnixMs: 45_001,
-            initialPromptRetracted: false,
-            initialTurnExpected: false,
-            mode: "new",
-            requestId: "activation-1",
-            requestedAtUnixMs: 1,
-            status: "failed",
-            title: null,
-            workspaceId: "workspace-1"
-          }
-        }
+    const failedState = createTestRuntimeState("workspace-1");
+    failedState.activations.recordFailure(
+      {
+        mode: "new",
+        agentSessionId: failedAgentSessionId,
+        agentTargetId: "target-1",
+        clientSubmitId: "submit-1",
+        requestId: "activation-1"
       },
-      sessionLifecycle: { sessionsById: {} }
-    };
+      { code: null, message: "create failed" }
+    );
 
     const { result } = renderHook(() => {
       const [activeConversationId, setActiveConversationId] = useState<
@@ -322,7 +298,7 @@ describe("clearRolledBackAgentGUISelection", () => {
               }
             : null,
         activeSessionReconcileErrorCode: null,
-        agentActivityRuntime: {} as AgentGUIRuntime,
+        agentActivityRuntime: {} as ConversationServices,
         conversationIdsRef: { current: new Set() },
         conversationsRef: { current: [transientConversation] },
         conversationListQuery: {},
@@ -337,10 +313,7 @@ describe("clearRolledBackAgentGUISelection", () => {
         loadSessionState: vi.fn(),
         markSelectedConversationDetailPending: vi.fn(() => null),
         onDataChangeRef: { current: onDataChange },
-        sessionEngine: {
-          dispatch: vi.fn(),
-          getSnapshot: vi.fn(() => failedActivationSnapshot)
-        } as unknown as AgentSessionEngine,
+        conversationServices: failedState,
         setActiveConversationId,
         setDetailError: vi.fn(),
         setIntent,
@@ -370,10 +343,7 @@ describe("clearRolledBackAgentGUISelection", () => {
           setActiveConversationId(agentSessionId);
           setIntent({ tag: "active", id: agentSessionId });
         },
-        sessionEngine: {
-          dispatch: vi.fn(),
-          getSnapshot: vi.fn(() => failedActivationSnapshot)
-        } as unknown as AgentSessionEngine,
+        conversationServices: failedState,
         setIntent,
         transientConversation,
         workspaceId: "workspace-1"
@@ -396,7 +366,7 @@ describe("clearRolledBackAgentGUISelection", () => {
 
 describe("conversation reload ownership", () => {
   it("ensures message hydration without turning selection into a forced refresh", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const loadSelectedConversationMessages = vi.fn(async () => undefined);
     const data: AgentGUINodeData = {
       lastActiveAgentSessionId: "session-previous",
@@ -425,7 +395,7 @@ describe("conversation reload ownership", () => {
         activeConversationIdRef,
         activePendingActivation: null,
         activeSessionReconcileErrorCode: null,
-        agentActivityRuntime: {} as AgentGUIRuntime,
+        agentActivityRuntime: {} as ConversationServices,
         conversationIdsRef: { current: new Set(["session-next"]) },
         conversationsRef: { current: [] },
         conversationListQuery: {},
@@ -445,7 +415,7 @@ describe("conversation reload ownership", () => {
             dataRef.current = updater(dataRef.current);
           }
         },
-        sessionEngine,
+        conversationServices,
         setActiveConversationId,
         setDetailError: vi.fn(),
         setIntent,
@@ -464,6 +434,6 @@ describe("conversation reload ownership", () => {
     expect(loadSelectedConversationMessages).toHaveBeenCalledWith(
       "session-next"
     );
-    sessionEngine.dispose();
+    conversationServices.dispose();
   });
 });

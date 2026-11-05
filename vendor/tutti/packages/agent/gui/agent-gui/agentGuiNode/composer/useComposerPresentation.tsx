@@ -1,3 +1,5 @@
+import { Spinner } from "@tutti-os/ui-system";
+import { ArrowUp as SendFilledIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -6,9 +8,13 @@ import {
   type RefObject
 } from "react";
 import { createPortal } from "react-dom";
-import { Spinner } from "@tutti-os/ui-system";
 import { cn } from "../../../app/renderer/lib/utils";
+import { useOptionalConversationServices } from "../../../conversationServices";
 import type { AgentConversationPromptVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import { submitAgentInteractionResponseAndDismiss } from "../../../shared/agentConversation/interactionResponseAdmission";
+import styles from "../AgentGUINode.styles";
+import type { AgentMentionSearchController } from "../AgentMentionSearchController";
+import type { AgentFileMentionSuggestionState } from "../agentRichText/agentFileMentionExtension";
 import {
   agentComposerDraftFiles,
   agentComposerDraftHasContent,
@@ -16,17 +22,11 @@ import {
   agentComposerDraftLargeTexts
 } from "../model/agentComposerDraft";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
-import type { AgentFileMentionSuggestionState } from "../agentRichText/agentFileMentionExtension";
-import type { AgentMentionSearchController } from "../AgentMentionSearchController";
-import styles from "../AgentGUINode.styles";
 import type {
   AgentComposerPromptTip,
-  AgentComposerProps
+  AgentComposerRenderProps as AgentComposerProps
 } from "./AgentComposer.types";
-import { ArrowUp as SendFilledIcon } from "lucide-react";
-import { useOptionalAgentGUIRuntime } from "../../../agentActivityRuntime";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
-import { submitAgentInteractionResponseAndDismiss } from "../../../shared/agentConversation/interactionResponseAdmission";
 
 interface Input {
   draftContent: AgentComposerDraft;
@@ -119,7 +119,7 @@ export function useComposerPresentation(input: Input) {
     canUploadAttachment,
     promptImagesSupported
   } = input;
-  const agentActivityRuntime = useOptionalAgentGUIRuntime();
+  const agentActivityRuntime = useOptionalConversationServices();
   const draftImages = agentComposerDraftImages(draftContent);
   const draftFiles = agentComposerDraftFiles(draftContent);
   const draftLargeTexts = agentComposerDraftLargeTexts(draftContent);
@@ -185,7 +185,7 @@ export function useComposerPresentation(input: Input) {
         sendDisabledReason: sendDisabledReasonKey || null,
         submitDisabled,
         uploadFunctionAvailable: Boolean(
-          agentActivityRuntime?.uploadPromptContent
+          agentActivityRuntime?.attachments?.uploadPromptContent
         )
       },
       event: "agent.gui.composer.submit_state_changed",

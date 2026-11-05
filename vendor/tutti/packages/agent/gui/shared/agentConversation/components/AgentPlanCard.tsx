@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type JSX, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronUp, Copy, ListChecks } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { useCallback, useRef, useState, type JSX, type ReactNode } from "react";
 import { translate } from "../../../i18n/index";
 
 const COLLAPSED_MAX_HEIGHT_PX = 220;
@@ -10,7 +11,7 @@ const COLLAPSED_MAX_HEIGHT_PX = 220;
  * a framed card with a title, a copy action, and a collapse/expand affordance
  * (long plans default to collapsed with an "expand plan" overlay).
  */
-export function AgentPlanCard({
+export const AgentPlanCard = observer(function AgentPlanCard({
   title,
   copyText,
   children,
@@ -120,4 +121,4 @@ export function AgentPlanCard({
       </div>
     </section>
   );
-}
+});

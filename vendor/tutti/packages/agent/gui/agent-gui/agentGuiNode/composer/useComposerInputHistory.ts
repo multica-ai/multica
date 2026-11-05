@@ -1,6 +1,5 @@
 import { useCallback, useRef, type RefObject } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import type { ConversationServices } from "../../../conversationServices";
 import {
   agentComposerDraftHasContent,
   agentComposerDraftImages,
@@ -15,6 +14,7 @@ import {
   type AgentComposerInputHistoryEntry,
   type AgentComposerInputHistoryState
 } from "../model/agentComposerInputHistory";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { QueuedPromptImageLoadOwner } from "../queuedPromptImageLoadOwner";
 
 interface Input {
@@ -30,7 +30,7 @@ interface Input {
     sourceScopeKey?: string
   ) => void;
   onRequestOlderPage?: () => void;
-  runtime: AgentGUIRuntime | null;
+  runtime: ConversationServices | null;
   workspaceId: string;
 }
 

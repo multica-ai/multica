@@ -1,26 +1,26 @@
-import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import type { PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
+import type { ConversationServices } from "../../../conversationServices";
 import { translate } from "../../../i18n/index";
 import type { AgentHostAccountUserProfile } from "../../../shared/contracts/dto";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
-import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
-import type { AgentGUIConversationUserProject } from "../model/agentGuiConversationProjectResolver";
-import { resolveAgentGUIExplicitConversationTitle } from "../model/agentGuiProviderIdentity";
 import {
   agentComposerDraftPrompt,
   emptyAgentComposerDraft,
   updateAgentComposerDraft
 } from "../model/agentComposerDraft";
 import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
+import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
+import type { AgentGUIConversationUserProject } from "../model/agentGuiConversationProjectResolver";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import { resolveAgentGUIExplicitConversationTitle } from "../model/agentGuiProviderIdentity";
 import { buildContinueInNewConversationPrompt } from "./agentGuiController.conversationHelpers";
-import { resolveAgentGUINewConversationProjectSelection } from "./agentGuiNewConversationRequest";
 import { reportAgentGUIActiveConversationCleared } from "./agentGuiController.reporting";
-import { isPendingNewConversationActivationForSession } from "./useAgentGUIActivation";
+import { resolveAgentGUINewConversationProjectSelection } from "./agentGuiNewConversationRequest";
 import {
   resolveConversationSummaryById,
   type ConversationIntent
 } from "./useAgentConversationSelection";
+import { isPendingNewConversationActivationForSession } from "./useAgentGUIActivation";
 
 interface CurrentValue<T> {
   current: T;
@@ -32,7 +32,7 @@ interface UseAgentGUIContinueConversationInput {
   >;
   activeConversationIdRef: CurrentValue<string | null>;
   activePendingActivation: PendingActivationIntentRecord | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   conversations: readonly AgentGUIConversationSummary[];
   currentUserId: string | null | undefined;
   draftByScopeKey: Record<string, AgentComposerDraft>;

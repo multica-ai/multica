@@ -1,9 +1,10 @@
+import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import { translate } from "../../../i18n/index";
 import type { AgentGeneratedImageRowVM } from "../contracts/agentGeneratedImageRowVM";
 import { AgentGeneratedImagePreview } from "./AgentGeneratedImagePreview";
 
-export function AgentGeneratedImageRow({
+export const AgentGeneratedImageRow = observer(function AgentGeneratedImageRow({
   row
 }: {
   row: AgentGeneratedImageRowVM;
@@ -22,4 +23,4 @@ export function AgentGeneratedImageRow({
       />
     </div>
   );
-}
+});

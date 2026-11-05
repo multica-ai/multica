@@ -1,10 +1,14 @@
 // Consumers see this declaration, not the GUI's sources, so they do not
 // type-check the vendored tree under their own compiler options.
 import type { ComponentType } from "react";
-import type { AgentGuiInitSnapshot, AgentGuiRpcClient, LocalConversationSource } from "./protocol";
+import type {
+AgentGuiHostServices,
+AgentGuiInitSnapshot,
+LocalConversationSource
+} from "./protocol";
 
 export interface AgentGuiMountProps {
-  client: AgentGuiRpcClient;
+  client: AgentGuiHostServices;
   initial: AgentGuiInitSnapshot;
   localConversations: LocalConversationSource;
   onRendered?: () => void;

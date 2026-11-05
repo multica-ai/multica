@@ -1,12 +1,36 @@
 import { renderHook } from "@testing-library/react";
+import { useEffect, useMemo, useRef } from "react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  ConversationOverviewState,
+  type ConversationOverviewInput
+} from "../../../state/ConversationOverviewState";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
-import { useAgentGUIConversationPresentation } from "./useAgentGUIConversationPresentation";
 
-type PresentationInput = Parameters<
-  typeof useAgentGUIConversationPresentation
->[0];
+type PresentationInput = ConversationOverviewInput & {
+  activeLatestPendingSubmitTurnId?: string | null;
+  hasUnconfirmedSubmit?: boolean;
+  isCreatingConversation?: boolean;
+  isSubmitting?: boolean;
+};
+// Controlled sources keep the same model while the table supplies new immutable values.
+function useAgentGUIConversationPresentation(input: PresentationInput) {
+  const current = useRef(input);
+  current.current = input;
+  const model = useMemo(
+    () =>
+      new ConversationOverviewState(
+        new Proxy({} as ConversationOverviewInput, {
+          get: (_, key) =>
+            current.current[key as keyof ConversationOverviewInput]
+        })
+      ),
+    []
+  );
+  useEffect(() => model.startRemembering(), [model, input]);
+  return model;
+}
 
 describe("useAgentGUIConversationPresentation", () => {
   it("does not project a pending submit into Conversation working status", () => {
@@ -119,7 +143,10 @@ describe("useAgentGUIConversationPresentation", () => {
         useAgentGUIConversationPresentation(value),
       { initialProps: { value: input } }
     );
-    const previous = rendered.result.current;
+    const previous = {
+      activeConversation: rendered.result.current.activeConversation,
+      visibleConversations: rendered.result.current.visibleConversations
+    };
 
     rendered.rerender({
       value: {
@@ -145,7 +172,10 @@ describe("useAgentGUIConversationPresentation", () => {
         useAgentGUIConversationPresentation(value),
       { initialProps: { value: input } }
     );
-    const previous = rendered.result.current;
+    const previous = {
+      activeConversation: rendered.result.current.activeConversation,
+      visibleConversations: rendered.result.current.visibleConversations
+    };
 
     rendered.rerender({
       value: {
@@ -359,7 +389,6 @@ function createInput(
     data,
     dataRef: { current: data },
     defaultAgentTargetId: null,
-    draftByScopeKey: {},
     hasUnconfirmedSubmit: false,
     isCreatingConversation: false,
     isSubmitting: true,

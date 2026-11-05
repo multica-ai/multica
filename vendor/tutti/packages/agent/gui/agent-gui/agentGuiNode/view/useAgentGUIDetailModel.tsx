@@ -1,32 +1,38 @@
 import { useMemo } from "react";
 import { isAgentGUIAgentTargetComingSoon } from "../../../agentTargets";
 import { UnavailableChatIcon } from "../../../app/renderer/components/icons/UnavailableChatIcon";
-import { useProjectedAgentConversation } from "../../../shared/agentConversation/projection/useProjectedAgentConversation";
+import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import { DetailChromeState } from "../../../state/DetailChromeState";
+import { useActiveConversationState } from "../../../state/useActiveConversationState";
 import type { AgentComposerSlashStatusLimit } from "../AgentComposer";
-import type {
-  AgentGUIInlineNotice,
-  AgentGUINodeViewModel,
-  AgentGUISessionChrome
-} from "../model/agentGuiNodeTypes";
+import styles from "../AgentGUINode.styles";
 import type { AgentGUIViewLabels } from "../AgentGUINodeView";
-import {
-  isContextCanceledMessage,
-  isAgentGUIHomeStatusNoticeVisible,
-  resolveAgentGUIHomeNoticeChrome,
-  resolveAgentGUIStopControl,
-  resolveSlashStatus,
-  useStableSlashStatus
-} from "./agentGUIDetailModelHelpers";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
+import { useStableSlashStatus } from "./agentGUIDetailModelHelpers";
 import { useAgentGUIDetailLabels } from "./useAgentGUIDetailLabels";
 import { useAgentGUITimelineTransition } from "./useAgentGUITimelineTransition";
 import { useBottomDockPromptDismissal } from "./useBottomDockPromptDismissal";
-import styles from "../AgentGUINode.styles";
 interface Input {
+  conversation: AgentConversationVM | null;
   labels: AgentGUIViewLabels;
   slashStatusLimits: readonly AgentComposerSlashStatusLimit[];
   slashStatusLimitsLoading: boolean;
   slashStatusLimitsUnavailable: boolean;
-  viewModel: AgentGUINodeViewModel;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
 }
 export function useAgentGUIDetailModel(input: Input) {
   const {
@@ -34,129 +40,90 @@ export function useAgentGUIDetailModel(input: Input) {
     slashStatusLimits,
     slashStatusLimitsLoading,
     slashStatusLimitsUnavailable,
-    viewModel
+    shell,
+    rail,
+    detail,
+    composer,
+    interaction,
+    readiness,
+    operations
   } = input;
-  const projectedConversation = useProjectedAgentConversation({
-    conversation: viewModel.detail.conversation,
-    detail: viewModel.detail.conversationDetail,
-    avoidGroupingEdits: viewModel.detail.avoidGroupingEdits
-  });
+  const nativeState = useActiveConversationState(rail.activeConversationId);
+  const chromeState = useMemo(
+    () =>
+      new DetailChromeState({
+        labels,
+        slashStatusLimits,
+        slashStatusLimitsLoading,
+        slashStatusLimitsUnavailable,
+        rail,
+        detail,
+        composer,
+        interaction,
+        readiness,
+        nativeState
+      }),
+    [
+      labels,
+      slashStatusLimits,
+      slashStatusLimitsLoading,
+      slashStatusLimitsUnavailable,
+      rail,
+      detail,
+      composer,
+      interaction,
+      readiness,
+      nativeState
+    ]
+  );
+  const {
+    hasActiveConversation,
+    activePrompt,
+    activePromptResponsePending,
+    activePromptRequestId,
+    sessionChrome,
+    homeStatusNoticeVisible,
+    rawSlashStatus,
+    displayedInlineNotice,
+    inlineNoticeChrome,
+    homeNoticeChrome,
+    activeConversationTurnBusy,
+    isComposerSending,
+    isCollaboratorConversation,
+    composerDisabledReason,
+    stopControl,
+    showStopButton,
+    stopDisabled
+  } = chromeState;
   const targetConversation =
-    viewModel.detail.availability === "not_found"
-      ? null
-      : projectedConversation;
+    detail.availability === "not_found" ? null : input.conversation;
   const {
     conversation,
     showTimelineSkeleton,
     timelineConversationId,
     transitionPending: timelineTransitionPending
   } = useAgentGUITimelineTransition({
-    activeConversationId: viewModel.rail.activeConversationId,
-    availability: viewModel.detail.availability,
+    activeConversationId: rail.activeConversationId,
+    availability: detail.availability,
     conversation: targetConversation
   });
-  const hasActiveConversation = viewModel.rail.activeConversationId !== null;
+
   const selectedAgentTargetComingSoon = isAgentGUIAgentTargetComingSoon(
-    viewModel.rail.selectedAgentTarget,
-    viewModel.rail.comingSoonProviders
+    rail.selectedAgentTarget,
+    rail.comingSoonProviders
   );
   const emptyProviderReadinessGate = !hasActiveConversation
-    ? viewModel.readiness.providerReadinessGate
+    ? readiness.providerReadinessGate
     : null;
-  const activePrompt =
-    viewModel.interaction.pendingInteractivePrompt ??
-    viewModel.interaction.pendingApproval;
-  const activePromptResponsePending =
-    activePrompt?.kind === "approval"
-      ? viewModel.interaction.isRespondingApproval
-      : viewModel.interaction.isRespondingInteractivePrompt;
-  const activePromptRequestId = activePrompt?.requestId ?? null;
+
   const { dismissPrompt: dismissBottomDockPrompt, promptVisible } =
     useBottomDockPromptDismissal(
-      viewModel.rail.activeConversationId,
+      rail.activeConversationId,
       activePromptRequestId
     );
-  const sessionChrome = useMemo<AgentGUISessionChrome>(
-    () => ({ ...viewModel.interaction.sessionChrome, approval: null }),
-    [viewModel.interaction.sessionChrome]
-  );
-  const homeStatusNoticeVisible = isAgentGUIHomeStatusNoticeVisible(
-    sessionChrome.recovery
-  );
-  const rawSlashStatus = useMemo(
-    () =>
-      resolveSlashStatus({
-        rawState: viewModel.interaction.sessionChrome.rawState,
-        limits: slashStatusLimits,
-        limitsLoading: slashStatusLimitsLoading,
-        limitsUnavailable: slashStatusLimitsUnavailable,
-        usage: viewModel.detail.usage
-      }),
-    [
-      slashStatusLimits,
-      slashStatusLimitsLoading,
-      slashStatusLimitsUnavailable,
-      viewModel.detail.usage,
-      viewModel.interaction.sessionChrome.rawState
-    ]
-  );
-  const slashStatus = useStableSlashStatus(rawSlashStatus);
-  const displayedInlineNotice = useMemo(() => {
-    if (homeStatusNoticeVisible) {
-      return null;
-    }
-    const inlineNotice = viewModel.interaction.inlineNotice;
-    const inlineNoticeMessage = inlineNotice?.message.trim() ?? "";
-    if (!inlineNotice || inlineNoticeMessage === "") {
-      return null;
-    }
-    if (
-      isContextCanceledMessage(inlineNoticeMessage) &&
-      viewModel.rail.activeConversation?.status === "completed" &&
-      viewModel.readiness.activeLiveState !== "failed"
-    ) {
-      return null;
-    }
-    const chromeMessages = [
-      sessionChrome.auth?.message,
-      sessionChrome.recovery?.message
-    ].flatMap((message) => {
-      const normalizedMessage = message?.trim() ?? "";
-      return normalizedMessage === "" ? [] : [normalizedMessage];
-    });
 
-    return chromeMessages.includes(inlineNoticeMessage)
-      ? null
-      : { ...inlineNotice, message: inlineNoticeMessage };
-  }, [
-    sessionChrome.auth?.message,
-    sessionChrome.recovery?.message,
-    viewModel.rail.activeConversation?.status,
-    viewModel.readiness.activeLiveState,
-    homeStatusNoticeVisible,
-    viewModel.interaction.inlineNotice
-  ]);
-  const inlineNoticeChrome = useMemo<AgentGUISessionChrome | null>(() => {
-    if (!displayedInlineNotice) {
-      return null;
-    }
-    return {
-      auth: null,
-      approval: null,
-      recovery: {
-        kind: displayedInlineNotice.tone === "warning" ? "warning" : "failed",
-        message: displayedInlineNotice.message,
-        canRetry: displayedInlineNotice.id.startsWith(
-          "agent-gui-tutti-mode-update-failed"
-        )
-      },
-      rawState: null
-    };
-  }, [displayedInlineNotice]);
-  const homeNoticeChrome = resolveAgentGUIHomeNoticeChrome({
-    inlineNoticeChrome,
-    sessionChrome
-  });
+  const slashStatus = useStableSlashStatus(rawSlashStatus);
+
   // Plan decisions replace the composer in the bottom dock: the card takes its slot
   // and the composer hides until it is acted on (optimistically cleared via
   // bottomDockDismissedPrompt) or otherwise resolves.
@@ -184,46 +151,15 @@ export function useAgentGUIDetailModel(input: Input) {
       ? null
       : activePrompt;
   const showUnavailableChatEmpty =
-    hasActiveConversation && viewModel.detail.availability === "not_found";
-  const activeConversationTurnBusy = viewModel.composer.gate.conversationBusy;
-  const isComposerSending =
-    activeConversationTurnBusy ||
-    viewModel.composer.gate.isAwaitingTurnStart === true ||
-    (!hasActiveConversation &&
-      viewModel.composer.gate.submission.status === "blocked" &&
-      viewModel.composer.gate.submission.reason === "creating_conversation");
-  const isCollaboratorConversation =
-    viewModel.composer.gate.editor.status === "blocked" &&
-    viewModel.composer.gate.editor.reason === "collaborator_read_only";
-  const composerDisabledReason = isCollaboratorConversation
-    ? labels.collaboratorSessionReadOnlyPlaceholder
-    : null;
-  const stopControl = resolveAgentGUIStopControl({
-    hasPendingApproval: viewModel.interaction.pendingApproval !== null,
-    hasPendingInteractivePrompt:
-      viewModel.interaction.pendingInteractivePrompt !== null,
-    isAuthBlocked: sessionChrome.auth !== null,
-    isCancelPending: viewModel.composer.isCancelPending,
-    isConversationBusy: activeConversationTurnBusy,
-    isCreatingConversation: viewModel.composer.isCreatingConversation,
-    hasPendingSubmitStopTarget:
-      viewModel.composer.hasPendingSubmitStopTarget === true,
-    isInterrupting: viewModel.composer.isInterrupting,
-    isSubmitting: viewModel.composer.isSubmitting,
-    isUnavailable: viewModel.readiness.activeLiveState === "failed"
-  });
-  const showStopButton = stopControl.visible;
-  const stopDisabled = stopControl.disabled;
-  const {
-    chromeLabels,
-    conversationFlowLabels,
-    interactivePromptLabels
-  } = useAgentGUIDetailLabels({
-    canAnswerPendingInteractivePromptFromComposer:
-      viewModel.interaction.canAnswerPendingInteractivePromptFromComposer,
-    isCancelPending: viewModel.composer.isCancelPending,
-    labels
-  });
+    hasActiveConversation && detail.availability === "not_found";
+
+  const { chromeLabels, conversationFlowLabels, interactivePromptLabels } =
+    useAgentGUIDetailLabels({
+      canAnswerPendingInteractivePromptFromComposer:
+        interaction.canAnswerPendingInteractivePromptFromComposer,
+      isCancelPending: nativeState.isCancelPending,
+      labels
+    });
   const conversationFlowEmpty = useMemo(
     () =>
       showUnavailableChatEmpty ? (
@@ -317,7 +253,7 @@ export function useAgentGUIDetailModel(input: Input) {
       slashCommandCompactLabel: labels.slashCommandCompactLabel,
       slashCommandContextLabel: labels.slashCommandContextLabel,
       slashCommandFastLabel: labels.slashCommandFastLabel,
-      slashCommandGoalLabel: labels.slashCommandGoalLabel,
+
       slashCommandInitLabel: labels.slashCommandInitLabel,
       slashCommandPlanLabel: labels.slashCommandPlanLabel,
       slashCommandReviewLabel: labels.slashCommandReviewLabel,
@@ -326,7 +262,7 @@ export function useAgentGUIDetailModel(input: Input) {
       slashCommandCompactDescription: labels.slashCommandCompactDescription,
       slashCommandContextDescription: labels.slashCommandContextDescription,
       slashCommandFastDescription: labels.slashCommandFastDescription,
-      slashCommandGoalDescription: labels.slashCommandGoalDescription,
+
       slashCommandInitDescription: labels.slashCommandInitDescription,
       slashCommandPlanDescription: labels.slashCommandPlanDescription,
       slashCommandReviewDescription: labels.slashCommandReviewDescription,
@@ -535,7 +471,7 @@ export function useAgentGUIDetailModel(input: Input) {
       labels.slashCommandCompactLabel,
       labels.slashCommandContextLabel,
       labels.slashCommandFastLabel,
-      labels.slashCommandGoalLabel,
+
       labels.slashCommandInitLabel,
       labels.slashCommandPlanLabel,
       labels.slashCommandReviewLabel,
@@ -544,7 +480,7 @@ export function useAgentGUIDetailModel(input: Input) {
       labels.slashCommandCompactDescription,
       labels.slashCommandContextDescription,
       labels.slashCommandFastDescription,
-      labels.slashCommandGoalDescription,
+
       labels.slashCommandInitDescription,
       labels.slashCommandPlanDescription,
       labels.slashCommandReviewDescription,
@@ -588,6 +524,7 @@ export function useAgentGUIDetailModel(input: Input) {
   );
 
   return {
+    chromeState,
     activePrompt,
     activeConversationTurnBusy,
     activePromptRequestId,
@@ -597,7 +534,7 @@ export function useAgentGUIDetailModel(input: Input) {
     chromeLabels,
     composerActivePrompt,
     composerDisabledReason,
-    composerGate: viewModel.composer.gate,
+    composerGate: composer.state.gate,
     composerLabels,
     conversation,
     conversationFlowEmpty,

@@ -1,12 +1,15 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Mock } from "vitest";
 import type { MutableRefObject, RefObject } from "react";
-import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import type { Mock } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentGUINodeViewProps } from "../AgentGUINodeView";
 import { useAgentGUIDetailScroll } from "./useAgentGUIDetailScroll";
+
+vi.mock("@multica/tutti-agent-gui-host/timeline-end-position", () => ({
+  useTimelineEndPosition: () => true
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -53,17 +56,17 @@ describe("useAgentGUIDetailScroll", () => {
       harness.timeline.scrollTop = 2_000;
       harness.timeline.dispatchEvent(new Event("scroll"));
     });
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     harness.setScrollHeight(8_000);
     rerender({ activeConversationId: "conversation-b" });
     expect(harness.timeline.scrollTop).toBe(7_900);
-    expect(result.current.isTimelineScrolledToBottom).toBe(true);
+    expect(result.current.followEndMode === "following").toBe(true);
 
     harness.setScrollHeight(5_000);
     rerender({ activeConversationId: "conversation-a" });
     expect(harness.timeline.scrollTop).toBe(2_000);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
   });
 
   it("keeps a detached position while the reselected conversation hydrates", () => {
@@ -99,7 +102,7 @@ describe("useAgentGUIDetailScroll", () => {
       showTimelineSkeleton: true
     });
     expect(harness.timeline.scrollTop).toBe(7_900);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     harness.setScrollHeight(5_000);
     rerender({
@@ -107,7 +110,7 @@ describe("useAgentGUIDetailScroll", () => {
       showTimelineSkeleton: false
     });
     expect(harness.timeline.scrollTop).toBe(2_000);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
   });
 
   it("restores a virtualized conversation's detached scroll position", () => {
@@ -127,7 +130,7 @@ describe("useAgentGUIDetailScroll", () => {
       harness.timeline.scrollTop = 2_000;
       harness.timeline.dispatchEvent(new Event("scroll"));
     });
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     const secondController = virtualScrollController("conversation-b");
     harness.virtualScrollControllerRef.current = secondController;
@@ -144,7 +147,7 @@ describe("useAgentGUIDetailScroll", () => {
       behavior: "auto"
     });
     expect(firstController.scrollToEnd).not.toHaveBeenCalled();
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
   });
 
   it("reads timeline geometry once for a semantic conversation switch", () => {
@@ -360,14 +363,14 @@ describe("useAgentGUIDetailScroll", () => {
 
     expect(controller.scrollToEnd).not.toHaveBeenCalled();
     expect(harness.timeline.scrollTop).toBe(4_899);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     rerender({ conversation: conversationVM("second") });
     act(() => timelineObserver?.callback([], timelineObserver));
 
     expect(controller.scrollToEnd).not.toHaveBeenCalled();
     expect(harness.timeline.scrollTop).toBe(4_899);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
   });
 
   it("releases and restores the DOM bottom lock around a mouse-wheel step", () => {
@@ -398,7 +401,7 @@ describe("useAgentGUIDetailScroll", () => {
 
     expect(harness.scrollTopWriteCount()).toBe(1);
     expect(harness.timeline.scrollTop).toBe(4_899);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     harness.setScrollHeight(5_100);
     rerender({ conversation: conversationVM("second") });
@@ -406,7 +409,7 @@ describe("useAgentGUIDetailScroll", () => {
 
     expect(harness.scrollTopWriteCount()).toBe(1);
     expect(harness.timeline.scrollTop).toBe(4_899);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
 
     act(() => {
       harness.timeline.dispatchEvent(new WheelEvent("wheel", { deltaY: 1 }));
@@ -414,7 +417,7 @@ describe("useAgentGUIDetailScroll", () => {
       harness.timeline.dispatchEvent(new Event("scroll"));
     });
 
-    expect(result.current.isTimelineScrolledToBottom).toBe(true);
+    expect(result.current.followEndMode === "following").toBe(true);
   });
 
   it("does not scroll the retained previous timeline when selection changes", () => {
@@ -510,7 +513,7 @@ describe("useAgentGUIDetailScroll", () => {
       harness.timeline.dispatchEvent(new Event("scroll"));
     });
     expect(result.current.isTimelineScrolledToTop).toBe(false);
-    expect(result.current.isTimelineScrolledToBottom).toBe(false);
+    expect(result.current.followEndMode === "following").toBe(false);
     harness.resetGeometryReadCounts();
 
     harness.setScrollHeight(100);
@@ -525,7 +528,7 @@ describe("useAgentGUIDetailScroll", () => {
       scrollTop: 0
     });
     expect(result.current.isTimelineScrolledToTop).toBe(true);
-    expect(result.current.isTimelineScrolledToBottom).toBe(true);
+    expect(result.current.followEndMode === "following").toBe(true);
     expect(harness.timeline.scrollTop).toBe(2_000);
 
     harness.setScrollHeight(8_000);
@@ -664,7 +667,7 @@ describe("useAgentGUIDetailScroll", () => {
     });
 
     expect(harness.timeline.scrollTop).toBe(4_900);
-    expect(result.current.isTimelineScrolledToBottom).toBe(true);
+    expect(result.current.followEndMode === "following").toBe(true);
     expect(harness.loadOlderConversationMessages).not.toHaveBeenCalled();
 
     harness.setScrollHeight(6_000);
@@ -873,7 +876,7 @@ describe("useAgentGUIDetailScroll", () => {
             showTimelineSkeleton: false
           })
         ),
-      { initialProps: { isLoadingOlderMessages: false } }
+      { initialProps: { isLoadingOlderMessages: true } }
     );
 
     act(() => {
@@ -889,7 +892,7 @@ describe("useAgentGUIDetailScroll", () => {
     harness.setScrollHeight(6_000);
     harness.resetGeometryReadCounts();
 
-    rerender({ isLoadingOlderMessages: true });
+    rerender({ isLoadingOlderMessages: false });
 
     expect(harness.geometryReadCounts()).toEqual({
       clientHeight: 1,
@@ -1416,7 +1419,7 @@ function createHarness(input: { scrollHeight: number }) {
         timelineRef: ref(timeline),
         timelineScrollAnchorRef,
         virtualScrollControllerRef,
-        viewModel: viewModel(
+        ...featureProps(
           options.activeConversationId,
           options.hasOlderMessages,
           options.isLoadingOlderMessages
@@ -1480,18 +1483,12 @@ function installResizeObserverMock(): ResizeObserverMock[] {
   return observers;
 }
 
-function viewModel(
+function featureProps(
   activeConversationId: string,
   hasOlderMessages = false,
   isLoadingOlderMessages = false
-): AgentGUINodeViewModel {
-  return {
-    rail: { activeConversationId },
-    detail: {
-      hasOlderMessages,
-      isLoadingOlderMessages
-    }
-  } as unknown as AgentGUINodeViewModel;
+) {
+  return { activeConversationId, hasOlderMessages, isLoadingOlderMessages };
 }
 
 function mutableRef<T>(current: T): MutableRefObject<T> {

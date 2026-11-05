@@ -1,4 +1,3 @@
-import { memo, useMemo } from "react";
 import {
   Select,
   SelectContent,
@@ -6,6 +5,7 @@ import {
   SelectTrigger,
   cn
 } from "@tutti-os/ui-system";
+import { memo, useMemo } from "react";
 import { Button } from "../../../app/renderer/components/ui/button";
 import {
   MANAGED_AGENT_ICON_FALLBACK_URL,
@@ -13,42 +13,42 @@ import {
   MANAGED_AGENT_PROVIDER_RAIL_ICON_URLS
 } from "../../../shared/managedAgentIcons";
 import { normalizeManagedAgentProvider } from "../../../shared/managedAgentProviders";
-import { agentColorfulUrl } from "../../../managedAgentIconAssets";
 import type {
-  AgentGUIProviderRailAllPresentation,
-  AgentGUIProviderReadinessGate,
-  AgentGUIAgentTarget
+  AgentGUIAgentTarget,
+  AgentGUIProviderReadinessGate
 } from "../../../types";
-import { AgentGUIHeroAgentCarousel } from "../AgentGUIHeroAgentCarousel";
-import { AgentSessionChrome } from "../AgentSessionChrome";
 import { AgentComposer, type AgentComposerProps } from "../AgentComposer";
+import { AgentGUIHeroAgentCarousel } from "../AgentGUIHeroAgentCarousel";
+import styles from "../AgentGUINode.styles";
+import type {
+  AgentGUINodeViewProps,
+  AgentGUIViewLabels
+} from "../AgentGUINodeView";
+import { AgentGUIOwnerAvatar } from "../AgentGUIOwnerAvatar";
 import { AgentHomeSuggestions } from "../AgentHomeSuggestions";
+import {
+  AgentSessionChrome,
+  type AgentSessionChromeSource
+} from "../AgentSessionChrome";
 import {
   createFallbackAgentGUIAgentAvatar,
   projectAgentGUIAgentTargetAvatar,
   type AgentGUIAgentAvatarPresentation
 } from "../model/agentGuiAgentAvatarPresentation";
 import type {
+  AgentGUIShellViewModel,
   AgentHomeSuggestionAction,
-  AgentHomeSuggestionCategory,
-  AgentGUINodeViewModel,
-  AgentGUISessionChrome
+  AgentHomeSuggestionCategory
 } from "../model/agentGuiNodeTypes";
 import {
   resolveAgentGUIProviderReadinessAction,
   resolveAgentGUIProviderReadinessContent
 } from "../model/agentGuiProviderReadiness";
-import type {
-  AgentGUINodeViewProps,
-  AgentGUIViewLabels
-} from "../AgentGUINodeView";
-import type { ChromeLabels } from "./AgentGUINodeView.types";
-import { AgentGUIEmptyHeroCarouselStage } from "./AgentGUIEmptyHeroCarouselStage";
-import { AgentTargetSetupGate } from "./AgentTargetSetupGate.tsx";
 import { projectAgentGUIAgentTargetName } from "../model/agentGuiTargetName";
 import { AgentGUIAgentTargetName } from "./AgentGUIAgentTargetName";
-import styles from "../AgentGUINode.styles";
-import { AgentGUIOwnerAvatar } from "../AgentGUIOwnerAvatar";
+import { AgentGUIEmptyHeroCarouselStage } from "./AgentGUIEmptyHeroCarouselStage";
+import type { ChromeLabels } from "./AgentGUINodeView.types";
+import { AgentTargetSetupGate } from "./AgentTargetSetupGate.tsx";
 
 export interface AgentGUIProviderIconPresentation {
   iconUrl: string;
@@ -91,14 +91,13 @@ export const EMPTY_HOME_SUGGESTIONS: readonly AgentHomeSuggestionCategory[] =
 interface AgentGUIEmptyHomePaneProps {
   isActive: boolean;
   isVisible: boolean;
-  provider: AgentGUINodeViewModel["shell"]["data"]["provider"];
+  provider: AgentGUIShellViewModel["data"]["provider"];
   providerReadinessGate: AgentGUIProviderReadinessGate | null;
   showAllProviders: boolean;
   agentTargets: readonly AgentGUIAgentTarget[];
   selectedAgentTarget: AgentGUIAgentTarget | null;
   onProviderSelect?: AgentGUINodeViewProps["actions"]["selectHomeComposerAgentTarget"];
-  noticeChrome: AgentGUISessionChrome | null;
-  isRespondingApproval: boolean;
+  noticeSource: AgentSessionChromeSource;
   onSubmitApprovalOption: AgentGUINodeViewProps["actions"]["submitApprovalOption"];
   onAuthLogin?: (provider?: string | null) => void;
   onRetryActivation: AgentGUINodeViewProps["actions"]["retryActivation"];
@@ -143,9 +142,22 @@ export const AgentGUIEmptyHomePane = memo(function AgentGUIEmptyHomePane({
   const avatarPresentations = useMemo(
     () =>
       agentTargets.length
-        ? agentTargets.map((target) => ({ ...projectAgentGUIAgentTargetAvatar(target), iconUrl: agentGUIProviderRailIconPresentation(target.provider).iconUrl }))
+        ? agentTargets.map((target) => ({
+            ...projectAgentGUIAgentTargetAvatar(target),
+            iconUrl: agentGUIProviderRailIconPresentation(target.provider)
+              .iconUrl
+          }))
         : presentedSelectedAgentTarget
-          ? [{ ...projectAgentGUIAgentTargetAvatar(presentedSelectedAgentTarget), iconUrl: agentGUIProviderRailIconPresentation(presentedSelectedAgentTarget.provider).iconUrl }]
+          ? [
+              {
+                ...projectAgentGUIAgentTargetAvatar(
+                  presentedSelectedAgentTarget
+                ),
+                iconUrl: agentGUIProviderRailIconPresentation(
+                  presentedSelectedAgentTarget.provider
+                ).iconUrl
+              }
+            ]
           : [
               createFallbackAgentGUIAgentAvatar({
                 provider,
@@ -213,13 +225,12 @@ export const AgentGUIEmptyHomePane = memo(function AgentGUIEmptyHomePane({
 interface AgentGUIEmptyHeroPaneProps {
   isActive?: boolean;
   isVisible?: boolean;
-  provider: AgentGUINodeViewModel["shell"]["data"]["provider"];
+  provider: AgentGUIShellViewModel["data"]["provider"];
   emptyLabel: string;
   emptyProvider: string;
   avatarPresentations: readonly AgentGUIAgentAvatarPresentation[];
   carouselMountedExternally?: boolean;
-  noticeChrome: AgentGUISessionChrome | null;
-  isRespondingApproval: boolean;
+  noticeSource: AgentSessionChromeSource;
   onSubmitApprovalOption: AgentGUINodeViewProps["actions"]["submitApprovalOption"];
   onAuthLogin?: (provider?: string | null) => void;
   onRetryActivation: AgentGUINodeViewProps["actions"]["retryActivation"];
@@ -245,8 +256,7 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
   emptyProvider,
   avatarPresentations,
   carouselMountedExternally = false,
-  noticeChrome,
-  isRespondingApproval,
+  noticeSource,
   onSubmitApprovalOption,
   onAuthLogin,
   onRetryActivation,
@@ -282,7 +292,12 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
     .join("|");
 
   return (
-    <div className={cn(styles.emptyHero, !composerProps && "multica-empty-conversation-welcome")}>
+    <div
+      className={cn(
+        styles.emptyHero,
+        !composerProps && "multica-empty-conversation-welcome"
+      )}
+    >
       <div className={styles.emptyHeroBody}>
         <div
           className={styles.emptyHeroIconSlot}
@@ -320,17 +335,14 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
             sharedAgentOwnerSeparator={sharedAgentOwnerSeparator}
           />
         </h2>
-        {noticeChrome ? (
-          <AgentSessionChrome
-            chrome={noticeChrome}
-            isRespondingApproval={isRespondingApproval}
-            onSubmitApprovalOption={onSubmitApprovalOption}
-            onAuthLogin={onAuthLogin}
-            onRetryActivation={onRetryActivation}
-            onContinueInNewConversation={onContinueInNewConversation}
-            labels={chromeLabels}
-          />
-        ) : null}
+        <AgentSessionChrome
+          source={noticeSource}
+          onSubmitApprovalOption={onSubmitApprovalOption}
+          onAuthLogin={onAuthLogin}
+          onRetryActivation={onRetryActivation}
+          onContinueInNewConversation={onContinueInNewConversation}
+          labels={chromeLabels}
+        />
         {composerProps ? <AgentComposer {...composerProps} /> : null}
         <AgentHomeSuggestions
           categories={suggestions}
@@ -346,7 +358,7 @@ export const AgentGUIEmptyHeroPane = memo(function AgentGUIEmptyHeroPane({
 interface AgentGUIProviderReadinessGatePaneProps {
   isActive?: boolean;
   isVisible?: boolean;
-  provider: AgentGUINodeViewModel["shell"]["data"]["provider"];
+  provider: AgentGUIShellViewModel["data"]["provider"];
   gate: AgentGUIProviderReadinessGate;
   showAllProviders?: boolean;
   emptyLabel: string;
@@ -561,24 +573,6 @@ export const AgentGUIProviderReadinessGatePane = memo(
     );
   }
 );
-
-export function AgentGUIUnifiedProviderIcon({
-  presentation
-}: {
-  presentation?: AgentGUIProviderRailAllPresentation | null;
-}): React.JSX.Element {
-  const iconUrl = presentation?.iconUrl?.trim() || agentColorfulUrl;
-  return (
-    <span aria-hidden="true" className={styles.providerRailAvatar}>
-      <img
-        alt=""
-        className={styles.providerRailAvatarImage}
-        draggable={false}
-        src={iconUrl}
-      />
-    </span>
-  );
-}
 
 export function AgentGUIProviderIconVisual({
   ariaHidden = false,

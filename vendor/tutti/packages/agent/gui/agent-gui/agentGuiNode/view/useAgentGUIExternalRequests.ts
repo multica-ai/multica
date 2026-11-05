@@ -1,24 +1,35 @@
 import { useEffect, useRef } from "react";
 import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
-import type {
-  AgentGUINodeViewProps,
-  AgentGUIViewLabels
-} from "./AgentGUINodeView.types";
-import { useAgentGUIConversationCopyAction } from "./AgentGUIConversationActionsMenu";
 import {
   AGENT_GUI_WORKBENCH_COMMAND_EVENT,
   normalizeAgentGuiWorkbenchCommand
 } from "../../../workbench/commands";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
+import { useAgentGUIConversationCopyAction } from "./agentGUIConversationCopy";
+import type {
+  AgentGUINodeViewProps,
+  AgentGUIViewLabels
+} from "./AgentGUINodeView.types";
 
-type Conversation = AgentGUINodeViewModel["rail"]["conversations"][number];
+type Conversation = AgentGUIRailViewModel["conversations"][number];
 
 function resolveSessionActionConversation(
-  viewModel: AgentGUINodeViewModel,
+  {
+    shell,
+    rail
+  }: { rail: AgentGUIRailViewModel; shell: AgentGUIShellViewModel },
   agentSessionId: string | null
 ): Conversation | null {
-  const active = viewModel.rail.activeConversation;
+  const active = rail.activeConversation;
   if (!agentSessionId) {
     return active;
   }
@@ -26,7 +37,7 @@ function resolveSessionActionConversation(
     return active;
   }
   return (
-    viewModel.rail.conversations.find(
+    rail.conversations.find(
       (conversation) => conversation.id === agentSessionId
     ) ?? null
   );
@@ -58,7 +69,13 @@ export function useAgentGUIExternalRequests(input: {
   requestCreateConversation: (options?: { source?: string }) => void;
   requestRenameConversation: (conversation: Conversation) => void;
   uiLanguage: UiLanguage;
-  viewModel: AgentGUINodeViewModel;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
   workbenchCommandBridge: NonNullable<
     AgentGUINodeViewProps["workbenchCommandBridge"]
   > | null;
@@ -69,7 +86,13 @@ export function useAgentGUIExternalRequests(input: {
     requestCreateConversation,
     requestRenameConversation,
     uiLanguage,
-    viewModel,
+    shell,
+    rail,
+    detail,
+    composer,
+    interaction,
+    readiness,
+    operations,
     workbenchCommandBridge
   } = input;
   const agentHostApi = useOptionalAgentHostApi();
@@ -82,7 +105,7 @@ export function useAgentGUIExternalRequests(input: {
     requestCreateConversation,
     requestRenameConversation,
     uiLanguage,
-    viewModel,
+    ...{ shell, rail, detail, composer, interaction, readiness, operations },
     workbenchCommandBridge
   });
   requestContextRef.current = {
@@ -93,7 +116,7 @@ export function useAgentGUIExternalRequests(input: {
     requestCreateConversation,
     requestRenameConversation,
     uiLanguage,
-    viewModel,
+    ...{ shell, rail, detail, composer, interaction, readiness, operations },
     workbenchCommandBridge
   };
   useEffect(() => {
@@ -122,7 +145,7 @@ export function useAgentGUIExternalRequests(input: {
         return;
       }
       const conversation = resolveSessionActionConversation(
-        current.viewModel,
+        current,
         command.agentSessionId
       );
       if (!conversation) {
@@ -135,7 +158,7 @@ export function useAgentGUIExternalRequests(input: {
         current.copyConversationValue(command.action, {
           conversation,
           uiLanguage: current.uiLanguage,
-          workspaceId: current.viewModel.shell.workspaceId
+          workspaceId: current.shell.workspaceId
         });
       }
     };

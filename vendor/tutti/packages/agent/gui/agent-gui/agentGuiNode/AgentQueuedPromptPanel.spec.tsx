@@ -2,11 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  resetAgentGUIRuntimeForTests,
-  setAgentGUIRuntimeForTests,
-  type AgentGUIRuntime
-} from "../../agentActivityRuntime";
-import { AgentQueuedPromptPanel } from "./AgentQueuedPromptPanel";
+  resetConversationServicesForTests,
+  setConversationServicesForTests,
+  type ConversationServices
+} from "../../conversationServices";
+import { AgentQueuedPromptPanelView as AgentQueuedPromptPanel } from "./AgentQueuedPromptPanel";
 
 const labels = {
   queuedLabel: "Queued",
@@ -19,7 +19,7 @@ const labels = {
 };
 
 afterEach(() => {
-  resetAgentGUIRuntimeForTests();
+  resetConversationServicesForTests();
 });
 
 function textQueuedPrompt(id: string, text: string, createdAtUnixMs = 1) {
@@ -379,9 +379,11 @@ describe("AgentQueuedPromptPanel", () => {
       name: "staged.png",
       path: "/agent-prompt-assets/staged.png"
     }));
-    setAgentGUIRuntimeForTests({
-      readPromptAsset
-    } as unknown as AgentGUIRuntime);
+    setConversationServicesForTests({
+      attachments: {
+        readPromptAsset
+      }
+    } as unknown as ConversationServices);
 
     const { container } = render(
       <AgentQueuedPromptPanel
@@ -431,9 +433,11 @@ describe("AgentQueuedPromptPanel", () => {
       mimeType: "image/png",
       name: "attached.png"
     }));
-    setAgentGUIRuntimeForTests({
-      readSessionAttachment
-    } as unknown as AgentGUIRuntime);
+    setConversationServicesForTests({
+      attachments: {
+        readSessionAttachment
+      }
+    } as unknown as ConversationServices);
 
     const { container } = render(
       <AgentQueuedPromptPanel
@@ -489,9 +493,11 @@ describe("AgentQueuedPromptPanel", () => {
           resolvers.set(`${input.workspaceId}:${input.path}`, resolve);
         })
     );
-    setAgentGUIRuntimeForTests({
-      readPromptAsset
-    } as unknown as AgentGUIRuntime);
+    setConversationServicesForTests({
+      attachments: {
+        readPromptAsset
+      }
+    } as unknown as ConversationServices);
     const createPanel = (workspaceId: string, path: string) => (
       <AgentQueuedPromptPanel
         agentSessionId="session-1"
@@ -575,7 +581,9 @@ describe("AgentQueuedPromptPanel", () => {
   it("does not hydrate or fetch queued HTTPS image URLs in the owner", () => {
     const readSessionAttachment = vi.fn();
     const url = "https://bucket.example/image.webp?token=secret";
-    setAgentGUIRuntimeForTests({ readSessionAttachment } as never);
+    setConversationServicesForTests({
+      attachments: { readSessionAttachment }
+    } as never);
     const { container } = render(
       <AgentQueuedPromptPanel
         queuedPrompts={[

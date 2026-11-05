@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { useState, type JSX } from "react";
 import type { AgentTaskStepVM } from "../contracts/agentTaskItemVM";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
@@ -11,7 +12,7 @@ interface AgentTaskStepListProps {
   onLinkClick?: (href: string) => void;
 }
 
-export function AgentTaskStepList({
+export const AgentTaskStepList = observer(function AgentTaskStepList({
   steps,
   onLinkClick
 }: AgentTaskStepListProps): JSX.Element {
@@ -23,7 +24,7 @@ export function AgentTaskStepList({
       ))}
     </div>
   );
-}
+});
 
 function AgentTaskStepRow({
   step,

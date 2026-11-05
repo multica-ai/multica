@@ -1,10 +1,11 @@
+import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import type { AgentToolCallCardProps } from "./AgentToolCallCard";
 import { AgentToolCallHeader } from "./AgentToolCallHeader";
 import { AgentExpandedToolContent } from "./tool-renderers/AgentExpandedToolContent";
 import { hasAgentToolContent } from "./tool-renderers/agentToolContentShared";
 
-export function AgentExitPlanModeCard({
+export const AgentExitPlanModeCard = observer(function AgentExitPlanModeCard({
   call,
   onLinkClick
 }: AgentToolCallCardProps): JSX.Element {
@@ -26,4 +27,4 @@ export function AgentExitPlanModeCard({
       ) : null}
     </div>
   );
-}
+});

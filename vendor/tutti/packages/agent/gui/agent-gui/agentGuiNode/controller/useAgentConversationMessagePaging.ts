@@ -1,12 +1,13 @@
-import { oldestVersion } from "../../../contexts/workspace/presentation/renderer/agentSessions/useAgentSessionControllerState";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
-import { isWorkspaceAgentActivityOptimisticMessage } from "../../../shared/workspaceAgentMessageOverlay";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   createAgentConversationMessageController,
   type AgentConversationMessageController
 } from "../../../agentConversationMessageController";
+import { oldestVersion } from "../../../contexts/workspace/presentation/renderer/agentSessions/useAgentSessionControllerState";
+import type { ConversationServices } from "../../../conversationServices";
+import { isWorkspaceAgentActivityOptimisticMessage } from "../../../shared/workspaceAgentMessageOverlay";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 
 const PAGE_SIZE = 100;
 
@@ -181,8 +182,8 @@ export interface AgentConversationMessagePagingInput {
   getActiveSessionId(): string | null;
   isMounted(): boolean;
   onOlderPageLoadingChanged(loading: boolean): void;
-  runtime: AgentGUIRuntime;
-  sessionEngine: import("@tutti-os/agent-activity-core").AgentSessionEngine;
+  runtime: ConversationServices;
+  conversationServices: AgentConversationServices;
   workspaceId: string;
 }
 
@@ -210,9 +211,9 @@ export function useAgentConversationMessagePaging(
               phase: "synchronize_session"
             })
         },
-        engine: input.sessionEngine,
+        engine: input.conversationServices,
         ensureSessionSynchronized: ({ agentSessionId, onError, workspaceId }) =>
-          inputRef.current.runtime.ensureSessionSynchronized?.({
+          inputRef.current.runtime.conversations.watch?.({
             agentSessionId,
             onError,
             workspaceId
@@ -221,12 +222,15 @@ export function useAgentConversationMessagePaging(
           inputRef.current.isMounted() &&
           (!agentSessionId ||
             inputRef.current.getActiveSessionId()?.trim() === agentSessionId),
-        loadOlderSessionMessages: (older) => inputRef.current.runtime.loadOlderSessionMessages(older),
+        loadOlderSessionMessages: (older) =>
+          inputRef.current.runtime.conversations.loadOlder(older),
         olderMessages: (agentSessionId) => {
           const { transcript } = inputRef.current.runtime;
           return {
             hasOlderMessages: transcript.hasOlderMessages(agentSessionId),
-            oldestLoadedVersion: oldestVersion(transcript.messages(agentSessionId))
+            oldestLoadedVersion: oldestVersion(
+              transcript.messages(agentSessionId)
+            )
           };
         },
         onSnapshotChanged: (snapshot) =>
@@ -235,7 +239,7 @@ export function useAgentConversationMessagePaging(
           ),
         workspaceId: input.workspaceId
       }),
-    [input.sessionEngine, input.workspaceId]
+    [input.conversationServices, input.workspaceId]
   );
   const controllerLifetimeRef = useRef<{
     controller: AgentConversationMessageController;

@@ -1,4 +1,3 @@
-import { type JSX, type ReactNode } from "react";
 import {
   Button,
   Tooltip,
@@ -6,12 +5,14 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { type JSX, type ReactNode } from "react";
 import { CastIcon } from "../../app/renderer/components/icons/CastIcon";
 import { cn } from "../../app/renderer/lib/utils";
 import { approvalOptionDisplayLabel } from "../../shared/agentConversation/approvalOptionPresentation";
 import type { AgentInteractionResponseInput } from "../../shared/agentConversation/contracts/agentConversationVM";
-import type { AgentGUISessionChrome } from "./model/agentGuiNodeTypes";
 import styles from "./AgentGUIChrome.styles";
+import type { AgentGUISessionChrome } from "./model/agentGuiNodeTypes";
 
 interface AgentChromeNoticeProps {
   tone: "warning" | "danger" | "muted";
@@ -22,10 +23,13 @@ interface AgentChromeNoticeProps {
   testId?: string;
 }
 
+export interface AgentSessionChromeSource {
+  readonly chrome: AgentGUISessionChrome | null;
+  readonly approvalDisabledReason?: string | null;
+  readonly isRespondingApproval: boolean;
+}
 interface AgentSessionChromeProps {
-  chrome: AgentGUISessionChrome;
-  approvalDisabledReason?: string | null;
-  isRespondingApproval: boolean;
+  source: AgentSessionChromeSource;
   onSubmitApprovalOption: (input: AgentInteractionResponseInput) => boolean;
   onAuthLogin?: () => void;
   onRetryActivation: () => void;
@@ -110,17 +114,20 @@ export function AgentChromeNotice({
   );
 }
 
-export function AgentSessionChrome({
-  chrome,
-  approvalDisabledReason = null,
-  isRespondingApproval,
+export const AgentSessionChrome = observer(function AgentSessionChrome({
+  source,
   onSubmitApprovalOption,
   onAuthLogin,
   onRetryActivation,
   onContinueInNewConversation,
   labels
 }: AgentSessionChromeProps): JSX.Element | null {
-  "use memo";
+  const {
+    chrome,
+    approvalDisabledReason = null,
+    isRespondingApproval
+  } = source;
+  if (!chrome) return null;
   const visibleAuth =
     chrome.recovery?.kind === "activating" ||
     chrome.recovery?.kind === "agent-sharing-revoked" ||
@@ -320,7 +327,7 @@ export function AgentSessionChrome({
       ) : null}
     </div>
   );
-}
+});
 
 function DisabledApprovalActions({
   children,

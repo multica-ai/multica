@@ -1,14 +1,15 @@
-import type { ReactNode } from "react";
+import type { WorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
+import type {
+  WorkspaceFileReferenceAdapter,
+  WorkspaceFileReferenceCopy
+} from "@tutti-os/workspace-file-reference/contracts";
 import {
   ReferenceSourcePicker,
   WorkspaceFileReferencePicker,
   type ReferenceSourcePickerProps
 } from "@tutti-os/workspace-file-reference/ui";
-import type {
-  WorkspaceFileReferenceAdapter,
-  WorkspaceFileReferenceCopy
-} from "@tutti-os/workspace-file-reference/contracts";
-import type { WorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
+import { observer } from "mobx-react-lite";
+import type { ReactNode } from "react";
 
 export interface AgentGUIReferencePickerSurfaceProps {
   aggregator: ReferenceSourcePickerProps["aggregator"] | null;
@@ -34,59 +35,61 @@ export interface AgentGUIReferencePickerSurfaceProps {
   onConfirmBundles: ReferenceSourcePickerProps["onConfirmBundles"];
 }
 
-export function AgentGUIReferencePickerSurface({
-  aggregator,
-  copy,
-  fileAdapter,
-  fileManagerCopy,
-  initialPath,
-  initialTarget,
-  isNodeSelectable,
-  open,
-  purpose,
-  renderDirectoryHeaderActions,
-  renderSidebarActions,
-  resolveContentErrorAction,
-  resolveEntryIconUrl,
-  workspaceId,
-  onClose,
-  onConfirm,
-  onConfirmBundles
-}: AgentGUIReferencePickerSurfaceProps): React.JSX.Element {
-  return aggregator ? (
-    <ReferenceSourcePicker
-      aggregator={aggregator}
-      copy={copy}
-      initialTarget={initialTarget}
-      isNodeSelectable={isNodeSelectable}
-      fileManagerCopy={fileManagerCopy ?? undefined}
-      open={open}
-      purpose={purpose}
-      renderHeaderActions={
-        purpose === "directory" ? renderDirectoryHeaderActions : undefined
-      }
-      renderSidebarActions={
-        renderSidebarActions
-          ? (context) => renderSidebarActions({ ...context, purpose })
-          : undefined
-      }
-      resolveContentErrorAction={resolveContentErrorAction}
-      resolveEntryIconUrl={resolveEntryIconUrl}
-      workspaceId={workspaceId}
-      onClose={onClose}
-      onConfirm={onConfirm}
-      onConfirmBundles={onConfirmBundles}
-    />
-  ) : (
-    <WorkspaceFileReferencePicker
-      copy={copy}
-      fileAdapter={fileAdapter ?? undefined}
-      initialPath={initialPath}
-      open={open}
-      scoped
-      workspaceId={workspaceId}
-      onClose={onClose}
-      onConfirm={onConfirm}
-    />
-  );
-}
+export const AgentGUIReferencePickerSurface = observer(
+  function AgentGUIReferencePickerSurface({
+    aggregator,
+    copy,
+    fileAdapter,
+    fileManagerCopy,
+    initialPath,
+    initialTarget,
+    isNodeSelectable,
+    open,
+    purpose,
+    renderDirectoryHeaderActions,
+    renderSidebarActions,
+    resolveContentErrorAction,
+    resolveEntryIconUrl,
+    workspaceId,
+    onClose,
+    onConfirm,
+    onConfirmBundles
+  }: AgentGUIReferencePickerSurfaceProps): React.JSX.Element {
+    return aggregator ? (
+      <ReferenceSourcePicker
+        aggregator={aggregator}
+        copy={copy}
+        initialTarget={initialTarget}
+        isNodeSelectable={isNodeSelectable}
+        fileManagerCopy={fileManagerCopy ?? undefined}
+        open={open}
+        purpose={purpose}
+        renderHeaderActions={
+          purpose === "directory" ? renderDirectoryHeaderActions : undefined
+        }
+        renderSidebarActions={
+          renderSidebarActions
+            ? (context) => renderSidebarActions({ ...context, purpose })
+            : undefined
+        }
+        resolveContentErrorAction={resolveContentErrorAction}
+        resolveEntryIconUrl={resolveEntryIconUrl}
+        workspaceId={workspaceId}
+        onClose={onClose}
+        onConfirm={onConfirm}
+        onConfirmBundles={onConfirmBundles}
+      />
+    ) : (
+      <WorkspaceFileReferencePicker
+        copy={copy}
+        fileAdapter={fileAdapter ?? undefined}
+        initialPath={initialPath}
+        open={open}
+        scoped
+        workspaceId={workspaceId}
+        onClose={onClose}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+);

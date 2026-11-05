@@ -1,21 +1,21 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import {
   normalizeAgentActivitySession,
   type AgentActivityComposerOptions
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import type { AgentGUINodeData } from "../../../types";
-import type { AgentGUIRememberComposerDefaultsResult } from "./agentGuiController.providerHelpers";
 import type { AgentGUIComposerDefaultsAuthorityReconciler } from "./agentGuiComposerDefaultsReconciliation";
+import type { AgentGUIRememberComposerDefaultsResult } from "./agentGuiController.providerHelpers";
 import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 import { useAgentGUIComposerSettingsActions } from "./useAgentGUIComposerSettingsActions";
 
 describe("useAgentGUIComposerSettingsActions", () => {
   it("retires a remembered model rejected by the authoritative target catalog", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,
@@ -54,7 +54,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
           composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -67,7 +67,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: vi.fn() },
         reloadComposerOptionsForTarget: vi.fn(async () => {}),
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId,
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"
@@ -116,7 +116,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("preserves all explicit home defaults across stale options, transient empty selects, and unrelated patches", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,
@@ -148,21 +148,21 @@ describe("useAgentGUIComposerSettingsActions", () => {
         agentActivityRuntime: {
           composer: {
             options: () => ({
-                behavior: { refreshModelOptionsAfterSettings: false },
-                models: [],
-                permissionConfig: {
-                  configurable: true,
-                  defaultValue: "auto",
-                  modes: [{ id: "auto", label: "Approve for me" }]
-                },
-                reasoningConfigurable: false,
-                reasoningEfforts: [],
-                speeds: []
-              }),
+              behavior: { refreshModelOptionsAfterSettings: false },
+              models: [],
+              permissionConfig: {
+                configurable: true,
+                defaultValue: "auto",
+                modes: [{ id: "auto", label: "Approve for me" }]
+              },
+              reasoningConfigurable: false,
+              reasoningEfforts: [],
+              speeds: []
+            }),
             status: () => undefined
           },
           trackDraftComposerSettingsChange: vi.fn()
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -178,7 +178,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: vi.fn() },
         reloadComposerOptionsForTarget: vi.fn(async () => {}),
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId: vi.fn(),
         setDetailError,
         updateComposerSettingsRef: { current: vi.fn() },
@@ -246,24 +246,21 @@ describe("useAgentGUIComposerSettingsActions", () => {
 
   it("asks the composer to write an active-session selection and remembers it", () => {
     const execute = vi.fn(() => new Promise<unknown>(() => undefined));
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    sessionEngine.dispatch({
-      type: "session/snapshotReceived",
-      sessions: [
-        normalizeAgentActivitySession({
-          activeTurnId: null,
-          agentTargetId: "local:claude-code",
-          agentSessionId: "session-1",
-          cwd: "/workspace",
-          latestTurnInteractions: [],
-          pendingInteractions: [],
-          provider: "claude-code",
-          settings: { permissionModeId: "dontAsk", planMode: false },
-          title: "Historical session",
-          workspaceId: "workspace-1"
-        })
-      ]
-    });
+    const conversationServices = createTestRuntimeState("workspace-1");
+    conversationServices.sessions.upsertSessions([
+      normalizeAgentActivitySession({
+        activeTurnId: null,
+        agentTargetId: "local:claude-code",
+        agentSessionId: "session-1",
+        cwd: "/workspace",
+        latestTurnInteractions: [],
+        pendingInteractions: [],
+        provider: "claude-code",
+        settings: { permissionModeId: "dontAsk", planMode: false },
+        title: "Historical session",
+        workspaceId: "workspace-1"
+      })
+    ]);
 
     const data: AgentGUINodeData = {
       agentTargetId: "local:claude-code",
@@ -293,8 +290,12 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeConversationIdRef: { current: "session-1" },
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
-          composer: { options: () => null, status: () => undefined, updateSettings }
-        } as unknown as AgentGUIRuntime,
+          composer: {
+            options: () => null,
+            status: () => undefined,
+            updateSettings
+          }
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -317,7 +318,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
             targetId: "local:claude-code"
           }
         },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId,
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"
@@ -345,7 +346,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("reconciles A to B to A by exact field generation", async () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -399,7 +400,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
           composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -414,7 +415,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: vi.fn() },
         reloadComposerOptionsForTarget,
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId,
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"
@@ -491,7 +492,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("keeps acknowledged intent after a failed reload and releases confirmation when authority omits the field", async () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -523,7 +524,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
           composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -538,7 +539,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: onShowMessage },
         reloadComposerOptionsForTarget,
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId: vi.fn(),
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"
@@ -630,7 +631,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("does not sanitize an acknowledged model before a stale authority read is reconciled", async () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:opencode",
       lastActiveAgentSessionId: null,
@@ -701,7 +702,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
           composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -716,7 +717,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: vi.fn() },
         reloadComposerOptionsForTarget,
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId: vi.fn(),
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"
@@ -758,7 +759,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
   });
 
   it("retries composer options without forcing a superseding request", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const data: AgentGUINodeData = {
       agentTargetId: "local:codex",
       lastActiveAgentSessionId: null,
@@ -781,7 +782,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         activeEngineActiveTurn: null,
         agentActivityRuntime: {
           composer: { options: () => null, status: () => undefined }
-        } as unknown as AgentGUIRuntime,
+        } as unknown as ConversationServices,
         composerSupportPermissionModeChangeDeferred: false,
         dataRef: { current: data },
         defaultReasoningEffort: null,
@@ -795,7 +796,7 @@ describe("useAgentGUIComposerSettingsActions", () => {
         onShowMessageRef: { current: vi.fn() },
         reloadComposerOptionsForTarget: vi.fn(async () => {}),
         selectedComposerTargetDataRef: { current: target },
-        sessionEngine,
+        conversationServices,
         setDraftSettingsBySessionId: vi.fn(),
         updateComposerSettingsRef: { current: vi.fn() },
         workspaceId: "workspace-1"

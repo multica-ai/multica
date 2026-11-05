@@ -9,7 +9,7 @@ import type {
   AgentGUIObservationGap,
   AgentGUIObservationGapSource
 } from "../../types";
-import { useEngineSelector } from "../engine/useEngineSelector";
+import { useExternalStoreSelector } from "../useExternalStoreSelector";
 
 const AgentObservationGapSourceContext =
   createContext<AgentGUIObservationGapSource | null>(null);
@@ -52,7 +52,7 @@ export function useAgentObservationGap(
     }),
     [agentSessionId, source, turnId]
   );
-  return useEngineSelector(
+  return useExternalStoreSelector(
     binding,
     identityObservationGap,
     observationGapsEqual

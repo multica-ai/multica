@@ -1,10 +1,17 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
 import {
   type AgentActivityTurn,
   type PendingActivationIntentRecord
 } from "@tutti-os/agent-activity-core";
+import { useMemo } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { useAgentObservationGap } from "../../../shared/agentConversation/AgentObservationGapContext";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
+import {
+  buildSessionPresentation,
+  resolveAgentGUISharingRevokedRecovery,
+  type SessionPresentationInput
+} from "../../../state/sessionPresentation";
 import type {
   AgentGUIInteractionReadiness,
   AgentGUIInteractionReadinessSource,
@@ -13,10 +20,9 @@ import type {
   AgentGUITargetConnectionSource,
   AgentGUITargetConnectionState
 } from "../../../types";
-import {
-  resolveAgentGUISharingRevokedRecovery,
-  useAgentGUISessionPresentation
-} from "./useAgentGUISessionPresentation";
+import { resolveAgentGUIInteractionReadinessIdentity } from "./agentGuiController.interactionHelpers";
+import { useAgentGUIInteractionReadiness } from "./useAgentGUIInteractionReadiness";
+import { useAgentGUITargetConnectionState } from "./useAgentGUITargetConnectionState";
 
 class FakeTargetConnectionSource implements AgentGUITargetConnectionSource {
   private readonly listeners = new Set<() => void>();
@@ -91,7 +97,7 @@ describe("useAgentGUISessionPresentation", () => {
   });
 
   it("separates Turn-start feedback from canonical execution busy", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",
@@ -102,7 +108,7 @@ describe("useAgentGUISessionPresentation", () => {
       activeEngineLatestTurn: null as AgentActivityTurn | null,
       activeEngineRuntimeAvailability: null,
       activeEngineRuntimeActivity: "idle" as "idle" | "running",
-      activeEngineSession: {
+      activeCanonicalSession: {
         agentSessionId: "session-1",
         resumable: true
       },
@@ -143,7 +149,7 @@ describe("useAgentGUISessionPresentation", () => {
       selectedAgentTargetUnavailable: false,
       selectedAgentTargetUnavailableReason: null,
       serverInteractivePrompt: null,
-      sessionEngine,
+      conversationServices,
       targetConnectionAgentTargetId: null,
       workspaceId: "workspace-1"
     } as unknown as Parameters<typeof useAgentGUISessionPresentation>[0];
@@ -247,7 +253,7 @@ describe("useAgentGUISessionPresentation", () => {
   });
 
   it("does not expose manual retry for failed activation", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-rejected",
@@ -256,7 +262,7 @@ describe("useAgentGUISessionPresentation", () => {
       activeEngineHasPendingInteractions: false,
       activeEngineLatestTurn: null,
       activeEngineRuntimeAvailability: null,
-      activeEngineSession: null,
+      activeCanonicalSession: null,
       activeLatestPendingSubmitTurnId: null,
       activeLiveState: "failed",
       activeMessages: [],
@@ -309,7 +315,7 @@ describe("useAgentGUISessionPresentation", () => {
       selectedAgentTargetUnavailable: false,
       selectedAgentTargetUnavailableReason: null,
       serverInteractivePrompt: null,
-      sessionEngine,
+      conversationServices,
       targetConnectionAgentTargetId: null,
       workspaceId: "workspace-1"
     } as unknown as Parameters<typeof useAgentGUISessionPresentation>[0];
@@ -334,7 +340,7 @@ describe("useAgentGUISessionPresentation", () => {
 
   it("makes a shared Agent composer editable in the same snapshot that its target connects", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: null,
@@ -343,7 +349,7 @@ describe("useAgentGUISessionPresentation", () => {
       activeEngineHasPendingInteractions: false,
       activeEngineLatestTurn: null,
       activeEngineRuntimeAvailability: null,
-      activeEngineSession: null,
+      activeCanonicalSession: null,
       activeEngineSettingsUpdate: null,
       activeLatestPendingSubmitTurnId: null,
       activeLiveState: "inactive",
@@ -380,7 +386,7 @@ describe("useAgentGUISessionPresentation", () => {
       selectedAgentTargetUnavailable: false,
       selectedAgentTargetUnavailableReason: null,
       serverInteractivePrompt: null,
-      sessionEngine,
+      conversationServices,
       targetConnectionAgentTargetId: "shared-agent:shared-1",
       targetConnectionSource,
       workspaceId: "workspace-1"
@@ -412,14 +418,14 @@ describe("useAgentGUISessionPresentation", () => {
 
     rendered.rerender({ renderRevision: 1 });
 
-    expect(rendered.result.current.composerGate).toBe(readyGate);
+    expect(rendered.result.current.composerGate).toEqual(readyGate);
   });
 
   it("keeps target and Turn recovery outside exact Interaction readiness authority", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
     targetConnectionSource.set({ status: "connected", retryAttempt: 0 });
     const observationGapSource = new FakeObservationGapSource();
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",
@@ -435,7 +441,7 @@ describe("useAgentGUISessionPresentation", () => {
       activeEngineHasPendingInteractions: false,
       activeEngineLatestTurn: null,
       activeEngineRuntimeAvailability: null,
-      activeEngineSession: {
+      activeCanonicalSession: {
         agentSessionId: "session-1",
         resumable: true
       },
@@ -476,7 +482,7 @@ describe("useAgentGUISessionPresentation", () => {
       selectedAgentTargetUnavailable: false,
       selectedAgentTargetUnavailableReason: null,
       serverInteractivePrompt: null,
-      sessionEngine,
+      conversationServices,
       targetConnectionAgentTargetId: "shared-agent:shared-1",
       targetConnectionSource,
       workspaceId: "workspace-1"
@@ -653,7 +659,7 @@ describe("useAgentGUISessionPresentation", () => {
   it("keeps shared history visible while revoked sharing blocks commands with owner copy", () => {
     const targetConnectionSource = new FakeTargetConnectionSource();
     targetConnectionSource.set({ status: "unavailable", retryAttempt: 4 });
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const input = {
       activeConversation: null,
       activeConversationId: "session-1",
@@ -666,7 +672,7 @@ describe("useAgentGUISessionPresentation", () => {
         reason: "agent_sharing_revoked",
         ownerLabel: "riceballmama"
       },
-      activeEngineSession: {
+      activeCanonicalSession: {
         agentSessionId: "session-1",
         resumable: true
       },
@@ -706,7 +712,7 @@ describe("useAgentGUISessionPresentation", () => {
       selectedAgentTargetUnavailable: false,
       selectedAgentTargetUnavailableReason: null,
       serverInteractivePrompt: null,
-      sessionEngine,
+      conversationServices,
       targetConnectionAgentTargetId: "shared-agent:shared-1",
       targetConnectionSource,
       workspaceId: "workspace-1"
@@ -731,3 +737,63 @@ describe("useAgentGUISessionPresentation", () => {
     });
   });
 });
+
+interface ExactInteractionPromptIdentity {
+  agentSessionId?: string | null;
+  requestId?: string | null;
+  turnId?: string | null;
+}
+function useExactInteractionReadiness(input: {
+  prompt: ExactInteractionPromptIdentity | null;
+  source?: AgentGUIInteractionReadinessSource | null;
+  workspaceId: string;
+}) {
+  const identity = useMemo(
+    () =>
+      resolveAgentGUIInteractionReadinessIdentity({
+        agentSessionId: input.prompt?.agentSessionId,
+        requestId: input.prompt?.requestId,
+        turnId: input.prompt?.turnId,
+        workspaceId: input.workspaceId
+      }),
+    [
+      input.prompt?.agentSessionId,
+      input.prompt?.requestId,
+      input.prompt?.turnId,
+      input.workspaceId
+    ]
+  );
+  const readiness = useAgentGUIInteractionReadiness({
+    identity,
+    required: input.prompt !== null,
+    source: input.source
+  });
+  return {
+    block: readiness?.status === "blocked" ? readiness : null,
+    ownsInteraction: input.source != null && input.prompt !== null
+  };
+}
+function useAgentGUISessionPresentation(input: SessionPresentationInput) {
+  return buildSessionPresentation(input, {
+    interactiveReadiness: useExactInteractionReadiness({
+      prompt: input.serverInteractivePrompt,
+      source: input.interactionReadinessSource,
+      workspaceId: input.workspaceId
+    }),
+    approvalReadiness: useExactInteractionReadiness({
+      prompt: input.pendingApproval,
+      source: input.interactionReadinessSource,
+      workspaceId: input.workspaceId
+    }),
+    targetConnection: useAgentGUITargetConnectionState({
+      agentTargetId: input.targetConnectionAgentTargetId,
+      source: input.targetConnectionSource
+    }),
+    observationGap: useAgentObservationGap(
+      input.activeCanonicalSession?.agentSessionId ??
+        input.activeConversationId,
+      input.activeEngineActiveTurn?.turnId,
+      input.observationGapSource
+    )
+  });
+}

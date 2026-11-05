@@ -1,13 +1,13 @@
 import type {
-  AgentGUIRuntime,
-  AgentActivityRuntimeDiagnosticInput
-} from "../../../agentActivityRuntime";
+  AgentActivityRuntimeDiagnosticInput,
+  ConversationServices
+} from "../../../conversationServices";
 
 export function reportAgentComposerDiagnostic(
-  runtime: AgentGUIRuntime | null,
+  runtime: ConversationServices | null,
   input: AgentActivityRuntimeDiagnosticInput
 ): void {
-  const reportDiagnostic = runtime?.reportDiagnostic;
+  const reportDiagnostic = runtime?.diagnostics?.reportDiagnostic;
   try {
     if (reportDiagnostic && runtime) {
       void Promise.resolve(reportDiagnostic.call(runtime, input)).catch(
@@ -54,10 +54,10 @@ function reportAgentComposerDiagnosticFailure(
 }
 
 function agentComposerDevConsoleDiagnosticSinkEnabled(
-  runtime: AgentGUIRuntime
+  runtime: ConversationServices
 ): boolean {
   return (
-    runtime.devDiagnosticConsoleSink !== false &&
+    runtime.diagnostics?.devDiagnosticConsoleSink !== false &&
     typeof process !== "undefined" &&
     (process.env.NODE_ENV === "development" ||
       process.env.AGENT_GUI_DEV_DIAGNOSTIC_CONSOLE === "1")

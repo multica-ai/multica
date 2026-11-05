@@ -4,8 +4,7 @@ This package mounts the Tutti Agent GUI, vendored and owned in `vendor/tutti`,
 directly in Desktop's document for its local conversations. `src/mount.tsx` is one
 instance: its runtime lives as long as the component, and its styles apply only
 under its root element. Desktop loads it on demand. Desktop owns the session list
-and header around it, and the embedded provider and session rails are hidden with
-host-scoped CSS. Web does not build the GUI, and `/chat` on either platform does
+and header around it, and the embedded provider rail has been removed. Web does not build the GUI, and `/chat` on either platform does
 not use it.
 
 The host's `multica-theme.css` and `multica-components.css` adapt the intact
@@ -66,13 +65,14 @@ Desktop's `public/licenses/agent-gui/`.
 
 ## Host contract
 
-`createInProcessRpcClient` connects a GUI to its host in the same document. Calls
-stay asynchronous and copy their data, so the two sides never alias objects and a
-host event cannot re-enter a runtime operation in progress. Requests use exact
-Multica workspace, session and attachment identities. Abort stops awaiting a
-request and never retries a send. Unmounting rejects outstanding calls. A hidden
-or unfocused instance cannot act for the user: other than reads and admitted queue
-items, its requests fail with `inactive_host`.
+`createHostServicesConnection` supplies direct, typed service groups in the same
+document. Native commands call `ConversationService`; there is no command RPC
+dispatcher or structured-clone boundary. Navigation and native file actions live
+under `hostApi`; storage stays partitioned by account, workspace and surface.
+Calls remain asynchronous. Abort stops awaiting a call and never retries a send.
+Unmounting rejects outstanding calls. A hidden or unfocused instance cannot act
+for the user: other than reads and admitted queue items, calls fail with
+`inactive_host`. Workspace identity is checked before and after asynchronous work.
 
 Local conversations are read through an injected `LocalConversationSource`; the
 runtime only projects them, and they outlive it.
@@ -97,8 +97,8 @@ is not currently supported by a public source draft persistence port. Multica's
 durable cancellation restore still uses its existing host pipeline and ACK.
 
 The source `AgentGUI` public entry provides its own UI/runtime/i18n providers.
-The runtime adapter in `src/runtime/` owns semantic projection into the source
-activity engine. Multica remains the execution and persistence authority.
+The composition in `src/runtime/` wires the GUI to native conversation
+models and services. Multica remains the execution and persistence authority.
 Unimplemented execution capabilities are declared unsupported. Local filesystem
 operations reject explicitly; browser drops use the real Multica attachment
 upload API, preserving source per-file error states and the existing upload

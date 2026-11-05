@@ -4,7 +4,7 @@ export const enAgentGuiSessionActions = {
   copyFailed: "Copy failed",
   copyAsMarkdown: "Copy as Markdown",
   copyAsReference: "Copy as reference",
-  markSessionUnread: "Mark as unread",
+
   conversationCopyImage: "Image",
   conversationCopyMentionPrefix: "@",
   conversationCopyFile: "File",

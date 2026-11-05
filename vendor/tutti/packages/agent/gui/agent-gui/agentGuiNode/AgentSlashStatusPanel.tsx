@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { Fragment } from "react";
 import { AgentProbeUsageFreshness } from "./AgentProbeUsageFreshness";
 
@@ -89,7 +90,7 @@ function slashStatusContextText(
   });
 }
 
-export function AgentSlashStatusPanel({
+export const AgentSlashStatusPanel = observer(function AgentSlashStatusPanel({
   status,
   labels,
   onClose,
@@ -215,4 +216,4 @@ export function AgentSlashStatusPanel({
       </dl>
     </section>
   );
-}
+});

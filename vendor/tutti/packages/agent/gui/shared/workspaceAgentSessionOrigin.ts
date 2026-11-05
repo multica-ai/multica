@@ -1,7 +1,7 @@
-import { AGENT_SESSION_ENGINE_LOCAL_ORIGIN } from "@tutti-os/agent-activity-core";
+import { AGENT_CONVERSATION_LOCAL_ORIGIN } from "@tutti-os/agent-activity-core";
 
 export const WORKSPACE_AGENT_ACTIVITY_RUNTIME_SESSION_ORIGIN =
-  AGENT_SESSION_ENGINE_LOCAL_ORIGIN;
+  AGENT_CONVERSATION_LOCAL_ORIGIN;
 
 export function isWorkspaceAgentActivityRuntimeSessionOrigin(
   sessionOrigin: string | null | undefined

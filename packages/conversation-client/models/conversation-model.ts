@@ -49,7 +49,7 @@ export class ConversationModel {
   private constructor(snapshot: LocalV2Snapshot) {
     this.summary = snapshot.conversation;
     this.queue = new PromptQueueModel(snapshot.queue);
-    makeObservable(this, {
+    makeObservable<this, "load">(this, {
       turns: observable.shallow,
       items: observable.shallow,
       messages: observable.shallow,
@@ -63,6 +63,7 @@ export class ConversationModel {
       applyEvents: action,
       mergeHistory: action,
       receiveQueue: action,
+      load: action,
     });
     this.load(snapshot);
   }

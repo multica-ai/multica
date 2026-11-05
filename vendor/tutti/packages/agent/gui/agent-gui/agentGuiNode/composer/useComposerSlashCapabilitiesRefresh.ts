@@ -1,4 +1,4 @@
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 
 export function refreshComposerSlashCapabilities(input: {
   agentSessionId: string | null;

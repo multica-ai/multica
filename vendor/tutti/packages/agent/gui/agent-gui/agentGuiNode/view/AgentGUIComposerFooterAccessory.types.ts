@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { AgentComposerProps } from "../AgentComposer";
+import type { AgentComposerRenderProps as AgentComposerProps } from "../composer/AgentComposer.types";
 
 export type AgentGUIComposerFooterAccessoryContext = Pick<
   AgentComposerProps,

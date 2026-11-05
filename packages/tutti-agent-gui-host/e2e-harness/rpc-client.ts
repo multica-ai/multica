@@ -1,12 +1,16 @@
 import type {
-  AgentGuiHostEvent,
-  AgentGuiInitSnapshot,
-  AgentGuiRpcClient,
-  AgentGuiRpcError,
-  AgentGuiRpcMethod,
-  AgentGuiRpcMethods,
+AgentGuiHostErrorDetails,
+AgentGuiHostEvent,
+AgentGuiHostServices,
+AgentGuiInitSnapshot,
+AgentGuiOperation,
+AgentGuiOperations
 } from "../src/protocol";
-import { agentGuiMessageTargetOrigin, isAgentGuiFrameMessage } from "./frame-messaging";
+import { fakeHostServices } from "./fake-host-services";
+import {
+agentGuiMessageTargetOrigin,
+isAgentGuiFrameMessage
+} from "./frame-messaging";
 
 interface PendingRequest {
   resolve(value: unknown): void;
@@ -18,7 +22,7 @@ export class AgentGuiHostError extends Error {
   code?: string;
   status?: number;
 
-  constructor(error: AgentGuiRpcError) {
+  constructor(error: AgentGuiHostErrorDetails) {
     super(error.message);
     this.name = "AgentGuiHostError";
     this.code = error.code;
@@ -27,8 +31,8 @@ export class AgentGuiHostError extends Error {
 }
 
 /** One private port owns the lifetime of this exact iframe connection. */
-export function createAgentGuiRpcClient(port: MessagePort): {
-  client: AgentGuiRpcClient;
+export function createAgentGuiHostServices(port: MessagePort): {
+  client: AgentGuiHostServices;
   dispose(): void;
 } {
   let disposed = false;
@@ -42,7 +46,8 @@ export function createAgentGuiRpcClient(port: MessagePort): {
     if (!message || typeof message !== "object") return;
     if (message.type === "event" && message.event) {
       if (message.event.type === "init") latestInit = message.event;
-      if (message.event.type === "appendPrompt") unappliedPrompts.set(message.event.sequence, message.event);
+      if (message.event.type === "appendPrompt")
+        unappliedPrompts.set(message.event.sequence, message.event);
       for (const listener of [...listeners]) listener(message.event);
       return;
     }
@@ -57,30 +62,46 @@ export function createAgentGuiRpcClient(port: MessagePort): {
   port.addEventListener("message", receive);
   port.start();
 
-  const client: AgentGuiRpcClient = {
-    request<TMethod extends AgentGuiRpcMethod>(
+  const transport = {
+    request<TMethod extends AgentGuiOperation>(
       method: TMethod,
-      params: AgentGuiRpcMethods[TMethod]["params"],
-      options?: { signal?: AbortSignal },
-    ): Promise<AgentGuiRpcMethods[TMethod]["result"]> {
-      if (disposed) return Promise.reject(new DOMException("Host disconnected", "AbortError"));
-      if (options?.signal?.aborted) return Promise.reject(options.signal.reason ?? new DOMException("Aborted", "AbortError"));
+      params: AgentGuiOperations[TMethod]["params"],
+      options?: { signal?: AbortSignal }
+    ): Promise<AgentGuiOperations[TMethod]["result"]> {
+      if (disposed)
+        return Promise.reject(
+          new DOMException("Host disconnected", "AbortError")
+        );
+      if (options?.signal?.aborted)
+        return Promise.reject(
+          options.signal.reason ?? new DOMException("Aborted", "AbortError")
+        );
       const id = `${++sequence}`;
       return new Promise((resolve, reject) => {
         const abort = () => {
           pending.delete(id);
           cleanup();
           port.postMessage({ type: "cancel", id });
-          reject(options?.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+          reject(
+            options?.signal?.reason ?? new DOMException("Aborted", "AbortError")
+          );
         };
-        const timer = setTimeout(() => {
-          pending.delete(id);
-          cleanup();
-          port.postMessage({ type: "cancel", id });
-          reject(new AgentGuiHostError({ code: "timeout", message: "The host request timed out" }));
-        // Existing runtime discovery can spend 30s pending + 60s running;
-        // its canonical poller allows 100s including network slack.
-        }, method === "models.list" ? 110_000 : 60_000);
+        const timer = setTimeout(
+          () => {
+            pending.delete(id);
+            cleanup();
+            port.postMessage({ type: "cancel", id });
+            reject(
+              new AgentGuiHostError({
+                code: "timeout",
+                message: "The host request timed out"
+              })
+            );
+            // Existing runtime discovery can spend 30s pending + 60s running;
+            // its canonical poller allows 100s including network slack.
+          },
+          method === "models.list" ? 110_000 : 60_000
+        );
         const cleanup = () => {
           clearTimeout(timer);
           options?.signal?.removeEventListener("abort", abort);
@@ -88,12 +109,15 @@ export function createAgentGuiRpcClient(port: MessagePort): {
         pending.set(id, {
           resolve(value) {
             if (method === "host.promptApplied") {
-              unappliedPrompts.delete((params as AgentGuiRpcMethods["host.promptApplied"]["params"]).sequence);
+              unappliedPrompts.delete(
+                (params as AgentGuiOperations["host.promptApplied"]["params"])
+                  .sequence
+              );
             }
-            resolve(value as AgentGuiRpcMethods[TMethod]["result"]);
+            resolve(value as AgentGuiOperations[TMethod]["result"]);
           },
           reject,
-          cleanup,
+          cleanup
         });
         options?.signal?.addEventListener("abort", abort, { once: true });
         try {
@@ -105,7 +129,7 @@ export function createAgentGuiRpcClient(port: MessagePort): {
         }
       });
     },
-    subscribe(listener) {
+    subscribe(listener: (event: AgentGuiHostEvent) => void) {
       listeners.add(listener);
       queueMicrotask(() => {
         if (!listeners.has(listener)) return;
@@ -113,11 +137,11 @@ export function createAgentGuiRpcClient(port: MessagePort): {
         for (const prompt of unappliedPrompts.values()) listener(prompt);
       });
       return () => listeners.delete(listener);
-    },
+    }
   };
 
   return {
-    client,
+    client: fakeHostServices(transport.request, transport.subscribe),
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -131,29 +155,38 @@ export function createAgentGuiRpcClient(port: MessagePort): {
       unappliedPrompts.clear();
       latestInit = null;
       port.close();
-    },
+    }
   };
 }
 
 export function connectAgentGuiHost(): Promise<{
-  client: AgentGuiRpcClient;
+  client: AgentGuiHostServices;
   snapshot: AgentGuiInitSnapshot;
   dispose(): void;
 }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       window.removeEventListener("message", receive);
-      reject(new AgentGuiHostError({ code: "connection_timeout", message: "The Agent GUI host did not connect" }));
+      reject(
+        new AgentGuiHostError({
+          code: "connection_timeout",
+          message: "The Agent GUI host did not connect"
+        })
+      );
     }, 20_000);
     const receive = (event: MessageEvent) => {
       if (!isAgentGuiFrameMessage(event, window.parent)) return;
-      if (event.data?.type !== "multica:agent-gui:connect" || !event.ports[0]) return;
+      if (event.data?.type !== "multica:agent-gui:connect" || !event.ports[0])
+        return;
       clearTimeout(timer);
       window.removeEventListener("message", receive);
-      const connection = createAgentGuiRpcClient(event.ports[0]);
+      const connection = createAgentGuiHostServices(event.ports[0]);
       resolve({ ...connection, snapshot: event.data.snapshot });
     };
     window.addEventListener("message", receive);
-    window.parent.postMessage({ type: "multica:agent-gui:ready", version: 1 }, agentGuiMessageTargetOrigin());
+    window.parent.postMessage(
+      { type: "multica:agent-gui:ready", version: 1 },
+      agentGuiMessageTargetOrigin()
+    );
   });
 }

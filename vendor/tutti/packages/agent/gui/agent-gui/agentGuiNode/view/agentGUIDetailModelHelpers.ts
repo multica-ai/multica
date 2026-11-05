@@ -1,21 +1,27 @@
 import { useRef } from "react";
-import { normalizeOptionalWorkspaceAgentStatus } from "../../../shared/workspaceAgentStatusNormalizer";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
 import type {
   AgentConversationPromptVM,
   AgentConversationVM
 } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import { createAgentSessionHandoffPrompt } from "../agentRichText/agentFileMentionExtension";
+import { normalizeOptionalWorkspaceAgentStatus } from "../../../shared/workspaceAgentStatusNormalizer";
+import type { AgentGUIAgentTarget } from "../../../types";
 import type {
   AgentComposerSlashStatus,
   AgentComposerSlashStatusLimit
 } from "../AgentComposer";
+import { createAgentSessionHandoffPrompt } from "../agentRichText/agentFileMentionExtension";
 import type {
-  AgentGUINodeViewModel,
-  AgentGUISessionChrome
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUISessionChrome,
+  AgentGUIShellViewModel
 } from "../model/agentGuiNodeTypes";
-import type { AgentGUIAgentTarget } from "../../../types";
 import type { AgentGUIViewLabels } from "./AgentGUINodeView.types";
 import { conversationPlainTitle, stringValue } from "./agentGUIViewUtils";
 export { isDifferentKnownConversationOwner } from "../model/agentGuiComposerGate";
@@ -62,8 +68,10 @@ export function isContextCanceledMessage(
 }
 
 export function resolveConversationDetailStatus(
-  detail: AgentGUINodeViewModel["detail"]["conversationDetail"]
-): AgentGUINodeViewModel["rail"]["conversations"][number]["status"] | null {
+  detail:
+    | import("../../../shared/workspaceAgentSessionDetailViewModel").WorkspaceAgentSessionDetailViewModel
+    | null
+): AgentGUIRailViewModel["conversations"][number]["status"] | null {
   if (!detail) {
     return null;
   }
@@ -100,7 +108,7 @@ export function resolveSlashStatus({
   limits: readonly AgentComposerSlashStatusLimit[];
   limitsLoading: boolean;
   limitsUnavailable: boolean;
-  usage: AgentGUINodeViewModel["detail"]["usage"];
+  usage: AgentGUIDetailViewModel["usage"];
 }): AgentComposerSlashStatus {
   const usedTokens = usage?.usedTokens ?? null;
   const totalTokens = usage?.totalTokens ?? null;
@@ -196,7 +204,7 @@ function conversationHasActiveWork(
 
 function isSettledConversationStatus(
   status:
-    | AgentGUINodeViewModel["rail"]["conversations"][number]["status"]
+    | AgentGUIRailViewModel["conversations"][number]["status"]
     | null
     | undefined
 ): boolean {
@@ -205,13 +213,11 @@ function isSettledConversationStatus(
 
 export function resolveActiveConversationBusyStatus(input: {
   conversationStatus:
-    | AgentGUINodeViewModel["rail"]["conversations"][number]["status"]
+    | AgentGUIRailViewModel["conversations"][number]["status"]
     | undefined;
-  detailStatus:
-    | AgentGUINodeViewModel["rail"]["conversations"][number]["status"]
-    | null;
+  detailStatus: AgentGUIRailViewModel["conversations"][number]["status"] | null;
   conversation: AgentConversationVM | null | undefined;
-}): AgentGUINodeViewModel["rail"]["conversations"][number]["status"] | null {
+}): AgentGUIRailViewModel["conversations"][number]["status"] | null {
   if (
     input.conversationStatus === "waiting" ||
     input.detailStatus === "waiting"
@@ -292,7 +298,7 @@ export function resolveAgentGUIInteractionDisabledReason(input: {
 
 export function resolveAgentGUIComposerInteractionDisabledReason(
   promptKind: AgentConversationPromptVM["kind"] | null | undefined,
-  interaction: AgentGUINodeViewModel["interaction"]
+  interaction: AgentGUIInteractionViewModel
 ): string | null {
   return resolveAgentGUIInteractionDisabledReason({
     promptKind,
@@ -332,7 +338,7 @@ export function resolveAgentGUIStopControl(input: {
 }
 
 export function buildAgentConversationHandoffPrompt(input: {
-  activeConversation: AgentGUINodeViewModel["rail"]["activeConversation"];
+  activeConversation: AgentGUIRailViewModel["activeConversation"];
   currentUserId?: string | null;
   labels: Pick<AgentGUIViewLabels, "untitledConversationTitle">;
   selectedAgentTarget: AgentGUIAgentTarget | null;
@@ -360,7 +366,7 @@ export function buildAgentConversationHandoffPrompt(input: {
 }
 
 export function handoffProjectPathForConversation(
-  conversation: AgentGUINodeViewModel["rail"]["activeConversation"]
+  conversation: AgentGUIRailViewModel["activeConversation"]
 ): string | null {
   if (conversation?.railSectionKey?.trim() === "conversations") {
     return null;
@@ -379,7 +385,13 @@ export function agentGUIDetailBottomDockStoreRevision(input: {
     | null
     | undefined;
   sessionChrome: AgentGUISessionChrome;
-  viewModel: Pick<AgentGUINodeViewModel, "composer">;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
 }): string {
   return [
     input.bottomDockLiftedPrompt?.requestId ?? "",
@@ -388,15 +400,12 @@ export function agentGUIDetailBottomDockStoreRevision(input: {
     input.sessionChrome.auth?.message ?? "",
     input.sessionChrome.recovery?.kind ?? "",
     input.sessionChrome.recovery?.message ?? "",
-    input.viewModel.composer.queuedPrompts.map((prompt) => prompt.id).join(","),
-    input.viewModel.composer.queueStatus,
-    input.viewModel.composer.drainingQueuedPromptId ?? "",
     input.activePromptResponsePending ? "1" : "0"
   ].join("|");
 }
 
 export function mergeWorkspaceAppIconsFromCommands(input: {
-  commands: AgentGUINodeViewModel["composer"]["availableCommands"];
+  commands: AgentGUIComposerViewModel["state"]["availableCommands"];
   workspaceAppIcons: readonly AgentMessageMarkdownWorkspaceAppIcon[];
   workspaceId: string;
 }): readonly AgentMessageMarkdownWorkspaceAppIcon[] {

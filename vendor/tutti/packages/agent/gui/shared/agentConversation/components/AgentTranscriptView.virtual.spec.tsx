@@ -5,9 +5,9 @@ import {
   screen,
   waitFor
 } from "@testing-library/react";
+import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { normalizeAgentActivitySession } from "@tutti-os/agent-activity-core";
 import type { AgentConversationVM } from "../contracts/agentConversationVM";
 import type { AgentTranscriptRowVM } from "../contracts/agentTranscriptRowVM";
 
@@ -62,11 +62,11 @@ vi.mock("@tanstack/react-virtual", () => ({
 }));
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AgentTranscriptView } from "./AgentTranscriptView";
 import type {
   AgentTranscriptAttachmentLocator,
   AgentTranscriptVirtualScrollController
 } from "./AgentTranscriptView";
+import { AgentTranscriptLayout as AgentTranscriptView } from "./AgentTranscriptView";
 
 const TRANSCRIPT_LABELS = {
   thinkingLabel: "Thought process",

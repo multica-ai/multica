@@ -1,8 +1,8 @@
+import { extractImageGenerationPreview } from "../../imageGenerationTool";
 import type {
   WorkspaceAgentSessionDetailTurn,
   WorkspaceAgentSessionDetailViewModel
 } from "../../workspaceAgentSessionDetailViewModel";
-import { extractImageGenerationPreview } from "../../imageGenerationTool";
 import type { AgentConversationVM } from "../contracts/agentConversationVM";
 import type { AgentGeneratedImageRowVM } from "../contracts/agentGeneratedImageRowVM";
 import type {
@@ -12,10 +12,10 @@ import type {
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import type { AgentTranscriptRowVM } from "../contracts/agentTranscriptRowVM";
 import { projectAgentMessageFinalText } from "./agentMessageFinalTextProjection";
-import { computeAgentToolGroups } from "./agentToolGroupingProjection";
-import { buildAgentTurnSequenceItems } from "./agentTurnSequenceProjection";
-import { projectTurnRows } from "./agentTurnRowProjection";
 import { projectAgentProcessingRow } from "./agentProcessingProjection";
+import { computeAgentToolGroups } from "./agentToolGroupingProjection";
+import { projectTurnRows } from "./agentTurnRowProjection";
+import { buildAgentTurnSequenceItems } from "./agentTurnSequenceProjection";
 import { projectAgentTurnSummaryRows } from "./agentTurnSummaryProjection";
 
 export interface AgentConversationProjectionOptions {
@@ -47,7 +47,7 @@ export function projectAgentConversationVM(
 
   turns.forEach((turn) => {
     rows.push(
-      ...projectTurnConversationRows(turn, detail.session.workspaceId, {
+      ...buildTurnConversationRows(turn, detail.session.workspaceId, {
         agentSessionId: detail.session.agentSessionId,
         avoidGroupingEdits: options.avoidGroupingEdits
       })
@@ -503,10 +503,10 @@ function isMergeableAssistantMessageRow(
 ): row is AgentMessageRowVM {
   return Boolean(
     row &&
-    row.kind === "message" &&
-    row.speaker === "assistant" &&
-    row.thinking.length === 0 &&
-    !row.messages.some(isSpecialAssistantMessage)
+      row.kind === "message" &&
+      row.speaker === "assistant" &&
+      row.thinking.length === 0 &&
+      !row.messages.some(isSpecialAssistantMessage)
   );
 }
 
@@ -530,36 +530,14 @@ function isSpecialAssistantMessage(message: {
 }): boolean {
   return Boolean(
     message.visibleError ||
-    message.systemNotice ||
-    message.contentKind === "plan" ||
-    message.contentKind === "collaboration" ||
-    message.contentKind === "tutti-plan-issue-link"
+      message.systemNotice ||
+      message.contentKind === "plan" ||
+      message.contentKind === "collaboration" ||
+      message.contentKind === "tutti-plan-issue-link"
   );
 }
 
-/** A turn's rows, kept while the detail keeps the turn's object. */
-const rowsByTurn = new WeakMap<
-  WorkspaceAgentSessionDetailTurn,
-  { key: string; rows: AgentTranscriptRowVM[] }
->();
-
-function projectTurnConversationRows(
-  turn: WorkspaceAgentSessionDetailTurn,
-  workspaceId: string | null | undefined,
-  options: {
-    agentSessionId: string;
-    avoidGroupingEdits?: boolean;
-  }
-): AgentTranscriptRowVM[] {
-  const key = JSON.stringify([workspaceId, options.agentSessionId, options.avoidGroupingEdits]);
-  const cached = rowsByTurn.get(turn);
-  if (cached?.key === key) return cached.rows;
-  const rows = buildTurnConversationRows(turn, workspaceId, options);
-  rowsByTurn.set(turn, { key, rows });
-  return rows;
-}
-
-function buildTurnConversationRows(
+export function buildTurnConversationRows(
   turn: WorkspaceAgentSessionDetailTurn,
   workspaceId: string | null | undefined,
   options: {

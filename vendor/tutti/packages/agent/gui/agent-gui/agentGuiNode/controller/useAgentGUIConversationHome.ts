@@ -1,3 +1,4 @@
+import type { PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
 import {
   useCallback,
   useEffect,
@@ -5,31 +6,30 @@ import {
   type RefObject,
   type SetStateAction
 } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
-import type { AgentGUIConversationFilter } from "../model/agentGuiConversationFilter";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import { resolveAgentGUIAgentTarget } from "../../../agentTargets";
+import type { ConversationServices } from "../../../conversationServices";
+import type {
+  AgentGUIAgentTarget,
+  AgentGUINodeData,
+  AgentGUIProvider
+} from "../../../types";
 import { buildAgentComposerDraft } from "../model/agentComposerDraft";
 import {
   normalizeAgentComposerDraftProjectPath,
   resolveAgentComposerDraftScopeKey
 } from "../model/agentComposerDraftScope";
-import type {
-  AgentGUINodeData,
-  AgentGUIProvider,
-  AgentGUIAgentTarget
-} from "../../../types";
-import { resolveAgentGUIAgentTarget } from "../../../agentTargets";
+import type { AgentGUIConversationFilter } from "../model/agentGuiConversationFilter";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import {
+  buildNodeDefaultComposerSettings,
+  nodeDataFromComposerSettings
+} from "./agentGuiController.composerHelpers";
 import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
 import { isPendingNewConversationActivationForSession } from "./useAgentGUIActivation";
 import {
   resolveAgentGUIComposerAppendRequest,
   type AgentGUIComposerAppendRequest
 } from "./useAgentGUIComposerAppendRequest";
-import {
-  buildNodeDefaultComposerSettings,
-  nodeDataFromComposerSettings
-} from "./agentGuiController.composerHelpers";
 
 export interface AgentGUIPrefillPromptRequest {
   agentTargetId?: string | null;
@@ -46,7 +46,7 @@ export interface UseAgentGUIConversationHomeInput {
   activeConversationId: string | null;
   activeConversationIdRef: RefObject<string | null>;
   activePendingActivation: PendingActivationIntentRecord | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   currentProvider: AgentGUIProvider;
   composerTargetDataFromProviderTarget: (input: {
     current: AgentGUINodeData;
@@ -78,7 +78,7 @@ export interface UseAgentGUIConversationHomeInput {
     details: Record<string, unknown>;
     previousAgentSessionId: string | null;
     reason: "create_conversation" | "prefill_prompt";
-    runtime: AgentGUIRuntime;
+    runtime: ConversationServices;
     workspaceId: string;
   }) => void;
   selectedComposerTargetDataRef: RefObject<AgentGUIComposerTargetData>;
@@ -203,8 +203,8 @@ export function useAgentGUIConversationHome({
         isComposerHome: isComposerHomeRef.current,
         projectPathPresent: Boolean(
           options &&
-          "projectPath" in options &&
-          normalizeAgentComposerDraftProjectPath(options.projectPath)
+            "projectPath" in options &&
+            normalizeAgentComposerDraftProjectPath(options.projectPath)
         ),
         source: options?.source ?? "controller"
       });

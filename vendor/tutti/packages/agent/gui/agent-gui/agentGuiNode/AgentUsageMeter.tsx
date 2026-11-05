@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import * as React from "react";
 
 import {
@@ -19,7 +20,7 @@ export function agentUsageBarColor(percentUsed: number): string {
   return "var(--state-success)";
 }
 
-export function AgentUsageMeter({
+export const AgentUsageMeter = observer(function AgentUsageMeter({
   label,
   value,
   percent,
@@ -65,4 +66,4 @@ export function AgentUsageMeter({
       ) : null}
     </div>
   );
-}
+});

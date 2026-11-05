@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import type { WorkspaceFileReferenceCopy } from "@tutti-os/workspace-file-reference/contracts";
+import { useMemo } from "react";
 import type { TranslateFn } from "../../i18n/index";
 import {
   agentGUIProviderIdentityDisplayName,
@@ -7,19 +7,17 @@ import {
 } from "../../providerIdentityCatalog";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../shared/AgentMessageMarkdown";
 import type { AgentGUIHomeSuggestionId } from "../../types";
+import type { AgentGUIViewLabels } from "./AgentGUINodeView";
+import { agentGUIConnectorLabels } from "./composer/agentGUIConnectorLabels";
+import { agentGUIProjectLaunchLabels } from "./composer/agentGUIProjectLaunchLabels";
+import { agentSlashPaletteLabels } from "./composer/agentSlashPaletteLabels";
+import { agentQuickPromptLabels } from "./composer/quickPrompts/agentQuickPromptLabels";
 import { resolveAgentGUIProviderDisplayLabel } from "./model/agentGuiProviderIdentity";
 import { buildAgentHomeSuggestions } from "./model/agentHomeSuggestions";
-import type { AgentGUIViewLabels } from "./AgentGUINodeView";
 import { agentGUIConversationLabels } from "./view/agentGUIConversationLabels";
-import { agentGUIProviderManagerLabels } from "./view/agentGUIProviderManagerLabels";
 import { agentGUIUsageStatusLabels } from "./view/agentGUIUsageStatusLabels";
-import { agentQuickPromptLabels } from "./composer/quickPrompts/agentQuickPromptLabels";
-import { agentSlashPaletteLabels } from "./composer/agentSlashPaletteLabels";
-import { agentGUIProjectLaunchLabels } from "./composer/agentGUIProjectLaunchLabels";
-import { agentGUIConnectorLabels } from "./composer/agentGUIConnectorLabels";
 
 export { buildAgentHomeSuggestions };
-
 
 const workspaceFileReferenceLocaleKeyByPickerKey: Record<string, string> = {
   "actions.cancel": "common.cancel",
@@ -383,7 +381,6 @@ export function useAgentGUIViewLabels(input: {
       agentConfig: t("agentHost.agentGui.agentConfig"),
       agentSettingsMenu: t("agentHost.agentGui.agentSettingsMenu"),
       agentEnvSetup: t("agentHost.agentGui.agentEnvSetup"),
-      ...agentGUIProviderManagerLabels(t),
       ...agentGUIConversationLabels(t),
       conversationFilterAll: t("agentHost.agentGui.conversationFilterAll"),
       conversationFilterCodex: t("agentHost.agentGui.conversationFilterCodex"),
@@ -528,7 +525,7 @@ export function useAgentGUIViewLabels(input: {
       moreSessionActions: t("agentHost.agentGui.moreSessionActions"),
       copyAsMarkdown: t("agentHost.agentGui.copyAsMarkdown"),
       copyAsReference: t("agentHost.agentGui.copyAsReference"),
-      markSessionUnread: t("agentHost.agentGui.markSessionUnread"),
+
       conversationCopyImage: t("agentHost.agentGui.conversationCopyImage"),
       conversationCopyMentionPrefix: t(
         "agentHost.agentGui.conversationCopyMentionPrefix"
@@ -647,7 +644,7 @@ export function useAgentGUIViewLabels(input: {
         "agentHost.agentGui.slashCommandContextLabel"
       ),
       slashCommandFastLabel: t("agentHost.agentGui.slashCommandFastLabel"),
-      slashCommandGoalLabel: t("agentHost.agentGui.slashCommandGoalLabel"),
+
       slashCommandInitLabel: t("agentHost.agentGui.slashCommandInitLabel"),
       slashCommandPlanLabel: t("agentHost.agentGui.slashCommandPlanLabel"),
       slashCommandReviewLabel: t("agentHost.agentGui.slashCommandReviewLabel"),
@@ -662,9 +659,7 @@ export function useAgentGUIViewLabels(input: {
       slashCommandFastDescription: t(
         "agentHost.agentGui.slashCommandFastDescription"
       ),
-      slashCommandGoalDescription: t(
-        "agentHost.agentGui.slashCommandGoalDescription"
-      ),
+
       slashCommandInitDescription: t(
         "agentHost.agentGui.slashCommandInitDescription"
       ),

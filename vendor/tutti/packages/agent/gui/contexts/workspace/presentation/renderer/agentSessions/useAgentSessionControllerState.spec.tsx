@@ -1,7 +1,10 @@
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
 import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
-import { useAgentSessionControllerState } from "./useAgentSessionControllerState";
+import { describe, expect, it } from "vitest";
+import {
+  oldestVersion,
+  useAgentSessionControllerState
+} from "./useAgentSessionControllerState";
 
 const ACTIVE_REF = {
   agentSessionId: "session-1",
@@ -25,8 +28,7 @@ function message(version: number): AgentActivityMessage {
 describe("useAgentSessionControllerState", () => {
   it("does not infer older history from a streamed message version", () => {
     const { result, rerender } = renderHook(
-      ({ version }) =>
-        useAgentSessionControllerState(ACTIVE_REF, [message(version)]),
+      ({ version }) => useAgentSessionControllerState(ACTIVE_REF, version),
       { initialProps: { version: 1 } }
     );
 
@@ -46,7 +48,11 @@ describe("useAgentSessionControllerState", () => {
   it("reads terminal older-page coverage from the history", () => {
     const { result, rerender } = renderHook(
       ({ hasOlderMessages, messages }) =>
-        useAgentSessionControllerState(ACTIVE_REF, messages, hasOlderMessages),
+        useAgentSessionControllerState(
+          ACTIVE_REF,
+          oldestVersion(messages),
+          hasOlderMessages
+        ),
       {
         initialProps: {
           hasOlderMessages: true,

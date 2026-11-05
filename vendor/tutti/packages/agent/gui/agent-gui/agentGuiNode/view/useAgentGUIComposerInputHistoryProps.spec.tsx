@@ -1,9 +1,27 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel,
+  AgentGUIViewFixture
+} from "../model/agentGuiNodeTypes";
 import type { AgentGUINodeViewProps } from "./AgentGUINodeView.types";
 import { useAgentGUIComposerInputHistoryProps } from "./useAgentGUIComposerInputHistoryProps";
+type AgentGUIViewFixture = {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
+};
 
 describe("useAgentGUIComposerInputHistoryProps", () => {
   it("keeps history disabled until the host opts in", () => {
@@ -21,13 +39,13 @@ describe("useAgentGUIComposerInputHistoryProps", () => {
       conversation: conversationWithPrompt(),
       pendingPrependScrollAnchorRef,
       timelineRef: { current: timeline },
-      viewModel: {
+      ...({
         rail: { activeConversationId: "session-1" },
         detail: {
           hasOlderMessages: true,
           isLoadingOlderMessages: false
         }
-      } as AgentGUINodeViewModel
+      } as AgentGUIViewFixture)
     };
     const { result, rerender } = renderHook(
       ({ enabled }) =>

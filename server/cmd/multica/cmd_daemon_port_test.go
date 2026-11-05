@@ -281,3 +281,21 @@ func TestDaemonBackgroundWaitsForShutdownBeforeSpawning(t *testing.T) {
 		t.Fatalf("background child started after %s, before the previous daemon released its lock", elapsed)
 	}
 }
+
+func TestIsolatedDevelopmentHealthPort(t *testing.T) {
+	t.Setenv("MULTICA_DEV_HEALTH_PORT", "32123")
+	t.Setenv("MULTICA_DEV_ISOLATED", "")
+	if healthPortForProfile("desktop-runtime") == 32123 {
+		t.Fatal("override outside isolated development")
+	}
+	t.Setenv("MULTICA_DEV_ISOLATED", "1")
+	if got := healthPortForProfile("desktop-runtime"); got != 32123 {
+		t.Fatalf("port = %d", got)
+	}
+	for _, value := range []string{"", "0", "65536", "12.5", "abc"} {
+		t.Setenv("MULTICA_DEV_HEALTH_PORT", value)
+		if got := healthPortForProfile("desktop-runtime"); got != 0 {
+			t.Fatalf("invalid %q gave port %d", value, got)
+		}
+	}
+}

@@ -1,17 +1,12 @@
-import {
-  selectSessionActivationPresentations,
-  sessionActivationPresentationMapsEqual,
-  type PendingActivationIntentRecord,
-  type AgentSessionEngine
-} from "@tutti-os/agent-activity-core";
+import { type PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
 import { useCallback, useMemo, useRef } from "react";
 import { type AppErrorCode } from "../../../shared/contracts/dto";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 
 type AgentGUILiveState = "inactive" | "activating" | "active" | "failed";
 
 type AgentGUIActivateInput = Parameters<
-  AgentSessionEngine["activateSession"]
+  AgentConversationServices["activations"]["request"]
 >[0] extends infer TInput
   ? TInput extends { requestId: string }
     ? Omit<TInput, "requestId">
@@ -19,7 +14,7 @@ type AgentGUIActivateInput = Parameters<
   : never;
 
 interface UseAgentGUIActivationInput {
-  engine: AgentSessionEngine;
+  engine: AgentConversationServices;
   workspaceId: string;
   getErrorMessage: (error: unknown) => string;
   getErrorCode?: (error: unknown) => AppErrorCode | null;
@@ -47,8 +42,8 @@ export function isPendingNewConversationActivationForSession(
   const normalizedSessionId = agentSessionId?.trim() ?? "";
   return Boolean(
     normalizedSessionId &&
-    activation?.agentSessionId.trim() === normalizedSessionId &&
-    isPendingNewConversationActivation(activation)
+      activation?.agentSessionId.trim() === normalizedSessionId &&
+      isPendingNewConversationActivation(activation)
   );
 }
 
@@ -59,12 +54,6 @@ export function useAgentGUIActivation({
   getErrorCode
 }: UseAgentGUIActivationInput) {
   const requestSequenceRef = useRef(0);
-  const presentations = useEngineSelector(
-    engine,
-    selectSessionActivationPresentations,
-    sessionActivationPresentationMapsEqual
-  );
-
   const nextRequestId = (kind: string, agentSessionId: string): string => {
     requestSequenceRef.current += 1;
     return `${kind}:${workspaceId}:${agentSessionId}:${Date.now()}:${requestSequenceRef.current}`;
@@ -74,7 +63,7 @@ export function useAgentGUIActivation({
     (input: AgentGUIActivateInput): string | null => {
       const agentSessionId = input.agentSessionId.trim();
       const requestId = nextRequestId("activation", agentSessionId);
-      return engine.activateSession({
+      return engine.activations.request({
         ...input,
         agentSessionId,
         requestId
@@ -91,12 +80,7 @@ export function useAgentGUIActivation({
       if (!normalized) {
         return Promise.resolve();
       }
-      engine.dispatch({
-        type: "activation/unactivateRequested",
-        agentSessionId: normalized,
-        commandId: nextRequestId("unactivate", normalized),
-        workspaceId
-      });
+      engine.activations.unactivate(normalized);
       return Promise.resolve();
     },
     [engine, workspaceId]
@@ -108,15 +92,14 @@ export function useAgentGUIActivation({
       if (!normalized) {
         return;
       }
-      engine.dispatch({
-        type: "activation/failureRecorded",
-        agentSessionId: normalized,
-        errorCode: getErrorCode?.(error) ?? null,
-        errorMessage: getErrorMessage(error),
-        occurredAtUnixMs: Date.now(),
-        requestId: nextRequestId("activation-failure", normalized),
-        workspaceId
-      });
+      engine.activations.recordFailure(
+        {
+          mode: "existing",
+          agentSessionId: normalized,
+          requestId: nextRequestId("activation-failure", normalized)
+        },
+        { code: getErrorCode?.(error) ?? null, message: getErrorMessage(error) }
+      );
     },
     [engine, getErrorCode, getErrorMessage, workspaceId]
   );
@@ -125,10 +108,7 @@ export function useAgentGUIActivation({
     (agentSessionId: string): void => {
       const normalized = agentSessionId.trim();
       if (normalized) {
-        engine.dispatch({
-          type: "activation/failureCleared",
-          agentSessionId: normalized
-        });
+        engine.activations.clearFailure(normalized);
       }
     },
     [engine]
@@ -136,22 +116,24 @@ export function useAgentGUIActivation({
 
   const stateFor = useCallback(
     (agentSessionId: string | null | undefined): AgentGUILiveState =>
-      (agentSessionId ? presentations[agentSessionId]?.status : null) ??
-      "inactive",
-    [presentations]
+      (agentSessionId
+        ? engine.activations.presentation(agentSessionId).status
+        : null) ?? "inactive",
+    [engine]
   );
   const errorFor = useCallback(
     (agentSessionId: string | null | undefined): string | null =>
-      (agentSessionId ? presentations[agentSessionId]?.errorMessage : null) ??
-      null,
-    [presentations]
+      (agentSessionId
+        ? engine.activations.presentation(agentSessionId).errorMessage
+        : null) ?? null,
+    [engine]
   );
   const codeFor = useCallback(
     (agentSessionId: string | null | undefined): AppErrorCode | null =>
       ((agentSessionId
-        ? presentations[agentSessionId]?.errorCode
+        ? engine.activations.presentation(agentSessionId).errorCode
         : null) as AppErrorCode | null) ?? null,
-    [presentations]
+    [engine]
   );
 
   return useMemo(

@@ -1,16 +1,17 @@
-import { memo, useState, type JSX } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { memo, useState, type JSX } from "react";
 import { ToolActivityKindIcon } from "../../toolActivityKindIcons";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import type { AgentToolGroupRowVM } from "../contracts/agentToolGroupRowVM";
 import { AgentAskUserQuestionCard } from "./AgentAskUserQuestionCard";
-import { CollapsibleReveal } from "./CollapsibleReveal";
 import { AgentEnterPlanModeCard } from "./AgentEnterPlanModeCard";
 import { AgentExitPlanModeCard } from "./AgentExitPlanModeCard";
-import { AgentThinkingDisclosure } from "./AgentThinkingDisclosure";
-import { AgentTaskCallCard } from "./AgentTaskCallCard";
 import { AgentSubAgentCards } from "./AgentSubAgentCards";
+import { AgentTaskCallCard } from "./AgentTaskCallCard";
+import { AgentThinkingDisclosure } from "./AgentThinkingDisclosure";
 import { AgentToolCallCard } from "./AgentToolCallCard";
+import { CollapsibleReveal } from "./CollapsibleReveal";
 import { RawTimelineJsonDisclosure } from "./RawTimelineJsonDisclosure";
 
 interface AgentToolGroupRowProps {
@@ -25,112 +26,114 @@ interface AgentToolGroupRowProps {
   rawTimelineJsonLabel?: string;
 }
 
-export const AgentToolGroupRow = memo(function AgentToolGroupRow({
-  row,
-  label,
-  thinkingLabel,
-  onLinkClick,
-  expanded,
-  expansionKey,
-  onExpandedChange,
-  showRawTimelineJson = false,
-  rawTimelineJsonLabel = ""
-}: AgentToolGroupRowProps): JSX.Element {
-  "use memo";
-  const [localExpanded, setLocalExpanded] = useState(false);
-  const hasDetail = row.entries.length > 0;
-  const isExpanded = hasDetail && (expanded ?? localExpanded);
-  const setNextExpanded = (nextExpanded: boolean) => {
-    if (expanded === undefined) {
-      setLocalExpanded(nextExpanded);
+export const AgentToolGroupRow = memo(
+  observer(function AgentToolGroupRow({
+    row,
+    label,
+    thinkingLabel,
+    onLinkClick,
+    expanded,
+    expansionKey,
+    onExpandedChange,
+    showRawTimelineJson = false,
+    rawTimelineJsonLabel = ""
+  }: AgentToolGroupRowProps): JSX.Element {
+    "use memo";
+    const [localExpanded, setLocalExpanded] = useState(false);
+    const hasDetail = row.entries.length > 0;
+    const isExpanded = hasDetail && (expanded ?? localExpanded);
+    const setNextExpanded = (nextExpanded: boolean) => {
+      if (expanded === undefined) {
+        setLocalExpanded(nextExpanded);
+      }
+      if (expansionKey) {
+        onExpandedChange?.(expansionKey, nextExpanded);
+      }
+    };
+    const groupLabel = label(row.calls.length);
+    const singleCall = row.calls[0];
+    if (!row.grouped && singleCall) {
+      return renderToolCard(
+        singleCall,
+        onLinkClick,
+        showRawTimelineJson,
+        rawTimelineJsonLabel
+      );
     }
-    if (expansionKey) {
-      onExpandedChange?.(expansionKey, nextExpanded);
-    }
-  };
-  const groupLabel = label(row.calls.length);
-  const singleCall = row.calls[0];
-  if (!row.grouped && singleCall) {
-    return renderToolCard(
-      singleCall,
-      onLinkClick,
-      showRawTimelineJson,
-      rawTimelineJsonLabel
-    );
-  }
 
-  return (
-    <div
-      className="workspace-agents-status-panel__detail-tool-section"
-      data-tool-group-expanded={isExpanded ? "true" : undefined}
-    >
-      {hasDetail ? (
-        <button
-          type="button"
-          className="workspace-agents-status-panel__detail-tool-count"
-          aria-expanded={isExpanded}
-          aria-label={groupLabel}
-          onClick={() => setNextExpanded(!isExpanded)}
-        >
-          <ToolGroupLabel label={groupLabel} />
-          {isExpanded ? (
-            <ChevronDown
-              size={12}
-              strokeWidth={2.2}
-              aria-hidden="true"
-              className="workspace-agents-status-panel__detail-tool-count-chevron"
-            />
-          ) : (
-            <ChevronRight
-              size={12}
-              strokeWidth={2.2}
-              aria-hidden="true"
-              className="workspace-agents-status-panel__detail-tool-count-chevron"
-            />
-          )}
-        </button>
-      ) : (
-        <div className="workspace-agents-status-panel__detail-tool-count">
-          <ToolGroupLabel label={groupLabel} />
-        </div>
-      )}
-      {hasDetail ? (
-        <CollapsibleReveal expanded={isExpanded}>
-          <div className="workspace-agents-status-panel__detail-tool-list">
-            {row.entries.map((entry) =>
-              entry.kind === "thinking" ? (
-                <div
-                  key={entry.thinking.id}
-                  className="workspace-agents-status-panel__detail-tool-list-item workspace-agents-status-panel__detail-tool-row"
-                >
-                  <AgentThinkingDisclosure
-                    thinking={entry.thinking}
-                    label={thinkingLabel}
-                    onLinkClick={onLinkClick}
-                    showRawTimelineJson={showRawTimelineJson}
-                    rawTimelineJsonLabel={rawTimelineJsonLabel}
-                  />
-                </div>
-              ) : (
-                <div
-                  key={entry.call.id}
-                  className="workspace-agents-status-panel__detail-tool-list-item"
-                >
-                  {renderToolCard(
-                    entry.call,
-                    onLinkClick,
-                    showRawTimelineJson,
-                    rawTimelineJsonLabel
-                  )}
-                </div>
-              )
+    return (
+      <div
+        className="workspace-agents-status-panel__detail-tool-section"
+        data-tool-group-expanded={isExpanded ? "true" : undefined}
+      >
+        {hasDetail ? (
+          <button
+            type="button"
+            className="workspace-agents-status-panel__detail-tool-count"
+            aria-expanded={isExpanded}
+            aria-label={groupLabel}
+            onClick={() => setNextExpanded(!isExpanded)}
+          >
+            <ToolGroupLabel label={groupLabel} />
+            {isExpanded ? (
+              <ChevronDown
+                size={12}
+                strokeWidth={2.2}
+                aria-hidden="true"
+                className="workspace-agents-status-panel__detail-tool-count-chevron"
+              />
+            ) : (
+              <ChevronRight
+                size={12}
+                strokeWidth={2.2}
+                aria-hidden="true"
+                className="workspace-agents-status-panel__detail-tool-count-chevron"
+              />
             )}
+          </button>
+        ) : (
+          <div className="workspace-agents-status-panel__detail-tool-count">
+            <ToolGroupLabel label={groupLabel} />
           </div>
-        </CollapsibleReveal>
-      ) : null}
-    </div>
-  );
-});
+        )}
+        {hasDetail ? (
+          <CollapsibleReveal expanded={isExpanded}>
+            <div className="workspace-agents-status-panel__detail-tool-list">
+              {row.entries.map((entry) =>
+                entry.kind === "thinking" ? (
+                  <div
+                    key={entry.thinking.id}
+                    className="workspace-agents-status-panel__detail-tool-list-item workspace-agents-status-panel__detail-tool-row"
+                  >
+                    <AgentThinkingDisclosure
+                      thinking={entry.thinking}
+                      label={thinkingLabel}
+                      onLinkClick={onLinkClick}
+                      showRawTimelineJson={showRawTimelineJson}
+                      rawTimelineJsonLabel={rawTimelineJsonLabel}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    key={entry.call.id}
+                    className="workspace-agents-status-panel__detail-tool-list-item"
+                  >
+                    {renderToolCard(
+                      entry.call,
+                      onLinkClick,
+                      showRawTimelineJson,
+                      rawTimelineJsonLabel
+                    )}
+                  </div>
+                )
+              )}
+            </div>
+          </CollapsibleReveal>
+        ) : null}
+      </div>
+    );
+  })
+);
 
 function ToolGroupLabel({ label }: { label: string }): JSX.Element {
   "use memo";

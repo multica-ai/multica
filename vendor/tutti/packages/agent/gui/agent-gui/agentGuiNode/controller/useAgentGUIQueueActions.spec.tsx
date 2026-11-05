@@ -1,4 +1,3 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import {
   act,
   fireEvent,
@@ -7,25 +6,24 @@ import {
   screen,
   waitFor
 } from "@testing-library/react";
-import {
-  selectEngineQueuedPrompt
-} from "@tutti-os/agent-activity-core";
-import { useRef, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
+
+import type { AgentQueuedPrompt } from "@tutti-os/agent-activity-core";
 import { RichTextMentionServiceProvider } from "@tutti-os/ui-rich-text/editor";
 import { createRichTextMentionService } from "@tutti-os/ui-rich-text/service";
 import type { RichTextTriggerProvider } from "@tutti-os/ui-rich-text/types";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { EngineQueuedPrompt, PromptQueueRecord } from "@tutti-os/agent-activity-core";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import { useRef, useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import type { ConversationServices } from "../../../conversationServices";
+import { AgentQueuedPromptPanelView as AgentQueuedPromptPanel } from "../AgentQueuedPromptPanel";
+import { AgentRichTextEditor } from "../agentRichText/AgentRichTextEditor";
 import {
   agentComposerDraftImages,
   agentComposerDraftPrompt,
   agentComposerDraftToPromptContent,
   updateAgentComposerDraft
 } from "../model/agentComposerDraft";
-import { AgentQueuedPromptPanel } from "../AgentQueuedPromptPanel";
-import { AgentRichTextEditor } from "../agentRichText/AgentRichTextEditor";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { useAgentGUIQueueActions } from "./useAgentGUIQueueActions";
 
 describe("useAgentGUIQueueActions", () => {
@@ -39,18 +37,18 @@ describe("useAgentGUIQueueActions", () => {
           resolveRead = resolve;
         })
     );
-    const sessionEngine = createQueueTestEngine({
-    id: "queued-1",
-    content: [
-      {
-        type: "image",
-        mimeType: "image/png",
-        name: "image.png",
-        path: "/agent-prompt-assets/image.png"
-      }
-    ],
-    createdAtUnixMs: 1
-  });
+    const conversationServices = createQueueTestEngine({
+      id: "queued-1",
+      content: [
+        {
+          type: "image",
+          mimeType: "image/png",
+          name: "image.png",
+          path: "/agent-prompt-assets/image.png"
+        }
+      ],
+      createdAtUnixMs: 1
+    });
 
     const rendered = renderHook(() => {
       const [drafts, setDrafts] = useState<Record<string, AgentComposerDraft>>(
@@ -61,9 +59,11 @@ describe("useAgentGUIQueueActions", () => {
         actions: useAgentGUIQueueActions({
           activeConversationIdRef: { current: "session-1" },
           agentActivityRuntime: {
-            readPromptAsset
-          } as unknown as AgentGUIRuntime,
-          sessionEngine,
+            attachments: {
+              readPromptAsset
+            }
+          } as unknown as ConversationServices,
+          conversationServices,
           setDraftByScopeKey: setDrafts,
           workspaceId: "workspace-1"
         })
@@ -88,11 +88,7 @@ describe("useAgentGUIQueueActions", () => {
       path: "/agent-prompt-assets/image.png"
     });
     expect(
-      selectEngineQueuedPrompt(
-        sessionEngine.getSnapshot(),
-        "session-1",
-        "queued-1"
-      )
+      conversationServices.prompts.queuedPrompt("session-1", "queued-1")
     ).toBeNull();
 
     await act(async () => {
@@ -164,18 +160,18 @@ describe("useAgentGUIQueueActions", () => {
       })
     );
     const mentionService = createRichTextMentionService({ providers });
-    const sessionEngine = createQueueTestEngine({
-    id: "queued-mentions",
-    content: [{ type: "text", text: prompt }],
-    createdAtUnixMs: 1
-  });
+    const conversationServices = createQueueTestEngine({
+      id: "queued-mentions",
+      content: [{ type: "text", text: prompt }],
+      createdAtUnixMs: 1
+    });
     const onEditorChange = vi.fn();
     const rendered = render(
       <RichTextMentionServiceProvider service={mentionService}>
         <QueuedMentionEditHarness
           onEditorChange={onEditorChange}
           prompt={prompt}
-          sessionEngine={sessionEngine}
+          conversationServices={conversationServices}
         />
       </RichTextMentionServiceProvider>
     );
@@ -215,11 +211,7 @@ describe("useAgentGUIQueueActions", () => {
     );
     expect(onEditorChange).not.toHaveBeenCalled();
     expect(
-      selectEngineQueuedPrompt(
-        sessionEngine.getSnapshot(),
-        "session-1",
-        "queued-mentions"
-      )
+      conversationServices.prompts.queuedPrompt("session-1", "queued-mentions")
     ).toBeNull();
 
     rendered.unmount();
@@ -237,44 +229,28 @@ const queueLabels = {
 };
 
 /** An engine as the prompt service presents it: holding one queued prompt until it is removed. */
-function createQueueTestEngine(prompt: EngineQueuedPrompt) {
-  const engine = createTestAgentSessionEngine("workspace-1");
-  let prompts: readonly EngineQueuedPrompt[] = [prompt];
-  return {
-    ...engine,
-    dispatch(intent: Parameters<typeof engine.dispatch>[0]) {
-      if (intent.type === "queue/removed" || intent.type === "submit/canceled") prompts = [];
-      else engine.dispatch(intent);
-    },
-    getSnapshot() {
-      const state = engine.getSnapshot();
-      return {
-        ...state,
-        promptQueue: {
-          ...state.promptQueue,
-          recordsBySessionId: { "session-1": { prompts } as PromptQueueRecord }
-        }
-      };
-    }
-  };
+function createQueueTestEngine(prompt: AgentQueuedPrompt) {
+  const state = createTestRuntimeState("workspace-1");
+  state.seedQueue("session-1", [prompt]);
+  return state;
 }
 
 function QueuedMentionEditHarness({
   onEditorChange,
   prompt,
-  sessionEngine
+  conversationServices
 }: {
   onEditorChange: (value: string) => void;
   prompt: string;
-  sessionEngine: ReturnType<typeof createQueueTestEngine>;
+  conversationServices: ReturnType<typeof createQueueTestEngine>;
 }): React.JSX.Element {
   const draftScopeKey = "session:session-1";
   const activeConversationIdRef = useRef<string | null>("session-1");
   const [drafts, setDrafts] = useState<Record<string, AgentComposerDraft>>({});
   const actions = useAgentGUIQueueActions({
     activeConversationIdRef,
-    agentActivityRuntime: {} as AgentGUIRuntime,
-    sessionEngine,
+    agentActivityRuntime: {} as ConversationServices,
+    conversationServices,
     setDraftByScopeKey: setDrafts,
     workspaceId: "workspace-1"
   });

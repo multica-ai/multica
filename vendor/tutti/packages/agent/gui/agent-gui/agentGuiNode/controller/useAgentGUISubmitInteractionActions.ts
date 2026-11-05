@@ -1,19 +1,23 @@
 import {
+  promptHasAgentMention,
+  promptSubmissionError
+} from "@multica/tutti-agent-gui-host/prompt-submission-policy";
+import {
   type AgentActivityInteraction,
-  type AgentActivityTurn,
-  type AgentSessionEngine
+  type AgentActivityTurn
 } from "@tutti-os/agent-activity-core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import { getActiveUiLanguage, translate } from "../../../i18n/index";
-import { promptHasAgentMention, promptSubmissionError } from "@multica/tutti-agent-gui-host/prompt-submission-policy";
-import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
 import type { AgentInteractionResponseInput } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 import type {
-  AgentGUINodeData,
-  AgentGUIInteractionReadinessSource
+  AgentGUIInteractionReadinessSource,
+  AgentGUINodeData
 } from "../../../types";
+import type { AgentComposerSubmitOptions } from "../composer/AgentComposer.types";
 import {
   agentPromptContentDisplayText,
   agentPromptContentHasImage,
@@ -21,24 +25,22 @@ import {
   normalizeAgentPromptContentBlocks,
   snapshotAgentComposerDraft
 } from "../model/agentComposerDraft";
+import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
+import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type {
   AgentComposerDraft,
   SubmittedDraftSnapshot
 } from "../model/agentGuiNodeTypes";
-import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
-import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
-import type { AgentComposerSubmitOptions } from "../composer/AgentComposer.types";
+import {
+  AgentGUIActivationSettlementController,
+  agentGUIInteractionDraftSettlementKey,
+  type AgentGUIInteractionDraftPendingSettlement
+} from "./AgentGUIActivationSettlementController";
 import {
   clearSubmittedDraftIfUnchanged,
   deleteUnacceptedSubmittedDraftSnapshot,
   toRuntimeSendContent
 } from "./agentGuiController.draftMessageHelpers";
-import { clearSubmittedAgentGUIHomeDraft } from "./agentGuiController.homeDraftHelpers";
-import {
-  agentGUIInteractionDraftSettlementKey,
-  AgentGUIEngineSettlementController,
-  type AgentGUIInteractionDraftPendingSettlement
-} from "./AgentGUIEngineSettlementController";
 import {
   AGENT_RESUME_SESSION_NOT_LOCAL_ERROR,
   agentGUISubmitSettlementError,
@@ -47,6 +49,8 @@ import {
   getAgentGUIErrorMessage,
   isNonRetryableResumeErrorCode
 } from "./agentGuiController.errors";
+import { clearSubmittedAgentGUIHomeDraft } from "./agentGuiController.homeDraftHelpers";
+import { resolveAgentGUIInteractionReadinessIdentity } from "./agentGuiController.interactionHelpers";
 import {
   agentSubmitTraceDiagnostics,
   createAgentSubmitTraceState,
@@ -55,15 +59,14 @@ import {
   reportAgentSubmitTraceDiagnostic,
   scheduleAgentSubmitTracePaint
 } from "./agentGuiController.reporting";
-import { resolveAgentGUIInteractionReadinessIdentity } from "./agentGuiController.interactionHelpers";
-import { readAgentGUIInteractionReadiness } from "./useAgentGUIInteractionReadiness";
+import type { AgentGUINewConversationActivationResult } from "./agentGuiNewConversationActivation.types";
+import { resolvePendingQuestionComposerResponse } from "./pendingQuestionComposerResponse";
 import {
   resolveConversationSummaryById,
   type ConversationIntent
 } from "./useAgentConversationSelection";
 import type { useAgentGUIActivation } from "./useAgentGUIActivation";
-import type { AgentGUINewConversationActivationResult } from "./agentGuiNewConversationActivation.types";
-import { resolvePendingQuestionComposerResponse } from "./pendingQuestionComposerResponse";
+import { readAgentGUIInteractionReadiness } from "./useAgentGUIInteractionReadiness";
 
 interface UseAgentGUISubmitInteractionActionsInput {
   activation: ReturnType<typeof useAgentGUIActivation>;
@@ -71,7 +74,7 @@ interface UseAgentGUISubmitInteractionActionsInput {
   activeConversationIdRef: RefObject<string | null>;
   activeEngineActiveTurn: AgentActivityTurn | null;
   activeEnginePendingInteractions: readonly AgentActivityInteraction[];
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   conversationListQuery: unknown | null;
   conversationsRef: RefObject<AgentGUIConversationSummary[]>;
   dataRef: RefObject<AgentGUINodeData>;
@@ -99,7 +102,7 @@ interface UseAgentGUISubmitInteractionActionsInput {
   isSessionMarkedNonResumable(agentSessionId: string): boolean;
   persistActiveConversation(agentSessionId: string | null): void;
   promptImagesSupported: boolean;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   setActiveConversationId: Dispatch<SetStateAction<string | null>>;
   setDetailError: Dispatch<SetStateAction<string | null>>;
   setDraftByScopeKey: Dispatch<
@@ -145,7 +148,7 @@ export function useAgentGUISubmitInteractionActions(
     isSessionMarkedNonResumable,
     persistActiveConversation,
     promptImagesSupported,
-    sessionEngine,
+    conversationServices,
     setActiveConversationId,
     setDetailError,
     setDraftByScopeKey,
@@ -200,7 +203,10 @@ export function useAgentGUISubmitInteractionActions(
       if (!agentSessionId || normalizedContent.length === 0) {
         return;
       }
-      const submissionError = promptSubmissionError(options ?? {}, getActiveUiLanguage());
+      const submissionError = promptSubmissionError(
+        options ?? {},
+        getActiveUiLanguage()
+      );
       if (submissionError) {
         setDetailError(submissionError);
         return;
@@ -253,7 +259,7 @@ export function useAgentGUISubmitInteractionActions(
           targetMode: "existing"
         }
       });
-      const { accepted, queued } = sessionEngine.submitPrompt({
+      const { accepted, queued } = conversationServices.prompts.submitPrompt({
         agentSessionId,
         ...(options?.capabilityRefs?.length
           ? { capabilityRefs: options.capabilityRefs }
@@ -284,7 +290,7 @@ export function useAgentGUISubmitInteractionActions(
       // Clear the composer optimistically the instant the engine takes the
       // prompt — whether it was queued behind a busy turn or accepted straight
       // into an idle session. The snapshot is retained so
-      // AgentGUIEngineSettlementController can restore it if the send is
+      // AgentGUIActivationSettlementController can restore it if the send is
       // later rejected. A submit the engine never accepted is left untouched so
       // its text is not lost (deleteUnacceptedSubmittedDraftSnapshot cleans up).
       const submittedSnapshot =
@@ -317,7 +323,12 @@ export function useAgentGUISubmitInteractionActions(
         workspaceId
       });
     },
-    [agentActivityRuntime, sessionEngine, setDraftByScopeKey, workspaceId]
+    [
+      agentActivityRuntime,
+      conversationServices,
+      setDraftByScopeKey,
+      workspaceId
+    ]
   );
 
   useEffect(() => {
@@ -325,7 +336,7 @@ export function useAgentGUISubmitInteractionActions(
   }, [executePrompt]);
 
   useEffect(() => {
-    const controller = new AgentGUIEngineSettlementController({
+    const controller = new AgentGUIActivationSettlementController({
       applyDraftUpdate: (update) => {
         setDraftByScopeKey((current) => {
           const next = update(current);
@@ -333,7 +344,7 @@ export function useAgentGUISubmitInteractionActions(
           return next;
         });
       },
-      engine: sessionEngine,
+      engine: conversationServices,
       prompts: agentActivityRuntime.prompts,
       interactionDraftSettlements: interactionDraftSettlementsRef.current,
       isCurrentConversation,
@@ -349,7 +360,7 @@ export function useAgentGUISubmitInteractionActions(
     agentActivityRuntime,
     draftByScopeKeyRef,
     isCurrentConversation,
-    sessionEngine,
+    conversationServices,
     setDetailError,
     setDraftByScopeKey,
     submittedDraftSnapshotsRef
@@ -548,13 +559,15 @@ export function useAgentGUISubmitInteractionActions(
         return;
       }
       const activeTurnId = activeEngineActiveTurn?.turnId.trim() ?? "";
-      const pendingQuestionResponse = promptHasAgentMention(normalizedContent) ? null : resolvePendingQuestionComposerResponse({
-        activeTurnId,
-        agentSessionId,
-        content: normalizedContent,
-        pendingInteractions: activeEnginePendingInteractions,
-        submitOptions: options
-      });
+      const pendingQuestionResponse = promptHasAgentMention(normalizedContent)
+        ? null
+        : resolvePendingQuestionComposerResponse({
+            activeTurnId,
+            agentSessionId,
+            content: normalizedContent,
+            pendingInteractions: activeEnginePendingInteractions,
+            submitOptions: options
+          });
       if (pendingQuestionResponse) {
         const sourceScopeKey = resolveAgentComposerDraftScopeKey({
           agentSessionId

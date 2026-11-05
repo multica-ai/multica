@@ -1,16 +1,25 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { createRichTextMentionHref } from "@tutti-os/ui-rich-text/core";
 import type {
   ReferenceLocateTarget,
   ReferenceNode,
   WorkspaceFileReference
 } from "@tutti-os/workspace-file-reference/contracts";
 import type { ReferenceGroupedSelection } from "@tutti-os/workspace-file-reference/ui";
-import { createRichTextMentionHref } from "@tutti-os/ui-rich-text/core";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { WorkspaceReferencePickResult } from "../AgentComposer";
 import type {
   AgentContextMentionItem,
   AgentMentionWorkspaceReferenceItem
 } from "../agentRichText/agentFileMentionExtension";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import type { AgentGUINodeViewProps } from "./AgentGUINodeView.types";
 
 interface Input {
@@ -19,7 +28,13 @@ interface Input {
   referenceSourceAggregator: AgentGUINodeViewProps["referenceSourceAggregator"];
   resolveMentionReferenceTarget: AgentGUINodeViewProps["resolveMentionReferenceTarget"];
   resolveWorkspaceReferenceInitialTarget: AgentGUINodeViewProps["resolveWorkspaceReferenceInitialTarget"];
-  viewModel: AgentGUINodeViewProps["viewModel"];
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
   workspaceFileReferenceAdapter: AgentGUINodeViewProps["workspaceFileReferenceAdapter"];
   workspaceFileReferenceCopy: AgentGUINodeViewProps["workspaceFileReferenceCopy"];
 }
@@ -31,7 +46,13 @@ export function useAgentGUIWorkspaceReferencePicker(input: Input) {
     referenceSourceAggregator,
     resolveMentionReferenceTarget,
     resolveWorkspaceReferenceInitialTarget,
-    viewModel,
+    shell,
+    rail,
+    detail,
+    composer,
+    interaction,
+    readiness,
+    operations,
     workspaceFileReferenceAdapter,
     workspaceFileReferenceCopy
   } = input;
@@ -75,11 +96,10 @@ export function useAgentGUIWorkspaceReferencePicker(input: Input) {
           ? (resolveMentionReferenceTarget?.(entity) ?? null)
           : referenceSourceAggregator
             ? (resolveWorkspaceReferenceInitialTarget?.({
-                activeConversation: viewModel.rail.activeConversation,
+                activeConversation: rail.activeConversation,
                 composerSelectedProjectPath:
-                  viewModel.composer.composerSettings.selectedProjectPath ??
-                  null,
-                userProjects: viewModel.rail.userProjects
+                  composer.state.composerSettings.selectedProjectPath ?? null,
+                userProjects: rail.userProjects
               }) ?? null)
             : null;
       setWorkspaceReferencePickerTarget(target);
@@ -97,9 +117,9 @@ export function useAgentGUIWorkspaceReferencePicker(input: Input) {
       referenceSourceAggregator,
       resolveMentionReferenceTarget,
       resolveWorkspaceReferenceInitialTarget,
-      viewModel.rail.activeConversation,
-      viewModel.composer.composerSettings.selectedProjectPath,
-      viewModel.rail.userProjects,
+      rail.activeConversation,
+      composer.state.composerSettings.selectedProjectPath,
+      rail.userProjects,
       workspaceFileReferenceAdapter,
       workspaceFileReferenceCopy
     ]
@@ -180,7 +200,7 @@ export function useAgentGUIWorkspaceReferencePicker(input: Input) {
               entityId: handle.id,
               label: bundle.displayName,
               scope: {
-                workspaceId: viewModel.shell.workspaceId,
+                workspaceId: shell.workspaceId,
                 source: handle.source,
                 ...(handle.groupId?.trim()
                   ? { groupId: handle.groupId.trim() }
@@ -190,7 +210,7 @@ export function useAgentGUIWorkspaceReferencePicker(input: Input) {
                   : {})
               }
             }),
-            workspaceId: viewModel.shell.workspaceId,
+            workspaceId: shell.workspaceId,
             targetId: handle.id,
             source: handle.source,
             ...(handle.groupId ? { groupId: handle.groupId } : {}),

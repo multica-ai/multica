@@ -1,21 +1,22 @@
-import { type AgentSessionEngine } from "@tutti-os/agent-activity-core";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+
 import { type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import { type AgentGUIConversationListQuery } from "../../../contexts/workspace/presentation/renderer/agentGuiConversationList/useAgentGuiConversationList";
+import type { ConversationServices } from "../../../conversationServices";
 import type {
   AgentSessionComposerSettings,
   AgentSessionState
 } from "../../../shared/agentSessionTypes";
-import type { AgentGUINodeData, AgentGUIAgentTarget } from "../../../types";
+import type { AgentGUIAgentTarget, AgentGUINodeData } from "../../../types";
 import { type AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
+import type { AgentGUIConversationRailRevealReason } from "../model/agentGuiConversationRailViewState";
 import type {
   AgentComposerDraft,
   SubmittedDraftSnapshot
 } from "../model/agentGuiNodeTypes";
 import { type AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
-import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 import type { ConversationIntent } from "./useAgentConversationSelection";
-import type { AgentGUIConversationRailRevealReason } from "../model/agentGuiConversationRailViewState";
+import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 
 export interface UseAgentGUINewConversationActivationInput {
   codexSaverModeEntryEnabled: boolean;
@@ -41,13 +42,13 @@ export interface UseAgentGUINewConversationActivationInput {
   draftSettingsBySessionIdRef: RefObject<
     Record<string, AgentSessionComposerSettings>
   >;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   workspaceId: string;
   activeConversationIdRef: RefObject<string | null>;
   isComposerHomeRef: RefObject<boolean>;
   conversationsRef: RefObject<AgentGUIConversationSummary[]>;
   activeSessionState: AgentSessionState | null;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   conversationListQuery: AgentGUIConversationListQuery | null;
   currentUserId: string | null | undefined;
   requestRailReveal(

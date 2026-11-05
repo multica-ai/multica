@@ -1,15 +1,15 @@
-import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import { agentComposerDraftPrompt } from "../model/agentComposerDraft";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import { agentGUISubmitSettlementError } from "./agentGuiController.errors";
 import {
   clearSubmittedAgentGUIHomeDraft,
   restoreFailedAgentGUIHomeDraft
 } from "./agentGuiController.homeDraftHelpers";
 import { useAgentGUISubmitInteractionActions } from "./useAgentGUISubmitInteractionActions";
-import { agentGUISubmitSettlementError } from "./agentGuiController.errors";
 
 const draftKey = "node-default:codex:local:codex";
 
@@ -43,8 +43,8 @@ function createSubmitInput() {
     updatedAtUnixMs: 1,
     workspaceId: "workspace-1"
   };
-  const sessionEngine = createTestAgentSessionEngine("workspace-1");
-  sessionEngine.dispatch({ session: baseSession, type: "session/upserted" });
+  const conversationServices = createTestRuntimeState("workspace-1");
+  conversationServices.sessions.upsertSession(baseSession);
   const setDetailError = vi.fn();
   const draftByScopeKeyRef = {
     current: {} as Record<string, AgentComposerDraft>
@@ -86,7 +86,7 @@ function createSubmitInput() {
     isSessionMarkedNonResumable: () => false,
     persistActiveConversation: vi.fn(),
     promptImagesSupported: true,
-    sessionEngine,
+    conversationServices,
     setActiveConversationId: vi.fn(),
     setDetailError,
     setDraftByScopeKey,
@@ -100,7 +100,7 @@ function createSubmitInput() {
   return {
     input,
     draftByScopeKeyRef,
-    sessionEngine,
+    conversationServices,
     setDetailError,
     setDraftByScopeKey
   };
@@ -166,8 +166,9 @@ describe("conversation stop", () => {
 
 describe("interaction submissions", () => {
   it("routes the explicit answer through the prompt service", () => {
-    const { input, sessionEngine, setDetailError } = createSubmitInput();
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
+    const { input, conversationServices, setDetailError } = createSubmitInput();
+    const submitInteractionResponse = vi
+      .spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
       .mockReturnValue(true);
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions({
@@ -207,8 +208,9 @@ describe("interaction submissions", () => {
   });
 
   it("rechecks exact Host readiness at the interaction boundary", () => {
-    const { input, sessionEngine } = createSubmitInput();
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
+    const { input, conversationServices } = createSubmitInput();
+    const submitInteractionResponse = vi
+      .spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
       .mockReturnValue(true);
     let readiness: "ready" | "blocked" = "blocked";
     const interactionReadinessSource = {
@@ -272,8 +274,9 @@ describe("interaction submissions", () => {
   });
 
   it("submits only the exact pending interaction when request ids repeat", () => {
-    const { input, sessionEngine } = createSubmitInput();
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
+    const { input, conversationServices } = createSubmitInput();
+    const submitInteractionResponse = vi
+      .spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
       .mockReturnValue(true);
     const interactionReadinessSource = {
       getInteractionReadiness: vi.fn(() => ({ status: "ready" }) as const),
@@ -334,8 +337,11 @@ describe("interaction submissions", () => {
   });
 
   it("rejects a response without an exact pending interaction identity", () => {
-    const { input, sessionEngine } = createSubmitInput();
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction");
+    const { input, conversationServices } = createSubmitInput();
+    const submitInteractionResponse = vi.spyOn(
+      input.agentActivityRuntime.prompts,
+      "respondToInteraction"
+    );
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
     );
@@ -353,11 +359,11 @@ describe("interaction submissions", () => {
 });
 
 describe("existing-session prompt submission", () => {
-  it("captures the exact active Turn for guidance before routing to the Engine", () => {
-    const { input, sessionEngine } = createSubmitInput();
+  it("rejects unsupported active-turn guidance before submitting", () => {
+    const { input, conversationServices } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: false });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -373,19 +379,19 @@ describe("existing-session prompt submission", () => {
       )
     );
 
-    expect(submitPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentSessionId: "session-1",
-        capabilityRefs: [{ capability: "tutti", source: "slash_command" }],
-        routing: "send_now",
-        targetTurnId: "turn-target"
-      })
+    expect(submitPrompt).not.toHaveBeenCalled();
+    expect(input.setDetailError).toHaveBeenCalledWith(
+      expect.stringMatching(/guide|引导/)
     );
   });
 
   it("answers the exact pending question from the ordinary composer without sending a prompt", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -412,9 +418,10 @@ describe("existing-session prompt submission", () => {
     draftByScopeKeyRef.current = {
       "session:session-1": draft("Continue with a different direction")
     };
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
+    const submitInteractionResponse = vi
+      .spyOn(input.agentActivityRuntime.prompts, "respondToInteraction")
       .mockReturnValue(true);
-    const submitPrompt = vi.spyOn(sessionEngine, "submitPrompt");
+    const submitPrompt = vi.spyOn(conversationServices.prompts, "submitPrompt");
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
     );
@@ -445,8 +452,12 @@ describe("existing-session prompt submission", () => {
   });
 
   it("clears the exact pending-question draft when the controller ref is stale", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -474,7 +485,10 @@ describe("existing-session prompt submission", () => {
     draftByScopeKeyRef.current = {
       "session:session-1": draft("stale projection")
     };
-    vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction").mockReturnValue(true);
+    vi.spyOn(
+      input.agentActivityRuntime.prompts,
+      "respondToInteraction"
+    ).mockReturnValue(true);
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
     );
@@ -499,8 +513,12 @@ describe("existing-session prompt submission", () => {
   });
 
   it("keeps the composer draft when the pending question response is not admitted", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -527,8 +545,11 @@ describe("existing-session prompt submission", () => {
     draftByScopeKeyRef.current = {
       "session:session-1": draft("Continue with a different direction")
     };
-    vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction").mockReturnValue(false);
-    const submitPrompt = vi.spyOn(sessionEngine, "submitPrompt");
+    vi.spyOn(
+      input.agentActivityRuntime.prompts,
+      "respondToInteraction"
+    ).mockReturnValue(false);
+    const submitPrompt = vi.spyOn(conversationServices.prompts, "submitPrompt");
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
     );
@@ -547,7 +568,7 @@ describe("existing-session prompt submission", () => {
   });
 
   it("keeps fixed-choice questions on the ordinary queue path", () => {
-    const { input, sessionEngine } = createSubmitInput();
+    const { input, conversationServices } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -571,9 +592,12 @@ describe("existing-session prompt submission", () => {
         updatedAtUnixMs: 1
       }
     ];
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction");
+    const submitInteractionResponse = vi.spyOn(
+      input.agentActivityRuntime.prompts,
+      "respondToInteraction"
+    );
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: true });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -589,8 +613,8 @@ describe("existing-session prompt submission", () => {
     );
   });
 
-  it("keeps capability-bearing text on the ordinary queue path", () => {
-    const { input, sessionEngine } = createSubmitInput();
+  it("rejects unsupported capability references before admitting a prompt", () => {
+    const { input, conversationServices } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -614,9 +638,12 @@ describe("existing-session prompt submission", () => {
         updatedAtUnixMs: 1
       }
     ];
-    const submitInteractionResponse = vi.spyOn(input.agentActivityRuntime.prompts, "respondToInteraction");
+    const submitInteractionResponse = vi.spyOn(
+      input.agentActivityRuntime.prompts,
+      "respondToInteraction"
+    );
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: true });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -633,15 +660,14 @@ describe("existing-session prompt submission", () => {
     );
 
     expect(submitInteractionResponse).not.toHaveBeenCalled();
-    expect(submitPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        capabilityRefs: [{ capability: "tutti", source: "slash_command" }]
-      })
+    expect(submitPrompt).not.toHaveBeenCalled();
+    expect(input.setDetailError).toHaveBeenCalledWith(
+      expect.stringMatching(/capability|能力/)
     );
   });
 
   it("keeps ordinary queue routing when the pending interaction is not a question", () => {
-    const { input, sessionEngine } = createSubmitInput();
+    const { input, conversationServices } = createSubmitInput();
     input.activeEngineActiveTurn = { turnId: "turn-target" } as never;
     input.activeEnginePendingInteractions = [
       {
@@ -655,7 +681,7 @@ describe("existing-session prompt submission", () => {
       }
     ];
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: true });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -671,13 +697,17 @@ describe("existing-session prompt submission", () => {
   });
 
   it("routes submission through the Engine semantic operation", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     draftByScopeKeyRef.current = {
       "session:session-1": draft("continue")
     };
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: false });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -688,7 +718,6 @@ describe("existing-session prompt submission", () => {
         [{ type: "text", text: "continue" }],
         " Continue ",
         {
-          capabilityRefs: [{ capability: "tutti", source: "slash_command" }],
           requiredSettingsPatch: { computerUse: true }
         }
       )
@@ -696,7 +725,6 @@ describe("existing-session prompt submission", () => {
 
     expect(submitPrompt).toHaveBeenCalledWith({
       agentSessionId: "session-1",
-      capabilityRefs: [{ capability: "tutti", source: "slash_command" }],
       clientSubmitId: expect.any(String),
       content: [{ type: "text", text: "continue" }],
       displayPrompt: " Continue ",
@@ -713,14 +741,18 @@ describe("existing-session prompt submission", () => {
   });
 
   it("clears the draft captured by the Composer when the controller ref is stale", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     const submittedDraft = draft("continue");
     draftByScopeKeyRef.current = {
       "session:session-1": draft("stale projection")
     };
     const submitPrompt = vi
-      .spyOn(sessionEngine, "submitPrompt")
+      .spyOn(conversationServices.prompts, "submitPrompt")
       .mockReturnValue({ accepted: true, queued: true });
     const { result } = renderHook(() =>
       useAgentGUISubmitInteractionActions(input)
@@ -753,12 +785,16 @@ describe("existing-session prompt submission", () => {
   });
 
   it("keeps the draft when the Engine does not admit the submission", () => {
-    const { input, draftByScopeKeyRef, sessionEngine, setDraftByScopeKey } =
-      createSubmitInput();
+    const {
+      input,
+      draftByScopeKeyRef,
+      conversationServices,
+      setDraftByScopeKey
+    } = createSubmitInput();
     draftByScopeKeyRef.current = {
       "session:session-1": draft("continue")
     };
-    vi.spyOn(sessionEngine, "submitPrompt").mockReturnValue({
+    vi.spyOn(conversationServices.prompts, "submitPrompt").mockReturnValue({
       accepted: false,
       queued: false
     });

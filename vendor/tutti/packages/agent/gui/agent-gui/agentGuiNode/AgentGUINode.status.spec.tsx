@@ -6,39 +6,54 @@ import {
   createSharedAgentGUIAgentTarget
 } from "../../agentTargets";
 import type { AgentGUINodeData, NodeFrame } from "../../types";
-import { buildAgentComposerDraft } from "./model/agentComposerDraft";
-import {
-  groupAgentGUINodeViewModelFixture,
-  type AgentGUINodeViewModelFixtureOverrides,
-  type FlatAgentGUINodeViewModelFixture
-} from "./model/AgentGUINodeViewModel.fixture";
-import type {
-  AgentComposerDraft,
-  AgentGUINodeViewModel
-} from "./model/agentGuiNodeTypes";
+import { AgentGUINode } from "./AgentGUINode";
 import {
   createAgentStatusController,
   type AgentStatusController,
-  type AgentStatusQuery,
   type AgentStatusControllerSnapshot,
+  type AgentStatusQuery,
   type AgentStatusStreamObserver
 } from "./controller/AgentStatusController";
-import { AgentGUINode } from "./AgentGUINode";
+import { buildAgentComposerDraft } from "./model/agentComposerDraft";
+import {
+  groupAgentGUIViewFixture,
+  type AgentGUIViewFixtureOverrides,
+  type FlatAgentGUIViewFixture
+} from "./model/agentGUIView.fixture";
+import type {
+  AgentComposerDraft,
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "./model/agentGuiNodeTypes";
+type AgentGUIViewFixture = {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
+};
 
 const { agentGuiNodeViewSpy, agentProbeInfoPopoverSpy } = vi.hoisted(() => ({
   agentGuiNodeViewSpy: vi.fn(),
   agentProbeInfoPopoverSpy: vi.fn()
 }));
 
-let mockViewModel: AgentGUINodeViewModel;
+let mockViewModel: AgentGUIViewFixture;
 
 vi.mock("../../i18n/index", () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }));
 
-vi.mock("./controller/useAgentGUINodeController", () => ({
-  useAgentGUINodeController: () => ({
-    viewModel: mockViewModel,
+vi.mock("./controller/useAgentGUIPage", () => ({
+  useAgentGUIPage: () => ({
+    ...mockViewModel,
     actions: {
       createConversation: vi.fn(),
       selectConversation: vi.fn(),
@@ -613,12 +628,12 @@ function createState(
 }
 
 function createViewModel(
-  overrides: AgentGUINodeViewModelFixtureOverrides = {}
-): AgentGUINodeViewModel {
+  overrides: AgentGUIViewFixtureOverrides = {}
+): AgentGUIViewFixture {
   const draftContent: AgentComposerDraft = buildAgentComposerDraft({
     prompt: ""
   });
-  return groupAgentGUINodeViewModelFixture({
+  return groupAgentGUIViewFixture({
     workspaceId: "room-1",
     data: createState(),
     activeConversationId: null,
@@ -687,5 +702,5 @@ function createViewModel(
     availableCommands: [],
     availableSkills: [],
     ...overrides
-  } as FlatAgentGUINodeViewModelFixture);
+  } as FlatAgentGUIViewFixture);
 }

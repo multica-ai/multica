@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { useState, type JSX } from "react";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import { AgentToolCallHeader } from "./AgentToolCallHeader";
@@ -13,7 +14,7 @@ export interface AgentToolCallCardProps {
   variantClassName?: string;
 }
 
-export function AgentToolCallCard({
+export const AgentToolCallCard = observer(function AgentToolCallCard({
   call,
   onLinkClick,
   defaultExpanded = false,
@@ -60,7 +61,7 @@ export function AgentToolCallCard({
       ) : null}
     </div>
   );
-}
+});
 
 function toolCallAriaLabel(call: AgentToolCallVM): string {
   return [
