@@ -397,6 +397,7 @@ export function ChatPage() {
 
       <ChatInput
         onSend={c.handleSend}
+        onAddToRun={c.addToRun}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}

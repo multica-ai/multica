@@ -77,6 +77,7 @@ const (
 	EventSkillDeleted = "skill:deleted"
 
 	// Chat events
+	EventChatSupplement = "chat:supplement"
 	EventChatMessage = "chat:message"
 	EventChatDone    = "chat:done"
 	// Bounded owner-only alert; unlike chat content, delivered across workspaces.

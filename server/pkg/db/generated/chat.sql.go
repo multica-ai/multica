@@ -738,9 +738,10 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 
 const deleteUserChatMessageByTask = `-- name: DeleteUserChatMessageByTask :one
 DELETE FROM chat_message
-WHERE task_id = $1
+WHERE chat_message.task_id = $1
   AND role = 'user'
   AND message_kind <> 'onboarding_kickoff'
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = chat_message.id)
 RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, channel_typing_settled
 `
 
@@ -1908,7 +1909,8 @@ func (q *Queries) ListChatDraftRestoresBySession(ctx context.Context, chatSessio
 
 const listChatInputMessages = `-- name: ListChatInputMessages :many
 SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, channel_typing_settled FROM chat_message
-WHERE task_id = $1 AND role = 'user'
+WHERE chat_message.task_id = $1 AND role = 'user'
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = chat_message.id)
 ORDER BY created_at ASC, id ASC
 `
 
@@ -2046,6 +2048,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 const listChatMessagesForLegacyTask = `-- name: ListChatMessagesForLegacyTask :many
 SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.channel_typing_settled FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND NOT EXISTS (SELECT 1 FROM chat_supplement s WHERE s.message_id = message.id)
   AND NOT (
     message.role = 'user'
     AND EXISTS (

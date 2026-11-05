@@ -415,6 +415,7 @@ export function ChatWindow() {
       <ChatInput
         hidden={!isOpen}
         onSend={c.handleSend}
+        onAddToRun={c.addToRun}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}

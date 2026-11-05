@@ -33,7 +33,7 @@ import {
   useSetChatSessionProject,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, useAddToChatRun } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import {
@@ -233,6 +233,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
       : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const addToRun = useAddToChatRun(activeSessionId, pendingTask?.can_supplement === true ? pendingTask.task_id : undefined);
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). The whole lifecycle —
   // fetch, offer, skip-and-re-offer, apply, consume, reconcile — lives in this
@@ -872,6 +873,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     pendingTask,
     pendingTaskLoading,
     pendingTaskId,
+    addToRun,
     showSkeleton,
     hasMessages,
     firstItemIndex,

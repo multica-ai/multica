@@ -19,6 +19,7 @@ import {
   useCoordinatedUploads,
   type UploadDraftBinding,
 } from "../../editor/use-coordinated-uploads";
+import { Button } from "@multica/ui/components/ui/button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -71,6 +72,7 @@ function isAttachmentReferenced(content: string, attachment: Attachment): boolea
 }
 
 interface ChatInputProps {
+  onAddToRun?: (content: string) => Promise<void>;
   onSend: (
     content: string,
     attachmentIds: string[] | undefined,
@@ -176,6 +178,7 @@ const PAGE_CONTEXT_SHORTCUT = {
 
 export function ChatInput({
   onSend,
+  onAddToRun,
   restoreDraftRequest,
   conversationStarterRequest,
   onConversationStarterApplied,
@@ -212,6 +215,7 @@ export function ChatInput({
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const addToRunRef = useRef(false);
   // Two keys with deliberately different concerns:
   //
   // `draftKey` — zustand storage key. Scopes the in-progress draft per session
@@ -616,6 +620,17 @@ export function ChatInput({
       const sent = attachedPage
         ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
         : content;
+      if (addToRunRef.current) {
+        if (!onAddToRun || draftAttachments.length > 0) return false;
+        try {
+          await onAddToRun(sent);
+          commitInput({ clearEditor: editorDraftKeyRef.current === keyAtSend });
+          return true;
+        } catch {
+          toast.error(t(($) => $.input.add_to_run_error));
+          return false;
+        }
+      }
       const accepted = await onSend(
         sent,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
@@ -913,6 +928,21 @@ export function ChatInput({
             >
               <Scan />
             </IconButton>
+          )}
+          {onAddToRun && (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              disabled={hasNothingToSend || submitting || !!disabled || !!noAgent || gate.uploading || draftAttachments.length > 0}
+              onClick={async () => {
+                if (submitting || addToRunRef.current) return;
+                addToRunRef.current = true;
+                try { await submit(); } finally { addToRunRef.current = false; }
+              }}
+            >
+              {t(($) => $.input.add_to_run)}
+            </Button>
           )}
           <SubmitButton
             onClick={submit}
