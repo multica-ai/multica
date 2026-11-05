@@ -67,19 +67,15 @@ export function useDeleteProject() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (id: string) => api.deleteProject(id),
-    onMutate: async (id) => {
+    onSuccess: async (_data, id) => {
+      // Reads started during DELETE may still contain the removed project.
       await qc.cancelQueries({ queryKey: projectKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListProjectsResponse>(projectKeys.list(wsId));
       qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
-        old ? { ...old, projects: old.projects.filter((p) => p.id !== id), total: old.total - 1 } : old,
+        old && old.projects.some((p) => p.id === id)
+          ? { ...old, projects: old.projects.filter((p) => p.id !== id), total: old.total - 1 }
+          : old,
       );
       qc.removeQueries({ queryKey: projectKeys.detail(wsId, id) });
-      return { prevList };
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(projectKeys.list(wsId), ctx.prevList);
-    },
-    onSuccess: (_data, id) => {
       useRecentContextStore.getState().forgetContext(wsId, { type: "project", id });
       clearIssueSurfaceViewState(issueScopeKey({ type: "project", projectId: id }));
     },
