@@ -1,25 +1,39 @@
 import "@testing-library/jest-dom/vitest";
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLocalAgentGUIAgentTarget } from "../../agentTargets";
 import type {
   AgentGUIAgentTarget,
   AgentGUINodeData,
   NodeFrame
 } from "../../types";
+import { AgentGUINode } from "./AgentGUINode";
+import { buildAgentComposerDraft } from "./model/agentComposerDraft";
 import type { AgentGUIConversationSummary } from "./model/agentGuiConversationModel";
 import type {
   AgentComposerDraft,
-  AgentGUINodeViewModel
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
 } from "./model/agentGuiNodeTypes";
 import {
-  groupAgentGUINodeViewModelFixture,
-  type AgentGUINodeViewModelFixtureOverrides,
-  type FlatAgentGUINodeViewModelFixture
-} from "./model/AgentGUINodeViewModel.fixture";
-import { AgentGUINode } from "./AgentGUINode";
-import { createLocalAgentGUIAgentTarget } from "../../agentTargets";
-import { buildAgentComposerDraft } from "./model/agentComposerDraft";
-import { resolveNextAgentGUIConversationRailWidthPx } from "./model/agentGuiRailLayout";
+  groupAgentGUIViewFixture,
+  type AgentGUIViewFixtureOverrides,
+  type FlatAgentGUIViewFixture
+} from "./model/agentGUIView.fixture";
+type AgentGUIViewFixture = {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
+};
 
 const { agentGuiNodeViewSpy, translate } = vi.hoisted(() => ({
   agentGuiNodeViewSpy: vi.fn(),
@@ -34,7 +48,7 @@ const { agentGuiNodeViewSpy, translate } = vi.hoisted(() => ({
   }
 }));
 
-let mockViewModel: AgentGUINodeViewModel;
+let mockViewModel: AgentGUIViewFixture;
 
 vi.mock("../../i18n/index", () => ({
   useTranslation: () => ({
@@ -42,9 +56,9 @@ vi.mock("../../i18n/index", () => ({
   })
 }));
 
-vi.mock("./controller/useAgentGUINodeController", () => ({
-  useAgentGUINodeController: () => ({
-    viewModel: mockViewModel,
+vi.mock("./controller/useAgentGUIPage", () => ({
+  useAgentGUIPage: () => ({
+    ...mockViewModel,
     actions: {
       createConversation: vi.fn(),
       selectConversation: vi.fn(),
@@ -156,28 +170,6 @@ describe("AgentGUINode memoization", () => {
 
     expect(agentGuiNodeViewSpy).toHaveBeenLastCalledWith(
       expect.objectContaining({ sessionInputHistoryEnabled: true })
-    );
-  });
-
-  it("rerenders when Side conversations are enabled", () => {
-    mockViewModel = createViewModel();
-    const props = createProps();
-    const { rerender } = render(<AgentGUINode {...props} />);
-
-    expect(agentGuiNodeViewSpy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sideConversationEnabled: false })
-    );
-    agentGuiNodeViewSpy.mockClear();
-
-    rerender(
-      <AgentGUINode
-        {...props}
-        hostCapabilities={{ sideConversationEnabled: true }}
-      />
-    );
-
-    expect(agentGuiNodeViewSpy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sideConversationEnabled: true })
     );
   });
 
@@ -454,12 +446,12 @@ function createState(
 }
 
 function createViewModel(
-  overrides: AgentGUINodeViewModelFixtureOverrides = {}
-): AgentGUINodeViewModel {
+  overrides: AgentGUIViewFixtureOverrides = {}
+): AgentGUIViewFixture {
   const draftContent: AgentComposerDraft = buildAgentComposerDraft({
     prompt: ""
   });
-  return groupAgentGUINodeViewModelFixture({
+  return groupAgentGUIViewFixture({
     workspaceId: "room-1",
     data: createState(),
     activeConversationId: null,
@@ -528,5 +520,5 @@ function createViewModel(
     availableCommands: [],
     availableSkills: [],
     ...overrides
-  } as FlatAgentGUINodeViewModelFixture);
+  } as FlatAgentGUIViewFixture);
 }

@@ -1,5 +1,25 @@
+import type {
+  AgentActivityMessage,
+  AgentActivitySession,
+  AgentActivitySnapshot,
+  CanonicalAgentSession
+} from "@tutti-os/agent-activity-core";
+import { selectRootAgentActivitySessions } from "@tutti-os/agent-activity-core";
+import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import { projectAgentConversationVM } from "../../../shared/agentConversation/projection/agentConversationProjection";
+import { projectAgentSessionEventsToTimelineItems } from "../../../shared/agentConversation/projection/agentSessionEventProjection";
+import {
+  attachChildSessionLanesToConversationVM,
+  buildChildSessionLanesByParentToolCallId
+} from "../../../shared/agentConversation/projection/childSessionLanes";
+import {
+  resolveAgentGUIConversationTitle,
+  resolveAgentGUIExplicitConversationTitle,
+  resolveAgentGUIExplicitConversationTitleFromMessages,
+  resolveAgentGUIProviderIdentity,
+  type AgentGUIConversationTitleFallback
+} from "../../../shared/agentConversationTitleProjection.ts";
 import type { AgentSessionEvent } from "../../../shared/agentSessionTypes";
-import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
 import {
   buildWorkspaceAgentActivityListViewModel,
   type WorkspaceAgentActivityCard,
@@ -9,32 +29,12 @@ import {
   buildWorkspaceAgentSessionDetailViewModel,
   type WorkspaceAgentSessionDetailViewModel
 } from "../../../shared/workspaceAgentSessionDetailViewModel";
-import { projectAgentSessionEventsToTimelineItems } from "../../../shared/agentConversation/projection/agentSessionEventProjection";
-import { projectAgentConversationVM } from "../../../shared/agentConversation/projection/agentConversationProjection";
-import {
-  attachChildSessionLanesToConversationVM,
-  buildChildSessionLanesByParentToolCallId
-} from "../../../shared/agentConversation/projection/childSessionLanes";
+import { resolveWorkspaceAgentSessionSortTimeUnixMs } from "../../../shared/workspaceAgentSessionSortTime";
+import type { WorkspaceAgentActivityTimelineItem } from "../../../shared/workspaceAgentTimelineTypes";
 import {
   filterAgentGUIConversationSummaries,
   normalizeAgentGUIConversationFilter
 } from "./agentGuiConversationFilter";
-import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import {
-  resolveAgentGUIConversationTitle,
-  resolveAgentGUIExplicitConversationTitle,
-  resolveAgentGUIExplicitConversationTitleFromMessages,
-  resolveAgentGUIProviderIdentity,
-  type AgentGUIConversationTitleFallback
-} from "../../../shared/agentConversationTitleProjection.ts";
-import type {
-  AgentActivitySession,
-  AgentActivitySnapshot,
-  CanonicalAgentSession
-} from "@tutti-os/agent-activity-core";
-import { selectRootAgentActivitySessions } from "@tutti-os/agent-activity-core";
-import type { WorkspaceAgentActivityTimelineItem } from "../../../shared/workspaceAgentTimelineTypes";
-import { resolveWorkspaceAgentSessionSortTimeUnixMs } from "../../../shared/workspaceAgentSessionSortTime";
 import {
   createAgentGUIConversationProjectResolver,
   type AgentGUIConversationProjectResolver,
@@ -49,19 +49,15 @@ import type {
   AgentGUITimelineRow,
   BuildAgentGUIConversationsInput
 } from "./agentGuiConversationTypes";
+import { sortTimelineRows } from "./agentGuiInteractiveProjection";
+import { mergeTimelineItems } from "./agentGuiTimelineMerge";
 import {
   firstUserMessageTitleFromTimelineItems,
   timelineRowsFromActivityTimelineItems,
   timelineSessionFromItems,
   workspaceAgentMessagesFromTimelineItems
 } from "./agentGuiTimelineProjection";
-import { sortTimelineRows } from "./agentGuiInteractiveProjection";
-import { mergeTimelineItems } from "./agentGuiTimelineMerge";
 
-export {
-  AGENT_GUI_RUNTIME_SESSION_ORIGIN,
-  resolveAgentGUIConversationSortTimeUnixMs
-} from "./agentGuiConversationTypes";
 export {
   resolveAgentGUIConversationProjectBySectionKey,
   resolveAgentGUISelectedUserProject
@@ -70,6 +66,10 @@ export type {
   AgentGUIConversationProjectSummary,
   AgentGUIConversationUserProject
 } from "./agentGuiConversationProjectResolver";
+export {
+  AGENT_GUI_RUNTIME_SESSION_ORIGIN,
+  resolveAgentGUIConversationSortTimeUnixMs
+} from "./agentGuiConversationTypes";
 export type {
   AgentGUIApprovalOption,
   AgentGUIApprovalRequest,
@@ -99,7 +99,7 @@ export function buildAgentGUIConversationSummaries({
       return rootSessionId ? [rootSessionId] : [];
     })
   );
-  const runtimeSnapshot = filterAgentGUIRuntimeSnapshot(snapshot);
+  const runtimeSnapshot = filterConversationServicesSnapshot(snapshot);
   const sessionsById = new Map(
     selectRootAgentActivitySessions(runtimeSnapshot).map((session) => [
       session.agentSessionId,
@@ -420,18 +420,18 @@ export function resolveAgentGUIConversationTitleFromMessages({
   return resolveAgentGUIConversationTitle(projectedTitle);
 }
 
-function filterAgentGUIRuntimeSnapshot(
+function filterConversationServicesSnapshot(
   snapshot: AgentActivitySnapshot
 ): AgentActivitySnapshot {
   return {
     ...snapshot,
     sessions: selectRootAgentActivitySessions(snapshot).filter((session) =>
-      isAgentGUIRuntimeSession(session)
+      isConversationServicesSession(session)
     )
   };
 }
 
-function isAgentGUIRuntimeSession(session: AgentActivitySession): boolean {
+function isConversationServicesSession(session: AgentActivitySession): boolean {
   return session.agentSessionId.trim().length > 0;
 }
 

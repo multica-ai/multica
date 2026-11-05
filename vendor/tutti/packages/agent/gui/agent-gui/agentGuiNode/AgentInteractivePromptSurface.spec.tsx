@@ -6,8 +6,8 @@ import {
   waitFor
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentInteractivePromptSurface } from "./AgentInteractivePromptSurface";
 import { setAgentGuiI18nTestLocale } from "../../i18n/testUtils";
+import { AgentInteractivePromptSurface } from "./AgentInteractivePromptSurface";
 
 const labels = {
   approvalLead: "Waiting for your approval",
@@ -1421,7 +1421,10 @@ describe("AgentInteractivePromptSurface", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Small/ }));
-    expect(screen.queryByPlaceholderText(labels.answerPlaceholder)).toBeNull();
+    expect(screen.getByRole("button", { name: /Small/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
 
     fireEvent.click(
       screen.getByRole("button", { name: labels.returnToConversation })

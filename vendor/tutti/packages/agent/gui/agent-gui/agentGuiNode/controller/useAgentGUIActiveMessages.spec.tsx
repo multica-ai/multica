@@ -1,23 +1,23 @@
 import { renderHook } from "@testing-library/react";
 import type {
   AgentActivityMessage,
-  EngineQueuedPrompt,
-  PendingSubmitIntentRecord,
-  PendingActivationIntentRecord
+  AgentQueuedPrompt,
+  PendingActivationIntentRecord,
+  PendingSubmitIntentRecord
 } from "@tutti-os/agent-activity-core";
 import { describe, expect, it } from "vitest";
-import { useAgentGUIActiveMessages } from "./useAgentGUIActiveMessages";
+import { readPendingConversationMessages } from "../../../state/pendingConversationMessages";
 
 type NewPendingActivationIntentRecord = Extract<
   PendingActivationIntentRecord,
   { mode: "new" }
 >;
 
-describe("useAgentGUIActiveMessages", () => {
+describe("readPendingConversationMessages", () => {
   it("does not rematerialize an authoritatively retracted initial prompt", () => {
     const storedMessage = message("replacement", "replacement-submit");
     const { result } = renderHook(() =>
-      useAgentGUIActiveMessages({
+      readPendingConversationMessages({
         activeConversationId: "session-1",
         activePendingActivation: activation({ initialPromptRetracted: true }),
         activePendingSubmits: [],
@@ -33,7 +33,7 @@ describe("useAgentGUIActiveMessages", () => {
 
   it("keeps an unretracted initial prompt optimistic until canonical confirmation", () => {
     const { result } = renderHook(() =>
-      useAgentGUIActiveMessages({
+      readPendingConversationMessages({
         activeConversationId: "session-1",
         activePendingActivation: activation({
           initialPromptRetracted: false
@@ -74,10 +74,10 @@ describe("useAgentGUIActiveMessages", () => {
         activeQueuedPrompts,
         storedMessages
       }: {
-        activeQueuedPrompts: readonly EngineQueuedPrompt[];
+        activeQueuedPrompts: readonly AgentQueuedPrompt[];
         storedMessages: readonly AgentActivityMessage[];
       }) =>
-        useAgentGUIActiveMessages({
+        readPendingConversationMessages({
           activeConversationId: "session-1",
           activePendingActivation: null,
           activePendingSubmits: [pendingImageSubmit],
@@ -209,7 +209,7 @@ function pendingSubmit(): PendingSubmitIntentRecord {
   };
 }
 
-function queuedPrompt(): EngineQueuedPrompt {
+function queuedPrompt(): AgentQueuedPrompt {
   const pending = pendingSubmit();
   return {
     clientSubmitId: pending.clientSubmitId,
@@ -220,7 +220,9 @@ function queuedPrompt(): EngineQueuedPrompt {
 }
 
 function timelineEventIds(
-  items: ReturnType<typeof useAgentGUIActiveMessages>["activeTimelineItems"]
+  items: ReturnType<
+    typeof readPendingConversationMessages
+  >["activeTimelineItems"]
 ): string[] {
   return items.map((item) => item.eventId);
 }

@@ -6,27 +6,27 @@ import {
   type SetStateAction
 } from "react";
 import { flushSync } from "react-dom";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { useAgentHostApi } from "../../../agentActivityHost";
 import type { AgentSessionViewRef } from "../../../contexts/workspace/presentation/renderer/agentSessions/useAgentSessionPagingState";
-import type { useAgentGUIActivation } from "./useAgentGUIActivation";
+import type { ConversationServices } from "../../../conversationServices";
+import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
 import { type AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type {
   AgentComposerDraft,
   SubmittedDraftSnapshot
 } from "../model/agentGuiNodeTypes";
-import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
 import { deleteSubmittedDraftSnapshotsForScopes } from "./agentGuiController.draftMessageHelpers";
 import { getAgentGUIErrorMessage } from "./agentGuiController.errors";
 import {
-  reportAgentGUIRuntimeError,
+  reportConversationServicesError,
   showAgentGUIControllerErrorToast
 } from "./agentGuiController.reporting";
-import { type ConversationIntent } from "./useAgentConversationSelection";
 import {
   parseTuttiProtectedDeletionConflict,
   type TuttiProtectedDeletionConflict
 } from "./tuttiProtectedDeletion";
+import { type ConversationIntent } from "./useAgentConversationSelection";
+import type { useAgentGUIActivation } from "./useAgentGUIActivation";
 
 export interface UseAgentGUIConversationDeletionInput {
   isDeletingConversation: boolean;
@@ -45,7 +45,7 @@ export interface UseAgentGUIConversationDeletionInput {
     origin: string;
   };
   activation: ReturnType<typeof useAgentGUIActivation>;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   setDraftByScopeKey: Dispatch<
     SetStateAction<Record<string, AgentComposerDraft>>
   >;
@@ -118,11 +118,8 @@ export function useAgentGUIConversationDeletion(
     }
     setIsDeletingConversation(true);
     setDetailError(null);
-    void agentActivityRuntime
-      .deleteSession({
-        workspaceId,
-        agentSessionId: target.id
-      })
+    void agentActivityRuntime.mutations
+      .deleteSessions({ agentSessionIds: [target.id] })
       .then(() => {
         if (activeConversationIdRef.current === target.id) {
           activeConversationIdRef.current = null;
@@ -160,7 +157,7 @@ export function useAgentGUIConversationDeletion(
           return;
         }
         const message = getAgentGUIErrorMessage(error);
-        reportAgentGUIRuntimeError({
+        reportConversationServicesError({
           agentSessionId: target.id,
           error,
           phase: "delete_conversation",

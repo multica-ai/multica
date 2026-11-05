@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 import { ComposerPrimaryCapabilityControl } from "./ComposerPrimaryCapabilityControl";
 
 const labels = {

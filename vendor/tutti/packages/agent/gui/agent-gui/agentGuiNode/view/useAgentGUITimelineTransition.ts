@@ -1,12 +1,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type { AgentGUIDetailViewModel } from "../model/agentGuiNodeTypes";
 
 export const AGENT_GUI_TIMELINE_SKELETON_DELAY_MS = 300;
 
 interface Input {
   activeConversationId: string | null;
-  availability: AgentGUINodeViewModel["detail"]["availability"];
+  availability: AgentGUIDetailViewModel["availability"];
   conversation: AgentConversationVM | null;
 }
 

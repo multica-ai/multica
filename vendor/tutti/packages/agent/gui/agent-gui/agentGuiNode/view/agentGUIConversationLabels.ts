@@ -15,7 +15,7 @@ type AgentGUIConversationLabels = Pick<
   | "copyAsMarkdown"
   | "copyAsReference"
   | "copyFailed"
-  | "markSessionUnread"
+  | never
   | "moreSessionActions"
   | "openConversationWindow"
   | "renameSession"
@@ -50,7 +50,7 @@ export function agentGUIConversationLabels(
       "agentHost.agentGui.conversationCopyPreviousMessages"
     ),
     moreSessionActions: t("agentHost.agentGui.moreSessionActions"),
-    markSessionUnread: t("agentHost.agentGui.markSessionUnread"),
+
     openConversationWindow: t("agentHost.agentGui.openConversationWindow"),
     renameSession: t("agentHost.agentGui.renameSession"),
     searchPlaceholder: t("agentHost.agentGui.searchPlaceholder"),

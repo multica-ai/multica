@@ -1,6 +1,6 @@
 import type { WorkspaceUserProjectI18nRuntime } from "@tutti-os/workspace-user-project/i18n";
-import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
+import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
 import type {
   AgentComposerGitBranchLoader,
@@ -10,18 +10,25 @@ import type {
 } from "../AgentComposer";
 import type { AgentContextMentionItem } from "../agentRichText/agentFileMentionExtension";
 import type { AgentGUIComposerEngagement } from "../engagement/agentGUIEngagement.types";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import type { AgentGUIManagedHomeTargetProjection } from "../model/agentGuiProviderRailOrder";
 import type { AgentGUISessionLaunchMode } from "../model/agentSessionLaunchMode";
-import type {
-  AgentGUINodeViewProps,
-  AgentGUIViewLabels
-} from "./AgentGUINodeView.types";
 import type {
   AgentGUIComposerEmptySubmit,
   AgentGUIComposerFooterAccessoryRenderer
 } from "./AgentGUIComposerFooterAccessory.types";
-import type { AgentGUISideConversationPresentation } from "../../../agentSideConversationPresentation";
+import type {
+  AgentGUINodeViewProps,
+  AgentGUIViewLabels
+} from "./AgentGUINodeView.types";
 
 type AgentGUIDetailExternalPromptProps = Pick<
   AgentComposerProps,
@@ -31,20 +38,19 @@ type AgentGUIDetailExternalPromptProps = Pick<
   | "promptAssetLimit"
 >;
 
-export interface AgentGUIDetailPaneProps extends AgentGUIDetailExternalPromptProps {
-  shell: AgentGUINodeViewModel["shell"];
-  rail: AgentGUINodeViewModel["rail"];
-  detail: AgentGUINodeViewModel["detail"];
-  composer: AgentGUINodeViewModel["composer"];
-  interaction: AgentGUINodeViewModel["interaction"];
-  readiness: AgentGUINodeViewModel["readiness"];
-  operations: AgentGUINodeViewModel["operations"];
+export interface AgentGUIDetailPaneProps
+  extends AgentGUIDetailExternalPromptProps {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
   homeTargetProjection: AgentGUIManagedHomeTargetProjection;
   referenceProvenanceFilters?: AgentComposerProps["referenceProvenanceFilters"];
   hiddenMentionFilterIds?: readonly string[];
   sessionInputHistoryEnabled?: boolean;
-  sideConversationEnabled?: boolean;
-  sideConversationPresentation?: AgentGUISideConversationPresentation | null;
   sessionWorktreeEnabled?: boolean;
   sessionLaunchModesByProjectSectionKey?: Readonly<
     Record<string, AgentGUISessionLaunchMode>

@@ -6,9 +6,13 @@ import {
   type AgentActivitySessionCapabilities,
   type CanonicalAgentSession
 } from "@tutti-os/agent-activity-core";
+import { useRef } from "react";
 import { describe, expect, it } from "vitest";
+import {
+  ComposerCapabilitiesState,
+  type ComposerCapabilitiesInput
+} from "../../../state/ComposerCapabilitiesState";
 import type { AgentGUIComposerOptionsReader } from "./agentGuiController.providerHelpers";
-import { useAgentGUIComposerCapabilities } from "./useAgentGUIComposerCapabilities";
 
 function composerWith(
   options: Record<string, AgentActivityComposerOptions>
@@ -17,6 +21,11 @@ function composerWith(
     options: (targetKey) => options[targetKey?.trim() ?? ""] ?? null,
     status: () => undefined
   };
+}
+
+function useAgentGUIComposerCapabilities(input: ComposerCapabilitiesInput) {
+  const history = useRef(new Map());
+  return new ComposerCapabilitiesState(input, history.current);
 }
 
 describe("useAgentGUIComposerCapabilities", () => {
@@ -48,9 +57,9 @@ describe("useAgentGUIComposerCapabilities", () => {
       latestTurn: _latestTurn,
       latestTurnInteractions: _latestTurnInteractions,
       pendingInteractions: _pendingInteractions,
-      ...activeEngineSession
+      ...activeCanonicalSession
     } = normalized;
-    return activeEngineSession as CanonicalAgentSession;
+    return activeCanonicalSession as CanonicalAgentSession;
   }
 
   function composerOptions(input: {
@@ -92,7 +101,7 @@ describe("useAgentGUIComposerCapabilities", () => {
   }
 
   it("projects typed canonical session usage into the composer footer", () => {
-    const activeEngineSession = engineSession({
+    const activeCanonicalSession = engineSession({
       usage: {
         contextWindow: { usedTokens: 33_168, totalTokens: 400_000 },
         quotas: []
@@ -107,7 +116,7 @@ describe("useAgentGUIComposerCapabilities", () => {
     const { result, rerender } = renderHook(() =>
       useAgentGUIComposerCapabilities({
         activeConversationId: "session-1",
-        activeEngineSession,
+        activeCanonicalSession,
         activeSessionState: null,
         data,
         draftSettingsBySessionId: {},
@@ -135,7 +144,7 @@ describe("useAgentGUIComposerCapabilities", () => {
   });
 
   it("retains the last session usage while a model change awaits fresh usage", () => {
-    let activeEngineSession = engineSession({
+    let activeCanonicalSession = engineSession({
       usage: {
         contextWindow: { usedTokens: 20_000, totalTokens: 200_000 },
         quotas: []
@@ -148,8 +157,8 @@ describe("useAgentGUIComposerCapabilities", () => {
     };
     const { result, rerender } = renderHook(() =>
       useAgentGUIComposerCapabilities({
-        activeConversationId: activeEngineSession.agentSessionId,
-        activeEngineSession,
+        activeConversationId: activeCanonicalSession.agentSessionId,
+        activeCanonicalSession,
         activeSessionState: null,
         data,
         draftSettingsBySessionId: {},
@@ -164,12 +173,12 @@ describe("useAgentGUIComposerCapabilities", () => {
     );
 
     const previousUsage = result.current.usage;
-    activeEngineSession = engineSession({ usage: null });
+    activeCanonicalSession = engineSession({ usage: null });
     rerender();
 
     expect(result.current.usage).toBe(previousUsage);
 
-    activeEngineSession = engineSession({
+    activeCanonicalSession = engineSession({
       usage: {
         contextWindow: { usedTokens: 36_103, totalTokens: 1_000_000 },
         quotas: []
@@ -186,7 +195,7 @@ describe("useAgentGUIComposerCapabilities", () => {
   });
 
   it("does not carry retained usage into another session", () => {
-    let activeEngineSession = engineSession({
+    let activeCanonicalSession = engineSession({
       usage: {
         contextWindow: { usedTokens: 20_000, totalTokens: 200_000 },
         quotas: []
@@ -199,8 +208,8 @@ describe("useAgentGUIComposerCapabilities", () => {
     };
     const { result, rerender } = renderHook(() =>
       useAgentGUIComposerCapabilities({
-        activeConversationId: activeEngineSession.agentSessionId,
-        activeEngineSession,
+        activeConversationId: activeCanonicalSession.agentSessionId,
+        activeCanonicalSession,
         activeSessionState: null,
         data,
         draftSettingsBySessionId: {},
@@ -216,7 +225,7 @@ describe("useAgentGUIComposerCapabilities", () => {
 
     expect(result.current.usage?.totalTokens).toBe(200_000);
 
-    activeEngineSession = engineSession({
+    activeCanonicalSession = engineSession({
       agentSessionId: "session-2",
       usage: null
     });
@@ -226,7 +235,7 @@ describe("useAgentGUIComposerCapabilities", () => {
   });
 
   it("keeps target-declared browser support when active session metadata lacks it", () => {
-    const activeEngineSession = engineSession({
+    const activeCanonicalSession = engineSession({
       agentTargetId: "extension:hermes",
       capabilities: capabilitiesFixture(["interrupt"]),
       provider: "acp:hermes",
@@ -247,7 +256,7 @@ describe("useAgentGUIComposerCapabilities", () => {
     const { result } = renderHook(() =>
       useAgentGUIComposerCapabilities({
         activeConversationId: "session-1",
-        activeEngineSession,
+        activeCanonicalSession,
         activeSessionState: null,
         data,
         draftSettingsBySessionId: {},
@@ -284,7 +293,7 @@ describe("useAgentGUIComposerCapabilities", () => {
 
     type CreationProps = {
       activeConversationId: string | null;
-      activeEngineSession: CanonicalAgentSession | null;
+      activeCanonicalSession: CanonicalAgentSession | null;
       optimisticComposerTarget: {
         agentSessionId: string;
         target: typeof selectedComposerTargetData;
@@ -292,18 +301,18 @@ describe("useAgentGUIComposerCapabilities", () => {
     };
     const initialProps: CreationProps = {
       activeConversationId: null,
-      activeEngineSession: null,
+      activeCanonicalSession: null,
       optimisticComposerTarget: null
     };
     const { result, rerender } = renderHook(
       ({
         activeConversationId,
-        activeEngineSession,
+        activeCanonicalSession,
         optimisticComposerTarget
       }: CreationProps) =>
         useAgentGUIComposerCapabilities({
           activeConversationId,
-          activeEngineSession,
+          activeCanonicalSession,
           activeSessionState: null,
           data,
           draftSettingsBySessionId: {},
@@ -318,7 +327,7 @@ describe("useAgentGUIComposerCapabilities", () => {
 
     rerender({
       activeConversationId: "session-new",
-      activeEngineSession: null,
+      activeCanonicalSession: null,
       optimisticComposerTarget: {
         agentSessionId: "session-new",
         target: selectedComposerTargetData
@@ -330,7 +339,7 @@ describe("useAgentGUIComposerCapabilities", () => {
 
     rerender({
       activeConversationId: "session-new",
-      activeEngineSession: engineSession({
+      activeCanonicalSession: engineSession({
         agentSessionId: "session-new",
         agentTargetId: "local:codex",
         provider: "codex",

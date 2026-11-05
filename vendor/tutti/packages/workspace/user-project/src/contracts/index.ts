@@ -105,7 +105,6 @@ export interface WorkspaceUserProjectService {
   getRevision?(): number;
   getSnapshot?(): WorkspaceUserProjectServiceSnapshot;
   isNoProjectPath?(path: string): boolean;
-  moveProject?(input: WorkspaceUserProjectMoveInput): Promise<void> | void;
   pinProject?(input: WorkspaceUserProjectPinInput): Promise<void> | void;
   rememberNoProjectPath?(path: string | null | undefined): void;
   prepareSelection(

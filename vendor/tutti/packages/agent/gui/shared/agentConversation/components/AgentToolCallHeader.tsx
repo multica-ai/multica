@@ -1,12 +1,13 @@
-import type { JSX } from "react";
 import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import type { JSX } from "react";
 import { FilePenLineIcon } from "../../../app/renderer/components/icons/FilePenLineIcon";
 import { FileTextIcon } from "../../../app/renderer/components/icons/FileTextIcon";
 import { HammerIcon } from "../../../app/renderer/components/icons/HammerIcon";
 import { ToolsLinedIcon } from "../../../app/renderer/components/icons/ToolsLinedIcon";
 import { WriteLinedIcon } from "../../../app/renderer/components/icons/WriteLinedIcon";
-import { ToolNameIcon } from "../../toolActivityKindIcons";
 import { isImageGenerationToolCall } from "../../imageGenerationTool";
+import { ToolNameIcon } from "../../toolActivityKindIcons";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import {
   getFileChangeRenderData,
@@ -21,7 +22,7 @@ interface AgentToolCallHeaderProps {
   hasDetail: boolean;
 }
 
-export function AgentToolCallHeader({
+export const AgentToolCallHeader = observer(function AgentToolCallHeader({
   call,
   expanded,
   hasDetail
@@ -184,7 +185,7 @@ export function AgentToolCallHeader({
       ) : null}
     </div>
   );
-}
+});
 
 function formatInlineStatusLabel(label: string): string {
   return /^[A-Z][a-z]+$/.test(label) ? label.toLowerCase() : label;

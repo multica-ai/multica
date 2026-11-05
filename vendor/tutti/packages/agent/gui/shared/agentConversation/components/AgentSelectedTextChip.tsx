@@ -1,9 +1,10 @@
 import { MessageSquareText } from "lucide-react";
+import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import { useTranslation } from "../../../i18n/index";
 import type { AgentSelectedTextVM } from "../contracts/agentMessageRowVM";
 
-export function AgentSelectedTextChip({
+export const AgentSelectedTextChip = observer(function AgentSelectedTextChip({
   selectedText
 }: {
   selectedText: AgentSelectedTextVM;
@@ -35,4 +36,4 @@ export function AgentSelectedTextChip({
       </span>
     </div>
   );
-}
+});

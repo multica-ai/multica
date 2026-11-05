@@ -1,5 +1,3 @@
-import { type ReactNode } from "react";
-import { ListChecks, X } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -11,18 +9,21 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@tutti-os/ui-system";
-import { cn } from "../../../app/renderer/lib/utils";
+import { ListChecks, X } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { type ReactNode } from "react";
 import atLinedIconUrl from "../../../app/renderer/assets/icons/@-lined.svg";
 import addLinedIconUrl from "../../../app/renderer/assets/icons/add-lined.svg";
-import styles from "../AgentGUINode.styles";
+import { cn } from "../../../app/renderer/lib/utils";
+import type { AgentGUIAgentTarget } from "../../../types";
 import {
   AgentModelReasoningDropdown,
   AgentPermissionModeDropdown
 } from "../AgentComposerSettingsMenus";
+import styles from "../AgentGUINode.styles";
 import { textPromptContent } from "../model/agentComposerDraft";
-import type { AgentGUIAgentTarget } from "../../../types";
 import type {
-  AgentComposerProps,
+  AgentComposerRenderProps as AgentComposerProps,
   AgentComposerUsage
 } from "./AgentComposer.types";
 import {
@@ -88,7 +89,7 @@ interface Props {
   onClearPlanMode: () => void;
 }
 
-export function ComposerFooter({
+export const ComposerFooter = observer(function ComposerFooter({
   workspaceId: _workspaceId,
   labels,
   provider,
@@ -510,7 +511,7 @@ export function ComposerFooter({
       </div>
     </>
   );
-}
+});
 
 function RemovableBadgeIcon({ icon }: { icon: ReactNode }) {
   return (

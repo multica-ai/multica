@@ -1,59 +1,63 @@
-import type { ReactNode } from "react";
-import type { AgentGuiWorkbenchCommandBridge } from "../../../workbench/commands";
-import type { ReferenceSourceAggregator } from "@tutti-os/workspace-file-reference/core";
-import type { ReferenceSourcePickerProps } from "@tutti-os/workspace-file-reference/ui";
+import type { WorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
+import type { WorkspaceFileEntry } from "@tutti-os/workspace-file-manager/services";
 import type {
   ReferenceLocateTarget,
   WorkspaceFileReference,
   WorkspaceFileReferenceAdapter,
   WorkspaceFileReferenceCopy
 } from "@tutti-os/workspace-file-reference/contracts";
-import type { WorkspaceFileManagerI18nRuntime } from "@tutti-os/workspace-file-manager";
-import type { WorkspaceFileEntry } from "@tutti-os/workspace-file-manager/services";
+import type { ReferenceSourceAggregator } from "@tutti-os/workspace-file-reference/core";
+import type { ReferenceSourcePickerProps } from "@tutti-os/workspace-file-reference/ui";
 import type { WorkspaceUserProjectI18nRuntime } from "@tutti-os/workspace-user-project/i18n";
-import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
+import type { ReactNode } from "react";
 import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
-import type {
-  AgentGUIProvider,
-  AgentGUIProviderRailAllPresentation,
-  AgentGUIAgentTarget,
-  AgentGUIAgentTargetInfoRenderer
-} from "../../../types";
+import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
-import type { PlanIssueBudgetPreset } from "../../../shared/agentConversation/planImplementationPresentation";
-import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
 import type { AgentInteractionResponseInput } from "../../../shared/agentConversation/contracts/agentConversationVM";
+import type { PlanIssueBudgetPreset } from "../../../shared/agentConversation/planImplementationPresentation";
+import type { OpenAgentEnvPanelInput } from "../../../shared/agentEnv";
+import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
+import type {
+  AgentGUIAgentTarget,
+  AgentGUIAgentTargetInfoRenderer,
+  AgentGUIProvider
+} from "../../../types";
+import type { AgentGuiWorkbenchCommandBridge } from "../../../workbench/commands";
 import type {
   AgentComposerGitBranchLoader,
+  AgentComposerPromptTip,
   AgentComposerProps,
   AgentComposerReferenceProvenanceFilters,
-  AgentComposerPromptTip,
   AgentComposerSlashStatusLimit
 } from "../AgentComposer";
+import type { AgentProjectDropdownOptions } from "../AgentComposerProjectMenu";
 import type { AgentContextMentionItem } from "../agentRichText/agentFileMentionExtension";
+import type { AgentGUIEngagementEventSink } from "../engagement/agentGUIEngagement.types";
 import type {
   AgentComposerDraft,
-  AgentHomeSuggestionCategory,
-  AgentGUINodeViewModel
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel,
+  AgentHomeSuggestionCategory
 } from "../model/agentGuiNodeTypes";
-import type { AgentGUIEngagementEventSink } from "../engagement/agentGUIEngagement.types";
 import type { AgentGUIProviderReadinessLabels } from "../model/agentGuiProviderReadiness";
-import type { OpenAgentEnvPanelInput } from "../../../shared/agentEnv";
+import type { AgentGUISessionLaunchMode } from "../model/agentSessionLaunchMode";
 import type {
   AgentGUIComposerEmptySubmit,
   AgentGUIComposerFooterAccessoryRenderer
 } from "./AgentGUIComposerFooterAccessory.types";
-import type { AgentGUISessionLaunchMode } from "../model/agentSessionLaunchMode";
-import type { AgentProjectDropdownOptions } from "../AgentComposerProjectMenu";
-import type { AgentGUISideConversationPresentation } from "../../../agentSideConversationPresentation";
 export type AgentMentionReferenceTargetResolver = (
   item: AgentContextMentionItem
 ) => ReferenceLocateTarget | null;
 
 export interface AgentWorkspaceReferenceInitialTargetInput {
-  activeConversation: AgentGUINodeViewModel["rail"]["activeConversation"];
+  activeConversation: AgentGUIRailViewModel["activeConversation"];
   composerSelectedProjectPath: string | null;
-  userProjects: AgentGUINodeViewModel["rail"]["userProjects"];
+  userProjects: AgentGUIRailViewModel["userProjects"];
 }
 export type AgentWorkspaceReferenceInitialTargetResolver = (
   input: AgentWorkspaceReferenceInitialTargetInput
@@ -149,18 +153,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   agentConfig: string;
   agentSettingsMenu: string;
   agentEnvSetup: string;
-  manageAgents: string;
-  manageAgentsTitle: string;
-  manageAgentsDescription: string;
-  manageAgentsAvailable: string;
-  manageAgentsDisabled: string;
-  manageAgentsNoAvailable: string;
-  manageAgentsNoDisabled: string;
-  manageAgentsKeepOneAvailable: string;
-  manageAgentsRunningBlocked: (agent: string) => string;
-  removeAgentFromSidebar: (agent: string) => string;
-  addAgentToSidebar: (agent: string) => string;
-  dragAgentToReorder: (agent: string) => string;
   conversationFilterAll: string;
   conversationFilterCodex: string;
   conversationFilterClaudeCode: string;
@@ -223,7 +215,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   renameSessionDescription: string;
   renameSessionPlaceholder: string;
   renameSessionSave: string;
-  markSessionUnread: string;
   deleteSessionTitle: string;
   deleteSessionBody: string;
   cancel: string;
@@ -246,7 +237,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   slashCommandCompactLabel: string;
   slashCommandContextLabel: string;
   slashCommandFastLabel: string;
-  slashCommandGoalLabel: string;
   slashCommandInitLabel: string;
   slashCommandPlanLabel: string;
   slashCommandReviewLabel: string;
@@ -255,7 +245,6 @@ export interface AgentGUIViewLabels extends AgentGUIProviderReadinessLabels {
   slashCommandCompactDescription: string;
   slashCommandContextDescription: string;
   slashCommandFastDescription: string;
-  slashCommandGoalDescription: string;
   slashCommandInitDescription: string;
   slashCommandPlanDescription: string;
   slashCommandReviewDescription: string;
@@ -393,16 +382,21 @@ type AgentGUIComposerExternalPromptProps = Pick<
   | "resolvePastedPath"
   | "promptAssetLimit"
 >;
-export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptProps {
-  viewModel: AgentGUINodeViewModel;
+export interface AgentGUINodeViewProps
+  extends AgentGUIComposerExternalPromptProps {
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
   /** Complete presentation-only catalog for exact Agent mention identity. */
   mentionAgentTargets?: readonly AgentGUIAgentTarget[];
   /** Host-owned mention categories to omit from the palette. */
   hiddenMentionFilterIds?: readonly string[];
   referenceProvenanceFilters?: AgentComposerReferenceProvenanceFilters | null;
   sessionInputHistoryEnabled?: boolean;
-  sideConversationEnabled?: boolean;
-  sideConversationPresentation?: AgentGUISideConversationPresentation | null;
   sessionWorktreeEnabled?: boolean;
   sessionLaunchModesByProjectSectionKey?: Readonly<
     Record<string, AgentGUISessionLaunchMode>
@@ -424,8 +418,6 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
   ) => ReactNode;
   renderSidebarFooter?: AgentGUISidebarFooterRenderer;
   /** Renders the provider rail empty state in "exact" mode. See the type doc. */
-  renderProviderRailEmpty?: AgentGUIAgentsEmptyRenderer;
-  providerRailAllPresentation?: AgentGUIProviderRailAllPresentation | null;
   onLinkAction?: (action: WorkspaceLinkAction) => void;
   onHandoffConversation?: (input: {
     agentTargetId?: string | null;
@@ -478,7 +470,7 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
   onAgentEnvPanelOpen?: (input?: OpenAgentEnvPanelInput) => void;
   actions: {
     updateConversationFilter: (
-      filter: AgentGUINodeViewModel["rail"]["conversationFilter"]
+      filter: AgentGUIRailViewModel["conversationFilter"]
     ) => void;
     selectConversationFilterTarget: (input: {
       provider: AgentGUIProvider;
@@ -540,10 +532,6 @@ export interface AgentGUINodeViewProps extends AgentGUIComposerExternalPromptPro
     ) => Promise<void>;
     openForkSourceConversation: (agentSessionId: string) => Promise<void>;
     removeProject: (path: string) => Promise<boolean>;
-    moveProject: (
-      projectId: string,
-      beforeProjectId: string | null
-    ) => Promise<void>;
     toggleProjectPinned: (projectId: string, pinned: boolean) => Promise<void>;
     requestDeleteConversation: (agentSessionId: string) => void;
     cancelDeleteConversation: () => void;
@@ -579,7 +567,7 @@ export type { AgentGUIDetailPaneProps } from "./AgentGUIDetailPane.types";
 
 export interface AgentGUISidebarFooterContext {
   currentUserId?: string | null;
-  activeConversation: AgentGUINodeViewModel["rail"]["activeConversation"];
+  activeConversation: AgentGUIRailViewModel["activeConversation"];
 }
 export type AgentGUISidebarFooterRenderer = (
   ctx: AgentGUISidebarFooterContext

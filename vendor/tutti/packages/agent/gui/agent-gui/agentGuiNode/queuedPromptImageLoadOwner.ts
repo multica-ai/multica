@@ -1,4 +1,4 @@
-import type { AgentGUIRuntime } from "../../agentActivityRuntime";
+import type { ConversationServices } from "../../conversationServices";
 
 export interface QueuedPromptImageLoadRequest {
   agentSessionId: string;
@@ -8,7 +8,7 @@ export interface QueuedPromptImageLoadRequest {
   name: string;
   path: string;
   remoteUrl: string;
-  runtime: AgentGUIRuntime;
+  runtime: ConversationServices;
   workspaceId: string;
 }
 
@@ -63,13 +63,13 @@ export class QueuedPromptImageLoadOwner {
       { data: string; mimeType: string } | undefined
     > => {
       if (attachmentId) {
-        return await runtime.readSessionAttachment?.({
+        return await runtime.attachments?.readSessionAttachment?.({
           workspaceId,
           agentSessionId,
           attachmentId
         });
       }
-      return await runtime.readPromptAsset?.({
+      return await runtime.attachments?.readPromptAsset?.({
         workspaceId,
         agentSessionId,
         mimeType,

@@ -6,13 +6,13 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import {
-  useOptionalAgentGUIRuntime,
-  type AgentGUIRuntime
-} from "../../../agentActivityRuntime";
-import { ZoomableImage } from "../../../app/renderer/components/ZoomableImage";
-import { useTranslation } from "../../../i18n/index";
 import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { ZoomableImage } from "../../../app/renderer/components/ZoomableImage";
+import {
+  useOptionalConversationServices,
+  type ConversationServices
+} from "../../../conversationServices";
+import { useTranslation } from "../../../i18n/index";
 import type {
   AgentMessageContentVM,
   AgentMessageImageVM
@@ -47,7 +47,7 @@ export function AgentUserImageGrid({
 }): JSX.Element {
   "use memo";
   const images = message.images ?? [];
-  const runtime = useOptionalAgentGUIRuntime();
+  const runtime = useOptionalConversationServices();
   const reportFailure = useCallback(
     (image: AgentMessageImageVM, kind: ImageFailureKind, attempt: number) => {
       reportImageLoadFailure(runtime, image, kind, attempt);
@@ -183,7 +183,7 @@ function useAgentMessageImageSources(
   markFailed: (imageId: string, source: ImageFailureSource) => void;
   retry: (imageId: string) => void;
 } {
-  const runtime = useOptionalAgentGUIRuntime();
+  const runtime = useOptionalConversationServices();
   const [failedSources, setFailedSources] = useState<
     Map<string, ImageFailureSource>
   >(() => new Map());
@@ -237,8 +237,8 @@ function useAgentMessageImageSources(
           image.workspaceId &&
           image.agentSessionId &&
           (image.attachmentId
-            ? runtime?.readSessionAttachment
-            : runtime?.readPromptAsset) &&
+            ? runtime?.attachments?.readSessionAttachment
+            : runtime?.attachments?.readPromptAsset) &&
           (image.attachmentId || image.path)
       ),
     [failedSources, images, runtime, sources]
@@ -257,8 +257,8 @@ function useAgentMessageImageSources(
             !image.agentSessionId ||
             !(image.attachmentId || image.path) ||
             (image.attachmentId
-              ? !runtime?.readSessionAttachment
-              : !runtime?.readPromptAsset))
+              ? !runtime?.attachments?.readSessionAttachment
+              : !runtime?.attachments?.readPromptAsset))
       ),
     [failedSources, images, runtime, sources]
   );
@@ -269,17 +269,21 @@ function useAgentMessageImageSources(
     let canceled = false;
     if (
       runtime &&
-      (runtime.readSessionAttachment || runtime.readPromptAsset) &&
+      (runtime.attachments!.readSessionAttachment ||
+        runtime.attachments?.readPromptAsset) &&
       missingImages.length > 0
     ) {
       for (const image of missingImages) {
         const readImage = image.attachmentId
-          ? (runtime.readSessionAttachmentSource ?? runtime.readSessionAttachment)?.({
+          ? (
+              runtime.attachments!.readSessionAttachmentSource ??
+              runtime.attachments?.readSessionAttachment
+            )?.({
               workspaceId: image.workspaceId ?? "",
               agentSessionId: image.agentSessionId,
               attachmentId: image.attachmentId ?? ""
             })
-          : runtime.readPromptAsset?.({
+          : runtime.attachments?.readPromptAsset?.({
               workspaceId: image.workspaceId ?? "",
               agentSessionId: image.agentSessionId,
               mimeType: image.mimeType,
@@ -296,7 +300,9 @@ function useAgentMessageImageSources(
               const next = new Map(current);
               next.set(
                 image.id,
-                "url" in attachment ? attachment.url : `data:${attachment.mimeType};base64,${attachment.data}`
+                "url" in attachment
+                  ? attachment.url
+                  : `data:${attachment.mimeType};base64,${attachment.data}`
               );
               return next;
             });
@@ -403,12 +409,12 @@ function ImageLoadFailurePlaceholder({
 }
 
 function reportImageLoadFailure(
-  runtime: AgentGUIRuntime | null,
+  runtime: ConversationServices | null,
   image: AgentMessageImageVM,
   kind: ImageFailureKind,
   attempt: number
 ): void {
-  const reportDiagnostic = runtime?.reportDiagnostic;
+  const reportDiagnostic = runtime?.diagnostics?.reportDiagnostic;
   if (!reportDiagnostic) return;
   try {
     void Promise.resolve(
@@ -469,7 +475,7 @@ function imageSourceUrl(image: AgentMessageImageVM): string | null {
 function imageFailureSource(
   image: AgentMessageImageVM,
   src: string | null,
-  runtime: AgentGUIRuntime | null,
+  runtime: ConversationServices | null,
   unavailableReason?: ImageFailureUnavailableReason
 ): ImageFailureSource {
   if (src) {
@@ -483,7 +489,9 @@ function imageFailureSource(
     attachmentId,
     path: image.path?.trim() ?? "",
     readerAvailable: Boolean(
-      attachmentId ? runtime?.readSessionAttachment : runtime?.readPromptAsset
+      attachmentId
+        ? runtime?.attachments?.readSessionAttachment
+        : runtime?.attachments?.readPromptAsset
     ),
     ...(unavailableReason ? { unavailableReason } : {})
   };

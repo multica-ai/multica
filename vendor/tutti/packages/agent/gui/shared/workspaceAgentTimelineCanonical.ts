@@ -1,6 +1,4 @@
-import type { AgentActivityTurn } from "@tutti-os/agent-activity-core";
-import type { WorkspaceAgentActivityTimelineItem } from "./workspaceAgentTimelineTypes";
-import { isWorkspaceAgentToolCallItem } from "./workspaceAgentToolCallDisplay";
+import { isCollaborationTimelineItem } from "./agentConversation/projection/agentCollaborationProjection";
 import type {
   BuildWorkspaceAgentSessionDetailInput,
   WorkspaceAgentSessionDetailAgentItem,
@@ -20,7 +18,6 @@ import {
   thinkingStatusKind,
   userMessageProjectionKey
 } from "./workspaceAgentTimelineMessageHelpers";
-import { isCollaborationTimelineItem } from "./agentConversation/projection/agentCollaborationProjection";
 import {
   compareToolCallsAscending,
   delegatedToolStepFromCall,
@@ -37,61 +34,23 @@ import {
   visibleErrorFromPayload,
   withSourceTimelineItems
 } from "./workspaceAgentTimelineProjectionHelpers";
-import { enrichProjectedTurnsWithCanonicalErrors } from "./workspaceAgentTurnErrorProjection";
 import {
   normalizeToolName,
   shouldSuppressToolCall,
   suppressedUnavailableAskUserQuestionCallIds
 } from "./workspaceAgentTimelineSuppression";
-
-/**
- * A turn as built, kept while its first item's object lives: a commit keeps the
- * objects of items that did not change, and most turns have none that did.
- */
-const builtTurnByFirstItem = new WeakMap<
-  WorkspaceAgentActivityTimelineItem,
-  {
-    items: readonly WorkspaceAgentActivityTimelineItem[];
-    canonicalKey: string;
-    turn: WorkspaceAgentSessionDetailTurn;
-  }
->();
-
-/** The items of each turn, or null when an item's turn depends on those before it. */
-function itemsByExplicitTurn(
-  items: readonly WorkspaceAgentActivityTimelineItem[]
-): Map<string, WorkspaceAgentActivityTimelineItem[]> | null {
-  const groups = new Map<string, WorkspaceAgentActivityTimelineItem[]>();
-  for (const item of items) {
-    const turnId = item.turnId?.trim();
-    if (!turnId) return null;
-    const group = groups.get(turnId);
-    if (group) group.push(item);
-    else groups.set(turnId, [item]);
-  }
-  return groups;
-}
-
-/** What a turn takes from its canonical record, beyond its own items. */
-function canonicalTurnKey(
-  turnId: string,
-  sessionTurns: readonly AgentActivityTurn[]
-): string {
-  const turn = sessionTurns.find((candidate) => candidate.turnId === turnId);
-  return turn?.outcome === "failed" || turn?.outcome === "interrupted"
-    ? JSON.stringify([turn.outcome, turn.error?.message, turn.error?.detail])
-    : "";
-}
+import type { WorkspaceAgentActivityTimelineItem } from "./workspaceAgentTimelineTypes";
+import { isWorkspaceAgentToolCallItem } from "./workspaceAgentToolCallDisplay";
+import { enrichProjectedTurnsWithCanonicalErrors } from "./workspaceAgentTurnErrorProjection";
 
 export function buildCanonicalWorkspaceAgentDetailView(
   input: BuildWorkspaceAgentSessionDetailInput
 ): WorkspaceAgentSessionDetailViewModel {
-  return buildDetailView(input, true);
+  return buildDetailView(input);
 }
 
 function buildDetailView(
-  input: BuildWorkspaceAgentSessionDetailInput,
-  reuseTurns: boolean
+  input: BuildWorkspaceAgentSessionDetailInput
 ): WorkspaceAgentSessionDetailViewModel {
   const {
     activity,
@@ -118,44 +77,10 @@ function buildDetailView(
       : session.latestTurn
         ? [session.latestTurn]
         : [];
-  // Goal controls, suppressed calls and items without a turn reach across turns.
-  const groups =
-    reuseTurns && suppressedToolCallIds.size === 0
-      ? itemsByExplicitTurn(sortedTimelineItems)
-      : null;
-  const reusedTurns = new Map<string, WorkspaceAgentSessionDetailTurn>();
-  for (const [turnId, items] of groups ?? []) {
-    const built = builtTurnByFirstItem.get(items[0]!);
-    if (
-      built &&
-      built.items.length === items.length &&
-      built.items.every((item, index) => item === items[index]) &&
-      built.canonicalKey === canonicalTurnKey(turnId, canonicalTurns)
-    ) {
-      reusedTurns.set(turnId, built.turn);
-    }
-  }
-  const dedupedTurnIds = new Set<string>();
-
   for (const item of sortedTimelineItems) {
     const role = messageRole(item);
     const body = messageBody(item);
     const explicitTurnId = item.turnId?.trim();
-    const reused = explicitTurnId ? reusedTurns.get(explicitTurnId) : undefined;
-    if (reused) {
-      if (!turns.has(explicitTurnId!)) turns.set(explicitTurnId!, reused);
-      if (role === "user") {
-        const projectionKey = userMessageProjectionKey(item, body);
-        if (projectionKey) {
-          // This prompt was kept when the turn was built. If it would be dropped now, build everything.
-          if (isRecentDuplicateUserMessage(recentUserMessages.get(projectionKey), item)) {
-            return buildDetailView(input, false);
-          }
-          recentUserMessages.set(projectionKey, item);
-        }
-      }
-      continue;
-    }
 
     if (role === "user") {
       const turnId = explicitTurnId || `seq:${item.seq || item.id}`;
@@ -169,7 +94,6 @@ function buildDetailView(
           item
         )
       ) {
-        dedupedTurnIds.add(turnId);
         continue;
       }
       activeSequenceTurnId = turnId;
@@ -308,8 +232,7 @@ function buildDetailView(
   enrichProjectedTurnsWithCanonicalErrors({
     turns,
     latestTurnId: session.latestTurn?.turnId ?? null,
-    // A kept turn already has what its record adds, by its key.
-    sessionTurns: canonicalTurns.filter((turn) => !reusedTurns.has(turn.turnId)),
+    sessionTurns: canonicalTurns,
     provider: session.provider,
     agentSessionId: session.agentSessionId
   });
@@ -318,28 +241,13 @@ function buildDetailView(
     (turn) => turn.userMessages.length > 0 || turn.agentItems.length > 0
   );
   const delegatedCalls = findDelegatedToolCalls(visibleTurns);
-  // Nesting moves calls between turns, which a kept turn must not take part in.
-  if (delegatedCalls && reusedTurns.size > 0) {
-    return buildDetailView(input, false);
-  }
   if (delegatedCalls) nestDelegatedToolCalls(delegatedCalls);
-  const builtTurns = visibleTurns.filter((turn) => !reusedTurns.has(turn.id));
+  const builtTurns = visibleTurns;
   builtTurns.forEach(mergeBackgroundTerminalContinuations);
   builtTurns.forEach((turn) => {
     turn.rawAgentItems = [...turn.agentItems];
     turn.agentItems = regroupAgentItems(turn.agentItems);
   });
-  if (groups && !delegatedCalls) {
-    for (const turn of builtTurns) {
-      const items = groups.get(turn.id);
-      if (!items || dedupedTurnIds.has(turn.id)) continue;
-      builtTurnByFirstItem.set(items[0]!, {
-        items,
-        canonicalKey: canonicalTurnKey(turn.id, canonicalTurns),
-        turn
-      });
-    }
-  }
 
   return {
     activity,

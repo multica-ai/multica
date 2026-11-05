@@ -14,7 +14,7 @@ const labels = {
 };
 
 describe("loadCompleteAgentConversationMessages", () => {
-  it("loads every history page and returns canonical presentation order", async () => {
+  it("reads complete native history and returns canonical presentation order", async () => {
     const newest = message({
       messageId: "assistant-2",
       occurredAtUnixMs: 30,
@@ -33,22 +33,13 @@ describe("loadCompleteAgentConversationMessages", () => {
       sequence: 1,
       version: 10
     });
-    const listSessionMessages = vi
-      .fn()
-      .mockResolvedValueOnce({
-        hasMore: true,
-        latestVersion: 30,
-        messages: [newest, middle]
-      })
-      .mockResolvedValueOnce({
-        hasMore: false,
-        latestVersion: 30,
-        messages: [oldest]
-      });
+    const loadAll = vi.fn().mockResolvedValue([newest, middle, oldest]);
 
     const result = await loadCompleteAgentConversationMessages({
       agentSessionId: "session-1",
-      runtime: { listSessionMessages },
+      runtime: { conversations: { loadAll } } as Parameters<
+        typeof loadCompleteAgentConversationMessages
+      >[0]["runtime"],
       workspaceId: "workspace-1"
     });
 
@@ -57,10 +48,10 @@ describe("loadCompleteAgentConversationMessages", () => {
       "user-2",
       "assistant-2"
     ]);
-    expect(listSessionMessages).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ beforeVersion: 20, order: "desc" })
-    );
+    expect(loadAll).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: "workspace-1",
+      agentSessionId: "session-1"
+    });
   });
 });
 

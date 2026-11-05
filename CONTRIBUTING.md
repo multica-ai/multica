@@ -466,6 +466,12 @@ over its shared registration. `make destroy` removes the marked env file and
 this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
 path-derived fallback when it is run outside `make up`.
 
+For conversation view verification without taking over the installed runtime,
+use `pnpm --filter @multica/desktop dev:isolated`. It starts with a temporary
+HOME, Codex home, Electron profile and independent ports, and removes its data
+on exit. See [conversation view verification](docs/engineering/conversation-view-state.md#运行验证)
+for the fake-host browser checks that do not launch Electron or model CLIs.
+
 Desktop dev startup requires Go and compiles the current checkout's CLI before
 launching Electron. Missing Go or a compile failure stops startup; dev never
 substitutes a downloaded or globally installed CLI. Rebuild Go changes with

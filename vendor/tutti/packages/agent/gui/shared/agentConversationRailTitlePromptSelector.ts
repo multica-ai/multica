@@ -1,4 +1,4 @@
-import type { AgentGUITranscriptReader } from "../agentActivityRuntime";
+import type { AgentGUITranscriptReader } from "../conversationServices";
 import { resolveAgentGUIFirstUserMessageDisplayPrompt } from "./agentConversationTitleProjection.ts";
 
 export type AgentGUIConversationRailTitlePromptsBySessionId = Readonly<

@@ -71,7 +71,6 @@ export function useAgentGUIControllerActions(
     actions.editQueuedPrompt
   );
   const removeProject = useStableControllerEventCallback(actions.removeProject);
-  const moveProject = useStableControllerEventCallback(actions.moveProject);
   const toggleProjectPinned = useStableControllerEventCallback(
     actions.toggleProjectPinned
   );
@@ -126,7 +125,7 @@ export function useAgentGUIControllerActions(
       removeQueuedPrompt,
       editQueuedPrompt,
       removeProject,
-      moveProject,
+
       toggleProjectPinned,
       toggleConversationPinned,
       renameConversation,
@@ -147,7 +146,7 @@ export function useAgentGUIControllerActions(
       interruptCurrentTurn,
       loadOlderConversationMessages,
       removeProject,
-      moveProject,
+
       toggleProjectPinned,
       removeQueuedPrompt,
       renameConversation,

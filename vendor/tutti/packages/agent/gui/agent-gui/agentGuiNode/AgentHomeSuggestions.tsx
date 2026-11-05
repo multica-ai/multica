@@ -1,13 +1,7 @@
-import { memo, useState, type ComponentType, type SVGProps } from "react";
-import {
-  ArrowLeftRight,
-  Code,
-  Compass,
-  Import,
-  Pencil,
-  X
-} from "lucide-react";
 import { GitHubBrandIcon } from "@tutti-os/ui-system/icons";
+import { ArrowLeftRight, Code, Compass, Import, Pencil, X } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { memo, useState, type ComponentType, type SVGProps } from "react";
 import styles from "./AgentGUINode.styles";
 import type {
   AgentHomeSuggestionAction,
@@ -143,104 +137,108 @@ export interface AgentHomeSuggestionsProps {
  * suggestions in a card. Clicking a suggestion prefills the composer (it does
  * not auto-send) so the user can edit before sending.
  */
-export const AgentHomeSuggestions = memo(function AgentHomeSuggestions({
-  categories,
-  onSelectSuggestion,
-  onSelectAction,
-  closeLabel
-}: AgentHomeSuggestionsProps): React.JSX.Element | null {
-  "use memo";
+export const AgentHomeSuggestions = memo(
+  observer(function AgentHomeSuggestions({
+    categories,
+    onSelectSuggestion,
+    onSelectAction,
+    closeLabel
+  }: AgentHomeSuggestionsProps): React.JSX.Element | null {
+    "use memo";
 
-  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+    const [activeCategoryId, setActiveCategoryId] = useState<string | null>(
+      null
+    );
 
-  if (categories.length === 0) {
-    return null;
-  }
+    if (categories.length === 0) {
+      return null;
+    }
 
-  const activeCategory =
-    categories.find(
-      (category) =>
-        category.id === activeCategoryId && !isDirectCategory(category)
-    ) ?? null;
-  const ActiveCategoryIcon = activeCategory?.icon
-    ? CATEGORY_ICON[activeCategory.icon]
-    : null;
+    const activeCategory =
+      categories.find(
+        (category) =>
+          category.id === activeCategoryId && !isDirectCategory(category)
+      ) ?? null;
+    const ActiveCategoryIcon = activeCategory?.icon
+      ? CATEGORY_ICON[activeCategory.icon]
+      : null;
 
-  return (
-    <div className={styles.emptyHeroSuggestions}>
-      <div className={styles.emptyHeroSuggestionsChips}>
-        {categories.map((category) => {
-          const Icon = category.icon ? CATEGORY_ICON[category.icon] : null;
-          const direct = isDirectCategory(category);
-          const isActive = !direct && category.id === activeCategory?.id;
-          return (
-            <button
-              key={category.id}
-              type="button"
-              className={styles.emptyHeroSuggestionsChip}
-              aria-pressed={isActive}
-              onClick={() => {
-                if (direct) {
-                  // A chip may carry both: fill the prompt first, then run the
-                  // action (e.g. open the @ palette on a specific tab).
-                  if (category.prompt) {
-                    onSelectSuggestion(category.prompt);
+    return (
+      <div className={styles.emptyHeroSuggestions}>
+        <div className={styles.emptyHeroSuggestionsChips}>
+          {categories.map((category) => {
+            const Icon = category.icon ? CATEGORY_ICON[category.icon] : null;
+            const direct = isDirectCategory(category);
+            const isActive = !direct && category.id === activeCategory?.id;
+            return (
+              <button
+                key={category.id}
+                type="button"
+                className={styles.emptyHeroSuggestionsChip}
+                aria-pressed={isActive}
+                onClick={() => {
+                  if (direct) {
+                    // A chip may carry both: fill the prompt first, then run the
+                    // action (e.g. open the @ palette on a specific tab).
+                    if (category.prompt) {
+                      onSelectSuggestion(category.prompt);
+                    }
+                    if (category.action) {
+                      onSelectAction?.(category.action);
+                    }
+                    return;
                   }
-                  if (category.action) {
-                    onSelectAction?.(category.action);
-                  }
-                  return;
-                }
-                setActiveCategoryId((current) =>
-                  current === category.id ? null : category.id
-                );
-              }}
-            >
-              {Icon ? (
-                <Icon
-                  className={styles.emptyHeroSuggestionsChipIcon}
-                  aria-hidden
-                />
-              ) : null}
-              <span>{category.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      {activeCategory ? (
-        <div className={styles.emptyHeroSuggestionsCard}>
-          <div className={styles.emptyHeroSuggestionsCardHeader}>
-            <span className={styles.emptyHeroSuggestionsCardTitle}>
-              {ActiveCategoryIcon ? (
-                <ActiveCategoryIcon
-                  className={styles.emptyHeroSuggestionsChipIcon}
-                  aria-hidden
-                />
-              ) : null}
-              {activeCategory.label}
-            </span>
-            <button
-              type="button"
-              className={styles.emptyHeroSuggestionsCardClose}
-              aria-label={closeLabel}
-              title={closeLabel}
-              onClick={() => setActiveCategoryId(null)}
-            >
-              <X aria-hidden />
-            </button>
-          </div>
-          {activeCategory.items?.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={styles.emptyHeroSuggestionsItem}
-              onClick={() => onSelectSuggestion(suggestionPrompt(item))}
-            >
-              {item.label}
-            </button>
-          ))}
+                  setActiveCategoryId((current) =>
+                    current === category.id ? null : category.id
+                  );
+                }}
+              >
+                {Icon ? (
+                  <Icon
+                    className={styles.emptyHeroSuggestionsChipIcon}
+                    aria-hidden
+                  />
+                ) : null}
+                <span>{category.label}</span>
+              </button>
+            );
+          })}
         </div>
-      ) : null}
-    </div>
-  );
-});
+        {activeCategory ? (
+          <div className={styles.emptyHeroSuggestionsCard}>
+            <div className={styles.emptyHeroSuggestionsCardHeader}>
+              <span className={styles.emptyHeroSuggestionsCardTitle}>
+                {ActiveCategoryIcon ? (
+                  <ActiveCategoryIcon
+                    className={styles.emptyHeroSuggestionsChipIcon}
+                    aria-hidden
+                  />
+                ) : null}
+                {activeCategory.label}
+              </span>
+              <button
+                type="button"
+                className={styles.emptyHeroSuggestionsCardClose}
+                aria-label={closeLabel}
+                title={closeLabel}
+                onClick={() => setActiveCategoryId(null)}
+              >
+                <X aria-hidden />
+              </button>
+            </div>
+            {activeCategory.items?.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={styles.emptyHeroSuggestionsItem}
+                onClick={() => onSelectSuggestion(suggestionPrompt(item))}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  })
+);

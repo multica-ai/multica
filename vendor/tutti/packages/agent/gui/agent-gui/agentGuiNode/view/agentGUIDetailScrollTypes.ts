@@ -2,7 +2,6 @@ import type { MutableRefObject, RefObject } from "react";
 import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentGUINodeViewProps } from "../AgentGUINodeView";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
 import type { TimelineScrollAnchor } from "./agentGUIScrollMemory";
 
 export interface AgentGUIPendingPrependScrollAnchor {
@@ -25,5 +24,7 @@ export interface AgentGUIDetailScrollInput {
   timelineRef: RefObject<HTMLDivElement | null>;
   timelineScrollAnchorRef: MutableRefObject<TimelineScrollAnchor | null>;
   virtualScrollControllerRef: RefObject<AgentTranscriptVirtualScrollController | null>;
-  viewModel: AgentGUINodeViewModel;
+  activeConversationId: string | null;
+  hasOlderMessages: boolean;
+  isLoadingOlderMessages: boolean;
 }

@@ -1,4 +1,4 @@
-import { createPortal } from "react-dom";
+import { pickComposerFiles } from "@multica/tutti-agent-gui-host/composer-file-picker";
 import {
   Popover,
   PopoverAnchor,
@@ -7,48 +7,52 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { createPortal } from "react-dom";
+import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import { cn } from "../../../app/renderer/lib/utils";
-import styles from "../AgentGUINode.styles";
-import { AgentInteractivePromptSurface } from "../AgentInteractivePromptSurface";
-import { AgentQueuedPromptPanel } from "../AgentQueuedPromptPanel";
 import {
   AgentProjectDropdown,
   AgentProjectMissingStatusProbe
 } from "../AgentComposerSettingsMenus";
-import { AgentChromeNotice } from "../AgentSessionChrome";
-import { AgentFullAccessRestoredWarning } from "../AgentFullAccessRestoredWarning";
-import { AgentRichTextEditor } from "../agentRichText/AgentRichTextEditor";
 import { AgentFileMentionPalette } from "../AgentFileMentionPalette";
-import { AgentReferenceProvenanceFilterControl } from "../AgentReferenceProvenanceFilterControl";
+import { AgentFullAccessRestoredWarning } from "../AgentFullAccessRestoredWarning";
+import styles from "../AgentGUINode.styles";
+import { AgentInteractivePromptSurface } from "../AgentInteractivePromptSurface";
 import type { AgentMentionFilterId } from "../AgentMentionSearchController";
+import { AgentQueuedPromptPanel } from "../AgentQueuedPromptPanel";
+import { AgentReferenceProvenanceFilterControl } from "../AgentReferenceProvenanceFilterControl";
+import { AgentReviewPickerPanel } from "../AgentReviewPickerPanel";
+import { AgentRichTextEditor } from "../agentRichText/AgentRichTextEditor";
+import {
+  readAgentRichTextPromptImages,
+  supportedPromptImageMimeType
+} from "../agentRichText/agentRichTextPromptImages";
+import { AgentChromeNotice } from "../AgentSessionChrome";
 import { AgentSlashCommandPalette } from "../AgentSlashCommandPalette";
 import { AgentSlashStatusPanel } from "../AgentSlashStatusPanel";
-import { AgentReviewPickerPanel } from "../AgentReviewPickerPanel";
 import { ComposerFloatingMenuSurface } from "../composerFloatingMenu/ComposerFloatingMenuSurface";
-import type { AgentComposerViewProps } from "./AgentComposerView.types";
+import {
+  agentComposerDraftConnectors,
+  agentComposerDraftHasContent,
+  agentComposerDraftImages,
+  agentComposerDraftPrompt,
+  agentComposerDraftQuotes,
+  updateAgentComposerDraft
+} from "../model/agentComposerDraft";
 import {
   EMPTY_PROVIDER_SKILLS,
   EMPTY_WORKSPACE_APP_ICONS,
   SLASH_PALETTE_HEIGHT_PX,
   composerStyles
 } from "./AgentComposerChrome";
-import { ComposerDraftAttachments } from "./ComposerDraftAttachments";
-import { pickComposerFiles } from "@multica/tutti-agent-gui-host/composer-file-picker";
-import { readAgentRichTextPromptImages, supportedPromptImageMimeType } from "../agentRichText/agentRichTextPromptImages";
-import { useOptionalAgentHostApi } from "../../../agentActivityHost";
-import { ComposerFooter } from "./ComposerFooter";
+import type { AgentComposerViewProps } from "./AgentComposerView.types";
 import { AgentSessionLaunchModeSelect } from "./AgentSessionLaunchModeSelect";
+import { ComposerDraftAttachments } from "./ComposerDraftAttachments";
+import { ComposerFooter } from "./ComposerFooter";
 import { AgentQuickPromptPopover } from "./quickPrompts/AgentQuickPromptPopover";
-import {
-  agentComposerDraftHasContent,
-  agentComposerDraftConnectors,
-  agentComposerDraftImages,
-  agentComposerDraftPrompt,
-  agentComposerDraftQuotes,
-  updateAgentComposerDraft
-} from "../model/agentComposerDraft";
 
-export function AgentComposerView(
+export const AgentComposerView = observer(function AgentComposerView(
   input: AgentComposerViewProps
 ): React.JSX.Element {
   const filePickerHost = useOptionalAgentHostApi();
@@ -61,9 +65,6 @@ export function AgentComposerView(
     availableSkills = EMPTY_PROVIDER_SKILLS,
     composerSettings,
     workspaceId,
-    queueStatus = "active",
-    queuedPrompts,
-    drainingQueuedPromptId,
     workspaceAppIcons = EMPTY_WORKSPACE_APP_ICONS,
     activePromptDisabledReason = null,
     activePromptKeyboardShortcutsEnabled = true,
@@ -185,8 +186,7 @@ export function AgentComposerView(
   ) : (
     composerActionButton
   );
-  const showComposerActionInFooter =
-    true;
+  const showComposerActionInFooter = true;
   const showProjectSelectorInFooter =
     !isHeroLayout && input.props.showProjectSelectorInFooter === true;
   const projectSelectorNode =
@@ -285,36 +285,23 @@ export function AgentComposerView(
           />
         </div>
       ) : null}
-      {queuedPrompts.length > 0 ? (
-        <div
-          className={cn(
-            styles.composerFloatingPrompt,
-            styles.composerQueuedPromptFloating
-          )}
-          data-testid="agent-gui-composer-queued-prompts"
-        >
-          <AgentQueuedPromptPanel
-            queueStatus={queueStatus}
-            queuedPrompts={queuedPrompts}
-            drainingQueuedPromptId={drainingQueuedPromptId}
-            labels={{
-              queuedLabel: labels.queuedLabel,
-              queuePausedByUserLabel: labels.queuePausedByUserLabel,
-              sendQueuedPromptNext: labels.sendQueuedPromptNext,
-              editQueuedPrompt: labels.editQueuedPrompt,
-              deleteQueuedPrompt: labels.deleteQueuedPrompt,
-              queuedPromptMoreActions: labels.queuedPromptMoreActions
-            }}
-            onSendQueuedPromptNext={onSendQueuedPromptNext}
-            onRemoveQueuedPrompt={onRemoveQueuedPrompt}
-            onEditQueuedPrompt={onEditQueuedPrompt}
-            agentSessionId={slashStatusAgentSessionId}
-            onLinkClick={handleLinkClick}
-            workspaceId={workspaceId}
-            workspaceAppIcons={workspaceAppIcons}
-          />
-        </div>
-      ) : null}
+      <AgentQueuedPromptPanel
+        labels={{
+          queuedLabel: labels.queuedLabel,
+          queuePausedByUserLabel: labels.queuePausedByUserLabel,
+          sendQueuedPromptNext: labels.sendQueuedPromptNext,
+          editQueuedPrompt: labels.editQueuedPrompt,
+          deleteQueuedPrompt: labels.deleteQueuedPrompt,
+          queuedPromptMoreActions: labels.queuedPromptMoreActions
+        }}
+        onSendQueuedPromptNext={onSendQueuedPromptNext}
+        onRemoveQueuedPrompt={onRemoveQueuedPrompt}
+        onEditQueuedPrompt={onEditQueuedPrompt}
+        agentSessionId={slashStatusAgentSessionId}
+        onLinkClick={handleLinkClick}
+        workspaceId={workspaceId}
+        workspaceAppIcons={workspaceAppIcons}
+      />
       {showProjectMissingProbe ? (
         <AgentProjectMissingStatusProbe
           composerSettings={composerSettings}
@@ -459,9 +446,7 @@ export function AgentComposerView(
                       input.props.resolvePastedPath ?? undefined
                     }
                   />
-                  {!showComposerActionInFooter
-                    ? composerActionNode
-                    : null}
+                  {!showComposerActionInFooter ? composerActionNode : null}
                 </div>
               </div>
             </PopoverAnchor>
@@ -703,17 +688,33 @@ export function AgentComposerView(
               input.props.onCapabilitySettingsRequest
             }
             onRequestWorkspaceReferences={onRequestWorkspaceReferences}
-            onWorkspaceReferencePicker={input.externalPromptEntriesSupported ? async () => {
-              try {
-                const files = await pickComposerFiles();
-                const images = files.filter((file) => supportedPromptImageMimeType(file.type));
-                const regularFiles = files.filter((file) => !supportedPromptImageMimeType(file.type));
-                if (images.length) handlePastedImages(await readAgentRichTextPromptImages(images));
-                if (regularFiles.length) input.addExternalPromptEntries(regularFiles);
-              } catch {
-                filePickerHost?.toast?.error(document.documentElement.lang.startsWith("zh") ? "无法读取所选文件，请重新选择" : "Could not read the selected files. Please select them again.");
-              }
-            } : handleWorkspaceReferencePicker}
+            onWorkspaceReferencePicker={
+              input.externalPromptEntriesSupported
+                ? async () => {
+                    try {
+                      const files = await pickComposerFiles();
+                      const images = files.filter((file) =>
+                        supportedPromptImageMimeType(file.type)
+                      );
+                      const regularFiles = files.filter(
+                        (file) => !supportedPromptImageMimeType(file.type)
+                      );
+                      if (images.length)
+                        handlePastedImages(
+                          await readAgentRichTextPromptImages(images)
+                        );
+                      if (regularFiles.length)
+                        input.addExternalPromptEntries(regularFiles);
+                    } catch {
+                      filePickerHost?.toast?.error(
+                        document.documentElement.lang.startsWith("zh")
+                          ? "无法读取所选文件，请重新选择"
+                          : "Could not read the selected files. Please select them again."
+                      );
+                    }
+                  }
+                : handleWorkspaceReferencePicker
+            }
             onMentionPaletteButton={handleMentionPaletteButton}
             onSettingsChange={onSettingsChange}
             onSubmit={onSubmit}
@@ -756,4 +757,4 @@ export function AgentComposerView(
       </div>
     </form>
   );
-}
+});

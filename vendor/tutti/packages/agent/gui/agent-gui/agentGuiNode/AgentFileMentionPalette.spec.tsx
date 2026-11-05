@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { setAgentGuiI18nTestLocale } from "../../i18n/testUtils";
 import { AgentFileMentionPalette } from "./AgentFileMentionPalette";
 import type { AgentMentionSearchState } from "./AgentMentionSearchController";
 import type { AgentContextMentionItem } from "./agentRichText/agentFileMentionExtension";
@@ -168,7 +169,8 @@ describe("AgentFileMentionPalette", () => {
     expect(onSelectItem).not.toHaveBeenCalled();
   });
 
-  it("renders issue mentions with room issue status labels instead of agent session labels", () => {
+  it("renders task mentions with Multica status labels and categories", () => {
+    setAgentGuiI18nTestLocale("zh-CN");
     const state: AgentMentionSearchState = {
       status: "ready",
       query: "",
@@ -188,7 +190,7 @@ describe("AgentFileMentionPalette", () => {
               title: "写一个文件",
               creatorName: "Alice",
               iconUrl: "tutti-asset://issue/default.png",
-              status: "not_started"
+              status: "todo"
             },
             {
               kind: "workspace-issue",
@@ -198,7 +200,7 @@ describe("AgentFileMentionPalette", () => {
               name: "查询天气",
               title: "查询天气",
               creatorName: "Bob",
-              status: "running"
+              status: "in_progress"
             },
             {
               kind: "workspace-issue",
@@ -218,7 +220,7 @@ describe("AgentFileMentionPalette", () => {
               name: "整理输出",
               title: "整理输出",
               creatorName: "Dora",
-              status: "pending_acceptance"
+              status: "in_review"
             },
             {
               kind: "workspace-issue",
@@ -228,7 +230,7 @@ describe("AgentFileMentionPalette", () => {
               name: "归档结果",
               title: "归档结果",
               creatorName: "Eve",
-              status: "completed"
+              status: "done"
             },
             {
               kind: "workspace-issue",
@@ -238,7 +240,7 @@ describe("AgentFileMentionPalette", () => {
               name: "重试任务",
               title: "重试任务",
               creatorName: "Frank",
-              status: "failed"
+              status: "blocked"
             },
             {
               kind: "workspace-issue",
@@ -248,7 +250,7 @@ describe("AgentFileMentionPalette", () => {
               name: "停止执行",
               title: "停止执行",
               creatorName: "Grace",
-              status: "canceled"
+              status: "cancelled"
             }
           ],
           totalCount: 7,
@@ -277,32 +279,24 @@ describe("AgentFileMentionPalette", () => {
       />
     );
 
-    expect(screen.getByText("待开始")).toBeVisible();
-    expect(
-      screen
-        .getByRole("option", { name: /写一个文件/ })
-        .querySelector('[data-agent-mention-issue-icon="true"] img')
-    ).toHaveAttribute("src", "tutti-asset://issue/default.png");
-    expect(screen.getAllByText("执行中")).toHaveLength(2);
-    expect(screen.getByText("待验收")).toBeVisible();
+    expect(screen.getByText("待办")).toBeVisible();
+    expect(screen.getAllByText("进行中")).toHaveLength(2);
+    expect(screen.getByText("审核中")).toBeVisible();
     expect(screen.getByText("已完成")).toBeVisible();
-    expect(screen.getAllByText("失败")).toHaveLength(1);
+    expect(screen.getByText("已阻塞")).toBeVisible();
     expect(screen.getByText("已取消")).toBeVisible();
     const statusTags = Array.from(
-      document.querySelectorAll('[data-agent-mention-status-tag="true"]')
+      document.querySelectorAll(".multica-mention-task-status")
     );
-    expect(statusTags.map((tag) => tag.getAttribute("data-tone"))).toEqual([
-      "neutral",
-      "blue",
-      "blue",
-      "purple",
-      "green",
-      "red",
-      "neutral"
+    expect(statusTags.map((tag) => tag.getAttribute("data-category"))).toEqual([
+      "unstarted",
+      "started",
+      "started",
+      "started",
+      "done",
+      "started",
+      "closed"
     ]);
-    for (const statusTag of statusTags) {
-      expect(statusTag.className).not.toContain("border-[");
-    }
     expect(screen.queryByText("空闲")).toBeNull();
     expect(screen.queryByText("已退出")).toBeNull();
   });

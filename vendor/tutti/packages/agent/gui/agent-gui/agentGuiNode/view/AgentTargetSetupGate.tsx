@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-import { useState } from "react";
 import { useExternalStoreSnapshot } from "@tutti-os/ui-react-hooks";
 import {
   Button,
@@ -13,17 +11,20 @@ import {
   SelectValue,
   cn
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import type { ReactNode } from "react";
+import { useState } from "react";
+import { useAgentHostApi } from "../../../agentActivityHost.tsx";
+import type { AgentHostAgentTargetSetupSnapshot } from "../../../host/agentHostApi.ts";
+import { useTranslation } from "../../../i18n/index.ts";
+import { resolveAgentErrorPresentation } from "../../../shared/agentEnv/agentErrorPresentation.ts";
 import {
   AgentSetupDialog,
   AgentSetupStepIcon,
   type AgentSetupStepStatus
 } from "../../../shared/agentEnv/AgentSetupDialog.tsx";
 import { useAgentTargetSetupController } from "../../../shared/agentEnv/agentTargetSetupController.tsx";
-import { resolveAgentErrorPresentation } from "../../../shared/agentEnv/agentErrorPresentation.ts";
 import { useAgentVisibleErrorPresentation } from "../../../shared/visibleError/AgentVisibleErrorPresentationContext.tsx";
-import { useAgentHostApi } from "../../../agentActivityHost.tsx";
-import type { AgentHostAgentTargetSetupSnapshot } from "../../../host/agentHostApi.ts";
-import { useTranslation } from "../../../i18n/index.ts";
 import styles from "../AgentGUINode.styles.ts";
 
 export interface AgentTargetSetupGateProps {
@@ -33,7 +34,7 @@ export interface AgentTargetSetupGateProps {
   gateVisible?: boolean;
 }
 
-export function AgentTargetSetupGate({
+export const AgentTargetSetupGate = observer(function AgentTargetSetupGate({
   children,
   carouselMountedExternally,
   dialogOwner = false,
@@ -406,7 +407,7 @@ export function AgentTargetSetupGate({
       ) : null}
     </>
   );
-}
+});
 
 function TerminalLoginGuide({
   command,

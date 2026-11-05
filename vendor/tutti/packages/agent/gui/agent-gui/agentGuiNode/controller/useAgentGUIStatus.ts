@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import type { TranslateFn } from "../../../i18n/index";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
+import { useExternalStoreSelector } from "../../../shared/useExternalStoreSelector";
 import { buildDockAgentProbeTooltipLines } from "../../workspaceDesktop/view/desktopDockAgentProbeTooltipModel";
 import type { AgentComposerSlashStatus } from "../AgentComposer";
 import type { AgentGUINodeProps } from "../AgentGUINode.types";
@@ -10,16 +10,32 @@ import {
   slashStatusLimitsFromQuotas,
   slashStatusUsageErrorMessage
 } from "../AgentGUINode.usage";
-import type { useAgentGUINodeController } from "./useAgentGUINodeController";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import {
   selectAgentStatusControllerSnapshot,
   type AgentStatusControllerSnapshot,
   type AgentStatusRequestReason
 } from "./AgentStatusController";
+import type { useAgentGUIPage } from "./useAgentGUIPage";
 
-type AgentGUIViewModel = ReturnType<
-  typeof useAgentGUINodeController
->["viewModel"];
+type AgentGUIViewModel = Pick<
+  ReturnType<typeof useAgentGUIPage>,
+  | "shell"
+  | "rail"
+  | "detail"
+  | "composer"
+  | "interaction"
+  | "readiness"
+  | "operations"
+>;
 type RuntimeRequests = AgentGUINodeProps["runtimeRequests"];
 
 const EMPTY_STATUS_SNAPSHOT: AgentStatusControllerSnapshot = {
@@ -47,43 +63,59 @@ export function useAgentGUIStatus(input: {
   activeProvider: string;
   agentStatusController: RuntimeRequests["agentStatusController"];
   t: TranslateFn;
-  viewModel: AgentGUIViewModel;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
 }) {
-  const { agentStatusController, t, viewModel } = input;
-  const agentStatusSnapshot = useEngineSelector(
+  const {
+    agentStatusController,
+    t,
+    shell,
+    rail,
+    detail,
+    composer,
+    interaction,
+    readiness,
+    operations
+  } = input;
+  const agentStatusSnapshot = useExternalStoreSelector(
     agentStatusController ?? EMPTY_STATUS_STORE,
     selectStatusSnapshot
   );
   const activeStatusScopeKey =
-    viewModel.rail.activeConversation?.agentTargetId?.trim() ||
-    viewModel.rail.selectedAgentTarget.agentTargetId?.trim() ||
-    viewModel.rail.selectedAgentTarget.targetId.trim();
+    rail.activeConversation?.agentTargetId?.trim() ||
+    rail.selectedAgentTarget.agentTargetId?.trim() ||
+    rail.selectedAgentTarget.targetId.trim();
   // Conversation identity is available before detail/raw-state hydration and
   // is the caller-visible binding for shared sessions.
   const activeStatusSessionId =
-    viewModel.rail.activeConversationId?.trim() ||
-    viewModel.interaction.sessionChrome.rawState?.agentSessionId?.trim() ||
+    rail.activeConversationId?.trim() ||
+    interaction.sessionChrome.rawState?.agentSessionId?.trim() ||
     null;
   const activeStatusTarget = useMemo(
     () =>
       resolveAgentGUIStatusTarget({
-        agentTargets: viewModel.rail.agentTargets,
+        agentTargets: rail.agentTargets,
         scopeKey: activeStatusScopeKey
       }),
-    [activeStatusScopeKey, viewModel.rail.agentTargets]
+    [activeStatusScopeKey, rail.agentTargets]
   );
   const railStatusTarget = useMemo(
     () =>
       resolveAgentGUIRailStatusTarget({
-        conversationFilter: viewModel.rail.conversationFilter,
-        agentTargets: viewModel.rail.agentTargets
+        conversationFilter: rail.conversationFilter,
+        agentTargets: rail.agentTargets
       }),
-    [viewModel.rail.conversationFilter, viewModel.rail.agentTargets]
+    [rail.conversationFilter, rail.agentTargets]
   );
   const railStatusProvider = railStatusTarget?.provider ?? null;
   const railStatusScopeKey =
-    viewModel.rail.conversationFilter.kind === "agentTarget"
-      ? viewModel.rail.conversationFilter.agentTargetId.trim()
+    rail.conversationFilter.kind === "agentTarget"
+      ? rail.conversationFilter.agentTargetId.trim()
       : activeStatusScopeKey;
   const activeAgentStatusSnapshot = selectAgentStatusControllerSnapshot(
     agentStatusSnapshot,
@@ -228,15 +260,15 @@ export function useAgentGUIStatus(input: {
     () =>
       slashStatusLimitsFromQuotas(
         activeAgentStatusSnapshot.value?.quotas,
-        viewModel.composer.composerSettings.selectedModelValue ??
-          viewModel.composer.composerSettings.draftSettings.model,
+        composer.state.composerSettings.selectedModelValue ??
+          composer.state.composerSettings.draftSettings.model,
         t
       ),
     [
       activeAgentStatusSnapshot.value?.quotas,
       t,
-      viewModel.composer.composerSettings.draftSettings.model,
-      viewModel.composer.composerSettings.selectedModelValue
+      composer.state.composerSettings.draftSettings.model,
+      composer.state.composerSettings.selectedModelValue
     ]
   );
   const railAgentStatusLimits = useMemo(

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setAgentGuiI18nTestLocale } from "../../i18n/testUtils";
+import type { AgentContextMentionProvider } from "./agentContextMentionProvider";
+import { AGENT_CONTEXT_MENTION_PROVIDER_IDS } from "./agentContextMentionProvider";
 import {
   AgentMentionSearchController as BaseAgentMentionSearchController,
   MAX_BROWSE_CACHE_ENTRIES,
@@ -8,8 +10,6 @@ import {
   type AgentMentionSearchState
 } from "./AgentMentionSearchController";
 import { issuePreviewText } from "./agentMentionSearchHelpers";
-import type { AgentContextMentionProvider } from "./agentContextMentionProvider";
-import { AGENT_CONTEXT_MENTION_PROVIDER_IDS } from "./agentContextMentionProvider";
 
 // Controller work settles through timers or microtasks. Vitest's 50 ms polling
 // default adds seconds of idle time across this state-heavy suite.
@@ -515,12 +515,9 @@ describe("AgentMentionSearchController", () => {
 
     expect(categories.map((category) => category.id)).toEqual([
       "session",
-      "file",
       "issue",
-      "agent",
-      "app"
+      "agent"
     ]);
-    expect(labelById.get("app")).toBe("应用");
     expect(labelById.get("session")).toBe("会话");
     expect(labelById.get("issue")).toBe("任务");
     expect(labelById.get("agent")).toBe("智能体");
@@ -535,8 +532,7 @@ describe("AgentMentionSearchController", () => {
 
     expect(states.at(-1)?.categories.map((category) => category.id)).toEqual([
       "session",
-      "agent",
-      "app"
+      "agent"
     ]);
   });
 
@@ -2495,7 +2491,7 @@ describe("AgentMentionSearchController", () => {
     );
   });
 
-  it("resets the active filter when the picker closes", () => {
+  it("retains the active filter when the picker closes", () => {
     const controller = new AgentMentionSearchController({
       queryFiles: vi.fn().mockResolvedValue({
         workspaceId: "room-1",
@@ -2520,7 +2516,7 @@ describe("AgentMentionSearchController", () => {
     expect(states.at(-1)).toMatchObject({
       status: "idle",
       mode: "browse",
-      filter: "session"
+      filter: "issue"
     });
   });
 

@@ -1469,6 +1469,9 @@ importers:
 
   vendor/tutti/packages/agent/gui:
     dependencies:
+      '@multica/conversation-client':
+        specifier: workspace:*
+        version: link:../../../../../packages/conversation-client
       '@tanstack/react-virtual':
         specifier: 3.14.8
         version: 3.14.8(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1559,6 +1562,9 @@ importers:
       mobx:
         specifier: 'catalog:'
         version: 6.16.1
+      mobx-react-lite:
+        specifier: 'catalog:'
+        version: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       monaco-editor:
         specifier: 0.55.1
         version: 0.55.1
@@ -1611,9 +1617,6 @@ importers:
       '@types/use-sync-external-store':
         specifier: 0.0.6
         version: 0.0.6
-      mobx-react-lite:
-        specifier: 'catalog:'
-        version: 4.1.1(mobx@6.16.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@24.12.4)(typescript@6.0.3))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@24.12.4)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))

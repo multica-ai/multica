@@ -19,7 +19,7 @@ export const DEFAULT_HEALTH_PORT = 19514;
 export function assertResolvedProfile(profile: string): void {
   if (!profile) {
     throw new Error(
-      "daemon profile is unresolved — refusing to fall back to the default CLI profile",
+      "daemon profile is unresolved — refusing to fall back to the default CLI profile"
     );
   }
 }
@@ -42,6 +42,15 @@ export function deriveProfileName(targetUrl: string): string {
  */
 export function healthPortForProfile(profile: string): number {
   assertResolvedProfile(profile);
+  if (process.env.MULTICA_DEV_ISOLATED === "1") {
+    const port = Number(process.env.MULTICA_DEV_HEALTH_PORT);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(
+        "Isolated development requires a valid MULTICA_DEV_HEALTH_PORT"
+      );
+    }
+    return port;
+  }
   let sum = 0;
   for (const b of Buffer.from(profile, "utf-8")) sum += b;
   return DEFAULT_HEALTH_PORT + 1 + (sum % 1000);
@@ -62,7 +71,12 @@ export function profileLogPath(profile: string): string {
 
 /** The daemon keeps local conversation data under the profile directory, not its state directory. */
 export function profileDaemonTimingPath(profile: string): string {
-  return join(profileDir(profile), "local-conversations", "diagnostics", "daemon-timing.jsonl");
+  return join(
+    profileDir(profile),
+    "local-conversations",
+    "diagnostics",
+    "daemon-timing.jsonl"
+  );
 }
 
 export function profilePidPath(profile: string): string {
@@ -71,12 +85,17 @@ export function profilePidPath(profile: string): string {
 
 export function profilePortPath(profile: string): string {
   const registered = profile === "desktop-runtime";
-  return join(profileStateDir(profile), registered ? "runtime.json" : "daemon.port");
+  return join(
+    profileStateDir(profile),
+    registered ? "runtime.json" : "daemon.port"
+  );
 }
 
 function profileStateDir(profile: string): string {
   assertResolvedProfile(profile);
-  return profile === "desktop-runtime" ? join(homedir(), ".multica", "desktop-runtime") : profileDir(profile);
+  return profile === "desktop-runtime"
+    ? join(homedir(), ".multica", "desktop-runtime")
+    : profileDir(profile);
 }
 
 // Sidecar file that records which Multica user the cached PAT in config.json
@@ -98,7 +117,9 @@ export function profileArgs(profile: string): string[] {
 }
 
 /** Credentials Desktop synced into its named profile; throws when absent. */
-export async function readDesktopProfileCredentials(profile: string): Promise<{ userId: string; token: string; serverUrl: string }> {
+export async function readDesktopProfileCredentials(
+  profile: string
+): Promise<{ userId: string; token: string; serverUrl: string }> {
   assertResolvedProfile(profile);
   const userId = (await readFile(profileUserIdPath(profile), "utf8")).trim();
   const config = JSON.parse(await readFile(profileConfigPath(profile), "utf8"));

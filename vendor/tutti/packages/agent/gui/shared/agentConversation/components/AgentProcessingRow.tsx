@@ -1,7 +1,8 @@
+import { observer } from "mobx-react-lite";
 import type { JSX } from "react";
 import type { AgentProcessingRowVM } from "../contracts/agentProcessingRowVM";
 
-export function AgentProcessingRow({
+export const AgentProcessingRow = observer(function AgentProcessingRow({
   row,
   label,
   paused = false
@@ -23,7 +24,7 @@ export function AgentProcessingRow({
       </span>
     </div>
   );
-}
+});
 
 function processingLabel(row: AgentProcessingRowVM, fallback: string): string {
   if (row.label?.trim()) {

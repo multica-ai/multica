@@ -1,23 +1,22 @@
 import { memo, type Ref } from "react";
-import { AgentConversationFlow } from "../../../shared/agentConversation/components/AgentConversationFlow";
-import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
-import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
+import type { AgentConversationFollowEndMode } from "../../../shared/agentConversation/agentConversationFollowEndController";
+import { AgentConversationFlow } from "../../../shared/agentConversation/components/AgentConversationFlow";
 import type {
   AgentTranscriptAttachmentLocator,
   AgentTranscriptTurnAttachment,
   AgentTranscriptVirtualScrollController
 } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import type { AgentTranscriptEditRetryControl } from "../../../shared/agentConversation/components/useAgentTranscriptEditRetryProjection";
+import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
 import { userScrollBehavior } from "./agentGUIDetailScrollHelpers";
-import type { AgentConversationFollowEndMode } from "../../../shared/agentConversation/agentConversationFollowEndController";
 
 const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
 
 interface AgentGUIConversationTimelinePaneProps {
-  conversation: AgentConversationVM | null;
+  agentSessionId: string | null;
   editRetry?: AgentTranscriptEditRetryControl;
   turnAttachments?: readonly AgentTranscriptTurnAttachment[];
   turnAttachmentLocatorRef?: Ref<AgentTranscriptAttachmentLocator>;
@@ -29,7 +28,7 @@ interface AgentGUIConversationTimelinePaneProps {
   isLoadingOlderMessages: boolean;
   isVisible: boolean;
   followEndMode: AgentConversationFollowEndMode;
-  forkThroughTurnPendingTurnIds?: readonly string[];
+
   virtualScrollControllerRef: Ref<AgentTranscriptVirtualScrollController>;
   loadingLabel: string;
   empty: React.JSX.Element;
@@ -49,7 +48,7 @@ interface AgentGUIConversationTimelinePaneProps {
 
 export const AgentGUIConversationTimelinePane = memo(
   function AgentGUIConversationTimelinePane({
-    conversation,
+    agentSessionId,
     editRetry,
     turnAttachments,
     turnAttachmentLocatorRef,
@@ -58,7 +57,7 @@ export const AgentGUIConversationTimelinePane = memo(
     isLoadingOlderMessages,
     isVisible,
     followEndMode,
-    forkThroughTurnPendingTurnIds,
+
     virtualScrollControllerRef,
     loadingLabel,
     empty,
@@ -83,7 +82,7 @@ export const AgentGUIConversationTimelinePane = memo(
           </div>
         ) : null}
         <AgentConversationFlow
-          conversation={conversation}
+          agentSessionId={agentSessionId}
           followEndMode={followEndMode}
           editRetry={editRetry}
           turnAttachments={turnAttachments}
@@ -96,7 +95,6 @@ export const AgentGUIConversationTimelinePane = memo(
           onLinkAction={onLinkAction}
           onAuthLogin={onAuthLogin}
           onForkThroughTurn={onForkThroughTurn}
-          forkThroughTurnPendingTurnIds={forkThroughTurnPendingTurnIds}
           availableSkills={availableSkills}
           workspaceAppIcons={workspaceAppIcons}
           labels={labels}

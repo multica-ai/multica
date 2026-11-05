@@ -1,4 +1,3 @@
-import { useState, type JSX } from "react";
 import {
   Select,
   SelectContent,
@@ -9,16 +8,18 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { useState, type JSX } from "react";
 import { cn } from "../../../app/renderer/lib/utils";
 import type { AgentGUIAgentTarget } from "../../../types";
 import styles from "../AgentGUINode.styles";
+import { AgentGUIOwnerAvatar } from "../AgentGUIOwnerAvatar";
 import {
   AgentComposerHandoffIcon,
   HANDOFF_SELECT_IDLE_VALUE,
   resolveComposerProviderTargetIconUrl
 } from "./AgentComposerChrome";
 import { resolveHandoffTargetOwnershipLabel } from "./handoffTargetPresentation";
-import { AgentGUIOwnerAvatar } from "../AgentGUIOwnerAvatar";
 
 export interface AgentHandoffMenuLabels {
   action: string;
@@ -49,7 +50,7 @@ export interface AgentHandoffMenuProps {
  * The host owns the authoritative target list and launch behavior; this
  * component owns only temporary menu disclosure, presentation, and icon motion.
  */
-export function AgentHandoffMenu({
+export const AgentHandoffMenu = observer(function AgentHandoffMenu({
   align = "start",
   contentClassName,
   disabled = false,
@@ -238,4 +239,4 @@ export function AgentHandoffMenu({
       </Select>
     </span>
   );
-}
+});

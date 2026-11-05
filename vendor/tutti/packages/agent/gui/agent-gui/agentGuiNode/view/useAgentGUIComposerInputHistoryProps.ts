@@ -2,8 +2,16 @@ import { useMemo, type RefObject } from "react";
 import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentComposerProps } from "../AgentComposer";
 import type { AgentGUINodeViewProps } from "../AgentGUINodeView";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
 import { projectAgentComposerInputHistory } from "../model/agentComposerInputHistory";
+import type {
+  AgentGUIComposerViewModel,
+  AgentGUIDetailViewModel,
+  AgentGUIInteractionViewModel,
+  AgentGUIOperationsViewModel,
+  AgentGUIRailViewModel,
+  AgentGUIReadinessViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import { useStableEventCallback } from "./agentGUIViewUtils";
 
 type InputHistoryProps = Pick<
@@ -25,14 +33,20 @@ export function useAgentGUIComposerInputHistoryProps(input: {
     scrollTop: number;
   } | null>;
   timelineRef: RefObject<HTMLDivElement | null>;
-  viewModel: AgentGUINodeViewModel;
+  shell: AgentGUIShellViewModel;
+  rail: AgentGUIRailViewModel;
+  detail: AgentGUIDetailViewModel;
+  composer: AgentGUIComposerViewModel;
+  interaction: AgentGUIInteractionViewModel;
+  readiness: AgentGUIReadinessViewModel;
+  operations: AgentGUIOperationsViewModel;
 }): InputHistoryProps {
   const onRequestOlderInputHistoryPage = useStableEventCallback(() => {
-    const activeConversationId = input.viewModel.rail.activeConversationId;
+    const activeConversationId = input.rail.activeConversationId;
     if (
       !activeConversationId ||
-      !input.viewModel.detail.hasOlderMessages ||
-      input.viewModel.detail.isLoadingOlderMessages
+      !input.detail.hasOlderMessages ||
+      input.detail.isLoadingOlderMessages
     ) {
       return;
     }
@@ -52,17 +66,16 @@ export function useAgentGUIComposerInputHistoryProps(input: {
   return useMemo(
     () => ({
       inputHistory,
-      inputHistoryHasOlderPage:
-        input.enabled && input.viewModel.detail.hasOlderMessages,
+      inputHistoryHasOlderPage: input.enabled && input.detail.hasOlderMessages,
       inputHistoryIsLoadingOlderPage:
-        input.enabled && input.viewModel.detail.isLoadingOlderMessages,
+        input.enabled && input.detail.isLoadingOlderMessages,
       onRequestOlderInputHistoryPage: input.enabled
         ? onRequestOlderInputHistoryPage
         : undefined
     }),
     [
-      input.viewModel.detail.hasOlderMessages,
-      input.viewModel.detail.isLoadingOlderMessages,
+      input.detail.hasOlderMessages,
+      input.detail.isLoadingOlderMessages,
       input.enabled,
       inputHistory,
       onRequestOlderInputHistoryPage

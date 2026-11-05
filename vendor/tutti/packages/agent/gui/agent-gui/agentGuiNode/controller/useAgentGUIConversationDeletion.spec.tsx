@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import { describe, expect, it, vi } from "vitest";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import { useAgentGUIConversationDeletion } from "./useAgentGUIConversationDeletion";
 
@@ -25,7 +25,7 @@ const nextConversation: AgentGUIConversationSummary = {
   updatedAtUnixMs: 1
 };
 
-function createInput(agentActivityRuntime: AgentGUIRuntime) {
+function createInput(agentActivityRuntime: ConversationServices) {
   const activeConversationIdRef = { current: targetConversation.id };
   const unactivate = vi.fn(async () => {});
   const toastError = vi.fn();
@@ -71,8 +71,8 @@ describe("useAgentGUIConversationDeletion", () => {
       };
     });
     const { input, unactivate } = createInput({
-      deleteSession
-    } as unknown as AgentGUIRuntime);
+      mutations: { deleteSessions: deleteSession }
+    } as unknown as ConversationServices);
     const { result } = renderHook(() => {
       const [activeConversationId, setActiveConversationId] = useState<
         string | null
@@ -92,8 +92,7 @@ describe("useAgentGUIConversationDeletion", () => {
     await waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(1));
     expect(activeConversationIdObservedByDelete).toBe(targetConversation.id);
     expect(deleteSession).toHaveBeenCalledWith({
-      agentSessionId: targetConversation.id,
-      workspaceId: "workspace-1"
+      agentSessionIds: [targetConversation.id]
     });
     await waitFor(() =>
       expect(input.deleteAgentSessionView).toHaveBeenCalledTimes(1)
@@ -113,8 +112,8 @@ describe("useAgentGUIConversationDeletion", () => {
       throw new Error("delete failed");
     });
     const { input, toastError, unactivate } = createInput({
-      deleteSession
-    } as unknown as AgentGUIRuntime);
+      mutations: { deleteSessions: deleteSession }
+    } as unknown as ConversationServices);
     const { result } = renderHook(() => {
       const [activeConversationId, setActiveConversationId] = useState<
         string | null
@@ -161,8 +160,8 @@ describe("useAgentGUIConversationDeletion", () => {
       throw conflict;
     });
     const { input, toastError, unactivate } = createInput({
-      deleteSession
-    } as unknown as AgentGUIRuntime);
+      mutations: { deleteSessions: deleteSession }
+    } as unknown as ConversationServices);
     const { result } = renderHook(() => useAgentGUIConversationDeletion(input));
 
     act(() => result.current.confirmDeleteConversation());

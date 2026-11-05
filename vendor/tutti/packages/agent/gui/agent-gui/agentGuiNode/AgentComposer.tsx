@@ -1,59 +1,62 @@
+import { repairMentionPaletteHighlight } from "@tutti-os/ui-rich-text/at-panel";
+import { observer } from "mobx-react-lite";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOptionalConversationServices } from "../../conversationServices";
+import { useActiveConversationState } from "../../state/useActiveConversationState";
+import {
+  agentMentionItemKey,
+  isAgentMentionItemDisabled
+} from "./AgentFileMentionPalette";
+import { type AgentFileMentionSuggestionState } from "./agentRichText/agentFileMentionExtension";
+import type { AgentRichTextEditorHandle } from "./agentRichText/AgentRichTextEditor";
+import { formatSlashStatusTokenCount } from "./AgentSlashStatusPanel";
+import type { AgentComposerProps } from "./composer/AgentComposer.types";
+import {
+  EMPTY_PROMPT_TIPS,
+  EMPTY_PROVIDER_SKILLS
+} from "./composer/AgentComposerChrome";
+import { AgentComposerView } from "./composer/AgentComposerView";
+import { useAgentQuickPromptLibrary } from "./composer/quickPrompts/useAgentQuickPromptLibrary";
+import { useAgentMentionSearchController } from "./composer/useAgentMentionSearchController";
+import { useComposerDraftAttachmentsWithConnectors } from "./composer/useComposerDraftAttachmentsWithConnectors";
+import { useComposerDraftCapabilitiesRequest } from "./composer/useComposerDraftCapabilitiesRequest";
+import { useComposerFocusAndDrop } from "./composer/useComposerFocusAndDrop";
+import { useComposerInputHistory } from "./composer/useComposerInputHistory";
+import {
+  INITIAL_DOCK_COMPOSER_METRICS,
+  useComposerLayout
+} from "./composer/useComposerLayout";
+import { useComposerMentionActions } from "./composer/useComposerMentionActions";
+import { useComposerPaletteCatalog } from "./composer/useComposerPaletteCatalog";
+import { useComposerPresentation } from "./composer/useComposerPresentation";
+import { useComposerProviderTargets } from "./composer/useComposerProviderTargets";
+import { useComposerSlashActions } from "./composer/useComposerSlashActions";
+import { refreshComposerSlashCapabilities } from "./composer/useComposerSlashCapabilitiesRefresh";
+import { useMentionPaletteFrame } from "./composer/useMentionPaletteFrame";
+import { useScopedProjectMissingState } from "./composer/useScopedProjectMissingState";
+import { useSessionWorktreeLaunch } from "./composer/useSessionWorktreeLaunch";
+import type { AgentGUIComposerContentType } from "./engagement/agentGUIEngagement.types";
+import {
+  agentComposerDraftFiles,
+  agentComposerDraftHasContent,
+  agentComposerDraftImages,
+  agentComposerDraftLargeTexts,
+  agentComposerDraftPrompt,
+  agentComposerDraftQuotes
+} from "./model/agentComposerDraft";
+import { agentComposerDraftAttachmentProjection } from "./model/agentComposerDraftAttachmentProjection";
+import {
+  groupAgentExternalPromptEntryInsertions,
+  resolveAgentExternalPromptEntries
+} from "./model/agentExternalPromptEntries";
+import { projectAgentGUIComposerGateControls } from "./model/agentGuiComposerGate";
 import type {
   AgentComposerDraft,
   AgentComposerDraftFile,
   AgentComposerDraftImage,
   AgentComposerDraftLargeText
 } from "./model/agentGuiNodeTypes";
-import { repairMentionPaletteHighlight } from "@tutti-os/ui-rich-text/at-panel";
 import { clampSlashCommandHighlight } from "./model/agentSlashCommands";
-import type { AgentRichTextEditorHandle } from "./agentRichText/AgentRichTextEditor";
-import {
-  agentMentionItemKey,
-  isAgentMentionItemDisabled
-} from "./AgentFileMentionPalette";
-import { type AgentFileMentionSuggestionState } from "./agentRichText/agentFileMentionExtension";
-import { formatSlashStatusTokenCount } from "./AgentSlashStatusPanel";
-import { useOptionalAgentGUIRuntime } from "../../agentActivityRuntime";
-import { useComposerDraftAttachmentsWithConnectors } from "./composer/useComposerDraftAttachmentsWithConnectors";
-import {
-  INITIAL_DOCK_COMPOSER_METRICS,
-  useComposerLayout
-} from "./composer/useComposerLayout";
-import { useComposerPaletteCatalog } from "./composer/useComposerPaletteCatalog";
-import { useMentionPaletteFrame } from "./composer/useMentionPaletteFrame";
-import { useComposerSlashActions } from "./composer/useComposerSlashActions";
-import { useComposerMentionActions } from "./composer/useComposerMentionActions";
-import { useComposerProviderTargets } from "./composer/useComposerProviderTargets";
-import { useComposerFocusAndDrop } from "./composer/useComposerFocusAndDrop";
-import { useComposerPresentation } from "./composer/useComposerPresentation";
-import { AgentComposerView } from "./composer/AgentComposerView";
-import {
-  EMPTY_PROMPT_TIPS,
-  EMPTY_PROVIDER_SKILLS
-} from "./composer/AgentComposerChrome";
-import { useAgentMentionSearchController } from "./composer/useAgentMentionSearchController";
-import { useAgentQuickPromptLibrary } from "./composer/quickPrompts/useAgentQuickPromptLibrary";
-import { useScopedProjectMissingState } from "./composer/useScopedProjectMissingState";
-import type { AgentComposerProps } from "./composer/AgentComposer.types";
-import {
-  agentComposerDraftFiles,
-  agentComposerDraftImages,
-  agentComposerDraftLargeTexts,
-  agentComposerDraftQuotes,
-  agentComposerDraftHasContent,
-  agentComposerDraftPrompt
-} from "./model/agentComposerDraft";
-import { agentComposerDraftAttachmentProjection } from "./model/agentComposerDraftAttachmentProjection";
-import type { AgentGUIComposerContentType } from "./engagement/agentGUIEngagement.types";
-import { projectAgentGUIComposerGateControls } from "./model/agentGuiComposerGate";
-import {
-  groupAgentExternalPromptEntryInsertions,
-  resolveAgentExternalPromptEntries
-} from "./model/agentExternalPromptEntries";
-import { useComposerInputHistory } from "./composer/useComposerInputHistory";
-import { refreshComposerSlashCapabilities } from "./composer/useComposerSlashCapabilitiesRefresh";
-import { useComposerDraftCapabilitiesRequest } from "./composer/useComposerDraftCapabilitiesRequest";
 
 export { formatSlashStatusTokenCount };
 
@@ -61,28 +64,48 @@ export { formatSlashStatusTokenCount };
  * 引用 picker 的确认结果:松散文件按 file mention 插入;mentionItems(如文件夹 bundle)
  * 作为整体节点插入。两者各走各的插入路径,composer 不需要理解 bundle 内部结构。
  */
-export type { WorkspaceReferencePickResult } from "./composer/useComposerDraftAttachments";
 export type {
   AgentComposerCapabilityMenuState,
   AgentComposerCapabilitySettingsTarget,
   AgentComposerComputerUseAuthorizationState,
-  AgentComposerGitBranchLoader,
   AgentComposerGitBranches,
+  AgentComposerGitBranchLoader,
   AgentComposerPromptTip,
+  AgentComposerProps,
   AgentComposerReferenceProvenanceFilter,
   AgentComposerReferenceProvenanceFilters,
-  AgentComposerProps,
   AgentComposerSlashStatus,
   AgentComposerSlashStatusLimit,
   AgentComposerSubmitOptions,
   AgentComposerUsage
 } from "./composer/AgentComposer.types";
-import { useSessionWorktreeLaunch } from "./composer/useSessionWorktreeLaunch";
+export type { WorkspaceReferencePickResult } from "./composer/useComposerDraftAttachments";
 
 const EMPTY_HIDDEN_MENTION_FILTER_IDS: readonly string[] = [];
 
-export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
-  "use memo";
+export const AgentComposer = observer(function AgentComposer(
+  inputProps: AgentComposerProps
+): React.JSX.Element {
+  const nativeState = useActiveConversationState(
+    inputProps.agentSessionId ?? null
+  );
+  const state = inputProps.state;
+  const props = {
+    ...inputProps,
+    availableCommands: state.availableCommands,
+    availableSkills: state.availableSkills,
+    hasCompactableContext: state.hasCompactableContext,
+    compactSupported: state.compactSupported,
+    gate: state.gate,
+    composerSettings: state.composerSettings,
+    usage: state.usage,
+    promptImagesSupported: state.promptImagesSupported,
+    isSendingTurn: state.isSendingTurn,
+    isSubmittingPrompt: state.isSubmittingPrompt,
+    activeTurnId: state.activeTurnId
+  };
+  const isInterrupting =
+    nativeState.isInterrupting || nativeState.isCancelPending;
   const {
     workspaceId,
     agentSessionId = null,
@@ -118,7 +141,6 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     stopDisabled,
     activePrompt,
     promptTips = EMPTY_PROMPT_TIPS,
-    isInterrupting,
     isSendingTurn,
     isSubmittingPrompt,
     projectMissingProbeEnabled = true,
@@ -179,7 +201,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     files: draftFiles,
     largeTexts: draftLargeTexts
   } = agentComposerDraftAttachmentProjection(draftContent);
-  const agentActivityRuntime = useOptionalAgentGUIRuntime();
+  const agentActivityRuntime = useOptionalConversationServices();
   const promptFilesSupported = Boolean(
     canUploadAttachment && prepareExternalPromptFiles
   );
@@ -187,7 +209,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
     resolveExternalPromptEntries || promptFilesSupported
   );
   const pastedTextStagingSupported = Boolean(
-    canUploadAttachment && agentActivityRuntime?.stagePastedText
+    canUploadAttachment && agentActivityRuntime?.attachments?.stagePastedText
   );
   const reportContentEntered = (
     contentType: AgentGUIComposerContentType
@@ -202,10 +224,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   const submitGuidanceWithComposerModifiers: NonNullable<
     AgentComposerProps["onSubmitGuidance"]
   > = (content, displayPrompt) => {
-    onSubmitGuidance?.(
-      content,
-      displayPrompt
-    );
+    onSubmitGuidance?.(content, displayPrompt);
   };
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [mentionHighlightedKey, setMentionHighlightedKey] = useState<
@@ -233,8 +252,8 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
       props.sessionWorktreeEnabled &&
       Boolean(
         props.labels.sessionLaunchModeLabel &&
-        props.labels.sessionLaunchModeLocal &&
-        props.labels.sessionLaunchModeWorktree
+          props.labels.sessionLaunchModeLocal &&
+          props.labels.sessionLaunchModeWorktree
       ),
     mode: props.sessionLaunchMode,
     onModeChange: props.onSessionLaunchModeChange,
@@ -431,11 +450,7 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
         });
       });
     }
-  }, [
-    draftContent,
-    draftPrompt,
-    settlePendingInputHistory
-  ]);
+  }, [draftContent, draftPrompt, settlePendingInputHistory]);
 
   useEffect(() => {
     if (
@@ -664,13 +679,13 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
   });
   const { activePromptTip, promptTipStyle, rotatingPromptTips } = layout;
   const presentation = useComposerPresentation({
+    isInterrupting,
     draftContent,
     canQueueWhileBusy,
     showStopButton,
     activeTurnId,
     draftOverridesStopButton,
     stopDisabled,
-    isInterrupting,
     isSendingTurn,
     activePrompt,
     disabledReason,
@@ -743,4 +758,4 @@ export function AgentComposer(props: AgentComposerProps): React.JSX.Element {
       sessionWorktreeLaunch={sessionWorktreeLaunch}
     />
   );
-}
+});

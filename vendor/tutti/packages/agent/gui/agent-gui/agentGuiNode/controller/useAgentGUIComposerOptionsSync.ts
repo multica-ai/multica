@@ -1,12 +1,13 @@
 import type { RefObject } from "react";
 import { useCallback, useEffect, useRef } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import { subscribe, subscribeCoalesced } from "../../../host/agentHostEventBus";
 import type {
   AgentSessionComposerSettings,
   AgentSessionReasoningEffort
 } from "../../../shared/agentSessionTypes";
 import type { AgentGUINodeData } from "../../../types";
+import type { AgentGUIComposerDefaultsAuthorityReconciler } from "./agentGuiComposerDefaultsReconciliation";
 import { readNodeDefaultDraftSettings } from "./agentGuiController.composerHelpers";
 import {
   composerTargetDataForConversation,
@@ -20,13 +21,12 @@ import {
   mergeAgentModelCatalogInvalidationEvents,
   withoutAcknowledgedComposerDefaults
 } from "./agentGuiController.providerHelpers";
-import type { AgentGUIComposerDefaultsAuthorityReconciler } from "./agentGuiComposerDefaultsReconciliation";
 
 export function useAgentGUIComposerOptionsSync(input: {
   activeConversationId: string | null;
   activeConversationIdRef: RefObject<string | null>;
   activeSessionTarget: AgentGUIActiveSessionTarget | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   composerTargetData: AgentGUIComposerTargetData;
   conversationFilter: unknown;
   currentUserId: string | null | undefined;
@@ -110,16 +110,15 @@ export function useAgentGUIComposerOptionsSync(input: {
         "";
       const request = {
         agentSessionId: input.activeConversationIdRef.current,
-        workspaceId: input.workspaceId,
         cwd,
         force: options?.force || authorityRead.force ? true : undefined,
         waitForFreshModelCatalog: options?.waitForFreshModelCatalog,
         provider: targetData.provider,
-        agentTargetId: targetData.agentTargetId,
+        targetKey: targetData.agentTargetId,
         settings: requestSettings
       } as const;
       const section = options?.section ?? "core";
-      const composerOptions = input.agentActivityRuntime.getComposerOptions({
+      const composerOptions = input.agentActivityRuntime.composer.load({
         ...request,
         section
       });

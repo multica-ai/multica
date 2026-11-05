@@ -1,4 +1,3 @@
-import { selectEngineSession } from "@tutti-os/agent-activity-core";
 import { useCallback, useRef } from "react";
 import { translate } from "../../../i18n/index";
 import { textPromptContent } from "../model/agentComposerDraft";
@@ -35,8 +34,7 @@ type UseAgentGUIOperationActionsInput = Omit<
   Parameters<typeof useAgentGUIComposerSettingsActions>[0] &
   Parameters<typeof useAgentGUIConversationDeletion>[0] &
   Parameters<typeof useAgentGUIQueueActions>[0] &
-  Parameters<typeof useAgentGUIConversationMetadataActions>[0] &
-  {
+  Parameters<typeof useAgentGUIConversationMetadataActions>[0] & {
     providerComposerOptions: ReturnType<
       NewConversationInput["getCachedComposerOptions"]
     >;
@@ -105,7 +103,7 @@ export function useAgentGUIOperationActions(
   const isSessionMarkedNonResumable = useCallback(
     (agentSessionId: string): boolean => {
       if (
-        selectEngineSession(input.sessionEngine.getSnapshot(), agentSessionId)
+        input.conversationServices.sessions.session(agentSessionId)
           ?.resumable === false
       ) {
         return true;
@@ -117,7 +115,11 @@ export function useAgentGUIOperationActions(
       );
       return conversation?.resumable === false;
     },
-    [input.sessionEngine, input.conversationsRef, input.transientConversation]
+    [
+      input.conversationServices,
+      input.conversationsRef,
+      input.transientConversation
+    ]
   );
 
   const submitActions = useAgentGUISubmitInteractionActions({

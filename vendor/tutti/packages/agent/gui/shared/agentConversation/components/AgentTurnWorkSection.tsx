@@ -1,10 +1,9 @@
-import { useCallback, useRef, type JSX, type ReactNode } from "react";
 import { Button } from "@tutti-os/ui-system/components";
 import { ChevronDownIcon } from "@tutti-os/ui-system/icons";
+import { observer } from "mobx-react-lite";
+import { useCallback, useRef, type JSX, type ReactNode } from "react";
 import { useTranslation } from "../../../i18n/index";
-import { CollapsibleReveal } from "./CollapsibleReveal";
 import type { AgentTurnDisclosureStore } from "./AgentTurnDisclosureContext";
-import { useElapsedSeconds } from "./useElapsedSeconds";
 import {
   formatAgentTurnDuration,
   type AgentTurnDuration,
@@ -12,6 +11,8 @@ import {
   type AgentTurnWorkSectionModel,
   type AgentTurnWorkSectionRow
 } from "./agentTurnWorkSectionModel";
+import { CollapsibleReveal } from "./CollapsibleReveal";
+import { useElapsedSeconds } from "./useElapsedSeconds";
 
 interface AgentTurnWorkSectionProps {
   model: AgentTurnWorkSectionModel;
@@ -32,7 +33,7 @@ interface AgentTurnWorkSectionProps {
   ) => JSX.Element;
 }
 
-export function AgentTurnWorkSection({
+export const AgentTurnWorkSection = observer(function AgentTurnWorkSection({
   model,
   sessionId,
   turnKey,
@@ -164,7 +165,7 @@ export function AgentTurnWorkSection({
       {footer}
     </div>
   );
-}
+});
 
 function renderRows(
   rows: readonly AgentTurnWorkSectionRow[],

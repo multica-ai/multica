@@ -1,9 +1,9 @@
-import type { TranslateFn } from "../../i18n/index";
 import { toLocalShortDateTime } from "../../app/renderer/shell/utils/format";
+import type { TranslateFn } from "../../i18n/index";
 import type { AgentUsageQuota } from "../../shared/contracts/dto";
 import type { AgentGUIAgentTarget, AgentGUIProvider } from "../../types";
 import type { AgentComposerSlashStatusLimit } from "./AgentComposer";
-import type { useAgentGUINodeController } from "./controller/useAgentGUINodeController";
+import type { useAgentGUIPage } from "./controller/useAgentGUIPage";
 
 function slashStatusQuotaLabel(quota: AgentUsageQuota, t: TranslateFn): string {
   const modelName = quota.modelName?.trim();
@@ -157,9 +157,16 @@ function normalizeSlashStatusModelName(
 }
 
 export function resolveAgentGUIRailStatusTarget(input: {
-  conversationFilter: ReturnType<
-    typeof useAgentGUINodeController
-  >["viewModel"]["rail"]["conversationFilter"];
+  conversationFilter: Pick<
+    ReturnType<typeof useAgentGUIPage>,
+    | "shell"
+    | "rail"
+    | "detail"
+    | "composer"
+    | "interaction"
+    | "readiness"
+    | "operations"
+  >["rail"]["conversationFilter"];
   agentTargets: readonly AgentGUIAgentTarget[];
 }): AgentGUIAgentTarget | null {
   const filter = input.conversationFilter;

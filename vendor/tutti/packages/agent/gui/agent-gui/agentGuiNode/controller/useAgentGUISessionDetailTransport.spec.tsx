@@ -3,10 +3,10 @@ import type { AgentActivityMessage } from "@tutti-os/agent-activity-core";
 import type { PropsWithChildren, RefObject } from "react";
 import { describe, expect, it } from "vitest";
 import {
-  AgentGUIRuntimeProvider,
-  type AgentGUIRuntime
-} from "../../../agentActivityRuntime";
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
+  ConversationServicesProvider,
+  type ConversationServices
+} from "../../../conversationServices";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import type { AgentGUINodeData } from "../../../types";
 import { useAgentGUISessionDetailTransport } from "./useAgentGUISessionDetailTransport";
 
@@ -14,9 +14,9 @@ describe("useAgentGUISessionDetailTransport", () => {
   it("renders with no active conversation", () => {
     const runtime = createRuntime([]);
     const wrapper = ({ children }: PropsWithChildren) => (
-      <AgentGUIRuntimeProvider runtime={runtime}>
+      <ConversationServicesProvider runtime={runtime}>
         {children}
-      </AgentGUIRuntimeProvider>
+      </ConversationServicesProvider>
     );
     const rendered = renderHook(
       () =>
@@ -27,8 +27,12 @@ describe("useAgentGUISessionDetailTransport", () => {
           agentActivityRuntimeOrigin: "test",
           dataRef: ref({ provider: "codex" } as AgentGUINodeData),
           isMountedRef: ref(true),
-          sessionEngine: createTestAgentSessionEngine("workspace-1"),
-          sessionFamily: { childSessions: [], pendingInteractions: [], rootSession: null },
+          conversationServices: createTestRuntimeState("workspace-1"),
+          sessionFamily: {
+            childSessions: [],
+            pendingInteractions: [],
+            rootSession: null
+          },
           workspaceId: "workspace-1"
         }),
       { wrapper }
@@ -41,9 +45,9 @@ describe("useAgentGUISessionDetailTransport", () => {
     const optimisticMessage = message();
     const runtime = createRuntime([optimisticMessage]);
     const wrapper = ({ children }: PropsWithChildren) => (
-      <AgentGUIRuntimeProvider runtime={runtime}>
+      <ConversationServicesProvider runtime={runtime}>
         {children}
-      </AgentGUIRuntimeProvider>
+      </ConversationServicesProvider>
     );
     const rendered = renderHook(
       () =>
@@ -54,7 +58,7 @@ describe("useAgentGUISessionDetailTransport", () => {
           agentActivityRuntimeOrigin: "test",
           dataRef: ref({ provider: "codex" } as AgentGUINodeData),
           isMountedRef: ref(true),
-          sessionEngine: createTestAgentSessionEngine("workspace-1"),
+          conversationServices: createTestRuntimeState("workspace-1"),
           sessionFamily: {
             childSessions: [],
             pendingInteractions: [],
@@ -65,7 +69,9 @@ describe("useAgentGUISessionDetailTransport", () => {
       { wrapper }
     );
 
-    expect(rendered.result.current.activeSessionView?.hasOlderMessages).toBe(false);
+    expect(rendered.result.current.activeSessionView?.hasOlderMessages).toBe(
+      false
+    );
     expect(rendered.result.current.resolveSessionMessages("session-1")).toEqual(
       [optimisticMessage]
     );
@@ -74,11 +80,15 @@ describe("useAgentGUISessionDetailTransport", () => {
 
 function createRuntime(
   messages: readonly AgentActivityMessage[]
-): AgentGUIRuntime {
+): ConversationServices {
   return {
     origin: "test",
-    transcript: { messages: () => messages, hasOlderMessages: () => false, conversationIds: () => ["session-1"] }
-  } as unknown as AgentGUIRuntime;
+    transcript: {
+      messages: () => messages,
+      hasOlderMessages: () => false,
+      conversationIds: () => ["session-1"]
+    }
+  } as unknown as ConversationServices;
 }
 
 function message(): AgentActivityMessage {

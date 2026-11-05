@@ -5,9 +5,9 @@ import { observable, runInAction } from "mobx";
 import { observer } from "mobx-react-lite";
 import { useRef, type FC } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useModelValue } from "../../engine/useEngineSelector";
+import { useModelValue } from "../../useModelValue";
 import type { AgentConversationVM } from "../contracts/agentConversationVM";
-import { AgentTranscriptView } from "./AgentTranscriptView";
+import { AgentTranscriptLayout as AgentTranscriptView } from "./AgentTranscriptView";
 
 vi.mock("../../../i18n/index", () => ({
   getActiveUiLanguage: () => "en",
@@ -42,7 +42,17 @@ function stubLayout() {
         this.dataset.testid === "agent-gui-timeline"
           ? VIEWPORT_HEIGHT
           : ITEM_HEIGHT;
-      return { bottom: height, height, left: 0, right: 800, top: 0, width: 800, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 800,
+        top: 0,
+        width: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      } as DOMRect;
     }
   );
 }

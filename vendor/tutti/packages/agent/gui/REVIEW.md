@@ -18,7 +18,7 @@ Do not use an unsupported statement such as "no impact" as review evidence.
 Trigger this lane when a change touches:
 
 - Session, Turn, Interaction, Goal, runtime-operation, or prompt lifecycle
-- `AgentGUIRuntime`, `AgentHostApi`, engine state, selectors, projections,
+- `ConversationServices`, `AgentHostApi`, engine state, selectors, projections,
   controllers, event handling, reconciliation, or public exports
 - composer, Rail, timeline, Message Center, approvals, interactive prompts,
   Workbench integration, or host adapters

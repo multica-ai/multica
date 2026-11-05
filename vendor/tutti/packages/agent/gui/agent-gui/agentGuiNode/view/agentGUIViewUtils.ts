@@ -1,3 +1,9 @@
+import type { WorkspaceFileReferenceCopy } from "@tutti-os/workspace-file-reference/contracts";
+import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
+import type { AgentGUIViewLabels } from "../AgentGUINodeView";
+import type { AgentGUIRailViewModel } from "../model/agentGuiNodeTypes";
+import { resolveAgentGUIConversationDisplayTitle } from "../model/agentGuiProviderIdentity";
 export function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -43,11 +49,6 @@ export function useOptionalStableEventCallback<Args extends unknown[], Result>(
     return (...args: Args) => callbackRef.current?.(...args) as Result;
   }, [callback != null]);
 }
-import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
-import { resolveAgentGUIConversationDisplayTitle } from "../model/agentGuiProviderIdentity";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
-import type { AgentGUIViewLabels } from "../AgentGUINodeView";
-import type { WorkspaceFileReferenceCopy } from "@tutti-os/workspace-file-reference/contracts";
 
 export const fallbackWorkspaceFileReferenceCopy: WorkspaceFileReferenceCopy = {
   t(key, values) {
@@ -65,7 +66,7 @@ export function roundAgentGuiPerfMs(value: number): number {
 
 export function conversationPlainTitle(
   conversation: Pick<
-    AgentGUINodeViewModel["rail"]["conversations"][number],
+    AgentGUIRailViewModel["conversations"][number],
     "title" | "titleFallback"
   >,
   labels: Pick<AgentGUIViewLabels, "untitledConversationTitle">,
@@ -77,4 +78,3 @@ export function conversationPlainTitle(
     labels.untitledConversationTitle
   );
 }
-import { useCallback, useLayoutEffect, useMemo, useRef } from "react";

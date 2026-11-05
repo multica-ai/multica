@@ -6,14 +6,14 @@ import {
   type PropsWithChildren
 } from "react";
 import {
+  ConversationServicesProvider,
+  type ConversationServices
+} from "./conversationServices";
+import {
   toAgentHostRuntimeApi,
   type AgentHostInputApi,
   type AgentHostRuntimeApi
 } from "./host/agentHostApi";
-import {
-  AgentGUIRuntimeProvider,
-  type AgentGUIRuntime
-} from "./agentActivityRuntime";
 
 const AgentActivityHostContext = createContext<AgentHostRuntimeApi | null>(
   null
@@ -22,7 +22,7 @@ const AgentActivityHostContext = createContext<AgentHostRuntimeApi | null>(
 let currentAgentHostApi: AgentHostRuntimeApi | null = null;
 
 export interface AgentGUIActivityHostProviderProps extends PropsWithChildren {
-  agentActivityRuntime?: AgentGUIRuntime | null;
+  agentActivityRuntime?: ConversationServices | null;
   agentHostApi?: AgentHostInputApi | null;
 }
 
@@ -37,11 +37,11 @@ export function AgentGUIActivityHostProvider({
   );
   currentAgentHostApi = resolvedAgentHostApi;
   return (
-    <AgentGUIRuntimeProvider runtime={agentActivityRuntime}>
+    <ConversationServicesProvider runtime={agentActivityRuntime}>
       <AgentActivityHostContext.Provider value={resolvedAgentHostApi}>
         {children}
       </AgentActivityHostContext.Provider>
-    </AgentGUIRuntimeProvider>
+    </ConversationServicesProvider>
   );
 }
 

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import {
   act,
   fireEvent,
@@ -7,19 +5,23 @@ import {
   screen,
   waitFor
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resetAgentHostApiForTests,
   setAgentHostApiForTests
 } from "../../../agentActivityHost";
+import type { ConversationServices } from "../../../conversationServices";
 import { AgentEnvPanelActionProvider } from "../../agentEnv";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import { AgentMessageBlock } from "./AgentMessageBlock";
-import { AgentTranscriptItemView } from "./AgentTranscriptItemView";
-import type { AgentMessageContentVM } from "../contracts/agentMessageRowVM";
-import type { AgentMessageRowVM } from "../contracts/agentMessageRowVM";
+import type {
+  AgentMessageContentVM,
+  AgentMessageRowVM
+} from "../contracts/agentMessageRowVM";
 import type { AgentToolCallVM } from "../contracts/agentToolCallVM";
 import type { AgentToolGroupRowVM } from "../contracts/agentToolGroupRowVM";
+import { AgentMessageBlock } from "./AgentMessageBlock";
+import { AgentTranscriptItemContent as AgentTranscriptItemView } from "./AgentTranscriptItemView";
 
 const mockState = vi.hoisted(() => ({
   markdownOnLinkClicks: [] as Array<((href: string) => void) | undefined>,
@@ -563,8 +565,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readSessionAttachment
-      } as Partial<AgentGUIRuntime>
+        attachments: { readSessionAttachment }
+      } as Partial<ConversationServices>
     });
 
     render(
@@ -619,8 +621,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readSessionAttachment
-      } as Partial<AgentGUIRuntime>
+        attachments: { readSessionAttachment }
+      } as Partial<ConversationServices>
     });
 
     render(
@@ -668,8 +670,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readSessionAttachment
-      } as Partial<AgentGUIRuntime>
+        attachments: { readSessionAttachment }
+      } as Partial<ConversationServices>
     });
 
     render(
@@ -725,9 +727,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readPromptAsset,
-        readSessionAttachment
-      } as Partial<AgentGUIRuntime>
+        attachments: { readPromptAsset, readSessionAttachment }
+      } as Partial<ConversationServices>
     });
     const stableImageId = "client-submit:user:submit-1:image:0";
     const optimisticMessage: AgentMessageContentVM = {
@@ -811,8 +812,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readPromptAsset
-      } as Partial<AgentGUIRuntime>
+        attachments: { readPromptAsset }
+      } as Partial<ConversationServices>
     });
 
     render(
@@ -1056,8 +1057,8 @@ describe("AgentTranscriptItemView render stability", () => {
     Object.defineProperty(window, "agentGUIRuntime", {
       configurable: true,
       value: {
-        readSessionAttachment
-      } as Partial<AgentGUIRuntime>
+        attachments: { readSessionAttachment }
+      } as Partial<ConversationServices>
     });
 
     render(

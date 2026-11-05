@@ -1,14 +1,12 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { renderHook } from "@testing-library/react";
-import {
-  selectEngineSessionReconcile
-} from "@tutti-os/agent-activity-core";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
+
 import { describe, expect, it, vi } from "vitest";
 import { useAgentGUIConversationRouting } from "./useAgentGUIConversationRouting";
 
 describe("useAgentGUIConversationRouting", () => {
   it("keeps an explicitly selected active session outside bounded rail state", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
+    const conversationServices = createTestRuntimeState("workspace-1");
     const selectConversation = vi.fn();
     const setIntent = vi.fn();
 
@@ -24,7 +22,7 @@ describe("useAgentGUIConversationRouting", () => {
         openSessionRequest: null,
         pendingOpenSessionRequestRef: { current: null },
         selectConversation,
-        sessionEngine,
+        conversationServices,
         setIntent,
         transientConversation: null,
         workspaceId: "workspace-1"
@@ -36,8 +34,8 @@ describe("useAgentGUIConversationRouting", () => {
   });
 
   it("reconciles a persisted selection outside the bounded list after restart", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    const dispatch = vi.spyOn(sessionEngine, "dispatch");
+    const conversationServices = createTestRuntimeState("workspace-1");
+    const dispatch = vi.spyOn(conversationServices.sessionLoads, "request");
     const selectConversation = vi.fn();
     const setIntent = vi.fn();
 
@@ -53,7 +51,7 @@ describe("useAgentGUIConversationRouting", () => {
         openSessionRequest: null,
         pendingOpenSessionRequestRef: { current: null },
         selectConversation,
-        sessionEngine,
+        conversationServices,
         setIntent,
         transientConversation: null,
         workspaceId: "workspace-1"
@@ -63,15 +61,18 @@ describe("useAgentGUIConversationRouting", () => {
     expect(selectConversation).toHaveBeenCalledWith("persisted-session", {
       reloadConversations: false
     });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "session/reconcileRequested", agentSessionId: "persisted-session" }));
+    expect(dispatch).toHaveBeenCalledWith("persisted-session", {
+      state: true,
+      messages: true
+    });
     expect(setIntent).not.toHaveBeenCalled();
   });
 
   it.each(["active", "requested"] as const)(
     "does not restore a failed new activation from a stale %s intent",
     (intentTag) => {
-      const sessionEngine = createTestAgentSessionEngine("workspace-1");
-      sessionEngine.dispatch({
+      const conversationServices = createTestRuntimeState("workspace-1");
+      conversationServices.report({
         agentSessionId: "failed-session",
         agentTargetId: "target-1",
         clientSubmitId: "submit-1",
@@ -84,7 +85,7 @@ describe("useAgentGUIConversationRouting", () => {
         type: "activation/requested",
         workspaceId: "workspace-1"
       });
-      sessionEngine.dispatch({
+      conversationServices.report({
         commandId: "activate:activation-1",
         commandType: "session/activate",
         correlationId: "activation-1",
@@ -109,7 +110,7 @@ describe("useAgentGUIConversationRouting", () => {
           openSessionRequest: null,
           pendingOpenSessionRequestRef: { current: null },
           selectConversation,
-          sessionEngine,
+          conversationServices,
           setIntent,
           transientConversation: null,
           workspaceId: "workspace-1"
@@ -120,17 +121,14 @@ describe("useAgentGUIConversationRouting", () => {
       expect(setIntent).toHaveBeenCalledWith({ tag: "home" });
       expect(selectConversation).not.toHaveBeenCalled();
       expect(
-        selectEngineSessionReconcile(
-          sessionEngine.getSnapshot(),
-          "failed-session"
-        )
+        conversationServices.sessionLoads.record("failed-session")
       ).toBeNull();
     }
   );
 
   it("keeps a failed activation open when canonical session state exists", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    sessionEngine.dispatch({
+    const conversationServices = createTestRuntimeState("workspace-1");
+    conversationServices.report({
       agentSessionId: "failed-session",
       agentTargetId: "target-1",
       clientSubmitId: "submit-1",
@@ -143,7 +141,7 @@ describe("useAgentGUIConversationRouting", () => {
       type: "activation/requested",
       workspaceId: "workspace-1"
     });
-    sessionEngine.dispatch({
+    conversationServices.report({
       commandId: "activate:activation-1",
       commandType: "session/activate",
       correlationId: "activation-1",
@@ -151,22 +149,19 @@ describe("useAgentGUIConversationRouting", () => {
       outcome: "failed",
       type: "engine/commandResult"
     });
-    sessionEngine.dispatch({
-      sessions: [
-        {
-          activeTurnId: null,
-          agentSessionId: "failed-session",
-          createdAtUnixMs: 2,
-          cwd: "/workspace",
-          latestTurnInteractions: [],
-          pendingInteractions: [],
-          provider: "codex",
-          title: "Historical session",
-          workspaceId: "workspace-1"
-        }
-      ],
-      type: "session/snapshotReceived"
-    });
+    conversationServices.sessions.upsertSessions([
+      {
+        activeTurnId: null,
+        agentSessionId: "failed-session",
+        createdAtUnixMs: 2,
+        cwd: "/workspace",
+        latestTurnInteractions: [],
+        pendingInteractions: [],
+        provider: "codex",
+        title: "Historical session",
+        workspaceId: "workspace-1"
+      }
+    ]);
     const setIntent = vi.fn();
 
     renderHook(() =>
@@ -181,7 +176,7 @@ describe("useAgentGUIConversationRouting", () => {
         openSessionRequest: null,
         pendingOpenSessionRequestRef: { current: null },
         selectConversation: vi.fn(),
-        sessionEngine,
+        conversationServices,
         setIntent,
         transientConversation: null,
         workspaceId: "workspace-1"
@@ -192,8 +187,8 @@ describe("useAgentGUIConversationRouting", () => {
   });
 
   it("does not let a failed activation override an explicit history selection", () => {
-    const sessionEngine = createTestAgentSessionEngine("workspace-1");
-    sessionEngine.dispatch({
+    const conversationServices = createTestRuntimeState("workspace-1");
+    conversationServices.report({
       agentSessionId: "historical-session",
       agentTargetId: "target-1",
       clientSubmitId: "submit-1",
@@ -206,7 +201,7 @@ describe("useAgentGUIConversationRouting", () => {
       type: "activation/requested",
       workspaceId: "workspace-1"
     });
-    sessionEngine.dispatch({
+    conversationServices.report({
       commandId: "activate:activation-1",
       commandType: "session/activate",
       correlationId: "activation-1",
@@ -232,7 +227,7 @@ describe("useAgentGUIConversationRouting", () => {
         openSessionRequest: null,
         pendingOpenSessionRequestRef: { current: null },
         selectConversation: vi.fn(),
-        sessionEngine,
+        conversationServices,
         setIntent,
         transientConversation: null,
         workspaceId: "workspace-1"

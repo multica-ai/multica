@@ -1,7 +1,7 @@
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
-import { labelForSlashCommand } from "../model/agentSlashCommands";
 import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import { labelForSlashCommand } from "../model/agentSlashCommands";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 
 export function slashCommandDescriptionForDisplay(
   command: AgentSessionCommand,
@@ -11,7 +11,6 @@ export function slashCommandDescriptionForDisplay(
     | "slashCommandCompactDescription"
     | "slashCommandContextDescription"
     | "slashCommandFastDescription"
-    | "slashCommandGoalDescription"
     | "slashCommandInitDescription"
     | "slashCommandPlanDescription"
     | "slashCommandReviewDescription"
@@ -35,8 +34,6 @@ export function slashCommandDescriptionForDisplay(
       return labels.slashCommandContextDescription;
     case "fast":
       return labels.slashCommandFastDescription;
-    case "goal":
-      return labels.slashCommandGoalDescription;
     case "init":
       return labels.slashCommandInitDescription;
     case "plan":
@@ -60,7 +57,6 @@ export function slashCommandLabelForDisplay(
     | "slashCommandCompactLabel"
     | "slashCommandContextLabel"
     | "slashCommandFastLabel"
-    | "slashCommandGoalLabel"
     | "slashCommandInitLabel"
     | "slashCommandPlanLabel"
     | "slashCommandReviewLabel"
@@ -84,7 +80,6 @@ function localizedSlashCommandLabel(
     | "slashCommandCompactLabel"
     | "slashCommandContextLabel"
     | "slashCommandFastLabel"
-    | "slashCommandGoalLabel"
     | "slashCommandInitLabel"
     | "slashCommandPlanLabel"
     | "slashCommandReviewLabel"
@@ -103,8 +98,6 @@ function localizedSlashCommandLabel(
       return labels.slashCommandContextLabel;
     case "fast":
       return labels.slashCommandFastLabel;
-    case "goal":
-      return labels.slashCommandGoalLabel;
     case "init":
       return labels.slashCommandInitLabel;
     case "plan":

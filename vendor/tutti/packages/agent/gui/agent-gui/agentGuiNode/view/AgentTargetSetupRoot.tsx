@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { resolveAgentGUIProviderCatalogIdentity } from "../../../providerIdentityCatalog.ts";
 import {
@@ -6,8 +7,8 @@ import {
 } from "../../../shared/agentEnv";
 import {
   AgentTargetSetupControllerProvider,
-  type AgentTargetSetupController,
-  useCreateAgentTargetSetupController
+  useCreateAgentTargetSetupController,
+  type AgentTargetSetupController
 } from "../../../shared/agentEnv/agentTargetSetupController.tsx";
 import type { AgentGUIAgentTarget } from "../../../types.ts";
 import {
@@ -15,7 +16,7 @@ import {
   type AgentGUIManagedHomeTargetProjection
 } from "../model/agentGuiProviderRailOrder.ts";
 import { AgentTargetSetupGate } from "./AgentTargetSetupGate.tsx";
-import { useAgentGUIProviderRailPreferences } from "./useAgentGUIProviderRailPreferences.ts";
+import { useAgentTargetPreferences } from "./useAgentTargetPreferences.ts";
 
 export function useAgentTargetSetupRoot(input: {
   activeConversationId: string | null;
@@ -29,7 +30,7 @@ export function useAgentTargetSetupRoot(input: {
   homeTargetProjection: AgentGUIManagedHomeTargetProjection;
   openAgentEnvSetup: () => void;
 } {
-  const { preferences } = useAgentGUIProviderRailPreferences();
+  const { preferences } = useAgentTargetPreferences();
   const homeTargetProjection = useMemo(
     () =>
       projectAgentGUIManagedHomeTargets({
@@ -74,7 +75,7 @@ export function useAgentTargetSetupRoot(input: {
   };
 }
 
-export function AgentTargetSetupRoot({
+export const AgentTargetSetupRoot = observer(function AgentTargetSetupRoot({
   children,
   controller,
   openEnvironmentSetup
@@ -95,4 +96,4 @@ export function AgentTargetSetupRoot({
       </AgentTargetSetupControllerProvider>
     </AgentEnvPanelActionProvider>
   );
-}
+});

@@ -1,11 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmationDialog, Input } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../../app/renderer/components/ui/button";
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type { AgentGUIRailViewModel } from "../model/agentGuiNodeTypes";
 import type { AgentGUIViewLabels } from "./AgentGUINodeView.types";
 
 interface AgentGUIRenameConversationDialogProps {
-  conversation: AgentGUINodeViewModel["rail"]["conversations"][number] | null;
+  conversation: AgentGUIRailViewModel["conversations"][number] | null;
   open: boolean;
   labels: AgentGUIViewLabels;
   onOpenChange: (open: boolean) => void;
@@ -13,7 +14,7 @@ interface AgentGUIRenameConversationDialogProps {
 }
 
 export const AgentGUIRenameConversationDialog = memo(
-  function AgentGUIRenameConversationDialog({
+  observer(function AgentGUIRenameConversationDialog({
     conversation,
     open,
     labels,
@@ -191,5 +192,5 @@ export const AgentGUIRenameConversationDialog = memo(
         />
       </ConfirmationDialog>
     );
-  }
+  })
 );

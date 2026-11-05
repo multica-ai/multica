@@ -1,3 +1,6 @@
+import type { AgentActivitySessionForkLineage } from "@tutti-os/agent-activity-core";
+import { ScrollArea } from "@tutti-os/ui-system/components";
+import { GitFork } from "lucide-react";
 import {
   memo,
   useMemo,
@@ -7,20 +10,16 @@ import {
   type Ref,
   type RefObject
 } from "react";
-import { GitFork } from "lucide-react";
-import { ScrollArea } from "@tutti-os/ui-system/components";
-import type { AgentActivitySessionForkLineage } from "@tutti-os/agent-activity-core";
-import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
-import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
 import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
-import { AgentGUIConversationTimelinePane } from "./AgentGUIConversationTimelinePane";
-import styles from "../AgentGUINode.styles";
-import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
+import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
 import type { AgentConversationFollowEndMode } from "../../../shared/agentConversation/agentConversationFollowEndController";
+import type { AgentTranscriptVirtualScrollController } from "../../../shared/agentConversation/components/AgentTranscriptView";
 import type { AgentTranscriptEditRetryControl } from "../../../shared/agentConversation/components/useAgentTranscriptEditRetryProjection";
+import styles from "../AgentGUINode.styles";
 import type { AgentGUIEditRetryRecoveryAction } from "../controller/agentGuiController.promptOperations";
 import type { AgentGUIEditRetryPresentation } from "../model/agentGUIEditRetryModel";
+import type { AgentGUIProviderSkillOption } from "../model/agentGuiNodeTypes";
+import { AgentGUIConversationTimelinePane } from "./AgentGUIConversationTimelinePane";
 import { AgentGUIEditRetryStatus } from "./AgentGUIEditRetryStatus";
 import {
   AgentGUITextSelectionActions,
@@ -38,7 +37,7 @@ const TIMELINE_CONTENT_STYLE: CSSProperties = {
 
 interface AgentGUIDetailTimelineProps {
   availableSkills: readonly AgentGUIProviderSkillOption[];
-  conversation: AgentConversationVM | null;
+  agentSessionId: string | null;
   editRetry?: {
     control?: AgentTranscriptEditRetryControl;
     presentation: AgentGUIEditRetryPresentation;
@@ -55,7 +54,7 @@ interface AgentGUIDetailTimelineProps {
   hasActiveConversation: boolean;
   followEndMode: AgentConversationFollowEndMode;
   forkedFrom?: AgentActivitySessionForkLineage | null;
-  forkThroughTurnPendingTurnIds?: readonly string[];
+
   homeContent: ReactNode;
   isLoadingOlderMessages: boolean;
   isVisible: boolean;
@@ -83,14 +82,14 @@ interface AgentGUIDetailTimelineProps {
 
 export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
   availableSkills,
-  conversation,
+  agentSessionId,
   editRetry,
   conversationFlowEmpty,
   conversationFlowLabels,
   hasActiveConversation,
   followEndMode,
   forkedFrom,
-  forkThroughTurnPendingTurnIds,
+
   homeContent,
   isLoadingOlderMessages,
   isVisible,
@@ -183,7 +182,7 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
         {hasActiveConversation ? (
           <>
             <AgentGUIConversationTimelinePane
-              conversation={conversation}
+              agentSessionId={agentSessionId}
               turnAttachments={forkLineageAttachments}
               editRetry={editRetry?.control}
               followEndMode={followEndMode}
@@ -195,7 +194,6 @@ export const AgentGUIDetailTimeline = memo(function AgentGUIDetailTimeline({
               onLinkAction={onLinkAction}
               onAuthLogin={onAuthLogin}
               onForkThroughTurn={onForkThroughTurn}
-              forkThroughTurnPendingTurnIds={forkThroughTurnPendingTurnIds}
               availableSkills={availableSkills}
               workspaceAppIcons={workspaceAppIcons}
               labels={conversationFlowLabels}

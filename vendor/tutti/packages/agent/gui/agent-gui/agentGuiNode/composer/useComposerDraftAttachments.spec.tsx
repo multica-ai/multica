@@ -1,24 +1,24 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { WorkspaceFileReference } from "@tutti-os/workspace-file-reference/contracts";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceFileReference } from "@tutti-os/workspace-file-reference/contracts";
-import {
-  AgentGUIRuntimeProvider,
-  type AgentGUIRuntime
-} from "../../../agentActivityRuntime";
 import {
   resetAgentHostApiForTests,
   setAgentHostApiForTests
 } from "../../../agentActivityHost";
-import { buildAgentComposerDraft } from "../model/agentComposerDraft";
-import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
+import {
+  ConversationServicesProvider,
+  type ConversationServices
+} from "../../../conversationServices";
+import { createAgentComposerFileMentionMarkdown } from "../agentRichText/agentMentionMarkdown";
 import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
+import { buildAgentComposerDraft } from "../model/agentComposerDraft";
 import type {
   AgentExternalPromptFilePreparationResult,
   AgentExternalPromptFilePreparer
 } from "../model/agentExternalPromptFiles";
+import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { useComposerDraftAttachments } from "./useComposerDraftAttachments";
-import { createAgentComposerFileMentionMarkdown } from "../agentRichText/agentMentionMarkdown";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -200,12 +200,12 @@ describe("useComposerDraftAttachments", () => {
     const reportDiagnostic = vi.fn();
     const runtime = {
       origin: "test",
-      reportDiagnostic
-    } as unknown as AgentGUIRuntime;
+      diagnostics: { reportDiagnostic }
+    } as unknown as ConversationServices;
     const wrapper = ({ children }: PropsWithChildren) => (
-      <AgentGUIRuntimeProvider runtime={runtime}>
+      <ConversationServicesProvider runtime={runtime}>
         {children}
-      </AgentGUIRuntimeProvider>
+      </ConversationServicesProvider>
     );
     const prepareExternalPromptFiles = vi.fn<AgentExternalPromptFilePreparer>(
       async () => [

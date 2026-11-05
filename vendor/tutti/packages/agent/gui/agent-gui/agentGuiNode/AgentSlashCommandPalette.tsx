@@ -1,4 +1,3 @@
-import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import { ConnectorPaletteItem } from "@tutti-os/connector-renderer/ui";
 import { Spinner } from "@tutti-os/ui-system";
 import {
@@ -12,11 +11,13 @@ import {
   Target,
   ZapIcon
 } from "lucide-react";
-import type { AgentSessionCommand } from "../../shared/agentSessionTypes";
+import { observer } from "mobx-react-lite";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import { cn } from "../../app/renderer/lib/utils";
+import type { AgentSessionCommand } from "../../shared/agentSessionTypes";
+import { projectConnectorPaletteItem } from "./integrations/connector/model/connectorPresentation";
 import type { AgentGUIProviderSkillOption } from "./model/agentGuiNodeTypes";
 import type { AgentSlashCommandCapability } from "./model/agentSlashCommandProviderPolicy";
-import { projectConnectorPaletteItem } from "./integrations/connector/model/connectorPresentation";
 
 export type AgentSlashPaletteEntry =
   | {
@@ -96,235 +97,242 @@ const paletteStyles = {
     "flex min-h-9 w-full items-center gap-2 px-2.5 py-2 text-[11px] text-[var(--text-secondary)]"
 };
 
-export function AgentSlashCommandPalette({
-  entries,
-  highlightedIndex,
-  label,
-  commandsGroupLabel,
-  capabilitiesGroupLabel,
-  capabilitiesLoading = false,
-  capabilitiesLoadingLabel = "",
-  skillsGroupLabel,
-  pluginsGroupLabel,
-  connectorsGroupLabel,
-  connectorConnectedLabel,
-  connectorNotConnectedLabel,
-  connectorUnsupportedLabel,
-  mcpGroupLabel,
-  onHighlightChange,
-  onSelect,
-  onSelectCapability,
-  onSelectCapabilitySettings,
-  onSelectSkill
-}: AgentSlashCommandPaletteProps): React.JSX.Element | null {
-  "use memo";
-  const highlightedOptionRef = useRef<HTMLDivElement | null>(null);
+export const AgentSlashCommandPalette = observer(
+  function AgentSlashCommandPalette({
+    entries,
+    highlightedIndex,
+    label,
+    commandsGroupLabel,
+    capabilitiesGroupLabel,
+    capabilitiesLoading = false,
+    capabilitiesLoadingLabel = "",
+    skillsGroupLabel,
+    pluginsGroupLabel,
+    connectorsGroupLabel,
+    connectorConnectedLabel,
+    connectorNotConnectedLabel,
+    connectorUnsupportedLabel,
+    mcpGroupLabel,
+    onHighlightChange,
+    onSelect,
+    onSelectCapability,
+    onSelectCapabilitySettings,
+    onSelectSkill
+  }: AgentSlashCommandPaletteProps): React.JSX.Element | null {
+    "use memo";
+    const highlightedOptionRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    highlightedOptionRef.current?.scrollIntoView({ block: "nearest" });
-  }, [highlightedIndex]);
+    useEffect(() => {
+      highlightedOptionRef.current?.scrollIntoView({ block: "nearest" });
+    }, [highlightedIndex]);
 
-  if (entries.length === 0 && !capabilitiesLoading) {
-    return null;
-  }
-  // Headers render only when multiple sections are present, except
-  // capabilities always keep their category label for discoverability. They are
-  // plain separators outside the option list, so keyboard navigation indices
-  // are untouched.
-  const entryTypes = new Set(entries.map((entry) => entryGroupType(entry)));
-  if (capabilitiesLoading) {
-    entryTypes.add("capability");
-  }
-  const showGroupHeaders = entryTypes.size > 1 || entryTypes.has("capability");
-  const firstEntryIndexByType = new Map<AgentSlashPaletteEntryGroup, number>();
-  entries.forEach((entry, index) => {
-    const groupType = entryGroupType(entry);
-    if (!firstEntryIndexByType.has(groupType)) {
-      firstEntryIndexByType.set(groupType, index);
+    if (entries.length === 0 && !capabilitiesLoading) {
+      return null;
     }
-  });
-  const hasCapabilityEntries = entries.some(
-    (entry) => entry.type === "capability"
-  );
-  const capabilityLoadingInsertIndex = capabilitiesLoading
-    ? capabilityLoadingIndex(entries)
-    : -1;
-  const capabilityLoadingNode = capabilitiesLoading ? (
-    <Fragment key="capability-loading">
-      {!hasCapabilityEntries ? (
-        <div
-          aria-hidden="true"
-          className={cn(
-            paletteStyles.groupHeader,
-            capabilityLoadingInsertIndex === 0
-              ? paletteStyles.groupHeaderFirst
-              : paletteStyles.groupHeaderSeparated
-          )}
-        >
-          {capabilitiesGroupLabel}
+    // Headers render only when multiple sections are present, except
+    // capabilities always keep their category label for discoverability. They are
+    // plain separators outside the option list, so keyboard navigation indices
+    // are untouched.
+    const entryTypes = new Set(entries.map((entry) => entryGroupType(entry)));
+    if (capabilitiesLoading) {
+      entryTypes.add("capability");
+    }
+    const showGroupHeaders =
+      entryTypes.size > 1 || entryTypes.has("capability");
+    const firstEntryIndexByType = new Map<
+      AgentSlashPaletteEntryGroup,
+      number
+    >();
+    entries.forEach((entry, index) => {
+      const groupType = entryGroupType(entry);
+      if (!firstEntryIndexByType.has(groupType)) {
+        firstEntryIndexByType.set(groupType, index);
+      }
+    });
+    const hasCapabilityEntries = entries.some(
+      (entry) => entry.type === "capability"
+    );
+    const capabilityLoadingInsertIndex = capabilitiesLoading
+      ? capabilityLoadingIndex(entries)
+      : -1;
+    const capabilityLoadingNode = capabilitiesLoading ? (
+      <Fragment key="capability-loading">
+        {!hasCapabilityEntries ? (
+          <div
+            aria-hidden="true"
+            className={cn(
+              paletteStyles.groupHeader,
+              capabilityLoadingInsertIndex === 0
+                ? paletteStyles.groupHeaderFirst
+                : paletteStyles.groupHeaderSeparated
+            )}
+          >
+            {capabilitiesGroupLabel}
+          </div>
+        ) : null}
+        <div aria-live="polite" className={paletteStyles.loading} role="status">
+          <span aria-hidden="true" className={paletteStyles.icon}>
+            <Spinner size={12} strokeWidth={2} />
+          </span>
+          <span>{capabilitiesLoadingLabel}</span>
         </div>
-      ) : null}
-      <div aria-live="polite" className={paletteStyles.loading} role="status">
-        <span aria-hidden="true" className={paletteStyles.icon}>
-          <Spinner size={12} strokeWidth={2} />
-        </span>
-        <span>{capabilitiesLoadingLabel}</span>
-      </div>
-    </Fragment>
-  ) : null;
-  return (
-    <div className={paletteStyles.palette} role="listbox" aria-label={label}>
-      {entries.map((entry, index) => {
-        const isHighlighted = index === highlightedIndex;
-        const connectorItem =
-          entry.type === "skill"
-            ? projectConnectorPaletteItem(
-                entry.skill,
-                entry.label,
-                entry.description
-                  ? descriptionWithoutTerminalPeriod(entry.description)
-                  : undefined
-              )
-            : null;
-        const isDisabled =
-          (entry.type === "capability" && entry.disabled === true) ||
-          connectorItem?.status === "unsupported";
-        const groupType = entryGroupType(entry);
-        const entryIcon = connectorItem ? null : slashPaletteEntryIcon(entry);
-        const groupHeader =
-          showGroupHeaders && firstEntryIndexByType.get(groupType) === index ? (
-            <div
-              aria-hidden="true"
-              className={cn(
-                paletteStyles.groupHeader,
-                index === 0 && capabilityLoadingInsertIndex !== 0
-                  ? paletteStyles.groupHeaderFirst
-                  : paletteStyles.groupHeaderSeparated
-              )}
-            >
-              {labelForEntryGroupType(groupType, {
-                commandsGroupLabel,
-                capabilitiesGroupLabel,
-                skillsGroupLabel,
-                pluginsGroupLabel,
-                connectorsGroupLabel,
-                mcpGroupLabel
-              })}
-            </div>
-          ) : null;
-        return (
-          <Fragment key={entry.key}>
-            {capabilityLoadingInsertIndex === index
-              ? capabilityLoadingNode
-              : null}
-            {groupHeader}
-            <div
-              ref={isHighlighted ? highlightedOptionRef : null}
-              className={cn(
-                paletteStyles.option,
-                isHighlighted && "bg-[var(--transparency-block)]",
-                isDisabled &&
-                  "cursor-not-allowed text-[var(--agent-gui-text-tertiary)] opacity-60 hover:bg-transparent active:bg-transparent"
-              )}
-              role="option"
-              aria-selected={isHighlighted}
-              aria-disabled={isDisabled || undefined}
-              data-testid={
-                entry.type === "command"
-                  ? `agent-gui-composer-slash-command-${entry.command.name}`
-                  : undefined
-              }
-              data-highlighted={isHighlighted ? "" : undefined}
-              onMouseEnter={() => onHighlightChange(index)}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if (isDisabled) {
-                  return;
+      </Fragment>
+    ) : null;
+    return (
+      <div className={paletteStyles.palette} role="listbox" aria-label={label}>
+        {entries.map((entry, index) => {
+          const isHighlighted = index === highlightedIndex;
+          const connectorItem =
+            entry.type === "skill"
+              ? projectConnectorPaletteItem(
+                  entry.skill,
+                  entry.label,
+                  entry.description
+                    ? descriptionWithoutTerminalPeriod(entry.description)
+                    : undefined
+                )
+              : null;
+          const isDisabled =
+            (entry.type === "capability" && entry.disabled === true) ||
+            connectorItem?.status === "unsupported";
+          const groupType = entryGroupType(entry);
+          const entryIcon = connectorItem ? null : slashPaletteEntryIcon(entry);
+          const groupHeader =
+            showGroupHeaders &&
+            firstEntryIndexByType.get(groupType) === index ? (
+              <div
+                aria-hidden="true"
+                className={cn(
+                  paletteStyles.groupHeader,
+                  index === 0 && capabilityLoadingInsertIndex !== 0
+                    ? paletteStyles.groupHeaderFirst
+                    : paletteStyles.groupHeaderSeparated
+                )}
+              >
+                {labelForEntryGroupType(groupType, {
+                  commandsGroupLabel,
+                  capabilitiesGroupLabel,
+                  skillsGroupLabel,
+                  pluginsGroupLabel,
+                  connectorsGroupLabel,
+                  mcpGroupLabel
+                })}
+              </div>
+            ) : null;
+          return (
+            <Fragment key={entry.key}>
+              {capabilityLoadingInsertIndex === index
+                ? capabilityLoadingNode
+                : null}
+              {groupHeader}
+              <div
+                ref={isHighlighted ? highlightedOptionRef : null}
+                className={cn(
+                  paletteStyles.option,
+                  isHighlighted && "bg-[var(--transparency-block)]",
+                  isDisabled &&
+                    "cursor-not-allowed text-[var(--agent-gui-text-tertiary)] opacity-60 hover:bg-transparent active:bg-transparent"
+                )}
+                role="option"
+                aria-selected={isHighlighted}
+                aria-disabled={isDisabled || undefined}
+                data-testid={
+                  entry.type === "command"
+                    ? `agent-gui-composer-slash-command-${entry.command.name}`
+                    : undefined
                 }
-                if (entry.type === "command") {
-                  onSelect(entry.command);
-                  return;
-                }
-                if (entry.type === "capability") {
-                  if (entry.selectAction === "settings") {
-                    onSelectCapabilitySettings?.(entry.capability);
+                data-highlighted={isHighlighted ? "" : undefined}
+                onMouseEnter={() => onHighlightChange(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (isDisabled) {
                     return;
                   }
-                  onSelectCapability(entry.capability);
-                  return;
-                }
-                onSelectSkill(entry.skill);
-              }}
-            >
-              {connectorItem && entry.type === "skill" ? (
-                <ConnectorPaletteItem
-                  item={connectorItem}
-                  labels={{
-                    connected: connectorConnectedLabel,
-                    notConnected: connectorNotConnectedLabel,
-                    unsupported: connectorUnsupportedLabel
-                  }}
-                  onSetup={() => onSelectSkill(entry.skill)}
-                />
-              ) : (
-                <>
-                  {entryIcon ? (
-                    <span aria-hidden="true" className={paletteStyles.icon}>
-                      {entryIcon}
-                    </span>
-                  ) : null}
-                  <span className={paletteStyles.copy}>
-                    <span className={paletteStyles.name}>
-                      <span className={paletteStyles.primaryName}>
-                        {entry.type === "command"
-                          ? (entry.primaryLabel ?? entry.label)
-                          : entry.label}
+                  if (entry.type === "command") {
+                    onSelect(entry.command);
+                    return;
+                  }
+                  if (entry.type === "capability") {
+                    if (entry.selectAction === "settings") {
+                      onSelectCapabilitySettings?.(entry.capability);
+                      return;
+                    }
+                    onSelectCapability(entry.capability);
+                    return;
+                  }
+                  onSelectSkill(entry.skill);
+                }}
+              >
+                {connectorItem && entry.type === "skill" ? (
+                  <ConnectorPaletteItem
+                    item={connectorItem}
+                    labels={{
+                      connected: connectorConnectedLabel,
+                      notConnected: connectorNotConnectedLabel,
+                      unsupported: connectorUnsupportedLabel
+                    }}
+                    onSetup={() => onSelectSkill(entry.skill)}
+                  />
+                ) : (
+                  <>
+                    {entryIcon ? (
+                      <span aria-hidden="true" className={paletteStyles.icon}>
+                        {entryIcon}
                       </span>
-                      {entry.type === "command" && entry.secondaryLabel ? (
-                        <span className={paletteStyles.secondaryName}>
-                          {entry.secondaryLabel}
+                    ) : null}
+                    <span className={paletteStyles.copy}>
+                      <span className={paletteStyles.name}>
+                        <span className={paletteStyles.primaryName}>
+                          {entry.type === "command"
+                            ? (entry.primaryLabel ?? entry.label)
+                            : entry.label}
+                        </span>
+                        {entry.type === "command" && entry.secondaryLabel ? (
+                          <span className={paletteStyles.secondaryName}>
+                            {entry.secondaryLabel}
+                          </span>
+                        ) : null}
+                      </span>
+                      {entry.description ? (
+                        <span className={paletteStyles.descriptionText}>
+                          {descriptionWithoutTerminalPeriod(entry.description)}
                         </span>
                       ) : null}
                     </span>
-                    {entry.description ? (
-                      <span className={paletteStyles.descriptionText}>
-                        {descriptionWithoutTerminalPeriod(entry.description)}
-                      </span>
-                    ) : null}
-                  </span>
-                </>
-              )}
-              {entry.type === "capability" &&
-              entry.settingsLabel &&
-              onSelectCapabilitySettings ? (
-                <button
-                  aria-label={entry.settingsAriaLabel ?? entry.settingsLabel}
-                  className={paletteStyles.settingsButton}
-                  disabled={isDisabled}
-                  title={entry.settingsAriaLabel ?? entry.settingsLabel}
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectCapabilitySettings(entry.capability);
-                  }}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                >
-                  {entry.settingsLabel}
-                </button>
-              ) : null}
-            </div>
-          </Fragment>
-        );
-      })}
-      {capabilityLoadingInsertIndex === entries.length
-        ? capabilityLoadingNode
-        : null}
-    </div>
-  );
-}
+                  </>
+                )}
+                {entry.type === "capability" &&
+                entry.settingsLabel &&
+                onSelectCapabilitySettings ? (
+                  <button
+                    aria-label={entry.settingsAriaLabel ?? entry.settingsLabel}
+                    className={paletteStyles.settingsButton}
+                    disabled={isDisabled}
+                    title={entry.settingsAriaLabel ?? entry.settingsLabel}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectCapabilitySettings(entry.capability);
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                  >
+                    {entry.settingsLabel}
+                  </button>
+                ) : null}
+              </div>
+            </Fragment>
+          );
+        })}
+        {capabilityLoadingInsertIndex === entries.length
+          ? capabilityLoadingNode
+          : null}
+      </div>
+    );
+  }
+);
 
 function descriptionWithoutTerminalPeriod(description: string): string {
   return description.trimEnd().replace(/[。.]+$/u, "");

@@ -1,4 +1,3 @@
-import { useCallback, useState, type JSX } from "react";
 import {
   ArrowRightLeft,
   ChevronDown,
@@ -8,26 +7,25 @@ import {
   MessageCircleQuestion,
   Users
 } from "lucide-react";
-import { toast } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import { useState, type JSX } from "react";
+import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import type { WorkspaceLinkAction } from "../../../contexts/workspace/presentation/renderer/actions/workspaceLinkActions";
 import { translate } from "../../../i18n/index";
-import { useOptionalAgentHostApi } from "../../../agentActivityHost";
-import { useOptionalAgentGUIRuntime } from "../../../agentActivityRuntime";
 import {
   AgentMessageMarkdown,
   type AgentMessageMarkdownWorkspaceAppIcon
 } from "../../AgentMessageMarkdown";
-import type { WorkspaceLinkAction } from "../../../contexts/workspace/presentation/renderer/actions/workspaceLinkActions";
 import type { AgentCollaborationVM } from "../contracts/agentCollaborationVM";
-import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
 
 /**
  * Transcript card for one durable collaboration run (model consult, fork,
  * delegate, or handoff). The daemon updates the same message in place as the
  * run progresses, so all durable state comes from the projected
  * `AgentCollaborationVM`; the card owns only UI-local interaction state
- * (result disclosure, in-flight adoption action + optimistic echo).
+ * (result disclosure).
  */
-export function AgentCollaborationRow({
+export const AgentCollaborationRow = observer(function AgentCollaborationRow({
   collaboration,
   workspaceRoot,
   basePath,
@@ -41,68 +39,9 @@ export function AgentCollaborationRow({
   workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
 }): JSX.Element {
   "use memo";
-  const agentHostApi = useOptionalAgentHostApi();
-  const runtime = useOptionalAgentGUIRuntime();
   const [resultExpanded, setResultExpanded] = useState(false);
-  const [adoptionPending, setAdoptionPending] = useState(false);
-  // Optimistic echo until the daemon's in-place message update arrives.
-  const [localAdoption, setLocalAdoption] = useState<string | null>(null);
-
-  const adoption = localAdoption ?? collaboration.adoption;
+  const adoption = collaboration.adoption;
   const resultText = collaboration.resultText?.trim() ?? "";
-  const canSubmitAdoption = Boolean(
-    runtime?.setCollaborationAdoption &&
-    collaboration.workspaceId &&
-    collaboration.agentSessionId
-  );
-  const showAdoptionControls =
-    (collaboration.mode === "consult" || collaboration.mode === "delegate") &&
-    adoption !== "not_applicable" &&
-    collaboration.status === "completed" &&
-    canSubmitAdoption;
-
-  const submitAdoption = useCallback(
-    async (nextAdoption: "adopted" | "rejected") => {
-      const setCollaborationAdoption = runtime?.setCollaborationAdoption;
-      if (
-        !setCollaborationAdoption ||
-        !collaboration.workspaceId ||
-        !collaboration.agentSessionId ||
-        adoptionPending
-      ) {
-        return;
-      }
-      setAdoptionPending(true);
-      try {
-        const run = await setCollaborationAdoption({
-          adoption: nextAdoption,
-          agentSessionId: collaboration.agentSessionId,
-          runId: collaboration.runId,
-          workspaceId: collaboration.workspaceId
-        });
-        setLocalAdoption(run.adoption);
-      } catch {
-        const message = translate(
-          "agentHost.agentGui.collaborationAdoptionFailed"
-        );
-        if (agentHostApi?.toast?.error) {
-          agentHostApi.toast.error(message);
-        } else {
-          toast.error(message);
-        }
-      } finally {
-        setAdoptionPending(false);
-      }
-    },
-    [
-      adoptionPending,
-      agentHostApi,
-      collaboration.agentSessionId,
-      collaboration.runId,
-      collaboration.workspaceId,
-      runtime
-    ]
-  );
 
   const ModeIcon = collaborationModeIcon(collaboration.mode);
   const planText = collaboration.modelPlanName ?? collaboration.modelPlanId;
@@ -230,28 +169,6 @@ export function AgentCollaborationRow({
           ) : null}
         </div>
       ) : null}
-      {showAdoptionControls && adoption === "pending" ? (
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="agent-collaboration-adopt"
-            disabled={adoptionPending}
-            className="inline-flex h-6 items-center rounded-[6px] border border-[var(--line-2)] px-2 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void submitAdoption("adopted")}
-          >
-            {translate("agentHost.agentGui.collaborationAdopt")}
-          </button>
-          <button
-            type="button"
-            data-testid="agent-collaboration-reject"
-            disabled={adoptionPending}
-            className="inline-flex h-6 items-center rounded-[6px] border border-[var(--line-2)] px-2 text-[12px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void submitAdoption("rejected")}
-          >
-            {translate("agentHost.agentGui.collaborationReject")}
-          </button>
-        </div>
-      ) : null}
       {adoption === "adopted" || adoption === "rejected" ? (
         <div
           data-testid="agent-collaboration-adoption"
@@ -267,7 +184,7 @@ export function AgentCollaborationRow({
       ) : null}
     </section>
   );
-}
+});
 
 function collaborationModeIcon(
   mode: AgentCollaborationVM["mode"]

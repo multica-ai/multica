@@ -1,6 +1,6 @@
 import { useCallback, useRef } from "react";
 import { agentComposerDraftPrompt } from "../model/agentComposerDraft";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 
 interface UseComposerDraftCapabilitiesRequestOptions {
   agentSessionId: string | null;

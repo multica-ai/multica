@@ -7,7 +7,22 @@ import {
   type RefObject,
   type SetStateAction
 } from "react";
+import { useOptionalConversationServices } from "../../../conversationServices";
 import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
+import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
+import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
+import { agentComposerFileMentionReferences } from "../agentRichText/agentMentionMarkdown";
+import {
+  agentComposerDraftHasContent,
+  agentComposerDraftPreservingConnectors,
+  projectAgentComposerDraftSubmission,
+  textPromptContent,
+  updateAgentComposerDraft
+} from "../model/agentComposerDraft";
+import {
+  draftForProviderSkillTrigger,
+  getAgentComposerTriggerQueryMatch
+} from "../model/agentComposerTriggerQueries";
 import type {
   AgentComposerDraft,
   AgentComposerDraftFile,
@@ -15,10 +30,7 @@ import type {
   AgentComposerDraftLargeText,
   AgentGUIProviderSkillOption
 } from "../model/agentGuiNodeTypes";
-import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
-import { agentComposerFileMentionReferences } from "../agentRichText/agentMentionMarkdown";
-import { useOptionalAgentGUIRuntime } from "../../../agentActivityRuntime";
-import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
+import { skillTriggerForPrefix } from "../model/agentSkillOptions";
 import type {
   AgentSlashCommand,
   AgentSlashCommandCapability,
@@ -28,21 +40,9 @@ import {
   resolveSlashCommandSelectionEffect,
   resolveSlashCommandSubmitEffect
 } from "../model/agentSlashCommandProviderPolicy";
-import {
-  draftForProviderSkillTrigger,
-  getAgentComposerTriggerQueryMatch
-} from "../model/agentComposerTriggerQueries";
-import { skillTriggerForPrefix } from "../model/agentSkillOptions";
 import { moveSlashCommandHighlight } from "../model/agentSlashCommands";
-import {
-  agentComposerDraftHasContent,
-  agentComposerDraftPreservingConnectors,
-  projectAgentComposerDraftSubmission,
-  textPromptContent,
-  updateAgentComposerDraft
-} from "../model/agentComposerDraft";
 import { resolvePermissionModeControlsDisabled } from "../model/composerModeSelection";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
 import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
 
 type TriggerMatch = ReturnType<typeof getAgentComposerTriggerQueryMatch>;
@@ -110,7 +110,7 @@ function useStableEventCallback<Args extends unknown[], Result>(
 }
 
 export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
-  const agentActivityRuntime = useOptionalAgentGUIRuntime();
+  const agentActivityRuntime = useOptionalConversationServices();
   const {
     workspaceId,
     provider,

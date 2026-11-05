@@ -1,7 +1,11 @@
-import { Fragment, useCallback, type JSX, type ReactNode } from "react";
+import { InvokedAgentReply } from "@multica/tutti-agent-gui-host/invoked-agent-reply";
 import { toast } from "@tutti-os/ui-system";
-import { AgentPlanCard } from "./AgentPlanCard";
-import { AgentCollaborationRow } from "./AgentCollaborationRow";
+import { observer } from "mobx-react-lite";
+import { Fragment, useCallback, type JSX, type ReactNode } from "react";
+import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
+import { parseMentionItemFromHref } from "../../../agent-gui/agentGuiNode/agentRichText/agentFileMentionExtension";
+import { notifyComposerFileMentionBlocked } from "../../../agent-gui/agentGuiNode/composer/resolveComposerFileMentionLinkAction";
+import type { AgentGUIProviderSkillOption } from "../../../agent-gui/agentGuiNode/model/agentGuiNodeTypes";
 import { useOptionalAgentHostApi } from "../../../agentActivityHost";
 import {
   AGENT_EXTERNAL_LINK_ACTION_SOURCE,
@@ -13,35 +17,32 @@ import {
 } from "../../AgentMessageMarkdown";
 import { AgentRichTextReadonly } from "../../AgentRichTextReadonly";
 import { resolveAgentConversationLinkAction } from "../actions/agentConversationLinkActions";
-import { parseMentionItemFromHref } from "../../../agent-gui/agentGuiNode/agentRichText/agentFileMentionExtension";
-import { notifyComposerFileMentionBlocked } from "../../../agent-gui/agentGuiNode/composer/resolveComposerFileMentionLinkAction";
-import type { AgentGUIProviderSkillOption } from "../../../agent-gui/agentGuiNode/model/agentGuiNodeTypes";
+import type { AgentConversationParticipantPresentation } from "../contracts/agentConversationParticipantPresentation";
 import type {
   AgentMessageContentVM,
   AgentMessageRowVM
 } from "../contracts/agentMessageRowVM";
-import type { AgentConversationParticipantPresentation } from "../contracts/agentConversationParticipantPresentation";
+import { AgentCollaborationRow } from "./AgentCollaborationRow";
 import { AgentConversationParticipantHeader } from "./AgentConversationParticipant";
-import { AgentToolGroupRow } from "./AgentToolGroupRow";
-import {
-  AgentVisibleErrorMessage,
-  recoverVisibleErrorFromMessage
-} from "./AgentVisibleErrorMessage";
+import { AgentCopyableMessageGroup } from "./AgentMessageActions";
+import { AgentUserImageGrid } from "./AgentMessageImages";
+import { AgentPlanCard } from "./AgentPlanCard";
+import { AgentSelectedTextChip } from "./AgentSelectedTextChip";
+import { AgentSystemNoticeMessage } from "./AgentSystemNoticeMessage";
 import { AgentThinkingDisclosure } from "./AgentThinkingDisclosure";
+import { AgentToolGroupRow } from "./AgentToolGroupRow";
 import { AgentTuttiModeCheckpointWakeCard } from "./AgentTuttiModeCheckpointWakeCard";
 import { AgentTuttiPlanIssueLinkCard } from "./AgentTuttiPlanIssueLinkCard";
-import { RawTimelineJsonDisclosure } from "./RawTimelineJsonDisclosure";
-import styles from "../../../agent-gui/agentGuiNode/AgentGUIConversation.styles";
-import { AgentUserImageGrid } from "./AgentMessageImages";
-import { AgentSelectedTextChip } from "./AgentSelectedTextChip";
 import {
   AgentUserMessageEditor,
   type AgentUserMessageEditRetryControl
 } from "./AgentUserMessageEditRetry";
+import {
+  AgentVisibleErrorMessage,
+  recoverVisibleErrorFromMessage
+} from "./AgentVisibleErrorMessage";
+import { RawTimelineJsonDisclosure } from "./RawTimelineJsonDisclosure";
 import { useAgentUserMessageEditRetry } from "./useAgentUserMessageEditRetry";
-import { AgentCopyableMessageGroup } from "./AgentMessageActions";
-import { AgentSystemNoticeMessage } from "./AgentSystemNoticeMessage";
-import { InvokedAgentReply } from "@multica/tutti-agent-gui-host/invoked-agent-reply";
 
 const DEFAULT_TOOL_CALLS_LABEL = (count: number): string =>
   `${count} tool calls`;
@@ -66,7 +67,7 @@ interface AgentMessageBlockProps {
   footerAction?: ReactNode;
 }
 
-export function AgentMessageBlock({
+export const AgentMessageBlock = observer(function AgentMessageBlock({
   workspaceRoot,
   basePath,
   row,
@@ -330,8 +331,12 @@ export function AgentMessageBlock({
           {renderedContent}
           {editor}
         </>
+      ) : isUser ? (
+        renderedContent
       ) : (
-        isUser ? renderedContent : <InvokedAgentReply message={message}>{renderedContent}</InvokedAgentReply>
+        <InvokedAgentReply message={message}>
+          {renderedContent}
+        </InvokedAgentReply>
       );
     const editAction =
       isEditTarget && !isEditing && editRetry
@@ -436,7 +441,7 @@ export function AgentMessageBlock({
       )}
     </div>
   );
-}
+});
 
 // Codex plan-mode proposals render as a framed card (mirrors the codex TUI
 // treating the plan item as a distinct artifact rather than chat text).

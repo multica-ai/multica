@@ -1,4 +1,5 @@
 import { Button, MenuSurface } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
 import { createPortal } from "react-dom";
 
 export interface AgentGUITextSelectionSnapshot {
@@ -36,61 +37,63 @@ export function readAgentGUITextSelection(
   };
 }
 
-export function AgentGUITextSelectionActions({
-  labels,
-  snapshot,
-  portalTarget,
-  onAddToConversation,
-  onAskInSide,
-  onDismiss
-}: {
-  labels: { addToConversation: string; askInSide: string };
-  snapshot: AgentGUITextSelectionSnapshot;
-  portalTarget: HTMLElement;
-  onAddToConversation: (text: string) => void;
-  onAskInSide?: (text: string) => void;
-  onDismiss: () => void;
-}): React.JSX.Element {
-  const run = (action: (text: string) => void) => {
-    onDismiss();
-    portalTarget.ownerDocument.getSelection()?.removeAllRanges();
-    action(snapshot.text);
-  };
+export const AgentGUITextSelectionActions = observer(
+  function AgentGUITextSelectionActions({
+    labels,
+    snapshot,
+    portalTarget,
+    onAddToConversation,
+    onAskInSide,
+    onDismiss
+  }: {
+    labels: { addToConversation: string; askInSide: string };
+    snapshot: AgentGUITextSelectionSnapshot;
+    portalTarget: HTMLElement;
+    onAddToConversation: (text: string) => void;
+    onAskInSide?: (text: string) => void;
+    onDismiss: () => void;
+  }): React.JSX.Element {
+    const run = (action: (text: string) => void) => {
+      onDismiss();
+      portalTarget.ownerDocument.getSelection()?.removeAllRanges();
+      action(snapshot.text);
+    };
 
-  return createPortal(
-    <MenuSurface
-      role="toolbar"
-      aria-label={labels.addToConversation}
-      className="nodrag fixed flex-row -translate-x-1/2 -translate-y-full gap-0 overflow-hidden rounded-xl p-0 text-[14px] font-medium shadow-[var(--tsh-shell-shadow)] [-webkit-app-region:no-drag]"
-      data-testid="agent-gui-text-selection-actions"
-      style={{
-        left: snapshot.left,
-        top: snapshot.top,
-        zIndex: "var(--z-popover)"
-      }}
-      onPointerDown={(event) => event.preventDefault()}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        size="lg"
-        className="h-10 rounded-none px-4 text-[14px] font-medium"
-        onClick={() => run(onAddToConversation)}
+    return createPortal(
+      <MenuSurface
+        role="toolbar"
+        aria-label={labels.addToConversation}
+        className="nodrag fixed flex-row -translate-x-1/2 -translate-y-full gap-0 overflow-hidden rounded-xl p-0 text-[14px] font-medium shadow-[var(--tsh-shell-shadow)] [-webkit-app-region:no-drag]"
+        data-testid="agent-gui-text-selection-actions"
+        style={{
+          left: snapshot.left,
+          top: snapshot.top,
+          zIndex: "var(--z-popover)"
+        }}
+        onPointerDown={(event) => event.preventDefault()}
       >
-        {labels.addToConversation}
-      </Button>
-      {onAskInSide ? (
         <Button
           type="button"
           variant="ghost"
           size="lg"
-          className="h-10 rounded-none border-0 border-l border-[var(--border-1)] px-4 text-[14px] font-medium"
-          onClick={() => run(onAskInSide)}
+          className="h-10 rounded-none px-4 text-[14px] font-medium"
+          onClick={() => run(onAddToConversation)}
         >
-          {labels.askInSide}
+          {labels.addToConversation}
         </Button>
-      ) : null}
-    </MenuSurface>,
-    portalTarget
-  );
-}
+        {onAskInSide ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="lg"
+            className="h-10 rounded-none border-0 border-l border-[var(--border-1)] px-4 text-[14px] font-medium"
+            onClick={() => run(onAskInSide)}
+          >
+            {labels.askInSide}
+          </Button>
+        ) : null}
+      </MenuSurface>,
+      portalTarget
+    );
+  }
+);

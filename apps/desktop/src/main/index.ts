@@ -138,7 +138,7 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // before any child_process.spawn / execFile call in the main process —
 // ES module imports are hoisted, so this block executes before createWindow
 // or any daemon-manager spawn.
-if (process.platform !== "win32") {
+if (process.platform !== "win32" && process.env.MULTICA_DEV_ISOLATED !== "1") {
   fixPath();
   // Fallback: ensure common install locations are on PATH when fix-path came
   // up short (broken shell rc, non-interactive $SHELL, missing entries).
@@ -608,7 +608,14 @@ const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
 
 if (is.dev) {
   app.setName(DEV_APP_NAME);
-  app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+  const isolatedUserData = process.env.MULTICA_DEV_ISOLATED === "1"
+    ? process.env.MULTICA_DEV_USER_DATA
+    : undefined;
+  if (process.env.MULTICA_DEV_ISOLATED === "1" && !isolatedUserData) {
+    throw new Error("Isolated development requires MULTICA_DEV_USER_DATA");
+  }
+  app.setPath("userData", isolatedUserData ?? join(app.getPath("appData"), DEV_APP_NAME));
+  if (isolatedUserData) app.setPath("sessionData", isolatedUserData);
 } else {
   // Pin the production app name in code. Electron's Linux WM_CLASS is set
   // from app.getName() when the first BrowserWindow is realized; the
@@ -742,7 +749,7 @@ if (!gotTheLock) {
         }).catch((error: unknown) => console.warn("[developer-logs-mcp] Could not publish the diagnostics manifest", error));
       };
       publishDeveloperLogsManifest();
-      void findCodex().then((codex) => registerCodexStdioMcp(codex, {
+      if (process.env.MULTICA_DEV_ISOLATED !== "1") void findCodex().then((codex) => registerCodexStdioMcp(codex, {
         name: DEVELOPER_LOGS_MCP_NAME,
         command: process.execPath,
         args: [join(__dirname, "developer-logs-mcp.js"), "--diagnostics", diagnosticsDir],

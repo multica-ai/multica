@@ -1,14 +1,5 @@
-import {
-  Component,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent
-} from "react";
-import { ChevronRight } from "lucide-react";
 import { SideQueueAction } from "@multica/tutti-agent-gui-host/side-entry";
+import { extractPlainTextFromContent } from "@tutti-os/ui-rich-text";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,21 +11,28 @@ import {
   TooltipTrigger,
   useTextOverflow
 } from "@tutti-os/ui-system";
-import { extractPlainTextFromContent } from "@tutti-os/ui-rich-text";
+import { ChevronRight } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import {
+  Component,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent
+} from "react";
+import { ZoomableImage } from "../../app/renderer/components/ZoomableImage";
+import {
+  useConversationServices,
+  useOptionalConversationServices,
+  type ConversationServices
+} from "../../conversationServices";
 import {
   AgentMessageMarkdown,
   type AgentMessageMarkdownWorkspaceAppIcon
 } from "../../shared/AgentMessageMarkdown";
 import type { AgentPromptContentBlock } from "../../shared/contracts/dto/agentSession";
-import type {
-  AgentGUIQueueStatus,
-  AgentGUIQueuedPromptVM
-} from "./model/agentGuiNodeTypes";
-import {
-  agentPromptContentDisplayText,
-  agentPromptContentImageBlocks
-} from "./model/agentComposerDraft";
-import { ZoomableImage } from "../../app/renderer/components/ZoomableImage";
 import { CanvasNodeGhostIconButton } from "../shared/CanvasNodeGhostIconButton";
 import {
   CanvasNodeGuideLinedIcon,
@@ -43,14 +41,18 @@ import {
 } from "../shared/canvasNodeChromeIcons";
 import styles from "./AgentGUINode.styles";
 import {
+  agentPromptContentDisplayText,
+  agentPromptContentImageBlocks
+} from "./model/agentComposerDraft";
+import type {
+  AgentGUIQueueStatus,
+  AgentGUIQueuedPromptVM
+} from "./model/agentGuiNodeTypes";
+import {
   QueuedPromptImageLoadOwner,
   queuedPromptImageHasSafeRemoteUrl,
   queuedPromptImageLoadRequestIdentity
 } from "./queuedPromptImageLoadOwner";
-import {
-  useOptionalAgentGUIRuntime,
-  type AgentGUIRuntime
-} from "../../agentActivityRuntime";
 
 const EMPTY_WORKSPACE_APP_ICONS: readonly AgentMessageMarkdownWorkspaceAppIcon[] =
   [];
@@ -66,7 +68,7 @@ type QueuedPromptImageBlock = AgentPromptContentBlock & {
   path?: string;
 };
 
-interface AgentQueuedPromptPanelProps {
+interface AgentQueuedPromptPanelViewProps {
   queueStatus?: AgentGUIQueueStatus;
   queuedPrompts: readonly AgentGUIQueuedPromptVM[];
   drainingQueuedPromptId: string | null;
@@ -131,7 +133,7 @@ interface AgentQueuedPromptImageProps {
   agentSessionId?: string | null;
   image: QueuedPromptImageBlock;
   imageKey: string;
-  runtime: AgentGUIRuntime | null;
+  runtime: ConversationServices | null;
   workspaceId?: string | null;
 }
 
@@ -216,7 +218,8 @@ class AgentQueuedPromptImage extends Component<
       !workspaceId ||
       (!attachmentId && !path) ||
       queuedPromptImageHasSafeRemoteUrl(remoteUrl) ||
-      (!runtime.readSessionAttachment && !runtime.readPromptAsset)
+      (!runtime.attachments?.readSessionAttachment &&
+        !runtime.attachments?.readPromptAsset)
     ) {
       this.setState({ requestIdentity, source: null });
       return;
@@ -324,7 +327,7 @@ function AgentQueuedPromptText({
   );
 }
 
-export function AgentQueuedPromptPanel({
+export function AgentQueuedPromptPanelView({
   queueStatus = "active",
   queuedPrompts,
   drainingQueuedPromptId,
@@ -336,9 +339,8 @@ export function AgentQueuedPromptPanel({
   onLinkClick,
   workspaceId = null,
   workspaceAppIcons = EMPTY_WORKSPACE_APP_ICONS
-}: AgentQueuedPromptPanelProps): React.JSX.Element {
-  "use memo";
-  const runtime = useOptionalAgentGUIRuntime();
+}: AgentQueuedPromptPanelViewProps): React.JSX.Element {
+  const runtime = useOptionalConversationServices();
   const [isExpanded, setIsExpanded] = useState(false);
   const singlePromptTextRef = useRef<HTMLDivElement | null>(null);
   const queuedPromptListRef = useRef<HTMLDivElement | null>(null);
@@ -592,7 +594,11 @@ export function AgentQueuedPromptPanel({
                       className={`${styles.composerMenuContent} multica-queue-menu`}
                       sideOffset={8}
                     >
-                      <SideQueueAction agentSessionId={agentSessionId} promptId={queuedPrompt.id} disabled={isDraining} />
+                      <SideQueueAction
+                        agentSessionId={agentSessionId}
+                        promptId={queuedPrompt.id}
+                        disabled={isDraining}
+                      />
                       <DropdownMenuItem
                         className={styles.composerMenuItem}
                         disabled={isDraining}
@@ -619,3 +625,32 @@ export function AgentQueuedPromptPanel({
     </div>
   );
 }
+
+type AgentQueuedPromptPanelProps = Omit<
+  AgentQueuedPromptPanelViewProps,
+  "queueStatus" | "queuedPrompts" | "drainingQueuedPromptId"
+>;
+
+export const AgentQueuedPromptPanel = observer(function AgentQueuedPromptPanel(
+  props: AgentQueuedPromptPanelProps
+) {
+  const { prompts } = useConversationServices();
+  const queuedPrompts = prompts.visibleQueuedPrompts(props.agentSessionId);
+  const queue = prompts.queueRecord(props.agentSessionId);
+  if (!queuedPrompts.length) return null;
+  return (
+    <div
+      className={`${styles.composerFloatingPrompt} ${styles.composerQueuedPromptFloating}`}
+      data-testid="agent-gui-composer-queued-prompts"
+    >
+      <AgentQueuedPromptPanelView
+        {...props}
+        queuedPrompts={queuedPrompts}
+        queueStatus={
+          queue?.suspendReason === "user_stop" ? "paused_by_user" : "active"
+        }
+        drainingQueuedPromptId={queue?.sendNextPromptId ?? null}
+      />
+    </div>
+  );
+});

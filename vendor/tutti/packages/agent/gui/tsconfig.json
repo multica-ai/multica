@@ -17,5 +17,5 @@
     },
     "types": ["node", "react", "react-dom", "vite/client"]
   },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts", "tsup.config.ts"]
+  "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"]
 }

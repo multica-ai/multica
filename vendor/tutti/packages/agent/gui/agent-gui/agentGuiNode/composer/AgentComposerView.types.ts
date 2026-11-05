@@ -6,7 +6,8 @@ import type {
 } from "react";
 import type { AgentMentionSearchController } from "../AgentMentionSearchController";
 import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
-import type { AgentComposerProps } from "./AgentComposer.types";
+import type { AgentComposerRenderProps as AgentComposerProps } from "./AgentComposer.types";
+import type { useAgentQuickPromptLibrary } from "./quickPrompts/useAgentQuickPromptLibrary";
 import type { useComposerDraftAttachmentsWithConnectors } from "./useComposerDraftAttachmentsWithConnectors";
 import type { useComposerFocusAndDrop } from "./useComposerFocusAndDrop";
 import type { useComposerLayout } from "./useComposerLayout";
@@ -17,7 +18,6 @@ import type { useComposerProviderTargets } from "./useComposerProviderTargets";
 import type { useComposerSlashActions } from "./useComposerSlashActions";
 import type { useMentionPaletteFrame } from "./useMentionPaletteFrame";
 import type { SessionWorktreeLaunchState } from "./useSessionWorktreeLaunch";
-import type { useAgentQuickPromptLibrary } from "./quickPrompts/useAgentQuickPromptLibrary";
 
 export interface AgentComposerViewProps {
   props: AgentComposerProps;

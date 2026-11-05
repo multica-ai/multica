@@ -1,32 +1,26 @@
-import { memo, useMemo, type JSX } from "react";
 import type { I18nRuntime } from "@tutti-os/ui-i18n-runtime";
 import { TooltipProvider } from "@tutti-os/ui-system";
-import type { AgentGUIRuntime } from "./agentActivityRuntime";
-import type { AgentHostInputApi } from "./host/agentHostApi";
-import type {
-  AgentGUIAgentDirectorySnapshot,
-  AgentGUIAllAgentsPresentation,
-  AgentGUIHomeSuggestionId
-} from "./types";
-import type { AgentGUIAgentsEmptyRenderer } from "./agent-gui/agentGuiNode/AgentGUINodeView";
-import {
-  normalizeAgentGUIAgents,
-  projectAgentGUIAgentsToTargets
-} from "./agents";
+import { memo, useMemo, type JSX } from "react";
 import {
   AgentGUINode,
   type AgentGUINodeProps
 } from "./agent-gui/agentGuiNode/AgentGUINode";
 import { AgentGUIActivityHostProvider } from "./agentActivityHost";
+import {
+  normalizeAgentGUIAgents,
+  projectAgentGUIAgentsToTargets
+} from "./agents";
+import type { ConversationServices } from "./conversationServices";
+import type { AgentHostInputApi } from "./host/agentHostApi";
 import { AgentGuiI18nProvider, type AgentGuiI18nLocale } from "./i18n/index";
 import { AgentVisibleErrorPresentationProvider } from "./shared/visibleError/AgentVisibleErrorPresentationContext";
-import {
-  AgentSideConversationRuntimeProvider,
-  type AgentSideConversationRuntime
-} from "./agentSideConversationRuntime";
+import type {
+  AgentGUIAgentDirectorySnapshot,
+  AgentGUIHomeSuggestionId
+} from "./types";
 
-export type { AgentGUIHomeSuggestionId } from "./types";
 export type { ReferenceProvenanceCatalog as AgentGUIReferenceProvenanceFilterCatalog } from "@tutti-os/workspace-file-reference/contracts";
+export type { AgentGUIHomeSuggestionId } from "./types";
 
 type AgentGUIPublicHostCapabilities = Omit<
   AgentGUINodeProps["hostCapabilities"],
@@ -35,20 +29,14 @@ type AgentGUIPublicHostCapabilities = Omit<
   | "mentionAgentTargets"
   | "handoffAgentTargets"
   | "handoffAgentTargetsLoading"
-  | "providerRailAllPresentation"
   | "providerRailMode"
   | "disabledHomeSuggestions"
 >;
 
-type AgentGUIPublicRenderSlots = Omit<
-  AgentGUINodeProps["renderSlots"],
-  "providerRailEmpty"
->;
+type AgentGUIPublicRenderSlots = AgentGUINodeProps["renderSlots"];
 
-export interface AgentGUIProps extends Omit<
-  AgentGUINodeProps,
-  "hostCapabilities" | "renderSlots"
-> {
+export interface AgentGUIProps
+  extends Omit<AgentGUINodeProps, "hostCapabilities" | "renderSlots"> {
   agentDirectory: AgentGUIAgentDirectorySnapshot;
   /**
    * Complete host-owned identity catalog for rendered Agent mentions. Unlike
@@ -61,10 +49,7 @@ export interface AgentGUIProps extends Omit<
    * uses `agentDirectory`, preserving the single-runtime host contract.
    */
   handoffAgentDirectory?: AgentGUIAgentDirectorySnapshot;
-  allAgentsPresentation?: AgentGUIAllAgentsPresentation | null;
-  renderAgentsEmpty?: AgentGUIAgentsEmptyRenderer;
-  agentActivityRuntime: AgentGUIRuntime;
-  agentSideConversationRuntime?: AgentSideConversationRuntime | null;
+  agentActivityRuntime: ConversationServices;
   agentHostApi?: AgentHostInputApi | null;
   /** Starter entries to hide below the empty new-session composer. */
   disabled?: readonly AgentGUIHomeSuggestionId[];
@@ -76,13 +61,11 @@ export interface AgentGUIProps extends Omit<
 
 export const AgentGUI = memo(function AgentGUI({
   agentActivityRuntime,
-  agentSideConversationRuntime,
   agentHostApi,
   agentDirectory,
   mentionAgentDirectory,
   handoffAgentDirectory,
-  allAgentsPresentation = null,
-  renderAgentsEmpty,
+
   disabled,
   i18n,
   locale,
@@ -158,14 +141,14 @@ export const AgentGUI = memo(function AgentGUI({
         (effectiveHandoffAgentDirectory.status === "idle" ||
           effectiveHandoffAgentDirectory.status === "loading"),
       disabledHomeSuggestions: disabled,
-      providerRailAllPresentation: allAgentsPresentation ?? null,
+
       providerRailMode: "exact"
     }),
     [
       agentDirectory.agents.length,
       agentDirectory.status,
       agentTargets,
-      allAgentsPresentation,
+
       disabled,
       effectiveHandoffAgentDirectory.agents.length,
       effectiveHandoffAgentDirectory.status,
@@ -176,10 +159,9 @@ export const AgentGUI = memo(function AgentGUI({
   );
   const nodeRenderSlots = useMemo<AgentGUINodeProps["renderSlots"]>(
     () => ({
-      ...renderSlots,
-      providerRailEmpty: renderAgentsEmpty
+      ...renderSlots
     }),
-    [renderAgentsEmpty, renderSlots]
+    [renderSlots]
   );
   const nodeProps: AgentGUINodeProps = {
     ...props,
@@ -188,21 +170,17 @@ export const AgentGUI = memo(function AgentGUI({
   };
   const content = (
     <AgentGuiI18nProvider runtime={i18n} locale={locale}>
-      <AgentSideConversationRuntimeProvider
-        runtime={agentSideConversationRuntime}
+      <AgentGUIActivityHostProvider
+        agentActivityRuntime={agentActivityRuntime}
+        agentHostApi={agentHostApi}
       >
-        <AgentGUIActivityHostProvider
-          agentActivityRuntime={agentActivityRuntime}
-          agentHostApi={agentHostApi}
+        <AgentVisibleErrorPresentationProvider
+          scope={props.hostCapabilities?.visibleErrorPresentationScope}
+          value={props.hostCapabilities?.visibleErrorPresentationOverrides}
         >
-          <AgentVisibleErrorPresentationProvider
-            scope={props.hostCapabilities?.visibleErrorPresentationScope}
-            value={props.hostCapabilities?.visibleErrorPresentationOverrides}
-          >
-            <AgentGUINode {...nodeProps} />
-          </AgentVisibleErrorPresentationProvider>
-        </AgentGUIActivityHostProvider>
-      </AgentSideConversationRuntimeProvider>
+          <AgentGUINode {...nodeProps} />
+        </AgentVisibleErrorPresentationProvider>
+      </AgentGUIActivityHostProvider>
     </AgentGuiI18nProvider>
   );
   return (

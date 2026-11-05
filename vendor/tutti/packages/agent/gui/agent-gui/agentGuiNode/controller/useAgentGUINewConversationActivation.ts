@@ -1,14 +1,14 @@
 import {
   type AgentActivityComposerOptions,
   type AgentActivityRailPlacement,
-  isPendingActivationViable,
-  selectLatestActivationForSession,
+  isPendingActivationViable
 } from "@tutti-os/agent-activity-core";
 import { useCallback } from "react";
 import { translate } from "../../../i18n/index";
-import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
-import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
 import { deriveAgentGUIOptimisticConversationTitle } from "../../../shared/agentConversationTitleProjection";
+import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
+import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
+import type { AgentComposerSubmitOptions } from "../composer/AgentComposer.types";
 import {
   agentPromptContentDisplayText,
   emptyAgentComposerDraft,
@@ -16,7 +16,6 @@ import {
   snapshotAgentComposerDraft,
   textPromptContent
 } from "../model/agentComposerDraft";
-import type { AgentComposerSubmitOptions } from "../composer/AgentComposer.types";
 import { resolveAgentComposerDraftScopeKey } from "../model/agentComposerDraftScope";
 import {
   type AgentGUIConversationUserProject,
@@ -223,7 +222,7 @@ export function useAgentGUINewConversationActivation(
     activeConversationIdRef,
     isComposerHomeRef,
     activeSessionState,
-    sessionEngine,
+    conversationServices,
     activation,
     currentUserId,
     data,
@@ -323,10 +322,7 @@ export function useAgentGUINewConversationActivation(
         prewarmedSessionId &&
         activation.stateFor(prewarmedSessionId) === "inactive" &&
         isPendingActivationViable(
-          selectLatestActivationForSession(
-            sessionEngine.getSnapshot(),
-            prewarmedSessionId
-          )
+          conversationServices.activations.latest(prewarmedSessionId)
         )
           ? prewarmedSessionId
           : createAgentGUIConversationId();
@@ -406,7 +402,7 @@ export function useAgentGUINewConversationActivation(
       isCurrentConversation,
       agentActivityRuntime,
       isConversationStale,
-      sessionEngine,
+      conversationServices,
       workspaceId
     ]
   );

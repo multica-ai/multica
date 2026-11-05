@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import type { ReactNode, RefObject } from "react";
 import styles from "./AgentGUINode.styles";
 
@@ -8,7 +9,7 @@ import styles from "./AgentGUINode.styles";
  * primary composer each have an explicit slot. Domain workflows compose into
  * `accessories`; this primitive owns no workflow or lifecycle policy.
  */
-export function AgentComposerRegion({
+export const AgentComposerRegion = observer(function AgentComposerRegion({
   accessories,
   floating,
   lifted,
@@ -33,4 +34,4 @@ export function AgentComposerRegion({
       {primary}
     </div>
   );
-}
+});

@@ -6,17 +6,19 @@ import {
   screen,
   waitFor
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { RichTextMentionServiceProvider } from "@tutti-os/ui-rich-text/editor";
 import type {
   RichTextMentionService,
   RichTextMentionSnapshot
 } from "@tutti-os/ui-rich-text/service";
+import { getPortalContainer } from "@tutti-os/ui-system/portal-container";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AgentMessageMarkdown,
   resetCachedMarkdownImagesForTests,
   splitStreamingMarkdownBlocks
 } from "./AgentMessageMarkdown";
+import { resolveMarkdownWorkspaceMediaPath } from "./agentMessageMarkdownLinks";
 import {
   MANAGED_AGENT_ICON_ROUNDED_URLS,
   managedAgentRoundedIconUrl
@@ -25,7 +27,6 @@ import {
   parsedDocumentCacheStatsForTests,
   resetParsedDocumentCacheForTests
 } from "./parsedDocumentCache";
-import { resolveMarkdownWorkspaceMediaPath } from "./agentMessageMarkdownLinks";
 
 describe("AgentMessageMarkdown", () => {
   afterEach(() => {
@@ -368,7 +369,8 @@ describe("AgentMessageMarkdown", () => {
 
   it("lets finished blocks skip layout only while streaming", () => {
     const shell = () =>
-      document.querySelector('[data-workspace-agent-markdown="true"]')!.className;
+      document.querySelector('[data-workspace-agent-markdown="true"]')!
+        .className;
     const { rerender } = render(
       <AgentMessageMarkdown content={"one\n\ntwo"} streaming />
     );
@@ -1191,7 +1193,7 @@ describe("AgentMessageMarkdown", () => {
     fireEvent.contextMenu(image, { clientX: 12, clientY: 34 });
     const inlineMenu = screen.getByRole("menu");
     expect(inlineMenu).toHaveStyle({ left: "12px", top: "34px" });
-    expect(inlineMenu.parentElement).toBe(document.body);
+    expect(inlineMenu.parentElement).toBe(getPortalContainer());
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy image" }));
     await waitFor(() => {
@@ -1328,6 +1330,7 @@ describe("AgentMessageMarkdown", () => {
 
     expect(dialog).toHaveAttribute("data-closing", "true");
     fireEvent.animationEnd(dialog);
+    fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -1370,6 +1373,7 @@ describe("AgentMessageMarkdown", () => {
 
     expect(dialog).toHaveAttribute("data-closing", "true");
     fireEvent.animationEnd(dialog);
+    fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -1881,7 +1885,7 @@ describe("AgentMessageMarkdown", () => {
     expect(screen.queryByText(/mention:\/\/session/)).toBeNull();
   });
 
-  it("keeps inline code paths as code instead of inferring links", () => {
+  it("links inline absolute paths while preserving code styling", () => {
     const onLinkClick = vi.fn();
     render(
       <AgentMessageMarkdown
@@ -1894,7 +1898,7 @@ describe("AgentMessageMarkdown", () => {
 
     expect(
       screen.queryByRole("link", { name: "/Users/example/demo/abc" })
-    ).toBeNull();
+    ).toBeInTheDocument();
     expect(screen.getByText("/Users/example/demo/abc")).toBeInTheDocument();
     expect(onLinkClick).not.toHaveBeenCalled();
   });
@@ -1918,7 +1922,7 @@ describe("AgentMessageMarkdown", () => {
     expect(onLinkAction).not.toHaveBeenCalled();
   });
 
-  it("keeps inline code Windows absolute paths as code", () => {
+  it("links inline Windows absolute paths while preserving code styling", () => {
     const onLinkAction = vi.fn();
     render(
       <AgentMessageMarkdown
@@ -1936,14 +1940,14 @@ describe("AgentMessageMarkdown", () => {
       screen.queryByRole("link", {
         name: "C:\\Users\\local\\project\\docs\\README.md"
       })
-    ).toBeNull();
+    ).toBeInTheDocument();
     expect(
       screen.getByText("C:\\Users\\local\\project\\docs\\README.md")
     ).toBeInTheDocument();
     expect(onLinkAction).not.toHaveBeenCalled();
   });
 
-  it("keeps inline code http urls as code", () => {
+  it("links inline http urls while preserving code styling", () => {
     const onLinkClick = vi.fn();
     render(
       <AgentMessageMarkdown
@@ -1954,7 +1958,7 @@ describe("AgentMessageMarkdown", () => {
 
     expect(
       screen.queryByRole("link", { name: "http://127.0.0.1:9999" })
-    ).toBeNull();
+    ).toBeInTheDocument();
     expect(screen.getByText("http://127.0.0.1:9999")).toBeInTheDocument();
     expect(onLinkClick).not.toHaveBeenCalled();
   });
@@ -1976,7 +1980,7 @@ describe("AgentMessageMarkdown", () => {
     expect(link).not.toHaveAttribute("href");
     expect(link).toHaveAttribute(
       "data-agent-link-href",
-      "http://127.0.0.1:9999"
+      "http://127.0.0.1:9999/"
     );
     const clickEvent = new MouseEvent("click", {
       bubbles: true,
@@ -1985,10 +1989,10 @@ describe("AgentMessageMarkdown", () => {
     link.dispatchEvent(clickEvent);
 
     expect(clickEvent.defaultPrevented).toBe(true);
-    expect(onLinkClick).toHaveBeenCalledWith("http://127.0.0.1:9999");
+    expect(onLinkClick).toHaveBeenCalledWith("http://127.0.0.1:9999/");
   });
 
-  it("keeps bare local absolute paths and slash commands as plain text", () => {
+  it("links explicit absolute paths without navigating on render", () => {
     const onLinkClick = vi.fn();
     render(
       <AgentMessageMarkdown
@@ -2003,14 +2007,16 @@ describe("AgentMessageMarkdown", () => {
       screen.queryByRole("link", {
         name: "/Users/example/demo/83c66a52-4ff2-436a-a300-e346c9fdd9d2/note.txt"
       })
-    ).toBeNull();
-    expect(screen.queryByRole("link", { name: "/login" })).toBeNull();
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "/login" })).toBeInTheDocument();
     expect(
       screen.getByText(
         "/Users/example/demo/83c66a52-4ff2-436a-a300-e346c9fdd9d2/note.txt"
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/Please run \/login/)).toBeInTheDocument();
+    expect(screen.getByText(/Please run/).parentElement).toHaveTextContent(
+      "Please run /login"
+    );
     expect(onLinkClick).not.toHaveBeenCalled();
   });
 

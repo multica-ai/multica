@@ -1,3 +1,4 @@
+import { type PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
 import {
   useCallback,
   useEffect,
@@ -5,22 +6,17 @@ import {
   type Dispatch,
   type SetStateAction
 } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import {
-  selectEngineSession,
-  selectEngineSessionDeleted,
-  type AgentSessionEngine,
-  type PendingActivationIntentRecord
-} from "@tutti-os/agent-activity-core";
 import {
   agentGUIAgentTargetRefsEqual,
   resolveAgentGUIAgentTarget
 } from "../../../agentTargets";
+import type { ConversationServices } from "../../../conversationServices";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 import type {
+  AgentGUIAgentTarget,
   AgentGUINodeData,
   AgentGUIProvider,
-  AgentGUIProviderReadinessGate,
-  AgentGUIAgentTarget
+  AgentGUIProviderReadinessGate
 } from "../../../types";
 import {
   normalizeAgentGUIConversationFilter,
@@ -40,11 +36,11 @@ import {
   resolveAgentGUIProviderRailTargetSelection
 } from "./agentGuiController.providerHelpers";
 import { reportAgentGUIConversationFilterTargetUnresolved } from "./agentGuiController.reporting";
-import { isPendingNewConversationActivationForSession } from "./useAgentGUIActivation";
 import {
   resolveConversationSummaryById,
   type ConversationIntent
 } from "./useAgentConversationSelection";
+import { isPendingNewConversationActivationForSession } from "./useAgentGUIActivation";
 
 interface CurrentValue<T> {
   current: T;
@@ -54,7 +50,7 @@ interface UseAgentGUIProviderHomeInput {
   activeConversationId: string | null;
   activeConversationIdRef: CurrentValue<string | null>;
   activePendingActivation: PendingActivationIntentRecord | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   clearRailRevealRequest(): void;
   conversationFilter: AgentGUIConversationFilter;
   conversationFilterRef: CurrentValue<AgentGUIConversationFilter>;
@@ -81,7 +77,7 @@ interface UseAgentGUIProviderHomeInput {
     agentSessionId: string,
     options?: { reloadConversations?: boolean }
   ): void;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   setActiveConversationId: Dispatch<SetStateAction<string | null>>;
   setConversationFilter: Dispatch<SetStateAction<AgentGUIConversationFilter>>;
   setDetailError: Dispatch<SetStateAction<string | null>>;
@@ -218,10 +214,8 @@ export function useAgentGUIProviderHome(input: UseAgentGUIProviderHomeInput) {
       const previousAgentTargetId = resolveAgentGUISessionMemoryTarget({
         agentSessionId: previous,
         canonicalAgentTargetId: previous
-          ? selectEngineSession(
-              currentInput.sessionEngine.getSnapshot(),
-              previous
-            )?.agentTargetId
+          ? currentInput.conversationServices.sessions.session(previous)
+              ?.agentTargetId
           : null,
         pendingActivation: currentInput.activePendingActivation,
         projectedAgentTargetId: previousSummary?.agentTargetId
@@ -401,14 +395,11 @@ export function useAgentGUIProviderHome(input: UseAgentGUIProviderHomeInput) {
         rememberedAgentSessionId,
         current.transientConversation
       );
-      const rememberedEngineSession = selectEngineSession(
-        current.sessionEngine.getSnapshot(),
-        rememberedAgentSessionId
-      );
+      const rememberedEngineSession =
+        current.conversationServices.sessions.session(rememberedAgentSessionId);
       const rememberedSelection = resolveAgentGUIRememberedSessionSelection({
         data: current.dataRef.current,
-        deleted: selectEngineSessionDeleted(
-          current.sessionEngine.getSnapshot(),
+        deleted: current.conversationServices.sessions.isDeleted(
           rememberedAgentSessionId
         ),
         knownAgentTargetId:

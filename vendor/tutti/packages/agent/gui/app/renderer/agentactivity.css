@@ -5135,8 +5135,6 @@ aside.workspace-agents-status-panel
 }
 
 .workbench-window[data-agent-gui-standalone-window="true"]
-  .agent-gui-node__provider-rail-panel,
-.workbench-window[data-agent-gui-standalone-window="true"]
   .agent-gui-node__rail,
 .workbench-window[data-agent-gui-standalone-window="true"]
   .agent-gui-node__detail-panel,
@@ -5158,11 +5156,6 @@ aside.workspace-agents-status-panel
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-.workbench-window[data-window-header-layout="overlay"]
-  .agent-gui-node__provider-rail-panel {
-  padding-top: var(--agent-gui-workbench-header-height);
 }
 
 /* The provider rail nests the workbench-header offset on the panel and the 2px
@@ -5958,43 +5951,6 @@ aside.workspace-agents-status-panel
   opacity: 1;
 }
 
-.agent-gui-node__provider-rail-panel {
-  position: relative;
-  z-index: 3;
-  display: flex;
-  width: var(--agent-gui-provider-rail-width, 52px);
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  background: var(--agent-gui-session-sidepanel-background);
-  overflow: hidden;
-  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  -webkit-app-region: no-drag;
-}
-
-.agent-gui-node__provider-rail-panel::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 1px;
-  background: linear-gradient(
-    180deg,
-    transparent 0,
-    var(--line-1) 24px,
-    var(--line-1) calc(100% - 24px),
-    transparent 100%
-  );
-}
-
-.workbench-window[data-window-header-layout="overlay"]
-  .agent-gui-node__provider-rail-panel::after {
-  top: var(--agent-gui-workbench-header-height);
-}
-
 .agent-gui-node__rail > * {
   transition:
     opacity 120ms ease,
@@ -6034,11 +5990,10 @@ aside.workspace-agents-status-panel
 
 @media (prefers-reduced-motion: reduce) {
   .agent-gui-node__layout,
-  .agent-gui-workbench-header,
-  .agent-gui-node__rail-resize-handle,
-  .agent-gui-node__provider-rail-panel,
-  .agent-gui-node__rail > *,
-  .agent-gui-node__rail::after {
+.agent-gui-workbench-header,
+.agent-gui-node__rail-resize-handle,
+.agent-gui-node__rail > *,
+.agent-gui-node__rail::after {
     transition: none;
   }
 
@@ -10312,277 +10267,13 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
   background: rgb(9 9 11);
 }
 
-.agent-gui-node__provider-rail {
-  display: flex;
-  width: 52px;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  align-items: center;
-  padding: 2px 0 16px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  mask-image: linear-gradient(
-    to bottom,
-    #000 0,
-    #000 calc(100% - 24px),
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0,
-    #000 calc(100% - 24px),
-    transparent 100%
-  );
-  -webkit-app-region: no-drag;
-}
-
-.agent-gui-node__provider-rail-footer {
-  display: flex;
-  width: 52px;
-  min-width: 0;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0;
-  -webkit-app-region: no-drag;
-}
-
-.agent-gui-node__provider-rail-config-footer {
-  padding-bottom: 4px;
-}
-
-.agent-gui-node__provider-rail-config-footer:last-child {
-  padding-bottom: 12px;
-}
-
-.agent-gui-node__provider-rail-sidebar-footer {
-  padding-bottom: 0;
-}
-
-.agent-gui-node__provider-rail-sidebar-footer:last-child {
-  padding-bottom: 12px;
-}
-
-.agent-gui-node__provider-rail-sidebar-footer
-  + .agent-gui-node__provider-rail-config-footer {
-  margin-top: 8px;
-}
-
-.agent-gui-node__provider-rail-config-button {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 0;
-  transition:
-    background 120ms ease,
-    color 120ms ease;
-  -webkit-app-region: no-drag;
-}
-
-.agent-gui-node__provider-rail-config-button:hover:not(:disabled),
-.agent-gui-node__provider-rail-config-button[data-state="open"] {
-  background: var(--transparency-hover);
-  color: var(--text-primary);
-}
-
-.agent-gui-node__provider-rail-config-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--border-focus);
-}
-
-.agent-gui-node__provider-rail-config-button:disabled {
-  color: var(--text-tertiary);
-  cursor: not-allowed;
-}
-
-.agent-gui-node__provider-rail-tile {
-  position: relative;
-  display: grid;
-  width: 52px;
-  min-width: 0;
-  grid-template-rows: 32px;
-  gap: 0;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--text-tertiary);
-  padding: 0;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 14px;
-  text-align: center;
-  transition:
-    color 120ms ease,
-    margin 140ms ease,
-    opacity 140ms ease;
-  -webkit-app-region: no-drag;
-}
-
-.agent-gui-node__provider-rail-tile[draggable="true"] {
-  cursor: grab;
-}
-
-.agent-gui-node__provider-rail-tile[draggable="true"]:active {
-  cursor: grabbing;
-}
-
-.agent-gui-node__provider-rail-tile + .agent-gui-node__provider-rail-tile {
-  margin-top: 12px;
-}
-
-.agent-gui-node__provider-rail-tile-label {
-  max-width: 100%;
-  margin-top: 4px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.agent-gui-node__provider-rail-tile:has(
-  + .agent-gui-node__provider-rail-separator
-) {
-  padding-bottom: 0;
-}
-
-.agent-gui-node__provider-rail-tile:hover:not(:disabled) {
-  color: var(--text-secondary);
-}
-
-.agent-gui-node__provider-rail-tile:disabled {
-  cursor: not-allowed;
-  opacity: 0.3;
-}
-
-.agent-gui-node__provider-rail-tile[data-dragging="true"] {
-  opacity: 0.42;
-}
-
-.agent-gui-node__provider-rail-tile[data-drag-over="before"] {
-  margin-top: 24px;
-}
-
-.agent-gui-node__provider-rail-tile[data-drag-over="after"] {
-  margin-bottom: 12px;
-}
-
-.agent-gui-node__provider-rail-tile[data-drag-over="before"]::before,
-.agent-gui-node__provider-rail-tile[data-drag-over="after"]::after {
-  content: "";
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--brand-primary, var(--tutti-purple));
-  pointer-events: none;
-}
-
-.agent-gui-node__provider-rail-tile[data-drag-over="before"]::before {
-  top: -13px;
-}
-
-.agent-gui-node__provider-rail-tile[data-drag-over="after"]::after {
-  bottom: -13px;
-}
-
-.agent-gui-node__provider-rail-separator {
-  display: block;
-  width: 28px;
-  height: 1px;
-  flex: 0 0 auto;
-  margin-block: 12px;
-  background: var(--line-2);
-}
-
-.agent-gui-node__provider-rail-tile[data-loading="true"] {
-  cursor: progress;
-}
-
-.agent-gui-node__provider-rail-avatar {
-  --agent-gui-avatar-badge-offset: -4px;
-  --agent-gui-avatar-badge-size: 16px;
-
-  position: relative;
-  box-sizing: border-box;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  overflow: visible;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-tertiary);
-  transition:
-    border-color 140ms ease,
-    outline-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease,
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.agent-gui-node__provider-rail-tile:not([data-selected="true"])
-  .agent-gui-node__provider-rail-avatar {
-  opacity: 1;
-}
-
 /* "Beta" tag straddling the selected icon's stroke: its centerline sits on
    the avatar's outer edge (the stroke is centered there with a -1px
    outline offset), horizontally centered on the icon. */
-.agent-gui-node__provider-rail-beta-badge {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-  width: 26px;
-  height: auto;
-  pointer-events: none;
-}
-
-.agent-gui-node__provider-rail-tile:hover:not(:disabled)
-  .agent-gui-node__provider-rail-avatar {
-  background: var(--fill-secondary);
-  color: var(--text-secondary);
-}
-
-.agent-gui-node__provider-rail-tile[data-selected="true"] {
-  color: var(--text-primary);
-}
 
 /* Selected stroke floats 1px outside the 28px icon container: a 2px outline
    centered on the avatar's outer edge (-1px offset) leaves exactly 1px of
    transparent gap between the container and the stroke's inner edge. */
-.agent-gui-node__provider-rail-tile[data-selected="true"]
-  .agent-gui-node__provider-rail-avatar {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--background-fronted) 80%, white);
-  outline: 2px solid var(--brand-primary, var(--tutti-purple));
-  outline-offset: -1px;
-  color: var(--brand-primary, var(--tutti-purple));
-}
-
-.agent-gui-node__provider-rail-avatar-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.agent-gui-node__provider-rail-avatar-image {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  object-fit: contain;
-}
 
 .agent-gui-node__agent-avatar {
   position: relative;
@@ -10617,18 +10308,6 @@ html[data-theme="light"] [data-message-center-item-id].agent-gui-edge-glow {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.agent-gui-node__provider-rail-tile[data-loading="true"]
-  .agent-gui-node__provider-rail-avatar {
-  background: linear-gradient(
-    90deg,
-    var(--fill-tertiary),
-    var(--fill-secondary),
-    var(--fill-tertiary)
-  );
-  background-size: 200% 100%;
-  animation: agent-gui-provider-target-loading 1.2s ease-in-out infinite;
 }
 
 .agent-gui-provider-manager-tile[data-dragging="true"] {

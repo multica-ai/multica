@@ -1,19 +1,25 @@
-import type { AgentGUINodeViewModel } from "../model/agentGuiNodeTypes";
+import type {
+  AgentGUIRailViewModel,
+  AgentGUIShellViewModel
+} from "../model/agentGuiNodeTypes";
 import type { AgentGUIEngagementContext } from "./agentGUIEngagement.types";
 
 export function projectAgentGUIEngagementContext(
-  viewModel: AgentGUINodeViewModel,
+  {
+    shell,
+    rail
+  }: { rail: AgentGUIRailViewModel; shell: AgentGUIShellViewModel },
   composerReady: boolean
 ): { context: AgentGUIEngagementContext; contextKey: string } {
-  const agentSessionId = viewModel.rail.activeConversationId;
+  const agentSessionId = rail.activeConversationId;
   const provider =
-    viewModel.rail.activeConversation?.provider ??
-    viewModel.rail.selectedAgentTarget.provider ??
-    viewModel.shell.data.provider;
+    rail.activeConversation?.provider ??
+    rail.selectedAgentTarget.provider ??
+    shell.data.provider;
   const agentTargetId =
-    viewModel.rail.activeConversation?.agentTargetId ??
-    viewModel.rail.selectedAgentTarget.agentTargetId ??
-    viewModel.rail.selectedAgentTarget.targetId ??
+    rail.activeConversation?.agentTargetId ??
+    rail.selectedAgentTarget.agentTargetId ??
+    rail.selectedAgentTarget.targetId ??
     null;
   return {
     context: {

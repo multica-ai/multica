@@ -1,6 +1,6 @@
 # AI 会话状态迁移到 MobX 方案
 
-日期：2026-11-03。状态：实施中，按第 9 节分阶段合入。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
+日期：2026-11-03。状态：实现完成，验证和人工验收边界见 [本地会话视图状态](conversation-view-state.md)。基于 [本地会话客户端模型与去 iframe 方案](./local-conversation-client-store.md)（#122）。
 
 把 AI 会话模块的状态统一到 MobX：数据是带方法的 `XxxModel`，逻辑在维护它们的 `XxxService`，并替换 Tutti engine。Web 上的 AI 会话页面删除，Tutti GUI 只服务 Desktop 的本地会话，最终由我们自己管理，view 直接读 Model、调 Service。
 
@@ -276,49 +276,35 @@ class ItemModel {
 | 3b. 列表 | 列表和设备在线状态迁入 `ConversationListModel`；vendor rail 在 Desktop 上固定折叠，折叠时不再挂载，分页查询层不再运行，代码在阶段 7 删除 | 列表的全量计算 |
 | 4. 写路径 | 第 6 节和 daemon 能力；提交、新建会话、队列、取消、交互、发送可用性一起迁；结束时迁出 `sessionLifecycle` | 数据存两份的主体 |
 | 5. 其余领域 | composer → detail，同时删除对应的 runtime 方法、controller hook、RPC 方法和 `useAgentHostApi` | |
-| 6. 删除 engine 和翻译层 | 删除 engine、`useEngineSelector`、投影、ledger、`AgentGuiRpcClient`、`AgentGUIRuntime`、runtime | 只有 MobX |
-| 7. 收尾 | 按第 2 节的规则拆完剩余 controller，用 provider 替换 view model，删除用不到的目录 | |
+| 6. 删除 engine 和翻译层（完成） | 删除 engine、`useEngineSelector`、投影、ledger、`AgentGuiRpcClient`、`AgentGUIRuntime`、runtime | 只有 MobX |
+| 7. 收尾（完成） | 按第 2 节的规则拆完剩余 controller，用 provider 替换 view model，删除用不到的目录 | |
 
 **controller 重写的主体在阶段 3 到 5，不在阶段 7**：删除 engine 前，controller 的 69 处 `useEngineSelector`、28 处 `getSnapshot`、18 处 `dispatch` 都要替换。
 
-每到一个阶段结束，用打点结果重新评估下一阶段的节奏。
+阶段 6、7 的实际边界和验证入口见 [本地会话视图状态](conversation-view-state.md)。
+按轮转录、原生命令、直接宿主服务、身份与旧存储迁移均已落地。消费组件直接读原生服务或 GUI computed state，草稿保留原存储；无效 Side/Provider 界面和未启用的 Goal 文案已清理。真实用户会话的最终确认仍由用户负责。
 
-### 阶段 3 的范围说明
+### 阶段 3、4 的最终边界
 
-按用户选择分两步，每一步应用都能跑。第一步已完成：时间线项、明细轮次和行都按输入对象缓存，每批只重建变化的轮次。行模型和现有组件没有变。合成数据下（200 轮、4200 条消息，不含 React），一批事件从约 69ms 降到约 8ms。
-
-第二步让 engine 不再持有 assistant 内容：
-
-- **读取：** `TranscriptModel` 持有每个会话已提交的消息列表，由 `LocalTranscript` 写入，经 `AgentGUIRuntime.transcript` 读取。`useAgentActivitySessionMessages` 用 `useModelValue` 订阅它，行模型和组件没有改。没有消息变化的提交保留原数组，下游不会重跑。
-- **engine：** 只收到用户消息和轮次，`pendingIntents`、`promptQueue` 和取消只看 `clientSubmitId`。`sessionMessagesById`、`selectSessionMessages` 还在，但只含用户消息。还在读它们的：标题和 rail 标题（只读首条用户消息）、`desktop-queue-engine`（是否已有用户消息）、历史版本的回退。计划检测读 assistant 消息，但本地转录不产出计划消息，结果不变；message center 没有挂载。
-- **同一次提交：** `applyDetail` 在一个 MobX batch 里写 Model 和分发 engine。observer 在 batch 结束时才运行，engine 的订阅者读到的 Model 已是新值，所以两边不会看到不一致的轮次状态（第 11 节风险 2）。
-- **节奏：** `CommitCadence` 约 30 ms 提交一次，取代 `receiveLocal` 的微任务合并。没有用 rAF：它在隐藏或被遮挡的窗口里暂停，在 120Hz 屏幕上又太频繁；定时器在隐藏窗口里只是被浏览器降频。提交之前 `ConversationModel` 已是新值，只有 `TranscriptModel` 和 engine 等这一拍。
-- **立即提交：** 进入 engine 的 `submitPrompt`、`dispatch`、`stopSession`、`submitInteractionResponse`，以及 `listSessionMessages`、`receiveWorkspace`。不是事件的变化（翻页、队列）在当前微任务里提交。把这些操作从 engine 迁到 Service 时，要带上这次 flush，否则发送判断会比已到达的事件晚一拍。
-- **虚拟列表：** `AgentTranscriptView.observer.spec.tsx` 在 jsdom 里跑真实的 `useVirtualizer`，尺寸是打桩的。`useModelValue` 和 `observer` 两种读法都覆盖：窗口不变时更新可见行、不在窗口内的行回来时显示最新内容、追加、卸载后不再订阅，没有 `flushSync` 警告。`observer` 行放进虚拟列表时只重渲染变化的行，滚出窗口后不再订阅。真实布局下的高度增长、滚动锚定和跟随到底，要在真实应用里看。
-
-把组件逐个改成 `observer` 直接读 Model 和阶段 5、6 一起做。
-
-### 阶段 4 的范围说明
-
-- daemon 能力已补齐：`queue.updated` 带 `request_ids`、`reason`、`dispatching_request_id`；`POST /sessions/{id}/queue/status` 批量查状态（能力 `prompt-status-v1`）；删除留墓碑，保留 7 天；重提比较时排除 `display`；`send_now` 不改变暂停的队列。
-- `PromptService` 接管了 `desktop-queue-engine` 的全部状态和逻辑，后者只把它投影给 engine。原有 28 个队列测试没有修改。
-- 重载后恢复的消息会查询状态：已送达、已入队、派发中、已删除的不再显示；未送达和结果未知的留给用户判断，不自动重发。
-- 未确认发送的存储 key 对非本机设备带设备 id。本机 key 不变，升级后已有草稿还在。
-- 还没迁的：engine 的 `pendingIntents`、`sessionMutations`、`promptExecution`、`editRetry` 和 `sessionLifecycle`。它们和新建会话、取消、交互、发送可用性缠在一起，要等 controller 的读写换掉后才能删，和阶段 5、6 一起做。
+- `TranscriptModel` 按会话和轮次保留已提交消息。`CommittedConversationMessages` 只更新变化轮次，`ConversationRowsModel` 按轮 computed 复用既有纯投影函数；正文与列表结构分别订阅。
+- `AgentSessionsModel` 从原生会话和列表 Model 派生，不再保存 engine state。GUI 专用的交互、设置和门控计算位于 `gui/state`。
+- `PromptService`、`ActivationService`、`SessionLoadService`、`ComposerService` 执行原生读写。轮次决策前保留 `commits.flush()`，提交后的消息和轮次共享原子发布边界。
+- 默认验证使用可控宿主和假传输，不运行真实 Agent 或模型。浏览器回归覆盖流式、输入、历史翻页、定位和主/Side 实例隔离。
+- UI 瞬时状态、草稿和滚动记忆保留现有归属；不将草稿放入新的原生状态容器。滚动 hook 仅调整输入读取边界。
 
 ### 阶段 5 的迁移做法
 
 以 composer 选项为样板，每个领域都这样做：
 
 1. 在 `packages/conversation-client/services/` 写 Service，按原语义移植 reducer 的逻辑，并把对应的 reducer 测试移植成 Service 测试。Service 不依赖 `@tutti-os/*`，类型用泛型或结构类型。
-2. host 的 runtime 创建 Service，把原来 engine 命令处理里的逻辑作为依赖注入，并挂到 `AgentGUIRuntime` 上。
-3. controller 的 hook 还不是 `observer` 时，用 `useModelValue(read, deps)` 读 Model，它负责在 React 和 MobX 之间订阅。
+2. host 的 composition 创建 Service，注入宿主 I/O，并通过 `ConversationServicesProvider` 传递实例。
+3. 消费组件使用 `observer`；派生计算放在 GUI state 的 computed，hook 只管理实例生命周期、宿主绑定和客户端临时状态。
 4. 从 engine 整个删除这个 slice：reducer、selector、intent、command、snapshot 字段。不留兼容层。
 5. 改 spec 的夹具，不改断言的语义。删除行为测试要说明理由。
 
 每个领域完成的标准：`pnpm typecheck`、`pnpm test` 通过；GUI spec 对照基线清单（`.tmp/gui-spec-baseline.fail`）没有新增失败。
 
-**会话设置（`sessionSettings`）：** 选择和保存在 `ComposerService`，preferences 类移到 `models/composer-preferences.ts`。每个会话一条写入通道，状态和乐观值由 `composer.settingsUpdate(id)` 读取。Engine 只留下裸的 `session/updateSettings` 命令，供 `pendingIntents` 的新建补丁和 `promptExecution` 的前置设置使用，前者经 `applyActivationSettings` 回到同一条通道。等 `pendingIntents` 和 `promptExecution` 迁走后，这个命令和 `AgentSessionEffectPort.updateSessionSettings` 一起删除。
+**会话设置（`sessionSettings`）：** 选择和保存由 `ComposerService` 负责，preferences 位于 `models/composer-preferences.ts`。每个会话只有一条写入通道；`ActiveConversationState` 合并可展示的乐观值，失败或超时恢复权威设置。新建、前置设置和已有会话更新都通过同一条通道，不再保留 reducer 命令。
 
 队列排空不再被未结算的设置挡住：Desktop 的提示不进 engine 队列，由 `PromptService` 经 daemon 派发，发送前会等 `ComposerService` 的写入完成，界面上的发送也由 composer gate 拦截。
 

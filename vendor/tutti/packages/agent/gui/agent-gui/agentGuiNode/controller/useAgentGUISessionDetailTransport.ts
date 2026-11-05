@@ -1,34 +1,31 @@
 import {
   type AgentActivityMessage,
-  type AgentSessionFamilySnapshot,
-  type AgentSessionEngine
+  type AgentSessionFamilySnapshot
 } from "@tutti-os/agent-activity-core";
 import type { RefObject } from "react";
 import { useCallback } from "react";
-import {
-  useAgentActivitySessionMessages,
-  type AgentGUIRuntime
-} from "../../../agentActivityRuntime";
 import { useAgentSessionControllerState } from "../../../contexts/workspace/presentation/renderer/agentSessions/useAgentSessionControllerState";
+import { type ConversationServices } from "../../../conversationServices";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+import { conversationTranscriptStateFor } from "../../../state/ConversationTranscriptState";
 import type { AgentGUINodeData } from "../../../types";
 import {
   reportAgentGUIMessagePageDiagnostic,
-  reportAgentGUIRuntimeError
+  reportConversationServicesError
 } from "./agentGuiController.reporting";
 import { useAgentConversationMessagePaging } from "./useAgentConversationMessagePaging";
-import { useModelValue } from "../../../shared/engine/useEngineSelector";
 
 const NO_MESSAGES: readonly AgentActivityMessage[] = [];
 
 export function useAgentGUISessionDetailTransport(input: {
   activeConversationId: string | null;
   activeConversationIdRef: RefObject<string | null>;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   agentActivityRuntimeOrigin: string;
   dataRef: RefObject<AgentGUINodeData>;
   isMountedRef: RefObject<boolean>;
   sessionFamily: AgentSessionFamilySnapshot;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   workspaceId: string;
 }) {
   const {
@@ -39,7 +36,7 @@ export function useAgentGUISessionDetailTransport(input: {
     dataRef,
     isMountedRef,
     sessionFamily,
-    sessionEngine,
+    conversationServices,
     workspaceId
   } = input;
   const sessionViewRef = useCallback(
@@ -51,53 +48,37 @@ export function useAgentGUISessionDetailTransport(input: {
     [agentActivityRuntimeOrigin, workspaceId]
   );
   const { transcript } = agentActivityRuntime;
-  const activeMessages = useModelValue(
-    () => (activeConversationId ? transcript.messages(activeConversationId) : NO_MESSAGES),
-    [activeConversationId, transcript]
-  );
-  const projectedSessionMessagesById = useAgentActivitySessionMessages([
-    activeConversationId,
-    sessionFamily.rootSession?.agentSessionId,
-    ...sessionFamily.childSessions.map((session) => session.agentSessionId)
-  ]);
-  const activeHasOlderMessages = useModelValue(
-    () => (activeConversationId ? transcript.hasOlderMessages(activeConversationId) : false),
-    [activeConversationId, transcript]
-  );
+  const transcriptState = activeConversationId
+    ? conversationTranscriptStateFor(transcript, activeConversationId)
+    : null;
   const state = useAgentSessionControllerState(
     sessionViewRef(activeConversationId),
-    activeMessages,
-    activeHasOlderMessages
+    transcriptState?.oldestLoadedVersion ?? null,
+    transcriptState?.hasOlderMessages ?? false
   );
   const resolveSessionMessages = useCallback(
     (agentSessionId: string | null | undefined) => {
       const normalized = agentSessionId?.trim() ?? "";
       if (!normalized) return [];
-      return (
-        projectedSessionMessagesById[normalized] ??
-        transcript.messages(normalized)
-      );
+      return transcript.messages(normalized);
     },
-    [projectedSessionMessagesById, transcript]
+    [transcript]
   );
   const loadSessionState = useCallback(
     (agentSessionId: string) => {
       const normalized = agentSessionId.trim();
       if (!normalized) return;
-      sessionEngine.dispatch({
-        agentSessionId: normalized,
-        needsMessages: false,
-        needsState: true,
-        type: "session/reconcileRequested",
-        workspaceId
+      conversationServices.sessionLoads.request(normalized, {
+        state: true,
+        messages: false
       });
     },
-    [sessionEngine, workspaceId]
+    [conversationServices, workspaceId]
   );
   const paging = useAgentConversationMessagePaging({
     diagnostics: {
       error: ({ agentSessionId, context, error, phase }) =>
-        reportAgentGUIRuntimeError({
+        reportConversationServicesError({
           agentSessionId,
           context,
           error,
@@ -125,7 +106,7 @@ export function useAgentGUISessionDetailTransport(input: {
         loading
       ),
     runtime: agentActivityRuntime,
-    sessionEngine,
+    conversationServices,
     workspaceId
   });
   const markSelectedConversationDetailPending = useCallback(
@@ -145,7 +126,7 @@ export function useAgentGUISessionDetailTransport(input: {
     loadSelectedConversationMessages: paging.loadInitialMessages,
     loadSessionState,
     markSelectedConversationDetailPending,
-    projectedSessionMessagesById,
+
     resolveSessionMessages,
     setActiveMessageSession: paging.setActiveSession,
     sessionViewRef

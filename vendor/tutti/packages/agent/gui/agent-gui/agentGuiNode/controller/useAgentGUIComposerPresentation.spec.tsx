@@ -1,12 +1,19 @@
 import { renderHook } from "@testing-library/react";
 import type { AgentActivityComposerOptions } from "@tutti-os/agent-activity-core";
 import { describe, expect, it } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
+import {
+  ComposerSettingsState,
+  type ComposerSettingsInput
+} from "../../../state/ComposerSettingsState";
 import type { AgentGUINodeData } from "../../../types";
 import { composerSettingsSupportFromOptions } from "../model/composerSettingsSupport";
 import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
-import { useAgentGUIComposerPresentation } from "./useAgentGUIComposerPresentation";
+
+function useAgentGUIComposerPresentation(input: ComposerSettingsInput) {
+  return new ComposerSettingsState(input);
+}
 
 describe("useAgentGUIComposerPresentation", () => {
   it("exposes a terminal options error without leaving the composer in loading state", () => {
@@ -26,11 +33,11 @@ describe("useAgentGUIComposerPresentation", () => {
       useAgentGUIComposerPresentation({
         activeConversation: null,
         activeConversationId: null,
-        activeEngineSession: null,
+        activeCanonicalSession: null,
         activeSessionState: null,
         agentActivityRuntime: {
           projectPathIsRemote: false
-        } as AgentGUIRuntime,
+        } as ConversationServices,
         composerOptionsLoadStatus: "error",
         composerOptionsLoading: false,
         connectorOptionsLoading: false,
@@ -117,11 +124,11 @@ describe("useAgentGUIComposerPresentation", () => {
         useAgentGUIComposerPresentation({
           activeConversation: null,
           activeConversationId: null,
-          activeEngineSession: null,
+          activeCanonicalSession: null,
           activeSessionState: null,
           agentActivityRuntime: {
             projectPathIsRemote: false
-          } as AgentGUIRuntime,
+          } as ConversationServices,
           composerSupport: {
             ...composerSettingsSupportFromOptions(currentOptions, null),
             reasoning: false
@@ -300,11 +307,11 @@ describe("useAgentGUIComposerPresentation", () => {
         return useAgentGUIComposerPresentation({
           activeConversation: null,
           activeConversationId: "session-1",
-          activeEngineSession: null,
+          activeCanonicalSession: null,
           activeSessionState: null,
           agentActivityRuntime: {
             projectPathIsRemote: false
-          } as AgentGUIRuntime,
+          } as ConversationServices,
           composerSupport: composerSettingsSupportFromOptions(options, null),
           composerOptionsLoading: false,
           connectorOptionsLoading: false,

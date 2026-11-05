@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
 import type { ReferenceSourceAggregator } from "@tutti-os/workspace-file-reference/core";
+import { describe, expect, it } from "vitest";
 
 import { useAgentGUIWorkspaceReferencePicker } from "./useAgentGUIWorkspaceReferencePicker";
 
@@ -13,18 +13,25 @@ function createInput(
     referenceSourceAggregator: {} as ReferenceSourceAggregator,
     resolveMentionReferenceTarget: undefined,
     resolveWorkspaceReferenceInitialTarget: undefined,
-    viewModel: {
+    ...({
       composer: {
-        composerSettings: { selectedProjectPath: null }
+        state: { composerSettings: { selectedProjectPath: null } }
       },
       rail: {
         activeConversation: null,
         userProjects: []
       },
       shell: { workspaceId: "workspace-1" }
-    } as unknown as Parameters<
-      typeof useAgentGUIWorkspaceReferencePicker
-    >[0]["viewModel"],
+    } as unknown as Pick<
+      Parameters<typeof useAgentGUIWorkspaceReferencePicker>[0],
+      | "shell"
+      | "rail"
+      | "detail"
+      | "composer"
+      | "interaction"
+      | "readiness"
+      | "operations"
+    >),
     workspaceFileReferenceAdapter: undefined,
     workspaceFileReferenceCopy: undefined
   };

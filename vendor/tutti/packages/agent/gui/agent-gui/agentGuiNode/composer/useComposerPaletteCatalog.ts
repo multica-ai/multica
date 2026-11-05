@@ -1,40 +1,40 @@
 import { useMemo, type RefObject } from "react";
-import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
+import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
+import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
+import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
+import type { AgentCapabilityTokenOption } from "../agentRichText/agentCapabilityTokenExtension";
+import {
+  filterProviderSkillsForTrigger,
+  getAgentComposerTriggerQueryMatch,
+  getPromptStartSlashCommandQuery
+} from "../model/agentComposerTriggerQueries";
 import type {
   AgentGUIComposerSettingsVM,
   AgentGUIProviderSkillOption
 } from "../model/agentGuiNodeTypes";
-import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEditor";
-import type { AgentCapabilityTokenOption } from "../agentRichText/agentCapabilityTokenExtension";
-import type {
-  AgentComposerCapabilityMenuState,
-  AgentComposerProps
-} from "./AgentComposer.types";
-import {
-  filterSlashCommands,
-  labelForSlashCommand
-} from "../model/agentSlashCommands";
 import {
   labelForProviderSkill,
   skillDescriptionForDisplay,
   skillTriggerForPrefix
 } from "../model/agentSkillOptions";
 import {
-  filterProviderSkillsForTrigger,
-  getAgentComposerTriggerQueryMatch,
-  getPromptStartSlashCommandQuery
-} from "../model/agentComposerTriggerQueries";
-import {
   resolveSlashCommandsForProvider,
   type AgentSlashCommand,
   type AgentSlashCommandCapability
 } from "../model/agentSlashCommandProviderPolicy";
 import {
+  filterSlashCommands,
+  labelForSlashCommand
+} from "../model/agentSlashCommands";
+import type {
+  AgentComposerCapabilityMenuState,
+  AgentComposerRenderProps as AgentComposerProps
+} from "./AgentComposer.types";
+import {
   slashCommandDescriptionForDisplay,
   slashCommandLabelForDisplay
 } from "./slashCommandDisplay";
-import type { AgentSlashPaletteEntry } from "../AgentSlashCommandPalette";
 
 interface UseComposerPaletteCatalogInput {
   provider: string;
@@ -108,7 +108,7 @@ export function useComposerPaletteCatalog({
         compactSupported,
         planSupported: composerSettings.supportsPlanMode,
         browserSupported: Boolean(composerSettings.supportsBrowser),
-        computerSupported: computerPresentationSupported,
+        computerSupported: computerPresentationSupported
       }),
     [
       availableCommands,
@@ -287,7 +287,7 @@ export function useComposerPaletteCatalog({
     labels.slashCommandCompactLabel,
     labels.slashCommandContextLabel,
     labels.slashCommandFastLabel,
-    labels.slashCommandGoalLabel,
+
     labels.slashCommandInitLabel,
     labels.slashCommandPlanLabel,
     labels.slashCommandReviewLabel,
@@ -296,7 +296,7 @@ export function useComposerPaletteCatalog({
     labels.slashCommandCompactDescription,
     labels.slashCommandContextDescription,
     labels.slashCommandFastDescription,
-    labels.slashCommandGoalDescription,
+
     labels.slashCommandInitDescription,
     labels.slashCommandPlanDescription,
     labels.slashCommandReviewDescription,

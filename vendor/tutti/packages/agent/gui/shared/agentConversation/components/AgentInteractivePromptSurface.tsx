@@ -1,4 +1,3 @@
-import type { JSX } from "react";
 import { canonicalInteractionKey } from "@tutti-os/agent-activity-core";
 import {
   Tooltip,
@@ -6,6 +5,8 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@tutti-os/ui-system";
+import { observer } from "mobx-react-lite";
+import type { JSX } from "react";
 import type {
   AgentConversationPromptVM,
   AgentInteractionResponseInput
@@ -69,150 +70,152 @@ export interface AgentInteractivePromptSurfaceProps {
   };
 }
 
-export function AgentInteractivePromptSurface({
-  prompt,
-  variant = "full",
-  conversationReturn,
-  edgeGlow = false,
-  embedded = false,
-  keyboardShortcuts = true,
-  isSubmitting,
-  isInteractionDisabled = false,
-  interactionDisabledReason = null,
-  onSubmit,
-  labels
-}: AgentInteractivePromptSurfaceProps & {
-  embedded?: boolean;
-}): JSX.Element | null {
-  "use memo";
+export const AgentInteractivePromptSurface = observer(
+  function AgentInteractivePromptSurface({
+    prompt,
+    variant = "full",
+    conversationReturn,
+    edgeGlow = false,
+    embedded = false,
+    keyboardShortcuts = true,
+    isSubmitting,
+    isInteractionDisabled = false,
+    interactionDisabledReason = null,
+    onSubmit,
+    labels
+  }: AgentInteractivePromptSurfaceProps & {
+    embedded?: boolean;
+  }): JSX.Element | null {
+    "use memo";
 
-  const submitPrompt = (
-    input: AgentInteractionResponseInput
-  ): boolean | void => {
-    const agentSessionId =
-      "agentSessionId" in prompt ? prompt.agentSessionId?.trim() : "";
-    const turnId = "turnId" in prompt ? prompt.turnId?.trim() : "";
-    return onSubmit({
-      ...input,
-      ...(agentSessionId && turnId ? { agentSessionId, turnId } : {}),
-      requestId: prompt.requestId
-    });
-  };
-  const isComposerAnswerableAskUser =
-    prompt.kind === "ask-user" &&
-    Boolean(prompt.agentSessionId?.trim()) &&
-    Boolean(prompt.turnId?.trim()) &&
-    prompt.questions.length > 0 &&
-    prompt.questions.every((question) => question.allowFreeText !== false);
-  const askUserConversationReturn = isComposerAnswerableAskUser
-    ? conversationReturn
-    : undefined;
+    const submitPrompt = (
+      input: AgentInteractionResponseInput
+    ): boolean | void => {
+      const agentSessionId =
+        "agentSessionId" in prompt ? prompt.agentSessionId?.trim() : "";
+      const turnId = "turnId" in prompt ? prompt.turnId?.trim() : "";
+      return onSubmit({
+        ...input,
+        ...(agentSessionId && turnId ? { agentSessionId, turnId } : {}),
+        requestId: prompt.requestId
+      });
+    };
+    const isComposerAnswerableAskUser =
+      prompt.kind === "ask-user" &&
+      Boolean(prompt.agentSessionId?.trim()) &&
+      Boolean(prompt.turnId?.trim()) &&
+      prompt.questions.length > 0 &&
+      prompt.questions.every((question) => question.allowFreeText !== false);
+    const askUserConversationReturn = isComposerAnswerableAskUser
+      ? conversationReturn
+      : undefined;
 
-  let promptSurface: JSX.Element;
-  if (prompt.kind === "approval") {
-    promptSurface = (
-      <ApprovalPromptSurface
-        prompt={prompt}
-        embedded={embedded}
-        edgeGlow={edgeGlow}
-        keyboardShortcuts={keyboardShortcuts}
-        isSubmitting={isSubmitting}
-        isInteractionDisabled={isInteractionDisabled}
-        onSubmit={submitPrompt}
-        labels={labels}
-      />
-    );
-  } else if (prompt.kind === "exit-plan") {
-    promptSurface = (
-      <ExitPlanPromptSurface
-        prompt={prompt}
-        variant={variant}
-        embedded={embedded}
-        edgeGlow={edgeGlow}
-        isSubmitting={isSubmitting}
-        isInteractionDisabled={isInteractionDisabled}
-        onSubmit={submitPrompt}
-        labels={labels}
-      />
-    );
-  } else if (prompt.kind === "plan-implementation") {
-    promptSurface = (
-      <PlanImplementationSurface
-        prompt={prompt}
-        variant={variant}
-        embedded={embedded}
-        edgeGlow={edgeGlow}
-        isSubmitting={isSubmitting}
-        isInteractionDisabled={isInteractionDisabled}
-        onSubmit={submitPrompt}
-        labels={labels}
-      />
-    );
-  } else {
-    promptSurface = (
-      <AgentAskUserPromptSurface
-        key={canonicalInteractionKey(
-          prompt.agentSessionId ?? "",
-          prompt.turnId ?? "",
-          prompt.requestId
-        )}
-        prompt={prompt}
-        variant={variant}
-        conversationReturn={askUserConversationReturn}
-        embedded={embedded}
-        edgeGlow={edgeGlow}
-        isSubmitting={isSubmitting}
-        isInteractionDisabled={isInteractionDisabled}
-        onSubmit={submitPrompt}
-        labels={labels}
-      />
-    );
-  }
+    let promptSurface: JSX.Element;
+    if (prompt.kind === "approval") {
+      promptSurface = (
+        <ApprovalPromptSurface
+          prompt={prompt}
+          embedded={embedded}
+          edgeGlow={edgeGlow}
+          keyboardShortcuts={keyboardShortcuts}
+          isSubmitting={isSubmitting}
+          isInteractionDisabled={isInteractionDisabled}
+          onSubmit={submitPrompt}
+          labels={labels}
+        />
+      );
+    } else if (prompt.kind === "exit-plan") {
+      promptSurface = (
+        <ExitPlanPromptSurface
+          prompt={prompt}
+          variant={variant}
+          embedded={embedded}
+          edgeGlow={edgeGlow}
+          isSubmitting={isSubmitting}
+          isInteractionDisabled={isInteractionDisabled}
+          onSubmit={submitPrompt}
+          labels={labels}
+        />
+      );
+    } else if (prompt.kind === "plan-implementation") {
+      promptSurface = (
+        <PlanImplementationSurface
+          prompt={prompt}
+          variant={variant}
+          embedded={embedded}
+          edgeGlow={edgeGlow}
+          isSubmitting={isSubmitting}
+          isInteractionDisabled={isInteractionDisabled}
+          onSubmit={submitPrompt}
+          labels={labels}
+        />
+      );
+    } else {
+      promptSurface = (
+        <AgentAskUserPromptSurface
+          key={canonicalInteractionKey(
+            prompt.agentSessionId ?? "",
+            prompt.turnId ?? "",
+            prompt.requestId
+          )}
+          prompt={prompt}
+          variant={variant}
+          conversationReturn={askUserConversationReturn}
+          embedded={embedded}
+          edgeGlow={edgeGlow}
+          isSubmitting={isSubmitting}
+          isInteractionDisabled={isInteractionDisabled}
+          onSubmit={submitPrompt}
+          labels={labels}
+        />
+      );
+    }
 
-  const normalizedReason = interactionDisabledReason?.trim() ?? "";
-  if (!isInteractionDisabled || !normalizedReason) {
-    return promptSurface;
-  }
-  const hasPresentationNavigation =
-    prompt.kind === "ask-user" &&
-    variant === "full" &&
-    askUserConversationReturn !== undefined;
+    const normalizedReason = interactionDisabledReason?.trim() ?? "";
+    if (!isInteractionDisabled || !normalizedReason) {
+      return promptSurface;
+    }
+    const hasPresentationNavigation =
+      prompt.kind === "ask-user" &&
+      variant === "full" &&
+      askUserConversationReturn !== undefined;
 
-  return (
-    <TooltipProvider delayDuration={120} skipDelayDuration={0}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            aria-disabled={hasPresentationNavigation ? undefined : "true"}
-            aria-label={normalizedReason}
-            className={
-              hasPresentationNavigation
-                ? "rounded-md outline-none"
-                : "cursor-not-allowed rounded-md outline-none"
-            }
-            data-agent-interaction-disabled="true"
-            role="group"
-            tabIndex={0}
-          >
-            {/* Without a presentation-only escape action, keep disabled
-                controls out of hit testing so the wrapper owns the tooltip. */}
+    return (
+      <TooltipProvider delayDuration={120} skipDelayDuration={0}>
+        <Tooltip>
+          <TooltipTrigger asChild>
             <div
+              aria-disabled={hasPresentationNavigation ? undefined : "true"}
+              aria-label={normalizedReason}
               className={
-                hasPresentationNavigation ? undefined : "pointer-events-none"
+                hasPresentationNavigation
+                  ? "rounded-md outline-none"
+                  : "cursor-not-allowed rounded-md outline-none"
               }
+              data-agent-interaction-disabled="true"
+              role="group"
+              tabIndex={0}
             >
-              {promptSurface}
+              {/* Without a presentation-only escape action, keep disabled
+                controls out of hit testing so the wrapper owns the tooltip. */}
+              <div
+                className={
+                  hasPresentationNavigation ? undefined : "pointer-events-none"
+                }
+              >
+                {promptSurface}
+              </div>
             </div>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          align="start"
-          className="max-w-[min(360px,calc(100vw-32px))] whitespace-normal text-left [overflow-wrap:anywhere]"
-        >
-          {normalizedReason}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
+          </TooltipTrigger>
+          <TooltipContent
+            side="top"
+            align="start"
+            className="max-w-[min(360px,calc(100vw-32px))] whitespace-normal text-left [overflow-wrap:anywhere]"
+          >
+            {normalizedReason}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+);

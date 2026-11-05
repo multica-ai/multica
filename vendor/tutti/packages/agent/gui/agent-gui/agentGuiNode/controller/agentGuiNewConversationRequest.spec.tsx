@@ -1,19 +1,17 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
-import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import {
-  type AgentActivityRailPlacement,
-} from "@tutti-os/agent-activity-core";
+import { type AgentActivityRailPlacement } from "@tutti-os/agent-activity-core";
 import { describe, expect, it, vi } from "vitest";
 import { createLocalAgentGUIAgentTarget } from "../../../agentTargets";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentHostUserProject } from "../../../host/agentHostApi";
 import type { AgentSessionComposerSettings } from "../../../shared/agentSessionTypes";
+import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
-import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
 import { nodeDefaultDraftKey } from "./agentGuiController.composerHelpers";
+import type { AgentGUIComposerTargetData } from "./agentGuiController.composerPresentation";
 import { requestAgentGUINewConversation } from "./agentGuiNewConversationRequest";
 import { useAgentGUIActivation } from "./useAgentGUIActivation";
 import { useAgentGUIConversationHome } from "./useAgentGUIConversationHome";
@@ -261,8 +259,8 @@ function renderNewConversationScenario(input: {
   rememberedSettings?: AgentSessionComposerSettings;
   userProjects: AgentHostUserProject[];
 }) {
-  const sessionEngine = createTestAgentSessionEngine("workspace-1");
-  const activateSession = vi.spyOn(sessionEngine, "activateSession");
+  const conversationServices = createTestRuntimeState("workspace-1");
+  const activateSession = vi.spyOn(conversationServices.activations, "request");
   const target = createLocalAgentGUIAgentTarget("codex");
   const dataRef: { current: AgentGUINodeData } = {
     current: {
@@ -290,7 +288,7 @@ function renderNewConversationScenario(input: {
   const submittedDraftSnapshotsRef = { current: {} };
   const agentActivityRuntime = {
     prompts: createTestPromptOperations()
-  } as unknown as AgentGUIRuntime;
+  } as unknown as ConversationServices;
   const setDraftByScopeKey = vi.fn();
   const persistActiveConversation = vi.fn();
   const conversationsRef = {
@@ -305,7 +303,7 @@ function renderNewConversationScenario(input: {
 
   const { result } = renderHook(() => {
     const activation = useAgentGUIActivation({
-      engine: sessionEngine,
+      engine: conversationServices,
       getErrorMessage: (error) => String(error),
       workspaceId: "workspace-1"
     });
@@ -407,7 +405,7 @@ function renderNewConversationScenario(input: {
       selectedAgentTargetRef: { current: target },
       selectedComposerTargetDataRef: { current: targetData },
       selectedProjectPathRef,
-      sessionEngine,
+      conversationServices,
       setActiveConversationId: vi.fn(),
       setDetailError: vi.fn(),
       setIntent: vi.fn(),
@@ -435,7 +433,7 @@ function renderNewConversationScenario(input: {
       isSessionMarkedNonResumable: () => false,
       persistActiveConversation: vi.fn(),
       promptImagesSupported: true,
-      sessionEngine,
+      conversationServices,
       setActiveConversationId: vi.fn(),
       setDetailError: vi.fn(),
       setDraftByScopeKey,

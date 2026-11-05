@@ -1,20 +1,17 @@
+import { isPendingActivationViable } from "@tutti-os/agent-activity-core";
+import { areWorkspaceUserProjectPathsEqual } from "@tutti-os/workspace-user-project/core";
+import { reaction } from "mobx";
 import {
   useCallback,
   type Dispatch,
   type RefObject,
   type SetStateAction
 } from "react";
-import {
-  isPendingActivationViable,
-  selectLatestActivationForSession,
-  selectEngineSession,
-  type AgentSessionEngine
-} from "@tutti-os/agent-activity-core";
-import { areWorkspaceUserProjectPathsEqual } from "@tutti-os/workspace-user-project/core";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
 import type { useAgentHostApi } from "../../../agentActivityHost";
+import type { ConversationServices } from "../../../conversationServices";
 import type { AgentHostUserProject } from "../../../host/agentHostApi";
 import { translate } from "../../../i18n/index";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 import type { AgentGUINodeData } from "../../../types";
 import {
   getAgentGUIErrorCode,
@@ -23,7 +20,7 @@ import {
   isSessionNotFoundErrorCode
 } from "./agentGuiController.errors";
 import {
-  reportAgentGUIRuntimeError,
+  reportConversationServicesError,
   showAgentGUIControllerErrorToast
 } from "./agentGuiController.reporting";
 
@@ -33,10 +30,10 @@ export interface UseAgentGUIConversationMetadataActionsInput {
   setUserProjectsSnapshot: (projects: readonly AgentHostUserProject[]) => void;
   userProjectsRef: RefObject<AgentHostUserProject[]>;
   setDetailError: Dispatch<SetStateAction<string | null>>;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   dataRef: RefObject<AgentGUINodeData>;
   workspaceId: string;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   currentUserId: string | null | undefined;
   selectConversation?: (agentSessionId: string) => void;
 }
@@ -46,19 +43,17 @@ const CANONICAL_SESSION_WAIT_TIMEOUT_MS = 30_000;
 type CanonicalSessionWaitResult = "ready" | "unavailable" | "timed_out";
 
 async function waitForCanonicalSession(
-  sessionEngine: AgentSessionEngine,
+  conversationServices: AgentConversationServices,
   agentSessionId: string
 ): Promise<CanonicalSessionWaitResult> {
   const hasCanonicalSession = (): boolean =>
-    selectEngineSession(sessionEngine.getSnapshot(), agentSessionId) !== null;
+    conversationServices.sessions.session(agentSessionId) !== null;
   if (hasCanonicalSession()) {
     return "ready";
   }
 
-  const pendingActivation = selectLatestActivationForSession(
-    sessionEngine.getSnapshot(),
-    agentSessionId
-  );
+  const pendingActivation =
+    conversationServices.activations.latest(agentSessionId);
   if (!isPendingActivationViable(pendingActivation)) {
     return "unavailable";
   }
@@ -84,10 +79,8 @@ async function waitForCanonicalSession(
         finish("ready");
         return;
       }
-      const activation = selectLatestActivationForSession(
-        sessionEngine.getSnapshot(),
-        agentSessionId
-      );
+      const activation =
+        conversationServices.activations.latest(agentSessionId);
       if (!isPendingActivationViable(activation)) {
         finish("unavailable");
       }
@@ -96,7 +89,13 @@ async function waitForCanonicalSession(
       finish("timed_out");
     }
     timeoutSignal.addEventListener("abort", onTimeout, { once: true });
-    const registeredUnsubscribe = sessionEngine.subscribe(check);
+    const registeredUnsubscribe = reaction(
+      () => [
+        conversationServices.sessions.session(agentSessionId),
+        conversationServices.activations.latest(agentSessionId)
+      ],
+      check
+    );
     if (active) {
       unsubscribe = registeredUnsubscribe;
     } else {
@@ -118,7 +117,7 @@ export function useAgentGUIConversationMetadataActions(
     agentActivityRuntime,
     dataRef,
     workspaceId,
-    sessionEngine,
+    conversationServices,
     currentUserId
   } = input;
 
@@ -159,34 +158,6 @@ export function useAgentGUIConversationMetadataActions(
       }
     },
     [agentHostApi.toast, agentHostApi.userProjects, setUserProjectsSnapshot]
-  );
-
-  const moveProject = useCallback(
-    async (projectId: string, beforeProjectId: string | null) => {
-      const move = agentHostApi.userProjects?.move;
-      if (!move) return;
-      agentHostApi.debug?.logRuntimeDiagnostics?.({
-        beforeProjectId,
-        phase: "move_user_project_requested",
-        projectId
-      });
-      try {
-        await move({ beforeProjectId, projectId });
-        agentHostApi.debug?.logRuntimeDiagnostics?.({
-          beforeProjectId,
-          phase: "move_user_project_succeeded",
-          projectId
-        });
-      } catch (error) {
-        agentHostApi.debug?.logRuntimeDiagnostics?.({
-          beforeProjectId,
-          error: getAgentGUIErrorMessage(error),
-          phase: "move_user_project_failed",
-          projectId
-        });
-      }
-    },
-    [agentHostApi.debug, agentHostApi.userProjects]
   );
 
   const toggleProjectPinned = useCallback(
@@ -232,7 +203,7 @@ export function useAgentGUIConversationMetadataActions(
         })
         .catch((error) => {
           const message = getAgentGUIErrorMessage(error);
-          reportAgentGUIRuntimeError({
+          reportConversationServicesError({
             agentSessionId: normalizedAgentSessionId,
             context: { pinned },
             error,
@@ -257,7 +228,7 @@ export function useAgentGUIConversationMetadataActions(
       setDetailError(null);
       try {
         const canonicalSessionWait = await waitForCanonicalSession(
-          sessionEngine,
+          conversationServices,
           normalizedAgentSessionId
         );
         if (canonicalSessionWait !== "ready") {
@@ -274,7 +245,7 @@ export function useAgentGUIConversationMetadataActions(
         });
       } catch (error) {
         const message = getAgentGUIErrorMessage(error);
-        reportAgentGUIRuntimeError({
+        reportConversationServicesError({
           agentSessionId: normalizedAgentSessionId,
           context: { titleLength: normalizedTitle.length },
           error,
@@ -291,7 +262,7 @@ export function useAgentGUIConversationMetadataActions(
       agentActivityRuntime,
       agentHostApi.toast,
       dataRef,
-      sessionEngine,
+      conversationServices,
       setDetailError,
       workspaceId
     ]
@@ -310,10 +281,14 @@ export function useAgentGUIConversationMetadataActions(
           sourceAgentSessionId: normalizedSourceAgentSessionId,
           turnId: normalizedTurnId
         });
-        if (dataRef.current.lastActiveAgentSessionId === normalizedSourceAgentSessionId) input.selectConversation?.(result.targetAgentSessionId);
+        if (
+          dataRef.current.lastActiveAgentSessionId ===
+          normalizedSourceAgentSessionId
+        )
+          input.selectConversation?.(result.targetAgentSessionId);
       } catch (error) {
         const message = getAgentGUIErrorMessage(error);
-        reportAgentGUIRuntimeError({
+        reportConversationServicesError({
           agentSessionId: normalizedSourceAgentSessionId,
           context: { turnId: normalizedTurnId },
           error,
@@ -343,7 +318,7 @@ export function useAgentGUIConversationMetadataActions(
       }
       setDetailError(null);
       try {
-        const sourceSession = await agentActivityRuntime.getSession(
+        const sourceSession = await agentActivityRuntime.conversations.load(
           workspaceId,
           normalizedSourceAgentSessionId
         );
@@ -362,7 +337,7 @@ export function useAgentGUIConversationMetadataActions(
           reason === "workspace_agent_session_not_found"
             ? translate("agentHost.agentGui.sourceConversationNotFound")
             : getAgentGUIErrorMessage(error);
-        reportAgentGUIRuntimeError({
+        reportConversationServicesError({
           agentSessionId: normalizedSourceAgentSessionId,
           error,
           phase: "open_fork_source_conversation",
@@ -386,7 +361,7 @@ export function useAgentGUIConversationMetadataActions(
   return {
     forkConversationThroughTurn,
     openForkSourceConversation,
-    moveProject,
+
     removeProject,
     toggleProjectPinned,
     toggleConversationPinned,

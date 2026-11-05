@@ -1,24 +1,24 @@
 import { act, renderHook } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
+import type { ConversationServices } from "../../../conversationServices";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
 import { useAgentConversationMessagePaging } from "./useAgentConversationMessagePaging";
 
 function runtime(loadOlderSessionMessages: () => Promise<void>) {
   return {
-    loadOlderSessionMessages,
+    conversations: { loadOlder: loadOlderSessionMessages },
     transcript: {
       messages: () => [{ version: 5 }],
       hasOlderMessages: () => true,
       conversationIds: () => ["session-1"]
     }
-  } as unknown as AgentGUIRuntime;
+  } as unknown as ConversationServices;
 }
 
 describe("useAgentConversationMessagePaging", () => {
   it("binds the AgentGUI runtime to the shared message controller", async () => {
-    const engine = createTestAgentSessionEngine("workspace-1");
+    const engine = createTestRuntimeState("workspace-1");
     const loadOlderSessionMessages = vi.fn(async () => {});
     const onOlderPageLoadingChanged = vi.fn();
     const { result, unmount } = renderHook(() =>
@@ -28,7 +28,7 @@ describe("useAgentConversationMessagePaging", () => {
         isMounted: () => true,
         onOlderPageLoadingChanged,
         runtime: runtime(loadOlderSessionMessages),
-        sessionEngine: engine,
+        conversationServices: engine,
         workspaceId: "workspace-1"
       })
     );
@@ -52,7 +52,7 @@ describe("useAgentConversationMessagePaging", () => {
   });
 
   it("disposes its request-owning controller on unmount", async () => {
-    const engine = createTestAgentSessionEngine("workspace-1");
+    const engine = createTestRuntimeState("workspace-1");
     let resolvePage!: () => void;
     const onOlderPageLoadingChanged = vi.fn();
     const { result, unmount } = renderHook(() =>
@@ -67,7 +67,7 @@ describe("useAgentConversationMessagePaging", () => {
               resolvePage = resolve;
             })
         ),
-        sessionEngine: engine,
+        conversationServices: engine,
         workspaceId: "workspace-1"
       })
     );
@@ -89,7 +89,7 @@ describe("useAgentConversationMessagePaging", () => {
   });
 
   it("remains usable after the Strict Mode lifecycle probe", async () => {
-    const engine = createTestAgentSessionEngine("workspace-1");
+    const engine = createTestRuntimeState("workspace-1");
     const loadOlderSessionMessages = vi.fn(async () => {});
     const { result, unmount } = renderHook(
       () =>
@@ -99,7 +99,7 @@ describe("useAgentConversationMessagePaging", () => {
           isMounted: () => true,
           onOlderPageLoadingChanged: vi.fn(),
           runtime: runtime(loadOlderSessionMessages),
-          sessionEngine: engine,
+          conversationServices: engine,
           workspaceId: "workspace-1"
         }),
       {

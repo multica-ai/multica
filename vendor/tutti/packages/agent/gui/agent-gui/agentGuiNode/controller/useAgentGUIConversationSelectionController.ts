@@ -1,17 +1,9 @@
-import {
-  selectFailedNewActivationResolution,
-  selectEngineSession,
-  selectEngineSessionCanReload,
-  selectEngineSessionDetailHydrated,
-  selectEngineSessionStateHydrated,
-  selectLatestActivationForSession,
-  type AgentSessionEngine,
-  type PendingActivationIntentRecord
-} from "@tutti-os/agent-activity-core";
+import { type PendingActivationIntentRecord } from "@tutti-os/agent-activity-core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import { translate } from "../../../i18n/index";
+import type { AgentConversationServices } from "../../../state/conversation-services";
 import type { AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import type { AgentGUIConversationRailRevealReason } from "../model/agentGuiConversationRailViewState";
@@ -25,15 +17,15 @@ import {
   reportAgentGUIConversationListProjectionSkipped
 } from "./agentGuiController.reporting";
 import {
-  isPendingNewConversationActivation,
-  isPendingNewConversationActivationForSession,
-  type useAgentGUIActivation
-} from "./useAgentGUIActivation";
-import {
   resolveConversationSummaryById,
   useAgentConversationSelection,
   type ConversationIntent
 } from "./useAgentConversationSelection";
+import {
+  isPendingNewConversationActivation,
+  isPendingNewConversationActivationForSession,
+  type useAgentGUIActivation
+} from "./useAgentGUIActivation";
 
 type ActivationRecord = Pick<
   PendingActivationIntentRecord,
@@ -51,7 +43,7 @@ interface UseAgentGUIConversationSelectionControllerInput {
   activeConversationIdRef: RefObject<string | null>;
   activePendingActivation: ActivationRecord | null;
   activeSessionReconcileErrorCode: string | null;
-  agentActivityRuntime: AgentGUIRuntime;
+  agentActivityRuntime: ConversationServices;
   conversationIdsRef: RefObject<Set<string>>;
   conversationsRef: RefObject<AgentGUIConversationSummary[]>;
   conversationListQuery: unknown | null;
@@ -71,7 +63,7 @@ interface UseAgentGUIConversationSelectionControllerInput {
   onDataChangeRef: RefObject<
     (updater: (current: AgentGUINodeData) => AgentGUINodeData) => void
   >;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   setActiveConversationId: Dispatch<SetStateAction<string | null>>;
   setDetailError: Dispatch<SetStateAction<string | null>>;
   setIntent: Dispatch<SetStateAction<ConversationIntent>>;
@@ -135,7 +127,7 @@ export function useAgentGUIConversationSelectionController(
     loadSessionState,
     markSelectedConversationDetailPending,
     onDataChangeRef,
-    sessionEngine,
+    conversationServices,
     setActiveConversationId,
     setDetailError,
     setIntent,
@@ -173,9 +165,13 @@ export function useAgentGUIConversationSelectionController(
     if (
       activeConversationIdRef.current ===
         activePendingActivation?.agentSessionId &&
-      selectFailedNewActivationResolution(
-        sessionEngine.getSnapshot(),
+      conversationServices.activations.failedResolution(
         activePendingActivation.agentSessionId,
+        Boolean(
+          conversationServices.sessions.session(
+            activePendingActivation.agentSessionId
+          )
+        ),
         intent.tag === "active" ? { selectionSource: intent.source } : undefined
       ) === "rollback"
     ) {
@@ -225,7 +221,7 @@ export function useAgentGUIConversationSelectionController(
     activePendingActivation,
     activeSessionReconcileErrorCode,
     clearRailRevealRequest,
-    sessionEngine,
+    conversationServices,
     setActiveMessageSession
   ]);
 
@@ -299,32 +295,22 @@ export function useAgentGUIConversationSelectionController(
   const selection = useAgentConversationSelection({
     activation: {
       canReload: (agentSessionId) => {
-        return selectEngineSessionCanReload(
-          sessionEngine.getSnapshot(),
-          agentSessionId
-        );
+        return conversationServices.sessionLoads.canReload(agentSessionId);
       },
       forget: activation.clearFailure,
       isPending: (agentSessionId) =>
         isPendingNewConversationActivation(
-          selectLatestActivationForSession(
-            sessionEngine.getSnapshot(),
-            agentSessionId
-          )
+          conversationServices.activations.latest(agentSessionId)
         )
     },
     conversations: {
       agentTargetIdFor: (agentSessionId) => {
-        const state = sessionEngine.getSnapshot();
+        const state = conversationServices;
         const sessionAgentTargetId =
-          selectEngineSession(state, agentSessionId)?.agentTargetId?.trim() ??
-          "";
+          state.sessions.session(agentSessionId)?.agentTargetId?.trim() ?? "";
         if (sessionAgentTargetId) return sessionAgentTargetId;
         const activationAgentTargetId =
-          selectLatestActivationForSession(
-            state,
-            agentSessionId
-          )?.agentTargetId?.trim() ?? "";
+          state.activations.latest(agentSessionId)?.agentTargetId?.trim() ?? "";
         if (activationAgentTargetId) return activationAgentTargetId;
         return (
           resolveConversationSummaryById(
@@ -343,15 +329,10 @@ export function useAgentGUIConversationSelectionController(
       },
       ensureStateHydrated: loadSessionState,
       isHydrated: (agentSessionId) =>
-        selectEngineSessionDetailHydrated(
-          sessionEngine.getSnapshot(),
-          agentSessionId
-        ),
+        conversationServices.sessionLoads.isDetailHydrated(agentSessionId),
       isStateHydrated: (agentSessionId) =>
-        selectEngineSessionStateHydrated(
-          sessionEngine.getSnapshot(),
-          agentSessionId
-        ),
+        conversationServices.sessions.session(agentSessionId)
+          ?.lifecycleCapabilitiesProjected === true,
       markPending: markSelectedConversationDetailPending,
       setLoading: setIsLoadingMessages
     },
@@ -419,10 +400,9 @@ export function useAgentGUIConversationSelectionController(
           .filter(Boolean)
       );
       for (const agentSessionId of conversationIds) {
-        sessionEngine.dispatch({
-          type: "session/removed",
-          agentSessionId
-        });
+        (conversationServices.sessions.removeSession(agentSessionId),
+          conversationServices.activations.removeSession(agentSessionId),
+          conversationServices.sessionLoads.remove(agentSessionId));
       }
       if (removedIds.size === 0) return;
       onDataChangeRef.current((current) => {
@@ -431,7 +411,7 @@ export function useAgentGUIConversationSelectionController(
         return next;
       });
     },
-    [dataRef, onDataChangeRef, sessionEngine]
+    [dataRef, onDataChangeRef, conversationServices]
   );
 
   return { ...selection, removeConversations };

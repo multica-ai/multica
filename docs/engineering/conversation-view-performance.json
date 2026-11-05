@@ -1,0 +1,122 @@
+{
+  "fixtureVersion": 1,
+  "baselineCommit": "115bfc7c0",
+  "implementationBranch": "codex/conversation-view-migration",
+  "turnCount": 120,
+  "requestedEventsPerSecond": 120,
+  "baseline": {
+    "samples": [
+      {
+        "scriptMs": 668,
+        "taskMs": 1179,
+        "layoutMs": 34,
+        "styleMs": 337,
+        "typingMs": 817,
+        "retainedHeapBytes": 27950940,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      },
+      {
+        "scriptMs": 695,
+        "taskMs": 1235,
+        "layoutMs": 37,
+        "styleMs": 361,
+        "typingMs": 816,
+        "retainedHeapBytes": 27946820,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      },
+      {
+        "scriptMs": 705,
+        "taskMs": 1251,
+        "layoutMs": 36,
+        "styleMs": 366,
+        "typingMs": 832,
+        "retainedHeapBytes": 27978648,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      }
+    ],
+    "median": {
+      "scriptMs": 695,
+      "taskMs": 1235,
+      "layoutMs": 36,
+      "styleMs": 361,
+      "typingMs": 817,
+      "retainedHeapBytes": 27950940,
+      "openingGap": 0,
+      "followingGap": 40,
+      "detachedDrift": 0,
+      "returnDrift": 0
+    }
+  },
+  "implementation": {
+    "samples": [
+      {
+        "scriptMs": 359,
+        "taskMs": 895,
+        "layoutMs": 37,
+        "styleMs": 374,
+        "typingMs": 752,
+        "retainedHeapBytes": 27242252,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      },
+      {
+        "scriptMs": 370,
+        "taskMs": 971,
+        "layoutMs": 44,
+        "styleMs": 435,
+        "typingMs": 739,
+        "retainedHeapBytes": 27236980,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      },
+      {
+        "scriptMs": 390,
+        "taskMs": 1048,
+        "layoutMs": 45,
+        "styleMs": 486,
+        "typingMs": 759,
+        "retainedHeapBytes": 27220468,
+        "openingGap": 0,
+        "followingGap": 40,
+        "detachedDrift": 0,
+        "returnDrift": 0,
+        "composerRetained": true
+      }
+    ],
+    "median": {
+      "scriptMs": 370,
+      "taskMs": 971,
+      "layoutMs": 44,
+      "styleMs": 435,
+      "typingMs": 752,
+      "retainedHeapBytes": 27236980,
+      "openingGap": 0,
+      "followingGap": 40,
+      "detachedDrift": 0,
+      "returnDrift": 0
+    }
+  },
+  "limits": [
+    "The baseline and implementation both retain a 40 px gap after streaming; relative scroll stability passes, strict end-following does not.",
+    "The fixture uses fake transport and performs no real model execution.",
+    "Renderer shell startup with an empty isolated profile does not validate an authenticated user conversation."
+  ]
+}

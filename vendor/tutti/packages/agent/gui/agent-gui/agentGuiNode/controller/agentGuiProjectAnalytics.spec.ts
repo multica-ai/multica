@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUIRuntime } from "../../../agentActivityRuntime";
+import type { ConversationServices } from "../../../conversationServices";
 import { trackAgentGUISettingsProjectChange } from "./agentGuiProjectAnalytics";
 
 describe("trackAgentGUISettingsProjectChange", () => {
@@ -10,8 +10,8 @@ describe("trackAgentGUISettingsProjectChange", () => {
 
       trackAgentGUISettingsProjectChange({
         agentActivityRuntime: {
-          trackSettingsProjectChange
-        } as unknown as AgentGUIRuntime,
+          diagnostics: { trackSettingsProjectChange }
+        } as unknown as ConversationServices,
         agentSessionId: null,
         metadata: { action },
         provider: "codex",
@@ -32,8 +32,8 @@ describe("trackAgentGUISettingsProjectChange", () => {
 
     trackAgentGUISettingsProjectChange({
       agentActivityRuntime: {
-        trackSettingsProjectChange
-      } as unknown as AgentGUIRuntime,
+        diagnostics: { trackSettingsProjectChange }
+      } as unknown as ConversationServices,
       agentSessionId: null,
       provider: "codex",
       workspaceId: "room-1"

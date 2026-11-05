@@ -1,42 +1,41 @@
-import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
+import type { AgentActivitySubmitSettingsPatch } from "@tutti-os/agent-activity-core";
+import type {
+  ReferenceProvenanceFilterController,
+  ReferenceProvenanceFilterSnapshot
+} from "@tutti-os/workspace-file-reference/react";
+import type { WorkspaceUserProjectApi } from "@tutti-os/workspace-user-project/contracts";
+import type { WorkspaceUserProjectI18nRuntime } from "@tutti-os/workspace-user-project/i18n";
 import type { ReactNode } from "react";
+import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
 import type { UiLanguage } from "../../../contexts/settings/domain/agentSettings";
 import type {
   AgentConversationPromptVM,
   AgentInteractionResponseInput
 } from "../../../shared/agentConversation/contracts/agentConversationVM";
 import type { AgentMessageMarkdownWorkspaceAppIcon } from "../../../shared/AgentMessageMarkdown";
+import type { AgentSessionCommand } from "../../../shared/agentSessionTypes";
 import type { AgentPromptContentBlock } from "../../../shared/contracts/dto/agentSession";
-import type { WorkspaceUserProjectI18nRuntime } from "@tutti-os/workspace-user-project/i18n";
-import type { WorkspaceUserProjectApi } from "@tutti-os/workspace-user-project/contracts";
+import type { ComposerFeatureState } from "../../../state/ComposerFeatureState";
+import type { AgentGUIAgentTarget, AgentGUIProvider } from "../../../types";
 import type { AgentProjectDropdownOptions } from "../AgentComposerProjectMenu";
-import type { WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
+import type { AgentProjectPathChangeMetadata } from "../AgentComposerSettingsMenus";
+import type { AgentMentionFilterId } from "../AgentMentionSearchContracts";
 import type { AgentContextMentionItem } from "../agentRichText/agentFileMentionExtension";
 import type { AgentRichTextEditorProps } from "../agentRichText/AgentRichTextEditor.types";
+import type { AgentGUIComposerEngagement } from "../engagement/agentGUIEngagement.types";
+import type { AgentComposerInputHistoryEntry } from "../model/agentComposerInputHistory";
 import type { AgentExternalPromptEntryResolver } from "../model/agentExternalPromptEntries";
 import type { AgentExternalPromptFilePreparer } from "../model/agentExternalPromptFiles";
-import type { AgentProjectPathChangeMetadata } from "../AgentComposerSettingsMenus";
-import type { AgentSlashCommandCapability } from "../model/agentSlashCommandProviderPolicy";
 import type {
   AgentComposerDraft,
   AgentGUIComposerGate,
   AgentGUIComposerSettingsVM,
-  AgentGUIProviderSkillOption,
-  AgentGUIQueueStatus,
-  AgentGUIQueuedPromptVM
+  AgentGUIProviderSkillOption
 } from "../model/agentGuiNodeTypes";
-import type { AgentGUIProvider, AgentGUIAgentTarget } from "../../../types";
-import type { WorkspaceReferencePickResult } from "./useComposerDraftAttachments";
-import type { AgentGUIComposerEngagement } from "../engagement/agentGUIEngagement.types";
-import type { AgentActivitySubmitSettingsPatch } from "@tutti-os/agent-activity-core";
-import type {
-  ReferenceProvenanceFilterController,
-  ReferenceProvenanceFilterSnapshot
-} from "@tutti-os/workspace-file-reference/react";
-import type { AgentQuickPromptLabels } from "./quickPrompts/agentQuickPromptLabels";
-import type { AgentMentionFilterId } from "../AgentMentionSearchContracts";
-import type { AgentComposerInputHistoryEntry } from "../model/agentComposerInputHistory";
 import type { AgentGUISessionLaunchMode } from "../model/agentSessionLaunchMode";
+import type { AgentSlashCommandCapability } from "../model/agentSlashCommandProviderPolicy";
+import type { AgentQuickPromptLabels } from "./quickPrompts/agentQuickPromptLabels";
+import type { WorkspaceReferencePickResult } from "./useComposerDraftAttachments";
 
 export interface AgentComposerReferenceProvenanceFilter {
   snapshot: ReferenceProvenanceFilterSnapshot;
@@ -68,7 +67,7 @@ export interface AgentComposerCapabilityReference {
   source: "slash_command";
 }
 
-export interface AgentComposerProps {
+export interface AgentComposerRenderProps {
   workspaceId: string;
   agentSessionId?: string | null;
   workspacePath?: string | null;
@@ -96,9 +95,6 @@ export interface AgentComposerProps {
   presentationSubmitDisabled: boolean;
   placeholder: string;
   composerSettings: AgentGUIComposerSettingsVM;
-  queueStatus?: AgentGUIQueueStatus;
-  queuedPrompts: readonly AgentGUIQueuedPromptVM[];
-  drainingQueuedPromptId: string | null;
   workspaceAppIcons?: readonly AgentMessageMarkdownWorkspaceAppIcon[];
   selectedAgentTarget?: AgentGUIAgentTarget | null;
   sessionWorktreeEnabled?: boolean;
@@ -133,7 +129,6 @@ export interface AgentComposerProps {
   activePromptDisabledReason?: string | null;
   activePromptKeyboardShortcutsEnabled?: boolean;
   promptTips?: readonly AgentComposerPromptTip[];
-  isInterrupting: boolean;
   isSendingTurn: boolean;
   isSubmittingPrompt: boolean;
   /** Whether the active session is authoritative enough to probe its cwd. */
@@ -261,7 +256,6 @@ export interface AgentComposerProps {
     slashCommandCompactLabel: string;
     slashCommandContextLabel: string;
     slashCommandFastLabel: string;
-    slashCommandGoalLabel: string;
     slashCommandInitLabel: string;
     slashCommandPlanLabel: string;
     slashCommandReviewLabel: string;
@@ -270,7 +264,6 @@ export interface AgentComposerProps {
     slashCommandCompactDescription: string;
     slashCommandContextDescription: string;
     slashCommandFastDescription: string;
-    slashCommandGoalDescription: string;
     slashCommandInitDescription: string;
     slashCommandPlanDescription: string;
     slashCommandReviewDescription: string;
@@ -548,3 +541,32 @@ export interface AgentComposerUsage {
   usedTokens: number | null;
   totalTokens: number | null;
 }
+
+export type AgentComposerControlsState = Pick<
+  ComposerFeatureState,
+  | "availableCommands"
+  | "availableSkills"
+  | "hasCompactableContext"
+  | "compactSupported"
+  | "gate"
+  | "composerSettings"
+  | "usage"
+  | "promptImagesSupported"
+  | "isSendingTurn"
+  | "isSubmittingPrompt"
+  | "activeTurnId"
+>;
+export type AgentComposerProps = Omit<
+  AgentComposerRenderProps,
+  | "availableCommands"
+  | "availableSkills"
+  | "hasCompactableContext"
+  | "compactSupported"
+  | "gate"
+  | "composerSettings"
+  | "usage"
+  | "promptImagesSupported"
+  | "isSendingTurn"
+  | "isSubmittingPrompt"
+  | "activeTurnId"
+> & { state: AgentComposerControlsState };

@@ -1,36 +1,34 @@
 import type {
-  AgentActivityUsage,
   AgentActivityComposerOptionsLoadStatus,
+  AgentActivityUsage,
   CanonicalAgentSession,
   SessionRuntimeAvailability
 } from "@tutti-os/agent-activity-core";
 import type {
+  AgentSessionComposerSettings,
+  AgentSessionPermissionConfig,
+  AgentSessionReasoningEffort,
+  AgentSessionSpeed
+} from "../../../shared/agentSessionTypes";
+import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
+import { AGENT_PASTED_TEXT_BLOCK_KIND } from "../../../shared/pastedTextKinds";
+import type { ComposerFeatureState } from "../../../state/ComposerFeatureState";
+import type {
+  AgentGUIAgentTarget,
   AgentGUINodeData,
   AgentGUIProvider,
   AgentGUIProviderRailMode,
-  AgentGUIProviderReadinessGate,
-  AgentGUIAgentTarget
+  AgentGUIProviderReadinessGate
 } from "../../../types";
+import type { AgentGUIConversationFilter } from "./agentGuiConversationFilter";
 import type {
   AgentGUIApprovalRequest,
   AgentGUIConversationSummary,
   AgentGUIConversationUserProject,
   AgentGUIInteractivePrompt
 } from "./agentGuiConversationModel";
-import type { AgentGUIConversationFilter } from "./agentGuiConversationFilter";
 import type { AgentGUIConversationRailRevealRequest } from "./agentGuiConversationRailViewState";
-import type {
-  AgentSessionCommand,
-  AgentSessionComposerSettings,
-  AgentSessionPermissionConfig,
-  AgentSessionReasoningEffort,
-  AgentSessionSpeed
-} from "../../../shared/agentSessionTypes";
 import type { AgentSlashCommandPolicy } from "./agentSlashCommandProviderPolicy";
-import type { AgentConversationVM } from "../../../shared/agentConversation/contracts/agentConversationVM";
-import type { WorkspaceAgentSessionDetailViewModel } from "../../../shared/workspaceAgentSessionDetailViewModel";
-import type { AgentPromptContentBlock } from "../../../shared/contracts/dto";
-import { AGENT_PASTED_TEXT_BLOCK_KIND } from "../../../shared/pastedTextKinds";
 
 export {
   AGENT_PASTED_TEXT_BLOCK_KIND,
@@ -186,12 +184,14 @@ interface AgentComposerFileBlockBase {
   uploadRetryable?: boolean;
 }
 
-export interface AgentComposerRegularFileBlock extends AgentComposerFileBlockBase {
+export interface AgentComposerRegularFileBlock
+  extends AgentComposerFileBlockBase {
   kind: "file";
   text?: never;
 }
 
-export interface AgentComposerPastedTextBlock extends AgentComposerFileBlockBase {
+export interface AgentComposerPastedTextBlock
+  extends AgentComposerFileBlockBase {
   kind: typeof AGENT_PASTED_TEXT_BLOCK_KIND;
   /** Empty only when a queued pasted-text attachment is restored by path. */
   text: string;
@@ -400,7 +400,7 @@ export interface AgentGUIComposerSettingsVM {
 
 export interface AgentGUIQueuedPromptVM {
   id: string;
-  content: AgentPromptContentBlock[];
+  content: readonly AgentPromptContentBlock[];
   /** 仅展示用文本(bundle 折叠成一个 chip);content 仍带展开后的文件。 */
   displayPrompt?: string;
   createdAtUnixMs: number;
@@ -442,11 +442,9 @@ export interface AgentGUIDetailViewModel {
   usage: AgentActivityUsage | null;
   hasSentUserMessage: boolean;
   avoidGroupingEdits: boolean;
-  conversation?: AgentConversationVM | null;
-  conversationDetail: WorkspaceAgentSessionDetailViewModel | null;
 }
 
-export type AgentGUIRuntimeBlockedReason = Extract<
+export type ConversationServicesBlockedReason = Extract<
   SessionRuntimeAvailability,
   { state: "blocked" }
 >["reason"];
@@ -465,7 +463,7 @@ export type AgentGUIComposerRuntimeGate =
   | {
       status: "blocked";
       reason: "session_runtime";
-      sessionRuntimeReason: AgentGUIRuntimeBlockedReason;
+      sessionRuntimeReason: ConversationServicesBlockedReason;
     };
 
 export type AgentGUIComposerEditorBlockedReason =
@@ -523,25 +521,25 @@ export interface AgentGUIComposerGate {
       };
 }
 
+export type AgentGUIComposerControlsState = Pick<
+  ComposerFeatureState,
+  | "handoffAgentTargets"
+  | "availableCommands"
+  | "availableSkills"
+  | "promptImagesSupported"
+  | "compactSupported"
+  | "gate"
+  | "composerSettings"
+  | "usage"
+  | "hasCompactableContext"
+  | "isSendingTurn"
+  | "isSubmittingPrompt"
+  | "activeTurnId"
+>;
 export interface AgentGUIComposerViewModel {
-  handoffAgentTargets: readonly AgentGUIAgentTarget[];
-  availableCommands: AgentSessionCommand[];
-  availableSkills: AgentGUIProviderSkillOption[];
   draftPrompt: string;
   draftContent: AgentComposerDraft;
-  isCreatingConversation: boolean;
-  isSubmitting: boolean;
-  isInterrupting: boolean;
-  isCancelPending: boolean;
-  /** The Engine can stop a pending prompt before its Turn is visible. */
-  hasPendingSubmitStopTarget?: boolean;
-  promptImagesSupported: boolean;
-  compactSupported: boolean | null;
-  gate: AgentGUIComposerGate;
-  composerSettings: AgentGUIComposerSettingsVM;
-  queuedPrompts: AgentGUIQueuedPromptVM[];
-  queueStatus: AgentGUIQueueStatus;
-  drainingQueuedPromptId: string | null;
+  state: AgentGUIComposerControlsState;
 }
 
 export interface AgentGUIInteractionViewModel {
@@ -564,19 +562,8 @@ export interface AgentGUIReadinessViewModel {
 }
 
 export interface AgentGUIOperationsViewModel {
-  forkThroughTurnPendingTurnIds: readonly string[];
   isDeletingConversation: boolean;
   isUserProjectMutationPending: boolean;
   pendingDeleteConversation: AgentGUIConversationSummary | null;
   pendingDeleteProjectConversations: AgentGUIProjectConversationDeleteTarget | null;
-}
-
-export interface AgentGUINodeViewModel {
-  shell: AgentGUIShellViewModel;
-  rail: AgentGUIRailViewModel;
-  detail: AgentGUIDetailViewModel;
-  composer: AgentGUIComposerViewModel;
-  interaction: AgentGUIInteractionViewModel;
-  readiness: AgentGUIReadinessViewModel;
-  operations: AgentGUIOperationsViewModel;
 }

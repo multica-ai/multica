@@ -1,5 +1,8 @@
-import { flushSync } from "react-dom";
-import { createMessageDraftImage, prepareMessageDraftImage } from "@multica/tutti-agent-gui-host/message-image-clipboard";
+import {
+  createMessageDraftImage,
+  prepareMessageDraftImage
+} from "@multica/tutti-agent-gui-host/message-image-clipboard";
+import type { WorkspaceFileReference } from "@tutti-os/workspace-file-reference/contracts";
 import {
   startTransition,
   useCallback,
@@ -8,49 +11,49 @@ import {
   type RefObject,
   type SetStateAction
 } from "react";
-import type { WorkspaceFileReference } from "@tutti-os/workspace-file-reference/contracts";
+import { flushSync } from "react-dom";
+import { type WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
 import { useOptionalAgentHostApi } from "../../../agentActivityHost";
-import { useOptionalAgentGUIRuntime } from "../../../agentActivityRuntime";
+import { useOptionalConversationServices } from "../../../conversationServices";
 import { translate } from "../../../i18n/index";
-import type {
-  AgentComposerDraft,
-  AgentComposerDraftFile,
-  AgentComposerDraftImage,
-  AgentComposerDraftLargeText
-} from "../model/agentGuiNodeTypes";
-import {
-  applyPastedTextStagingResult,
-  agentComposerDraftFiles,
-  agentComposerDraftImages,
-  agentComposerDraftLargeTexts,
-  agentComposerDraftPrompt,
-  MAX_AGENT_COMPOSER_DRAFT_IMAGES,
-  updateAgentComposerDraft
-} from "../model/agentComposerDraft";
 import type {
   AgentRichTextEditorHandle,
   AgentRichTextPastedImage
 } from "../agentRichText/AgentRichTextEditor";
 import type { AgentContextMentionItem } from "../agentRichText/agentFileMentionExtension";
 import {
+  agentComposerFileMentionReferences,
+  updateAgentComposerFileMentions
+} from "../agentRichText/agentMentionMarkdown";
+import type { AgentGUIComposerContentType } from "../engagement/agentGUIEngagement.types";
+import {
+  agentComposerDraftFiles,
+  agentComposerDraftImages,
+  agentComposerDraftLargeTexts,
+  agentComposerDraftPrompt,
+  applyPastedTextStagingResult,
+  MAX_AGENT_COMPOSER_DRAFT_IMAGES,
+  updateAgentComposerDraft
+} from "../model/agentComposerDraft";
+import { updateDraftPromptAndReconcileFiles } from "../model/agentComposerDraftFileReconciliation";
+import {
   agentExternalPromptFileErrorI18nKey,
   createAgentExternalPromptFilePreparation,
   remainingAgentComposerPromptAssetSlots,
   type AgentExternalPromptFilePreparer
 } from "../model/agentExternalPromptFiles";
-import {
-  agentComposerFileMentionReferences,
-  updateAgentComposerFileMentions
-} from "../agentRichText/agentMentionMarkdown";
-import { updateDraftPromptAndReconcileFiles } from "../model/agentComposerDraftFileReconciliation";
-import { type WorkspaceLinkAction } from "../../../actions/workspaceLinkActions";
-import { dispatchComposerDraftMarkdownLinkClick } from "./resolveComposerFileMentionLinkAction";
+import type {
+  AgentComposerDraft,
+  AgentComposerDraftFile,
+  AgentComposerDraftImage,
+  AgentComposerDraftLargeText
+} from "../model/agentGuiNodeTypes";
+import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
 import {
   AGENT_COMPOSER_PASTED_TEXT_FILE_PREFIX,
   agentComposerTextByteLength
 } from "./composerDraftUtils";
-import { reportAgentComposerDiagnostic } from "./agentComposerDiagnostics";
-import type { AgentGUIComposerContentType } from "../engagement/agentGUIEngagement.types";
+import { dispatchComposerDraftMarkdownLinkClick } from "./resolveComposerFileMentionLinkAction";
 
 export interface WorkspaceReferencePickResult {
   files: readonly WorkspaceFileReference[];
@@ -122,7 +125,7 @@ export function useComposerDraftAttachments({
   onLinkAction
 }: UseComposerDraftAttachmentsInput) {
   const agentHostApi = useOptionalAgentHostApi();
-  const agentActivityRuntime = useOptionalAgentGUIRuntime();
+  const agentActivityRuntime = useOptionalConversationServices();
   const activeDraftScopeKeyRef = useRef(draftScopeKey);
   activeDraftScopeKeyRef.current = draftScopeKey;
   const reportContentEntered = useStableEventCallback(
@@ -159,7 +162,10 @@ export function useComposerDraftAttachments({
       if (!current) return null;
       const next = update(current);
       publishScopedDraft(sourceScopeKey, next);
-      agentActivityRuntime?.promptAttachmentsRemoved?.(current, next);
+      agentActivityRuntime?.attachments?.promptAttachmentsRemoved?.(
+        current,
+        next
+      );
       return next;
     }
   );
@@ -205,9 +211,10 @@ export function useComposerDraftAttachments({
         return;
       }
       const uploadPromptContent =
-        agentActivityRuntime?.uploadPromptContent &&
-        (agentActivityRuntime.promptContentUploadSupport?.image ?? true)
-          ? agentActivityRuntime.uploadPromptContent
+        agentActivityRuntime?.attachments!.uploadPromptContent &&
+        (agentActivityRuntime.attachments?.promptContentUploadSupport?.image ??
+          true)
+          ? agentActivityRuntime.attachments?.uploadPromptContent
           : undefined;
       reportAgentComposerDiagnostic(agentActivityRuntime, {
         details: {
@@ -216,16 +223,19 @@ export function useComposerDraftAttachments({
           runtimeAvailable: Boolean(agentActivityRuntime),
           uploadFunctionAvailable: Boolean(uploadPromptContent),
           uploadSupportDeclared:
-            agentActivityRuntime?.promptContentUploadSupport?.image ?? null
+            agentActivityRuntime?.attachments?.promptContentUploadSupport
+              ?.image ?? null
         },
         event: "agent.gui.composer.image_upload.requested",
         level: "info",
         source: "agent-gui",
         workspaceId
       });
-      const imagePreparations = images.slice(0, remainingSlots).map((image) =>
-        createMessageDraftImage(image, Boolean(uploadPromptContent))
-      );
+      const imagePreparations = images
+        .slice(0, remainingSlots)
+        .map((image) =>
+          createMessageDraftImage(image, Boolean(uploadPromptContent))
+        );
       const nextImages = imagePreparations.map(({ image }) => image);
       const nextDraftImages = [...currentDraftImages, ...nextImages];
       draftImagesRef.current = nextDraftImages;
@@ -238,7 +248,11 @@ export function useComposerDraftAttachments({
       }
       for (const { image: draftImage, reference } of imagePreparations) {
         void prepareMessageDraftImage({
-          workspaceId, image: draftImage, reference, runtime: agentActivityRuntime, uploadPromptContent
+          workspaceId,
+          image: draftImage,
+          reference,
+          runtime: agentActivityRuntime,
+          uploadPromptContent
         })
           .then((result) => {
             const uploadedImage = result.content.find(
@@ -289,7 +303,8 @@ export function useComposerDraftAttachments({
                         ...(uploadedImage.path
                           ? { path: uploadedImage.path }
                           : {}),
-                        previewUrl: uploadedImage.previewUrl ?? image.previewUrl,
+                        previewUrl:
+                          uploadedImage.previewUrl ?? image.previewUrl,
                         uploading: false
                       }
                     : image
@@ -554,7 +569,7 @@ export function useComposerDraftAttachments({
       }
       reportContentEntered("large_text");
       const stagePastedText = pastedTextStagingSupported
-        ? agentActivityRuntime?.stagePastedText
+        ? agentActivityRuntime?.attachments?.stagePastedText
         : undefined;
       const id = crypto.randomUUID();
       const name = `${AGENT_COMPOSER_PASTED_TEXT_FILE_PREFIX}.txt`;

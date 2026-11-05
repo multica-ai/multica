@@ -1,10 +1,10 @@
 import { useMemo } from "react";
+import { useExternalStoreSelector } from "../../../shared/useExternalStoreSelector";
 import type {
   AgentGUIInteractionReadiness,
   AgentGUIInteractionReadinessIdentity,
   AgentGUIInteractionReadinessSource
 } from "../../../types";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
 
 const SYNCHRONIZING: AgentGUIInteractionReadiness = {
   status: "blocked",
@@ -41,7 +41,7 @@ export function useAgentGUIInteractionReadiness(input: {
     }),
     [input.identity, input.required, input.source]
   );
-  return useEngineSelector(
+  return useExternalStoreSelector(
     binding,
     identityInteractionReadiness,
     interactionReadinessEqual

@@ -1,9 +1,9 @@
 import { useMemo } from "react";
+import { useExternalStoreSelector } from "../../../shared/useExternalStoreSelector";
 import type {
   AgentGUITargetConnectionSource,
   AgentGUITargetConnectionState
 } from "../../../types";
-import { useEngineSelector } from "../../../shared/engine/useEngineSelector";
 import {
   AgentGUITargetConnectionController,
   type AgentGUITargetConnectionBinding
@@ -29,7 +29,7 @@ export function useAgentGUITargetConnectionState(input: {
     }),
     [input.agentTargetId, input.source]
   );
-  const state = useEngineSelector(
+  const state = useExternalStoreSelector(
     binding,
     identityTargetConnectionState,
     targetConnectionStatesEqual
@@ -38,7 +38,7 @@ export function useAgentGUITargetConnectionState(input: {
     () => new AgentGUITargetConnectionController({ source: binding }),
     [binding]
   );
-  const visibleState = useEngineSelector(
+  const visibleState = useExternalStoreSelector(
     controller,
     identityTargetConnectionState,
     targetConnectionStatesEqual

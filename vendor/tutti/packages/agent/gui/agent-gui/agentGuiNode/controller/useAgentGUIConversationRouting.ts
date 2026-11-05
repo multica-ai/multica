@@ -1,9 +1,5 @@
-import {
-  selectFailedNewActivationResolution,
-  selectEngineSessionReconcile,
-  selectWorkspaceAgentConsumerSession,
-  type AgentSessionEngine
-} from "@tutti-os/agent-activity-core";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect } from "react";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
@@ -31,7 +27,7 @@ interface UseAgentGUIConversationRoutingInput {
     agentSessionId: string,
     options?: AgentGUIConversationSelectionOptions
   ): void;
-  sessionEngine: AgentSessionEngine;
+  conversationServices: AgentConversationServices;
   setIntent: Dispatch<SetStateAction<ConversationIntent>>;
   transientConversation: AgentGUIConversationSummary | null;
   workspaceId: string;
@@ -51,7 +47,7 @@ export function useAgentGUIConversationRouting(
     openSessionRequest,
     pendingOpenSessionRequestRef,
     selectConversation,
-    sessionEngine,
+    conversationServices,
     setIntent,
     transientConversation,
     workspaceId
@@ -70,31 +66,26 @@ export function useAgentGUIConversationRouting(
       ) {
         return;
       }
-      const consumerSession = selectWorkspaceAgentConsumerSession(
-        sessionEngine.getSnapshot(),
+      const consumerSession = conversationServices.sessions.consumerSession(
         normalizedAgentSessionId
       );
       if (consumerSession && consumerSession.session.visible !== false) return;
-      const reconcile = selectEngineSessionReconcile(
-        sessionEngine.getSnapshot(),
+      const reconcile = conversationServices.sessionLoads.record(
         normalizedAgentSessionId
       );
       if (
-        reconcile?.inFlightCommandId ||
+        reconcile?.inFlight ||
         reconcile?.pendingMessages ||
         reconcile?.pendingState
       ) {
         return;
       }
-      sessionEngine.dispatch({
-        agentSessionId: normalizedAgentSessionId,
-        needsMessages: true,
-        needsState: true,
-        type: "session/reconcileRequested",
-        workspaceId
+      conversationServices.sessionLoads.request(normalizedAgentSessionId, {
+        state: true,
+        messages: true
       });
     },
-    [sessionEngine, transientConversation, workspaceId]
+    [conversationServices, transientConversation, workspaceId]
   );
 
   useEffect(() => {
@@ -135,9 +126,9 @@ export function useAgentGUIConversationRouting(
 
     if (intent.tag !== "home") {
       if (
-        selectFailedNewActivationResolution(
-          sessionEngine.getSnapshot(),
+        conversationServices.activations.failedResolution(
           intent.id,
+          Boolean(conversationServices.sessions.session(intent.id)),
           intent.tag === "active"
             ? { selectionSource: intent.source }
             : undefined

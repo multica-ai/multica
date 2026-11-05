@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { useState, type JSX } from "react";
 import type { AgentToolCallCardProps } from "./AgentToolCallCard";
 import { AgentToolCallHeader } from "./AgentToolCallHeader";
@@ -5,7 +6,7 @@ import { CollapsibleReveal } from "./CollapsibleReveal";
 import { AgentExpandedToolContent } from "./tool-renderers/AgentExpandedToolContent";
 import { hasAgentToolContent } from "./tool-renderers/agentToolContentShared";
 
-export function AgentTaskCallCard({
+export const AgentTaskCallCard = observer(function AgentTaskCallCard({
   call,
   onLinkClick,
   defaultExpanded,
@@ -51,7 +52,7 @@ export function AgentTaskCallCard({
       ) : null}
     </div>
   );
-}
+});
 
 function taskCallAriaLabel(call: AgentToolCallCardProps["call"]): string {
   return [

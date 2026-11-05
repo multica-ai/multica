@@ -1,10 +1,17 @@
-import {
-  DEFAULT_AGENT_MENTION_FILTER,
-  DEFAULT_MENTION_GROUP_PAGE_SIZE,
-  mentionGroupPageSize
-} from "./agentMentionSearchHelpers";
-import type { AgentContextMentionItem } from "./agentRichText/agentFileMentionExtension";
+import type {
+  ReferenceProvenanceCatalog,
+  ReferenceProvenanceFilter
+} from "@tutti-os/workspace-file-reference/contracts";
 import type { AgentContextMentionProvider } from "./agentContextMentionProvider";
+import { AgentMentionDirectoryRequestLifecycle } from "./AgentMentionDirectoryRequestLifecycle";
+import { AgentMentionProvenanceFilterState } from "./AgentMentionProvenanceFilterState";
+import { resolveAgentMentionQueryUpdate } from "./AgentMentionQueryUpdate";
+import {
+  MAX_BROWSE_CACHE_ENTRIES,
+  mergeAgentMentionBrowseIssueGroupPage,
+  resetAgentMentionSearchBrowseCacheForTests,
+  scheduleAgentMentionIdleTask
+} from "./AgentMentionSearchCache";
 import {
   buildBrowseCategories,
   FILE_PROVIDER_ID,
@@ -13,30 +20,23 @@ import {
   type AgentMentionGroupId,
   type AgentMentionSearchListener
 } from "./AgentMentionSearchContracts";
-import {
-  scheduleAgentMentionIdleTask,
-  mergeAgentMentionBrowseIssueGroupPage,
-  MAX_BROWSE_CACHE_ENTRIES,
-  resetAgentMentionSearchBrowseCacheForTests
-} from "./AgentMentionSearchCache";
-import { diagnosticErrorKind } from "./AgentMentionSearchModel";
+import { AgentMentionSearchControllerBase } from "./AgentMentionSearchControllerBase";
 import {
   queryAgentMentionProviderWithDiagnostics,
   type AgentMentionProviderQueryDiagnostic
 } from "./agentMentionSearchDiagnostics";
 import {
+  DEFAULT_AGENT_MENTION_FILTER,
+  DEFAULT_MENTION_GROUP_PAGE_SIZE,
+  mentionGroupPageSize
+} from "./agentMentionSearchHelpers";
+import {
   queryAgentMentionProviderDirectoryItems,
   queryAgentMentionProviderGroupPage
 } from "./AgentMentionSearchIndex";
-import { AgentMentionSearchControllerBase } from "./AgentMentionSearchControllerBase";
-import { AgentMentionDirectoryRequestLifecycle } from "./AgentMentionDirectoryRequestLifecycle";
-import type {
-  ReferenceProvenanceCatalog,
-  ReferenceProvenanceFilter
-} from "@tutti-os/workspace-file-reference/contracts";
+import { diagnosticErrorKind } from "./AgentMentionSearchModel";
 import { presentWorkspaceFileDirectoryMentionItems } from "./agentMentionWorkspaceFilesPresentation";
-import { AgentMentionProvenanceFilterState } from "./AgentMentionProvenanceFilterState";
-import { resolveAgentMentionQueryUpdate } from "./AgentMentionQueryUpdate";
+import type { AgentContextMentionItem } from "./agentRichText/agentFileMentionExtension";
 export type {
   AgentMentionBrowseCategory,
   AgentMentionFilterId,
@@ -165,6 +165,7 @@ export class AgentMentionSearchController extends AgentMentionSearchControllerBa
     });
   }
   setFilter(filter: AgentMentionFilterId): void {
+    if (filter === this.currentFilter) return;
     if (this.disposed) {
       return;
     }

@@ -4,9 +4,9 @@ import type {
   AgentHostQuickPrompt,
   AgentHostQuickPromptSnapshot
 } from "../../../../host/agentHostApi";
-import { useEngineSelector } from "../../../../shared/engine/useEngineSelector";
-import type { AgentQuickPromptLabels } from "./agentQuickPromptLabels";
+import { useExternalStoreSelector } from "../../../../shared/useExternalStoreSelector";
 import type { AgentGUIQuickPromptType } from "../../engagement/agentGUIEngagement.types";
+import type { AgentQuickPromptLabels } from "./agentQuickPromptLabels";
 
 const unavailableSnapshot: AgentHostQuickPromptSnapshot = {
   enabled: false,
@@ -99,7 +99,7 @@ export function useAgentQuickPromptLibrary(input: {
   } = input;
   const hostApi = useOptionalAgentHostApi();
   const quickPrompts = hostApi?.quickPrompts;
-  const snapshot = useEngineSelector(
+  const snapshot = useExternalStoreSelector(
     quickPrompts ?? unavailableQuickPromptStore,
     selectQuickPromptSnapshot
   );
@@ -167,15 +167,15 @@ export function useAgentQuickPromptLibrary(input: {
   );
   const canReorder = Boolean(
     reorderCapabilityAvailable &&
-    !disabled &&
-    !searchQuery.trim() &&
-    filteredPrompts.length > 1 &&
-    !isInteractionLocked
+      !disabled &&
+      !searchQuery.trim() &&
+      filteredPrompts.length > 1 &&
+      !isInteractionLocked
   );
   const showReorderHandles = Boolean(
     reorderCapabilityAvailable &&
-    !searchQuery.trim() &&
-    filteredPrompts.length > 1
+      !searchQuery.trim() &&
+      filteredPrompts.length > 1
   );
 
   const openPopover = useCallback(() => {
@@ -319,8 +319,8 @@ export function useAgentQuickPromptLibrary(input: {
 
       const insertIntoComposerAfterSave = Boolean(
         createOptions?.insertIntoComposerAfterSave &&
-        createOptionsRef.current === createOptions &&
-        disclosureAvailableRef.current
+          createOptionsRef.current === createOptions &&
+          disclosureAvailableRef.current
       );
       if (insertIntoComposerAfterSave) {
         let inserted = false;

@@ -1,7 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
-import type { AgentSessionEngine } from "@tutti-os/agent-activity-core";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
+import type { AgentConversationServices } from "../../../state/conversation-services";
+
 import { describe, expect, it, vi } from "vitest";
-import type { AgentGUINodeData, AgentGUIAgentTarget } from "../../../types";
+import type { AgentGUIAgentTarget, AgentGUINodeData } from "../../../types";
 import type { AgentGUIConversationSummary } from "../model/agentGuiConversationModel";
 import { useAgentGUIProviderHome } from "./useAgentGUIProviderHome";
 
@@ -268,7 +270,7 @@ function renderProviderHome(input: {
         }
       },
       selectConversation,
-      sessionEngine: engine(input.conversations),
+      conversationServices: engine(input.conversations),
       setActiveConversationId,
       setConversationFilter,
       setDetailError: vi.fn(),
@@ -326,21 +328,20 @@ function conversation(
 
 function engine(
   conversations: readonly AgentGUIConversationSummary[]
-): AgentSessionEngine {
-  return {
-    getSnapshot: () => ({
-      sessionLifecycle: {
-        deletedSessionIds: {},
-        sessionsById: Object.fromEntries(
-          conversations.map((item) => [
-            item.id,
-            {
-              agentSessionId: item.id,
-              agentTargetId: item.agentTargetId
-            }
-          ])
-        )
-      }
-    })
-  } as unknown as AgentSessionEngine;
+): AgentConversationServices {
+  const state = createTestRuntimeState("workspace-1");
+  state.sessions.upsertSessions(
+    conversations.map((item) => ({
+      agentSessionId: item.id,
+      agentTargetId: item.agentTargetId,
+      workspaceId: "workspace-1",
+      provider: item.provider,
+      title: item.title,
+      cwd: "/workspace",
+      activeTurnId: null,
+      latestTurnInteractions: [],
+      pendingInteractions: []
+    }))
+  );
+  return state;
 }

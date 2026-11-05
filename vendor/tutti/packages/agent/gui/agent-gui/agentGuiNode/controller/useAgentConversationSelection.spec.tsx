@@ -1,8 +1,6 @@
-import { createTestAgentSessionEngine } from "../../../shared/testing/createTestAgentSessionEngine";
 import { act, renderHook } from "@testing-library/react";
-import {
-  selectEngineSessionCanReload
-} from "@tutti-os/agent-activity-core";
+import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
+
 import { describe, expect, it, vi } from "vitest";
 import type { AgentGUINodeData } from "../../../types";
 import { useAgentConversationSelection } from "./useAgentConversationSelection";
@@ -288,8 +286,8 @@ describe("useAgentConversationSelection", () => {
 
   it("hydrates a historical session after its new activation failed", () => {
     const agentSessionId = "historical-session";
-    const engine = createTestAgentSessionEngine("workspace-1");
-    engine.dispatch({
+    const engine = createTestRuntimeState("workspace-1");
+    engine.report({
       agentSessionId,
       agentTargetId: "target-1",
       clientSubmitId: "submit-1",
@@ -302,7 +300,7 @@ describe("useAgentConversationSelection", () => {
       type: "activation/requested",
       workspaceId: "workspace-1"
     });
-    engine.dispatch({
+    engine.report({
       commandId: "activate:activation-1",
       commandType: "session/activate",
       correlationId: "activation-1",
@@ -317,8 +315,7 @@ describe("useAgentConversationSelection", () => {
     const { result } = renderHook(() =>
       useAgentConversationSelection({
         activation: {
-          canReload: (sessionId) =>
-            selectEngineSessionCanReload(engine.getSnapshot(), sessionId),
+          canReload: (sessionId) => engine.sessionLoads.canReload(sessionId),
           forget: vi.fn(),
           isPending: () => false
         },
