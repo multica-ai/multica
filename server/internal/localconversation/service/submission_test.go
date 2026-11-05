@@ -214,3 +214,10 @@ func TestUnknownSubmissionStaysVisibleAndExplicitRemovalReleasesIt(t *testing.T)
 		t.Fatalf("resolved slot=%v", err)
 	}
 }
+
+func TestFailedSubmissionRestoredAtFrontHasOneQueueIdentity(t *testing.T) {
+	ids := requestIDsAfter(store.QueueState{Items: []store.QueueItem{{RequestID: "later"}}}, store.QueueChange{Append: &store.QueueItem{RequestID: "retry"}, Front: "retry"})
+	if len(ids) != 2 || ids[0] != "retry" || ids[1] != "later" {
+		t.Fatalf("queue identities=%v", ids)
+	}
+}

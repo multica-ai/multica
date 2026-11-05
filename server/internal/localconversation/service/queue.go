@@ -579,7 +579,7 @@ func requestIDsAfter(state store.QueueState, change store.QueueChange) []string 
 	if change.Front != "" {
 		ids = append([]string{change.Front}, ids...)
 	}
-	if change.Append != nil {
+	if change.Append != nil && change.Append.RequestID != change.Front {
 		ids = append(ids, change.Append.RequestID)
 	}
 	return ids
