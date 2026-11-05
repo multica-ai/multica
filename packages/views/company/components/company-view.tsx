@@ -9,6 +9,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   layoutFloor,
   companyFloorsOptions,
+  companySetupOptions,
   companySquadMembersOptions,
   proposalDetailOptions,
   proposalListOptions,
@@ -100,6 +101,8 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const { data: tasks = EMPTY_TASKS } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const squadsQuery = useQuery(squadListOptions(wsId));
+  // The secretary sits at the boss's desk on every floor.
+  const { data: setup } = useQuery(companySetupOptions(wsId));
   const floorsQuery = useQuery(companyFloorsOptions(wsId));
   const squads = squadsQuery.data ?? EMPTY_SQUADS;
   const floors = floorsQuery.data ?? EMPTY_FLOORS;
@@ -134,8 +137,8 @@ function CompanyScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       const list = membersBySquad[index];
       if (list) members[id] = list;
     });
-    return layoutFloor({ id: floor?.id ?? "" }, squads, agents, members);
-  }, [floor, floorSquadIds, membersBySquad, squads, agents]);
+    return layoutFloor({ id: floor?.id ?? "" }, squads, agents, members, setup?.secretary_id ?? null);
+  }, [floor, floorSquadIds, membersBySquad, squads, agents, setup?.secretary_id]);
 
   const workingAgents = useMemo(
     () => new Set(tasks.filter((task) => task.status === "running").map((task) => task.agent_id)),

@@ -25,7 +25,8 @@ export const FRAME_MS = 33;
 
 /**
  * A worker on the floor: one per agent, seated at a desk of its home squad's room.
- * `room` is the room's slot on the floor, 0 to `COMPANY_SLOTS - 1` (see `@multica/core/company`).
+ * `room` is the room's slot on the floor, 0 to `COMPANY_SLOTS - 1` (see `@multica/core/company`), or
+ * `COMPANY_BOSS_SLOT` for the secretary at the boss's desk.
  */
 export interface WorkerSession {
   key: string;

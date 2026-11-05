@@ -1,5 +1,5 @@
 import type { Agent, Squad, SquadMember } from "../types";
-import { COMPANY_ROOM_DESKS, COMPANY_SLOTS } from "./constants";
+import { COMPANY_BOSS_SLOT, COMPANY_ROOM_DESKS, COMPANY_SLOTS } from "./constants";
 import type { CompanyFloor } from "./types";
 
 /** What `layoutFloor` needs to know about a squad's members. */
@@ -17,10 +17,10 @@ export interface FloorRoom {
   overflow: number;
 }
 
-/** An agent at a desk, in the shape the engine seats. */
+/** An agent at a desk, in the shape the engine seats. The secretary has no squad: it sits at the boss's desk. */
 export interface FloorSession {
   agentId: string;
-  squadId: string;
+  squadId: string | null;
   slot: number;
   desk: number;
 }
@@ -57,6 +57,8 @@ function validSlot(value: unknown): value is number {
  *   0..5, or a seat another squad already holds, is unseated.
  * - Squads seated on other floors are not part of this floor, and neither are
  *   their agents.
+ * - The secretary (`secretaryId`) sits at the boss's desk on every floor, whatever
+ *   its home squad, and is never drawn at a squad desk.
  *
  * Pure: no ordering or identity is taken from anything but the arguments.
  */
@@ -65,6 +67,7 @@ export function layoutFloor(
   squads: readonly Squad[],
   agents: readonly Agent[],
   membersBySquad: Readonly<Record<string, readonly FloorMemberRef[]>> = {},
+  secretaryId: string | null = null,
 ): FloorLayout {
   const rooms: FloorRoom[] = Array.from({ length: COMPANY_SLOTS }, (_, slot) => ({
     slot,
@@ -102,8 +105,10 @@ export function layoutFloor(
   }
   const inputOrder = new Map(liveAgents.map((agent, index) => [agent.id, index]));
 
+  const secretary = liveAgents.find((agent) => agent.id === secretaryId);
   const unassignedAgents = liveAgents.filter(
-    (agent) => !agent.home_squad_id || !liveSquadIds.has(agent.home_squad_id),
+    (agent) =>
+      agent !== secretary && (!agent.home_squad_id || !liveSquadIds.has(agent.home_squad_id)),
   );
 
   const sessions: FloorSession[] = [];
@@ -124,7 +129,7 @@ export function layoutFloor(
     ];
 
     const homed = liveAgents
-      .filter((agent) => agent.home_squad_id === squad.id)
+      .filter((agent) => agent.home_squad_id === squad.id && agent !== secretary)
       .sort((a, b) => {
         const [aLeader, aOrder] = rank(a);
         const [bLeader, bOrder] = rank(b);
@@ -137,6 +142,10 @@ export function layoutFloor(
     room.agentIds.forEach((agentId, desk) => {
       sessions.push({ agentId, squadId: squad.id, slot: room.slot, desk });
     });
+  }
+
+  if (secretary) {
+    sessions.push({ agentId: secretary.id, squadId: null, slot: COMPANY_BOSS_SLOT, desk: 0 });
   }
 
   return { floorId: floor.id, rooms, sessions, overflowTotal, unseatedSquads, unassignedAgents };

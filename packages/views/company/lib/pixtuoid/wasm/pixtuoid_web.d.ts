@@ -129,7 +129,7 @@ export class Company {
     issue_present(key: string): boolean;
     /**
      * Seat a worker for the issue `key` at a free desk of office room `room`
-     * (0..[`OFFICE_ROOMS`]). `seated` puts it at its desk from the first frame;
+     * (0..[`OFFICE_ROOMS`], or [`BOSS_ROOM`] for the boss's desk). `seated` puts it at its desk from the first frame;
      * otherwise it walks in from the door. `false` before the first `step`,
      * when that room has no desk left, or when the office has none left.
      */

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Agent, Squad } from "../types";
-import { COMPANY_ROOM_DESKS, COMPANY_SLOTS } from "./constants";
+import { COMPANY_BOSS_SLOT, COMPANY_ROOM_DESKS, COMPANY_SLOTS } from "./constants";
 import { layoutFloor } from "./layout";
 
 const FLOOR = { id: "f1" };
@@ -243,5 +243,36 @@ describe("layoutFloor", () => {
     const snapshot = JSON.stringify({ squads, agents });
     layoutFloor(FLOOR, squads, agents);
     expect(JSON.stringify({ squads, agents })).toBe(snapshot);
+  });
+});
+
+describe("layoutFloor: the secretary", () => {
+  it("sits at the boss's desk, whatever its home squad, and is drawn nowhere else", () => {
+    const squads = [squad("a")];
+    const agents = [agent("sec", "a"), agent("w", "a")];
+    const layout = layoutFloor(FLOOR, squads, agents, {}, "sec");
+    expect(layout.sessions).toEqual([
+      { agentId: "w", squadId: "a", slot: 0, desk: 0 },
+      { agentId: "sec", squadId: null, slot: COMPANY_BOSS_SLOT, desk: 0 },
+    ]);
+    expect(layout.rooms[0]!.agentIds).toEqual(["w"]);
+    expect(layout.unassignedAgents).toEqual([]);
+  });
+
+  it("is seated on a floor with no squads, and is not an unassigned agent", () => {
+    const layout = layoutFloor(FLOOR, [], [agent("sec", null)], {}, "sec");
+    expect(layout.sessions).toEqual([{ agentId: "sec", squadId: null, slot: COMPANY_BOSS_SLOT, desk: 0 }]);
+    expect(layout.unassignedAgents).toEqual([]);
+  });
+
+  it("is not seated when it is archived or unknown", () => {
+    const archived = layoutFloor(FLOOR, [], [agent("sec", null, { archived_at: "t" })], {}, "sec");
+    expect(archived.sessions).toEqual([]);
+    expect(layoutFloor(FLOOR, [], [], {}, "ghost").sessions).toEqual([]);
+  });
+
+  it("leaves the floor as it was without a secretary", () => {
+    const layout = layoutFloor(FLOOR, [squad("a")], [agent("w", "a")]);
+    expect(layout.sessions).toEqual([{ agentId: "w", squadId: "a", slot: 0, desk: 0 }]);
   });
 });
