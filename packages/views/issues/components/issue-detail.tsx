@@ -24,6 +24,7 @@ import {
   ChevronRight,
   CircleCheck,
   FileQuestion,
+  Loader2,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -129,6 +130,7 @@ import {
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
+import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -1194,6 +1196,8 @@ interface IssueDetailProps {
    * the notification it selected itself, and keeps one marked unread there.
    */
   readsInbox?: boolean;
+  /** The route already completed the authoritative detail read this mount. */
+  skipInitialRefetch?: boolean;
 }
 
 // Not found
@@ -1243,6 +1247,54 @@ export function IssueNotFound({
               {t(($) => $.detail.back)}
             </Button>
           ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+/** Safe primary-read failure; host navigation remains available during retry. */
+export function IssueLoadError({
+  showBackLink = true,
+  leading,
+  trailing,
+  onRetry,
+  isRetrying,
+}: {
+  showBackLink?: boolean;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  onRetry: () => Promise<void>;
+  isRetrying: boolean;
+}) {
+  const { t } = useT("issues");
+  const backOrReplace = useBackOrReplace();
+  const paths = useWorkspacePaths();
+
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      {(leading || trailing) && (
+        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+          {leading}
+          {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
+        </div>
+      )}
+      <CollectionPageState
+        icon={FileQuestion}
+        title={t(($) => $.detail.load_failed)}
+        actions={
+          <>
+            <Button size="sm" disabled={isRetrying} aria-busy={isRetrying} onClick={() => { void onRetry(); }}>
+              {isRetrying && <Loader2 aria-hidden="true" className="animate-spin" />}
+              {t(($) => $.detail.load_retry)}
+            </Button>
+            {showBackLink && (
+              <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
+                <ChevronLeft aria-hidden="true" />
+                {t(($) => $.detail.back)}
+              </Button>
+            )}
+          </>
         }
       />
     </div>
@@ -1326,7 +1378,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1553,19 +1605,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; the list API omits it, so a partial
   // list row must not masquerade as a hydrated issue detail.
-  const { data: issue = null, isLoading: issueLoading, refetch: refetchIssue } = useQuery({
+  const issueQuery = useQuery({
     ...issueDetailOptions(wsId, id),
     // List rows and issue-created realtime payloads intentionally omit the
     // detail-only source-context snapshot. They can still seed this query via
-    // initialData, so always reconcile with the authoritative detail endpoint
-    // when the detail view mounts. Without this, the global Infinity staleTime
+    // initialData, so reconcile with the authoritative detail endpoint when
+    // mounting unless the route already completed that read. Without this, the global Infinity staleTime
     // hides source context until a full page refresh.
-    refetchOnMount: "always",
+    refetchOnMount: skipInitialRefetch ? false : "always",
     initialData: () => {
       const cached = allIssues.find((i) => i.id === id);
       return cached?.description != null ? cached : undefined;
     },
   });
+  const { data: issue = null, isLoading: issueLoading, refetch: refetchIssue } = issueQuery;
+  const issueReadState = useIssueReadState(wsId, id, issueQuery);
   useMarkIssueReadWhileViewing(wsId, issue?.id ?? "");
   useMarkIssueInboxReadWhileViewing(wsId, issue?.id ?? "", readsInbox);
   const descriptionSourceId = `description:${id}`;
@@ -2752,6 +2806,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         : null,
     [resolvedIssueId, resolvedIssueIdentifier],
   );
+
+  if (issueReadState.loadFailed) {
+    return (
+      <IssueLoadError
+        showBackLink={!onDelete}
+        leading={leadingAction}
+        trailing={trailingActions}
+        onRetry={issueReadState.retry}
+        isRetrying={issueReadState.isRetrying}
+      />
+    );
+  }
 
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the

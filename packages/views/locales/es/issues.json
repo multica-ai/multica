@@ -557,6 +557,8 @@
     "thread_nav_show_replies_one": "Mostrar {{count}} respuesta",
     "thread_nav_show_replies_other": "Mostrar {{count}} respuestas",
     "thread_nav_hide_replies": "Ocultar respuestas",
+    "load_failed": "No se pudo cargar la tarea.",
+    "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada"
   },
   "timeline": {

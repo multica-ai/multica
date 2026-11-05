@@ -459,6 +459,8 @@
     "metadata_description": "エージェントや連携機能がワークフローを引き継ぐために記録するキーと値のデータ。",
     "section_load_failed_retry": "読み込めませんでした。再試行",
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
+    "load_failed": "タスクを読み込めませんでした。",
+    "load_retry": "再試行",
     "not_found_title": "タスクが見つかりません",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
