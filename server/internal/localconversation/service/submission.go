@@ -157,7 +157,7 @@ func (s *Service) submissionResult(ctx context.Context, id, requestID string) (S
 	if len(views) == 0 {
 		return SubmissionResult{}, store.ErrNotFound
 	}
-	return SubmissionResult{StoreGeneration: s.Generation(), SnapshotSeq: seq, QueueRevision: queue.Revision, Submission: views[0], Queue: s.queueView(id, queue)}, nil
+	return SubmissionResult{StoreGeneration: s.Generation(), SnapshotSeq: seq, QueueRevision: queue.Revision, Submission: views[0], Queue: withRecoveryItems(s.queueView(id, queue), views)}, nil
 }
 func executionError(err error) error {
 	if errors.Is(err, store.ErrExecutionBusy) {
@@ -460,6 +460,9 @@ func withRecoveryItems(view QueueView, submissions []store.Submission) QueueView
 		}
 		if !found {
 			view.Items = append(view.Items, value.Item)
+		}
+		if view.Error == "" {
+			view.Error = value.BlockedReason
 		}
 	}
 	return view

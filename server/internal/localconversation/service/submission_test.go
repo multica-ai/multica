@@ -192,6 +192,10 @@ func TestUnknownSubmissionStaysVisibleAndExplicitRemovalReleasesIt(t *testing.T)
 		v, e := f.svc.Submissions(ctx, f.scopeID, "conv", []string{"r"})
 		return e == nil && len(v.Submissions) == 1 && v.Submissions[0].State == "recovery_required"
 	})
+	duplicate, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("r", "keep original"), TurnOrigin{})
+	if err != nil || len(duplicate.Queue.Items) != 1 || duplicate.Queue.Error == "" {
+		t.Fatalf("duplicate lost recovery queue: %+v %v", duplicate, err)
+	}
 	view, err := f.svc.Queue(ctx, f.scopeID, "conv")
 	if err != nil || len(view.Items) != 1 {
 		t.Fatalf("recovery item invisible: %+v %v", view, err)
