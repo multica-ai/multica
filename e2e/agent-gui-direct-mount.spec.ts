@@ -354,6 +354,8 @@ test("slash host commands survive capability refresh and use the existing settin
   await page.getByRole("menuitemradio", { name: "Fixture model", exact: true }).click();
   await expect(main.getByTestId("multica-model-picker")).toContainText("Fixture model");
   await expect(editor).toHaveText("");
+  await expect(page.locator(".multica-model-picker-menu")).toBeHidden();
+  await expect(editor).toBeFocused();
   await editor.fill("/rea");
   await expect(command("reasoning")).toBeVisible();
   await expect(command("model")).toHaveCount(0);
@@ -363,6 +365,8 @@ test("slash host commands survive capability refresh and use the existing settin
   await command("reasoning").click();
   await page.getByRole("menuitemradio", { name: "High", exact: true }).click();
   await expect(main.getByTestId("multica-model-picker")).toContainText("High");
+  await expect(page.locator(".multica-model-picker-menu")).toBeHidden();
+  await expect(editor).toBeFocused();
   await editor.fill("/status");
   await editor.press("Escape");
   await editor.press("Enter");
