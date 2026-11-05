@@ -113,9 +113,9 @@ describe("proxy legacy workspace route redirects", () => {
     expect(redirectLocation("/acme/squads", sessionCookies)).toBeNull();
   });
 
-  it("redirects app-host root URLs to the last workspace", () => {
+  it("redirects app-host root URLs to the last workspace's company page", () => {
     expect(redirectLocation("/", sessionCookies)).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/acme/company",
     );
   });
 
@@ -264,7 +264,7 @@ describe("proxy runtime upstream rewrites", () => {
 });
 
 describe("proxy root and locale handling", () => {
-  it("redirects logged-in root visits to the last workspace", () => {
+  it("redirects logged-in root visits to the last workspace's company page", () => {
     const res = proxy(
       makeRequest("/", {
         multica_logged_in: "1",
@@ -274,7 +274,7 @@ describe("proxy root and locale handling", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/acme/company",
     );
   });
 

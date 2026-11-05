@@ -98,7 +98,7 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
 
-  // --- Root path: redirect logged-in users to their last workspace ---
+  // --- Root path: redirect logged-in users to their last workspace's company page ---
   // The official cloud host also serves the public marketing site. Visiting
   // https://multica.ai/ must remain a public-site navigation even when a local
   // desktop/runtime session has fresh auth cookies; explicit app routes such
@@ -110,7 +110,7 @@ export function proxy(req: NextRequest) {
     !isOfficialMarketingHost(req.nextUrl.hostname)
   ) {
     const url = req.nextUrl.clone();
-    url.pathname = `/${lastSlug}/issues`;
+    url.pathname = `/${lastSlug}/company`;
     return NextResponse.redirect(url);
   }
 
