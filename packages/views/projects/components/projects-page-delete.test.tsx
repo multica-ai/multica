@@ -219,15 +219,18 @@ describe("ProjectsPage deletion lifecycle", () => {
   );
 
   it.each(["online", "offline"])(
-    "does not resubmit a batch through remounted toolbar or row while %s",
+    "does not resubmit a batch after page remount or through its row while %s",
     async (connection) => {
       if (connection === "offline") onlineManager.setOnline(false);
-      renderPage();
+      const page = renderPage();
       await submitBatch();
-      // Submission clears selection and unmounts the batch mutation owner.
+      // Clearing selection hides the inner bar; the mutation owner remains mounted.
       expect(
         screen.getByRole("checkbox", { name: "Select row" }),
       ).not.toBeChecked();
+      // Unmount the whole page to actually destroy the ProjectBatchToolbar owner.
+      page.unmount();
+      renderPage();
       await submitBatch();
       expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
       expect(

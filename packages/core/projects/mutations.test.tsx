@@ -345,7 +345,7 @@ describe("useDeleteProject", () => {
     },
   );
 
-  it("updates subscribers when the pending identities change and isolates other workspaces", async () => {
+  it("updates subscribers when the pending identities change and isolates workspace mutation keys", async () => {
     const first = deferred<void>();
     const second = deferred<void>();
     deleteProject
