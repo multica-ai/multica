@@ -149,6 +149,21 @@ func (q *Queries) BumpScopeSeq(ctx context.Context, id int64) (int64, error) {
 	return scope_seq, err
 }
 
+const claimExecution = `-- name: ClaimExecution :exec
+INSERT INTO conversation_execution (conversation_id, request_id, attempt_id) VALUES (?, ?, ?)
+`
+
+type ClaimExecutionParams struct {
+	ConversationID string
+	RequestID      string
+	AttemptID      string
+}
+
+func (q *Queries) ClaimExecution(ctx context.Context, arg ClaimExecutionParams) error {
+	_, err := q.db.ExecContext(ctx, claimExecution, arg.ConversationID, arg.RequestID, arg.AttemptID)
+	return err
+}
+
 const completeTurn = `-- name: CompleteTurn :exec
 UPDATE turn SET status = ?, error_kind = ?, error = ?, completed_at = ? WHERE id = ?
 `
@@ -278,6 +293,42 @@ DELETE FROM attachment WHERE id = ?
 
 func (q *Queries) DeleteAttachment(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteAttachment, id)
+	return err
+}
+
+const deleteConversationAttempts = `-- name: DeleteConversationAttempts :exec
+DELETE FROM prompt_attempt WHERE conversation_id = ?
+`
+
+func (q *Queries) DeleteConversationAttempts(ctx context.Context, conversationID string) error {
+	_, err := q.db.ExecContext(ctx, deleteConversationAttempts, conversationID)
+	return err
+}
+
+const deleteConversationExecution = `-- name: DeleteConversationExecution :exec
+DELETE FROM conversation_execution WHERE conversation_id = ?
+`
+
+func (q *Queries) DeleteConversationExecution(ctx context.Context, conversationID string) error {
+	_, err := q.db.ExecContext(ctx, deleteConversationExecution, conversationID)
+	return err
+}
+
+const deleteConversationQueueOperations = `-- name: DeleteConversationQueueOperations :exec
+DELETE FROM queue_operation WHERE conversation_id = ?
+`
+
+func (q *Queries) DeleteConversationQueueOperations(ctx context.Context, conversationID string) error {
+	_, err := q.db.ExecContext(ctx, deleteConversationQueueOperations, conversationID)
+	return err
+}
+
+const deleteConversationSubmissions = `-- name: DeleteConversationSubmissions :exec
+DELETE FROM prompt_submission WHERE conversation_id = ?
+`
+
+func (q *Queries) DeleteConversationSubmissions(ctx context.Context, conversationID string) error {
+	_, err := q.db.ExecContext(ctx, deleteConversationSubmissions, conversationID)
 	return err
 }
 
@@ -454,6 +505,54 @@ func (q *Queries) GetAttachment(ctx context.Context, id string) (Attachment, err
 	return i, err
 }
 
+const getAttempt = `-- name: GetAttempt :one
+SELECT conversation_id, request_id, attempt_id, submission_id, delivery, turn_ids, settings FROM prompt_attempt WHERE conversation_id = ? AND attempt_id = ?
+`
+
+type GetAttemptParams struct {
+	ConversationID string
+	AttemptID      string
+}
+
+func (q *Queries) GetAttempt(ctx context.Context, arg GetAttemptParams) (PromptAttempt, error) {
+	row := q.db.QueryRowContext(ctx, getAttempt, arg.ConversationID, arg.AttemptID)
+	var i PromptAttempt
+	err := row.Scan(
+		&i.ConversationID,
+		&i.RequestID,
+		&i.AttemptID,
+		&i.SubmissionID,
+		&i.Delivery,
+		&i.TurnIds,
+		&i.Settings,
+	)
+	return i, err
+}
+
+const getAttemptByRequest = `-- name: GetAttemptByRequest :one
+SELECT conversation_id, request_id, attempt_id, submission_id, delivery, turn_ids, settings FROM prompt_attempt WHERE conversation_id = ? AND request_id = ? ORDER BY rowid DESC LIMIT 1
+`
+
+type GetAttemptByRequestParams struct {
+	ConversationID string
+	RequestID      string
+}
+
+func (q *Queries) GetAttemptByRequest(ctx context.Context, arg GetAttemptByRequestParams) (PromptAttempt, error) {
+	row := q.db.QueryRowContext(ctx, getAttemptByRequest, arg.ConversationID, arg.RequestID)
+	var i PromptAttempt
+	err := row.Scan(
+		&i.ConversationID,
+		&i.RequestID,
+		&i.AttemptID,
+		&i.SubmissionID,
+		&i.Delivery,
+		&i.TurnIds,
+		&i.Settings,
+	)
+	return i, err
+}
+
 const getCommandReceipt = `-- name: GetCommandReceipt :one
 SELECT scope_id, request_id, fingerprint, result, uncertain, created_at FROM command_receipt WHERE scope_id = ? AND request_id = ?
 `
@@ -515,6 +614,17 @@ func (q *Queries) GetConversation(ctx context.Context, id string) (Conversation,
 		&i.UpdatedAt,
 		&i.BackgroundTasks,
 	)
+	return i, err
+}
+
+const getExecution = `-- name: GetExecution :one
+SELECT conversation_id, request_id, attempt_id FROM conversation_execution WHERE conversation_id = ?
+`
+
+func (q *Queries) GetExecution(ctx context.Context, conversationID string) (ConversationExecution, error) {
+	row := q.db.QueryRowContext(ctx, getExecution, conversationID)
+	var i ConversationExecution
+	err := row.Scan(&i.ConversationID, &i.RequestID, &i.AttemptID)
 	return i, err
 }
 
@@ -612,6 +722,43 @@ func (q *Queries) GetPromptQueue(ctx context.Context, conversationID string) (Pr
 	return i, err
 }
 
+const getQueueItemPosition = `-- name: GetQueueItemPosition :one
+SELECT position FROM prompt_queue_item WHERE conversation_id = ? AND request_id = ?
+`
+
+type GetQueueItemPositionParams struct {
+	ConversationID string
+	RequestID      string
+}
+
+func (q *Queries) GetQueueItemPosition(ctx context.Context, arg GetQueueItemPositionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getQueueItemPosition, arg.ConversationID, arg.RequestID)
+	var position int64
+	err := row.Scan(&position)
+	return position, err
+}
+
+const getQueueOperation = `-- name: GetQueueOperation :one
+SELECT conversation_id, operation_id, "action", request_id FROM queue_operation WHERE conversation_id = ? AND operation_id = ?
+`
+
+type GetQueueOperationParams struct {
+	ConversationID string
+	OperationID    string
+}
+
+func (q *Queries) GetQueueOperation(ctx context.Context, arg GetQueueOperationParams) (QueueOperation, error) {
+	row := q.db.QueryRowContext(ctx, getQueueOperation, arg.ConversationID, arg.OperationID)
+	var i QueueOperation
+	err := row.Scan(
+		&i.ConversationID,
+		&i.OperationID,
+		&i.Action,
+		&i.RequestID,
+	)
+	return i, err
+}
+
 const getScope = `-- name: GetScope :one
 SELECT id, api_origin, user_id, workspace_id, scope_seq FROM scope WHERE id = ?
 `
@@ -655,6 +802,32 @@ func (q *Queries) GetScopeSeq(ctx context.Context, id int64) (int64, error) {
 	var scope_seq int64
 	err := row.Scan(&scope_seq)
 	return scope_seq, err
+}
+
+const getSubmission = `-- name: GetSubmission :one
+SELECT conversation_id, request_id, item, state, revision, attempt_id, message_id, blocked_reason, updated_at FROM prompt_submission WHERE conversation_id = ? AND request_id = ?
+`
+
+type GetSubmissionParams struct {
+	ConversationID string
+	RequestID      string
+}
+
+func (q *Queries) GetSubmission(ctx context.Context, arg GetSubmissionParams) (PromptSubmission, error) {
+	row := q.db.QueryRowContext(ctx, getSubmission, arg.ConversationID, arg.RequestID)
+	var i PromptSubmission
+	err := row.Scan(
+		&i.ConversationID,
+		&i.RequestID,
+		&i.Item,
+		&i.State,
+		&i.Revision,
+		&i.AttemptID,
+		&i.MessageID,
+		&i.BlockedReason,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getTurn = `-- name: GetTurn :one
@@ -968,6 +1141,27 @@ func (q *Queries) InsertPromptQueueTombstone(ctx context.Context, arg InsertProm
 	return err
 }
 
+const insertQueueOperation = `-- name: InsertQueueOperation :exec
+INSERT INTO queue_operation (conversation_id, operation_id, action, request_id) VALUES (?, ?, ?, ?)
+`
+
+type InsertQueueOperationParams struct {
+	ConversationID string
+	OperationID    string
+	Action         string
+	RequestID      string
+}
+
+func (q *Queries) InsertQueueOperation(ctx context.Context, arg InsertQueueOperationParams) error {
+	_, err := q.db.ExecContext(ctx, insertQueueOperation,
+		arg.ConversationID,
+		arg.OperationID,
+		arg.Action,
+		arg.RequestID,
+	)
+	return err
+}
+
 const insertScope = `-- name: InsertScope :one
 INSERT INTO scope (api_origin, user_id, workspace_id) VALUES (?, ?, ?) RETURNING id
 `
@@ -1015,6 +1209,46 @@ func (q *Queries) InsertTurn(ctx context.Context, arg InsertTurnParams) error {
 		arg.StartedAt,
 	)
 	return err
+}
+
+const listAttempts = `-- name: ListAttempts :many
+SELECT conversation_id, request_id, attempt_id, submission_id, delivery, turn_ids, settings FROM prompt_attempt WHERE conversation_id = ? AND submission_id = ?
+`
+
+type ListAttemptsParams struct {
+	ConversationID string
+	SubmissionID   string
+}
+
+func (q *Queries) ListAttempts(ctx context.Context, arg ListAttemptsParams) ([]PromptAttempt, error) {
+	rows, err := q.db.QueryContext(ctx, listAttempts, arg.ConversationID, arg.SubmissionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PromptAttempt{}
+	for rows.Next() {
+		var i PromptAttempt
+		if err := rows.Scan(
+			&i.ConversationID,
+			&i.RequestID,
+			&i.AttemptID,
+			&i.SubmissionID,
+			&i.Delivery,
+			&i.TurnIds,
+			&i.Settings,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listBackgroundTaskEvents = `-- name: ListBackgroundTaskEvents :many
@@ -1217,6 +1451,33 @@ func (q *Queries) ListEventsAfter(ctx context.Context, arg ListEventsAfterParams
 	return items, nil
 }
 
+const listExecutions = `-- name: ListExecutions :many
+SELECT conversation_id, request_id, attempt_id FROM conversation_execution
+`
+
+func (q *Queries) ListExecutions(ctx context.Context) ([]ConversationExecution, error) {
+	rows, err := q.db.QueryContext(ctx, listExecutions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ConversationExecution{}
+	for rows.Next() {
+		var i ConversationExecution
+		if err := rows.Scan(&i.ConversationID, &i.RequestID, &i.AttemptID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFolderProjects = `-- name: ListFolderProjects :many
 SELECT id, scope_id, title, path, created_at FROM folder_project WHERE scope_id = ? ORDER BY created_at, id
 `
@@ -1280,6 +1541,43 @@ func (q *Queries) ListItemEvents(ctx context.Context, arg ListItemEventsParams) 
 			&i.Final,
 			&i.Payload,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenSubmissions = `-- name: ListOpenSubmissions :many
+SELECT conversation_id, request_id, item, state, revision, attempt_id, message_id, blocked_reason, updated_at FROM prompt_submission WHERE prompt_submission.conversation_id = ? AND (state IN ('queued', 'starting', 'recovery_required') OR request_id IN (SELECT conversation_execution.request_id FROM conversation_execution WHERE conversation_execution.conversation_id = prompt_submission.conversation_id)) ORDER BY updated_at, request_id
+`
+
+func (q *Queries) ListOpenSubmissions(ctx context.Context, conversationID string) ([]PromptSubmission, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenSubmissions, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PromptSubmission{}
+	for rows.Next() {
+		var i PromptSubmission
+		if err := rows.Scan(
+			&i.ConversationID,
+			&i.RequestID,
+			&i.Item,
+			&i.State,
+			&i.Revision,
+			&i.AttemptID,
+			&i.MessageID,
+			&i.BlockedReason,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1978,6 +2276,35 @@ func (q *Queries) PromptQueueBounds(ctx context.Context, conversationID string) 
 	return i, err
 }
 
+const putAttempt = `-- name: PutAttempt :exec
+INSERT INTO prompt_attempt (conversation_id, request_id, attempt_id, submission_id, delivery, turn_ids, settings)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (conversation_id, attempt_id) DO UPDATE SET delivery = excluded.delivery, turn_ids = excluded.turn_ids, settings = excluded.settings
+`
+
+type PutAttemptParams struct {
+	ConversationID string
+	RequestID      string
+	AttemptID      string
+	SubmissionID   string
+	Delivery       string
+	TurnIds        string
+	Settings       string
+}
+
+func (q *Queries) PutAttempt(ctx context.Context, arg PutAttemptParams) error {
+	_, err := q.db.ExecContext(ctx, putAttempt,
+		arg.ConversationID,
+		arg.RequestID,
+		arg.AttemptID,
+		arg.SubmissionID,
+		arg.Delivery,
+		arg.TurnIds,
+		arg.Settings,
+	)
+	return err
+}
+
 const putMeta = `-- name: PutMeta :exec
 INSERT INTO store_meta (key, value) VALUES (?, ?)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value
@@ -1990,6 +2317,53 @@ type PutMetaParams struct {
 
 func (q *Queries) PutMeta(ctx context.Context, arg PutMetaParams) error {
 	_, err := q.db.ExecContext(ctx, putMeta, arg.Key, arg.Value)
+	return err
+}
+
+const putSubmission = `-- name: PutSubmission :exec
+INSERT INTO prompt_submission (conversation_id, request_id, item, state, revision, attempt_id, message_id, blocked_reason, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (conversation_id, request_id) DO UPDATE SET state = excluded.state, revision = excluded.revision, attempt_id = excluded.attempt_id, message_id = excluded.message_id, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at
+`
+
+type PutSubmissionParams struct {
+	ConversationID string
+	RequestID      string
+	Item           string
+	State          string
+	Revision       int64
+	AttemptID      string
+	MessageID      string
+	BlockedReason  string
+	UpdatedAt      string
+}
+
+func (q *Queries) PutSubmission(ctx context.Context, arg PutSubmissionParams) error {
+	_, err := q.db.ExecContext(ctx, putSubmission,
+		arg.ConversationID,
+		arg.RequestID,
+		arg.Item,
+		arg.State,
+		arg.Revision,
+		arg.AttemptID,
+		arg.MessageID,
+		arg.BlockedReason,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const releaseExecution = `-- name: ReleaseExecution :exec
+DELETE FROM conversation_execution WHERE conversation_id = ? AND attempt_id = ?
+`
+
+type ReleaseExecutionParams struct {
+	ConversationID string
+	AttemptID      string
+}
+
+func (q *Queries) ReleaseExecution(ctx context.Context, arg ReleaseExecutionParams) error {
+	_, err := q.db.ExecContext(ctx, releaseExecution, arg.ConversationID, arg.AttemptID)
 	return err
 }
 

@@ -50,7 +50,10 @@ const queueTombstoneRetention = 7 * 24 * time.Hour
 
 // Queue reads a conversation's prompt queue.
 func (s *Store) Queue(ctx context.Context, conversationID string) (QueueState, error) {
-	q := sqlitedb.New(s.read)
+	return readQueue(ctx, sqlitedb.New(s.read), conversationID)
+}
+
+func readQueue(ctx context.Context, q *sqlitedb.Queries, conversationID string) (QueueState, error) {
 	var state QueueState
 	meta, err := q.GetPromptQueue(ctx, conversationID)
 	switch {

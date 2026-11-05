@@ -1,3 +1,8 @@
+import { savedActivationSchema } from "./saved-activation";
+import {
+  persistedQueuedPromptSchema,
+  type StoredSubmission,
+} from "@multica/core/local-conversation/submission-storage";
 import {
 TranscriptModel,
 WorkspaceLoadModel
@@ -68,7 +73,10 @@ LegacyConversationMigration
 } from "./legacy-conversation-migration";
 import { createPromptRuntime } from "./prompt-runtime";
 import { promptSubmissionError } from "./prompt-submission-policy";
-import { snapshotPromptQueues } from "./saved-prompt-queues";
+import {
+  readSavedPromptQueues,
+  snapshotPromptQueues,
+} from "./saved-prompt-queues";
 import {
 composerOptions,
 readLocalSessionMetadata,
@@ -383,6 +391,16 @@ export function createMulticaAgentGuiRuntime(
         : null;
     }
   });
+  const durableStorage = source.submissionStorage;
+  const storedSubmissions = new Map<string, StoredSubmission>();
+  let submissionContext = { generation: "", lifecycle: false };
+  let storageReady = false;
+  let storageWrites: Promise<void> = Promise.resolve();
+  const persistWrite = (write: () => Promise<void>) => {
+    const next = storageWrites.catch(() => {}).then(write);
+    storageWrites = next;
+    return next;
+  };
   const pendingStore = init.composerDraftScope
     ? createDesktopPendingStore(
         window.sessionStorage,
@@ -409,14 +427,88 @@ export function createMulticaAgentGuiRuntime(
 
     // A stop or an answer decides against turn state, which must not be behind what has arrived.
     beforeTurnOperation: () => commits.flush(),
-    pendingStore,
+    pendingStore: durableStorage ? undefined : pendingStore,
     locale: () => init.locale,
     enqueue: enqueueDesktop,
-    update: async (id, action, requestId) =>
+    checkpoint: durableStorage
+      ? async (input, display) => {
+          const params = prepareDesktop(input);
+          const frozen = (await client.queue.prepare?.(params)) ?? params;
+          desktopAdmissions.set(input.clientSubmitId, frozen);
+          const prepared = frozen.item;
+          const record = await durableStorage.put({
+            version: 1,
+            requestId: input.clientSubmitId,
+            sessionId: input.agentSessionId,
+            sequence: 0,
+            createdAt: display.createdAtUnixMs,
+            kind: "prompt",
+            stage: "unconfirmed",
+            input: { ...input },
+            prepared: persistedQueuedPromptSchema.parse(prepared),
+            generation:
+              source.conversation(input.agentSessionId)?.storeGeneration ??
+              submissionContext.generation,
+            lifecycle: submissionContext.lifecycle,
+          });
+          storedSubmissions.set(record.requestId, record);
+        }
+      : undefined,
+    checkpointActivation: durableStorage
+      ? async (input) => {
+          if (input.mode !== "new" || !input.clientSubmitId) return;
+          let prepared: StoredSubmission["prepared"];
+          if (input.initialContent?.length) {
+            const params: AgentGuiOperations["queue.enqueue"]["params"] = {
+              sessionId: input.agentSessionId,
+              queued: true,
+              item: persistedQueuedPromptSchema.parse({
+                ...encodeContent([
+                  ...(input.runtimeContent ?? input.initialContent),
+                ]),
+                requestId: input.clientSubmitId,
+                display: {
+                  id: input.clientSubmitId,
+                  clientSubmitId: input.clientSubmitId,
+                  createdAtUnixMs: Date.now(),
+                  content: [...input.initialContent],
+                },
+                ...(input.settings?.model
+                  ? { model: input.settings.model }
+                  : {}),
+                reasoningEffort: input.settings?.reasoningEffort ?? null,
+                permissionMode: input.settings?.permissionModeId ?? "default",
+              }),
+            };
+            const frozen = (await client.queue.prepare?.(params)) ?? params;
+            prepared = persistedQueuedPromptSchema.parse(frozen.item);
+            desktopAdmissions.set(input.clientSubmitId, {
+              ...frozen,
+              item: prepared,
+            });
+          }
+          const record = await durableStorage.put({
+            version: 1,
+            requestId: input.clientSubmitId,
+            sessionId: input.agentSessionId,
+            sequence: 0,
+            createdAt: Date.now(),
+            prepared,
+            kind: "activation",
+            stage: "unconfirmed",
+            input: { ...input },
+            generation: submissionContext.generation,
+            lifecycle: submissionContext.lifecycle,
+          });
+          storedSubmissions.set(record.requestId, record);
+        }
+      : undefined,
+    update: async (id, action, requestId, targetTurnId) =>
       client.queue.update({
         sessionId: await backendSessionId(id),
         action,
-        requestId
+        requestId,
+        targetTurnId,
       }),
     statuses: async (id, requestIds) =>
       client.queue.statuses({
@@ -747,6 +839,7 @@ export function createMulticaAgentGuiRuntime(
       () => {
         if (disposed) return;
         workspaceLoadState.succeed();
+        void restoreDurableSubmissions().catch(reportError);
         // A running conversation's turn state cannot wait until it is opened.
         for (const session of sessionState.allConsumerSessions.map(
           ({ session }) => session
@@ -789,8 +882,9 @@ export function createMulticaAgentGuiRuntime(
           detail.session.workspace_id,
           detail.session.id,
           init.locale,
-          (id) => migration.clientSubmitId(id)
-        ))
+          (id) => migration.clientSubmitId(id),
+          (requestId) => desktopQueue.prompts.requestIdentity(guiId, requestId),
+        )),
       );
     const messages = transcript.update(conversation, changedTurns);
     return {
@@ -902,6 +996,7 @@ export function createMulticaAgentGuiRuntime(
       desktopQueue.loads.markHydrated(guiId);
     });
     desktopQueue.transcriptCommitted();
+    persistSubmissionMirror(guiId, detail.promptQueue);
     const conversation = localConversation(guiId);
     for (const turn of result.turns) {
       presentationTiming.applied(
@@ -1021,81 +1116,50 @@ export function createMulticaAgentGuiRuntime(
     const session = await loadSession(input.agentSessionId);
     // Creation is complete. The queue owns admission failures and explicit
     // retries, including the first prompt's content and stable submit ID.
-    if (initialContent?.length)
-      desktopQueue.prompts.submitPrompt({
+    if (initialContent?.length) {
+      const submission = desktopQueue.prompts.submitPrompt({
         agentSessionId: input.agentSessionId,
         clientSubmitId: input.clientSubmitId,
         content: initialContent,
         displayPrompt: input.initialDisplayPrompt
       });
+      if (submission.ready && !(await submission.ready))
+        throw new Error("Could not save the initial message");
+    }
     return {
       activation: { mode: "new" as const, status: "attached" as const },
       session
     };
   }
 
-  const desktopAdmissions = new WeakMap<
-    AgentSessionSubmitPromptInput,
+  const desktopAdmissions = new Map<
+    string,
     AgentGuiOperations["queue.enqueue"]["params"]
   >();
-  async function enqueueDesktop(
+  function prepareDesktop(
     input: AgentSessionSubmitPromptInput,
     paused = false
   ) {
-    const startedAt = Date.now();
-    const previous = desktopAdmissions.get(input);
-    if (previous) {
-      await uploads.ensure(previous.item.attachmentIds ?? []);
-      const retry = () => client.queue.enqueue(previous);
-      const result = await sendTiming
-        .begin(previous.sessionId, input.clientSubmitId, startedAt)
-        .measure("client.request", retry);
-      uploads.forget(previous.item.attachmentIds ?? []);
-      desktopQueue.receive(input.agentSessionId, result);
-      return result;
-    }
-    const sessionId = await backendSessionId(input.agentSessionId);
+    const previous = desktopAdmissions.get(input.clientSubmitId);
+    if (previous) return previous;
+    const sessionId =
+      resolvedServerId(input.agentSessionId) ?? input.agentSessionId;
     const session =
       details.get(input.agentSessionId)?.session ??
       workspace.sessions.find((item) => item.id === sessionId);
     if (!session) throw new Error("Conversation is not loaded");
-    const submissionError = promptSubmissionError(input, init.locale);
-    if (submissionError)
-      throw new MulticaAgentGuiError(submissionError, "unsupported");
     const encoded = encodeContent([...(input.runtimeContent ?? input.content)]);
-    // The prompt waits here in the visible pending queue, with its failure and retry.
-    await uploads.ensure(encoded.attachmentIds ?? []);
-    const display = snapshotPromptQueues(
-      {
-        nextCommandSequence: 0,
-        recordsBySessionId: {
-          [input.agentSessionId]: {
-            agentSessionId: input.agentSessionId,
-            workspaceId,
-            prompts: [
-              {
-                ...input,
-                id: input.clientSubmitId,
-                createdAtUnixMs: Date.now()
-              }
-            ],
-            deliveryBarrierTurnId: null,
-            failedPromptId: null,
-            failureMessage: null,
-            inFlight: null,
-            sendNextPromptId: null,
-            suspendReason: null,
-            uncertainDelivery: null
-          }
-        }
-      },
-      [...attachments.values()]
-    )[0]!.prompts[0]!;
-    // Restoring a saved queue is not the user sending anything.
-    const timing = !paused
-      ? sendTiming.begin(sessionId, input.clientSubmitId, startedAt)
-      : undefined;
-    const reasoningEffort = await composer.reasoningForSend(
+    const display = {
+      id: input.clientSubmitId,
+      clientSubmitId: input.clientSubmitId,
+      createdAtUnixMs: Date.now(),
+      content: [...input.content],
+      ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
+      ...(input.runtimeContent
+        ? { runtimeContent: [...input.runtimeContent] }
+        : {}),
+    };
+    const model = composer.selectedModel(
       session.agent_id,
       input.agentSessionId
     );
@@ -1107,31 +1171,316 @@ export function createMulticaAgentGuiRuntime(
         ...encoded,
         requestId: input.clientSubmitId,
         display,
-        ...(composer.selectedModel(session.agent_id, input.agentSessionId)
-          ? {
-              model: composer.selectedModel(
-                session.agent_id,
-                input.agentSessionId
-              )!
-            }
-          : {}),
-        reasoningEffort,
+        ...(model?{model}:durableStorage?{model:null}:{}),
+        reasoningEffort: composer.selectedReasoning(
+          session.agent_id,
+          input.agentSessionId,
+        ),
         permissionMode: composer.selectedPermission(
           session.agent_id,
           input.agentSessionId
         )
       }
     };
-    // Keep the admitted payload stable even if preferences change before an
-    // explicit retry of a failed or lost acknowledgement.
-    desktopAdmissions.set(input, params);
-    const enqueue = () => client.queue.enqueue(params);
+    desktopAdmissions.set(input.clientSubmitId, params);
+    return params;
+  }
+  async function enqueueDesktop(
+    input: AgentSessionSubmitPromptInput,
+    paused = false,
+  ) {
+    const params = prepareDesktop(input, paused);
+    const id = await backendSessionId(input.agentSessionId);
+    if (params.sessionId !== id) throw new Error("Submission target changed");
+    const error = promptSubmissionError(input, init.locale);
+    if (error) throw new MulticaAgentGuiError(error, "unsupported");
+    await uploads.ensure(params.item.attachmentIds ?? []);
+    const timing = paused
+      ? undefined
+      : sendTiming.begin(id, input.clientSubmitId, Date.now());
+    const send = () => client.queue.enqueue(params);
     const result = await (timing
-      ? timing.measure("client.request", enqueue)
-      : enqueue());
-    uploads.forget(encoded.attachmentIds ?? []);
+      ? timing.measure("client.request", send)
+      : send());
     desktopQueue.receive(input.agentSessionId, result);
+    uploads.forget(params.item.attachmentIds ?? []);
+    if (durableStorage) {
+      const authority = result.submissions?.find(
+        (value) => value.request_id === input.clientSubmitId,
+      );
+      const record = storedSubmissions.get(input.clientSubmitId);
+      if (record)
+        storedSubmissions.set(record.requestId, {
+          ...record,
+          stage: "confirmed",
+          ...(authority ? { authority } : {}),
+        });
+      await persistWrite(() =>
+        durableStorage.confirm(input.clientSubmitId, authority),
+      ).catch(reportError);
+    }
     return result;
+  }
+
+  async function restoreDurableSubmissions() {
+    if (!durableStorage) return;
+    for (const record of await durableStorage.read())
+      storedSubmissions.set(record.requestId, record);
+    const mirrored = new Map<string, StoredSubmission[]>();
+    for (const record of storedSubmissions.values())
+      if (
+        record.stage === "confirmed" &&
+        record.prepared &&
+        record.queue &&
+        (!record.authority ||
+          record.authority.state === "queued" ||
+          record.authority.state === "recovery_required")
+      )
+        mirrored.set(record.sessionId, [
+          ...(mirrored.get(record.sessionId) ?? []),
+          record,
+        ]);
+    for (const [id, values] of mirrored) {
+      values.sort((a, b) => a.queue!.position - b.queue!.position);
+      const latest = values.reduce((a, b) =>
+        a.queue!.revision > b.queue!.revision ? a : b,
+      );
+      desktopQueue.receive(id, {
+        revision: latest.queue!.revision,
+        paused: latest.queue!.paused,
+        error: latest.queue!.error,
+        items: values.flatMap((value) =>
+          value.prepared ? [value.prepared] : [],
+        ),
+        submissions: values.flatMap((value) =>
+          value.authority ? [value.authority] : [],
+        ),
+        storeGeneration: latest.generation,
+      });
+    }
+    const legacy = pendingStore?.getState().queues ?? [];
+    for (const queue of legacy)
+      for (const prompt of queue.prompts) {
+        const id = prompt.clientSubmitId || prompt.id;
+        if (storedSubmissions.has(id)) continue;
+        const record = await durableStorage.put({
+          version: 1,
+          requestId: id,
+          sessionId: queue.agentSessionId,
+          sequence: 0,
+          createdAt: prompt.createdAtUnixMs,
+          kind: "prompt",
+          stage: "unconfirmed",
+          input: {
+            ...prompt,
+            agentSessionId: queue.agentSessionId,
+            clientSubmitId: id,
+          },
+          generation: "",
+          lifecycle: false,
+        });
+        storedSubmissions.set(id, record);
+      }
+    if (legacy.length) pendingStore?.getState().setQueues([]);
+    try {
+      submissionContext =
+        (await source.submissionContext?.()) ?? submissionContext;
+    } catch (error) {
+      reportError(error);
+    }
+    storageReady = true;
+    for (const record of [...storedSubmissions.values()].sort(
+      (a, b) => a.sequence - b.sequence,
+    )) {
+      if (record.prepared)
+        desktopAdmissions.set(record.requestId, {
+          sessionId: record.sessionId,
+          queued: true,
+          item: record.prepared,
+        });
+      if (record.kind === "activation") {
+        if (
+          record.generation &&
+          record.generation !== submissionContext.generation
+        )
+          continue;
+        const parsed = savedActivationSchema.safeParse(record.input);
+        if (parsed.success) desktopQueue.activations.request(parsed.data);
+        else
+          reportError(new Error("The saved conversation request is invalid"));
+        continue;
+      }
+      const parsed = readSavedPromptQueues([
+        {
+          agentSessionId: record.sessionId,
+          prompts: [
+            {
+              ...record.input,
+              id: record.requestId,
+              clientSubmitId: record.requestId,
+              createdAtUnixMs: record.createdAt,
+            },
+          ],
+        },
+      ])[0]?.prompts[0];
+      if (!parsed) continue;
+      const input: AgentSessionSubmitPromptInput = {
+        agentSessionId: record.sessionId,
+        clientSubmitId: record.requestId,
+        content: parsed.content,
+        runtimeContent: parsed.runtimeContent,
+        displayPrompt: parsed.displayPrompt,
+      };
+      if (record.prepared)
+        desktopAdmissions.set(record.requestId, {
+          sessionId: record.sessionId,
+          queued: true,
+          item: record.prepared,
+        });
+      desktopQueue.prompts.restorePending([
+        {
+          agentSessionId: record.sessionId,
+          input,
+          display: { ...parsed, visibleInQueue: true },
+        },
+      ]);
+      if (record.authority)
+        desktopQueue.prompts.receiveSubmissions(
+          record.sessionId,
+          [record.authority],
+          record.generation,
+        );
+      try {
+        const state = await source.inspectSubmissions?.(record.sessionId, [
+          record.requestId,
+        ]);
+        if (!state) continue;
+        desktopQueue.prompts.receiveSubmissions(
+          record.sessionId,
+          state.submissions,
+          state.store_generation,
+        );
+        if (state.submissions.some((value) => value.state === "removed")) {
+          await durableStorage.remove(record.requestId);
+          storedSubmissions.delete(record.requestId);
+          continue;
+        }
+        if (state.submissions.length) {
+          const authority = state.submissions[0]!;
+          if (authority.state === "attached") {
+            await durableStorage.remove(record.requestId);
+            storedSubmissions.delete(record.requestId);
+          }
+          await loadSession(record.sessionId, true);
+          continue;
+        }
+        if (
+          record.stage === "unconfirmed" &&
+          record.lifecycle &&
+          record.generation === state.store_generation &&
+          state.known_history &&
+          !desktopQueue.prompts
+            .pending(record.sessionId)
+            .some(
+              (value) =>
+                value.input.clientSubmitId === record.requestId &&
+                value.admission,
+            )
+        ) {
+          const result = await enqueueDesktop(input);
+          desktopQueue.receive(record.sessionId, result);
+        }
+      } catch (error) {
+        reportError(error);
+      }
+    }
+  }
+
+  function persistSubmissionMirror(
+    id: string,
+    queue:
+      | import("@multica/core/local-conversation/protocol").LocalPromptQueue
+      | undefined,
+  ) {
+    for(const message of transcriptModel.messages(id))if(message.role==="user"&&typeof message.payload.clientSubmitId==="string")desktopAdmissions.delete(message.payload.clientSubmitId);
+    if (!durableStorage || !storageReady || !queue) return;
+    for (const [position, item] of queue.items.entries()) {
+      const prepared = persistedQueuedPromptSchema.safeParse(item);
+      if (!prepared.success) continue;
+      const authority = queue.submissions?.find(
+        (value) => value.request_id === item.requestId,
+      );
+      const previous = storedSubmissions.get(item.requestId);
+      if (
+        previous?.stage === "confirmed" &&
+        previous.authority?.revision === authority?.revision &&
+        previous.queue?.revision === queue.revision
+      )
+        continue;
+      const record: StoredSubmission = {
+        version: 1,
+        requestId: item.requestId,
+        sessionId: id,
+        sequence: previous?.sequence ?? 0,
+        createdAt: item.display.createdAtUnixMs,
+        kind: "prompt",
+        stage: "confirmed",
+        input: {
+          agentSessionId: id,
+          clientSubmitId: item.requestId,
+          ...item.display,
+        },
+        prepared: prepared.data,
+        queue: {
+          revision: queue.revision,
+          paused: queue.paused,
+          error: queue.error,
+          position,
+        },
+        generation: queue.storeGeneration ?? submissionContext.generation,
+        lifecycle: submissionContext.lifecycle,
+        ...(authority ? { authority } : {}),
+      };
+      storedSubmissions.set(record.requestId, record);
+      void persistWrite(async () => {
+        await durableStorage.put(record);
+      }).catch((error)=>{
+        if(storedSubmissions.get(record.requestId)===record){if(previous)storedSubmissions.set(record.requestId,previous);else storedSubmissions.delete(record.requestId);}
+        reportError(error);
+      });
+    }
+    for (const record of storedSubmissions.values()) {
+      if (record.sessionId !== id || record.kind !== "prompt") continue;
+      const authority = queue.submissions?.find(
+        (value) => value.request_id === record.requestId,
+      );
+      const message = transcriptModel
+        .messages(id)
+        .some(
+          (value) =>
+            value.role === "user" &&
+            (value.payload.clientSubmitId === record.requestId ||
+              value.payload.clientSubmitId === authority?.attempt?.request_id),
+        );
+      if (message || authority?.state === "removed") {
+        storedSubmissions.delete(record.requestId);
+        void persistWrite(() => durableStorage.remove(record.requestId)).catch(
+          reportError,
+        );
+      } else if (
+        authority &&
+        record.authority?.revision !== authority.revision
+      ) {
+        storedSubmissions.set(record.requestId, {
+          ...record,
+          stage: "confirmed",
+          authority,
+        });
+        void persistWrite(() =>
+          durableStorage.confirm(record.requestId, authority),
+        ).catch(reportError);
+      }
+    }
   }
 
   async function uploadAttachment(file: File) {
@@ -1514,6 +1863,7 @@ export function createMulticaAgentGuiRuntime(
       await composer.hydrated();
       initialized = true;
       await loadWorkspace();
+      await restoreDurableSubmissions().catch(reportError);
       await restorePromptQueues();
       receiveConnection(true);
     },

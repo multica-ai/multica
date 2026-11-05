@@ -37,6 +37,8 @@ type Snapshot struct {
 	PendingInteractions []sqlitedb.InteractionRequest
 	// SnapshotSeq is the last event included; subscribe with after_seq set to it.
 	SnapshotSeq int64
+	Queue       QueueState
+	Submissions []Submission
 	// HasOlderTurns reports whether turns before Turns[0] exist.
 	HasOlderTurns bool
 	// OpenBackgroundItems is the latest event of each background item still
@@ -88,7 +90,23 @@ func (s *Store) Snapshot(ctx context.Context, conversationID string, turnLimit i
 			openOutside = append(openOutside, e)
 		}
 	}
-	snap := Snapshot{Conversation: conv, Turns: views, PendingInteractions: pending, SnapshotSeq: conv.LastSeq, OpenBackgroundItems: openOutside}
+	queue, err := readQueue(ctx, q, conversationID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	rows, err := q.ListOpenSubmissions(ctx, conversationID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	submissions := make([]Submission, 0, len(rows))
+	for _, row := range rows {
+		v, err := submissionView(ctx, q, row)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		submissions = append(submissions, v)
+	}
+	snap := Snapshot{Queue: queue, Submissions: submissions, Conversation: conv, Turns: views, PendingInteractions: pending, SnapshotSeq: conv.LastSeq, OpenBackgroundItems: openOutside}
 	if len(turns) > 0 {
 		snap.HasOlderTurns = turns[len(turns)-1].TurnIndex > 0
 	}

@@ -16,6 +16,8 @@
     "./local-conversation/focus": "./local-conversation/focus.ts",
     "./local-conversation/protocol": "./local-conversation/protocol.ts",
     "./local-conversation/timing": "./local-conversation/timing.ts",
+    "./local-conversation/submission": "./local-conversation/submission.ts",
+    "./local-conversation/submission-storage": "./local-conversation/submission-storage.ts",
     "./local-conversation/v2": "./local-conversation/v2.ts",
     "./attachments": "./attachments/index.ts",
     "./attachments/deliverables": "./attachments/deliverables.ts",

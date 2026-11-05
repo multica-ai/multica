@@ -1,3 +1,4 @@
+import { SUBMISSION_LIFECYCLE_CAPABILITY, localSubmissionStatusesSchema } from "@multica/core/local-conversation/submission";
 import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
 import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
@@ -73,6 +74,9 @@ export class AISessionClient {
   private retryDelay?: number;
   private sendAttempts = new Map<string, number>();
   private browseRefreshTimer?: ReturnType<typeof setTimeout>;
+  submissionLifecycle=false;
+  storeGeneration="";
+  submissionStatuses(id:string,requestIds:string[]){return this.request("POST",`/sessions/${encodeURIComponent(id)}/queue/status`,localSubmissionStatusesSchema,{request_ids:requestIds});}
   connectionError: "incompatible" | null = null;
   /** Stays true through the short reconnect window, so a brief drop shows nothing. */
   connected = false;
@@ -161,7 +165,7 @@ export class AISessionClient {
       if (!this.stopped && received >= 0 && current && current.queue.revision > received) void this.refreshQueue(id);
     }
   }
-  command<T>(id: string, body: Record<string, unknown>, schema: z.ZodType<T>) { return this.request("POST", `/sessions/${encodeURIComponent(id)}/commands`, schema, body, undefined, COMMAND_TIMEOUT_MS); }
+  command<T>(id: string, body: Record<string, unknown>, schema: z.ZodType<T>) { if(body.type==="queue_update"&&!body.operation_id)body={...body,operation_id:createRequestId()}; return this.request("POST", `/sessions/${encodeURIComponent(id)}/commands`, schema, body, undefined, COMMAND_TIMEOUT_MS); }
   /** For commands the daemon deduplicates by request ID: a failure during the reconnect window is retried once the link recovers. */
   async submit<T>(id: string, body: Record<string, unknown>, schema: z.ZodType<T>, startedAt = Date.now()) {
     const requestId = localTimingRequestId(body);
@@ -184,6 +188,7 @@ export class AISessionClient {
     }
   }
   private async deliver<T>(id: string, body: Record<string, unknown>, schema: z.ZodType<T>) {
+    if(body.type==="queue_update"&&!body.operation_id)body={...body,operation_id:createRequestId()};
     const closedSockets = this.closedSockets;
     try { return await this.command(id, body, schema); }
     catch (error) {
@@ -224,6 +229,8 @@ export class AISessionClient {
       this.mark("ws.hello", { event: "end", durationMs: Date.now() - asked, outcome: "completed" });
       if (hello.version !== LOCAL_V2_VERSION || !hello.capabilities.includes("device-link") || hello.scope_seq === undefined) throw new Error("incompatible");
       if (this.stopped) return;
+      this.submissionLifecycle=hello.capabilities.includes(SUBMISSION_LIFECYCLE_CAPABILITY);
+      this.storeGeneration=hello.store_generation;
       this.focusSupported = hello.capabilities.includes(LOCAL_V2_FOCUS_CAPABILITY);
       this.reportSupported = hello.capabilities.includes(LOCAL_TIMING_REPORT_CAPABILITY);
       const opening = Date.now();
@@ -403,7 +410,7 @@ export class AISessionClient {
         this.mark("link.event_received", { ...identity, count: turn.batches, bytes: turn.bytes, maxGapMs: turn.maxGap });
         this.scheduleReport();
       }
-      if (message.events.some((event) => event.type === "queue.updated")) void this.refreshQueue(message.conversation_id);
+      if (message.events.some((event) => event.type === "queue.updated" || (event.type==="submission.updated"&&event.payload.submission&&typeof event.payload.submission==="object"&&"state" in event.payload.submission&&event.payload.submission.state==="recovery_required"))) void this.refreshQueue(message.conversation_id);
     } else if (message.type === "subscription.status") {
       const id = message.conversation_id;
       if (message.status === "resubscribe" || message.status === "snapshot_required") {

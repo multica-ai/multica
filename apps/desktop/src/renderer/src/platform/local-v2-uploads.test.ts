@@ -104,3 +104,56 @@ describe("local v2 uploads", () => {
     expect(client.discardUpload).not.toHaveBeenCalled();
   });
 });
+
+it("stages bytes before returning an attachment and resumes the same id after renderer restart", async () => {
+  const files = new Map<string, File>();
+  let save!: () => void;
+  const disk = {
+    put: vi.fn(async (id: string, value: File) => {
+      await new Promise<void>((resolve) => {
+        save = resolve;
+      });
+      files.set(id, value);
+    }),
+    get: async (id: string) => files.get(id),
+    remove: async (id: string) => {
+      files.delete(id);
+    },
+  };
+  const first = createLocalV2Uploads(
+    {
+      upload: vi.fn(async () => stored()),
+      linkUpload: vi.fn(async () => stored()),
+      discardUpload: vi.fn(),
+    } as never,
+    async () => [ATTACHMENT_RESERVE_CAPABILITY],
+    () => {},
+    async () => null,
+    disk,
+  );
+  let returned = false;
+  const begin = first.begin(file()).then((value) => {
+    returned = true;
+    return value;
+  });
+  await flush();
+  expect(returned).toBe(false);
+  save();
+  const attachment = await begin;
+  first.dispose();
+  const upload = vi.fn(async (_file: File, options: { id: string }) =>
+    stored(options.id),
+  );
+  const reopened = createLocalV2Uploads(
+    { upload, linkUpload: vi.fn(), discardUpload: vi.fn() } as never,
+    async () => [ATTACHMENT_RESERVE_CAPABILITY],
+    () => {},
+    async () => null,
+    disk,
+  );
+  await reopened.ensure([attachment.id]);
+  expect(upload).toHaveBeenCalledWith(
+    expect.any(File),
+    expect.objectContaining({ id: attachment.id }),
+  );
+});

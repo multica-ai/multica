@@ -83,7 +83,10 @@ type SummaryPatch struct {
 
 // Batch is everything one conversation commits at once. All of it lands in
 // the same transaction or none of it does.
+type QueueOperation struct{ ID, Action, RequestID string }
+
 type Batch struct {
+	Operation      *QueueOperation
 	ConversationID string
 	StartTurn      *NewTurn
 	Events         []NewEvent
@@ -113,7 +116,8 @@ type Batch struct {
 	// always follows it.
 	Metadata *ConversationMetadata
 	// Queue changes the conversation's prompt queue.
-	Queue *QueueChange
+	Queue       *QueueChange
+	Submissions []SubmissionChange
 }
 
 // ConversationMetadata is how a conversation is listed and where it runs.
@@ -316,6 +320,16 @@ func (w *Writer) commitGroup(group []*writeRequest) {
 }
 
 func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, error) {
+	if op := b.Operation; op != nil {
+		if _, err := q.GetQueueOperation(ctx, sqlitedb.GetQueueOperationParams{ConversationID: b.ConversationID, OperationID: op.ID}); err == nil {
+			return Committed{}, ErrDuplicateRequest
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return Committed{}, err
+		}
+		if err := q.InsertQueueOperation(ctx, sqlitedb.InsertQueueOperationParams{ConversationID: b.ConversationID, OperationID: op.ID, Action: op.Action, RequestID: op.RequestID}); err != nil {
+			return Committed{}, err
+		}
+	}
 	conv, err := q.GetConversation(ctx, b.ConversationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Committed{}, fmt.Errorf("%w: conversation %s", ErrNotFound, b.ConversationID)
@@ -388,6 +402,15 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 		if err != nil {
 			return Committed{}, err
 		}
+	}
+
+	if b.Queue != nil {
+		if err := applyQueue(ctx, q, conv.ID, b.Queue); err != nil {
+			return Committed{}, err
+		}
+	}
+	if err := applySubmissions(ctx, q, &b, started); err != nil {
+		return Committed{}, err
 	}
 
 	committed := Committed{Events: make([]CommittedEvent, 0, len(b.Events))}
@@ -473,12 +496,6 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 		}
 		if b.Summary == nil {
 			b.Summary = &SummaryPatch{UpdatedAt: metadataTime(b)}
-		}
-	}
-
-	if c := b.Queue; c != nil {
-		if err := applyQueue(ctx, q, conv.ID, c); err != nil {
-			return Committed{}, err
 		}
 	}
 

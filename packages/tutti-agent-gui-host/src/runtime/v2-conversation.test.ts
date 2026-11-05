@@ -798,3 +798,11 @@ describe("ConversationModel", () => {
     expect(conversation.continuable()).toBe(expected);
   });
 });
+
+it("keeps a retried turn linked to its logical submission in both events and snapshots",()=>{
+ const conversation=empty();const events=[event(1,"user.message",{message_id:"retry-message",request_id:"r-retry-1",submission_id:"r",content:"same content"},{final:true}),event(2,"turn.started",{request_id:"r-retry-1"})];
+ conversation.applyEvents(events);
+ expect(project(conversation).messages.find((value)=>value.role==="user")?.payload.clientSubmitId).toBe("r");
+ const restored=ConversationModel.fromSnapshot(localV2SnapshotSchema.parse({version:2,store_generation:"g1",snapshot_seq:2,conversation:{conversation_id:"conv-1",summary_seq:1,provider:"claude",title:"",status:"running",pinned:false,archived:false,updated_at:at},turns:[{id:"turn-1",turn_index:0,request_id:"r-retry-1",status:"running",started_at:at,messages:[{id:"retry-message",role:"user",content:"same content",created_at:at}],events}]}));
+ expect(project(restored).messages.find((value)=>value.role==="user")?.payload.clientSubmitId).toBe("r");
+});

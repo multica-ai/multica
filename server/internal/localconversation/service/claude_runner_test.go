@@ -590,3 +590,36 @@ func TestClaudeRunnerDoesNotDispatchATurnStoppedDuringPreparation(t *testing.T) 
 		t.Fatalf("requests after the next send = %s", got)
 	}
 }
+
+func TestClaudeInterruptCannotReachTheNextPrompt(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	f := newRunnerFixture(t, NewLimiter(MaxRunningTurns), func(typ string) (json.RawMessage, error) {
+		if typ == "interrupt" {
+			close(entered)
+			<-release
+		}
+		return json.RawMessage(`{}`), nil
+	})
+	send(t, f, "first")
+	done := make(chan error, 1)
+	go func() { done <- f.runner.Interrupt(context.Background(), "first") }()
+	<-entered
+	f.adapter(0).emit(t, turnDone)
+	f.turnEvents(t, "first")
+	if err := f.runner.Send(context.Background(), SendRequest{TurnID: "second", RequestID: "second", MessageID: "msg-second", Text: "next"}); !errors.Is(err, ErrTurnRunning) {
+		t.Fatalf("prompt passed an unresolved interrupt: %v", err)
+	}
+	once.Do(func() { close(release) })
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	send(t, f, "second")
+	if err := f.runner.Interrupt(context.Background(), "first"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.runner.Running() {
+		t.Fatal("stale target stopped successor")
+	}
+}

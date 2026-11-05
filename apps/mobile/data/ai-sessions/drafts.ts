@@ -7,7 +7,7 @@ import { EMPTY_REFERENCES, type AIReference, type PreparedAIMessage } from "./re
 export function aiDraftKey(scope: SessionScope, id: string) { return JSON.stringify([scope.userId, scope.workspaceId, scope.deviceId, id]); }
 
 export interface PendingSend { requestId: string; text: string; attachments: string[]; queued?: boolean; queuePaused?: boolean; queueContent?: string; createdAt?: number; prepared?: PreparedAIMessage; }
-export interface DraftAttachment { id: string; name: string; status: "uploading" | "uploaded" | "failed" }
+export interface DraftAttachment { id: string; name: string; status: "uploading" | "uploaded" | "failed"; uri?:string; mimeType?:string|null }
 export const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = [];
 
 interface AIDrafts {
@@ -24,7 +24,7 @@ interface AIDrafts {
 /** A transfer does not survive the app; only attachments the device has stored do. */
 export function persistedAttachments(attachments: Record<string, DraftAttachment[]>) {
   return Object.fromEntries(Object.entries(attachments).flatMap(([key, files]) => {
-    const stored = files.filter((file) => file.status === "uploaded");
+    const stored = files.filter((file) => file.status === "uploaded"||!!file.uri);
     return stored.length ? [[key, stored]] : [];
   }));
 }

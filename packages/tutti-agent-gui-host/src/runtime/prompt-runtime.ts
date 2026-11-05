@@ -43,10 +43,13 @@ export function createPromptRuntime<Result>(
     loadSession(id: string): Promise<unknown>;
     locale?(): string;
     enqueue(input: SubmitInput): Promise<LocalPromptQueue>;
+    checkpoint?(input: SubmitInput, display: AgentQueuedPrompt): Promise<void>;
+    checkpointActivation?(input: AgentSessionActivationInput): Promise<void>;
     update(
       id: string,
       action: PromptQueueAction,
-      requestId?: string
+      requestId?: string,
+      targetTurnId?: string,
     ): Promise<LocalPromptQueue>;
     statuses?(
       id: string,
@@ -76,6 +79,7 @@ export function createPromptRuntime<Result>(
   const service: PromptService<SubmitInput, AgentQueuedPrompt> =
     new PromptService<SubmitInput, AgentQueuedPrompt>({
       enqueue: options.enqueue,
+      checkpoint: options.checkpoint,
       canSubmit: (id) => sessions.submitAvailability(id)?.state === "available",
       admit(input, queued) {
         if (!input.content.length || !input.clientSubmitId) return null;
@@ -127,14 +131,11 @@ export function createPromptRuntime<Result>(
         // The presented state, because this client's messages on their way live in this service.
         stopTarget: (id) =>
           service.latestStopTarget(id)?.clientSubmitId ?? null,
-        turnForSubmit: (id, clientSubmitId) =>
-          options
-            .messages(id)
-            .find(
-              (message) =>
-                message.turnId &&
-                message.payload?.clientSubmitId === clientSubmitId
-            )?.turnId ?? null
+        turnForSubmit: (id, clientSubmitId) => {
+          const authority=service.submission(id,clientSubmitId);
+          if(authority?.state==="queued"||authority?.state==="recovery_required")return null;
+          return options.messages(id).find((message)=>message.turnId&&message.payload?.clientSubmitId===clientSubmitId&&(!authority?.attempt||authority.attempt.turn_ids.includes(message.turnId)))?.turnId??null;
+        }
       },
       respondToInteraction: options.respondToInteraction,
       editRetry: options.editRetry,
@@ -181,6 +182,7 @@ export function createPromptRuntime<Result>(
     Result
   >({
     workspaceId,
+    checkpoint: options.checkpointActivation,
     nowUnixMs: () => Date.now(),
     isDeleted: (id) => sessions.isDeleted(id),
     activate: options.activate,
@@ -311,6 +313,7 @@ export function createPromptRuntime<Result>(
           ? "preserve"
           : "rollback";
     },
+    saved: (requestId) => activations.saved(requestId),
     request(input) {
       options.beforeTurnOperation?.();
       const normalized = normalizeActivation(input);

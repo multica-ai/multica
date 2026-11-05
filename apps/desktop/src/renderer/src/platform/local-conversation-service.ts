@@ -1,22 +1,32 @@
+import {
+  createSubmissionStorage,
+  createSubmissionAssets,
+} from "./local-submission-storage";
+import {
+  SUBMISSION_LIFECYCLE_CAPABILITY,
+  localSubmissionStatusesSchema,
+} from "@multica/core/local-conversation/submission";
+import { persistedQueuedPromptSchema } from "@multica/core/local-conversation/submission-storage";
 import { type ConversationService } from "@multica/conversation-client/services";
 import { GLOBAL_EXECUTION_PERMISSION_KEY } from "@multica/conversation-client/models";
 import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
 import {
-isTaskCreationReference,
-type LocalFolderProject,
-type LocalPromptQueue,
-type LocalProviderId,
-type LocalProviderUsage,
-type LocalQueuedPrompt
+  isTaskCreationReference,
+  type LocalFolderProject,
+  type LocalPromptQueue,
+  type LocalProviderId,
+  type LocalProviderUsage,
 } from "@multica/core/local-conversation/protocol";
 import {
-LOCAL_V2_PROMPT_STATUS_CAPABILITY,
-localV2PromptStatusesSchema,
-localV2SummarySchema,
-type LocalV2Scope,
-type LocalV2Summary,
-type LocalV2Transport
+  LOCAL_V2_PROMPT_STATUS_CAPABILITY,
+  localV2PromptStatusesSchema,
+  localV2SummarySchema,
+  localV2QueueSchema,
+  localSubmissionResultSchema,
+  type LocalV2Scope,
+  type LocalV2Summary,
+  type LocalV2Transport,
 } from "@multica/core/local-conversation/v2";
 import { defaultStorage } from "@multica/core/platform";
 import type { AgentTask,Attachment } from "@multica/core/types";
@@ -89,13 +99,12 @@ export function projectLocalSession(
 
 /** The daemon's queue in the shape the GUI's desktop queue engine keeps. */
 function projectQueue(raw: unknown): LocalPromptQueue {
-  const queue = (raw ?? {}) as {
-    revision?: number;
-    paused?: boolean;
-    error?: string;
-    dispatching_request_id?: string;
-    items?: unknown[];
-  };
+  const queue = parseWithFallback<z.infer<typeof localV2QueueSchema>>(
+    raw,
+    localV2QueueSchema,
+    { revision: 0, paused: false, items: [] },
+    { endpoint: "local-v2.queue" },
+  );
   return {
     revision: queue.revision ?? 0,
     paused: queue.paused ?? false,
@@ -103,7 +112,37 @@ function projectQueue(raw: unknown): LocalPromptQueue {
     ...(queue.dispatching_request_id
       ? { dispatchingRequestId: queue.dispatching_request_id }
       : {}),
-    items: (queue.items ?? []) as LocalQueuedPrompt[]
+    items: queue.items.flatMap((item) => {
+      const object = z.record(z.string(), z.unknown()).safeParse(item);
+      const display = z
+        .record(z.string(), z.unknown())
+        .safeParse(object.success ? object.data.display : undefined);
+      const compatible = object.success
+        ? {
+            ...object.data,
+            display: {
+              id: object.data.requestId,
+              createdAtUnixMs: 0,
+              content: [
+                {
+                  type: "text",
+                  text:
+                    typeof object.data.content === "string"
+                      ? object.data.content
+                      : "",
+                },
+              ],
+              ...(display.success ? display.data : {}),
+            },
+          }
+        : item;
+      const parsed = parseWithFallback<z.infer<
+        typeof persistedQueuedPromptSchema
+      > | null>(compatible, persistedQueuedPromptSchema, null, {
+        endpoint: "local-v2.queue-item",
+      });
+      return parsed ? [parsed] : [];
+    }),
   };
 }
 
@@ -153,6 +192,30 @@ export function localConversationSource(
   scope: LocalV2Scope
 ): LocalConversationSource {
   return {
+    submissionStorage: createSubmissionStorage(
+      JSON.stringify([
+        api.getBaseUrl(),
+        scope.userId,
+        scope.workspaceId,
+        store.deviceId,
+      ]),
+    ),
+    submissionContext: () => store.submissionContext(),
+    async inspectSubmissions(id, requestIds) {
+      if (!(await store.submissionContext()).lifecycle) return null;
+      const raw = await store.request(
+        "POST",
+        `/sessions/${encodeURIComponent(id)}/queue/status`,
+        { request_ids: requestIds },
+      );
+      const parsed = parseWithFallback<z.infer<
+        typeof localSubmissionStatusesSchema
+      > | null>(raw, localSubmissionStatusesSchema, null, {
+        endpoint: "local-v2.submission-status",
+      });
+      if (!parsed) throw new Error("Invalid submission status response");
+      return parsed;
+    },
     navigation: (id) => store.navigation(id),
     open: (id) => store.open(id),
     ensure: (id) => store.ensure(id),
@@ -193,7 +256,28 @@ export function localConversationSource(
           null) as AgentGuiSessionDetail["reasoningEffort"],
         permissionMode:
           settings.permission_mode as AgentGuiSessionDetail["permissionMode"],
-        promptQueue: projectQueue(conversation.queue.toQueue()),
+        promptQueue: {
+          ...projectQueue({
+            ...conversation.queue.toQueue(),
+            items: [
+              ...conversation.queue.toQueue().items,
+              ...[...conversation.submissions.values()]
+                .filter(
+                  (value) =>
+                    value.state === "recovery_required" &&
+                    !conversation.queue
+                      .toQueue()
+                      .items.some(
+                        (item) => item.requestId === value.request_id,
+                      ),
+                )
+                .map((value) => value.item),
+            ],
+          }),
+          submissions: [...conversation.submissions.values()],
+          storeGeneration: conversation.storeGeneration,
+          snapshotSeq: conversation.seq,
+        },
         messages: [],
         pending: {},
         tasks: [],
@@ -271,7 +355,16 @@ export function createLocalConversationParentService(
   const uploads = createLocalV2Uploads(
     client,
     () => transport.capabilities?.() ?? Promise.resolve([]),
-    (outcome) => publish({ type: "attachment.upload", ...outcome })
+    (outcome) => publish({ type: "attachment.upload", ...outcome }),
+    undefined,
+    createSubmissionAssets(
+      JSON.stringify([
+        api.getBaseUrl(),
+        scope.userId,
+        scope.workspaceId,
+        client.deviceId,
+      ]),
+    ),
   );
   const conversationPath = (id: string, suffix = "") =>
     `/sessions/${encodeURIComponent(id)}${suffix}`;
@@ -443,12 +536,46 @@ export function createLocalConversationParentService(
 
   const services: AgentGuiHostServices = {
     queue: {
+      prepare: async (params) => {
+        assertCurrent();
+        const agents = await mentionedAgents(params.item.references ?? []);
+        assertCurrent();
+        return { ...params, item: { ...params.item, agents } };
+      },
       enqueue: async (params) => {
+        assertCurrent();
+        await uploads.ensure(params.item.attachmentIds ?? []);
         assertCurrent();
 
         // Transfer ownership before any asynchronous view-bound preparation.
-        const agents = await mentionedAgents(params.item.references ?? []);
+        const agents =
+          params.item.agents ??
+          (await mentionedAgents(params.item.references ?? []));
         const item = { ...params.item, ...(agents.length ? { agents } : {}) };
+        assertCurrent();
+        if (
+          !params.paused &&
+          (await transport.capabilities?.())?.includes(
+            SUBMISSION_LIFECYCLE_CAPABILITY,
+          )
+        ) {
+          const raw = await command(params.sessionId, { type: "submit", item });
+          const parsed = parseWithFallback<z.infer<
+            typeof localSubmissionResultSchema
+          > | null>(raw, localSubmissionResultSchema, null, {
+            endpoint: "local-v2.submit",
+          });
+          if (!parsed) throw new Error("Invalid submission response");
+          client
+            .conversation(params.sessionId)
+            ?.mergeSubmissions([parsed.submission]);
+          return {
+            ...projectQueue(parsed.queue),
+            submissions: [parsed.submission],
+            storeGeneration: parsed.store_generation,
+            snapshotSeq: parsed.snapshot_seq,
+          };
+        }
         return projectQueue(
           await command(params.sessionId, {
             type: "queue_enqueue",
@@ -483,9 +610,11 @@ export function createLocalConversationParentService(
         return projectQueue(
           await command(params.sessionId, {
             type: "queue_update",
+            operation_id: crypto.randomUUID(),
             action: params.action === "sendNow" ? "send_now" : params.action,
-            request_id: params.requestId
-          })
+            request_id: params.requestId,
+            ...(params.targetTurnId?{turn_id:params.targetTurnId}:{}),
+          }),
         );
       }
     },

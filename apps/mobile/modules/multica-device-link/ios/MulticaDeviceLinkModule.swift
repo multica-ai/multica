@@ -143,6 +143,21 @@ public final class MulticaDeviceLinkModule: Module {
       return try DeviceContentStore.sha256(fileAt: url)
     }.runOnQueue(self.contentQueue)
 
+    AsyncFunction("retainSubmissionAsset") { (key: String, uri: String) -> String in
+      try SubmissionStore.retainAsset(key, uri: uri, under: self.deviceLinkStorage())
+    }.runOnQueue(self.contentQueue)
+    AsyncFunction("removeSubmissionAsset") { (key: String) in
+      try SubmissionStore.removeAsset(key, under: self.deviceLinkStorage())
+    }.runOnQueue(self.contentQueue)
+
+    AsyncFunction("readSubmissions") { (key: String) -> String? in
+      try SubmissionStore.read(key, under: self.deviceLinkStorage())
+    }.runOnQueue(self.contentQueue)
+
+    AsyncFunction("writeSubmissions") { (key: String, content: String) in
+      try SubmissionStore.write(key, content: content, under: self.deviceLinkStorage())
+    }.runOnQueue(self.contentQueue)
+
     AsyncFunction("readSnapshot") { (key: String) -> String? in
       DeviceContentStore.read(key: key, under: try self.snapshotRoot())
     }.runOnQueue(self.contentQueue)

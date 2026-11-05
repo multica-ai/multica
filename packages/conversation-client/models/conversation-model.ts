@@ -1,3 +1,8 @@
+import {
+  localSubmissionEventSchema,
+  mergeSubmission,
+  type LocalSubmission,
+} from "@multica/core/local-conversation/submission";
 import { action, makeObservable, observable } from "mobx";
 import "../mobx-config";
 import type { LocalV2Event, LocalV2History, LocalV2Snapshot, LocalV2SnapshotTurn, LocalV2Summary, LocalV2Queue } from "@multica/core/local-conversation/v2";
@@ -24,6 +29,7 @@ const INTERRUPTED_TURN_ERRORS = new Set(["daemon_restarted", "provider_exited", 
  * in place, because views hold on to it; the turns and items inside are new.
  */
 export class ConversationModel {
+  readonly submissions = new Map<string, LocalSubmission>();
   readonly turns = new Map<string, TurnModel>();
   readonly items = new Map<string, ItemModel>();
   readonly messages = new Map<string, UserMessageModel>();
@@ -54,6 +60,8 @@ export class ConversationModel {
     this.summary = snapshot.conversation;
     this.queue = new PromptQueueModel(snapshot.queue);
     makeObservable<this, "load">(this, {
+      submissions: observable.shallow,
+      mergeSubmissions: action,
       turns: observable.shallow,
       items: observable.shallow,
       messages: observable.shallow,
@@ -93,7 +101,10 @@ export class ConversationModel {
       this.queue.receive(snapshot.queue);
       return false;
     }
-    if (!sameStore || options.authoritative) this.completedTurns.clear();
+    if (!sameStore || options.authoritative) {
+      this.completedTurns.clear();
+      this.submissions.clear();
+    }
     const previous = {
       turns: [...this.turns.values()], items: [...this.items.values()],
       messages: [...this.messages.values()], interactions: [...this.interactions.values()],
@@ -126,6 +137,7 @@ export class ConversationModel {
     this.summary = snapshot.conversation;
     this.hasOlderTurns = snapshot.has_older_turns;
     this.historyStartIndex = snapshot.turns[0]?.turn_index ?? 0;
+    this.mergeSubmissions(snapshot.submissions);
     this.settings = { ...snapshot.settings };
     this.createdAt = snapshot.created_at;
     this.forkedFromId = snapshot.forked_from_id;
@@ -199,7 +211,17 @@ export class ConversationModel {
   /** Whether a queue change arrived whose items have not been read. */
   queueItemsStale(): boolean { return this.queue.itemsStale(); }
 
-  receiveQueue(queue: LocalV2Queue): void { this.queue.receive(queue); }
+  mergeSubmissions(values: readonly LocalSubmission[]): void {
+    for (const value of values)
+      this.submissions.set(
+        value.request_id,
+        mergeSubmission(this.submissions.get(value.request_id), value),
+      );
+  }
+
+  receiveQueue(queue: LocalV2Queue): void {
+    this.queue.receive(queue);
+  }
 
   private addTurn(turn: LocalV2SnapshotTurn): void {
     const completion = this.completedTurns.get(turn.id);
@@ -296,13 +318,18 @@ export class ConversationModel {
   }
 
   private applyEvent(event: LocalV2Event): void {
+    if (event.type === "submission.updated") {
+      const parsed = localSubmissionEventSchema.safeParse(event.payload);
+      if (parsed.success) this.mergeSubmissions([parsed.data.submission]);
+    }
+
     const payload = event.payload;
     switch (event.type) {
       case "user.message": {
         const id = text(payload.message_id);
         if (!id) return;
         this.setMessage(new UserMessageModel({
-          id, requestId: text(payload.request_id), turnId: event.turn_id, content: text(payload.content),
+          id, requestId: text(payload.submission_id)||text(payload.request_id), turnId: event.turn_id, content: text(payload.content),
           attachmentIds: Array.isArray(payload.attachment_ids) ? payload.attachment_ids.filter((value): value is string => typeof value === "string") : [],
           steered: payload.steered === true, failed: false, createdAt: event.created_at,
         }));

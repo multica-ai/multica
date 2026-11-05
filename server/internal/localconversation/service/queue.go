@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
-	"github.com/multica-ai/multica/server/internal/localconversation/timing"
 )
 
 const (
@@ -88,6 +86,7 @@ type queues struct {
 	mu          sync.Mutex
 	locks       map[string]*sync.Mutex
 	dispatching map[string]string
+	preparing   map[string]submissionRun
 	// once names a message to send although its queue is paused. In memory on
 	// purpose: after a restart the queue waits for the user, this message included.
 	once map[string]string
@@ -145,11 +144,11 @@ func (s *Service) Queue(ctx context.Context, scopeID int64, conversationID strin
 	if _, err := s.scopedConversation(ctx, scopeID, conversationID); err != nil {
 		return QueueView{}, err
 	}
-	state, err := s.store.Queue(ctx, conversationID)
+	_, state, submissions, err := s.store.SubmissionState(ctx, conversationID, nil)
 	if err != nil {
 		return QueueView{}, err
 	}
-	return s.queueView(conversationID, state), nil
+	return withRecoveryItems(s.queueView(conversationID, state), submissions), nil
 }
 
 func (s *Service) queueView(conversationID string, state store.QueueState) QueueView {
@@ -193,6 +192,21 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 			return s.queueView(conversationID, state), nil
 		}
 	}
+	_, _, known, err := s.store.SubmissionState(ctx, conversationID, []string{item.RequestID})
+	if err != nil {
+		unlock()
+		return QueueView{}, err
+	}
+	if len(known) > 0 {
+		if known[0].State != "removed" && string(known[0].Item) != "{}" && !sameQueuedMessage(known[0].Item, raw) {
+			unlock()
+			return QueueView{}, ErrRequestConflict
+		}
+		if known[0].State != "queued" {
+			unlock()
+			return s.queueView(conversationID, state), nil
+		}
+	}
 	if _, err := s.store.Receipt(ctx, scopeID, item.RequestID); err == nil {
 		unlock()
 		return s.queueView(conversationID, state), nil
@@ -218,7 +232,7 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 		if paused || len(state.Items) > 0 || conv.Status == "running" {
 			s.traces.waited(item.RequestID)
 		}
-		go s.dispatchQueue(conversationID)
+		s.goBackground(func() { s.dispatchQueue(conversationID) })
 	}
 	return view, err
 }
@@ -227,9 +241,14 @@ func (s *Service) Enqueue(ctx context.Context, scopeID int64, conversationID str
 // send_now also interrupt the running turn; send_now then moves the item
 // to the front, so it runs as soon as that turn ends.
 func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID, action, requestID string) (QueueView, error) {
+	return s.ControlQueue(ctx, scopeID, conversationID, action, requestID, "")
+}
+
+func (s *Service) ControlQueue(ctx context.Context, scopeID int64, conversationID, action, requestID, operationID string, expectedTurnID ...string) (QueueView, error) {
 	if _, err := s.scopedConversation(ctx, scopeID, conversationID); err != nil {
 		return QueueView{}, err
 	}
+	ctx = context.WithoutCancel(ctx)
 	started := func() bool {
 		if s.queues.dispatchingFor(conversationID) == requestID {
 			return true
@@ -246,11 +265,61 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 	default:
 		return QueueView{}, fmt.Errorf("%w: unknown queue action %q", ErrInvalidRequest, action)
 	}
-	if action == "send_now" && started() {
+	unlock := s.queues.lock(conversationID)
+	if len(operationID) > 160 {
+		unlock()
+		return QueueView{}, ErrInvalidRequest
+	}
+	if operationID != "" {
+		op, err := s.store.QueueOperation(ctx, conversationID, operationID)
+		if err == nil {
+			unlock()
+			if op.Action != action || op.RequestID != requestID {
+				return QueueView{}, ErrRequestConflict
+			}
+			return s.Queue(ctx, scopeID, conversationID)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			unlock()
+			return QueueView{}, err
+		}
+	}
+	_, _, submissions, readErr := s.store.SubmissionState(ctx, conversationID, []string{requestID})
+	if readErr != nil {
+		unlock()
+		return QueueView{}, readErr
+	}
+	var recovery *store.Submission
+	if len(submissions) > 0 && submissions[0].State == "recovery_required" {
+		recovery = &submissions[0]
+	}
+	if action == "send_now" && recovery == nil && started() {
+		unlock()
 		return s.Queue(ctx, scopeID, conversationID)
 	}
+	slot, _ := s.store.Execution(ctx, conversationID)
+	if action == "stop" && len(expectedTurnID) > 0 && expectedTurnID[0] != "" {
+		owns := false
+		if slot.AttemptID != "" {
+			a, err := s.store.Attempt(ctx, conversationID, slot.AttemptID)
+			if err != nil {
+				unlock()
+				return QueueView{}, err
+			}
+			var turns []string
+			_ = json.Unmarshal([]byte(a.TurnIds), &turns)
+			for _, id := range turns {
+				owns = owns || id == expectedTurnID[0]
+			}
+		}
+		if !owns {
+			unlock()
+			return s.Queue(ctx, scopeID, conversationID)
+		}
+	}
+	if action == "stop" && requestID != "" && slot.RequestID != requestID {
+		slot = sqlitedb.ConversationExecution{}
+	}
 
-	unlock := s.queues.lock(conversationID)
 	state, err := s.store.Queue(ctx, conversationID)
 	if err != nil {
 		unlock()
@@ -264,24 +333,50 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 	count := len(state.Items)
 	wasHeld, heldError := state.Paused || state.Error != "", state.Error
 	reason := action
+	var removedUnknown bool
+	var recoveryChange *store.SubmissionChange
 	switch action {
 	case "pause", "stop":
 		change.Paused = true
 	case "resume":
 		change.Paused, change.Error = false, ""
 	case "remove":
-		if !queued {
+		if recovery != nil {
+			recoveryChange = &store.SubmissionChange{RequestID: requestID, State: "removed", Release: true, ExpectedAttemptID: slot.AttemptID}
+			break
+		}
+		_, _, values, e := s.store.SubmissionState(ctx, conversationID, []string{requestID})
+		if e != nil {
 			unlock()
+			return QueueView{}, e
+		}
+		if len(values) > 0 && values[0].State == "starting" {
+			unlock()
+			return QueueView{}, ErrQueueItemStarted
+		}
+		if !queued {
 			if started() {
+				unlock()
 				return QueueView{}, ErrQueueItemStarted
 			}
-			return s.queueView(conversationID, state), nil
+			removedUnknown = true
+			break
 		}
 		change.Remove = requestID
 		change.RemovedAt = s.opts.Now()
 		reason = "removed"
 		count--
 	case "send_now":
+		if recovery != nil {
+			recoveryChange = &store.SubmissionChange{RequestID: requestID, State: "queued", Release: true, ExpectedAttemptID: slot.AttemptID}
+			if !queued {
+				change.Append = &store.QueueItem{RequestID: requestID, Item: recovery.Item}
+				count++
+			}
+			change.Paused = true
+			change.Error = ""
+			break
+		}
 		if !queued {
 			unlock()
 			return QueueView{}, ErrQueueItemStarted
@@ -289,20 +384,35 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 		// Hold the queue until the running turn has stopped.
 		change.Paused = true
 	}
-	view, err := s.commitQueue(ctx, conversationID, change, count, reason)
+	batch := s.queueBatch(conversationID, state, change, count, reason)
+	if recoveryChange != nil {
+		batch.Submissions = []store.SubmissionChange{*recoveryChange}
+	}
+	if removedUnknown {
+		batch.Submissions = []store.SubmissionChange{{RequestID: requestID, Item: json.RawMessage(`{}`), State: "removed"}}
+	}
+	if operationID != "" {
+		batch.Operation = &store.QueueOperation{ID: operationID, Action: action, RequestID: requestID}
+	}
+	_, err = s.batcher.AppendWait(ctx, batch)
+	var view QueueView
+	if err == nil {
+		state, err = s.store.Queue(ctx, conversationID)
+		view = s.queueView(conversationID, state)
+	}
 	unlock()
 	if err != nil {
 		return view, err
 	}
 	if action == "stop" || action == "send_now" {
-		if err := s.Interrupt(ctx, scopeID, conversationID); err != nil && !errors.Is(err, ErrNoRunningTurn) {
+		if err := s.interruptExecution(ctx, scopeID, conversationID, slot); err != nil && !errors.Is(err, ErrNoRunningTurn) {
 			return view, err
 		}
 	}
 	if action == "send_now" {
 		unlock := s.queues.lock(conversationID)
 		state, err := s.store.Queue(ctx, conversationID)
-		if err == nil {
+		if err == nil && state.Revision == view.Revision {
 			// A queue the user was holding stays held: only this message goes.
 			if wasHeld {
 				s.queues.setOnce(conversationID, requestID)
@@ -318,7 +428,7 @@ func (s *Service) UpdateQueue(ctx context.Context, scopeID int64, conversationID
 			return view, err
 		}
 	}
-	go s.dispatchQueue(conversationID)
+	s.goBackground(func() { s.dispatchQueue(conversationID) })
 	return view, nil
 }
 
@@ -345,23 +455,7 @@ func (s *Service) commitQueue(ctx context.Context, conversationID string, change
 	if err != nil {
 		return QueueView{}, err
 	}
-	// The order and the reason tell a client a message that went out from one
-	// another device removed. No content: the items stay behind the queue route.
-	payload := map[string]any{"revision": change.Revision, "paused": change.Paused, "count": count, "request_ids": requestIDsAfter(current, change), "reason": reason}
-	if change.Error != "" {
-		payload["error"] = change.Error
-	}
-	if id := s.queues.dispatchingFor(conversationID); id != "" {
-		payload["dispatching_request_id"] = id
-	}
-	data, _ := json.Marshal(payload)
-	n := int64(count)
-	now := s.opts.Now()
-	_, err = s.batcher.AppendWait(ctx, store.Batch{
-		ConversationID: conversationID, Queue: &change,
-		Events:  []store.NewEvent{{Type: "queue.updated", Payload: data, CreatedAt: now}},
-		Summary: &store.SummaryPatch{QueueCount: &n, UpdatedAt: now},
-	})
+	_, err = s.batcher.AppendWait(ctx, s.queueBatch(conversationID, current, change, count, reason))
 	if err != nil {
 		return QueueView{}, err
 	}
@@ -372,98 +466,73 @@ func (s *Service) commitQueue(ctx context.Context, conversationID string, change
 	return s.queueView(conversationID, state), nil
 }
 
+func (s *Service) queueBatch(conversationID string, current store.QueueState, change store.QueueChange, count int, reason string) store.Batch {
+	payload := map[string]any{"revision": change.Revision, "paused": change.Paused, "count": count, "request_ids": requestIDsAfter(current, change), "reason": reason}
+	if change.Error != "" {
+		payload["error"] = change.Error
+	}
+	if id := s.queues.dispatchingFor(conversationID); id != "" {
+		payload["dispatching_request_id"] = id
+	}
+	data, _ := json.Marshal(payload)
+	n := int64(count)
+	now := s.opts.Now()
+	return store.Batch{ConversationID: conversationID, Queue: &change, Events: []store.NewEvent{{Type: "queue.updated", Payload: data, CreatedAt: now}}, Summary: &store.SummaryPatch{QueueCount: &n, UpdatedAt: now}}
+}
+
 // dispatchQueue sends the first queued message when the queue is running.
 // A running turn leaves the item queued for the next turn end; any other
 // failure pauses the queue with the error.
 func (s *Service) dispatchQueue(conversationID string) {
 	ctx := context.Background()
 	unlock := s.queues.lock(conversationID)
-	defer unlock()
-	if s.isClosing() {
+	if s.acceptTurn() != nil {
+		unlock()
 		return
 	}
 	state, err := s.store.Queue(ctx, conversationID)
 	if err != nil || len(state.Items) == 0 {
+		unlock()
 		return
 	}
 	once := s.queues.onceFor(conversationID) == state.Items[0].RequestID
 	if (state.Paused || state.Error != "") && !once {
+		unlock()
+		return
+	}
+	busy, err := s.executionBusy(ctx, conversationID)
+	if err != nil || busy {
+		unlock()
 		return
 	}
 	conv, err := s.store.Conversation(ctx, conversationID)
 	if err != nil || conv.Archived == 1 {
-		return
-	}
-	if busy, err := s.conversationBusy(ctx, conversationID); err != nil || busy {
+		unlock()
 		return
 	}
 	first := state.Items[0]
 	item, err := parseQueueItem(first.Item)
-	var trace *timing.Trace
-	var dispatched time.Time
-	if err == nil {
-		trace = s.traces.dispatching(conv, item)
-		dispatched = trace.Now()
-		s.queues.setDispatching(conversationID, first.RequestID)
-		err = s.sendQueued(ctx, conv, item, TurnOrigin{PeerID: first.OriginPeerID, ClientKind: first.OriginClientKind})
-		s.queues.setDispatching(conversationID, "")
+	if err != nil {
+		unlock()
+		return
 	}
-	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error}
-	count := len(state.Items)
-	switch {
-	case errors.Is(err, ErrTurnRunning) || errors.Is(err, ErrClosing) || errors.Is(err, ErrDraining):
+	claim, err := s.newClaim(ctx, conv, item)
+	if err != nil {
+		unlock()
+		return
+	}
+	_, err = s.batcher.AppendWait(ctx, store.Batch{ConversationID: conversationID, Submissions: []store.SubmissionChange{{RequestID: item.RequestID, Claim: claim}}})
+	if err != nil {
+		unlock()
 		return
 	}
 	if once {
 		s.queues.setOnce(conversationID, "")
 	}
-	// Recorded after the send because a dispatch that finds a running turn
-	// stays queued and is not the one that counts.
-	trace.Completed(timing.StageQueueDispatch, dispatched, dispatched.Sub(trace.Started()), err)
-	switch {
-	case err != nil && !errors.Is(err, ErrOutcomeUnknown):
-		change.Paused, change.Error = true, err.Error()
-	default:
-		change.Remove = first.RequestID
-		count--
-	}
-	reason := "dispatched"
-	if change.Remove == "" {
-		reason = "failed"
-	}
-	if _, err := s.commitQueue(ctx, conversationID, change, count, reason); err != nil {
-		s.opts.Logger.Warn("local conversations: could not record queue progress", "conversation_id", conversationID, "error", err)
-	}
-}
-
-func (s *Service) sendQueued(ctx context.Context, conv sqlitedb.Conversation, item queueItem, origin TurnOrigin) error {
-	update := SettingsUpdate{PermissionMode: item.PermissionMode}
-	var err error
-	if update.Model, update.ClearModel, err = rawOptionalString(item.Model); err != nil {
-		return err
-	}
-	if update.ReasoningEffort, update.ClearReasoningEffort, err = rawOptionalString(item.ReasoningEffort); err != nil {
-		return err
-	}
-	if update.Model != nil || update.ClearModel || update.ReasoningEffort != nil || update.ClearReasoningEffort || update.PermissionMode != nil {
-		if err := s.UpdateSettings(ctx, conv.ScopeID, conv.ID, update); err != nil {
-			return err
-		}
-	}
-	cmd := SendCommand{ScopeID: conv.ScopeID, Origin: origin, ConversationID: conv.ID, RequestID: item.RequestID, Text: item.Content, AttachmentIDs: item.AttachmentIDs, References: item.References}
-	if item.Prompt != nil {
-		cmd.Prompt = *item.Prompt
-	}
-	if len(item.Agents) > 0 {
-		_, err = s.SendToAgents(ctx, cmd, item.Agents)
-		return err
-	}
-	cmd.RequestID, err = s.queuedAttemptID(ctx, conv, item.RequestID)
-	if err != nil {
-		return err
-	}
-	_, err = s.Send(ctx, cmd)
-	return err
+	runCtx, cancel := context.WithCancel(ctx)
+	s.setSubmissionRun(conversationID, claim.AttemptID, cancel)
+	unlock()
+	s.runSubmission(runCtx, conv, item, first.Item, *claim, TurnOrigin{PeerID: first.OriginPeerID, ClientKind: first.OriginClientKind})
 }
 
 // queuedAttemptID is the request id to send a queued message under. A send
@@ -560,6 +629,22 @@ func (s *Service) PromptStatuses(ctx context.Context, scopeID int64, conversatio
 	statuses := make(map[string]string, len(requestIDs))
 	for _, item := range state.Items {
 		statuses[item.RequestID] = PromptQueued
+	}
+	_, _, submissions, err := s.store.SubmissionState(ctx, conversationID, requestIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range submissions {
+		switch value.State {
+		case "removed":
+			statuses[value.RequestID] = PromptRemoved
+		case "recovery_required":
+			statuses[value.RequestID] = PromptUnknown
+		case "starting":
+			statuses[value.RequestID] = PromptDispatching
+		case "attached":
+			statuses[value.RequestID] = PromptDelivered
+		}
 	}
 	dispatching := s.queues.dispatchingFor(conversationID)
 	result := make(map[string]string, len(requestIDs))

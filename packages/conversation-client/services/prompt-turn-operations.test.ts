@@ -71,7 +71,9 @@ describe("stopping a turn", () => {
     prompts.stop("s");
     expect(prompts.cancelStatus("s")).toBe("requested");
     await flush();
-    expect(vi.mocked(options.update).mock.calls).toEqual([["s", "stop", undefined]]);
+    expect(vi.mocked(options.update).mock.calls).toEqual([
+      ["s", "stop", undefined, "t1"],
+    ]);
     expect(prompts.cancelRecord("s")?.turnId).toBe("t1");
   });
 

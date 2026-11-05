@@ -677,7 +677,7 @@ describe("local conversation parent service over v2", () => {
     } as never);
     await service.session.cancel({ sessionId: "c1", taskId: "t-1" } as never);
     expect(requests.map((entry) => entry.body)).toEqual([
-      { type: "queue_update", action: "send_now", request_id: "q1" },
+      { type: "queue_update", action: "send_now", request_id: "q1",operation_id:expect.any(String) },
       { type: "fork", turn_id: "t-1", request_id: "f-1" },
       { type: "answer", interaction_id: "question:t:q", answer: { a: "b" } },
       { type: "interrupt" }

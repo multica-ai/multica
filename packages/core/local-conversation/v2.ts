@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { localSubmissionSchema } from "./submission";
 
 /**
  * Local conversation protocol v2 between Desktop and the Go daemon
@@ -110,14 +111,38 @@ export const localV2SnapshotSchema = z.object({
   conversation: localV2SummarySchema,
   turns: z.array(snapshotTurnSchema),
   has_older_turns: z.boolean().default(false),
-  pending_interactions: z.array(z.object({
-    interaction_id: z.string(), turn_id: z.string(), kind: z.string(), request: payload, created_at: z.string(),
-  })).default([]),
-  settings: z.object({ model: nullableString, reasoning_effort: nullableString, permission_mode: z.string().default("default") }).default({ model: null, reasoning_effort: null, permission_mode: "default" }),
-  queue: z.object({
-    revision: z.number().int(), paused: z.boolean(), error: z.string().optional(), dispatching_request_id: z.string().optional(),
-    items: z.array(payload).default([]),
-  }).default({ revision: 0, paused: false, items: [] }),
+  pending_interactions: z
+    .array(
+      z.object({
+        interaction_id: z.string(),
+        turn_id: z.string(),
+        kind: z.string(),
+        request: payload,
+        created_at: z.string(),
+      }),
+    )
+    .default([]),
+  settings: z
+    .object({
+      model: nullableString,
+      reasoning_effort: nullableString,
+      permission_mode: z.string().default("default"),
+    })
+    .default({
+      model: null,
+      reasoning_effort: null,
+      permission_mode: "default",
+    }),
+  submissions: z.array(localSubmissionSchema).default([]),
+  queue: z
+    .object({
+      revision: z.number().int(),
+      paused: z.boolean(),
+      error: z.string().optional(),
+      dispatching_request_id: z.string().optional(),
+      items: z.array(payload).default([]),
+    })
+    .default({ revision: 0, paused: false, items: [] }),
   /** Events of background items still running whose turn is older than this snapshot's window. */
   open_background_items: z.array(localV2EventSchema).default([]),
   created_at: z.string().default(""),
@@ -132,6 +157,15 @@ export const localV2QueueSchema = z.object({
   items: z.array(payload).default([]),
 });
 export type LocalV2Queue = z.infer<typeof localV2QueueSchema>;
+
+export const localSubmissionResultSchema = z.object({
+  store_generation: z.string(),
+  snapshot_seq: z.number().int().nonnegative(),
+  queue_revision: z.number().int().nonnegative(),
+  submission: localSubmissionSchema,
+  queue: localV2QueueSchema,
+});
+export type LocalSubmissionResult = z.infer<typeof localSubmissionResultSchema>;
 
 /** A daemon announcing this can say what became of queued messages. */
 export const LOCAL_V2_PROMPT_STATUS_CAPABILITY = "prompt-status-v1";
