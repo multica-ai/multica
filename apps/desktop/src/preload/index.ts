@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { verificationPreload } from "#verification-dev/preload";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
@@ -70,6 +71,7 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
 }
 
 const appInfo = fetchAppInfo();
+verificationPreload?.install();
 const runtimeConfig = fetchRuntimeConfig();
 const windowContext = readDesktopWindowContext(process.argv);
 

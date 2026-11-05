@@ -8,6 +8,9 @@ import (
 
 // Providers lists the supported providers and whether each is installed.
 func (s *Service) Providers(ctx context.Context) []catalog.Provider {
+	if s.verificationMode() {
+		return []catalog.Provider{{ID: "claude", Name: "Verification (Claude protocol)", Available: true}, {ID: "codex", Name: "Verification (Codex identity)", Available: true}}
+	}
 	if s.opts.Catalog == nil {
 		return []catalog.Provider{{ID: "codex", Name: "Codex"}, {ID: "claude", Name: "Claude Code"}}
 	}
@@ -16,6 +19,9 @@ func (s *Service) Providers(ctx context.Context) []catalog.Provider {
 
 // Models lists a provider's models.
 func (s *Service) Models(ctx context.Context, provider string, force bool) (catalog.Models, error) {
+	if s.verificationMode() {
+		return catalog.Models{Supported: true, Models: []catalog.Model{{ID: "verification-fake", Label: "Verification fake provider", IsDefault: true}}}, nil
+	}
 	if s.opts.Catalog == nil {
 		return catalog.Models{}, ErrUnsupportedProvider
 	}
@@ -25,6 +31,9 @@ func (s *Service) Models(ctx context.Context, provider string, force bool) (cata
 // Usage reads a provider's account usage and, for a conversation of that
 // provider, its context use.
 func (s *Service) Usage(ctx context.Context, scopeID int64, provider, conversationID string, force bool) (catalog.Usage, error) {
+	if s.verificationMode() {
+		return catalog.Usage{}, ErrUnsupportedProvider
+	}
 	if s.opts.Catalog == nil {
 		return catalog.Usage{}, ErrUnsupportedProvider
 	}

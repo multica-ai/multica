@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 570" role="img" aria-labelledby="title desc">
+<title id="title">面向 agent 的自动化验证能力架构</title>
+<desc id="desc">外部 agent 调用 setup 和基础验证 MCP，使用 Playwright 或获准的外部 Computer Use 操作专用 Mac 上的被测 Electron 与 daemon，诊断和截图关联后归档。</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#64748b"/></marker></defs>
+<rect width="900" height="570" rx="14" fill="#f8fafc"/>
+<g font-family="system-ui,sans-serif" text-anchor="middle" fill="#0f172a">
+<rect x="35" y="20" width="830" height="64" rx="10" fill="#e2e8f0"/>
+<text x="450" y="47" font-size="20" font-weight="600">外部 agent</text><text x="450" y="70" font-size="13">编排复现步骤、阅读证据、判断验证结论</text>
+<rect x="35" y="140" width="250" height="106" rx="10" fill="#dbeafe" stroke="#60a5fa"/>
+<text x="160" y="171" font-size="18" font-weight="600">setup 能力</text><text x="160" y="199" font-size="13">自检 · 构建 · 真实数据/副本 · 启停</text><text x="160" y="222" font-size="13">MCP / 独立工具宿主</text>
+<rect x="325" y="140" width="250" height="106" rx="10" fill="#ede9fe" stroke="#a78bfa"/>
+<text x="450" y="171" font-size="18" font-weight="600">交互驱动</text><text x="450" y="199" font-size="13">页面：Playwright</text><text x="450" y="222" font-size="13">完整桌面：获准的外部 CU</text>
+<rect x="615" y="140" width="250" height="106" rx="10" fill="#dcfce7" stroke="#4ade80"/>
+<text x="740" y="171" font-size="18" font-weight="600">基础验证能力</text><text x="740" y="199" font-size="13">快照 · 步骤事件 · 确定性检查</text><text x="740" y="222" font-size="13">MCP / 独立工具宿主</text>
+<rect x="35" y="317" width="830" height="100" rx="10" fill="#ffffff" stroke="#94a3b8"/>
+<text x="450" y="348" font-size="18" font-weight="600">专用干净 Mac 上的被测环境</text><text x="450" y="376" font-size="15">Electron / preload / IPC ↔ bundled CLI / daemon ↔ 本地会话与测试后端</text><text x="450" y="400" font-size="13" fill="#475569">真实业务链路 · 已授权真实数据/副本 · 按需 fake provider · 单实例串行</text>
+<rect x="35" y="478" width="830" height="67" rx="10" fill="#ffedd5" stroke="#fb923c"/>
+<text x="450" y="505" font-size="18" font-weight="600">本轮证据归档</text><text x="450" y="529" font-size="13">截图 + 快照 + 日志 + 检查 → 关联步骤与版本 → JSON / Markdown / HTML 报告</text>
+</g>
+<g fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)">
+<path d="M160 84V138"/><path d="M450 84V138"/><path d="M740 84V138"/>
+<path d="M160 246V315"/><path d="M450 246V315"/><path d="M740 317V248"/>
+<path d="M450 417V476"/>
+</g>
+<g font-family="system-ui,sans-serif" text-anchor="middle" fill="#475569" font-size="12">
+<text x="160" y="285">准备 / 启动 / 回收</text><text x="450" y="285">真实用户交互</text><text x="740" y="285">只读状态与事件</text><text x="450" y="451">采集与导入证据</text>
+</g>
+</svg>

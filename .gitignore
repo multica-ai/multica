@@ -89,3 +89,7 @@ perf-report/
 apps/desktop/resources/native/
 /.agent-gui-file-check/
 /.tmp/
+
+# Verification source adapters are code, not generated runtime data.
+!packages/verification/src/data/
+!packages/verification/src/data/**

@@ -13,8 +13,15 @@ const runtimeDeps = Object.keys(JSON.parse(readFileSync(resolve("package.json"),
 const mainExternal = (id: string) => id === "electron" || id.startsWith("electron/") || id.startsWith("node:") || builtinModules.includes(id)
   || runtimeDeps.some((dep) => id === dep || id.startsWith(`${dep}/`));
 
-export default defineConfig({
+export default defineConfig(({ command }) => {
+  const verificationAlias = (part: "main" | "preload" | "renderer") => ({
+    name: `verification-dev-${part}`,
+    resolveId(id: string) { if (id === `#verification-dev/${part}`) return command === "serve" ? resolve(`src/${part === "renderer" ? "renderer/src/platform" : part}/verification-dev/index.ts`) : `\0verification-disabled-${part}`; return null; },
+    load(id: string) { if (id === `\0verification-disabled-${part}`) return `export const ${part === "main" ? "verificationDev" : part === "preload" ? "verificationPreload" : "verificationRenderer"} = undefined;`; return null; },
+  });
+  return {
   main: {
+    plugins: [verificationAlias("main")],
     // Workspace packages expose raw TypeScript; main must bundle their runtime imports.
     build: {
       externalizeDeps: false,
@@ -50,7 +57,7 @@ export default defineConfig({
     // externalized `require("@electron-toolkit/preload")` would throw and
     // every contextBridge API would vanish. electron-vite emits preload as a
     // single CJS bundle, which is exactly what the sandbox requires.
-    plugins: [externalizeDepsPlugin({ exclude: ["@electron-toolkit/preload"] })],
+    plugins: [verificationAlias("preload"), externalizeDepsPlugin({ exclude: ["@electron-toolkit/preload"] })],
   },
   renderer: {
     server: {
@@ -61,6 +68,7 @@ export default defineConfig({
       strictPort: true,
     },
     plugins: [
+      verificationAlias("renderer"),
       {
         name: "multica-tutti-agent-gui-assets",
         config() {
@@ -79,4 +87,5 @@ export default defineConfig({
       dedupe: ["react", "react-dom", "@tanstack/react-query", "mobx", "mobx-react-lite"],
     },
   },
+  };
 });

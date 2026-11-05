@@ -36,6 +36,9 @@ catalogs:
     '@types/node':
       specifier: ^25.0.10
       version: 25.5.0
+    '@types/ws':
+      specifier: ^8.18.1
+      version: 8.18.1
     '@vitejs/plugin-react':
       specifier: ^6.0.1
       version: 6.0.1
@@ -108,6 +111,9 @@ catalogs:
     vitest:
       specifier: ^4.1.0
       version: 4.1.0
+    ws:
+      specifier: 8.21.0
+      version: 8.21.0
     yaml:
       specifier: ^2.6.0
       version: 2.9.0
@@ -325,7 +331,7 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
       ws:
-        specifier: ^8.21.0
+        specifier: 'catalog:'
         version: 8.21.0
       zod:
         specifier: 'catalog:'
@@ -362,7 +368,7 @@ importers:
         specifier: ^19.2.0
         version: 19.2.3(@types/react@19.2.14)
       '@types/ws':
-        specifier: ^8.18.1
+        specifier: 'catalog:'
         version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^5.1.1
@@ -1204,6 +1210,43 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(esbuild@0.25.12)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
+
+  packages/verification:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.27.1
+        version: 1.27.1(zod@4.3.6)
+      playwright:
+        specifier: 1.58.2
+        version: 1.58.2
+      ws:
+        specifier: 'catalog:'
+        version: 8.21.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+    devDependencies:
+      '@multica/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.5.0
+      '@types/ws':
+        specifier: 'catalog:'
+        version: 8.18.1
+      eslint:
+        specifier: ^9.28.0
+        version: 9.39.4(jiti@2.7.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
 
   packages/views:
     dependencies:

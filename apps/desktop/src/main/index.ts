@@ -1,4 +1,5 @@
 import { createComputerDesktop } from "./computer-use/desktop";
+import { verificationDev } from "#verification-dev/main";
 import { SideWorkspaceControl, parseSideWorkspaceResponse } from "./side-workspace-control";
 import { LocalTimingLog } from "./local-timing-log";
 import { WebDiagnosticLog, snapshotDaemonLog } from "./developer-runtime-logs";
@@ -630,7 +631,8 @@ if (is.dev) {
 
 // Generic dev Electron bundles share a macOS identity and cannot cold-start
 // our entry point through Launch Services. Dev browser auth uses loopback.
-registerDesktopProtocol(is.dev);
+verificationDev?.configureBeforeReady();
+if (!verificationDev?.enabled) registerDesktopProtocol(is.dev);
 
 // --- Single instance lock ------------------------------------------------
 
@@ -749,7 +751,7 @@ if (!gotTheLock) {
         }).catch((error: unknown) => console.warn("[developer-logs-mcp] Could not publish the diagnostics manifest", error));
       };
       publishDeveloperLogsManifest();
-      if (process.env.MULTICA_DEV_ISOLATED !== "1") void findCodex().then((codex) => registerCodexStdioMcp(codex, {
+      if (process.env.MULTICA_DEV_ISOLATED !== "1" && !verificationDev?.enabled) void findCodex().then((codex) => registerCodexStdioMcp(codex, {
         name: DEVELOPER_LOGS_MCP_NAME,
         command: process.execPath,
         args: [join(__dirname, "developer-logs-mcp.js"), "--diagnostics", diagnosticsDir],
@@ -1081,7 +1083,7 @@ if (!gotTheLock) {
     desktopInitialized = true;
     createWindow();
 
-    setupAutoUpdater(() => mainWindow, {
+    if (!verificationDev?.enabled) setupAutoUpdater(() => mainWindow, {
       // Windows only (the updater ignores it elsewhere): stop the bundled
       // daemon before the installer runs so multica.exe is replaced. #8823
       daemonGate: {
@@ -1134,7 +1136,15 @@ if (!gotTheLock) {
     });
 
     setupLocalDirectory(() => mainWindow);
-    setupTerminalCli(() => mainWindow);
+    if (!verificationDev?.enabled) setupTerminalCli(() => mainWindow);
+    await verificationDev?.start({
+      windows: () => BrowserWindow.getAllWindows(),
+      currentUser: () => settingsUserId ?? null,
+      apiOrigin: () => runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : "",
+      endpoint: () => desktopRuntimeRegistry().endpoint(runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : ""),
+      identity: () => desktopRuntimeRegistry().runtime(),
+      backendToken: async () => (await readDesktopProfileCredentials(desktopRuntimeProfile()))?.token ?? null,
+    });
 
     app.on("activate", () => {
       const window = ensureMainWindow();

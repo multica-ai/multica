@@ -1,0 +1,11 @@
+{
+  "extends": "@multica/tsconfig/base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

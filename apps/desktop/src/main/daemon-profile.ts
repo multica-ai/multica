@@ -1,3 +1,4 @@
+import { verificationDev } from "#verification-dev/main";
 import { readFile } from "node:fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -58,7 +59,7 @@ export function healthPortForProfile(profile: string): number {
 
 export function profileDir(profile: string): string {
   assertResolvedProfile(profile);
-  return join(homedir(), ".multica", "profiles", profile);
+  return join((verificationDev?.runtimeHome ?? homedir()), ".multica", "profiles", profile);
 }
 
 export function profileConfigPath(profile: string): string {
@@ -94,7 +95,7 @@ export function profilePortPath(profile: string): string {
 function profileStateDir(profile: string): string {
   assertResolvedProfile(profile);
   return profile === "desktop-runtime"
-    ? join(homedir(), ".multica", "desktop-runtime")
+    ? join(verificationDev?.runtimeHome ?? homedir(), ".multica", "desktop-runtime")
     : profileDir(profile);
 }
 
