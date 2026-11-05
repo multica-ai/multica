@@ -450,6 +450,18 @@ describe("v2 sidebar", () => {
 });
 
 describe("conditions, limits and history", () => {
+  it.each([undefined, 2])("names the reported aggregate in its row and details (stage %s)", async (stage) => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "once", event_types: [], interval_seconds: null,
+      condition: { type: "children_reported", ...(stage ? { stage } : {}) },
+    });
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    const label = stage ? /When sub-issues through stage 2 report/ : /When all sub-issues report/;
+    const row = screen.getByRole("button", { name: label });
+    fireEvent.click(row);
+    expect(await screen.findByRole("dialog")).toHaveTextContent(label);
+  });
+
   it("reads a platform condition as its own sentence, without the hint events", async () => {
     Object.assign(wakeup, {
       kind: "event", mode: "once", event_types: ["issue.status_changed"], interval_seconds: null,

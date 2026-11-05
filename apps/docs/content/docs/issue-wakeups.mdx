@@ -56,6 +56,7 @@ In the issue below, Ops helper has asked suppliers for quotes and is waiting for
 | Collaboration | A field changes to a value | The issue's status, assignee, label, or a custom property takes the value you chose. |
 | Runs and sub-issues | An agent's run ends | A run on this issue by a given agent (or any agent) succeeds, fails, or is cancelled. |
 | Runs and sub-issues | Sub-issues finish | Every sub-issue is closed (`done` or `cancelled`), or every stage up to the one you pick is. An issue without sub-issues never fires. |
+| Runs and sub-issues | Sub-issues report | All selected sub-issues are in review or ended, including cancellations. Wakes the coordinator to inspect results; does not accept reviews. |
 | Linked | A linked PR's CI finishes | Or the PR merges, or it has merge conflicts. Only PRs linked directly to this issue count; with several, any one is enough. CI and conflicts work only for GitHub pull requests. |
 | Linked | Another issue's status | Another issue is done, done or cancelled, or moves to In Review. |
 | | Custom events | Pick from the 25 raw events, such as reactions, attachments, edited comments, or resolved threads. |
@@ -101,6 +102,8 @@ To see every wakeup in the workspace, open **Autopilot** and switch to the **Iss
 - A repeating rule pauses once it reaches its maximum number of triggers. Waiting rules are also paused when they trigger each other with other wakeups (the trigger chain passes through the rule a third time with no person in between), or when they fire more than 12 times in an hour. A paused rule stays off until someone turns it back on, and its count starts over.
 - An issue can have at most 32 wakeups turned on, and a workspace at most 1,000.
 
+Choose **Sub-issues report** (CLI: `--until-children-reported`) to wait for a group of independent workers before reviewing their results. It counts exact `in_review` and terminal `done`/`closed` categories, including custom terminal statuses. With `--stage N` (1–1000), it selects staged direct children through N, and N must exist. Without a stage it includes unstaged children. Empty selections never fire. The current child set is checked every 30 seconds: adding, deleting, moving or restaging children changes the wait. A repeating rule may miss a same-count replacement or a quick false-to-true change between checks. This is an all-reported barrier, not a notification for each child; it does not approve work, assign agents or advance stages. The system rule below and **Sub-issues finish** still require terminal statuses.
+
 ## Wake the parent when sub-issues finish [#child-done]
 
 When an issue has sub-issues, its Wakeups section shows a rule marked **System**. Nobody needs to create it:
@@ -140,7 +143,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Check
 
 - **Time**: `--kind at` with `--after 10m` or `--at <RFC3339 time>`; `--kind every --every 1h` for a fixed interval of at least 1 minute; `--kind cron --cron "<5-field expression>"` with `--timezone` (UTC by default).
 - **Events**: list event names after `--event`, separated by commas. `multica issue wakeup events` lists every event and filter. `--mode continuous` makes the rule repeat.
-- **Conditions**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, and `--until-issue <issue> --until-issue-state done|ended|in_review|blocked`. Use one `--until-*` per wakeup, and not together with `--event`.
+- **Conditions**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-children-reported [--stage N]`, `--until-pr checks|merged|conflicts`, and `--until-issue <issue> --until-issue-state done|ended|in_review|blocked`. Use one `--until-*` per wakeup, and not together with `--event`.
 - **Endings**: the CLI does not add a deadline for you. Use `--expires-in 72h` or `--expires-at <RFC3339 time>`; `--on-timeout wake` makes an event rule wake the agent once more at the deadline. `--max-fires N` (1–1000) caps how many runs a repeating rule starts.
 - **Where results go**: `--parent <comment-id>` keeps the woken run's reply in the original thread.
 

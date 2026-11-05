@@ -38,6 +38,7 @@ export type WakeupCondition =
   | "field"
   | "run_end"
   | "children"
+  | "children_reported"
   | "pull_request"
   | "other_issue"
   | "custom";
@@ -180,6 +181,8 @@ export function platformCondition(
       };
     case "children":
       return { condition: d.stage ? { type: "children_done", stage: d.stage } : { type: "children_done" } };
+    case "children_reported":
+      return { condition: d.stage ? { type: "children_reported", stage: d.stage } : { type: "children_reported" } };
     case "pull_request":
       return { condition: { type: "pull_request", event: d.prEvent } };
     case "other_issue":

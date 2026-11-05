@@ -56,6 +56,7 @@ import { WakeupDemo } from "@/components/demos/wakeup-demo";
 | 協作 | 欄位變為某個值 | 任務的狀態、負責人、標籤或自定義屬性變成指定的值。 |
 | 執行與子任務 | AI 代理的執行結束 | 這條任務上某個 AI 代理（或任意 AI 代理）的執行成功、失敗或被取消。 |
 | 執行與子任務 | 子任務完成 | 全部子任務結束（`done` 或 `cancelled`），或某個階段及之前的階段全部結束。沒有子任務時不會觸發。 |
+| 執行與子任務 | 子任務已交付 | 全部選取的子任務待審核或已結束，包含已取消。喚醒協調者核對結果，不代表審核通過。 |
 | 關聯 | 關聯 PR 的 CI 結束 | 也可以選 PR 合併、出現合併衝突。只看直接關聯到這條任務的 PR，有多個時任意一個滿足即可。CI 結束和合並衝突只支援 GitHub 上的 PR。 |
 | 關聯 | 其他任務的狀態變化 | 另一條任務完成、完成或取消，或進入審查中。 |
 | | 自定義事件 | 從 25 種原始事件裡勾選，例如表態、附件、評論被編輯或討論被解決。 |
@@ -101,6 +102,8 @@ import { WakeupDemo } from "@/components/demos/wakeup-demo";
 - 重複喚醒的規則達到最多觸發次數後自動暫停。等待類規則還有兩種保護：和其他喚醒規則互相觸發（觸發鏈第三次經過它，中間沒有人參與），或 1 小時內觸發超過 12 次，都會自動暫停。暫停的規則保持關閉，有人重新開啟後恢復，次數重新計算。
 - 一條任務最多同時開啟 32 條喚醒，一個工作區最多 1000 條。
 
+選擇 **子任務已交付**（CLI：`--until-children-reported`），可在一組獨立任務全部交付後集中審核。僅精確的 `in_review` 和 `done`/`closed` 終態類別符合條件，自訂終態也算。`--stage N`（1–1000）只選第 N 階段及之前已分階段的直接子任務，且第 N 階段必須存在；不指定階段時包含未分階段的子任務。空集合不會觸發。平台每 30 秒檢查目前子任務集合，新增、刪除、移出或調整階段會改變判斷。重複喚醒可能漏掉數量相同的替換，或兩次檢查之間快速發生的不符合到符合的變化。這只等待全部交付，不逐項通知，也不會通過審核、指派智能體或推進階段。下方系統規則和 **子任務完成** 仍只認終態。
+
 ## 子任務結束時喚醒父任務 [#child-done]
 
 任務有子任務時，喚醒區域會出現一條帶**系統**標記的規則，它不用手動建立：
@@ -140,7 +143,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "檢�
 
 - **時間**：`--kind at` 配 `--after 10m` 或 `--at <RFC3339 時間>`；`--kind every --every 1h` 按固定間隔，最短 1 分鐘；`--kind cron --cron "<5 段表示式>"` 配 `--timezone`，時區預設 UTC。
 - **事件**：`--event` 後面寫事件名，多個用逗號分隔，`multica issue wakeup events` 列出全部事件和過濾引數。`--mode continuous` 改成重複喚醒。
-- **條件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任務> --until-issue-state done|ended|in_review|blocked`。一條喚醒只能用一個 `--until-*`，不能和 `--event` 同時用。
+- **條件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-children-reported [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任務> --until-issue-state done|ended|in_review|blocked`。一條喚醒只能用一個 `--until-*`，不能和 `--event` 同時用。
 - **結束方式**：CLI 不會自動給等待加期限，用 `--expires-in 72h` 或 `--expires-at <RFC3339 時間>` 設結束時間；`--on-timeout wake` 讓事件規則在超時時再喚醒一次。`--max-fires N`（1–1000）限制重複規則最多執行幾次。
 - **結果放在哪**：`--parent <評論 ID>` 讓喚醒後的回覆留在原來的評論串裡。
 

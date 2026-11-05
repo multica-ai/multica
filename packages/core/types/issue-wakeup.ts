@@ -53,6 +53,7 @@ export type WakeupCondition =
   | { type: "issue_field"; field: "label"; label_id: string }
   | { type: "issue_field"; field: "property"; property_id: string; value: unknown }
   | { type: "children_done"; stage?: number | null }
+  | { type: "children_reported"; stage?: number | null }
   | { type: "pull_request"; event: "checks_finished" | "merged" | "conflicts" }
   | { type: "other_issue"; issue_id: string; state: "done" | "ended" | "in_review" | "blocked"; identifier?: string };
 
