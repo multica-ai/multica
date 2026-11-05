@@ -11,6 +11,7 @@ import {
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentVisitsStore } from "@multica/core/command-bar";
 import { useNavigation } from "../navigation";
 
 /**
@@ -69,9 +70,9 @@ export function useDashboardGuard() {
   // changes (workspace deleted, user kicked, user left).
   useEffect(() => {
     if (!workspaceListReady) return;
-    useRecentIssuesStore
-      .getState()
-      .pruneWorkspaces(workspaces.map((w) => w.id));
+    const activeWsIds = workspaces.map((w) => w.id);
+    useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
+    useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
   }, [workspaceListReady, workspaces]);
 
   return { user, isLoading, workspace };

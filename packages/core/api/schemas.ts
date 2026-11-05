@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  WorkflowHandoffPreview,
+  IssueWorkflow,
+  IssueWorkflowDryRunResponse,
+  IssueWorkflowHandlerType,
+  ListIssueWorkflowsResponse,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -39,7 +44,10 @@ import type {
   ListDingTalkGroupsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
+  ListLarkInstallationsResponse,
   ListWecomInstallationsResponse,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
   RedeemWecomBindingTokenResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
@@ -49,7 +57,10 @@ import type {
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
+  IssueUnread,
   Label,
+  Project,
+  ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
@@ -83,6 +94,8 @@ import type {
   Skill,
   SkillImportResult,
   SkillSummary,
+  SkillVersion,
+  SkillVersionSummary,
   Squad,
   TimelineEntry,
   User,
@@ -536,6 +549,129 @@ export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   total: 0,
 };
 
+// Workspace workflows (MUL-7420). Handler types parse as plain strings and an
+// unknown one degrades to "none": a newer server may add a handler this build
+// cannot render, and the step's status must still show.
+const IssueWorkflowHandlerSchema = z.object({
+  type: z.string().transform((value): IssueWorkflowHandlerType =>
+    ISSUE_WORKFLOW_HANDLER_TYPES.has(value) ? (value as IssueWorkflowHandlerType) : "none",
+  ),
+  id: z.string().optional(),
+}).loose();
+
+const ISSUE_WORKFLOW_HANDLER_TYPES = new Set<string>([
+  "none", "agent", "squad", "member", "project_lead", "creator",
+]);
+
+const IssueWorkflowStepSchema = z.object({
+  status_key: z.string(),
+  handler: IssueWorkflowHandlerSchema.default({ type: "none" }),
+  instructions: z.string().default(""),
+  next_status_key: z.string().optional(),
+  back_status_key: z.string().optional(),
+}).loose();
+
+export const IssueWorkflowSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  is_default: z.boolean().default(false),
+  owner_id: z.string().nullable().default(null),
+  steps: z.array(IssueWorkflowStepSchema).default([]),
+  project_ids: z.array(z.string()).default([]),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ListIssueWorkflowsResponseSchema = z.object({
+  workflows: z.array(IssueWorkflowSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE: ListIssueWorkflowsResponse = {
+  workflows: [],
+  total: 0,
+};
+
+export const EMPTY_ISSUE_WORKFLOW: IssueWorkflow = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  is_default: false,
+  owner_id: null,
+  steps: [],
+  project_ids: [],
+  created_at: "",
+  updated_at: "",
+};
+
+export const IssueWorkflowMappingPlanSchema = z.object({
+  required: z.array(z.object({
+    status_key: z.string(),
+    issue_count: z.number().default(0),
+    suggested_status_key: z.string().default(""),
+  }).loose()).default([]),
+  unchanged: z.array(z.object({
+    status_key: z.string(),
+    issue_count: z.number().default(0),
+  }).loose()).default([]),
+  total_issues: z.number().default(0),
+  affected_issues: z.number().default(0),
+}).loose();
+
+export const IssueWorkflowDryRunResponseSchema = z.object({
+  dry_run: z.literal(true).default(true),
+  plan: IssueWorkflowMappingPlanSchema.default({ required: [], unchanged: [], total_issues: 0, affected_issues: 0 }),
+}).loose();
+
+export const EMPTY_ISSUE_WORKFLOW_DRY_RUN: IssueWorkflowDryRunResponse = {
+  dry_run: true,
+  plan: { required: [], unchanged: [], total_issues: 0, affected_issues: 0 },
+};
+
+export const IssueWorkflowBriefPreviewSchema = z.object({
+  brief: z.string().default(""),
+}).loose();
+
+const HANDOFF_HANDLER_TYPES = new Set(["agent", "squad", "member"]);
+
+export const WorkflowHandoffPreviewSchema = z.object({
+  handoff: z.boolean().default(false),
+  workflow_name: z.string().default(""),
+  from_status: z.string().default(""),
+  to_status: z.string().default(""),
+  handler_type: z.string().optional().transform((value): WorkflowHandoffPreview["handler_type"] =>
+    value && HANDOFF_HANDLER_TYPES.has(value) ? (value as "agent" | "squad" | "member") : null,
+  ),
+  handler_id: z.string().nullable().optional().transform((value) => value || null),
+  previous_assignee_type: z.string().nullable().default(null),
+  previous_assignee_id: z.string().nullable().default(null),
+  previous_runs: z.array(z.object({
+    task_id: z.string(),
+    agent_id: z.string(),
+    status: z.string().default(""),
+    started_at: z.string().nullable().default(null),
+  }).loose()).default([]),
+  brief: z.string().default(""),
+}).loose();
+
+// A preview the client cannot read says "no handoff": the write path still
+// applies the workflow, it only loses the confirmation.
+export const EMPTY_WORKFLOW_HANDOFF_PREVIEW: WorkflowHandoffPreview = {
+  handoff: false,
+  workflow_name: "",
+  from_status: "",
+  to_status: "",
+  handler_type: null,
+  handler_id: null,
+  previous_assignee_type: null,
+  previous_assignee_id: null,
+  previous_runs: [],
+  brief: "",
+};
+
 export const ResourceLabelsResponseSchema = z.object({
   labels: z.array(LabelSchema).default([]),
   issue_revision: z.number().int().positive().optional(),
@@ -589,6 +725,30 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   prefs: { hidden: [], order: [] },
   updated_at: "",
 };
+
+/**
+ * The `sidebar_projects` preference document. Another client version may have
+ * saved values this one does not know; every field that does not parse comes
+ * out undefined so the caller's default stands in for it.
+ */
+export const SidebarProjectPrefsDocSchema = z.object({
+  projects: z.object({
+    ordering: z.enum(["manual", "name", "updated", "created"]).optional().catch(undefined),
+    statuses: z.array(z.string()).optional().catch(undefined),
+    onlyMine: z.boolean().optional().catch(undefined),
+    showCount: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  issues: z.object({
+    sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
+    sortDirection: z.enum(["asc", "desc"]).optional().catch(undefined),
+    hiddenStatuses: z.array(z.string()).nullable().optional().catch(undefined),
+    assignee: z.enum(["anyone", "me", "my_agents", "me_and_my_agents"]).optional().catch(undefined),
+    showSubIssues: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  order: z.array(z.unknown()).catch([]).transform((ids) => ids.filter((id): id is string => typeof id === "string")),
+});
+
+export type SidebarProjectPrefsDoc = z.infer<typeof SidebarProjectPrefsDocSchema>;
 
 export interface CreateIssueViewRequest {
   name: string;
@@ -740,6 +900,7 @@ export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  attachment_public_url?: string;
   // True when the CDN domain serves private content via time-bounded signed
   // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
   // publicly fetchable and must not be used as native media sources
@@ -752,6 +913,7 @@ export interface AppConfigResponse {
   analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
+  daemon_setup_target?: "cloud" | "self_host" | "unknown";
   workspace_creation_disabled?: boolean;
   /** Whether this deployment offers the self-hosted Git provider integration
    * (self-host only; off on the managed cloud). Absent/false hides the whole
@@ -779,7 +941,6 @@ export interface AppConfigResponse {
   server_version?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
 // the issue detail page (timeline, comments, subscribers) and the issues
 // list. These are the surfaces that white-screened in #2143 / #2147 / #2192.
@@ -805,7 +966,6 @@ export interface AppConfigResponse {
 // literal unions, which would defeat the leniency above. `parseWithFallback`
 // returns the parsed value cast to the caller-supplied `T`, so the strict
 // type still flows out at the call site; the schema only guards shape.
-// ---------------------------------------------------------------------------
 
 const ReactionSchema = z.object({
   id: z.string(),
@@ -1022,6 +1182,7 @@ export const EMPTY_REFRESH_SESSION_RESPONSE: RefreshSessionResponse = {
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  attachment_public_url: OptionalStringSchema,
   cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
@@ -1030,6 +1191,7 @@ export const AppConfigSchema = z.object({
   analytics_environment: OptionalStringSchema,
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
+  daemon_setup_target: z.enum(["cloud", "self_host", "unknown"]).optional().catch("unknown"),
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
@@ -1042,11 +1204,13 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  attachment_public_url: "",
   cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
   daemon_server_url: "",
   daemon_app_url: "",
+  daemon_setup_target: "unknown",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
   // Fail closed: an unreadable config must not look like a server that
@@ -1413,7 +1577,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
@@ -1423,6 +1587,8 @@ const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  creator_type: z.string().nullable().default(null).catch(null),
+  creator_id: z.string().nullable().default(null).catch(null),
   // .default(null) so a project from an older backend (frontend deploys before
   // backend) that omits these keys parses to null instead of failing the whole
   // object — which would degrade a search/list batch to the empty fallback.
@@ -1433,7 +1599,22 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  workflow_id: z.string().nullable().default(null),
 }).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "", workspace_id: "", title: "", description: null, icon: null,
+  status: "planned", priority: "none", lead_type: null, lead_id: null,
+  creator_type: null, creator_id: null, start_date: null, due_date: null,
+  created_at: "", updated_at: "", issue_count: 0, done_count: 0, resource_count: 0,
+};
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -1693,7 +1874,6 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //
 // The dashboard hits three independent rollup endpoints. Each returns a flat
@@ -1702,7 +1882,6 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
 // String fields default to "" (no enum narrowing) to survive future model /
 // agent ID drift, and so a single null from tz-aware SQL bucketing fails
 // only that row instead of dropping the whole array to the `[]` fallback.
-// ---------------------------------------------------------------------------
 
 // Cost split carried by every usage row. `cost_usd_ticks` is what the provider
 // itself charged for the rows behind this aggregate (1e-10 USD); the
@@ -1802,12 +1981,10 @@ export const DashboardFailureByAgentListSchema = z.array(
   DashboardFailureByAgentSchema,
 );
 
-// ---------------------------------------------------------------------------
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes
 // unknown fields.
-// ---------------------------------------------------------------------------
 
 const RuntimeUsageSchema = z.object({
   runtime_id: z.string().default(""),
@@ -1857,10 +2034,8 @@ const RuntimeUsageByHourSchema = z.object({
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
-// ---------------------------------------------------------------------------
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.
-// ---------------------------------------------------------------------------
 
 // Human attribution (MUL-4302 §9): who an agent run is accountable to, and how
 // that human was resolved. Every field is defensive so a departed member, an
@@ -1916,6 +2091,7 @@ const TaskUsageSchema = z.object({
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
   cost_usd_ticks: z.number().optional(),
+  credits_micros: z.number().optional().catch(undefined),
 }).loose();
 
 export const AgentTaskSchema = z.object({
@@ -2217,7 +2393,9 @@ export const StoredAgentDraftSchema = z.object({
     .catch("private"),
   member_ids: z.array(z.string()).catch([]),
   team_ids: z.array(z.string()).catch([]),
+  qoder_agent_id: z.string().catch(""),
   applied_message_id: z.string().nullable().catch(null),
+  dismissed_message_id: z.string().nullish().catch(null),
 }).loose();
 
 /**
@@ -2333,7 +2511,6 @@ export const SquadMemberStatusListResponseSchema = z.object({
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 
-// ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //
 // When the server detects an active issue with the same title in the same
@@ -2353,7 +2530,6 @@ export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 //     so a future server-side rename of `status` must not knock this branch
 //     out. `.loose()` lets the field pass through unchanged for any other
 //     consumer.
-// ---------------------------------------------------------------------------
 
 export const DuplicateIssueErrorBodySchema = z.object({
   code: z.literal("active_duplicate_issue"),
@@ -2365,6 +2541,17 @@ export const DuplicateIssueErrorBodySchema = z.object({
   }).loose(),
 }).loose();
 
+// A destructive confirmation must fail closed on an incomplete plan. Do not
+// default missing arrays to empty or silently discard malformed entries.
+export const RuntimeAccessRevocationPlanSchema = z.object({
+  code: z.enum(["runtime_has_nonowner_dependents", "runtime_access_revocation_plan_changed"]),
+  nonowner_agents: z.array(z.object({ id: z.string().uuid(), name: z.string() })),
+  active_task_ids: z.array(z.string().uuid()),
+}).refine((body) =>
+  new Set(body.nonowner_agents.map((agent) => agent.id)).size === body.nonowner_agents.length &&
+  new Set(body.active_task_ids).size === body.active_task_ids.length,
+).transform((body) => ({ agents: body.nonowner_agents, activeTaskIds: body.active_task_ids }));
+
 export interface DuplicateIssueErrorBody {
   code: "active_duplicate_issue";
   error?: string;
@@ -2375,14 +2562,12 @@ export interface DuplicateIssueErrorBody {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
 // (`status`, `signature_status`, `provider`) are kept as `z.string()` so a
 // future server-side value (e.g. a Stripe provider, a new dedupe state)
 // degrades to a generic UI fallback rather than collapsing the list into
 // the empty array. `.loose()` lets unknown fields pass through, matching
 // the rule used by every other endpoint here.
-// ---------------------------------------------------------------------------
 
 const WebhookDeliverySchema = z.object({
   id: z.string(),
@@ -2429,13 +2614,11 @@ export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesRespon
   total: 0,
 };
 
-// ---------------------------------------------------------------------------
 // Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,
 // `last_run_status`) stay `z.string()` so future server-side values degrade
 // to a generic UI fallback. The three derived fields (trigger_kinds /
 // next_run_at / last_run_status) are list-endpoint-only and absent on older
 // servers — optional by contract, the list renders "—" without them.
-// ---------------------------------------------------------------------------
 
 const AutopilotListItemSchema = z.object({
   id: z.string(),
@@ -2564,7 +2747,6 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   created_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // User (`/api/me` GET + PATCH). The auth store and Settings → Account both
 // trust this shape — a drift here would knock both surfaces out. Kept
 // lenient by the same rules as IssueSchema: enums stay `z.string()`,
@@ -2573,7 +2755,6 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
 // MUL-2406; the server emits `""` when unset (NOT NULL DEFAULT ''), so
 // the schema defaults to `""` too — keeps the type tight without
 // breaking older backends that don't return the column yet.
-// ---------------------------------------------------------------------------
 
 export const UserSchema = z.object({
   id: z.string(),
@@ -2582,10 +2763,12 @@ export const UserSchema = z.object({
   avatar_url: z.string().nullable().default(null),
   onboarded_at: z.string().nullable().default(null),
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
-  starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
+  // No default: absence is the "server cannot track" signal. A malformed
+  // value degrades to that state instead of discarding the whole user.
+  whats_new_seen_version: z.string().nullable().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -2597,7 +2780,6 @@ export const EMPTY_USER: User = {
   avatar_url: null,
   onboarded_at: null,
   onboarding_questionnaire: {},
-  starter_content_state: null,
   language: null,
   profile_description: "",
   timezone: null,
@@ -2605,13 +2787,11 @@ export const EMPTY_USER: User = {
   updated_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).
 // One entry per workspace the user belongs to that has unread items; the
 // sidebar derives the workspace-switcher dot from it. Lenient per the usual
 // rules so a future field addition can't blank the dot — on malformed JSON
 // parseWithFallback returns the empty list, which simply hides the dot.
-// ---------------------------------------------------------------------------
 
 export const InboxUnreadSummarySchema = z.array(
   z
@@ -2624,7 +2804,55 @@ export const InboxUnreadSummarySchema = z.array(
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
-// ---------------------------------------------------------------------------
+// The viewer's unread issues (`/api/issues/unread` GET), behind the sidebar's
+// unread dot. `outcome` stays a string so a future kind still lights the dot;
+// on malformed JSON parseWithFallback returns the empty list, which hides it.
+
+export const IssueUnreadPageSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          issue_id: z.string(),
+          outcome: z.string(),
+          agent_id: z.string().nullish().transform((v) => v ?? null),
+          task_id: z.string().nullish().transform((v) => v ?? null),
+          comment_id: z.string().nullish().transform((v) => v ?? null),
+          created_at: z.string(),
+        })
+        .loose(),
+    ),
+    next_cursor: z.string().nullish().transform((v) => v ?? null),
+  })
+  .loose();
+
+export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: string | null } = {
+  items: [],
+  next_cursor: null,
+};
+
+// Reading one issue's notifications (`/api/inbox/issues/{id}/read` POST).
+// `count` is how many rows the write read; the client refreshes its inbox
+// caches only when it is above zero. A body without a usable count cannot say
+// that nothing changed, so the client treats it as unknown and refreshes.
+export const IssueInboxReadSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+  })
+  .loose();
+
+// The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
+// "subscribed" relation filter on client-filtered surfaces. A non-string entry
+// is dropped; a body without the list has no safe fallback — an empty set
+// would hide every row under the filter — so the client fails the request.
+export const SubscribedIssueIdsSchema = z
+  .object({
+    issue_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
+  .loose();
+
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still
@@ -2634,7 +2862,6 @@ export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 // empty list — the affected view then reads as empty rather than white-
 // screening the inbox. Both endpoints share this boundary because they return
 // the same row shape and both feed the status/priority filter UI.
-// ---------------------------------------------------------------------------
 
 export const InboxItemListSchema = z.array(
   z
@@ -2677,7 +2904,6 @@ export const ArchivedInboxFacetsSchema = z.object({
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
 
-// ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)
 //
 // All billing JSON we receive comes from multica-cloud verbatim — we proxy
@@ -2847,7 +3073,6 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
   url: "",
 };
 
-// ---------------------------------------------------------------------------
 // Workspace subscriptions (`/api/cloud-subscriptions/*`)
 //
 // These schemas are the compatibility boundary with multica-cloud. Three rules
@@ -3143,7 +3368,6 @@ export const CreateWorkspaceSubscriptionPortalResponseSchema = z
     }),
   );
 
-// ---------------------------------------------------------------------------
 // Runtime model discovery (`POST /api/runtimes/:id/models`,
 // `GET /api/runtimes/:id/models/:requestId`). Both endpoints return the same
 // request record, and the UI drives a state machine off `status`, so the two
@@ -3159,7 +3383,6 @@ export const CreateWorkspaceSubscriptionPortalResponseSchema = z
 //
 // `cached` / `cached_at` are additive markers for a snapshot served from the
 // server-side catalog cache (MUL-5444); an older backend omits them.
-// ---------------------------------------------------------------------------
 
 const RuntimeModelThinkingLevelSchema = z.object({
   value: z.string(),
@@ -3339,11 +3562,46 @@ export const ListWecomInstallationsResponseSchema = z.object({
   installations: z.array(WecomInstallationSchema).default([]),
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
+  // The settings tab gates the QR install entry point on this, so it is
+  // declared and validated here rather than left to pass through the loose
+  // object unchecked.
+  scan_install_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+export const BeginWecomInstallResponseSchema = z.object({
+  session_id: z.string(),
+  status: z.string().default("error"),
+  poll_interval_seconds: z.number().optional().default(1),
+}).loose();
+
+// A malformed begin response degrades to a terminal error rather than a session
+// the client would poll forever with an empty id.
+export const MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE: BeginWecomInstallResponse = {
+  session_id: "",
+  status: "error",
+  poll_interval_seconds: 1,
+};
+
+export const WecomInstallStatusResponseSchema = z.object({
+  status: z.string().default("error"),
+  qr_code_url: z.string().optional(),
+  expires_in_seconds: z.number().optional(),
+  poll_interval_seconds: z.number().optional().default(2),
+  installation_id: z.string().optional(),
+  error_reason: z.string().optional(),
+}).loose();
+
+// Same reasoning: an unparseable status stops the poll loop instead of leaving
+// the dialog spinning on a response nobody can read.
+export const MALFORMED_WECOM_INSTALL_STATUS_RESPONSE: WecomInstallStatusResponse = {
+  status: "error",
+  poll_interval_seconds: 2,
+  error_reason: "internal_error",
 };
 
 export const RedeemWecomBindingTokenResponseSchema = z.object({
@@ -3462,6 +3720,55 @@ export const EMPTY_SKILL: Skill = {
 };
 
 export const SkillSummaryListSchema = z.array(SkillSummarySchema).default([]);
+
+const SKILL_VERSION_SOURCES = [
+  "baseline",
+  "create",
+  "update",
+  "import",
+  "refresh",
+  "restore",
+] as const;
+
+export const SkillVersionSummarySchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  version: z.number(),
+  name: z.string().optional().default(""),
+  source: z.enum(SKILL_VERSION_SOURCES).catch("update"),
+  restored_from_version: z.number().nullable().optional().default(null),
+  created_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+}).loose();
+
+export const SkillVersionSummaryListSchema = z
+  .array(SkillVersionSummarySchema)
+  .default([]);
+
+export const EMPTY_SKILL_VERSION_SUMMARY_LIST: SkillVersionSummary[] = [];
+
+export const SkillVersionSchema = SkillVersionSummarySchema.extend({
+  description: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  files: z
+    .array(z.object({ path: z.string(), content: z.string().optional().default("") }).loose())
+    .optional()
+    .default([]),
+}).loose();
+
+export const EMPTY_SKILL_VERSION: SkillVersion = {
+  id: "",
+  skill_id: "",
+  version: 0,
+  name: "",
+  source: "update",
+  restored_from_version: null,
+  created_by: null,
+  created_at: "",
+  description: "",
+  content: "",
+  files: [],
+};
 
 export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
 
@@ -3618,8 +3925,8 @@ export const WakeupConditionSchema = z.union([
   z.object({ type: z.literal("issue_field"), field: z.literal("label"), label_id: z.string() }),
   z.object({ type: z.literal("issue_field"), field: z.literal("property"), property_id: z.string(), value: z.unknown() }),
   z.object({ type: z.literal("children_done"), stage: z.number().int().nullish() }),
-  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged"]) }),
-  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review"]), identifier: z.string().optional() }),
+  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged", "conflicts"]) }),
+  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review", "blocked"]), identifier: z.string().optional() }),
 ]);
 
 export const WakeupRunSchema = z.object({
@@ -3727,3 +4034,32 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Receipt evidence is optional across mixed server/desktop versions. A malformed
+// timestamp must never render the binding as verified.
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  app_id: z.string().default(""),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  tenant_key: z.string().nullable().optional(),
+  status: z.string().default("revoked"),
+  region: z.string().optional(),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  first_message_received_at: z.iso.datetime({ offset: true }).nullable().optional().catch(undefined),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
+  installations: [],
+  configured: false,
+};

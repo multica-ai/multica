@@ -12,7 +12,7 @@ import {
   Search,
   SlidersHorizontal,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -27,8 +27,9 @@ import type {
   IssuePropertyOption,
   IssuePropertyType,
 } from "@multica/core/types";
-import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
+import { ISSUE_PROPERTY_TYPES, MAX_ISSUE_PROPERTY_SELECT_OPTIONS } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -140,7 +141,6 @@ export function PropertiesTab() {
   return (
     <SettingsTab
       title={t(($) => $.properties.title)}
-      description={t(($) => $.properties.description)}
       scope="workspace"
     >
       {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
@@ -185,8 +185,8 @@ export function PropertiesTab() {
           </p>
         )}
 
-        <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground md:grid">
+        <div className="@container/properties overflow-hidden rounded-lg border border-surface-border bg-card">
+          <div className="hidden grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground @min-[50rem]/properties:grid">
             <span>{t(($) => $.properties.columns.name)}</span>
             <span>{t(($) => $.properties.columns.type)}</span>
             <span>{t(($) => $.properties.columns.options)}</span>
@@ -218,7 +218,7 @@ export function PropertiesTab() {
               {visible.map((property) => (
                 <div
                   key={property.id}
-                  className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] md:items-center md:gap-4"
+                  className="grid gap-2 px-4 py-3 @min-[50rem]/properties:grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] @min-[50rem]/properties:items-center @min-[50rem]/properties:gap-4"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <PropertyIcon property={property} />
@@ -229,7 +229,7 @@ export function PropertiesTab() {
                       </Badge>
                     )}
                   </div>
-                  <span className="text-caption text-muted-foreground md:text-body">
+                  <span className="text-caption text-muted-foreground @min-[50rem]/properties:text-body">
                     <PropertyTypeLabel type={property.type} />
                   </span>
                   <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -254,7 +254,7 @@ export function PropertiesTab() {
                       <span className="text-caption text-muted-foreground">—</span>
                     )}
                   </div>
-                  <span className="text-caption tabular-nums text-muted-foreground md:text-body">
+                  <span className="text-caption tabular-nums text-muted-foreground @min-[50rem]/properties:text-body">
                     {t(($) => $.properties.usage_count, { count: property.usage_count ?? 0 })}
                   </span>
                   <span className="text-caption text-muted-foreground">
@@ -264,13 +264,13 @@ export function PropertiesTab() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={t(($) => $.properties.actions.open, { name: property.name })}
+                            label={t(($) => $.properties.actions.open, { name: property.name })}
                           >
                             <MoreHorizontal className="size-4" />
-                          </Button>
+                          </IconButton>
                         }
                       />
                       <DropdownMenuContent align="end">
@@ -606,10 +606,10 @@ function PropertyEditorDialog({
                       placeholder={t(($) => $.properties.editor.option_name_placeholder)}
                       className="h-8"
                     />
-                    <Button
+                    <IconButton
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={t(($) => $.properties.editor.remove_option)}
+                      label={t(($) => $.properties.editor.remove_option)}
                       disabled={draft.options.length <= 1}
                       onClick={() =>
                         setDraft((current) => ({
@@ -619,7 +619,7 @@ function PropertyEditorDialog({
                       }
                     >
                       <X className="size-4" />
-                    </Button>
+                    </IconButton>
                   </div>
                 ))}
               </div>
@@ -627,6 +627,7 @@ function PropertyEditorDialog({
                 variant="ghost"
                 size="sm"
                 className="gap-2"
+                disabled={draft.options.length >= MAX_ISSUE_PROPERTY_SELECT_OPTIONS}
                 onClick={() =>
                   setDraft((current) => ({
                     ...current,

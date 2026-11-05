@@ -180,8 +180,27 @@ func TestWorkspaceSystemWakeupDefault(t *testing.T) {
 	if w := putChildDoneRule(t, custom.parent.ID, map[string]any{"enabled": true}); w.Code != http.StatusOK {
 		t.Fatalf("customize: %d", w.Code)
 	}
-	if _, err := (&service.IssueWakeupService{Tasks: testHandler.TaskService}).BackfillChildDoneRules(context.Background(), 1000); err != nil {
+	// Initialize only this fixture's uncustomized rule. A global backfill can
+	// race another package's workspace/rule cleanup in CI.
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
 		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	q := testHandler.Queries.WithTx(tx)
+	parent, err := q.GetIssue(ctx, parseUUID(follows.parent.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.EnsureChildDoneRule(ctx, tx, q, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rules := listSystemWakeupsFor(t, follows.parent.ID); len(rules) != 1 || rules[0].ID == "" || !rules[0].Enabled || rules[0].Customized {
+		t.Fatalf("fixture did not initialize its default-following rule: %+v", rules)
 	}
 	put := func(body map[string]any, user string) *httptest.ResponseRecorder {
 		req := withURLParam(newRequest("PUT", "/api/system-wakeups/child_done", body), "rule", "child_done")

@@ -93,7 +93,7 @@ func TestUpdateProjectInvalidStatusReturns400(t *testing.T) {
 	}
 }
 
-func TestDeleteProjectRequiresAdminOrOwner(t *testing.T) {
+func TestDeleteProjectDeniesNonCreatorMember(t *testing.T) {
 	memberUserID := createProjectPermissionTestMember(t, "member")
 	project := createProjectPermissionTestProject(t, "delete permission denied project")
 

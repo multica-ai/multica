@@ -14,4 +14,9 @@ export const larkInstallationsOptions = (wsId: string) =>
     queryKey: larkKeys.installations(wsId),
     queryFn: () => api.listLarkInstallations(wsId),
     enabled: !!wsId,
+    // Poll only while mounted and awaiting proof; silence never becomes failure.
+    refetchInterval: (query) =>
+      query.state.data?.installations.some(
+        (inst) => inst.status === "active" && !inst.first_message_received_at,
+      ) ? 5000 : false,
   });

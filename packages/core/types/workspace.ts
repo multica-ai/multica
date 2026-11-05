@@ -66,14 +66,6 @@ export interface User {
    * returns an object (defaults to `{}`), never null.
    */
   onboarding_questionnaire: Record<string, unknown>;
-  /**
-   * Legacy column from the removed starter-content dialog. The column is
-   * still written to (always 'imported' for new accounts after the
-   * mark-onboarded paths run) so older desktop builds — which still render
-   * the dialog on NULL — don't show it to anyone created on a newer server.
-   * Kept as `string | null` for forward compatibility.
-   */
-  starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
   /**
@@ -85,6 +77,12 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /**
+   * Newest release whose What's new highlights the user has dismissed.
+   * null = never dismissed; undefined = the server predates read tracking,
+   * so the client must not auto-open the card (it would reappear forever).
+   */
+  whats_new_seen_version?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -4,6 +4,7 @@ description: Invitez des membres et gérez les permissions de l'espace de travai
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
 
 Toute personne qui rejoint un [espace de travail](/workspaces) en est membre, et chaque membre a un rôle : `owner`, `admin` ou `member`. Les rôles ne contrôlent que les paramètres de l'espace de travail et la gestion de l'équipe ; la collaboration au quotidien — créer des tâches, écrire des commentaires — est ouverte à tous les membres.
 
@@ -20,13 +21,15 @@ Toute personne qui rejoint un [espace de travail](/workspaces) en est membre, et
 
 Un espace de travail doit toujours conserver au moins un `owner` : le dernier `owner` ne peut être ni rétrogradé, ni retiré, ni quitter l'espace de travail.
 
+<RolesDemo />
+
 <Callout type="info">
 Les rôles ne déterminent pas qui peut exécuter un agent. Chaque agent a son propre périmètre d'accès (**Accès**), et `owner` comme `admin` ne peuvent pas le contourner pour exécuter des agents auxquels l'accès ne leur a pas été accordé. Consultez [Agents](/agents#permissions-et-accès).
 </Callout>
 
 ## Inviter des membres
 
-`owner` et `admin` envoient les invitations depuis Paramètres → Membres, en saisissant une adresse e-mail et en choisissant un rôle. Les invitations ne peuvent accorder que `admin` ou `member` ; un `owner` doit d'abord rejoindre l'espace de travail, puis être promu par un `owner` existant.
+`owner` et `admin` cliquent sur **Inviter un membre** dans **Paramètres → Membres**, saisissent une adresse e-mail, choisissent un rôle et envoient l'invitation. Les invitations ne peuvent accorder que `admin` ou `member` ; un `owner` doit d'abord rejoindre l'espace de travail, puis être promu par un `owner` existant.
 
 ![Gestion des membres : le formulaire d'invitation et la liste des membres avec leurs rôles](/images/docs/members-roster.webp)
 
@@ -34,11 +37,13 @@ La personne invitée accepte en se connectant avec cette adresse e-mail — aucu
 
 Le lien d'invitation n'apparaît que dans l'e-mail ; il n'existe aucun endroit dans le produit pour le consulter ou le copier. Si l'envoi de l'e-mail échoue, l'invitation existe tout de même — révoquez-la et envoyez-en une nouvelle.
 
+Pour obtenir un lien à transmettre directement, générez-en un dans l'onglet **Liens de partage** de **Paramètres → Membres** en choisissant un rôle et une durée de validité. Toute personne qui a ce lien peut rejoindre l'espace de travail avec le rôle choisi, jusqu'à ce qu'il expire ou soit révoqué.
+
 ## Changer de rôle
 
-Un `admin` peut faire passer un membre de `admin` à `member` et inversement, et peut retirer les membres qui ont l'un de ces deux rôles. Tout changement impliquant `owner` — promotion, modification ou retrait — ne peut être effectué que par un `owner`.
+Dans la liste des membres, ouvrez le menu d'actions à droite d'un membre et choisissez **Changer de rôle** ; le nouveau rôle s'applique immédiatement.
 
-Les changements de rôle prennent effet immédiatement.
+Un `admin` peut faire passer un membre de `admin` à `member` et inversement, et peut retirer les membres qui ont l'un de ces deux rôles. Tout changement impliquant `owner` — promotion, modification ou retrait — ne peut être effectué que par un `owner`.
 
 ## Retirer un membre
 

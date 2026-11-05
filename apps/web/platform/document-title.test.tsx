@@ -8,7 +8,7 @@
  * navigation behavior of `document.title`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 
 const route = vi.hoisted(() => ({ pathname: "/acme/issues", search: "" }));
 vi.mock("next/navigation", () => ({
@@ -49,6 +49,28 @@ describe("formatDocumentTitle", () => {
   it("puts the page name in front of the product name", () => {
     expect(formatDocumentTitle("MUL-123: Fix login")).toBe(
       "MUL-123: Fix login | Multica",
+    );
+  });
+
+  it("normalizes HTML ASCII whitespace before clipping the page name", () => {
+    expect(formatDocumentTitle("  Chat\t\n\f\r  question  ")).toBe(
+      "Chat question | Multica",
+    );
+    expect(formatDocumentTitle(`Chat${"\n".repeat(MAX_PAGE_TITLE_LENGTH)}question`)).toBe(
+      "Chat question | Multica",
+    );
+  });
+
+  it("round-trips through document.title without changing the intended value", () => {
+    const formatted = formatDocumentTitle("Why did this fail?\n\nhttps://example.test/issue");
+    document.title = formatted;
+
+    expect(document.title).toBe(formatted);
+  });
+
+  it("preserves non-ASCII spaces within the page name", () => {
+    expect(formatDocumentTitle("Chat\u00a0\u2003question")).toBe(
+      "Chat\u00a0\u2003question | Multica",
     );
   });
 
@@ -137,5 +159,43 @@ describe("WorkspaceDocumentTitle", () => {
     view.rerender(<WorkspaceDocumentTitle />);
 
     expect(document.title).toBe("Inbox | Multica");
+  });
+  it("restores the workspace title when route metadata overwrites it", async () => {
+    open("/acme/issues/MUL-123");
+    presentation.title = "MUL-123: Fix login";
+    render(<WorkspaceDocumentTitle />);
+
+    document.title = SITE_TITLE;
+
+    await waitFor(() => {
+      expect(document.title).toBe("MUL-123: Fix login | Multica");
+    });
+  });
+  it("updates when navigating from one issue to another", () => {
+    open("/acme/issues/HIBE-63");
+    presentation.title = "HIBE-63: First issue";
+    const view = render(<WorkspaceDocumentTitle />);
+    expect(document.title).toBe("HIBE-63: First issue | Multica");
+
+    open("/acme/issues/HIBE-64");
+    presentation.title = "HIBE-64: Second issue";
+    view.rerender(<WorkspaceDocumentTitle />);
+
+    expect(document.title).toBe("HIBE-64: Second issue | Multica");
+  });
+
+  it("restores the latest issue after metadata overwrites a later navigation", async () => {
+    open("/acme/issues/HIBE-63");
+    presentation.title = "HIBE-63: First issue";
+    const view = render(<WorkspaceDocumentTitle />);
+
+    open("/acme/issues/HIBE-64");
+    presentation.title = "HIBE-64: Second issue";
+    view.rerender(<WorkspaceDocumentTitle />);
+    document.title = SITE_TITLE;
+
+    await waitFor(() => {
+      expect(document.title).toBe("HIBE-64: Second issue | Multica");
+    });
   });
 });

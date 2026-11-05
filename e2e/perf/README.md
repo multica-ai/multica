@@ -1,10 +1,55 @@
-# UI performance scenario
+# UI performance scenarios
 
-One browser scenario: typing a comment on a long issue thread while three agent
-runs stream progress. It exists because of MUL-7227, where a summary animation
+The comment-typing scenario models a long issue thread while three agent runs
+stream progress. It exists because of MUL-7227, where a summary animation
 replaced a DOM node per streamed message and typing a comment slowed to a crawl.
 Component tests could not see it — they run in jsdom, which has no style
 recalculation, no layout and no main-thread contention.
+
+## Chat session lists
+
+`chat-session-lists.spec.ts` exercises the real Chat history, archive and floating
+history dropdown against synthetic HTTP/WebSocket boundaries. It checks that
+2,000 sessions mount fewer than 40 rows, can scroll to and select the last row,
+and also covers compact layout and empty/single-session dropdowns. Each measured
+surface emits a JSON record and a test attachment with mounted rows and time to
+readiness; timings are illustrative samples, not performance thresholds.
+
+Run against a local production Web build (no API server or account needed):
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-lists.spec.ts
+# Measure the original full-list implementation with the same fixture:
+CHAT_LIST_BASELINE=1 PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm exec playwright test --config=playwright.perf.config.ts chat-session-lists.spec.ts
+```
+
+`scripts/perf-compare.mjs` remains scoped to the comment-typing scenario below;
+its report format and comparisons are unchanged. Session data is still fetched
+in full: these checks measure rendering, not API pagination or network savings.
+
+## Agent recent work
+
+`agent-recent-work.spec.ts` opens the real agent detail page, reveals 1,000
+synthetic terminal runs using the existing Show more action and 200-run API
+pages, then verifies a bounded mounted window, the last run's transcript,
+Escape dismissal, and dialog survival when its opener is recycled. It covers
+wide and compact layouts with the page's existing scroll owner. HTTP and
+WebSocket traffic are intercepted; unexpected requests and page errors fail
+the scenario. No server, daemon or real agent runs are involved.
+
+Build with a same-origin API URL so all requests reach the synthetic boundary:
+
+```bash
+NEXT_PUBLIC_API_URL='' pnpm --filter @multica/web build
+NEXT_PUBLIC_API_URL='' pnpm --filter @multica/web exec next start --port 3000
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm exec playwright test --config=playwright.perf.config.ts agent-recent-work.spec.ts
+```
+
+For a comparison, run the same test against an unmodified main production
+build with `AGENT_WORK_BASELINE=1`. Both sides keep API pagination; the baseline
+asserts that all 1,000 revealed rows stay mounted while the new renderer keeps
+fewer than 50. JSON attachments report the observed row counts and cursors;
+these are rendering checks, not backend or network-throughput benchmarks.
 
 ## What it runs against
 
@@ -39,6 +84,18 @@ success, on failure and on cancellation.
 
 The ordinary e2e suite ignores this directory; it needs a production build and
 a machine that is not busy doing anything else.
+
+The floating-chat lifetime regression runs against the same production build:
+
+```bash
+pnpm exec playwright test --config=playwright.perf.config.ts floating-chat-lifetime.spec.ts
+```
+
+It checks that closing removes the message list, keeps the real composer and
+an in-flight upload alive, shows messages received while closed on reopen, and
+survives an interrupted exit. It also checks that the message list's ancestor
+is never scaled, and that a reopened window never paints before its message
+list does. HTTP and WebSocket traffic is synthetic; no backend is needed.
 
 ## When to run it
 

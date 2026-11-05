@@ -12,7 +12,7 @@ import { projectPriorityBars } from "@/lib/project-status";
 
 const COLOR: Record<ProjectPriority, string> = {
   urgent: "#dc2626",
-  high: "#eab308",
+  high: "#f97316",
   medium: "#eab308",
   low: "#3b82f6",
   none: "#71717a",

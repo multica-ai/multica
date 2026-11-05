@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Brain, ChevronDown } from "lucide-react";
+import { Brain, ChevronDown } from "@multica/ui/icons";
 import type { RuntimeModelThinkingLevel } from "@multica/core/types";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Per-agent reasoning/effort picker (MUL-2339). Renders only when the
@@ -29,6 +30,7 @@ export function ThinkingPicker({
   value,
   levels,
   canEdit = true,
+  allowClear = true,
   variant = "chip",
   showLabel = true,
   onChange,
@@ -42,6 +44,8 @@ export function ThinkingPicker({
   levels: RuntimeModelThinkingLevel[];
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
+  /** ZCode requires an explicit reasoning level for reasoning-capable models. */
+  allowClear?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
   onChange: (next: string) => Promise<void> | void;
@@ -170,15 +174,16 @@ export function ThinkingPicker({
         </PickerItem>
       ))}
 
-      {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.thinking_clear_title)}
-        >
-          {t(($) => $.pickers.thinking_clear)}
-        </button>
+      {value && allowClear && (
+        <TooltipHint label={t(($) => $.pickers.thinking_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.thinking_clear)}
+          </button>
+        </TooltipHint>
       )}
     </PropertyPicker>
   );

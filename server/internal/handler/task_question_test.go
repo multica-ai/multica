@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -18,8 +17,9 @@ func taskQuestionRequest(t *testing.T, taskID string, body map[string]any) *http
 	t.Helper()
 	req := testutil.JSONRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/question", body)
 	req = testutil.WithURLParams(req, "taskId", taskID)
-	return req.WithContext(middleware.WithDaemonContext(
-		req.Context(), testWorkspaceID, "task-question-daemon"))
+	// The fixture runtime's owner, as a real daemon authenticates.
+	req.Header.Set("X-User-ID", testUserID)
+	return req
 }
 
 // TestReportTaskQuestionPostsMarkedAgentComment pins the whole contract of the

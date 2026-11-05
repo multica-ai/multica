@@ -115,7 +115,7 @@ func assertSnapshotEqual(t *testing.T, label string, want, got workdirSnapshot) 
 func runPrepareLikeCycle(t *testing.T, workDir, envRoot, provider string, ctx TaskContextForEnv) {
 	t.Helper()
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(workDir, provider, ctx, manifest); err != nil {
+	if _, err := writeContextFiles(workDir, provider, ctx, manifest); err != nil {
 		t.Fatalf("writeContextFiles(%s): %v", provider, err)
 	}
 	if err := writeSidecarManifest(envRoot, manifest); err != nil {
@@ -158,6 +158,7 @@ var allFileBasedProviders = []string{
 	"reasonix",
 	"dsh",
 	"dim",
+	"devin",
 	"zeroclaw",
 	"kiro",
 	"antigravity",
@@ -243,6 +244,7 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "skills", "my-own"), "SKILL.md"},
 		{"reasonix", filepath.Join(".reasonix", "skills", "my-own"), "SKILL.md"},
 		{"kiro", filepath.Join(".kiro", "skills", "my-own"), "SKILL.md"},
+		{"devin", filepath.Join(".devin", "skills", "my-own"), "SKILL.md"},
 		{"antigravity", filepath.Join(".agents", "skills", "my-own"), "SKILL.md"},
 		{"qwen", filepath.Join(".qwen", "skills", "my-own"), "SKILL.md"},
 		{"hermes", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
@@ -310,6 +312,7 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "config.json")},
 		{"reasonix", filepath.Join(".reasonix", "config.toml")},
 		{"kiro", filepath.Join(".kiro", "config.json")},
+		{"devin", filepath.Join(".devin", "config.json")},
 		{"antigravity", filepath.Join(".agents", "config.json")},
 		{"qwen", filepath.Join(".qwen", "settings.json")},
 	}
@@ -643,7 +646,9 @@ var sameSlugSkillProviderCases = []struct {
 	{"reasonix", filepath.Join(".reasonix", "skills", "issue-review")},
 	{"dsh", filepath.Join(".dsh", "skills", "issue-review")},
 	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
+	{"devin", filepath.Join(".devin", "skills", "issue-review")},
 	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
+	{"muse", filepath.Join(".agents", "skills", "issue-review")},
 	{"qwen", filepath.Join(".qwen", "skills", "issue-review")},
 	{"hermes", filepath.Join(".agent_context", "skills", "issue-review")},
 }
@@ -901,7 +906,7 @@ func TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation(t *testing.
 	// landed at a NEW path under the same parent, AND the user's
 	// path is untouched.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(workDir, "claude", TaskContextForEnv{
+	if _, err := writeContextFiles(workDir, "claude", TaskContextForEnv{
 		IssueID: "11111111-2222-3333-4444-555555555555",
 		AgentSkills: []SkillContextForEnv{
 			{Name: "Issue Review", Content: "Multica's version\n"},

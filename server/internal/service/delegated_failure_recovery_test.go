@@ -249,17 +249,44 @@ func TestDelegatedFailureRecoveryPreservesSignalWhenStatusUnavailable(t *testing
 				t.Fatalf("unresolved recovery: tasks=%d; want no dispatch or permanent receipt", count)
 			}
 			if !readError {
-				if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-					t.Fatalf("unresolved signal occupies the batch: %+v, %v", result, err)
+				pending, err := queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, candidate := range pending {
+					if candidate.ID == comment.ID {
+						t.Fatal("unresolved signal occupies the batch")
+					}
+				}
+				if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+					t.Fatalf("sweep with unresolved signal: %v", err)
 				}
 				createStatus()
 			}
-			svc.Queries = queries
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
-				t.Fatalf("catalog repaired: %+v, %v; want one replay without repeating the failure hook", result, err)
+			// Packages share DATABASE_URL in CI. Keep another workspace's
+			// signal pending to exercise the global sweep without assuming
+			// this fixture is its only candidate.
+			other, otherSvc := seedDelegatedFailureFixture(t)
+			otherFailedID := other.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if target, created, err := otherSvc.ensureDelegatedFailureRecoveryComment(ctx, otherFailedID); err != nil || target == nil || !created {
+				t.Fatalf("seed unrelated recovery signal: created=%v err=%v", created, err)
 			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("repeat sweep: %+v, %v; want no duplicate", result, err)
+			svc.Queries = queries
+			for _, phase := range []string{"catalog repaired", "repeat sweep"} {
+				result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+				if err != nil {
+					t.Fatalf("%s: %+v, %v", phase, result, err)
+				}
+				// Sweep totals include other workspaces. Each signal must have
+				// exactly one recovery task, including after the second sweep.
+				for _, sourceID := range []pgtype.UUID{failedID, otherFailedID} {
+					fx.QueryRow(t, `SELECT count(*) FROM agent_task_queue
+						WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, sourceID).Scan(&count)
+					if count != 1 {
+						t.Fatalf("%s: source %s has %d recovery tasks; want one replay without repeating the failure hook",
+							phase, util.UUIDToString(sourceID), count)
+					}
+				}
 			}
 		})
 	}
@@ -809,7 +836,7 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		util.MustParseUUID(f.issueID),
 		util.MustParseUUID(f.sourceTask),
 		pgtype.UUID{},
-		util.MustParseUUID(f.userID),
+		util.MustParseUUID(f.userID), false,
 		nil,
 	)
 	if err != nil {
@@ -1000,6 +1027,73 @@ func TestHandleFailedTasksFinalDelegatedFailureWakesCoordinator(t *testing.T) {
 	}
 	if recoveryTasks != 1 || recoveryComments != 1 {
 		t.Fatalf("sweeper recovery tasks/comments = %d/%d, want 1/1", recoveryTasks, recoveryComments)
+	}
+}
+
+// insertOrphanedWorkerTask seeds a non-delegated task on the worker's issue
+// that orphan recovery has just failed with runtime_recovery.
+func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt, maxAttempts int32) db.AgentTaskQueue {
+	t.Helper()
+	taskID := dbfx.New(f.pool, f.workspaceID, f.userID).Task(t, f.worker, dbfx.Cols{
+		"runtime_id":          f.runtimeID,
+		"issue_id":            f.workerIssue,
+		"status":              "failed",
+		"attempt":             attempt,
+		"max_attempts":        maxAttempts,
+		"originator_user_id":  f.userID,
+		"accountable_user_id": f.userID,
+		"originator_source":   "direct_human",
+		"failure_reason":      "runtime_recovery",
+		"error":               "daemon restarted while task was in flight",
+		"completed_at":        dbfx.Raw("now()"),
+	})
+	task, err := db.New(f.pool).GetAgentTask(context.Background(), util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load orphaned task: %v", err)
+	}
+	return task
+}
+
+func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 2, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 0 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 0", retried)
+	}
+
+	var comments int
+	var content string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(content), '')
+		FROM comment
+		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failed.ID).
+		Scan(&comments, &content); err != nil {
+		t.Fatalf("read failure comment: %v", err)
+	}
+	if comments != 1 || content != "daemon restarted while task was in flight" {
+		t.Fatalf("terminal failure comments = %d content %q, want one system comment with the task error", comments, content)
+	}
+}
+
+func TestHandleFailedTasksRetryPendingDoesNotCommentOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 1, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 1 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 1", retried)
+	}
+
+	var comments int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`,
+		f.workerIssue, failed.ID).Scan(&comments); err != nil {
+		t.Fatalf("count failure comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("retry-pending failure comments = %d, want 0", comments)
 	}
 }
 

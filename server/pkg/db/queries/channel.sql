@@ -466,9 +466,8 @@ SET status = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: SetChannelInstallationConfig :exec
--- Replaces the whole config blob for one installation. Used by the
--- operator backfills (e.g. setting a freshly-fetched bot_union_id) that
--- read-modify-write the JSON in Go and persist it back atomically by id.
+-- Replaces the whole config blob for one installation. Prefer field-level
+-- patches for metadata that can change concurrently with receipt evidence.
 UPDATE channel_installation
 SET config = $2, updated_at = now()
 WHERE id = $1;
@@ -560,6 +559,39 @@ JOIN channel_installation ci ON ci.id = b.installation_id
 WHERE b.workspace_id = sqlc.arg('workspace_id')
   AND b.multica_user_id = sqlc.arg('multica_user_id')
   AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1;
+
+-- name: FindChannelBindingForMemberOnAgentInstallation :one
+-- Agent-attributed notification lookup: the same member lookup as
+-- FindChannelBindingForMember, pinned to the ONE installation the agent whose
+-- activity raised the notification owns.
+--
+-- Why this exists. FindChannelBindingForMember answers by the
+-- RECIPIENT alone, so in a multi-bot org — one bot per agent, several of them
+-- bound by the same person — every notification a member receives is pushed
+-- through whichever bot they bound most recently, no matter which agent the
+-- notification is about. The recipient reads three agents' activity as if it
+-- all came from one of them. Pinning the lookup to the acting agent's bot is
+-- what makes the notification follow the bot↔agent mapping the sender is
+-- reading.
+--
+-- The tiebreak stays for the case where one member holds two channel users on
+-- the same bot (two WeCom accounts, one Multica account): both rows answer,
+-- and `:one` cannot take more than one, so the newest binding wins here
+-- exactly as it does in the recipient-wide lookup.
+--
+-- channel_type is named once and used for both columns: the installation's
+-- own discriminator and the binding's must agree, or installs of two
+-- platforms could cross-answer here.
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.channel_type = sqlc.arg('channel_type')
+  AND ci.agent_id = sqlc.arg('agent_id')
   AND ci.status = 'active'
 ORDER BY b.bound_at DESC
 LIMIT 1;
@@ -758,23 +790,6 @@ SET last_message_id = sqlc.narg('last_message_id'),
 FROM current_route
 WHERE binding.id = current_route.id;
 
--- name: MarkChannelChatSessionPendingFresh :one
--- Persists a channel `/clear` intent until the next chat task is successfully
--- created. RETURNING makes a missing binding an error instead of silently
--- acknowledging a fresh start that was never stored.
-UPDATE channel_chat_session_binding
-SET pending_fresh = TRUE
-WHERE chat_session_id = $1 AND retired_at IS NULL
-RETURNING pending_fresh;
-
--- name: LockChannelChatSessionPendingFresh :one
--- EnqueueChatTask reads this under the same row lock and transaction that
--- creates the task. A concurrent `/clear` therefore lands either before this
--- task and is consumed by it, or after this task and remains for the next one.
-SELECT pending_fresh FROM channel_chat_session_binding
-WHERE chat_session_id = $1
-FOR UPDATE;
-
 -- name: LockChannelChatSessionBindingForContext :one
 -- Context mutations acquire this row after chat_session and before any
 -- channel_chat_context_generation row. Keeping the statements separate makes
@@ -782,11 +797,6 @@ FOR UPDATE;
 SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = $1
 FOR UPDATE;
-
--- name: ClearChannelChatSessionPendingFresh :exec
-UPDATE channel_chat_session_binding
-SET pending_fresh = FALSE
-WHERE chat_session_id = $1;
 
 -- name: ClearChannelChatSessionPendingFreshForRevision :exec
 UPDATE channel_chat_session_binding
@@ -1270,6 +1280,8 @@ RETURNING storage_key;
 -- while earlier rows ran, and could expire and be reclaimed before its own
 -- DELETE was ever tried, inflating attempt/backoff for work that never
 -- happened. One row per claim means attempt counts attempts.
+-- MATERIALIZED pins the bounded candidate set so a nested-loop rescan cannot
+-- move the LIMIT window to another row after an update.
 --
 -- Due means (a) 'pending' rows older than the settle delay — an operational
 -- buffer only; correctness comes from the state flip, after which a bind can
@@ -1280,12 +1292,7 @@ RETURNING storage_key;
 -- FOR UPDATE SKIP LOCKED keeps replicas off each other's row; the
 -- object-storage DELETE happens outside any transaction, gated by the lease
 -- token. No row (ErrNoRows) means nothing is due — the sweep is done.
-UPDATE channel_media_pending_object AS obj
-SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
-    lease_token = @lease_token,
-    lease_expires_at = now() + @lease::interval,
-    attempt = obj.attempt + 1
-FROM (
+WITH due AS MATERIALIZED (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
@@ -1296,7 +1303,13 @@ FROM (
     ORDER BY cand.next_attempt_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) AS due
+)
+UPDATE channel_media_pending_object AS obj
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
+    lease_token = @lease_token,
+    lease_expires_at = now() + @lease::interval,
+    attempt = obj.attempt + 1
+FROM due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.*;
 

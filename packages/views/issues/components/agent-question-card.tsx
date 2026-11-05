@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, MessageCircleQuestion } from "lucide-react";
+import { CheckCircle2, Loader2, MessageCircleQuestion } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";

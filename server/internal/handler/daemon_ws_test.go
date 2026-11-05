@@ -83,7 +83,7 @@ func TestBuildDaemonWebSocketIdentityFailsClosedForMissingRuntime(t *testing.T) 
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/ws", nil, testWorkspaceID, "lease-daemon")
+	req := newOwnerDaemonRequest(http.MethodGet, "/api/daemon/ws", nil)
 	w := httptest.NewRecorder()
 
 	if _, ok := testHandler.buildDaemonWebSocketIdentity(w, req, []string{uuid.NewString()}, ""); ok {

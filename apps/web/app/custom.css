@@ -1,6 +1,6 @@
 /* =============================================================================
  * Multica Web — Custom styles (non-shadcn, web-only)
- * Shared styles (shiki, entrance-spin, sidebar, sonner, scrollbar) are in
+ * Shared styles (shiki, brand motion, sidebar, sonner, scrollbar) are in
  * @multica/ui/styles/base.css
  * ============================================================================= */
 
@@ -67,6 +67,7 @@
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);
+    --priority-high: oklch(0.68 0.18 50);
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
@@ -128,9 +129,8 @@ html[lang|="ja"] .landing-light {
 
    `[lang|="zh"]` is the BCP-47 language-range selector: it matches exactly `zh`
    or `zh-<region>` (app/layout.tsx emits `zh-CN`, `ja-JP`, `ko-KR`), never an
-   unrelated subtag such as `zha`. Scoped to headings so the footer wordmark — a
-   Latin-only <span> rendering "multica" at up to 16rem — keeps its tuned
-   tracking on every locale. */
+   unrelated subtag such as `zha`. Scoped to headings, the only `.landing-serif`
+   text that carries CJK. */
 html[lang|="zh"] :is(h1, h2).landing-serif,
 html[lang|="ja"] :is(h1, h2).landing-serif,
 html[lang|="ko"] :is(h1, h2).landing-serif {

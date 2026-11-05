@@ -184,7 +184,7 @@ func mediaInstallation() engine.ResolvedInstallation {
 
 func TestHasMediaLooksOnlyAtWhatIsAlreadyInHand(t *testing.T) {
 	t.Parallel()
-	r := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	r := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, nil, testLogger())
 	cases := []struct {
 		name    string
 		msgType string
@@ -215,7 +215,7 @@ func TestHasMediaLooksOnlyAtWhatIsAlreadyInHand(t *testing.T) {
 
 func TestHasMediaSaysNoWhenThereIsNoUrlToFetch(t *testing.T) {
 	t.Parallel()
-	r := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	r := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, nil, testLogger())
 	// A body with an aeskey and no url is not something we can download; it
 	// must not buy the message a media deadline and a deferred agent run.
 	mc := aibotMsgCallback{MsgType: "image"}
@@ -233,7 +233,7 @@ func TestHasMediaSaysNoWhenThereIsNoUrlToFetch(t *testing.T) {
 // runs is reachable while the guard's own decision stays under test in
 // media_guard_test.go.
 func newTestResolver(storage mediaStorage, ledger engine.MediaIntentLedger, senders *sendersRegistry) *wecomMediaResolver {
-	r := NewMediaResolver(storage, ledger, senders, testLogger()).(*wecomMediaResolver)
+	r := NewMediaResolver(storage, ledger, senders, nil, testLogger()).(*wecomMediaResolver)
 	r.http = testMediaClient()
 	return r
 }
@@ -267,6 +267,7 @@ func TestResolveMediaStoresTheDecryptedFile(t *testing.T) {
 				"image": map[string]any{"url": srv.URL, "aeskey": testAESKey},
 			})
 			got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+			r.notices.Wait()
 
 			if len(got.MediaRefs) != 1 {
 				t.Fatalf("MediaRefs = %d, want 1", len(got.MediaRefs))
@@ -318,6 +319,7 @@ func TestResolveMediaRecordsIntentBeforeUploading(t *testing.T) {
 		"file": map[string]any{"url": srv.URL, "aeskey": testAESKey},
 	})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 
 	if len(ledger.records) != 1 {
 		t.Fatalf("intent rows = %d, want 1", len(ledger.records))
@@ -353,6 +355,7 @@ func TestResolveMediaSkipsAKeyTheReconcilerOwns(t *testing.T) {
 		"image": map[string]any{"url": srv.URL, "aeskey": testAESKey},
 	})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(storage.stored()) != 0 {
 		t.Fatal("uploaded into a key the reconciler owns")
 	}
@@ -382,6 +385,7 @@ func TestResolveMediaKeepsGoingWhenOneAttachmentFails(t *testing.T) {
 		map[string]any{"msgtype": "image", "image": map[string]any{"url": good.URL, "aeskey": testAESKey}},
 	}}})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 
 	if len(got.MediaRefs) != 1 {
 		t.Fatalf("MediaRefs = %d, want the one that downloaded", len(got.MediaRefs))
@@ -438,7 +442,8 @@ func TestResolveMediaTellsTheSenderWhatWentWrong(t *testing.T) {
 			"file": map[string]any{"url": oversize.URL, "aeskey": testAESKey},
 		})
 		r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
-		if got := noticeText(t, conn); got != mediaTooLargeNotice {
+		r.notices.Wait()
+		if got := noticeText(t, conn); got != copyFor(DefaultLocale).MediaTooLarge {
 			t.Fatalf("notice = %q, want the too-large wording", got)
 		}
 	})
@@ -452,7 +457,8 @@ func TestResolveMediaTellsTheSenderWhatWentWrong(t *testing.T) {
 			map[string]any{"msgtype": "image", "image": map[string]any{"url": expired.URL, "aeskey": testAESKey}},
 		}}})
 		r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
-		if got := noticeText(t, conn); got != mediaUnreadableNotice {
+		r.notices.Wait()
+		if got := noticeText(t, conn); got != copyFor(DefaultLocale).MediaUnreadable {
 			t.Fatalf("notice = %q, want the unreadable wording once", got)
 		}
 	})
@@ -467,6 +473,7 @@ func TestResolveMediaTellsTheSenderWhatWentWrong(t *testing.T) {
 			"image": map[string]any{"url": srv.URL, "aeskey": testAESKey},
 		})
 		r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+		r.notices.Wait()
 		if len(conn.frames) != 0 {
 			t.Fatalf("sent %d notices for a message that worked", len(conn.frames))
 		}
@@ -482,6 +489,7 @@ func TestResolveMediaTellsTheSenderWhatWentWrong(t *testing.T) {
 			"image":    map[string]any{"url": expired.URL, "aeskey": testAESKey},
 		})
 		r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+		r.notices.Wait()
 		if len(conn.frames) != 1 {
 			t.Fatalf("notices = %d, want 1", len(conn.frames))
 		}
@@ -514,6 +522,7 @@ func TestResolveMediaRefusesAnUndecryptablePayload(t *testing.T) {
 			msg := channelMessageFromCallback("wb-1", "", mc, "[Image]", "req-1")
 
 			got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+			r.notices.Wait()
 			if len(storage.stored()) != 0 {
 				t.Fatal("stored bytes it could not decrypt")
 			}
@@ -540,6 +549,7 @@ func TestResolveMediaNamesAnUnnamedFile(t *testing.T) {
 		map[string]any{"msgtype": "image", "image": map[string]any{"url": srv.URL, "aeskey": testAESKey}},
 	}}})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 
 	if len(got.MediaRefs) != 2 {
 		t.Fatalf("MediaRefs = %d, want 2", len(got.MediaRefs))
@@ -576,6 +586,7 @@ func TestResolveMediaKeepsTheKeyPerChatMessage(t *testing.T) {
 			"image": map[string]any{"url": srv.URL, "aeskey": testAESKey},
 		})
 		got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), chatMessageID, msg)
+		r.notices.Wait()
 		if len(got.MediaRefs) != 1 {
 			t.Fatalf("MediaRefs = %d", len(got.MediaRefs))
 		}
@@ -598,6 +609,7 @@ func TestResolveMediaWithoutStorageLeavesThePlaceholder(t *testing.T) {
 		"image": map[string]any{"url": "https://cos.invalid/a", "aeskey": testAESKey},
 	})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(got.MediaRefs) != 0 {
 		t.Fatal("produced refs with no storage configured")
 	}
@@ -622,6 +634,7 @@ func TestResolveMediaSurvivesAConnectionThatWentAway(t *testing.T) {
 		"image": map[string]any{"url": expired.URL, "aeskey": testAESKey},
 	})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(got.MediaRefs) != 0 {
 		t.Fatal("produced a ref for an attachment that never downloaded")
 	}
@@ -697,13 +710,14 @@ func resolveOneAttachment(t *testing.T, storage mediaStorage, url string) string
 	if s, ok := storage.(*fakeStreamStorage); ok {
 		inspect = &s.fakeMediaStorage
 	}
-	r := NewMediaResolver(storage, newFakeMediaLedger(inspect), nil, logger).(*wecomMediaResolver)
+	r := NewMediaResolver(storage, newFakeMediaLedger(inspect), nil, nil, logger).(*wecomMediaResolver)
 	r.http = testMediaClient()
 
 	msg := mediaMessage(t, "image", map[string]any{
 		"image": map[string]any{"url": url, "aeskey": testAESKey},
 	})
 	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	r.notices.Wait()
 	if len(got.MediaRefs) != 1 {
 		t.Fatalf("MediaRefs = %d, want the attachment to have landed", len(got.MediaRefs))
 	}

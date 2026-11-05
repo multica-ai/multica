@@ -39,6 +39,9 @@ describe("wakeup timeline entries", () => {
     expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "checks_finished" } } }))).toBe(
       "当关联 PR 的 CI 结束时，唤醒了 Emacs",
     );
+    expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "conflicts" } } }))).toBe(
+      "当关联 PR 出现合并冲突时，唤醒了 Emacs",
+    );
     expect(read(entry("wakeup_triggered", { wakeup: reply, events: ["wakeup.manual"], actor_type: "member", actor_id: "u" }))).toBe(
       "Jiayuan 立即唤醒了 Emacs",
     );
@@ -68,6 +71,15 @@ describe("wakeup timeline entries", () => {
     expect(read(entry("wakeup_checkin", { wakeup: reply, note: "进度 72%" }, { actor_type: "agent", actor_id: "g", coalesced_count: 3 }))).toBe(
       "静默检查 3 次 · 最近一次：进度 72%",
     );
+  });
+
+  it("does not repeat \"wake\" when a time rule is added", () => {
+    const { t, text } = helpers();
+    const read = (e: TimelineEntry) => formatWakeupActivity(e, t, text, getActorName);
+    const at = { ...reply, kind: "at", event_types: [], next_fire_at: "2026-10-21T09:00:00Z" };
+    const hourly = { ...reply, kind: "every", mode: "continuous", event_types: [], interval_seconds: 3600 };
+    expect(read(entry("wakeup_created", { wakeup: at }))).toMatch(/^为 Emacs 添加了唤醒：.*09:00 唤醒$/);
+    expect(read(entry("wakeup_created", { wakeup: hourly }))).toBe("为 Emacs 添加了唤醒：每小时唤醒");
   });
 
   it("tags an entry with the rule it came from", () => {

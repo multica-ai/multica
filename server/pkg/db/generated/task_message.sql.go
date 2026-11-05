@@ -93,6 +93,7 @@ WITH incoming AS (
         NULLIF(m.output_truncated, '')::bool,
         NULLIF(m.call_id, '')
     FROM incoming AS m
+    ON CONFLICT (id) DO NOTHING
     RETURNING id, task_id, seq, type, tool, content, input, output, created_at, output_truncated, call_id
 )
 SELECT id, task_id, seq, type, tool, content, input, output, created_at, output_truncated, call_id FROM inserted ORDER BY seq ASC
@@ -160,8 +161,9 @@ type CreateTaskMessagesRow struct {
 // loop this replaces could persist part of a batch and then fail, leaving the
 // transcript with a prefix of the batch and no way to complete it — the daemon
 // does not retry this endpoint. One statement makes the batch all-or-nothing,
-// which buys consistency; a batch that fails is still lost whole, so closing
-// the gap for real needs a retry plus a (task_id, seq) uniqueness rule.
+// which buys consistency. Callers that supply a task-scoped idempotency key
+// derive a stable message UUID; the primary-key conflict below deduplicates
+// retries without changing the append-only behavior of legacy random IDs.
 //
 // The ORDER BY is a contract, not decoration. A bare `INSERT ... RETURNING`
 // has no defined row order, and the caller republishes these rows as realtime
@@ -293,6 +295,59 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.CreatedAt,
 			&i.OutputTruncated,
 			&i.CallID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskProgressSince = `-- name: ListTaskProgressSince :many
+SELECT seq, type, tool, content, input FROM task_message
+WHERE task_id = $1
+  AND seq > $2
+  AND type IN ('tool_use', 'thinking', 'error')
+ORDER BY seq ASC
+`
+
+type ListTaskProgressSinceParams struct {
+	TaskID   pgtype.UUID `json:"task_id"`
+	AfterSeq int32       `json:"after_seq"`
+}
+
+type ListTaskProgressSinceRow struct {
+	Seq     int32       `json:"seq"`
+	Type    string      `json:"type"`
+	Tool    pgtype.Text `json:"tool"`
+	Content pgtype.Text `json:"content"`
+	Input   []byte      `json:"input"`
+}
+
+// The rows a WeCom bubble shows while a run works: tool calls, reasoning and
+// errors past the last seq the bubble has folded in. Read by the replica that
+// holds the bubble, which is how a step reported to any replica reaches it
+// without the step's text crossing the realtime relay. Only the columns the
+// bubble renders: output (a tool's result) is the block the bubble never
+// shows, and routinely the largest column in the table.
+func (q *Queries) ListTaskProgressSince(ctx context.Context, arg ListTaskProgressSinceParams) ([]ListTaskProgressSinceRow, error) {
+	rows, err := q.db.Query(ctx, listTaskProgressSince, arg.TaskID, arg.AfterSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskProgressSinceRow{}
+	for rows.Next() {
+		var i ListTaskProgressSinceRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Type,
+			&i.Tool,
+			&i.Content,
+			&i.Input,
 		); err != nil {
 			return nil, err
 		}
