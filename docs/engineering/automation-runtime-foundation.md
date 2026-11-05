@@ -4,7 +4,7 @@
 
 七个模块逐项确认后的底层接口、公共结果、对象身份、调用顺序与实施切片见[接口与实施契约 v1](verification-foundation-contracts.md)。本文负责总体范围，该契约细化模块交互；文档描述架构与语义目标，实际调用参数以运行时 schema 为准。
 
-源码分析基线为远端 `origin/main` 的 `be88001167e7316d5516105547747846721b82e8`。原设计工作分支为 `codex/verification-foundation`；实现工作树从更新后的 `origin/main` `29b01f9eb1bc63ec773cb6732df92433db4dcb9b` 创建，分支为 `codex/verification-tooling`；PR 交付前已对齐 `origin/main` 的 `115bfc7c0`。源码证据表保留原分析基线，接入时按新基线复核。历史问题和已有实现证据保留在 [Bug 验证基础能力评估](bug-verification-foundation.md)。
+设计分析基线为 `origin/main` 的 `be88001167e7316d5516105547747846721b82e8`，源码证据表保留该基线；实现分支 `codex/verification-tooling` 已对齐 `origin/main` 的 `5f8d2ccf5` 并复核接入。已有问题评估见 [Bug 验证基础能力评估](bug-verification-foundation.md)。
 
 ## 1. 已确认的范围
 
