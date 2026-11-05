@@ -25,6 +25,7 @@ import (
 const (
 	sdlcWorkflowName        = "SDLC Auto"
 	sdlcWorkflowDescription = "Build, independent review, then QA, all by agents. A rejected step goes back to the developer."
+	sdlcInProgressStatusKey = "in_progress"
 	sdlcQAStatusKey         = "qa"
 	sdlcQAStatusName        = "QA"
 )
@@ -253,28 +254,37 @@ func (s *InitiativeService) sdlcWorkflowFor(ctx context.Context, q *db.Queries, 
 	return wf, nil
 }
 
-// sdlcSteps is SDLC_AUTO_WORKFLOW: the developer builds, the reviewer checks and
-// sends back, and QA verifies and sends back. QA's step is the last before done.
+// sdlcSteps is SDLC_AUTO_WORKFLOW, the same shape as the Delivery workflow: the
+// developer takes the issue and builds it in progress, the reviewer checks, and
+// QA verifies. Rejected work goes back to In Progress. QA's step is the last
+// before done.
 func sdlcSteps(agents map[string]pgtype.UUID) []issueworkflow.Step {
 	agent := func(role string) issueworkflow.Handler {
 		return issueworkflow.Handler{Type: issueworkflow.HandlerAgent, ID: util.UUIDToString(agents[role])}
 	}
+	none := issueworkflow.Handler{Type: issueworkflow.HandlerNone}
 	return []issueworkflow.Step{
+		{StatusKey: issuestatus.Backlog, Handler: none},
 		{
 			StatusKey: issuestatus.Todo, Handler: agent("developer"),
-			NextStatusKey: "in_review",
+			Instructions: "Pick up this issue from To Do. Read its spec, stories, and acceptance criteria, then move it to In Progress to start the build.",
+		},
+		{
+			StatusKey: sdlcInProgressStatusKey, Handler: agent("developer"),
+			BackStatusKey: issuestatus.Todo,
 			Instructions:  "Build everything this issue asks for, story by story, following the story flow in your instructions. Hand it to review only when every story is implemented and verified on the running app. Record what you verified in the spec.",
 		},
 		{
 			StatusKey: "in_review", Handler: agent("reviewer"),
-			BackStatusKey: issuestatus.Todo, NextStatusKey: sdlcQAStatusKey,
-			Instructions: "Review the whole change for this issue against its acceptance criteria. Send it back with the blocking findings, or pass it on with your verdict.",
+			BackStatusKey: sdlcInProgressStatusKey,
+			Instructions:  "Review the whole change for this issue against its acceptance criteria. Send it back to In Progress with the blocking findings, or pass it on to QA with your verdict.",
 		},
 		{
 			StatusKey: sdlcQAStatusKey, Handler: agent("qa"),
-			BackStatusKey: issuestatus.Todo,
-			Instructions:  "Verify the change on the running system against the acceptance criteria. NO GO sends it back with the defects. GO or CONDITIONAL GO finishes the issue.",
+			BackStatusKey: sdlcInProgressStatusKey,
+			Instructions:  "Verify the change on the running system against the acceptance criteria. NO GO sends it back to In Progress with the defects. GO or CONDITIONAL GO finishes the issue.",
 		},
+		{StatusKey: issuestatus.Blocked, Handler: none},
 	}
 }
 

@@ -154,35 +154,46 @@ export interface SquadWorkflowTemplate {
 }
 
 /**
- * The workflow of a build project: the developer builds, an independent
- * reviewer checks, QA verifies, and QA's step is the last one before done, so
- * an agent run can close the issue and the run queue moves on.
+ * The workflow of a build project, the same shape as the Delivery workflow:
+ * the developer takes the issue and builds it in progress, an independent
+ * reviewer checks, and QA verifies. A rejected step goes back to In Progress,
+ * and QA's step is the last one before done, so an agent run can close the
+ * issue and the run queue moves on.
  */
 export const SDLC_AUTO_WORKFLOW: SquadWorkflowTemplate = {
   name: "SDLC Auto",
   description:
     "Build, independent review, then QA, all by agents. A rejected step goes back to the developer.",
   steps: [
+    { status: { key: "backlog" }, handler: null, instructions: "" },
     {
       status: { key: "todo" },
       handler: "developer",
+      instructions:
+        "Pick up this issue from To Do. Read its spec, stories, and acceptance criteria, then move it to In Progress to start the build.",
+    },
+    {
+      status: { key: "in_progress" },
+      handler: "developer",
+      back: "todo",
       instructions:
         "Build everything this issue asks for, story by story, following the story flow in your instructions. Hand it to review only when every story is implemented and verified on the running app. Record what you verified in the spec.",
     },
     {
       status: { key: "in_review" },
       handler: "reviewer",
-      back: "todo",
+      back: "in_progress",
       instructions:
-        "Review the whole change for this issue against its acceptance criteria. Send it back with the blocking findings, or pass it on with your verdict.",
+        "Review the whole change for this issue against its acceptance criteria. Send it back to In Progress with the blocking findings, or pass it on to QA with your verdict.",
     },
     {
       status: { name: "QA" },
       handler: "qa",
-      back: "todo",
+      back: "in_progress",
       instructions:
-        "Verify the change on the running system against the acceptance criteria. NO GO sends it back with the defects. GO or CONDITIONAL GO finishes the issue.",
+        "Verify the change on the running system against the acceptance criteria. NO GO sends it back to In Progress with the defects. GO or CONDITIONAL GO finishes the issue.",
     },
+    { status: { key: "blocked" }, handler: null, instructions: "" },
   ],
 };
 

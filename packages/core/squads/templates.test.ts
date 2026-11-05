@@ -56,10 +56,18 @@ describe("SQUAD_TEMPLATES", () => {
   });
 
   it("ends the build workflow on an agent step so an agent run can close the issue", () => {
-    const last = SDLC_AUTO_WORKFLOW.steps.at(-1);
+    const agentStatuses = SDLC_AUTO_WORKFLOW.steps
+      .filter((s) => s.handler !== null)
+      .map((s) => ("key" in s.status ? s.status.key : s.status.name));
 
-    expect(last?.handler).toBe("qa");
-    expect(SDLC_AUTO_WORKFLOW.steps.every((s) => s.handler !== null)).toBe(true);
+    expect(agentStatuses).toEqual(["todo", "in_progress", "in_review", "QA"]);
+    expect(SDLC_AUTO_WORKFLOW.steps.filter((s) => s.handler !== null).at(-1)?.handler).toBe("qa");
+  });
+
+  it("sends rejected work back to In Progress, as the Delivery workflow does", () => {
+    const backs = SDLC_AUTO_WORKFLOW.steps.map((s) => s.back ?? null);
+
+    expect(backs).toEqual([null, null, "todo", "in_progress", "in_progress", null]);
   });
 });
 

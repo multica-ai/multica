@@ -4,19 +4,23 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { useCreateIssue } from "@multica/core/issues/mutations";
-import type { Agent, IssuePriority } from "@multica/core/types";
+import type { Agent, IssuePriority, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
+import { PillButton } from "../../common/pill-button";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { StatusPicker } from "../../issues/components/pickers/status-picker";
 import { priorityLabel } from "../../issues/utils/priority-label";
 
 /**
  * A quick issue form, handed to the agent by default. Handing it over starts the
  * issue as `todo` so the agent picks it up; without that it waits in the backlog.
+ * The status picker overrides that default, offering the project's workflow
+ * columns, or the workspace statuses when the issue has no project.
  */
 export function CompanyAgentNewIssue({
   agent,
@@ -36,6 +40,9 @@ export function CompanyAgentNewIssue({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<IssuePriority>("none");
   const [assign, setAssign] = useState(true);
+  // Unset until the user picks, so the status follows the assign switch by default.
+  const [chosenStatus, setChosenStatus] = useState<IssueStatus | null>(null);
+  const status: IssueStatus = chosenStatus ?? (assign ? "todo" : "backlog");
 
   const submit = () => {
     const trimmed = title.trim();
@@ -45,7 +52,7 @@ export function CompanyAgentNewIssue({
         title: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
         priority,
-        status: assign ? "todo" : "backlog",
+        status,
         ...(assign ? { assignee_type: "agent" as const, assignee_id: agent.id } : {}),
         ...(projectId ? { project_id: projectId } : {}),
       },
@@ -79,6 +86,20 @@ export function CompanyAgentNewIssue({
           onChange={(event) => setDescription(event.target.value)}
           className="min-h-28"
         />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-caption font-medium">{t(($) => $.detail.prop_status)}</span>
+        <div>
+          <StatusPicker
+            status={status}
+            projectId={projectId ?? null}
+            onUpdate={(updates) => {
+              if (updates.status) setChosenStatus(updates.status);
+            }}
+            triggerRender={<PillButton />}
+            align="start"
+          />
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-caption font-medium">{t(($) => $.company.new_priority)}</span>

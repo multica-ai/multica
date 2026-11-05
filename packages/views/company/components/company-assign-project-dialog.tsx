@@ -21,7 +21,7 @@ import { Search } from "@multica/ui/icons";
 import { useT } from "../../i18n";
 
 /** The statuses the SDLC Auto workflow lists, in the order its steps run. */
-const SDLC_STATUS_KEYS = ["todo", "in_review", "qa"] as const;
+const SDLC_STATUS_KEYS = ["todo", "in_progress", "in_review", "qa"] as const;
 
 /** Projects that are finished cannot take new work. */
 const CLOSED_PROJECT_STATUSES = new Set(["completed", "cancelled"]);

@@ -13,6 +13,15 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutate: create.mutate, isPending: create.isPending }),
 }));
 
+// The real picker reads the workspace providers; the form only needs to hand it a status.
+vi.mock("../../issues/components/pickers/status-picker", () => ({
+  StatusPicker: ({ status, onUpdate }: { status: string; onUpdate: (u: { status: string }) => void }) => (
+    <button type="button" onClick={() => onUpdate({ status: "in_review" })}>
+      Pick in review (was {status})
+    </button>
+  ),
+}));
+
 const AGENT = { id: "ada", name: "Ada" } as Agent;
 
 function setup(overrides: Partial<Parameters<typeof CompanyAgentNewIssue>[0]> = {}) {
@@ -60,6 +69,27 @@ describe("CompanyAgentNewIssue", () => {
       },
       expect.any(Object),
     );
+  });
+
+  it("creates the issue in the status picked, keeping the agent handover", () => {
+    setup();
+    typeTitle("Review me");
+    fireEvent.click(screen.getByRole("button", { name: "Pick in review (was todo)" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Create issue" }));
+
+    expect(create.mutate.mock.calls[0]![0]).toMatchObject({
+      status: "in_review",
+      assignee_type: "agent",
+      assignee_id: "ada",
+    });
+  });
+
+  it("follows the assign switch for the default status until a status is picked", () => {
+    setup();
+    typeTitle("Later");
+    fireEvent.click(screen.getByRole("switch", { name: "Assign to Ada" }));
+    expect(screen.getByRole("button", { name: "Pick in review (was backlog)" })).toBeTruthy();
   });
 
   it("leaves the issue in the backlog, unassigned, when it is not handed over", () => {

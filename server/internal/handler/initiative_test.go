@@ -683,10 +683,10 @@ func TestInitiative_ForceToBuildCreatesTheBuildProjectOnTheSDLCWorkflow(t *testi
 	var agentSteps int
 	dbfx.QueryRow(t, `SELECT count(*) FROM project p JOIN issue_workflow w ON w.id = p.workflow_id,
 		jsonb_array_elements(w.steps) AS s
-		WHERE p.id = $1 AND s->'handler'->>'type' = 'agent' AND s->>'status_key' IN ('todo', 'in_review', 'qa')`,
+		WHERE p.id = $1 AND s->'handler'->>'type' = 'agent' AND s->>'status_key' IN ('todo', 'in_progress', 'in_review', 'qa')`,
 		*detail.Initiative.BuildProjectID).Scan(&agentSteps)
-	if agentSteps != 3 {
-		t.Fatalf("developer, reviewer and QA steps should hand to agents, found %d", agentSteps)
+	if agentSteps != 4 {
+		t.Fatalf("developer, in progress, reviewer and QA steps should hand to agents, found %d", agentSteps)
 	}
 
 	// The kickoff sits in the developer step and is assigned to the developer agent.

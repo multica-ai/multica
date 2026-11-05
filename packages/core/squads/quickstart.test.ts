@@ -72,11 +72,14 @@ describe("runSquadQuickstart", () => {
     expect(out.workflow.status).toBe("created");
     const steps = client.createIssueWorkflow.mock.calls[0]![0].steps!;
     expect(steps.map((s) => ("status_key" in s ? s.status_key : s.new_status.name))).toEqual([
+      "backlog",
       "todo",
+      "in_progress",
       "in_review",
       "QA",
+      "blocked",
     ]);
-    expect(steps[0]).toMatchObject({ handler: { type: "agent" } });
+    expect(steps[1]).toMatchObject({ handler: { type: "agent" } });
   });
 
   it("reuses a live agent with the same name and ignores an archived one", async () => {
@@ -261,7 +264,7 @@ describe("runSquadQuickstart", () => {
     const out = await runSquadQuickstart(client, greenfield, options);
 
     expect(out.workflow).toEqual({ status: "created", note: "qa_step_left_out" });
-    expect(createIssueWorkflow.mock.calls[1]![0].steps).toHaveLength(2);
+    expect(createIssueWorkflow.mock.calls[1]![0].steps).toHaveLength(5);
   });
 
   it("skips the workflow when asked not to create it or when the template has none", async () => {
