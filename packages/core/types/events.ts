@@ -58,6 +58,7 @@ export type WSEventType =
   | "reaction:removed"
   | "issue_reaction:added"
   | "issue_reaction:removed"
+  | "chat:supplement"
   | "chat:message"
   | "chat:done"
   | "chat:quick_actions"
@@ -673,6 +674,7 @@ export interface WSEventPayloadMap {
   "subscriber:added": SubscriberAddedPayload;
   "subscriber:removed": SubscriberRemovedPayload;
   "activity:created": ActivityCreatedPayload;
+  "chat:supplement": { chat_session_id: string };
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
   "chat:quick_actions": ChatQuickActionsPayload;

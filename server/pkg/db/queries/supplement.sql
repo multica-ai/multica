@@ -3,7 +3,7 @@
 -- are one state transition. A missing row is the fail-closed value for old
 -- daemons, old servers, unsupported providers and application rollback.
 WITH candidate AS MATERIALIZED (
-    SELECT t.id, t.issue_id, r.workspace_id, r.provider
+    SELECT t.id, t.issue_id, t.chat_session_id, r.workspace_id, r.provider
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = @task_id
@@ -15,7 +15,10 @@ WITH candidate AS MATERIALIZED (
     FROM candidate
     WHERE @enable_task_supplement::boolean
       AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
-      AND issue_id IS NOT NULL
+      AND (issue_id IS NOT NULL OR (provider = 'codex' AND EXISTS (
+          SELECT 1 FROM chat_session cs WHERE cs.id = candidate.chat_session_id
+          AND cs.workspace_id = candidate.workspace_id AND NOT EXISTS (SELECT 1 FROM channel_chat_session_binding b WHERE b.chat_session_id = cs.id)
+      )))
     ON CONFLICT DO NOTHING
     RETURNING task_id
 )

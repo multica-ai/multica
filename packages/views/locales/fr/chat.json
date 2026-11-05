@@ -35,7 +35,9 @@
     "change_project_context": "Changer le contexte de projet",
     "remove_project_context": "Retirer le contexte de projet",
     "no_projects": "Aucun projet pour l'instant",
-    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour"
+    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
+    "add_to_run": "Ajouter au run actuel",
+    "add_to_run_error": "Ajout impossible. Le brouillon est conservé."
   },
   "queue": {
     "title_one": "{{count}} message en file d'attente",
@@ -255,5 +257,11 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "supplement": {
+    "pending": "En attente d’envoi au run actuel",
+    "delivered": "Accepté par le moteur",
+    "failed": "Non livré",
+    "unknown": "Livraison indéterminée"
   }
 }

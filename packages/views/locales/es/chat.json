@@ -35,7 +35,9 @@
     "change_project_context": "Cambiar contexto del proyecto",
     "remove_project_context": "Quitar contexto del proyecto",
     "no_projects": "Aún no hay proyectos",
-    "project_context_unsupported": "La descripción del proyecto no se aplicará: el daemon de este agente necesita una actualización"
+    "project_context_unsupported": "La descripción del proyecto no se aplicará: el daemon de este agente necesita una actualización",
+    "add_to_run": "Añadir a la ejecución actual",
+    "add_to_run_error": "No se pudo añadir el mensaje. El borrador se conserva."
   },
   "queue": {
     "title_one": "{{count}} mensaje en cola",
@@ -255,5 +257,11 @@
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
+  },
+  "supplement": {
+    "pending": "Pendiente de envío a la ejecución actual",
+    "delivered": "Aceptado por el motor",
+    "failed": "No entregado",
+    "unknown": "Entrega incierta"
   }
 }

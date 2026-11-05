@@ -771,6 +771,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := qtx.DeleteChatSupplementsBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat supplements")
+		return
+	}
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -1212,6 +1216,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
+	h.hydrateChatSupplements(r.Context(), session.WorkspaceID, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1277,6 +1282,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
+	h.hydrateChatSupplements(r.Context(), session.WorkspaceID, resp)
 	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
 		Messages:   resp,
 		Limit:      limit,
@@ -1292,9 +1298,10 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID    string `json:"task_id,omitempty"`
-	Status    string `json:"status,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	CanSupplement bool   `json:"can_supplement"`
+	TaskID        string `json:"task_id,omitempty"`
+	Status        string `json:"status,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
 	// WaitReason explains a waiting_local_directory hold: which directory the
 	// task is parked on and, when known, the short id of the task holding it.
 	// Emitted only for that status — on any other one the column still carries
@@ -1640,6 +1647,15 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	head := tasks[0]
+	canSupplement := false
+	if head.Status == "running" {
+		if cap, err := h.Queries.GetTaskSupplementCapability(r.Context(), head.ID); err == nil {
+			if ag, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID}); err == nil {
+				actorType, _ := h.resolveActor(r, userID, workspaceID)
+				canSupplement = actorType == "member" && session.Status == "active" && !ag.ArchivedAt.Valid && cap.Capability == protocol.DaemonCapabilityTaskSupplementV1 && h.canInvokeAgent(r.Context(), ag, "member", userID, userID, workspaceID)
+			}
+		}
+	}
 	queued := make([]QueuedChatTaskResponse, 0, len(tasks)-1)
 	for _, task := range tasks[1:] {
 		if task.Status != "queued" {
@@ -1661,6 +1677,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
 		SupportsQueue: true,
 		QueuedTasks:   queued,
+		CanSupplement: canSupplement,
 	})
 }
 
@@ -2002,12 +2019,13 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 }
 
 type ChatMessageResponse struct {
-	ID            string  `json:"id"`
-	ChatSessionID string  `json:"chat_session_id"`
-	Role          string  `json:"role"`
-	Content       string  `json:"content"`
-	TaskID        *string `json:"task_id"`
-	CreatedAt     string  `json:"created_at"`
+	Supplement    *ChatSupplementReceipt `json:"supplement,omitempty"`
+	ID            string                 `json:"id"`
+	ChatSessionID string                 `json:"chat_session_id"`
+	Role          string                 `json:"role"`
+	Content       string                 `json:"content"`
+	TaskID        *string                `json:"task_id"`
+	CreatedAt     string                 `json:"created_at"`
 	// FailureReason flags an assistant row synthesized by FailTask's chat
 	// fallback. Front-end uses it to switch to the destructive bubble.
 	FailureReason *string `json:"failure_reason"`

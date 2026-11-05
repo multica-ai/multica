@@ -1948,7 +1948,26 @@ func supplementCodexTurn(ctx context.Context, c *codexClient, instruction string
 		"expectedTurnId": turnID,
 		"input":          []map[string]any{{"type": "text", "text": instruction}},
 	})
+	if err != nil {
+		var rejection *codexRPCError
+		if !errors.As(err, &rejection) {
+			return fmt.Errorf("%w: %w", ErrSupplementDeliveryUnknown, err)
+		}
+	}
 	return err
+}
+
+// ErrSupplementDeliveryUnknown means the engine may have accepted an input
+// before its transport failed. Callers must not automatically send it again.
+var ErrSupplementDeliveryUnknown = errors.New("supplement delivery uncertain")
+
+type codexRPCError struct {
+	method, message string
+	code            int
+}
+
+func (e *codexRPCError) Error() string {
+	return fmt.Sprintf("%s: %s (code=%d)", e.method, e.message, e.code)
 }
 
 func resolveCodexHandshakeTimeouts(opts ExecOptions) (time.Duration, time.Duration) {
@@ -2945,7 +2964,7 @@ func (c *codexClient) handleResponse(raw map[string]json.RawMessage) {
 			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(errData, &rpcErr)
-		pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		pr.ch <- rpcResult{err: &codexRPCError{method: pr.method, message: rpcErr.Message, code: rpcErr.Code}}
 	} else {
 		pr.ch <- rpcResult{result: raw["result"]}
 	}

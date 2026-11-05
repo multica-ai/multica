@@ -34,7 +34,9 @@
     "change_project_context": "更改项目上下文",
     "remove_project_context": "移除项目上下文",
     "no_projects": "还没有项目",
-    "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
+    "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级",
+    "add_to_run": "添加到当前运行",
+    "add_to_run_error": "无法添加消息。草稿已保留。"
   },
   "queue": {
     "title_other": "{{count}} 条排队消息",
@@ -251,5 +253,11 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "supplement": {
+    "pending": "等待发送到当前运行",
+    "delivered": "引擎已接受",
+    "failed": "未送达",
+    "unknown": "送达状态不确定"
   }
 }

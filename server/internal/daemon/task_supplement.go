@@ -137,6 +137,9 @@ func taskSupplementFailureReason(ctx context.Context, err error) string {
 	if strings.Contains(strings.ToLower(err.Error()), "turn") && strings.Contains(strings.ToLower(err.Error()), "not started") {
 		return protocol.TaskSupplementFailureTurnNotStarted
 	}
+	if errors.Is(err, agent.ErrSupplementDeliveryUnknown) {
+		return protocol.TaskSupplementFailureUnknown
+	}
 	return protocol.TaskSupplementFailureProviderRejected
 }
 
