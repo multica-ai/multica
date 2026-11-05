@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
@@ -1191,5 +1191,29 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
     // and B still shows fallback, not A's bytes. The GC timer itself is
     // exercised by the sibling tests above.
     expect(revokeObjectURLMock).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("image download feedback", () => {
+  it("tracks the download promise and blocks repeat clicks only for the pending image", async () => {
+    let finish!: () => void;
+    downloadMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    renderWithQuery(<>
+      <Attachment attachment={{ kind: "record", attachment: makeRecord() }} />
+      <Attachment attachment={{ kind: "record", attachment: makeRecord({ id: "att-2" }) }} />
+    </>);
+    const [first, second] = screen.getAllByRole("button", { name: "Download" });
+    fireEvent.click(first!);
+    expect(first!.getAttribute("aria-busy")).toBe("true");
+    expect(first!.querySelector(".animate-spin")).not.toBeNull();
+    fireEvent.click(first!);
+    fireEvent.click(second!);
+    expect(downloadMock.mock.calls).toEqual([["att-1"], ["att-2"]]);
+    await act(async () => finish());
+    expect(first!.getAttribute("aria-busy")).toBe("false");
+    expect(first!.querySelector(".animate-spin")).toBeNull();
+    fireEvent.click(first!);
+    expect(downloadMock).toHaveBeenCalledTimes(3);
   });
 });

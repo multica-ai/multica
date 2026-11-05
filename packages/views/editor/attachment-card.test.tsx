@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../i18n", () => ({
   useT: () => ({
@@ -214,5 +214,37 @@ describe("AttachmentFileCard — a file in a grid of cards (MUL-7649)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("attachment download feedback", () => {
+  it.each(["row", "card"])("shows pending feedback and prevents repeated %s downloads until rejection", async (layout) => {
+    let reject!: (error: Error) => void;
+    const onDownload = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    const onOtherDownload = vi.fn();
+    const props = { filename: "bundle.zip", onPreview: vi.fn(), onDownload };
+    render(<>
+      {layout === "row"
+        ? <AttachmentCard {...props} href="https://example.test/bundle.zip" />
+        : <AttachmentFileCard {...props} canPreview={false} canDownload />}
+      <AttachmentCard filename="other.zip" href="https://example.test/other.zip" onPreview={vi.fn()} onDownload={onOtherDownload} />
+    </>);
+    const [button, other] = screen.getAllByRole("button", { name: "Download" });
+    const click = layout === "row" ? fireEvent.mouseDown : fireEvent.click;
+    click(button!);
+    expect(button!.getAttribute("aria-busy")).toBe("true");
+    expect(button!.querySelector(".animate-spin")).not.toBeNull();
+    click(button!);
+    if (layout === "card") fireEvent.click(screen.getByRole("button", { name: "bundle.zip" }));
+    expect(onDownload).toHaveBeenCalledOnce();
+    fireEvent.mouseDown(other!);
+    expect(onOtherDownload).toHaveBeenCalledOnce();
+    await act(async () => reject(new Error("download failed")));
+    expect(button!.getAttribute("aria-busy")).toBe("false");
+    expect(button!.querySelector(".animate-spin")).toBeNull();
+    click(button!);
+    expect(onDownload).toHaveBeenCalledTimes(2);
+    await act(async () => reject(new Error("download failed")));
   });
 });
