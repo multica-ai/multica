@@ -13,3 +13,8 @@ export function aiSubmission(request: PendingSend,lifecycle=false,settings?:{mod
     display: { id: request.requestId, clientSubmitId: request.requestId, createdAtUnixMs: request.createdAt, content: [{ type: "text", text }] },
   } };
 }
+
+/** Only an unconfirmed request with retained history in the same executor store may replay automatically. */
+export function canReplaySubmission(record:{confirmed:boolean;lifecycle:boolean;generation:string},reply:{known_history:boolean;store_generation:string}){
+ return !record.confirmed&&record.lifecycle&&record.generation===reply.store_generation&&reply.known_history;
+}

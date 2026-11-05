@@ -67,7 +67,7 @@ import {
   referenceKey,
 } from "@/data/ai-sessions/references";
 import { resolveAIMessage } from "@/data/ai-sessions/reference-queries";
-import { aiSubmission } from "@/data/ai-sessions/submission";
+import { aiSubmission,canReplaySubmission } from "@/data/ai-sessions/submission";
 import {
   ReferenceChips,
   AIMessageContent,
@@ -334,9 +334,10 @@ export function AISessionContent({
         const nativeId =
           authority?.attempt?.request_id ?? record.request.requestId;
         if (
-          authority?.state === "removed" ||
-          snapshot.turns.some((value) => value.request_id === nativeId)
+          authority?.state === "removed" || authority?.state==="attached" ||
+          (!client.submissionLifecycle&&snapshot.turns.some((value) => value.request_id === nativeId))
         ) {
+          draftUploads.forget(record.assets?.map((asset)=>asset.id)??record.request.attachments);
           await submissionOutbox.remove(outboxKey, record.request.requestId);
           settled.add(record.request.requestId);
           continue;
@@ -347,13 +348,16 @@ export function AISessionContent({
             record.request.requestId,
             authority,
           );
-        if (record.confirmed) continue;
-        if (
-          !client.submissionLifecycle ||
-          !record.lifecycle ||
-          record.generation !== client.storeGeneration
-        )
+        if (record.confirmed&&authority) continue;
+        if(!client.submissionLifecycle||!record.lifecycle){
+          const result=await client.promptStatuses(session,[record.request.requestId]);
+          if(result.statuses[record.request.requestId]==="delivered"||result.statuses[record.request.requestId]==="removed"){
+            draftUploads.forget(record.assets?.map((asset)=>asset.id)??record.request.attachments);
+            await submissionOutbox.remove(outboxKey,record.request.requestId);settled.add(record.request.requestId);
+          }
           continue;
+        }
+        if(record.generation!==client.storeGeneration)continue;
         const state = await client.submissionStatuses(session, [
           record.request.requestId,
         ]);
@@ -362,7 +366,8 @@ export function AISessionContent({
         );
         if (value) {
           if (value.state === "attached" || value.state === "removed") {
-            await submissionOutbox.remove(outboxKey, record.request.requestId);
+            draftUploads.forget(record.assets?.map((asset)=>asset.id)??record.request.attachments);
+          await submissionOutbox.remove(outboxKey, record.request.requestId);
             settled.add(record.request.requestId);
           } else
             await submissionOutbox.confirm(
@@ -371,8 +376,7 @@ export function AISessionContent({
               value,
             );
         } else if (
-          state.known_history &&
-          state.store_generation === record.generation
+          canReplaySubmission(record,state)
         ) {
           await deliverSubmission(client,session,outboxKey,draftKey,record,()=>{
             if(useAuthStore.getState().user?.id!==scope.userId||useWorkspaceStore.getState().currentWorkspaceId!==scope.workspaceId)throw new Error("scope_changed");
@@ -382,7 +386,7 @@ export function AISessionContent({
       }
       if (client.submissionLifecycle) {
         const mirror: MobileSubmission[] = snapshot.queue.items.flatMap(
-          (item) => {
+          (item,position) => {
             const parsed = queueItemSchema.safeParse(item);
             if (!parsed.success || settled.has(parsed.data.requestId))
               return [];
@@ -401,6 +405,7 @@ export function AISessionContent({
                 generation: snapshot.store_generation,
                 lifecycle: true,
                 confirmed: true,
+                queueRevision:snapshot.queue.revision,position,
                 authority: snapshot.submissions.find(
                   (value) => value.request_id === request.requestId,
                 ),
@@ -412,7 +417,7 @@ export function AISessionContent({
           mirror.some(
             (item) =>
               !records.some(
-                (old) => old.request.requestId === item.request.requestId,
+                (old) => old.request.requestId === item.request.requestId&&old.queueRevision===item.queueRevision&&old.position===item.position&&old.request.queuePaused===item.request.queuePaused,
               ),
           )
         )

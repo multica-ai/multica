@@ -1,7 +1,7 @@
 import { SUBMISSION_LIFECYCLE_CAPABILITY, localSubmissionStatusesSchema } from "@multica/core/local-conversation/submission";
 import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
-import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, localV2PromptStatusesSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { LOCAL_TIMING_REPORT_CAPABILITY, LOCAL_TIMING_REQUEST_HEADER, isLocalTimingModelOutput, localTimingCloseReason, localTimingFailure, localTimingRequestId, type LocalTimingRecord } from "@multica/core/local-conversation/timing";
 import { createRequestId } from "@/lib/request-id";
@@ -76,6 +76,7 @@ export class AISessionClient {
   private browseRefreshTimer?: ReturnType<typeof setTimeout>;
   submissionLifecycle=false;
   storeGeneration="";
+  promptStatuses(id:string,requestIds:string[]){return this.request("POST",`/sessions/${encodeURIComponent(id)}/queue/status`,localV2PromptStatusesSchema,{request_ids:requestIds});}
   submissionStatuses(id:string,requestIds:string[]){return this.request("POST",`/sessions/${encodeURIComponent(id)}/queue/status`,localSubmissionStatusesSchema,{request_ids:requestIds});}
   connectionError: "incompatible" | null = null;
   /** Stays true through the short reconnect window, so a brief drop shows nothing. */
