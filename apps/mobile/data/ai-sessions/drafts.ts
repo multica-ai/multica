@@ -17,8 +17,19 @@ interface AIDrafts {
   attachments: Record<string, DraftAttachment[]>;
   setAttachments(key: string, value: DraftAttachment[] | ((files: DraftAttachment[]) => DraftAttachment[])): void;
   complete(key: string, request: PendingSend): void;
+  takeOwnership(key:string,request:PendingSend):void;
   pending: Record<string, PendingSend>;
   setPending(key: string, value: PendingSend | null): void;
+}
+
+function submittedDraft(state:AIDrafts,key:string,request:PendingSend){
+ const drafts={...state.drafts},references={...state.references},attachments={...state.attachments};
+ if(drafts[key]===request.text)delete drafts[key];
+ const sent=request.prepared?.references??EMPTY_REFERENCES;
+ if(JSON.stringify((references[key]??EMPTY_REFERENCES).map(({kind,id})=>({kind,id})))===JSON.stringify(sent))delete references[key];
+ const files=attachments[key]?.filter((file)=>!request.attachments.includes(file.id));
+ if(files?.length)attachments[key]=files;else delete attachments[key];
+ return {drafts,references,attachments};
 }
 
 /** A transfer does not survive the app; only attachments the device has stored do. */
@@ -41,15 +52,12 @@ export const useAIDrafts = create(persist<AIDrafts, [], [], Pick<AIDrafts, "draf
     if (value.length) references[key] = value; else delete references[key];
     return { references };
   }),
+  takeOwnership:(key,request)=>set((state)=>submittedDraft(state,key,request)),
   complete: (key, request) => set((state) => {
     // A late acknowledgement must not clear a newer draft or pending request.
     if (state.pending[key]?.requestId !== request.requestId) return state;
-    const drafts = { ...state.drafts }, references = { ...state.references }, attachments = { ...state.attachments }, pending = { ...state.pending };
-    if (drafts[key] === request.text) delete drafts[key];
-    const sent = request.prepared?.references ?? EMPTY_REFERENCES;
-    if (JSON.stringify((references[key] ?? EMPTY_REFERENCES).map(({ kind, id }) => ({ kind, id }))) === JSON.stringify(sent)) delete references[key];
-    const remainingFiles = attachments[key]?.filter((file) => !request.attachments.includes(file.id));
-    if (remainingFiles?.length) attachments[key] = remainingFiles; else delete attachments[key];
+    const {drafts,references,attachments}=submittedDraft(state,key,request);
+    const pending={...state.pending};
     delete pending[key];
     return { drafts, references, attachments, pending };
   }),

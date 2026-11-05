@@ -158,7 +158,7 @@ export function AISessionContent({
   const draft = useAIDrafts((s) => s.drafts[draftKey] ?? "");
   const setDraft = useAIDrafts((s) => s.setDraft);
   const pending = useAIDrafts((s) => s.pending[draftKey]);
-  const setPending = useAIDrafts((s) => s.setPending);
+  const takeOwnership=useAIDrafts((s)=>s.takeOwnership);
   const references = useAIDrafts(
     (s) => s.references[draftKey] ?? EMPTY_REFERENCES,
   );
@@ -602,8 +602,7 @@ export function AISessionContent({
       };
       await submissionOutbox.put(outboxKey, record);
       // Only a committed local record may take ownership of the draft.
-      setPending(draftKey, request);
-      complete(draftKey, request);
+      takeOwnership(draftKey,request);
       client.pendingShown(session, request.requestId);
       submitting.current = false;
       setBusy(false);
