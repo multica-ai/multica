@@ -21,7 +21,7 @@ vi.mock("../shared/agentConversation/components/AgentMessageBlock", () => ({
 }));
 
 describe("conversation row observation", () => {
-  it("streams only the changed row without rerendering another row or the composer", () => {
+  it("streams only the changed row without rerendering another row", () => {
     renders.clear();
     const state = createTestRuntimeState("w"),
       transcript = new TranscriptModel<AgentActivityMessage>();
@@ -61,33 +61,22 @@ describe("conversation row observation", () => {
     const runtime = { ...state, transcript } as unknown as ConversationServices;
     const rows = new ConversationRowsModel(runtime, "s", { workspaceId: "w" });
     runtime.conversationRows = () => rows;
-    let parentRenders = 0,
-      composerRenders = 0;
-    function Composer() {
-      composerRenders++;
-      return <textarea aria-label="Prompt" />;
-    }
-    function Page() {
-      parentRenders++;
-      return (
-        <ConversationServicesProvider runtime={runtime}>
-          <AgentConversationFlow
-            agentSessionId="s"
-            isLoading={false}
-            loadingLabel="Loading"
-            empty={null}
-            labels={{
-              processing: "Working",
-              thinkingLabel: "Thinking",
-              toolCallsLabel: String,
-              turnSummary: "Summary"
-            }}
-          />
-          <Composer />
-        </ConversationServicesProvider>
-      );
-    }
-    render(<Page />);
+    render(
+      <ConversationServicesProvider runtime={runtime}>
+        <AgentConversationFlow
+          agentSessionId="s"
+          isLoading={false}
+          loadingLabel="Loading"
+          empty={null}
+          labels={{
+            processing: "Working",
+            thinkingLabel: "Thinking",
+            toolCallsLabel: String,
+            turnSummary: "Summary"
+          }}
+        />
+      </ConversationServicesProvider>
+    );
     expect(screen.getByText("First reply")).toBeTruthy();
     const before = new Map(renders);
     act(() =>
@@ -97,8 +86,6 @@ describe("conversation row observation", () => {
       ])
     );
     expect(screen.getByText("Second reply streamed")).toBeTruthy();
-    expect(parentRenders).toBe(1);
-    expect(composerRenders).toBe(1);
     const changed = [...renders].filter(
       ([id, count]) => count !== before.get(id)
     );

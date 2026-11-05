@@ -1992,7 +1992,7 @@ describe("AgentMessageMarkdown", () => {
     expect(onLinkClick).toHaveBeenCalledWith("http://127.0.0.1:9999/");
   });
 
-  it("links explicit absolute paths without navigating on render", () => {
+  it("links explicit absolute paths but not slash commands, without navigating on render", () => {
     const onLinkClick = vi.fn();
     render(
       <AgentMessageMarkdown
@@ -2008,15 +2008,13 @@ describe("AgentMessageMarkdown", () => {
         name: "/Users/example/demo/83c66a52-4ff2-436a-a300-e346c9fdd9d2/note.txt"
       })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "/login" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "/login" })).toBeNull();
     expect(
       screen.getByText(
         "/Users/example/demo/83c66a52-4ff2-436a-a300-e346c9fdd9d2/note.txt"
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/Please run/).parentElement).toHaveTextContent(
-      "Please run /login"
-    );
+    expect(screen.getByText(/Please run \/login/)).toBeInTheDocument();
     expect(onLinkClick).not.toHaveBeenCalled();
   });
 

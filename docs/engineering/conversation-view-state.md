@@ -1,17 +1,25 @@
 # 本地会话视图状态
 
-当前状态：迁移方案的实现项已完成。真实用户会话的最终验收由用户负责；下面分别记录实现、自动验证和既有行为边界。
+当前状态：步骤 0–3、5 大体落地，步骤 4 部分完成，真实用户会话尚未验收。方案见 [迁移执行手册](local-conversation-view-migration.md)；下面分别记录实现、自动验证和既有行为边界。
 
-## 迁移完成对照
+## 迁移对照
 
 | 步骤 | 已落地内容 |
 | --- | --- |
-| 0：基线与隔离 | 从 `origin/main` 的 `115bfc7c0` 建独立 worktree；固定假宿主和性能夹具；独立 Electron HOME、配置和端口 |
+| 0：基线与隔离 | 从 `origin/main` 的 `115bfc7c0` 建独立 worktree；固定假宿主和性能夹具；独立 Electron HOME、配置和端口。未完成：T0.5 的 `perf_load.go` 和 `scripts/perf/` |
 | 1：移除 engine | 原生 Prompt、Activation、SessionLoad、Composer Service 接管命令；GUI 会话状态从原生 Model 派生，保留轮次决策前的 flush |
 | 2：界面订阅 | 删除隐藏会话栏；队列面板和 fork 按钮直接观察原生 Service |
 | 3：按轮转录 | 每轮 computed、按 key 读行、独立待发送尾部和稳定结构索引；不改变虚拟化和滚动算法 |
-| 4：拆分 controller | Shell context；原生状态、交互门控、设置、详情和状态条的 GUI computed state；消费组件接收 Model 实例，草稿独立保留原存储 |
+| 4：拆分 controller（部分完成） | 已有 Shell context；原生状态、交互门控、设置、详情和状态条的 GUI computed state；草稿独立保留原存储。未完成见下节 |
 | 5：删除翻译层 | 直接 typed host services；移除 ledger 写路径、旧投影、无效 Side 和 Goal 文案；旧身份及待发送记录一次性迁移 |
+
+## 步骤 4 的剩余工作
+
+- 七组数据仍由 `useAgentGUIViewAssembly` 汇总并经 props 传递，`agentGuiNodeTypes.ts` 仍保留七个 `*ViewModel` 类型。手册的完成标准 grep 只检查旧名字，通过不代表拆分完成。
+- `useAgentGUILocalState`、`useAgentGUIControllerRefs`、`useAgentGUIControllerActions` 待删除；会话选择的三个 hook 待合成 `ConversationSelectionService`。
+- `useAgentGUISubmitInteractionActions`、`useAgentGUIComposerSettingsActions`、`useAgentGUIQueueActions` 待拆，动手前先补草稿保存和恢复测试。
+- `AgentGUIFrame.tsx` 承接了原 `AgentGUINode.tsx` 的逻辑，待缩减到只负责布局。
+- 部分 `useMemo` 和 effect 依赖仍读 Model 字段；`useAgentGUISessionPresentation` 在依赖变化时新建 state 实例，待改为稳定实例。
 
 原生状态不再经 `useAgentGUIViewAssembly` 复制成一组提交、停止、交互和 fork 状态值。`AgentComposer` 直接读取稳定的展示 Model，`AgentSessionChrome` 读取可观察的 chrome source。宿主订阅和延迟提示由 `SessionPresentationHostService` 管理，卸载后释放。
 
@@ -39,7 +47,7 @@
 
 ## 验证边界
 
-Model 测试检查未变化轮次的对象身份、轮次顺序和定位信息。组件测试使用真实 Model/Service 和可控宿主，断言流式时只更新受影响的行，父组件与输入框不重渲染。整页冒烟覆盖无选择挂载和会话切换。浏览器测试使用独立假宿主，不启动用户的模型 CLI 或已安装 daemon。
+Model 测试检查未变化轮次的对象身份、轮次顺序和定位信息。组件测试使用真实 Model/Service 和可控宿主，断言流式时只更新受影响的行。`application.streaming.test.tsx` 用真实应用断言流式时页面外层、详情面板和输入框不重渲染，并覆盖轮次结束后停止按钮消失。整页冒烟覆盖无选择挂载和会话切换；翻页依赖真实滚动，由浏览器回归覆盖。浏览器测试使用独立假宿主，不启动用户的模型 CLI 或已安装 daemon。
 
 ## 改造对应关系
 
@@ -104,7 +112,7 @@ pnpm --filter @multica/desktop dev:isolated
 | GC 后保留堆 | 27,950,940 B | 27,236,980 B |
 
 脚本时间下降约 47%，主线程任务时间下降约 21%，保留堆下降约 2.6%；布局和样式计算仍增加。即时堆受 GC 时机影响，不作为保留内存结论。
-这些数字仅说明此固定长会话夹具。复杂工具输出、慢设备和用户真实会话由后续人工验收覆盖；原方案禁止为了验收运行真实模型。
+这些数字仅说明此固定长会话夹具；手册 1.4 节的切换耗时、首开 500 轮和快速滚动帧率未重测。复杂工具输出、慢设备和用户真实会话由后续人工验收覆盖；原方案禁止为了验收运行真实模型。
 
 三次基线和三次最终样本保存在 [性能数据](conversation-view-performance.json)，测试期间输入文本与编辑器节点均保留，脱离跟随和切换返回的漂移均为 0。
 
