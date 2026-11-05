@@ -71,7 +71,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
-import { QueueOrderInput, QueueWaitingLabel } from "./queue-order-input";
+import { RunQueueControl, RunQueueWaitingLabel } from "./run-queue-control";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
@@ -2925,10 +2925,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             />
           </PropRow>
           {issue.status === "backlog" && (
-            <PropRow label={t(($) => $.queue_order.label)}>
+            <PropRow label={t(($) => $.run_queue.label)}>
               <div className="flex items-center gap-2">
-                <QueueOrderInput issue={issue} className="h-7 w-24" />
-                <QueueWaitingLabel issue={issue} className="text-caption text-muted-foreground" />
+                <RunQueueControl issue={issue} className="h-7 px-2" />
+                <RunQueueWaitingLabel issue={issue} className="text-caption text-muted-foreground" />
               </div>
             </PropRow>
           )}

@@ -379,7 +379,7 @@
       "created_at": "생성일",
       "updated_at": "수정일",
       "child_progress": "하위 태스크 진행률",
-      "queue_order": "실행 순서",
+      "run_queue": "실행 큐",
       "creator": "작성자"
     },
     "calculation": {
@@ -1037,15 +1037,22 @@
     "update_failed": "라벨을 업데이트하지 못했습니다",
     "delete_failed": "라벨을 삭제하지 못했습니다"
   },
-  "queue_order": {
-    "label": "실행 순서",
-    "placeholder": "순서",
-    "waiting": "#{{n}} 대기 중",
-    "confirm_title": "대기열 작업을 지금 시작할까요?",
-    "confirm_desc": "{{count}}개가 지금 할 일로 이동하고 {{runs}}개는 에이전트 실행을 시작합니다.",
-    "confirm_action": "시작",
+  "run_queue": {
+    "label": "실행 큐",
+    "queue": "큐에 추가",
+    "queued": "큐에 있음",
+    "take_out": "큐에서 빼기",
     "apply": "적용",
-    "clear": "지우기"
+    "search_label": "issue 검색",
+    "search_placeholder": "기다릴 issue 검색",
+    "searching": "검색 중…",
+    "no_results": "issue를 찾을 수 없음",
+    "none_selected": "기다리지 않고 바로 시작",
+    "selected_count": "{{count}}개 issue를 기다림",
+    "waiting": "{{count}}개 issue 대기 중",
+    "confirm_title": "대기 중인 작업을 지금 시작할까요?",
+    "confirm_desc": "{{count}}개가 지금 할 일로 이동하고 {{runs}}개가 에이전트 실행을 시작합니다.",
+    "confirm_action": "시작"
   },
   "backlog_hint": {
     "title": "백로그에서는 에이전트가 대기합니다",

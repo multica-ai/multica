@@ -433,8 +433,8 @@ export function onIssueUpdated(
   // Look up the OLD parent + cached entity before mutating cache state, so we
   // can keep the parent's children cache in sync (powers the sub-issues list
   // shown on the parent issue page) and diff-fallback the change flags.
-  // Finishing an issue moves its project's queue number on.
-  qc.invalidateQueries({ queryKey: issueKeys.queueFrontiers(wsId) });
+  // Finishing an issue can release the queued issues that wait on it.
+  qc.invalidateQueries({ queryKey: issueKeys.runQueueWaits(wsId) });
   const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
   const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));

@@ -364,14 +364,19 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     expect(parsed.issues[0]?.stage).toBe(2);
   });
 
-  it("defaults queue_order to null when the server omits it (older backend)", () => {
+  it("defaults run_queued to false and run_after_issue_ids to [] when the server omits them (older backend)", () => {
     const parsed = ListIssuesResponseSchema.parse({ issues: [baseIssue], total: 1 });
-    expect(parsed.issues[0]?.queue_order).toBeNull();
+    expect(parsed.issues[0]?.run_queued).toBe(false);
+    expect(parsed.issues[0]?.run_after_issue_ids).toEqual([]);
   });
 
-  it("accepts a numeric queue_order", () => {
-    const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, queue_order: 3 }], total: 1 });
-    expect(parsed.issues[0]?.queue_order).toBe(3);
+  it("accepts run_queued and the waits it carries", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, run_queued: true, run_after_issue_ids: ["issue-2"] }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.run_queued).toBe(true);
+    expect(parsed.issues[0]?.run_after_issue_ids).toEqual(["issue-2"]);
   });
 
   it("defaults stage to null when the server omits it (older backend)", () => {

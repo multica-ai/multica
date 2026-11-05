@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
-import { useBatchSetIssueQueueOrder, useSetIssueQueueOrder } from "@multica/core/issues/mutations";
-import type { QueueOrderPreview } from "@multica/core/types";
+import { useBatchSetRunQueue, useSetIssueRunQueue } from "@multica/core/issues/mutations";
+import type { RunQueuePreview, RunQueueSetting } from "@multica/core/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,8 +19,8 @@ import { useT } from "../../i18n";
 
 interface Pending {
   ids: string[];
-  order: number | null;
-  preview: QueueOrderPreview;
+  queue: RunQueueSetting;
+  preview: RunQueuePreview;
   onDone?: () => void;
   onCancel?: () => void;
 }
@@ -33,20 +33,20 @@ interface ApplyCallbacks {
 }
 
 /**
- * Numbers backlog issues. When the number would start agent runs at once, it
- * asks first, the way a manual move to Todo does; clearing a number or
- * numbering behind unfinished work applies directly.
+ * Writes run-queue settings. When the change would start agent runs at once it
+ * asks first, the way a manual move to Todo does; taking issues out of the
+ * queue, or waiting on unfinished work, applies directly.
  */
-export function useQueueOrderApply() {
+export function useRunQueueApply() {
   const { t } = useT("issues");
-  const setOne = useSetIssueQueueOrder();
-  const setMany = useBatchSetIssueQueueOrder();
+  const setOne = useSetIssueRunQueue();
+  const setMany = useBatchSetRunQueue();
   const [pending, setPending] = useState<Pending | null>(null);
 
-  const write = async (ids: string[], order: number | null, cb: ApplyCallbacks) => {
+  const write = async (ids: string[], queue: RunQueueSetting, cb: ApplyCallbacks) => {
     try {
-      if (ids.length === 1) await setOne.mutateAsync({ id: ids[0]!, queueOrder: order });
-      else await setMany.mutateAsync({ ids, queueOrder: order });
+      if (ids.length === 1) await setOne.mutateAsync({ id: ids[0]!, queue });
+      else await setMany.mutateAsync({ ids, queue });
       cb.onDone?.();
     } catch (err) {
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.batch.update_failed));
@@ -54,17 +54,17 @@ export function useQueueOrderApply() {
     }
   };
 
-  const apply = async (ids: string[], order: number | null, cb: ApplyCallbacks = {}) => {
+  const apply = async (ids: string[], queue: RunQueueSetting, cb: ApplyCallbacks = {}) => {
     if (ids.length === 0) return;
-    if (order !== null) {
-      // A failed preview must not block the write; the person still chose the number.
-      const preview = await api.previewQueueOrder(ids, order).catch(() => null);
+    if (queue.queued) {
+      // A failed preview must not block the write; the person still chose the waits.
+      const preview = await api.previewRunQueue(ids, queue).catch(() => null);
       if (preview && preview.run_count > 0) {
-        setPending({ ids, order, preview, ...cb });
+        setPending({ ids, queue, preview, ...cb });
         return;
       }
     }
-    await write(ids, order, cb);
+    await write(ids, queue, cb);
   };
 
   const dialog = (
@@ -78,9 +78,9 @@ export function useQueueOrderApply() {
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t(($) => $.queue_order.confirm_title)}</AlertDialogTitle>
+          <AlertDialogTitle>{t(($) => $.run_queue.confirm_title)}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t(($) => $.queue_order.confirm_desc, {
+            {t(($) => $.run_queue.confirm_desc, {
               count: pending?.preview.release_now ?? 0,
               runs: pending?.preview.run_count ?? 0,
             })}
@@ -92,10 +92,10 @@ export function useQueueOrderApply() {
             onClick={() => {
               const current = pending;
               setPending(null);
-              if (current) void write(current.ids, current.order, current);
+              if (current) void write(current.ids, current.queue, current);
             }}
           >
-            {t(($) => $.queue_order.confirm_action)}
+            {t(($) => $.run_queue.confirm_action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

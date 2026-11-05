@@ -385,7 +385,7 @@
       "created_at": "Création",
       "updated_at": "Mise à jour",
       "child_progress": "Avancement des sous-tâches",
-      "queue_order": "Ordre d'exécution",
+      "run_queue": "File d'exécution",
       "creator": "Créé par"
     },
     "calculation": {
@@ -1082,15 +1082,22 @@
     "update_failed": "Échec de la mise à jour de l'étiquette",
     "delete_failed": "Échec de la suppression de l'étiquette"
   },
-  "queue_order": {
-    "label": "Ordre d'exécution",
-    "placeholder": "Ordre",
-    "waiting": "En attente de #{{n}}",
-    "confirm_title": "Démarrer les tâches en file maintenant ?",
-    "confirm_desc": "{{count}} passeront à À faire maintenant et {{runs}} lanceront une exécution d'agent.",
-    "confirm_action": "Démarrer",
+  "run_queue": {
+    "label": "File d'exécution",
+    "queue": "Mettre en file",
+    "queued": "En file",
+    "take_out": "Retirer",
     "apply": "Appliquer",
-    "clear": "Effacer"
+    "search_label": "Rechercher des issues",
+    "search_placeholder": "Rechercher les issues à attendre",
+    "searching": "Recherche…",
+    "no_results": "Aucune issue trouvée",
+    "none_selected": "Démarre immédiatement",
+    "selected_count": "Attend {{count}} issue(s)",
+    "waiting": "En attente de {{count}} issue(s)",
+    "confirm_title": "Lancer les tâches en file maintenant ?",
+    "confirm_desc": "{{count}} passeront à À faire maintenant et {{runs}} lanceront une exécution d'agent.",
+    "confirm_action": "Lancer"
   },
   "backlog_hint": {
     "title": "L'agent est en pause dans À planifier",

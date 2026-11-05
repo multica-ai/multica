@@ -3,7 +3,7 @@ import { parseDigestMode, type DigestSetting, type DigestModeInfo } from "../gov
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema, QueueOrderPreviewSchema, QueueFrontierSchema } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema, RunQueuePreviewSchema, RunQueueWaitSchema } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
@@ -33,8 +33,9 @@ import type {
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
-  QueueFrontier,
-  QueueOrderPreview,
+  RunQueuePreview,
+  RunQueueSetting,
+  RunQueueWait,
   IssueDuplicates,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -1895,31 +1896,32 @@ export class ApiClient {
     });
   }
 
-  async setIssueQueueOrder(id: string, queueOrder: number | null): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}/queue-order`, {
+  /** Queues an issue behind `afterIssueIds`, or takes it out with queued false. */
+  async setIssueRunQueue(id: string, queue: RunQueueSetting): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/run-queue`, {
       method: "PUT",
-      body: JSON.stringify({ queue_order: queueOrder }),
+      body: JSON.stringify({ queued: queue.queued, after_issue_ids: queue.afterIssueIds }),
     });
   }
 
-  async batchSetIssueQueueOrder(ids: string[], queueOrder: number | null): Promise<{ updated: number }> {
-    return this.fetch(`/api/issues/batch-queue-order`, {
+  async batchSetRunQueue(ids: string[], queue: RunQueueSetting): Promise<{ updated: number }> {
+    return this.fetch(`/api/issues/batch-run-queue`, {
       method: "POST",
-      body: JSON.stringify({ issue_ids: ids, queue_order: queueOrder }),
+      body: JSON.stringify({ issue_ids: ids, queued: queue.queued, after_issue_ids: queue.afterIssueIds }),
     });
   }
 
-  async previewQueueOrder(ids: string[], queueOrder: number | null): Promise<QueueOrderPreview> {
-    const raw = await this.fetch<unknown>(`/api/issues/queue-order/preview`, {
+  async previewRunQueue(ids: string[], queue: RunQueueSetting): Promise<RunQueuePreview> {
+    const raw = await this.fetch<unknown>(`/api/issues/run-queue/preview`, {
       method: "POST",
-      body: JSON.stringify({ issue_ids: ids, queue_order: queueOrder }),
+      body: JSON.stringify({ issue_ids: ids, queued: queue.queued, after_issue_ids: queue.afterIssueIds }),
     });
-    return parseWithFallback(raw, QueueOrderPreviewSchema, { release_now: 0, run_count: 0 }, { endpoint: "POST /api/issues/queue-order/preview" });
+    return parseWithFallback(raw, RunQueuePreviewSchema, { release_now: 0, run_count: 0 }, { endpoint: "POST /api/issues/run-queue/preview" });
   }
 
-  async listQueueFrontiers(): Promise<QueueFrontier[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/queue-frontier`);
-    return parseWithFallback(raw, QueueFrontierSchema.array(), [] as QueueFrontier[], { endpoint: "GET /api/issues/queue-frontier" });
+  async listRunQueueWaits(): Promise<RunQueueWait[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/run-queue/waits`);
+    return parseWithFallback(raw, RunQueueWaitSchema.array(), [] as RunQueueWait[], { endpoint: "GET /api/issues/run-queue/waits" });
   }
 
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {

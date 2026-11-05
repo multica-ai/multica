@@ -379,7 +379,7 @@
       "created_at": "建立時間",
       "updated_at": "更新時間",
       "child_progress": "子任務進度",
-      "queue_order": "執行順序",
+      "run_queue": "執行佇列",
       "creator": "建立者"
     },
     "calculation": {
@@ -1037,15 +1037,22 @@
     "update_failed": "更新標籤失敗",
     "delete_failed": "刪除標籤失敗"
   },
-  "queue_order": {
-    "label": "執行順序",
-    "placeholder": "序號",
-    "waiting": "等待 #{{n}}",
-    "confirm_title": "現在開始排隊任務？",
-    "confirm_desc": "{{count}} 個任務將立即移到待辦，其中 {{runs}} 個會啟動智慧體執行。",
-    "confirm_action": "開始",
+  "run_queue": {
+    "label": "執行佇列",
+    "queue": "加入佇列",
+    "queued": "已排隊",
+    "take_out": "移出佇列",
     "apply": "套用",
-    "clear": "清除"
+    "search_label": "搜尋 issue",
+    "search_placeholder": "搜尋要等待的 issue",
+    "searching": "搜尋中…",
+    "no_results": "找不到 issue",
+    "none_selected": "無等待，立即開始",
+    "selected_count": "等待 {{count}} 個 issue",
+    "waiting": "等待 {{count}} 個 issue",
+    "confirm_title": "現在開始排隊的任務？",
+    "confirm_desc": "{{count}} 個將立即移到待辦，{{runs}} 個將啟動 agent 執行。",
+    "confirm_action": "開始"
   },
   "backlog_hint": {
     "title": "AI 代理在 backlog 狀態下暫停",

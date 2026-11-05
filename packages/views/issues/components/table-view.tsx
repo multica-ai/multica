@@ -92,7 +92,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
-import { QueueOrderInput, QueueWaitingLabel } from "./queue-order-input";
+import { RunQueueControl, RunQueueWaitingLabel } from "./run-queue-control";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
@@ -299,7 +299,7 @@ type ColumnLabelKey =
   | "created_at"
   | "updated_at"
   | "child_progress"
-  | "queue_order"
+  | "run_queue"
   | "creator";
 
 const SORTABLE_COLUMNS: Partial<Record<TableSystemColumnKey, SortField>> = {
@@ -1296,12 +1296,8 @@ function IssueTableBodyCell({
           }).format(new Date(issue[key]))}
         </span>
       );
-    case "queue_order":
-      if (issue.status !== "backlog") {
-        return issue.queue_order != null ? (
-          <span className="text-caption text-muted-foreground tabular-nums">{issue.queue_order}</span>
-        ) : null;
-      }
+    case "run_queue":
+      if (issue.status !== "backlog") return null;
       return (
         <div
           className="flex items-center gap-2"
@@ -1310,8 +1306,8 @@ function IssueTableBodyCell({
           onMouseDown={stopRowNavigation}
           onPointerDown={stopRowNavigation}
         >
-          <QueueOrderInput issue={issue} className="h-6 w-14 px-1.5 text-caption" />
-          <QueueWaitingLabel issue={issue} className="truncate text-caption text-muted-foreground" />
+          <RunQueueControl issue={issue} className="h-6 px-1.5 text-caption" />
+          <RunQueueWaitingLabel issue={issue} className="truncate text-caption text-muted-foreground" />
         </div>
       );
     case "child_progress": {

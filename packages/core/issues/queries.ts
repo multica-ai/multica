@@ -47,7 +47,7 @@ export interface IssueSortParam {
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  queueFrontiers: (wsId: string) => [...issueKeys.all(wsId), "queue-frontiers"] as const,
+  runQueueWaits: (wsId: string) => [...issueKeys.all(wsId), "run-queue-waits"] as const,
   /** PREFIX for invalidation — no sort. */
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
   /** FULL KEY for queryOptions — includes sort. */
@@ -719,33 +719,25 @@ export function issueAttachmentsOptions(issueId: string) {
   });
 }
 
-/** Lowest unfinished run-queue number per project; drives the "waiting" label. */
-export function queueFrontiersOptions(wsId: string) {
+/** Queued backlog issues that still wait on unfinished work; drives the "waiting" label. */
+export function runQueueWaitsOptions(wsId: string) {
   return queryOptions({
-    queryKey: issueKeys.queueFrontiers(wsId),
-    queryFn: () => api.listQueueFrontiers(),
+    queryKey: issueKeys.runQueueWaits(wsId),
+    queryFn: () => api.listRunQueueWaits(),
     enabled: !!wsId,
     staleTime: 30_000,
   });
 }
 
 /**
- * The number a queued backlog issue directly waits on: the nearest unfinished
- * number below its own, since numbers run one after another. Null when it is
- * not waiting. `frontiers` is the response of `queueFrontiersOptions`.
+ * Issues a queued backlog issue still waits on. Empty when it is not waiting.
+ * `waits` is the response of `runQueueWaitsOptions`.
  */
-export function queueWaitingOn(
-  issue: Pick<Issue, "status" | "queue_order" | "project_id">,
-  frontiers: readonly { project_id: string | null; unfinished: readonly number[] }[] | undefined,
-): number | null {
-  if (issue.status !== "backlog" || issue.queue_order == null || !frontiers) return null;
-  const projectId = issue.project_id ?? null;
-  const entry = frontiers.find((f) => f.project_id === projectId);
-  let nearest: number | null = null;
-  for (const n of entry?.unfinished ?? []) {
-    if (n < issue.queue_order && (nearest === null || n > nearest)) nearest = n;
-  }
-  return nearest;
+export function runQueueWaitingOn(
+  issueId: string,
+  waits: readonly { issue_id: string; waiting_on_issue_ids: readonly string[] }[] | undefined,
+): readonly string[] {
+  return waits?.find((w) => w.issue_id === issueId)?.waiting_on_issue_ids ?? [];
 }
 
 /**

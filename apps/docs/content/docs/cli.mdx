@@ -393,7 +393,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Change status | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Move within a column | |
-| | `queue-order <id>...` | Number backlog issues in the automatic run queue, or take them out | `--number` / `--clear` (one required), `--preview` (report how many would start a run without changing anything), `--output` |
+| | `queue <id>...` | Queue backlog issues to run automatically, each after the issues it names, or take them out | `--after <id>` (repeatable), `--clear`, `--preview` (report how many would start a run without changing anything), `--output` |
 | | `search <query>` | Search issues | `--limit`, `--include-closed` |
 | | `children <id>` | List sub-issues grouped by stage | |
 | | `pull-requests <id>` | List linked PRs | |

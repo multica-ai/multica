@@ -385,7 +385,7 @@
       "created_at": "Created",
       "updated_at": "Updated",
       "child_progress": "Sub-issue progress",
-      "queue_order": "Run order",
+      "run_queue": "Run queue",
       "creator": "Created by"
     },
     "calculation": {
@@ -1082,15 +1082,22 @@
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
   },
-  "queue_order": {
-    "label": "Run order",
-    "placeholder": "Order",
-    "waiting": "Waiting for #{{n}}",
+  "run_queue": {
+    "label": "Run queue",
+    "queue": "Queue",
+    "queued": "Queued",
+    "take_out": "Take out",
+    "apply": "Apply",
+    "search_label": "Search issues",
+    "search_placeholder": "Search issues to wait for",
+    "searching": "Searching…",
+    "no_results": "No issues found",
+    "none_selected": "Starts right away",
+    "selected_count": "Waits for {{count}} issues",
+    "waiting": "Waiting on {{count}}",
     "confirm_title": "Start queued tasks now?",
     "confirm_desc": "{{count}} will move to Todo now and {{runs}} will start an agent run.",
-    "confirm_action": "Start",
-    "apply": "Apply",
-    "clear": "Clear"
+    "confirm_action": "Start"
   },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",

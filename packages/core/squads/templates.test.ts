@@ -171,7 +171,7 @@ describe("squad instructions", () => {
   it("queue the greenfield epics as numbered issues in the build project", () => {
     const greenfield = template("sdlc_greenfield").instructions;
 
-    expect(greenfield).toContain("multica issue queue-order <issue> --number <N>");
+    expect(greenfield).toContain("multica issue queue <issue> --after <issue>");
     expect(greenfield).toContain("(an issue, not a sub-issue)");
     expect(greenfield).toContain("workflow_id is set");
     expect(greenfield).toContain("holds the queue");

@@ -40,7 +40,7 @@ import { refreshSubscribedIssues } from "./subscribed";
 import { getCurrentWsId } from "../platform/workspace-storage";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { InboxItem, Issue, IssueReaction } from "../types";
+import type { InboxItem, Issue, IssueReaction, RunQueueSetting } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
@@ -418,20 +418,19 @@ export function useUpdateIssue() {
 }
 
 /**
- * Sets or clears an issue's place in the automatic run queue. Not optimistic:
- * arming a number can start the issue at once, so the committed issue is the
- * only honest thing to show.
+ * Queues an issue behind other issues, or takes it out of the run queue. Not
+ * optimistic: a queue with no open waits can start the issue at once, so the
+ * committed issue is the only honest thing to show.
  */
-export function useSetIssueQueueOrder() {
+export function useSetIssueRunQueue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
-    mutationFn: ({ id, queueOrder }: { id: string; queueOrder: number | null }) =>
-      api.setIssueQueueOrder(id, queueOrder),
+    mutationFn: ({ id, queue }: { id: string; queue: RunQueueSetting }) => api.setIssueRunQueue(id, queue),
     onSuccess: (serverIssue) => {
       const reconcile = applyIssueChange(qc, wsId, serverIssue.id, serverIssue, {
-        changed: issueChangedDims({ queue_order: serverIssue.queue_order }, serverIssue),
+        changed: issueChangedDims({ run_queued: serverIssue.run_queued }, serverIssue),
         baseIssue: serverIssue,
         acceptCurrent: (current) =>
           current.revision === undefined ||
@@ -443,19 +442,18 @@ export function useSetIssueQueueOrder() {
     onSettled: () => {
       invalidateIssueDerivatives(qc, wsId, { statusOrProjectChanged: true });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.queueFrontiers(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.runQueueWaits(wsId) });
     },
   });
 }
 
-/** Numbers several issues at once; see useSetIssueQueueOrder. */
-export function useBatchSetIssueQueueOrder() {
+/** Queues or takes out several issues at once; see useSetIssueRunQueue. */
+export function useBatchSetRunQueue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
-    mutationFn: ({ ids, queueOrder }: { ids: string[]; queueOrder: number | null }) =>
-      api.batchSetIssueQueueOrder(ids, queueOrder),
+    mutationFn: ({ ids, queue }: { ids: string[]; queue: RunQueueSetting }) => api.batchSetRunQueue(ids, queue),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },

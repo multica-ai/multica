@@ -379,7 +379,7 @@
       "created_at": "创建时间",
       "updated_at": "更新时间",
       "child_progress": "子任务进度",
-      "queue_order": "执行顺序",
+      "run_queue": "运行队列",
       "creator": "创建者"
     },
     "calculation": {
@@ -1037,15 +1037,22 @@
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
   },
-  "queue_order": {
-    "label": "执行顺序",
-    "placeholder": "序号",
-    "waiting": "等待 #{{n}}",
-    "confirm_title": "现在开始排队任务？",
-    "confirm_desc": "{{count}} 个任务将立即移到待办，其中 {{runs}} 个会启动智能体运行。",
-    "confirm_action": "开始",
+  "run_queue": {
+    "label": "运行队列",
+    "queue": "加入队列",
+    "queued": "已排队",
+    "take_out": "移出队列",
     "apply": "应用",
-    "clear": "清除"
+    "search_label": "搜索 issue",
+    "search_placeholder": "搜索要等待的 issue",
+    "searching": "搜索中…",
+    "no_results": "没有找到 issue",
+    "none_selected": "无等待，立即开始",
+    "selected_count": "等待 {{count}} 个 issue",
+    "waiting": "等待 {{count}} 个 issue",
+    "confirm_title": "现在开始排队的任务？",
+    "confirm_desc": "{{count}} 个将立即移到待办，{{runs}} 个将启动 agent 运行。",
+    "confirm_action": "开始"
   },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",

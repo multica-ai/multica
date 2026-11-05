@@ -224,10 +224,10 @@ export interface Issue {
   // parent assignee is woken when a stage closes while a later one waits;
   // see server/internal/service/issue_wakeup_system.go.
   stage: number | null;
-  // Place in the automatic run queue (null = not queued). A backlog issue moves
-  // to todo once every lower number in its project has finished; equal numbers
-  // start together. See server/internal/handler/issue_queue.go.
-  queue_order?: number | null;
+  // Automatic run queue. A queued backlog issue moves to todo once every issue
+  // in run_after_issue_ids has finished. See server/internal/handler/issue_queue.go.
+  run_queued?: boolean;
+  run_after_issue_ids?: string[];
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`
   // + local formatting, which shifts the day by the viewer's offset.
@@ -253,17 +253,22 @@ export interface Issue {
   source_context?: IssueSourceContext;
 }
 
-/** What numbering a set of backlog issues would do right now. */
-export interface QueueOrderPreview {
+/** Target run-queue state for one or more issues: queued, and the issues they wait on. */
+export interface RunQueueSetting {
+  queued: boolean;
+  afterIssueIds: string[];
+}
+
+/** What queuing a set of backlog issues would do right now. */
+export interface RunQueuePreview {
   /** Issues that would move to todo at once. */
   release_now: number;
   /** Of those, how many would also start an agent run. */
   run_count: number;
 }
 
-/** The lowest unfinished queue number of one project (null = no project). */
-export interface QueueFrontier {
-  project_id: string | null;
-  /** Unfinished queue numbers in the project, ascending. */
-  unfinished: number[];
+/** A queued backlog issue and the issues it still waits on (unfinished or running). */
+export interface RunQueueWait {
+  issue_id: string;
+  waiting_on_issue_ids: string[];
 }

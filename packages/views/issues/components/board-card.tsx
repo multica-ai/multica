@@ -30,7 +30,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
-import { QueueOrderInput, QueueWaitingLabel } from "./queue-order-input";
+import { RunQueueControl, RunQueueWaitingLabel } from "./run-queue-control";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import {
   PEEK_TARGET_ATTR,
@@ -267,17 +267,17 @@ export const BoardCardContent = memo(function BoardCardContent({
         </div>
       )}
 
-      {issue.status === "backlog" && (canEdit || issue.queue_order != null) && (
+      {issue.status === "backlog" && (canEdit || issue.run_queued) && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="text-micro text-muted-foreground">{t(($) => $.queue_order.label)}</span>
+          <span className="text-micro text-muted-foreground">{t(($) => $.run_queue.label)}</span>
           {canEdit ? (
             <FieldWrapper className="flex">
-              <QueueOrderInput issue={issue} className="h-6 w-16 px-1.5 text-caption" />
+              <RunQueueControl issue={issue} className="h-6 px-1.5 text-caption" />
             </FieldWrapper>
           ) : (
-            <span className="text-caption text-muted-foreground tabular-nums">{issue.queue_order}</span>
+            <span className="text-caption text-muted-foreground">{t(($) => $.run_queue.queued)}</span>
           )}
-          <QueueWaitingLabel issue={issue} className="text-micro text-muted-foreground" />
+          <RunQueueWaitingLabel issue={issue} className="text-micro text-muted-foreground" />
         </div>
       )}
 

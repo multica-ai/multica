@@ -379,7 +379,7 @@
       "created_at": "作成日",
       "updated_at": "更新日",
       "child_progress": "サブタスクの進捗",
-      "queue_order": "実行順",
+      "run_queue": "実行キュー",
       "creator": "作成者"
     },
     "calculation": {
@@ -1037,15 +1037,22 @@
     "update_failed": "ラベルを更新できませんでした",
     "delete_failed": "ラベルを削除できませんでした"
   },
-  "queue_order": {
-    "label": "実行順",
-    "placeholder": "順番",
-    "waiting": "#{{n}} を待機中",
-    "confirm_title": "キューのタスクを今すぐ開始しますか？",
-    "confirm_desc": "{{count}} 件が今すぐ未着手に移り、{{runs}} 件でエージェントが実行を開始します。",
-    "confirm_action": "開始",
+  "run_queue": {
+    "label": "実行キュー",
+    "queue": "キューに追加",
+    "queued": "キュー済み",
+    "take_out": "キューから外す",
     "apply": "適用",
-    "clear": "クリア"
+    "search_label": "issueを検索",
+    "search_placeholder": "待つissueを検索",
+    "searching": "検索中…",
+    "no_results": "issueが見つかりません",
+    "none_selected": "待たずにすぐ開始",
+    "selected_count": "{{count}}件のissueを待機",
+    "waiting": "{{count}}件のissueを待機中",
+    "confirm_title": "キューのタスクを今すぐ開始しますか？",
+    "confirm_desc": "{{count}}件が今すぐTodoに移動し、{{runs}}件がエージェント実行を開始します。",
+    "confirm_action": "開始"
   },
   "backlog_hint": {
     "title": "バックログではエージェントが一時停止します",

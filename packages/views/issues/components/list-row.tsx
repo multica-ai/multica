@@ -25,7 +25,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
-import { QueueOrderInput, QueueWaitingLabel } from "./queue-order-input";
+import { RunQueueControl, RunQueueWaitingLabel } from "./run-queue-control";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import {
   PEEKED_ROW_CLASS,
@@ -202,8 +202,8 @@ function ListRowContent({
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <QueueWaitingLabel issue={issue} className="text-caption text-muted-foreground" />
-            <QueueOrderInput issue={issue} className="h-6 w-14 px-1.5 text-caption" />
+            <RunQueueWaitingLabel issue={issue} className="text-caption text-muted-foreground" />
+            <RunQueueControl issue={issue} className="h-6 px-1.5 text-caption" />
           </div>
         )}
       </div>
