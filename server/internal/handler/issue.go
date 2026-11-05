@@ -4431,7 +4431,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			// mode (MUL-6380 / GH #7180).
 			return http.StatusForbidden, "you do not have permission to assign work to this agent"
 		}
-		return 0, ""
+		return h.squadLeaderAssigneeGate(ctx, r, wsUUID, assigneeID)
 	case "squad":
 		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 			ID:          assigneeID,
@@ -4458,6 +4458,46 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	default:
 		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
 	}
+}
+
+// squadLeaderAssigneeGate limits an agent that leads a squad to the members of
+// the squads it leads when it assigns an issue to an agent. The squad leader's
+// briefing lists the roster, but the handler is the trust boundary: without
+// this check a leader can assign to any agent in the workspace. An agent that
+// leads no squad, and an assignment to itself, pass unchanged.
+func (h *Handler) squadLeaderAssigneeGate(ctx context.Context, r *http.Request, wsUUID, assigneeID pgtype.UUID) (int, string) {
+	actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(wsUUID))
+	if actorType != "agent" {
+		return 0, ""
+	}
+	actorUUID, err := util.ParseUUID(actorID)
+	if err != nil || actorUUID == assigneeID {
+		return 0, ""
+	}
+	ledSquads, err := h.Queries.ListSquadsLedByAgent(ctx, db.ListSquadsLedByAgentParams{
+		WorkspaceID: wsUUID,
+		AgentID:     actorUUID,
+	})
+	if err != nil {
+		return http.StatusInternalServerError, "failed to check squad membership"
+	}
+	if len(ledSquads) == 0 {
+		return 0, ""
+	}
+	for _, squadID := range ledSquads {
+		isMember, err := h.Queries.IsSquadMember(ctx, db.IsSquadMemberParams{
+			SquadID:    squadID,
+			MemberType: "agent",
+			MemberID:   assigneeID,
+		})
+		if err != nil {
+			return http.StatusInternalServerError, "failed to check squad membership"
+		}
+		if isMember {
+			return 0, ""
+		}
+	}
+	return http.StatusForbidden, "a squad leader can assign work only to agents in its squad"
 }
 
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
