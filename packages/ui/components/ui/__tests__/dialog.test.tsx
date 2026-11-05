@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./dialog";
-import { CommandDialog, Command, CommandInput } from "./command";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "../dialog";
+import { CommandDialog, Command, CommandInput } from "../command";
 
 async function click(element: Element) {
   fireEvent.pointerDown(element, { pointerType: "mouse", button: 0 });
