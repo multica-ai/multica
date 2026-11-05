@@ -420,8 +420,9 @@ func TestPromptStatuses(t *testing.T) {
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "sent", Text: "first"}); err != nil {
 		t.Fatal(err)
 	}
+	// Hold the queue so a dispatch attempt cannot change the status being asserted.
 	for _, id := range []string{"waiting", "removed"} {
-		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), false, TurnOrigin{}); err != nil {
+		if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", queued(id, id), true, TurnOrigin{}); err != nil {
 			t.Fatal(err)
 		}
 	}
