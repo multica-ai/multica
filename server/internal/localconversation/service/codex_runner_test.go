@@ -137,6 +137,53 @@ func codexSend(t *testing.T, r *CodexRunner, turn string) {
 	}
 }
 
+func TestCodexLateTurnStartDoesNotMutateClosedTurn(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	_, r, _ := newCodexFixture(t, CodexSession{}, func(server *fakeCodex) {
+		server.beforeTurnStart = func() { close(entered); <-release }
+	})
+	result := make(chan error, 1)
+	go func() {
+		result <- r.Send(context.Background(), SendRequest{TurnID: "t1", RequestID: "req-t1", MessageID: "msg-t1", Text: "test"})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn/start was not reached")
+	}
+	r.mu.Lock()
+	turn := r.turn
+	r.mu.Unlock()
+	if turn == nil {
+		t.Fatal("turn was not running")
+	}
+	if err := r.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("send did not return after the late response")
+	}
+	r.mu.Lock()
+	nativeID, current := turn.nativeTurnID, r.turn
+	r.mu.Unlock()
+	if nativeID != "" || current != nil {
+		t.Fatalf("late turn/start mutated a completed turn: native=%q running=%v", nativeID, current != nil)
+	}
+	if r.limiter.Running() != 0 {
+		t.Fatal("closed turn retained a limiter slot")
+	}
+}
+
 func TestCodexRunnerRecordsACompletedTurn(t *testing.T) {
 	t.Parallel()
 

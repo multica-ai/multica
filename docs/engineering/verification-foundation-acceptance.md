@@ -35,6 +35,7 @@
 | 基础测试 | 27 项通过，含缓存并发/篡改、设备互斥、源码身份、等待取消、游标作用域、报告要求与所属 Web 子进程关闭 |
 | 协议/页面集成 | 9 项通过，使用真实 Go service/SQLite/Local API/WS、受控 provider 和 Chromium；不等同完整 Electron |
 | 后端真实数据库导入 | 通过：请求复用/冲突、工作流不自动执行、父子/标签/评论映射、附件字节、受控重置；图关系和损坏附件在写入前拒绝 |
+| 会话关闭并发 | Codex 迟到 turn/start 不修改已关闭 turn；新增回归与队列设置测试各 100 次 race 通过，service 全套 race 通过 |
 | 生产新路由排除 | 生产构建扫描 622 个 JS 工件、4 组 Go 检查通过；开启验证环境变量时新增路由仍返回 404 |
 | `test:desktop` 实际执行 | 返回 instanceBusy，保存 inconclusive；本机存在日常 Desktop，未竞争启动 |
 

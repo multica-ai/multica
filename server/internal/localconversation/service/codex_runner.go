@@ -278,6 +278,10 @@ func (r *CodexRunner) Send(ctx context.Context, req SendRequest) error {
 	// Only the turn/start response establishes the turn; replay frames that
 	// arrived before it are filtered by turn id now.
 	r.mu.Lock()
+	if r.turn != turn {
+		r.mu.Unlock()
+		return nil
+	}
 	turn.nativeTurnID = started.Turn.ID
 	buffered := turn.buffered
 	turn.buffered = nil
@@ -1093,6 +1097,7 @@ func (r *CodexRunner) finish(turn *codexTurn, status string, failure *turnError)
 	}
 	r.turn = nil
 	r.gate.idleSince = r.rec.now()
+	nativeTurnID := turn.nativeTurnID
 	r.mu.Unlock()
 	defer r.limiter.Release()
 	itemStatus := status
@@ -1105,7 +1110,7 @@ func (r *CodexRunner) finish(turn *codexTurn, status string, failure *turnError)
 		finals = append(finals, codexOutput(e))
 	}
 	turn.normMu.Unlock()
-	_ = r.batcher.Append(r.rec.completionBatch(turn.id, turn.nativeTurnID, status, failure, finals), true)
+	_ = r.batcher.Append(r.rec.completionBatch(turn.id, nativeTurnID, status, failure, finals), true)
 	finishTrace(turn.trace, status, failure)
 	if r.onTurnEnd != nil {
 		r.onTurnEnd(turn.id)
