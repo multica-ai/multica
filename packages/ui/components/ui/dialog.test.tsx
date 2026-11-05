@@ -35,7 +35,7 @@ describe("nested dialog dismissal", () => {
     expect(screen.getByPlaceholderText("Search parents")).toBeVisible();
     const backdrops = document.querySelectorAll("[data-slot=dialog-overlay]");
     expect(backdrops).toHaveLength(2);
-    await click(backdrops[1]);
+    await click(backdrops[1]!);
     await waitFor(() => expect(screen.queryByPlaceholderText("Search parents")).not.toBeInTheDocument());
     expect(screen.getByRole("dialog", { name: "Create issue" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Issue title" })).toHaveValue("Keep my draft");
