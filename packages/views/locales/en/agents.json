@@ -912,6 +912,8 @@
     "skills": {
       "assigned_title": "Assigned to agent",
       "assigned_hint": "Turn off a skill to pause its use without removing it.",
+      "inherited_squad_title": "Inherited from squads",
+      "inherited_squad_from": "From {{squads}}",
       "runtime_title": "Inherited from runtime",
       "runtime_hint": "Discovered automatically from {{runtime}} and available whenever this agent runs there.",
       "workspace_badge": "Workspace",

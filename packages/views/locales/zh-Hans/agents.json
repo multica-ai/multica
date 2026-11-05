@@ -893,6 +893,8 @@
     "skills": {
       "assigned_title": "分配给智能体",
       "assigned_hint": "关闭后暂停使用，仍保留分配。",
+      "inherited_squad_title": "从小队继承",
+      "inherited_squad_from": "来自{{squads}}",
       "runtime_title": "从运行时继承",
       "runtime_hint": "自动从 {{runtime}} 发现；只要该智能体在这个运行时执行，就可以直接使用。",
       "workspace_badge": "工作区",

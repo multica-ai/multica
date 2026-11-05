@@ -19,6 +19,7 @@ import {
 } from "../../layout/object-page";
 import { useT } from "../../i18n";
 import { SkillAddDialog } from "./skill-add-dialog";
+import { useInheritedSquadSkills } from "../lib/use-inherited-squad-skills";
 
 /**
  * The skills assigned to the agent, as chips. Adding and removing happen
@@ -40,6 +41,10 @@ export function AgentSkillsSection({
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const [showAdd, setShowAdd] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const directSkillIds = new Set(agent.skills.map((skill) => skill.id));
+  const inheritedSkills = useInheritedSquadSkills(wsId, agent.id).filter(
+    (skill) => !directSkillIds.has(skill.id),
+  );
 
   const handleRemove = async (skillId: string) => {
     setRemovingId(skillId);
@@ -78,7 +83,7 @@ export function AgentSkillsSection({
         </>
       }
     >
-      {agent.skills.length === 0 ? (
+      {agent.skills.length === 0 && inheritedSkills.length === 0 ? (
         <p className="text-body text-muted-foreground">
           {t(($) => $.tab_body.skills.empty_title)}
         </p>
@@ -119,6 +124,27 @@ export function AgentSkillsSection({
           })}
         </ul>
       )}
+      {inheritedSkills.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.skills.inherited_squad_title)}
+          </p>
+          <ul className="flex flex-wrap gap-1.5">
+            {inheritedSkills.map((skill) => (
+              <li
+                key={skill.id}
+                title={t(($) => $.tab_body.skills.inherited_squad_from, {
+                  squads: skill.squadNames.join(", "),
+                })}
+                className="flex h-7 max-w-full items-center gap-1.5 rounded-md border border-dashed bg-card px-2 text-caption text-muted-foreground"
+              >
+                <SkillIcon className="size-3.5 shrink-0" />
+                <span className="min-w-0 truncate">{skill.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <SkillAddDialog agent={agent} open={showAdd} onOpenChange={setShowAdd} />
     </ObjectSection>
   );

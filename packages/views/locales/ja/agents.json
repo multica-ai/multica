@@ -590,6 +590,8 @@
     "skills": {
       "assigned_title": "エージェントに割り当て済み",
       "assigned_hint": "オフにすると割り当てを残したまま使用を停止できます。",
+      "inherited_squad_title": "スクワッドから継承",
+      "inherited_squad_from": "{{squads}} から",
       "runtime_title": "ランタイムから継承",
       "runtime_hint": "{{runtime}} から自動検出され、このエージェントがそこで実行されるときに利用できます。",
       "workspace_badge": "ワークスペース",

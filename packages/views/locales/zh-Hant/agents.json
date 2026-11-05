@@ -893,6 +893,8 @@
     "skills": {
       "assigned_title": "分配給 AI 代理",
       "assigned_hint": "關閉後暫停使用，仍保留分配。",
+      "inherited_squad_title": "從小隊繼承",
+      "inherited_squad_from": "來自{{squads}}",
       "runtime_title": "從執行時繼承",
       "runtime_hint": "自動從 {{runtime}} 發現；只要該 AI 代理在這個執行時執行，就可以直接使用。",
       "workspace_badge": "工作區",

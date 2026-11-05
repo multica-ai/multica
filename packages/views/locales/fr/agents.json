@@ -912,6 +912,8 @@
     "skills": {
       "assigned_title": "Assignés à l'agent",
       "assigned_hint": "Désactivez un skill pour suspendre son utilisation sans le retirer.",
+      "inherited_squad_title": "Hérités des squads",
+      "inherited_squad_from": "De {{squads}}",
       "runtime_title": "Hérités du runtime",
       "runtime_hint": "Détectés automatiquement depuis {{runtime}} et disponibles chaque fois que cet agent s'y exécute.",
       "workspace_badge": "Espace de travail",

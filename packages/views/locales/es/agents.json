@@ -745,6 +745,8 @@
     "skills": {
       "assigned_title": "Asignadas al agente",
       "assigned_hint": "Desactiva una skill para pausar su uso sin quitarla.",
+      "inherited_squad_title": "Heredadas de los squads",
+      "inherited_squad_from": "De {{squads}}",
       "runtime_title": "Heredadas del runtime",
       "runtime_hint": "Descubiertas automáticamente de {{runtime}} y disponibles siempre que este agente se ejecute allí.",
       "workspace_badge": "Espacio de trabajo",
