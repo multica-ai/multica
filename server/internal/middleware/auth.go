@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -229,8 +230,13 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
 				if err != nil {
-					slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					if errors.Is(err, pgx.ErrNoRows) {
+						slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
+						http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+						return
+					}
+					slog.Warn("auth: PAT lookup unavailable", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"pat lookup unavailable"}`, http.StatusServiceUnavailable)
 					return
 				}
 
