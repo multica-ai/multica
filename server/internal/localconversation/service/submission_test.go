@@ -72,7 +72,7 @@ func TestSubmitPreservesPauseAndRemovedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err = f.svc.Submit(ctx, f.scopeID, "conv", queued("new", "new"), TurnOrigin{})
-	if err != nil || result.Submission.State != "removed" {
+	if err != nil || result.Submission.State != "removed" || string(result.Submission.Item) != "{}" {
 		t.Fatalf("removed retry=%+v %v", result, err)
 	}
 	if len(f.sends(t)) != 0 {

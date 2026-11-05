@@ -324,7 +324,7 @@ SELECT * FROM prompt_submission WHERE prompt_submission.conversation_id = ? AND 
 -- name: PutSubmission :exec
 INSERT INTO prompt_submission (conversation_id, request_id, item, state, revision, attempt_id, message_id, blocked_reason, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (conversation_id, request_id) DO UPDATE SET state = excluded.state, revision = excluded.revision, attempt_id = excluded.attempt_id, message_id = excluded.message_id, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at;
+ON CONFLICT (conversation_id, request_id) DO UPDATE SET item = CASE WHEN excluded.state = 'removed' THEN '{}' ELSE prompt_submission.item END, state = excluded.state, revision = excluded.revision, attempt_id = excluded.attempt_id, message_id = excluded.message_id, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at;
 
 -- name: GetAttempt :one
 SELECT * FROM prompt_attempt WHERE conversation_id = ? AND attempt_id = ?;

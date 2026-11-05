@@ -147,6 +147,9 @@ func applySubmissions(ctx context.Context, q *sqlitedb.Queries, b *Batch, starte
 	}
 	save := func(row sqlitedb.PromptSubmission) error {
 		row.Revision++
+		if row.State == "removed" {
+			row.Item = "{}"
+		}
 		row.UpdatedAt = formatTime(now)
 		changed[row.RequestID] = true
 		return putSubmission(ctx, q, row)
@@ -319,8 +322,10 @@ func applySubmissions(ctx context.Context, q *sqlitedb.Queries, b *Batch, starte
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return err
 			}
-			if payload==nil{return errors.New("user message payload must be an object")}
-            payload["submission_id"] = a.SubmissionID
+			if payload == nil {
+				return errors.New("user message payload must be an object")
+			}
+			payload["submission_id"] = a.SubmissionID
 			encoded, err := json.Marshal(payload)
 			if err != nil {
 				return err
