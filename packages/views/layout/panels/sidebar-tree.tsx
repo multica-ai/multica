@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, memo, useCallback, useLayoutEffect, useState } from "react";
+import { forwardRef, memo, useCallback, useId, useLayoutEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -41,6 +41,12 @@ interface TreeRowProps extends React.ComponentProps<"div"> {
   label: string;
   icon: React.ReactNode;
   active: boolean;
+  /**
+   * The row holds the open page without listing it (a collapsed project
+   * with the open issue): a faint mark, never the selected fill. Its text
+   * is read after the label.
+   */
+  hint?: string;
   /** Omit the expand props for a row that only opens its page. */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -66,6 +72,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
     label,
     icon,
     active,
+    hint,
     expanded,
     onExpandedChange,
     listId,
@@ -80,6 +87,8 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   },
   linkRef,
 ) {
+  const hintId = useId();
+  const hinted = !!hint && !active;
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (!onExpandedChange) return;
     if (event.key === "ArrowRight" && !expanded) {
@@ -99,9 +108,12 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
         PANEL_ROW_CLASS,
         panelRowStateClass(active),
         "group/row relative",
-        expanded && !active && "text-foreground",
+        (expanded || hinted) && !active && "text-foreground",
+        hinted &&
+          "before:absolute before:inset-y-1.5 before:left-0.5 before:w-0.5 before:rounded-full before:bg-brand/70",
         className,
       )}
+      data-hinted={hinted || undefined}
     >
       {onExpandedChange ? (
         // The toggle takes the icon's place on hover, so the label keeps the
@@ -141,6 +153,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
         newTabTitle={label}
         draggable={false}
         aria-current={active ? "page" : undefined}
+        aria-describedby={hinted ? hintId : undefined}
         onKeyDown={onKeyDown}
         onClick={onNavigate}
         onNavigateInPlace={onNavigateInPlace}
@@ -148,6 +161,11 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
       >
         {label}
       </AppLink>
+      {hinted && (
+        <span id={hintId} className="sr-only">
+          {hint}
+        </span>
+      )}
       {trailing}
     </div>
   );

@@ -14,7 +14,7 @@ import {
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { ProjectsSection } from "./work-tree";
+import { ProjectsSection, type ProjectsSearch } from "./work-tree";
 
 const apiMock = vi.hoisted(() => ({ putIssueViewPreference: vi.fn() }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
@@ -81,7 +81,7 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection() {
+function renderSection(search?: ProjectsSearch) {
   const qc = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
   qc.setQueryData(
     issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey,
@@ -101,6 +101,7 @@ function renderSection() {
         totalProjects={4}
         plainRowsLit
         activeIssueId={null}
+        search={search}
       />
     </QueryClientProvider>,
   );
@@ -136,6 +137,30 @@ describe("ProjectsSection", () => {
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "New issue in Mobile" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });
+  });
+
+  it("collapses every expanded project at once, leaving other rows and the section open", () => {
+    useSidebarTreeStore.setState({ expanded: ["project:p1", "builtin:my_issues", "project:p3"] });
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all projects" }));
+
+    expect(useSidebarTreeStore.getState().expanded).toEqual(["builtin:my_issues"]);
+    expect(useSidebarTreeStore.getState().projectsCollapsed).toBe(false);
+    expect(screen.getByRole("link", { name: "Desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse all projects" })).toBeNull();
+  });
+
+  it("offers Collapse all only while a project is expanded", () => {
+    renderSection();
+    expect(screen.queryByRole("button", { name: "Collapse all projects" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Issues in Web" }));
+    expect(screen.getByRole("button", { name: "Collapse all projects" })).toBeInTheDocument();
+  });
+
+  it("keeps the manual order while a search narrows the list", () => {
+    renderSection({ query: "o", onQueryChange: vi.fn(), hiddenMatches: 0, searchAll: false, onSearchAllChange: vi.fn() });
+    act(() => dnd.onDragEnd?.({ active: { id: "p2" }, over: { id: "p1" } } as DragEndEvent));
+    expect(apiMock.putIssueViewPreference).not.toHaveBeenCalled();
   });
 
   it("collapses from the section label", () => {

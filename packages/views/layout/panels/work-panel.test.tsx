@@ -20,7 +20,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
-const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), listIssues: vi.fn(), getIssue: vi.fn() }));
 const actions = vi.hoisted(() => ({
   sidebar: {
     items: [
@@ -340,6 +340,112 @@ describe("WorkPanel issue highlight", () => {
 
     fireEvent.click(allIssues());
     expect(screen.queryByRole("link", { name: "Launched" })).toBeNull();
+  });
+});
+
+describe("WorkPanel open issue's project", () => {
+  const IN_PROJECT = {
+    id: "3e2d1c0b-9a8f-4e7d-8c6b-5a4f3e2d1c0b",
+    identifier: "MUL-3",
+    title: "Ship the installer",
+    status: "todo",
+    project_id: PROJECT.id,
+  } as Issue;
+  const projectRow = () => screen.getByRole("link", { name: PROJECT.title });
+
+  function openIssueInProject(pins: PinnedItem[] = []) {
+    const qc = renderPanel(`/acme/issues/${IN_PROJECT.id}`, pins, [PROJECT]);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", IN_PROJECT.id).queryKey, IN_PROJECT);
+    });
+    return qc;
+  }
+
+  it("marks the project faintly instead of expanding it", async () => {
+    openIssueInProject();
+    await screen.findByRole("link", { name: ISSUE.title });
+
+    expect(useSidebarTreeStore.getState().expanded).not.toContain(`project:${PROJECT.id}`);
+    expect(screen.getByRole("button", { name: `Issues in ${PROJECT.title}` })).toHaveAttribute("aria-expanded", "false");
+    expect(projectRow()).not.toHaveAttribute("aria-current");
+    expect(projectRow()).toHaveAccessibleDescription("Contains the open issue");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights the issue itself once the user expands its project", async () => {
+    // An expanded project lists through the plain issue list.
+    apiMock.listIssues.mockResolvedValue({ issues: [IN_PROJECT], total: 1 });
+    useSidebarTreeStore.setState({ expanded: [] });
+    openIssueInProject();
+    fireEvent.click(screen.getByRole("button", { name: `Issues in ${PROJECT.title}` }));
+
+    expect(await screen.findByRole("link", { name: IN_PROJECT.title })).toHaveAttribute("aria-current", "page");
+    expect(projectRow()).not.toHaveAccessibleDescription();
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("leaves the mark to a lit pin", async () => {
+    openIssueInProject([{ ...PIN, item_id: IN_PROJECT.id }]);
+    await screen.findByRole("link", { name: ISSUE.title });
+
+    expect(projectRow()).not.toHaveAccessibleDescription();
+    expect(useSidebarTreeStore.getState().expanded).not.toContain(`project:${PROJECT.id}`);
+  });
+
+  it("lights All issues again while the Projects section is collapsed", async () => {
+    openIssueInProject();
+    await screen.findByRole("link", { name: ISSUE.title });
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+
+    expect(allIssues()).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("WorkPanel project search", () => {
+  const DONE = { ...PROJECT, id: "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a", title: "Launch v1", status: "completed" } as Project;
+  const OTHER_PROJECT = { ...PROJECT, id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", title: "Billing" } as Project;
+
+  function search(query: string) {
+    fireEvent.click(screen.getByRole("button", { name: "Search projects" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search projects" }), { target: { value: query } });
+  }
+
+  it("filters the listed projects by name within the display filter", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT, DONE]);
+    search("LAUNCH");
+
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: OTHER_PROJECT.title })).toBeNull();
+    expect(screen.queryByRole("link", { name: DONE.title })).toBeNull();
+  });
+
+  it("offers the matches the display filter hides, then only the shown ones again", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT, DONE]);
+    search("launch");
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 more outside your display filter" }));
+    expect(screen.getByRole("link", { name: DONE.title })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Only search projects your display filter shows" }));
+    expect(screen.queryByRole("link", { name: DONE.title })).toBeNull();
+  });
+
+  it("says when nothing matches and restores every project once cleared", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT]);
+    search("nothing");
+    expect(screen.getByText("No matching projects")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: OTHER_PROJECT.title })).toBeInTheDocument();
+  });
+
+  it("closes on Escape, clearing the query", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT]);
+    search("bill");
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search projects" }), { key: "Escape" });
+
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
   });
 });
 
