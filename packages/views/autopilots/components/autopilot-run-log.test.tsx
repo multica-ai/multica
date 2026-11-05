@@ -418,4 +418,41 @@ describe("autopilot run log URL", () => {
     await screen.findByText("1 step");
     expect(calls.filter((c) => c.endsWith("/messages"))).toHaveLength(2);
   });
+
+  it.each([403, 404, 503])(
+    "hides cached live events from every dialog surface after a failed read (%i)",
+    async (status) => {
+      const write: TaskMessagePayload = {
+        task_id: taskA, issue_id: "", seq: 2, type: "tool_use", tool: "Write",
+        input: { file_path: "synthetic-denied-cache.txt", content: "Synthetic cached file content" },
+      };
+      getRun = () => response(run("old-run", { status: "running" }));
+      getMessages = () => response([message(), write]);
+      mount();
+      client.setQueryDefaults(chatKeys.taskMessages(taskA), { gcTime: Infinity });
+      await screen.findByText("2 steps");
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      let release!: (r: Response) => void;
+      getMessages = () => new Promise<Response>((resolve) => { release = resolve; });
+      act(() => navigate.push("/ws/autopilots/ap?run=old-run"));
+      await waitFor(() => expect(release).toBeDefined());
+      expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
+      expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+      await act(async () => release(response({ error: "private transcript detail" }, status)));
+      await screen.findByText(status === 503 ? "Could not load execution log." : "Execution log unavailable");
+      expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic cached file content");
+      expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+      expect(screen.queryByText("1 file")).toBeNull();
+      expect(client.getQueryData(chatKeys.taskMessages(taskA))).toEqual([message(), write]);
+      if (status === 503) {
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
+        await act(async () => release(response([message(), write])));
+        await screen.findByText("2 steps");
+        expect(screen.getByTitle("synthetic-denied-cache.txt")).toBeInTheDocument();
+      }
+    },
+  );
+
 });
