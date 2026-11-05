@@ -36,7 +36,39 @@ keep the draft, including newer edits or a draft opened in another session.
 
 Historical guidance remains visible after cancellation but is excluded from
 initial input batches, legacy trailing input and cancellation draft restoration.
-Session deletion and workspace teardown remove receipts in application code.
+Session deletion, workspace teardown and runtime teardown remove receipts in
+application code. Runtime teardown locks the system agents’ sessions and removes
+receipts in the same transaction before deleting those agents. Detached user
+agents retain their sessions and receipts. The shared helper covers manual
+deletion, profile deletion and offline retention GC.
+
+## Explicit retries after an uncertain HTTP result
+
+Before submitting, the client persists the request UUID, session, exact task and
+text using the existing workspace-scoped draft factory and StorageAdapter. These
+are unconfirmed user submissions, not a second cache of server receipts. They
+survive closing the window, navigation, switching between the main and floating
+chat, and reloading. Logout and workspace deletion use the existing draft cleanup.
+
+Retrying the same text uses the original UUID and task, even after that task has
+ended or a successor has started. The server can return the existing receipt
+before testing current availability. A different text gets its own request;
+it cannot overwrite an unresolved one. Success removes only that request, and
+the composer’s existing snapshot guard preserves newer edits and other sessions.
+No request is sent on mount, rehydration or reconnect.
+
+The retry action is labelled **Retry original request**. **Treat as a new
+instruction (may duplicate)** explicitly forgets that request’s local retry
+identity, without sending anything or changing the draft. A subsequent explicit
+send creates a new identity. After a confirmed successful response, an identical
+instruction also counts as a new instruction. Losing the browser’s local storage
+loses unresolved identities; it cannot provide recovery across devices.
+
+The error says the addition could not be confirmed, rather than claiming it was
+not delivered. The claim commits before emitting the existing targeted
+`chat:supplement` event. Both history queries are invalidated, so a previously
+rendered pending receipt becomes uncertain without a page reload while the task
+continues. A late positive acknowledgement refreshes it to accepted.
 
 ## Storage and compatibility
 
@@ -75,7 +107,7 @@ set -a
 set +a
 
 go -C server test ./internal/handler \
-  -run '^Test(ChatSupplement|TaskSupplement|DirectChat_)' -count=1 -v
+  -race -run '^Test(ChatSupplement|TaskSupplement|DirectChat_|DeleteRuntimeProfile_|DeleteAgentRuntime_.*DraftRestores)' -count=1 -v
 go -C server test -race ./internal/daemon ./pkg/agent \
   -run '^Test(ChatSupplementEndToEnd|SupplementCodex|TaskSupplement)' -count=1 -v
 ```
@@ -97,7 +129,7 @@ protocol simulation, not a test of a real Codex executable or model.
 pnpm typecheck
 pnpm lint
 pnpm --filter @multica/core exec vitest run \
-  api/chat-supplement.test.ts chat/use-add-to-chat-run.test.tsx \
+  api/chat-supplement.test.ts chat/use-add-to-chat-run*.test.tsx \
   api/schemas.test.ts realtime/use-realtime-sync.test.ts
 pnpm --filter @multica/views exec vitest run chat/ locales/parity.test.ts
 make build
@@ -119,7 +151,10 @@ make down
 
 The browser test uses TestApiClient with local fixtures. It checks both Chat
 surfaces, capability absence, pending/uncertain/accepted receipts, live ack
-refresh and the draft retained after a terminal-race refusal. It calls claim/ack
+refresh and the draft retained after a terminal-race refusal. It also aborts the
+HTTP response after a real server commit, reloads, and verifies a 200 retry with
+the same request UUID and one receipt. Pending → uncertain → accepted is checked
+without reloading between claim and acknowledgement. It calls claim/ack
 without an engine; the Go integration test owns the engine transport proof.
 Screenshots appear in Playwright's output directory.
 
