@@ -224,7 +224,7 @@ describe("specialist templates", () => {
   it("keeps the UX designer from approving its own design or adding unneeded screens", () => {
     const ux = instructionsOf("ux_designer");
 
-    expect(ux).toContain("Mark the design approved. A person approves it.");
+    expect(ux).toContain("you do not approve your own design, and you do not wait for a person to.");
     expect(ux).toContain("Add a screen, route, or navigation entry that no requirement needs");
   });
 
@@ -587,6 +587,26 @@ describe("company role templates", () => {
       for (const command of named) {
         expect(known.has(command.replace(/^multica /, "")), `${template.id}: ${command}`).toBe(true);
       }
+    }
+  });
+});
+
+describe("SDLC role rules", () => {
+  it("give every SDLC role the unattended rules, and keep the developer's full text", () => {
+    for (const id of ["tech_lead", "product_analyst", "ux_designer", "architect", "bug_fixer", "code_reviewer", "qa_tester", "security_reviewer", "devops_engineer"]) {
+      const t = AGENT_INSTRUCTION_TEMPLATES.find((x) => x.id === id)!;
+      expect(t.instructions, id).toContain("Unattended SDLC work:");
+      expect(t.instructions, id).toContain("superpowers:brainstorming");
+    }
+    const dev = AGENT_INSTRUCTION_TEMPLATES.find((x) => x.id === "fullstack_developer")!;
+    expect(dev.instructions).toContain("Epic builds:");
+    expect(dev.instructions).toContain("Backend unreachable or missing");
+  });
+
+  it("no longer tells an SDLC architect or designer that a person approves the design", () => {
+    for (const id of ["architect", "ux_designer"]) {
+      const t = AGENT_INSTRUCTION_TEMPLATES.find((x) => x.id === id)!;
+      expect(t.instructions, id).not.toContain("A person approves it.");
     }
   });
 });

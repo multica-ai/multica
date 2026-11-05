@@ -116,7 +116,31 @@ describe("squad instructions", () => {
       expect(t.instructions, t.id).toContain("You never build");
       expect(t.instructions, t.id).toContain("do not run it yourself");
       expect(t.instructions, t.id).toContain('"/bmad-build-auto Implement epic 01"');
-      expect(t.instructions, t.id).toContain('building an epic or story goes to "SDLC Developer"');
+      expect(t.instructions, t.id).toContain("building an epic or story goes to SDLC Developer");
+    }
+  });
+
+  it("assign sub-issues by the roster member id, never by a name that could match another agent", () => {
+    for (const t of SQUAD_TEMPLATES) {
+      expect(t.instructions, t.id).toContain("--assignee-id <member id>");
+      expect(t.instructions, t.id).not.toContain('--assignee "');
+      expect(t.instructions, t.id).toContain("Assign by that id, never by name");
+    }
+  });
+
+  it("never wait for a person's approval, including the approval gates of a skill", () => {
+    for (const t of SQUAD_TEMPLATES) {
+      expect(t.instructions, t.id).toContain("Never wait for a person to approve");
+      expect(t.instructions, t.id).toContain("superpowers:brainstorming");
+      expect(t.instructions, t.id).toContain("Do not wait for approval; take the recommended default");
+    }
+  });
+
+  it("carry the developer's decision and epic-close rules into every SDLC squad", () => {
+    for (const t of SQUAD_TEMPLATES) {
+      expect(t.instructions, t.id).toContain("is the member's to make, not a reason to stop");
+      expect(t.instructions, t.id).toContain("reversal cost");
+      expect(t.instructions, t.id).toContain("retrospective is accepted");
     }
   });
 
