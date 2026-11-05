@@ -12,14 +12,29 @@ import {
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { environmentSchema, type Environment } from "../contracts/resources.js";
-import { jsonSchema, resourceIdSchema, toJson } from "../contracts/index.js";
+import {
+  jsonSchema,
+  resourceIdSchema,
+  toJson,
+  jobSchema,
+} from "../contracts/index.js";
 import type { HostStorage } from "../host/storage.js";
 import { redactLogText } from "../host/redact.js";
 import { digest } from "../host/storage.js";
 import type { JobService, OperationContext } from "../host/jobs.js";
 import { problem, toProblem, VerificationError } from "../host/problem.js";
+import {
+  launchReadOnlyPages,
+  type ReadOnlyPageRuntime,
+} from "../page/read-only.js";
+import { sourceIdentity } from "./source-identity.js";
+import { awaitPrerequisites } from "./prerequisites.js";
+import { BuildCache, manifestSchema, verifyBuildFiles } from "./build-cache.js";
+import { probeTool } from "./inspect.js";
+import { DeviceLease } from "./device-lease.js";
 import { prepareToolchain } from "./toolchain.js";
 import { launch, run, type RunningProcess } from "./process.js";
 import type { Bindings } from "../sources/bindings.js";
@@ -102,6 +117,7 @@ async function freePort(): Promise<number> {
 }
 
 export class Environments {
+  private readonly readOnlyPages = new Map<string, ReadOnlyPageRuntime>();
   private readonly processes = new Map<string, RunningProcess[]>();
   private readonly tools = new Map<string, Tools>();
   private lifecycle: Promise<unknown> = Promise.resolve();
@@ -109,6 +125,7 @@ export class Environments {
     private readonly storage: HostStorage,
     jobs: JobService,
     readonly bindings: Bindings,
+    private readonly deviceLease: DeviceLease,
   ) {
     jobs.register("setup.prepare", {
       input: prepareInput,
@@ -127,10 +144,42 @@ export class Environments {
             .object({ environmentId: resourceIdSchema })
             .parse(input).environmentId;
           await context.addResource(id);
-          return this.serializeLifecycle(async () => {
+          if (operation === "stop") {
+            for (const name of await this.storage.list("jobs")) {
+              const pending = await this.storage.read(
+                `jobs/${name}`,
+                jobSchema,
+              );
+              if (
+                pending &&
+                ["setup.start", "setup.prepare"].includes(pending.operation) &&
+                pending.resourceRefs.includes(id) &&
+                ["queued", "running", "awaitingUser"].includes(pending.state)
+              )
+                await jobs.cancel(pending.jobId, `stop.${id}.${pending.jobId}`);
+            }
+          }
+          let result = await this.serializeLifecycle(async () => {
             context.signal.throwIfAborted();
-            return toJson(await this[operation](id, context));
+            return this[operation](id, context);
           });
+          while (operation === "start" && result.state === "awaitingUser") {
+            await context.awaitingUser(
+              String(result.components.readiness ?? "loginRequired"),
+            );
+            await new Promise((done) => setTimeout(done, 1000));
+            context.signal.throwIfAborted();
+            const retained = await this.get(id);
+            if (!["ready", "awaitingUser"].includes(retained.state))
+              throw new VerificationError(
+                problem(
+                  "interrupted",
+                  "The environment was stopped while waiting for user action",
+                ),
+              );
+            result = await this.readiness(retained);
+          }
+          return toJson(result);
         },
       });
   }
@@ -144,6 +193,118 @@ export class Environments {
       throw new VerificationError(
         problem("notFound", "The environment is not owned by this project"),
       );
+    return environment;
+  }
+  async advanceDataGeneration(id: string): Promise<void> {
+    const environment = await this.get(id);
+    await this.save({
+      ...environment,
+      components: { ...environment.components, dataGeneration: randomUUID() },
+    });
+  }
+  async recover(): Promise<void> {
+    for (const name of await this.storage.list("environments")) {
+      const environment = await this.storage.read(
+        `environments/${name}`,
+        environmentSchema,
+      );
+      if (
+        environment &&
+        ["preparing", "starting", "ready", "awaitingUser", "stopping"].includes(
+          environment.state,
+        )
+      )
+        await this.save({
+          ...environment,
+          state: "interrupted",
+          problem: problem(
+            "interrupted",
+            "The host restarted; inspect component identities and explicitly stop retained resources",
+            "inspect",
+          ),
+        });
+    }
+  }
+  async status(id: string): Promise<Environment> {
+    let environment = await this.get(id);
+    if (
+      !["starting", "ready", "awaitingUser", "interrupted", "failed"].includes(
+        environment.state,
+      )
+    )
+      return environment;
+    if (environment.dataMode === "liveReadOnly") {
+      const pages = this.readOnlyPages.get(id);
+      const available = Boolean(pages?.browser.isConnected());
+      environment = {
+        ...environment,
+        state: available ? "ready" : "interrupted",
+        components: {
+          ...environment.components,
+          observedAt: new Date().toISOString(),
+          observed: {
+            application: { status: available ? "available" : "unavailable" },
+          },
+        },
+      };
+      await this.save(environment);
+      return environment;
+    }
+    const components: Record<string, import("../contracts/index.js").Json> = {};
+    for (const source of ["application", "daemon", "backend"] as const) {
+      try {
+        if (source === "application") {
+          const descriptor = await this.descriptor(id);
+          process.kill(descriptor.pid, 0);
+          await this.desktopRequest(id, "/capabilities");
+          components[source] = {
+            status: "available",
+            pid: descriptor.pid,
+            ownerId: descriptor.ownerId,
+          };
+        } else {
+          const ref = await this.connection(id, source);
+          const binding = this.bindings.get(ref);
+          await this.bindings.request(
+            ref,
+            source === "daemon"
+              ? "/health"
+              : `/api/workspaces/${encodeURIComponent(binding.scope.workspaceId)}`,
+          );
+          components[source] = {
+            status: "available",
+            identity: toJson(binding.identity),
+          };
+        }
+      } catch (error) {
+        components[source] = {
+          status: "unavailable",
+          problem: toJson(toProblem(error)),
+        };
+      }
+    }
+    environment = {
+      ...environment,
+      components: {
+        ...environment.components,
+        observedAt: new Date().toISOString(),
+        observed: components,
+      },
+    };
+    if (["ready", "awaitingUser"].includes(environment.state)) {
+      if ((components.application as { status: string }).status !== "available")
+        environment = {
+          ...environment,
+          state: "interrupted",
+          problem: problem(
+            "sourceUnavailable",
+            "The application is offline; retained sources are reported separately",
+            "inspect",
+          ),
+        };
+      else environment = await this.readiness(environment);
+    }
+    await this.save(environment);
     return environment;
   }
   private save(value: Environment) {
@@ -250,6 +411,16 @@ export class Environments {
           "A host-bound source is required for live data",
         ),
       );
+    if (
+      input.dataMode === "liveReadOnly" &&
+      (input.mode !== "renderer" || source?.kind !== "backend")
+    )
+      throw new VerificationError(
+        problem(
+          "unsupportedCapability",
+          "Read-only application pages require renderer mode and an authorized backend binding; daemon data remains readable through source snapshots",
+        ),
+      );
     const apiOrigin =
       source?.scope.apiOrigin ??
       input.apiOrigin ??
@@ -275,24 +446,20 @@ export class Environments {
       state: "preparing",
       apiOrigin,
       ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
-      components: {},
+      components: { runtimeAttempted: false },
     };
-    if (input.dataMode === "liveReadOnly") {
-      environment = {
-        ...environment,
-        checkout: this.storage.projectRoot,
-        state: "prepared",
-        components: {
-          referenceOnly: true,
-          sourceIdentity: toJson(source!.identity),
-          applicationReady: "notApplicable",
-        },
-      };
-      await this.save(environment);
-      return environment;
-    }
     await this.save(environment);
     try {
+      await awaitPrerequisites(
+        this.storage.projectRoot,
+        input.mode,
+        ["platform", "disk", "commandLineTools", "make"],
+        context,
+        async (reason) => {
+          environment.components.waitingReason = reason;
+          await this.save(environment);
+        },
+      );
       await context.progress("checkout");
       await git(this.storage.projectRoot, [
         "worktree",
@@ -388,6 +555,7 @@ export class Environments {
         );
       }
       const sourceDigest = digest(commit + overlay);
+      const sourceTreeDigest = await sourceIdentity(checkout);
       const session = sessionSchema.parse({
         schemaVersion: 1,
         environmentId: id,
@@ -397,6 +565,9 @@ export class Environments {
         commit,
         sourceDigest,
         apiOrigin,
+      });
+      await writeFile(join(directory, "verification.token"), session.token, {
+        mode: 0o600,
       });
       await writeFile(
         join(directory, "session.json"),
@@ -432,6 +603,44 @@ export class Environments {
           signal: context.signal,
         },
       );
+      if (input.dataMode === "liveReadOnly") {
+        const require = createRequire(import.meta.url);
+        await run(
+          tools.node,
+          [
+            join(dirname(require.resolve("playwright/package.json")), "cli.js"),
+            "install",
+            "chromium",
+          ],
+          {
+            cwd: checkout,
+            env: tools.env,
+            log: join(directory, "prepare.log"),
+            signal: context.signal,
+          },
+        );
+        if (input.mode !== "renderer" || source?.kind !== "backend")
+          throw new VerificationError(
+            problem(
+              "unsupportedCapability",
+              "Live read-only pages use renderer mode with a backend binding; full Electron verification uses an isolated snapshot copy",
+            ),
+          );
+        environment = {
+          ...environment,
+          state: "prepared",
+          components: {
+            runtimeAttempted: false,
+            sourceDigest,
+            sourceTreeDigest,
+            buildKind: "development",
+            profile: "readOnlyWeb",
+            readOnlyNetwork: true,
+          },
+        };
+        await this.save(environment);
+        return environment;
+      }
       const require = createRequire(
         join(checkout, "apps/desktop/package.json"),
       );
@@ -467,28 +676,63 @@ export class Environments {
         );
       }
       await context.progress("build");
-      await run(
-        tools.node,
-        [
-          join(checkout, "apps/desktop/scripts/bundle-cli.mjs"),
-          "--require-build",
-          "--verification-dev",
-        ],
+      const versions = await Promise.all([
+        probeTool(tools.node, ["--version"], { cwd: checkout }),
+        // The managed environment selects Go through PATH/GOTOOLCHAIN.
+        new Promise<string>((resolve, reject) =>
+          execFile(
+            "go",
+            ["version"],
+            { cwd: checkout, env: tools.env },
+            (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
+          ),
+        ),
+      ]);
+      const electronVersion = z
+        .object({ version: z.string() })
+        .parse(
+          JSON.parse(
+            await readFile(require.resolve("electron/package.json"), "utf8"),
+          ),
+        ).version;
+      const build = await new BuildCache(
+        join(this.storage.root, "build-cache"),
+      ).materialize(
+        checkout,
         {
-          cwd: join(checkout, "apps/desktop"),
-          env: tools.env,
-          log: join(directory, "prepare.log"),
-          signal: context.signal,
+          sourceDigest,
+          sourceTreeDigest,
+          lockfile: digest(
+            await readFile(join(checkout, "pnpm-lock.yaml"), "utf8"),
+          ),
+          node:
+            versions[0].kind === "available" ? versions[0].output : "unknown",
+          go: versions[1],
+          electron: electronVersion,
+          platform: process.platform,
+          arch: process.arch,
+          GOFLAGS: tools.env.GOFLAGS ?? "",
+          CGO_ENABLED: tools.env.CGO_ENABLED ?? "",
+          SDKROOT: tools.env.SDKROOT ?? "",
+          MACOSX_DEPLOYMENT_TARGET: tools.env.MACOSX_DEPLOYMENT_TARGET ?? "",
+          buildKind: "development",
+          verificationdev: true,
+          mode: input.mode,
         },
-      );
-      if (input.mode === "desktop")
-        for (const script of [
-          "brand-dev-electron.mjs",
-          "build-computer-use.mjs",
-        ])
+        [
+          "apps/desktop/resources/bin",
+          ...(input.mode === "desktop" && process.platform === "darwin"
+            ? ["apps/desktop/resources/native/Multica Computer Use.app"]
+            : []),
+        ],
+        async () => {
           await run(
             tools.node,
-            [join(checkout, "apps/desktop/scripts", script)],
+            [
+              join(checkout, "apps/desktop/scripts/bundle-cli.mjs"),
+              "--require-build",
+              "--verification-dev",
+            ],
             {
               cwd: join(checkout, "apps/desktop"),
               env: tools.env,
@@ -496,11 +740,40 @@ export class Environments {
               signal: context.signal,
             },
           );
+          if (input.mode === "desktop")
+            for (const script of ["build-computer-use.mjs"])
+              await run(
+                tools.node,
+                [join(checkout, "apps/desktop/scripts", script)],
+                {
+                  cwd: join(checkout, "apps/desktop"),
+                  env: tools.env,
+                  log: join(directory, "prepare.log"),
+                  signal: context.signal,
+                },
+              );
+        },
+        context.signal,
+      );
+      if (input.mode === "desktop")
+        await run(
+          tools.node,
+          [join(checkout, "apps/desktop/scripts/brand-dev-electron.mjs")],
+          {
+            cwd: checkout,
+            env: tools.env,
+            log: join(directory, "prepare.log"),
+            signal: context.signal,
+          },
+        );
       environment = {
         ...environment,
         state: "prepared",
         components: {
+          runtimeAttempted: false,
           sourceDigest,
+          sourceTreeDigest,
+          build: toJson(build),
           buildKind: "development",
           profile: "desktop-runtime",
         },
@@ -542,6 +815,14 @@ export class Environments {
     path: string,
     body?: unknown,
   ): Promise<unknown> {
+    const livePages = this.readOnlyPages.get(id);
+    if (livePages && body === undefined) {
+      if (!livePages.browser.isConnected())
+        throw new VerificationError(
+          problem("sourceUnavailable", "The owned browser source is offline"),
+        );
+      return livePages.diagnostic(path, id);
+    }
     const descriptor = await this.descriptor(id),
       session = sessionSchema.parse(
         JSON.parse(
@@ -667,6 +948,14 @@ export class Environments {
     this.bindings.replace({
       ref,
       kind,
+      ...(kind === "backend"
+        ? {
+            verificationTokenFile: join(
+              this.directory(id),
+              "verification.token",
+            ),
+          }
+        : {}),
       ...value,
       access: environment.dataMode === "liveReadOnly" ? "readOnly" : "test",
     });
@@ -679,6 +968,219 @@ export class Environments {
     return ref;
   }
 
+  private async readOnlyControl(id: string, shutdown = false): Promise<void> {
+    const environment = await this.get(id),
+      directory = this.directory(id);
+    const control = z
+      .object({
+        environmentId: z.string(),
+        ownerId: z.string(),
+        pid: z.number().int().positive(),
+        port: z.number().int().positive(),
+        commit: z.string(),
+        sourceDigest: z.string(),
+        apiOrigin: z.string(),
+      })
+      .parse(JSON.parse(await readFile(join(directory, "web.json"), "utf8")));
+    if (
+      control.environmentId !== id ||
+      control.commit !== environment.commit ||
+      control.sourceDigest !== environment.components.sourceDigest ||
+      control.apiOrigin !== environment.apiOrigin
+    )
+      throw new VerificationError(
+        problem(
+          "identityMismatch",
+          "The retained web runtime belongs to another environment",
+        ),
+      );
+    const session = sessionSchema.parse(
+      JSON.parse(await readFile(join(directory, "session.json"), "utf8")),
+    );
+    try {
+      process.kill(control.pid, 0);
+    } catch (error) {
+      if (
+        shutdown &&
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ESRCH"
+      )
+        return;
+      throw error;
+    }
+    const base = `http://127.0.0.1:${control.port}`,
+      headers = { Authorization: `Bearer ${session.token}` };
+    const response = await fetch(`${base}/health`, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+      redirect: "error",
+    });
+    const health = z
+      .object({
+        environmentId: z.string(),
+        ownerId: z.string(),
+        pid: z.number(),
+        commit: z.string(),
+        sourceDigest: z.string(),
+        apiOrigin: z.string(),
+      })
+      .parse(await response.json());
+    if (
+      !response.ok ||
+      Object.entries(health).some(
+        ([key, value]) => value !== control[key as keyof typeof control],
+      )
+    )
+      throw new VerificationError(
+        problem(
+          "identityMismatch",
+          "Web runtime identity no longer matches its retained receipt",
+        ),
+      );
+    if (shutdown) {
+      const stopped = await fetch(`${base}/shutdown`, {
+        method: "POST",
+        headers,
+        signal: AbortSignal.timeout(5000),
+        redirect: "error",
+      });
+      if (!stopped.ok)
+        throw new VerificationError(
+          problem("cleanupIncomplete", "Owned web shutdown was not accepted"),
+        );
+      for (let index = 0; index < 100; index++) {
+        try {
+          process.kill(control.pid, 0);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "ESRCH"
+          )
+            return;
+          throw error;
+        }
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      throw new VerificationError(
+        problem("cleanupIncomplete", "Owned web shutdown has not finished"),
+      );
+    }
+  }
+  private async startReadOnly(
+    environment: Environment,
+    context: OperationContext,
+  ): Promise<Environment> {
+    const id = environment.environmentId;
+    if (this.readOnlyPages.has(id)) return this.status(id);
+    if (!["prepared", "stopped"].includes(environment.state))
+      throw new VerificationError(
+        problem(
+          "interrupted",
+          "Inspect and stop the previous read-only runtime before starting again",
+          "inspect",
+        ),
+      );
+    const tools =
+      this.tools.get(id) ??
+      (await prepareToolchain(
+        environment.checkout,
+        join(this.storage.root, "tools"),
+        context.signal,
+      ));
+    const webPort = await freePort(),
+      debugPort = await freePort();
+    await this.save({ ...environment, state: "starting" });
+    const child = await launch(
+      tools.node,
+      [
+        fileURLToPath(new URL("./read-only-web.js", import.meta.url)),
+        join(this.directory(id), "session.json"),
+        String(webPort),
+      ],
+      {
+        cwd: environment.checkout,
+        env: tools.env,
+        log: join(this.directory(id), "desktop.log"),
+        signal: context.signal,
+      },
+    );
+    this.processes.set(id, [child]);
+    try {
+      const webOrigin = `http://127.0.0.1:${webPort}`;
+      let available = false;
+      for (let index = 0; index < 120; index++) {
+        context.signal.throwIfAborted();
+        try {
+          available =
+            (
+              await fetch(webOrigin, {
+                signal: AbortSignal.timeout(2000),
+                redirect: "manual",
+              })
+            ).status < 500;
+        } catch {
+          /* The dev server is compiling. */
+        }
+        if (available) break;
+        await new Promise((done) => setTimeout(done, 500));
+      }
+      if (!available)
+        throw new VerificationError(
+          problem(
+            "deadlineExceeded",
+            "The read-only web runtime did not become available",
+          ),
+        );
+      const pages = await launchReadOnlyPages(
+        webOrigin,
+        this.bindings,
+        environment.sourceRef!,
+        debugPort,
+      );
+      this.readOnlyPages.set(id, pages);
+      const descriptor = {
+        schemaVersion: 1,
+        environmentId: id,
+        pid: child.pid,
+        ownerId: id,
+        port: webPort,
+        debugPort,
+        commit: environment.commit,
+        sourceDigest: String(environment.components.sourceDigest),
+        apiOrigin: environment.apiOrigin,
+      };
+      await writeFile(
+        join(this.directory(id), "desktop.json"),
+        JSON.stringify(descriptor),
+        { mode: 0o600 },
+      );
+      environment = {
+        ...environment,
+        state: "ready",
+        components: {
+          ...environment.components,
+          applicationKind: "webBrowser",
+          coverage: "readOnlyWebWithAuthorizedBackend",
+          webOrigin,
+          debugPort,
+          applicationPid: child.pid,
+        },
+      };
+      await this.save(environment);
+      return environment;
+    } catch (error) {
+      await child.stop();
+      this.processes.delete(id);
+      await this.save({
+        ...environment,
+        state: "failed",
+        problem: toProblem(error),
+      });
+      throw error;
+    }
+  }
   private async start(
     id: string,
     context: OperationContext,
@@ -686,27 +1188,25 @@ export class Environments {
     await this.assertTaskBoundary();
     let environment = await this.get(id);
     if (
-      environment.components.referenceOnly === true &&
-      environment.sourceRef
-    ) {
-      const binding = this.bindings.get(environment.sourceRef);
-      await this.bindings.request(
-        binding.ref,
-        binding.kind === "daemon"
-          ? "/health"
-          : `/api/workspaces/${encodeURIComponent(binding.scope.workspaceId)}`,
+      !environment.components.sourceTreeDigest ||
+      environment.components.sourceTreeDigest !==
+        (await sourceIdentity(environment.checkout))
+    )
+      throw new VerificationError(
+        problem(
+          "identityMismatch",
+          "The prepared source tree changed or has no immutable build identity; prepare another environment",
+          "inspect",
+        ),
       );
-      environment = {
-        ...environment,
-        state: "ready",
-        components: {
-          ...environment.components,
-          readiness: "readOnlyReferenceSourceReachable",
-        },
-      };
-      await this.save(environment);
-      return environment;
+    if (environment.components.build) {
+      const build = z
+        .object({ manifest: manifestSchema })
+        .parse(environment.components.build);
+      await verifyBuildFiles(environment.checkout, build.manifest);
     }
+    if (environment.dataMode === "liveReadOnly")
+      return this.startReadOnly(environment, context);
     if (environment.state === "ready" || environment.state === "awaitingUser")
       return this.readiness(environment);
     if (environment.state !== "prepared" && environment.state !== "stopped")
@@ -810,7 +1310,22 @@ export class Environments {
       )
         throw error;
     }
-    environment = { ...environment, state: "starting" };
+    await awaitPrerequisites(
+      environment.checkout,
+      environment.mode,
+      ["graphicalSession", "dockerCompose", "dockerEngine"],
+      context,
+      async (reason) => {
+        environment.components.waitingReason = reason;
+        await this.save(environment);
+      },
+    );
+    await this.deviceLease.acquire(id);
+    environment = {
+      ...environment,
+      state: "starting",
+      components: { ...environment.components, runtimeAttempted: true },
+    };
     await this.save(environment);
     const directory = this.directory(id),
       tools =
@@ -827,10 +1342,40 @@ export class Environments {
       if (environment.dataMode !== "liveReadOnly")
         await run("make", ["up", "C=api,web"], {
           cwd: environment.checkout,
-          env: tools.env,
+          env: {
+            ...tools.env,
+            GOFLAGS: `${tools.env.GOFLAGS ?? ""} -tags=verificationdev`,
+            MULTICA_VERIFICATION_BACKEND: id,
+            MULTICA_VERIFICATION_DIRECTORY: directory,
+            MULTICA_VERIFICATION_TOKEN: (
+              await readFile(join(directory, "verification.token"), "utf8")
+            ).trim(),
+          },
           log: join(directory, "backend.log"),
           signal: context.signal,
         });
+      if (environment.dataMode !== "liveReadOnly") {
+        const configuration = await readFile(
+          join(environment.checkout, ".env.worktree"),
+          "utf8",
+        );
+        const port = /^PORT=(\d+)$/m.exec(configuration)?.[1];
+        if (!port)
+          throw new VerificationError(
+            problem(
+              "identityMismatch",
+              "The managed runtime did not publish its actual API port",
+            ),
+          );
+        environment.apiOrigin = `http://localhost:${port}`;
+        const sessionFile = join(directory, "session.json");
+        const session = sessionSchema.parse(
+          JSON.parse(await readFile(sessionFile, "utf8")),
+        );
+        session.apiOrigin = environment.apiOrigin;
+        await writeFile(sessionFile, JSON.stringify(session), { mode: 0o600 });
+        await this.save(environment);
+      }
       const child = await launch(
         tools.node,
         [
@@ -948,6 +1493,28 @@ export class Environments {
       readiness = "loginRequired";
     if (status.userId) {
       try {
+        if (environment.dataMode !== "liveReadOnly") {
+          const response = await fetch(`${environment.apiOrigin}/health`, {
+            signal: AbortSignal.timeout(5000),
+            redirect: "error",
+          });
+          const health = z
+            .object({
+              commit: z.string(),
+              pid: z.number().int().positive(),
+              started_at: z.string(),
+            })
+            .passthrough()
+            .parse(await response.json());
+          if (!response.ok || health.commit !== environment.commit)
+            throw new VerificationError(
+              problem(
+                "identityMismatch",
+                "The backend build does not match the environment",
+              ),
+            );
+          environment.components.backend = toJson(health);
+        }
         const ref = await this.connection(environment.environmentId, "daemon"),
           binding = this.bindings.get(ref);
         const health = z
@@ -998,6 +1565,7 @@ export class Environments {
         ...environment.components,
         readiness,
         applicationPid: status.pid,
+        permissions: toJson(status.permissions ?? null),
       },
     };
     await this.save(current);
@@ -1008,7 +1576,48 @@ export class Environments {
     _context?: OperationContext,
   ): Promise<Environment> {
     let environment = await this.get(id);
-    if (environment.state === "stopped") return environment;
+    if (environment.dataMode === "liveReadOnly") {
+      const pages = this.readOnlyPages.get(id);
+      await pages?.close();
+      this.readOnlyPages.delete(id);
+      const children = this.processes.get(id) ?? [];
+      if (
+        ["ready", "interrupted", "starting", "failed"].includes(
+          environment.state,
+        )
+      ) {
+        try {
+          await this.readOnlyControl(id, true);
+        } catch (error) {
+          if (!children.length)
+            throw new VerificationError(
+              problem(
+                "cleanupIncomplete",
+                "The retained web runtime could not confirm owned shutdown; inspect its private identity",
+                "inspect",
+              ),
+            );
+          if (pages) throw error;
+        }
+      }
+      await Promise.all(children.map((child) => child.stop()));
+      this.processes.delete(id);
+      environment = { ...environment, state: "stopped" };
+      await this.save(environment);
+      return environment;
+    }
+    if (
+      environment.components.runtimeAttempted === false &&
+      !this.processes.has(id)
+    ) {
+      environment = { ...environment, state: "stopped" };
+      await this.save(environment);
+      return environment;
+    }
+    if (environment.state === "stopped") {
+      await this.deviceLease.releaseConfirmed(id);
+      return environment;
+    }
     if (
       environment.state === "prepared" ||
       environment.components.referenceOnly === true
@@ -1077,7 +1686,8 @@ export class Environments {
         }
       }
     }
-    let applicationAbsent = false;
+    let applicationAbsent =
+      this.processes.has(id) && this.processes.get(id)!.length === 0;
     try {
       const descriptor = await this.descriptor(id);
       await this.desktopRequest(id, "/shutdown", {});
@@ -1176,6 +1786,8 @@ export class Environments {
           }),
     };
     await this.save(environment);
+    if (environment.state === "stopped")
+      await this.deviceLease.releaseConfirmed(id);
     return environment;
   }
   async close(): Promise<void> {

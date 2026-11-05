@@ -31,8 +31,22 @@ export function registerOperations(
       input,
       output: jsonSchema,
       outputSchema: `${name}/v1`,
-      run: async (value, context) =>
-        toJson(await execute(input.parse(value), context)),
+      run: async (value, context) => {
+        const parsed = input.parse(value);
+        if (parsed && !Array.isArray(parsed) && typeof parsed === "object")
+          for (const key of [
+            "verificationId",
+            "environmentId",
+            "stepId",
+            "datasetId",
+          ])
+            if (
+              typeof parsed[key] === "string" &&
+              resourceIdSchema.safeParse(parsed[key]).success
+            )
+              await context.addResource(parsed[key]);
+        return toJson(await execute(parsed, context));
+      },
     });
   register(
     "data.bind",
@@ -56,7 +70,7 @@ export function registerOperations(
     async ({ sourceId, selection }, context) => {
       const snapshot = await services.data.snapshot(sourceId, selection);
       await context.addResource(snapshot.dataSnapshotId);
-      return { ...snapshot, content: undefined };
+      return services.data.describeSnapshot(snapshot.dataSnapshotId);
     },
   );
   register(
@@ -111,6 +125,23 @@ export function registerOperations(
     },
   );
   register(
+    "data.workspaceFixture",
+    z
+      .object({
+        environmentId: resourceIdSchema,
+        issueCount: z.number().int().min(0).max(20).default(3),
+      })
+      .strict(),
+    async ({ environmentId, issueCount }, context) =>
+      summarizeDataset(
+        await services.data.workspaceFixture(
+          environmentId,
+          issueCount,
+          context,
+        ),
+      ),
+  );
+  register(
     "data.reset",
     z.object({ datasetId: resourceIdSchema }).strict(),
     async ({ datasetId }, context) => {
@@ -140,10 +171,14 @@ export function registerOperations(
         subjectRef: z.string(),
         description: z.string().max(2000),
         driver: z.enum(["playwright", "computerUse", "api"]),
+        optionalSources: z
+          .array(z.enum(["daemon", "main", "renderer", "backend", "page"]))
+          .max(5)
+          .default([]),
         sources: z
-          .array(z.enum(["daemon", "main", "renderer", "backend"]))
+          .array(z.enum(["daemon", "main", "renderer", "backend", "page"]))
           .min(1)
-          .max(4),
+          .max(5),
       })
       .strict(),
     async (input, context) => {
@@ -175,9 +210,27 @@ export function registerOperations(
         kind: z.enum(["screenshot", "log", "data"]),
         source: z.string().max(200),
         mediaType: z.string().optional(),
+        capturedAt: z.iso.datetime().optional(),
+        colorScheme: z.enum(["light", "dark"]).optional(),
       })
       .strict(),
     (input) => services.evidence.attachFile(input),
+  );
+  register(
+    "evidence.attachImage",
+    z
+      .object({
+        verificationId: resourceIdSchema,
+        environmentId: resourceIdSchema,
+        stepId: resourceIdSchema,
+        data: z.string().max(44 * 1024 * 1024),
+        mediaType: z.enum(["image/png", "image/jpeg"]),
+        source: z.string().min(1).max(200),
+        capturedAt: z.iso.datetime(),
+        colorScheme: z.enum(["light", "dark"]),
+      })
+      .strict(),
+    (input) => services.evidence.attachImage(input),
   );
   register(
     "evidence.bindEnvironment",

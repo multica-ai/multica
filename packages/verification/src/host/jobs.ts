@@ -18,6 +18,7 @@ export interface OperationContext {
   signal: AbortSignal;
   addResource(id: string): Promise<void>;
   progress(phase: string): Promise<void>;
+  awaitingUser(reason: string): Promise<void>;
 }
 export interface Operation {
   input: z.ZodType<Json>;
@@ -283,6 +284,14 @@ export class JobService {
             resourceRefs: [...new Set([...current.resourceRefs, id])],
           };
         });
+      },
+      awaitingUser: async (reason) => {
+        assertActive();
+        await this.update(job.jobId, (current) => ({
+          ...current,
+          state: "awaitingUser",
+          phase: reason,
+        }));
       },
       progress: async (phase) => {
         assertActive();

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   createVerificationInputSchema,
+  toJson,
   resourceIdSchema,
   verificationSchema,
   type CommandResult,
@@ -47,7 +48,7 @@ export class VerificationRecords {
   ): Promise<CommandResult> {
     return this.jobs.submit(
       "verification.create",
-      createVerificationInputSchema.parse(input),
+      toJson(createVerificationInputSchema.parse(input)),
       requestId,
     );
   }

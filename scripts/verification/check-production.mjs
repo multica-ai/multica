@@ -36,6 +36,7 @@ for (const name of [
   "daemon/localhost",
   "localconversation/service",
   "verificationenv",
+  "handler",
 ]) {
   const { stdout } = await execute(
     "go",
@@ -52,5 +53,5 @@ for (const name of [
     );
 }
 console.log(
-  `Production boundary passed: ${checked} JavaScript artifacts and three Go package selections.`,
+  `Production boundary passed: ${checked} JavaScript artifacts and four Go package selections.`,
 );

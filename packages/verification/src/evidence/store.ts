@@ -18,10 +18,12 @@ import {
 import { z } from "zod";
 import {
   checkSchema,
+  datasetSchema,
   environmentSchema,
   evidenceSchema,
   stepSchema,
   stateSnapshotSchema,
+  dataSnapshotSchema,
   type Evidence,
 } from "../contracts/resources.js";
 import {
@@ -35,6 +37,10 @@ import type { VerificationRecords } from "./records.js";
 import { redactLogText } from "../host/redact.js";
 import { problem, VerificationError } from "../host/problem.js";
 
+import { manifestSchema, verifyBuildFiles } from "../setup/build-cache.js";
+import { sourceIdentity } from "../setup/source-identity.js";
+import { enforcePlan } from "./requirements.js";
+
 const reportSchema = z.object({
   schemaVersion: z.literal(1),
   reportRevision: resourceIdSchema,
@@ -47,6 +53,14 @@ const reportSchema = z.object({
   evidence: z.array(evidenceSchema),
   checks: z.array(checkSchema),
   cleanup: jsonSchema,
+  plan: verificationSchema.shape.plan,
+  environments: z.array(environmentSchema),
+  datasets: z.array(datasetSchema),
+  dataSnapshots: z.array(dataSnapshotSchema.omit({ content: true })),
+  steps: z.array(
+    stepSchema.omit({ events: true }).extend({ eventCount: z.number() }),
+  ),
+  jobs: z.array(jsonSchema),
 });
 export type Report = z.infer<typeof reportSchema>;
 const sha256 = (bytes: Uint8Array) =>
@@ -77,6 +91,7 @@ export class EvidenceStore {
     source: string;
     mediaType: string;
     capturedAt?: string;
+    colorScheme?: "light" | "dark";
     coverage?: Evidence["coverage"];
     bytes: Uint8Array;
   }): Promise<Evidence> {
@@ -159,12 +174,35 @@ export class EvidenceStore {
       sha256: sha256(input.bytes),
       bytes: input.bytes.length,
       mediaType: input.mediaType,
+      colorScheme: input.colorScheme,
       capturedAt: input.capturedAt ?? new Date().toISOString(),
       receivedAt: new Date().toISOString(),
       coverage: input.coverage ?? "unknown",
     });
     await this.storage.write(`evidence/${evidenceId}.json`, value);
     return value;
+  }
+  async attachImage(input: {
+    verificationId: string;
+    environmentId: string;
+    stepId: string;
+    data: string;
+    mediaType: "image/png" | "image/jpeg";
+    source: string;
+    capturedAt: string;
+    colorScheme: "light" | "dark";
+  }): Promise<Evidence> {
+    const bytes = Buffer.from(input.data, "base64");
+    if (bytes.toString("base64") !== input.data)
+      throw new VerificationError(
+        problem("invalidInput", "Image data must be canonical base64"),
+      );
+    return this.attach({
+      ...input,
+      kind: "screenshot",
+      coverage: "complete",
+      bytes,
+    });
   }
   async attachFile(
     input: Omit<
@@ -231,9 +269,23 @@ export class EvidenceStore {
         ".json": "application/json",
       }[extname(path).toLowerCase()] ??
       "text/plain";
+    if (
+      input.kind === "screenshot" &&
+      (!input.environmentId ||
+        !input.stepId ||
+        !input.capturedAt ||
+        !input.colorScheme)
+    )
+      throw new VerificationError(
+        problem(
+          "invalidInput",
+          "External screenshots require environment, step, capturedAt and colorScheme provenance",
+        ),
+      );
     return this.attach({
       ...input,
       mediaType,
+      coverage: input.kind === "screenshot" ? "complete" : input.coverage,
       bytes:
         input.kind === "screenshot"
           ? await readFile(path)
@@ -361,6 +413,51 @@ export class EvidenceStore {
           ),
         );
       if (input.conclusion === "passed") {
+        const datasets = [],
+          steps = [];
+        for (const name of await this.storage.list("datasets")) {
+          const value = await this.storage.read(
+            `datasets/${name}`,
+            datasetSchema,
+          );
+          if (value) datasets.push(value);
+        }
+        for (const name of await this.storage.list("steps")) {
+          const value = await this.storage.read(`steps/${name}`, stepSchema);
+          if (value?.verificationId === record.verificationId)
+            steps.push(value);
+        }
+        for (const entry of record.environments) {
+          const environment = await this.storage.read(
+            `environments/${entry.environmentId}.json`,
+            environmentSchema,
+          );
+          if (
+            environment?.components.sourceTreeDigest &&
+            environment.components.sourceTreeDigest !==
+              (await sourceIdentity(environment.checkout))
+          )
+            throw new VerificationError(
+              problem(
+                "coverageIncomplete",
+                "The source tree changed after preparation; the checks no longer identify that build",
+              ),
+            );
+        }
+        for (const entry of record.environments) {
+          const environment = await this.storage.read(
+            `environments/${entry.environmentId}.json`,
+            environmentSchema,
+          );
+          if (environment?.components.build)
+            await verifyBuildFiles(
+              environment.checkout,
+              z
+                .object({ manifest: manifestSchema })
+                .parse(environment.components.build).manifest,
+            );
+        }
+        enforcePlan(record, checks, datasets, steps, evidence);
         const candidateIds = new Set(
             record.environments
               .filter((entry) => entry.role !== "baseline")
@@ -473,20 +570,66 @@ export class EvidenceStore {
             problem("coverageIncomplete", "Required screenshots are missing"),
           );
       }
-      const environments: Json[] = [];
+      const environments: z.infer<typeof environmentSchema>[] = [];
+      const datasets = [],
+        dataSnapshots: Omit<z.infer<typeof dataSnapshotSchema>, "content">[] =
+          [],
+        steps = [],
+        jobs: Json[] = [];
+      const environmentIds = new Set(
+        record.environments.map((item) => item.environmentId),
+      );
+      const refs = new Set([record.verificationId, ...environmentIds]);
+      for (const name of await this.storage.list("datasets")) {
+        const dataset = await this.storage.read(
+          `datasets/${name}`,
+          datasetSchema,
+        );
+        if (dataset && environmentIds.has(dataset.environmentId)) {
+          datasets.push(dataset);
+          refs.add(dataset.datasetId);
+          if (
+            dataset.dataSnapshotId &&
+            !dataSnapshots.some(
+              (item) => item.dataSnapshotId === dataset.dataSnapshotId,
+            )
+          ) {
+            const snapshot = await this.storage.read(
+              `data-snapshots/${dataset.dataSnapshotId}.json`,
+              dataSnapshotSchema,
+            );
+            if (snapshot) {
+              const { content: _, ...metadata } = snapshot;
+              dataSnapshots.push(metadata);
+            }
+          }
+        }
+      }
+      for (const name of await this.storage.list("steps")) {
+        const step = await this.storage.read(`steps/${name}`, stepSchema);
+        if (step?.verificationId === record.verificationId) {
+          const { events, ...metadata } = step;
+          steps.push({ ...metadata, eventCount: events.length });
+          refs.add(step.stepId);
+        }
+      }
+      for (const check of checks) refs.add(check.checkId);
+      for (const name of await this.storage.list("jobs")) {
+        const job = await this.storage.read(
+          `jobs/${name}`,
+          (await import("../contracts/index.js")).jobSchema,
+        );
+        if (job?.resourceRefs.some((ref) => refs.has(ref))) {
+          const { output: _, ...metadata } = job;
+          jobs.push(jsonSchema.parse(metadata));
+        }
+      }
       for (const entry of record.environments) {
         const environment = await this.storage.read(
           `environments/${entry.environmentId}.json`,
           environmentSchema,
         );
-        if (environment)
-          environments.push(
-            jsonSchema.parse({
-              environmentId: entry.environmentId,
-              state: environment.state,
-              problem: environment.problem ?? null,
-            }),
-          );
+        if (environment) environments.push(environment);
       }
       const report = reportSchema.parse({
         schemaVersion: 1,
@@ -495,7 +638,17 @@ export class EvidenceStore {
         createdAt: new Date().toISOString(),
         evidence,
         checks,
-        cleanup: environments,
+        cleanup: environments.map((environment) => ({
+          environmentId: environment.environmentId,
+          state: environment.state,
+          problem: environment.problem ?? null,
+        })),
+        environments,
+        datasets,
+        dataSnapshots,
+        steps,
+        jobs,
+        plan: record.plan,
       });
       await this.storage.write(`reports/${report.reportRevision}.json`, report);
       record.revisions.push(report.reportRevision);
@@ -549,6 +702,54 @@ export class EvidenceStore {
         });
         files.push({ path: name, sha256: item.sha256 });
       }
+      for (const metadata of report.dataSnapshots) {
+        const snapshot = await this.storage.read(
+          `data-snapshots/${metadata.dataSnapshotId}.json`,
+          dataSnapshotSchema,
+        );
+        if (
+          !snapshot ||
+          sha256(
+            Buffer.from(
+              (await import("../host/storage.js")).canonicalJson(
+                snapshot.content,
+              ),
+            ),
+          ) !== metadata.sha256
+        )
+          throw new VerificationError(
+            problem(
+              "identityMismatch",
+              "The report's immutable data snapshot is missing or changed",
+            ),
+          );
+        for (const attachment of snapshot.attachments) {
+          const expected = `data-snapshots/${snapshot.dataSnapshotId}.files/${sha256(Buffer.from(attachment.originalId))}`;
+          if (attachment.relativePath !== expected)
+            throw new VerificationError(
+              problem("identityMismatch", "Snapshot attachment path changed"),
+            );
+          const bytes = await readFile(join(this.storage.root, expected));
+          if (
+            bytes.length !== attachment.bytes ||
+            sha256(bytes) !== attachment.sha256
+          )
+            throw new VerificationError(
+              problem(
+                "identityMismatch",
+                "Snapshot attachment integrity failed",
+              ),
+            );
+          await mkdir(dirname(join(directory, expected)), { recursive: true });
+          await writeFile(join(directory, expected), bytes, { mode: 0o600 });
+          files.push({ path: expected, sha256: attachment.sha256 });
+        }
+        const path = `data-snapshots/${snapshot.dataSnapshotId}.json`,
+          bytes = Buffer.from(JSON.stringify(snapshot));
+        await mkdir(dirname(join(directory, path)), { recursive: true });
+        await writeFile(join(directory, path), bytes, { mode: 0o600 });
+        files.push({ path, sha256: sha256(bytes) });
+      }
       const html = await this.export(verificationId, revision, "html"),
         bytes = await readFile(html.path);
       await writeFile(join(directory, "report.html"), bytes, { mode: 0o600 });
@@ -599,7 +800,7 @@ export class EvidenceStore {
         "\n\n" +
         report.uncovered.map((item) => `- Uncovered: ${item}`).join("\n");
     if (format === "html")
-      body = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><title>${escape(record.title)}</title><style>body{max-width:960px;margin:32px auto;padding:16px;font:16px system-ui}img{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>${escape(record.title)}</h1><p>${escape(report.conclusion)}</p><pre>${escape(report.explanation)}</pre><h2>Checks</h2><pre>${escape(JSON.stringify(report.checks, null, 2))}</pre>${images.map(({ evidence: item, bytes }) => `<figure><img alt="${escape(item.source)}" src="data:${item.mediaType};base64,${bytes.toString("base64")}"><figcaption>${escape(item.environmentId ?? "")} / ${escape(item.stepId ?? "")}</figcaption></figure>`).join("")}<h2>Uncovered</h2><pre>${escape(report.uncovered.join("\n"))}</pre><h2>Sources and cleanup</h2><pre>${escape(JSON.stringify({ evidence: report.evidence, cleanup: report.cleanup }, null, 2))}</pre></html>`;
+      body = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><title>${escape(record.title)}</title><style>body{max-width:960px;margin:32px auto;padding:16px;font:16px system-ui}img{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>${escape(record.title)}</h1><p>${escape(report.conclusion)}</p><pre>${escape(report.explanation)}</pre><h2>Checks</h2><pre>${escape(JSON.stringify(report.checks, null, 2))}</pre>${images.map(({ evidence: item, bytes }) => `<figure><img alt="${escape(item.source)}" src="data:${item.mediaType};base64,${bytes.toString("base64")}"><figcaption>${escape(item.environmentId ?? "")} / ${escape(item.stepId ?? "")}</figcaption></figure>`).join("")}<h2>Uncovered</h2><pre>${escape(report.uncovered.join("\n"))}</pre><h2>Sources and cleanup</h2><pre>${escape(JSON.stringify({ plan: report.plan, environments: report.environments, datasets: report.datasets, dataSnapshots: report.dataSnapshots, steps: report.steps, evidence: report.evidence, cleanup: report.cleanup }, null, 2))}</pre></html>`;
     const path = join(
       this.storage.root,
       "reports",
@@ -746,14 +947,37 @@ export class EvidenceStore {
   }
 }
 function isImage(bytes: Uint8Array, mediaType: string): boolean {
-  return mediaType === "image/png"
-    ? Buffer.from(bytes.subarray(0, 8)).equals(
-        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-      )
-    : mediaType === "image/jpeg"
-      ? bytes[0] === 255 &&
-        bytes[1] === 216 &&
-        bytes[bytes.length - 2] === 255 &&
-        bytes[bytes.length - 1] === 217
-      : false;
+  const data = Buffer.from(bytes);
+  if (mediaType === "image/png")
+    return (
+      data.length >= 45 &&
+      data
+        .subarray(0, 8)
+        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+      data.toString("ascii", 12, 16) === "IHDR" &&
+      data.readUInt32BE(16) > 0 &&
+      data.readUInt32BE(20) > 0 &&
+      data.toString("ascii", data.length - 8, data.length - 4) === "IEND"
+    );
+  if (
+    mediaType === "image/jpeg" &&
+    data.length > 12 &&
+    data[0] === 255 &&
+    data[1] === 216 &&
+    data[data.length - 2] === 255 &&
+    data[data.length - 1] === 217
+  ) {
+    for (let offset = 2; offset + 9 < data.length; ) {
+      if (data[offset] !== 255) return false;
+      const marker = data[offset + 1],
+        length = data.readUInt16BE(offset + 2);
+      if (length < 2 || offset + 2 + length > data.length) return false;
+      if (marker === 192 || marker === 194)
+        return (
+          data.readUInt16BE(offset + 5) > 0 && data.readUInt16BE(offset + 7) > 0
+        );
+      offset += length + 2;
+    }
+  }
+  return false;
 }

@@ -19,7 +19,8 @@
     "check:lint": "eslint .",
     "test:manual": "pnpm run build:manual && vitest run",
     "test:integration": "pnpm run build:manual && vitest run --config vitest.integration.config.ts",
-    "mcp": "node dist/mcp/stdio.js"
+    "mcp": "node dist/mcp/stdio.js",
+    "test:desktop": "pnpm run build:manual && MULTICA_RUN_DESKTOP_VERIFICATION=1 node dist/desktop.acceptance.js"
   },
   "engines": {
     "node": ">=22"

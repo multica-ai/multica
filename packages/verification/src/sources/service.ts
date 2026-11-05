@@ -1,3 +1,4 @@
+import { pageEvents, eventFilterSchema } from "./event-page.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import WebSocket from "ws";
@@ -18,7 +19,7 @@ import type { EvidenceStore } from "../evidence/store.js";
 import type { VerificationRecords } from "../evidence/records.js";
 import { problem, toProblem, VerificationError } from "../host/problem.js";
 
-export type SourceKind = "daemon" | "main" | "renderer" | "backend";
+export type SourceKind = "daemon" | "main" | "renderer" | "backend" | "page";
 const snapshotWire = z
   .object({
     version: z.literal(2),
@@ -65,7 +66,10 @@ export class Sources {
   }
   async capabilities(environmentId: string) {
     const result: Record<string, unknown> = {};
-    for (const source of ["daemon", "main"] as const)
+    const environment = await this.environments.get(environmentId);
+    for (const source of (environment.dataMode === "liveReadOnly"
+      ? ["page"]
+      : ["daemon", "main"]) as ("page" | "daemon" | "main")[])
       try {
         result[source] =
           source === "daemon"
@@ -248,12 +252,21 @@ export class Sources {
       description: string;
       driver: Step["driver"];
       sources: SourceKind[];
+      optionalSources?: SourceKind[];
     },
     context?: OperationContext,
   ): Promise<Step> {
     if (this.active.size >= 32)
       throw new VerificationError(
         problem("instanceBusy", "At most 32 observation steps may be active"),
+      );
+    const optionalSources = input.optionalSources ?? [];
+    if (optionalSources.some((source) => input.sources.includes(source)))
+      throw new VerificationError(
+        problem(
+          "invalidInput",
+          "Required and optional sources must be disjoint",
+        ),
       );
     if (input.sources.includes("renderer") && !input.sources.includes("main"))
       input = { ...input, sources: [...input.sources, "main"] };
@@ -274,7 +287,7 @@ export class Sources {
     const snapshot = await this.snapshot(
       input.environmentId,
       input.subjectRef,
-      input.sources,
+      [...input.sources, ...optionalSources],
     );
     const step: Step = {
       schemaVersion: 1,
@@ -283,7 +296,12 @@ export class Sources {
       environmentId: input.environmentId,
       subjectRef: input.subjectRef,
       description: input.description,
+      dataGeneration: String(
+        (await this.environments.get(input.environmentId)).components
+          .dataGeneration ?? "initial",
+      ),
       driver: input.driver,
+      optionalSources,
       state: "observing",
       startedAt: new Date().toISOString(),
       startSnapshotId: snapshot.stateSnapshotId,
@@ -300,8 +318,11 @@ export class Sources {
         observation.cursor === undefined ||
         !observation.generation
       ) {
-        step.coverage = "partial";
-        step.gaps.push(`${observation.source}:unavailable`);
+        if (!optionalSources.includes(observation.source))
+          step.coverage = "partial";
+        step.gaps.push(
+          `${optionalSources.includes(observation.source) ? "optional." : ""}${observation.source}:unavailable`,
+        );
         continue;
       }
       step.startCursors[observation.source] = observation.cursor;
@@ -334,7 +355,10 @@ export class Sources {
     active.timer.unref();
     this.active.set(step.stepId, active);
     for (const observation of snapshot.observations.filter(
-      (item) => item.status === "available" && item.source !== "backend",
+      (item) =>
+        item.status === "available" &&
+        item.source !== "backend" &&
+        item.source !== "page",
     )) {
       try {
         let url: string, headers: Record<string, string>;
@@ -506,6 +530,9 @@ export class Sources {
                   ...(typeof raw.turn_id === "string"
                     ? { turnId: raw.turn_id }
                     : {}),
+                  ...(typeof raw.request_id === "string"
+                    ? { requestId: raw.request_id }
+                    : {}),
                   payload: raw.payload ?? null,
                 });
                 step.events.push(event);
@@ -533,7 +560,8 @@ export class Sources {
                 );
             }
           } catch {
-            step.coverage = "partial";
+            if (!step.optionalSources.includes(source as SourceKind))
+              step.coverage = "partial";
             if (!step.gaps.includes(`${source}:coverageIncomplete`))
               step.gaps.push(`${source}:coverageIncomplete`);
           }
@@ -571,7 +599,8 @@ export class Sources {
     step.coverage = collected.coverage;
     for (const [source, watermark] of Object.entries(watermarks))
       if (source !== "renderer" && step.endCursors[source] !== watermark) {
-        step.coverage = "partial";
+        if (!step.optionalSources.includes(source as SourceKind))
+          step.coverage = "partial";
         step.gaps.push(`${source}:unconfirmedEndWatermark`);
       }
     for (const source of snapshot.observations)
@@ -580,7 +609,8 @@ export class Sources {
         `${source.generation}:${source.instance}` !==
           step.generations[source.source]
       ) {
-        step.coverage = "partial";
+        if (!step.optionalSources.includes(source.source))
+          step.coverage = "partial";
         step.gaps.push(`${source.source}:sourceChanged`);
       }
     step.endSnapshotId = snapshot.stateSnapshotId;
@@ -629,15 +659,26 @@ export class Sources {
       hasMore: cursor + limit < items.length,
     };
   }
-  async events(id: string, cursor = 0, limit = 100) {
+  async events(
+    id: string,
+    cursor?: string,
+    limit = 100,
+    filter: z.input<typeof eventFilterSchema> = {},
+  ) {
     const step = await this.get(id);
-    return {
-      items: step.events.slice(cursor, cursor + limit),
-      nextCursor: Math.min(step.events.length, cursor + limit),
-      hasMore: cursor + limit < step.events.length,
-      coverage: step.coverage,
-      gaps: step.gaps,
-    };
+    const environment = await this.environments.get(step.environmentId);
+    if (
+      step.dataGeneration !==
+      String(environment.components.dataGeneration ?? "initial")
+    )
+      throw new VerificationError(
+        problem(
+          "staleReference",
+          "The observation belongs to an earlier dataset generation; read its archived evidence instead",
+          "reobserve",
+        ),
+      );
+    return pageEvents(step, filter, cursor, limit);
   }
   async close(): Promise<void> {
     for (const id of this.active.keys())

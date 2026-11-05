@@ -1,3 +1,4 @@
+import { eventFilterSchema } from "../sources/event-page.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -9,7 +10,7 @@ import {
   toJson,
 } from "../contracts/index.js";
 import type { VerificationHost } from "../host/host.js";
-import { toProblem } from "../host/problem.js";
+import { toProblem, problem, VerificationError } from "../host/problem.js";
 import { prepareInput } from "../setup/environments.js";
 import { checkInput } from "../checks/service.js";
 import { pageActionSchema } from "../page/service.js";
@@ -44,7 +45,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "setup_inspect",
     {
       description:
-        "Read toolchain requirements from the bound checkout and probe Node, pnpm, Go and Git. Does not install dependencies or prove application readiness.",
+        "Inspect declared tools, disk, GUI session, build dependencies, managed database, ports and CU prerequisites; return preparation steps. Application identity and permissions are rechecked after launch.",
       inputSchema: { mode: z.enum(["renderer", "desktop"]).default("desktop") },
       annotations: {
         readOnlyHint: true,
@@ -112,7 +113,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
               : target.kind === "receipt"
                 ? await host.jobs.getReceipt(target.receiptId)
                 : target.kind === "environment"
-                  ? await host.environments.get(target.environmentId)
+                  ? await host.environments.status(target.environmentId)
                   : await host.jobs.byRequest(target.requestId),
         ),
       ),
@@ -193,6 +194,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
               title: action.title,
               kind: action.kind,
               requireScreenshots: action.requireScreenshots,
+              plan: action.plan,
             },
             action.requestId,
           );
@@ -293,6 +295,11 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
             .object({
               operation: z.literal("inspectSnapshot"),
               dataSnapshotId: resourceIdSchema,
+              section: z
+                .enum(["entities", "relationships", "attachments"])
+                .default("entities"),
+              cursor: z.number().int().nonnegative().default(0),
+              limit: z.number().int().min(1).max(100).default(50),
             })
             .strict(),
           z
@@ -315,7 +322,11 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
             .object({
               operation: z.literal("createFixture"),
               environmentId: resourceIdSchema,
-              template: z.literal("conversation.controlled/v1"),
+              template: z.enum([
+                "conversation.controlled/v1",
+                "workspace.basic/v1",
+              ]),
+              issueCount: z.number().int().min(0).max(20).default(3),
               historyMessageCount: z.number().int().min(0).max(1000).default(0),
               requestId: requestIdSchema,
             })
@@ -348,12 +359,15 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
       respond(async () => {
         if (action.operation === "inspectSource")
           return readOk(await host.data.inspect(action.sourceId));
-        if (action.operation === "inspectSnapshot") {
-          const { content: _, ...value } = await host.data.getSnapshot(
-            action.dataSnapshotId,
+        if (action.operation === "inspectSnapshot")
+          return readOk(
+            await host.data.describeSnapshot(
+              action.dataSnapshotId,
+              action.section,
+              action.cursor,
+              action.limit,
+            ),
           );
-          return readOk(value);
-        }
         if (action.operation === "inspectDataset")
           return readOk(
             summarizeDataset(await host.data.get(action.datasetId)),
@@ -376,8 +390,38 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
           resumeImport: "resume",
         }[operation];
         if ("template" in input) {
-          const { template: _, ...fixture } = input;
-          return host.jobs.submit(`data.${name}`, toJson(fixture), requestId);
+          if (input.template === "workspace.basic/v1") {
+            if (input.historyMessageCount !== 0)
+              throw new VerificationError(
+                problem(
+                  "invalidInput",
+                  "Workspace fixtures do not accept conversation history parameters",
+                ),
+              );
+            return host.jobs.submit(
+              "data.workspaceFixture",
+              {
+                environmentId: input.environmentId,
+                issueCount: input.issueCount,
+              },
+              requestId,
+            );
+          }
+          if (input.issueCount !== 3)
+            throw new VerificationError(
+              problem(
+                "invalidInput",
+                "Conversation fixtures do not accept workspace issue parameters",
+              ),
+            );
+          return host.jobs.submit(
+            "data.fixture",
+            {
+              environmentId: input.environmentId,
+              historyMessageCount: input.historyMessageCount,
+            },
+            requestId,
+          );
         }
         return host.jobs.submit(`data.${name}`, toJson(input), requestId);
       }),
@@ -436,9 +480,9 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
         environmentId: resourceIdSchema,
         subjectRef: z.string().default(""),
         sources: z
-          .array(z.enum(["daemon", "main", "renderer", "backend"]))
+          .array(z.enum(["daemon", "main", "renderer", "backend", "page"]))
           .min(1)
-          .max(4)
+          .max(5)
           .default(["daemon"]),
       },
       annotations: {
@@ -504,10 +548,18 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
               subjectRef: z.string(),
               description: z.string().max(2000),
               driver: z.enum(["playwright", "computerUse", "api"]),
+              optionalSources: z
+                .array(
+                  z.enum(["daemon", "main", "renderer", "backend", "page"]),
+                )
+                .max(5)
+                .default([]),
               sources: z
-                .array(z.enum(["daemon", "main", "renderer", "backend"]))
+                .array(
+                  z.enum(["daemon", "main", "renderer", "backend", "page"]),
+                )
                 .min(1)
-                .max(4),
+                .max(5),
               requestId: requestIdSchema,
             })
             .strict(),
@@ -565,7 +617,8 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
         "Read a bounded page of collected step events with explicit coverage and gaps.",
       inputSchema: {
         stepId: resourceIdSchema,
-        cursor: z.number().int().nonnegative().default(0),
+        cursor: z.string().max(4000).optional(),
+        filter: eventFilterSchema.default({}),
         limit: z.number().int().min(1).max(200).default(100),
       },
       annotations: { ...annotations, readOnlyHint: true },
@@ -573,7 +626,12 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     (input) =>
       respond(async () =>
         readOk(
-          await host.sources.events(input.stepId, input.cursor, input.limit),
+          await host.sources.events(
+            input.stepId,
+            input.cursor,
+            input.limit,
+            input.filter,
+          ),
         ),
       ),
   );
@@ -584,7 +642,12 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
         "List predicates or run a deterministic check. Checks execute in the verification host. Failed/unavailable checks remain factual results and cannot be overridden by the caller.",
       inputSchema: {
         action: z.discriminatedUnion("operation", [
-          z.object({ operation: z.literal("list") }).strict(),
+          z
+            .object({
+              operation: z.literal("list"),
+              environmentId: resourceIdSchema,
+            })
+            .strict(),
           checkInput.extend({
             operation: z.literal("check"),
             requestId: requestIdSchema,
@@ -595,7 +658,8 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     },
     ({ action }) =>
       respond(async () => {
-        if (action.operation === "list") return readOk(host.checks.list());
+        if (action.operation === "list")
+          return readOk(await host.checks.list(action.environmentId));
         const { operation: _, requestId, ...input } = action;
         return host.jobs.submit("checks.check", toJson(input), requestId);
       }),
@@ -610,6 +674,20 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
         action: z.discriminatedUnion("operation", [
           z
             .object({
+              operation: z.literal("attachImage"),
+              verificationId: resourceIdSchema,
+              environmentId: resourceIdSchema,
+              stepId: resourceIdSchema,
+              data: z.string().max(44 * 1024 * 1024),
+              mediaType: z.enum(["image/png", "image/jpeg"]),
+              source: z.string().min(1).max(200),
+              capturedAt: z.iso.datetime(),
+              colorScheme: z.enum(["light", "dark"]),
+              requestId: requestIdSchema,
+            })
+            .strict(),
+          z
+            .object({
               operation: z.literal("attach"),
               verificationId: resourceIdSchema,
               environmentId: resourceIdSchema.optional(),
@@ -618,6 +696,8 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
               kind: z.enum(["screenshot", "log", "data"]),
               source: z.string().max(200),
               mediaType: z.string().optional(),
+              capturedAt: z.iso.datetime().optional(),
+              colorScheme: z.enum(["light", "dark"]).optional(),
               requestId: requestIdSchema,
             })
             .strict(),

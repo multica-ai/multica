@@ -6,6 +6,7 @@ import { JobService } from "./jobs.js";
 import { SetupInspector, type Probe } from "../setup/inspect.js";
 import { VerificationRecords } from "../evidence/records.js";
 import { Bindings } from "../sources/bindings.js";
+import { DeviceLease } from "../setup/device-lease.js";
 import { Environments } from "../setup/environments.js";
 import { EvidenceStore } from "../evidence/store.js";
 import { Sources } from "../sources/service.js";
@@ -18,6 +19,7 @@ import type { SourceBinding } from "../contracts/resources.js";
 export interface HostOptions {
   projectRoot: string;
   stateRoot?: string;
+  deviceLeaseRoot?: string;
   recoverLock?: boolean;
   probe?: Probe;
   bindings?: SourceBinding[];
@@ -38,7 +40,17 @@ export async function createVerificationHost(options: HostOptions) {
     const jobs = await JobService.open(storage);
     const records = new VerificationRecords(storage, jobs);
     const bindings = new Bindings(options.bindings);
-    const environments = new Environments(storage, jobs, bindings);
+    const environments = new Environments(
+      storage,
+      jobs,
+      bindings,
+      new DeviceLease(
+        options.deviceLeaseRoot ??
+          join(homedir(), ".multica", "verification-device.lock"),
+        storage.root,
+      ),
+    );
+    await environments.recover();
     const evidence = new EvidenceStore(
       storage,
       records,
@@ -46,6 +58,9 @@ export async function createVerificationHost(options: HostOptions) {
       new Set(options.userWaiverRefs),
       (options.bindings ?? []).flatMap((binding) => [
         binding.tokenFile,
+        ...(binding.verificationTokenFile
+          ? [binding.verificationTokenFile]
+          : []),
         ...(binding.databaseFile ? [binding.databaseFile] : []),
       ]),
     );

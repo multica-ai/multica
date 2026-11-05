@@ -106,7 +106,7 @@ describe("durable verification commands", () => {
     );
   });
 
-  it("cancels cooperatively and preserves already registered resources", async () => {
+  it("cancels a user-waiting operation and preserves already registered resources", async () => {
     const { host } = await fixture();
     const resource = randomUUID();
     let started!: () => void;
@@ -119,6 +119,7 @@ describe("durable verification commands", () => {
       outputSchema: "test/v1",
       run: async (_input, context) => {
         await context.addResource(resource);
+        await context.awaitingUser("systemPermission");
         started();
         await delay(10_000, undefined, { signal: context.signal });
         return null;
@@ -126,6 +127,10 @@ describe("durable verification commands", () => {
     });
     const jobId = accepted(await host.jobs.submit("test.wait", {}, "wait"));
     await running;
+    expect(await host.jobs.get(jobId)).toMatchObject({
+      state: "awaitingUser",
+      phase: "systemPermission",
+    });
     const cancel = await host.jobs.cancel(jobId, "cancel-wait");
     await until(host, accepted(cancel), "completed");
     const stopped = await until(host, jobId, "cancelled");

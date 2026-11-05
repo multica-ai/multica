@@ -354,4 +354,6 @@ finalize 接受 agent 的分析，但检查事实不可被覆盖。passed 必须
 
 实现已经覆盖七个模块的可用闭环，具体状态、已运行命令和边界集中在[验证包说明](../../packages/verification/README.md)和[整体方案的验收范围](automation-runtime-foundation.md#16-首版实现与验收边界)。手动协议集成使用独立临时 SQLite/Go 服务和受控 Chromium，并验证源数据不变、事件不完整不能通过、未知导入可核对恢复。没有新增 CI 或真实模型调用。
 
-范围收敛：本地会话可完整内容导入；后端实体只能采集参考样本。`liveReadOnly` 只管理引用观察记录，不创建页面、不停止真实来源。不同版本通过独立 dev profile/SQLite 对照，同机串行；生产状态根与多实例能力不在本次改动中。干净 Mac 上的完整 Electron GUI 验收仍需实际执行。
+`multica.local-conversation/v1` 和 `multica.workspace/v1` 明确其内容范围、转换、附件清单与限制；不支持的执行上下文或扩展属性不会伪装为完整恢复。`liveReadOnly` 的 renderer 页面通过宿主绑定的来源读取真实数据，并阻断写请求；其 page 来源独立于 Electron main/renderer。不同版本使用独立数据库/profile 和相同不可变输入，设备级串行。
+
+最终通过以已声明的计划、当前数据恢复版本、必需边界检查、按步骤归属的截图及实际来源完整性为门槛。协议和验收证据集中在[验证包说明](../../packages/verification/README.md)及[原方案对齐清单](verification-foundation-acceptance.md)，专用 Mac 的原生验收不由模块测试替代。

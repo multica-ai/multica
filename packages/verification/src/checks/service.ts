@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   checkSchema,
+  datasetSchema,
   predicateSchema,
+  predicateDefinition,
   stateSnapshotSchema,
   temporalSchema,
   type Check,
@@ -34,11 +36,35 @@ export class Checks {
     private readonly pages: Pages,
     private readonly evidence: EvidenceStore,
   ) {}
-  list() {
+  async list(environmentId: string) {
+    const capabilities = await this.sources.capabilities(environmentId);
+    const environment = await this.sources.environments.get(environmentId);
     return {
-      predicates: predicateSchema.shape.kind.options,
-      operators: ["eq", "contains", "gte", "lte"],
-      temporal: ["now", "eventually", "throughout"],
+      environmentId,
+      predicates: predicateSchema.shape.kind.options.map((kind) => {
+        const definition = predicateDefinition(kind);
+        const { schema, ...metadata } = definition;
+        return {
+          kind,
+          ...metadata,
+          schema: z.toJSONSchema(schema),
+          availability:
+            definition.source === "page"
+              ? environment.state === "ready"
+                ? "available"
+                : "unavailable"
+              : capabilities[definition.source] &&
+                  !(capabilities[definition.source] as { status?: string })
+                    .status
+                ? "available"
+                : "unavailable",
+          requirements:
+            kind === "providerFixture.receivedCount"
+              ? ["dev daemon", "controlled fake provider receive records"]
+              : [definition.source],
+        };
+      }),
+      capabilities,
     };
   }
   async check(
@@ -46,60 +72,20 @@ export class Checks {
     signal?: AbortSignal,
     checkpoint?: (id: string) => Promise<void>,
   ): Promise<Check> {
-    const predicate = input.predicate;
-    if (predicate.kind.startsWith("page.")) {
-      if (!predicate.target)
-        throw new VerificationError(
-          problem("invalidInput", "A page condition target is required"),
-        );
-    } else if (
-      predicate.target !== undefined &&
-      typeof predicate.target !== "string"
+    const definition = predicateDefinition(input.predicate.kind);
+    if (
+      !(definition.operators as readonly string[]).includes(
+        input.predicate.operator,
+      ) ||
+      !definition.temporal.includes(input.temporal.mode)
     )
       throw new VerificationError(
         problem(
-          "invalidInput",
-          "Only page predicates accept semantic page locators",
+          "unsupportedCapability",
+          "The predicate does not support this operator or temporal mode",
         ),
       );
-    if (
-      [
-        "queue.itemCount",
-        "providerFixture.receivedCount",
-        "diagnostic.errorCount",
-      ].includes(predicate.kind)
-    ) {
-      z.number().int().nonnegative().parse(predicate.expected);
-      if (predicate.operator === "contains")
-        throw new VerificationError(
-          problem("invalidInput", "Count predicates require eq, gte or lte"),
-        );
-    } else if (
-      ["queue.paused", "page.visible", "page.controlState"].includes(
-        predicate.kind,
-      )
-    ) {
-      z.boolean().parse(predicate.expected);
-      if (predicate.operator !== "eq")
-        throw new VerificationError(
-          problem("invalidInput", "Boolean predicates require eq"),
-        );
-    } else {
-      z.string().parse(predicate.expected);
-      if (!["eq", "contains"].includes(predicate.operator))
-        throw new VerificationError(
-          problem("invalidInput", "Text predicates require eq or contains"),
-        );
-    }
-    if (predicate.kind === "turn.status")
-      z.enum([
-        "pending",
-        "running",
-        "completed",
-        "failed",
-        "cancelled",
-        "interrupted",
-      ]).parse(predicate.expected);
+    definition.schema.parse(input.predicate);
     const record = await this.storage.read(
       `verifications/${input.verificationId}.json`,
       (await import("../contracts/index.js")).verificationSchema,
@@ -129,6 +115,29 @@ export class Checks {
           ),
         );
     }
+    const datasets = [];
+    for (const name of await this.storage.list("datasets")) {
+      const value = await this.storage.read(`datasets/${name}`, datasetSchema);
+      if (
+        value?.environmentId === input.environmentId &&
+        value.state === "ready" &&
+        Object.values(value.refs).includes(
+          input.subjectRef.replace(/^(issue|project):/, ""),
+        )
+      )
+        datasets.push(value);
+    }
+    const dataset = datasets.at(-1);
+    if (
+      record.plan?.dataSnapshotId &&
+      (!dataset || dataset.dataSnapshotId !== record.plan.dataSnapshotId)
+    )
+      throw new VerificationError(
+        problem(
+          "identityMismatch",
+          "The subject must belong to the plan's restored dataset",
+        ),
+      );
     const checkId = randomUUID();
     await checkpoint?.(checkId);
     const startedAt = new Date().toISOString(),
@@ -283,9 +292,9 @@ export class Checks {
                 z.object({ id: z.string(), status: z.string() }).passthrough(),
               )
               .parse(payload.turns);
-            const turn = input.predicate.target
-              ? turns.find((item) => item.id === input.predicate.target)
-              : turns.at(-1);
+            const turn = turns.find(
+              (item) => item.id === input.predicate.target,
+            );
             if (!turn)
               throw new VerificationError(
                 problem(
@@ -346,6 +355,9 @@ export class Checks {
         ? { stepId: input.temporal.stepId }
         : {}),
       actual,
+      datasetId: dataset?.datasetId,
+      dataSnapshotId: dataset?.dataSnapshotId,
+      restoreVersion: dataset?.restoreVersion,
       status,
       startedAt,
       endedAt: new Date().toISOString(),

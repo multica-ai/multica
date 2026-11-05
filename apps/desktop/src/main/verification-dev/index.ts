@@ -1,4 +1,4 @@
-import { app, ipcMain } from "electron";
+import { app, ipcMain, systemPreferences } from "electron";
 import { createServer } from "node:http";
 import { timingSafeEqual, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync, mkdirSync } from "node:fs";
@@ -187,6 +187,16 @@ export const verificationDev = {
               userId: options.currentUser(),
               commit: session.commit,
               cursor,
+              permissions: {
+                accessibility:
+                  process.platform === "darwin"
+                    ? systemPreferences.isTrustedAccessibilityClient(false)
+                    : null,
+                screenRecording:
+                  process.platform === "darwin"
+                    ? systemPreferences.getMediaAccessStatus("screen")
+                    : "unknown",
+              },
               earliestCursor: events[0]?.cursor ?? cursor + 1,
               capabilities: [
                 "main.snapshot",

@@ -110,3 +110,116 @@ it("reads only bounded, redacted environment logs and exposes truncation without
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("archives external file and memory screenshots with complete bytes and separate capture provenance", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "verification-external-image-"),
+  );
+  const host = await createVerificationHost({
+    projectRoot: directory,
+    stateRoot: join(directory, "state"),
+  });
+  try {
+    const receipt = await host.records.create(
+      { title: "External screenshot", kind: "smoke" },
+      "external-record",
+    );
+    if (receipt.kind !== "accepted") throw new Error("Missing receipt");
+    let job = await host.jobs.get(receipt.jobId);
+    for (let index = 0; index < 100 && job.state !== "completed"; index++) {
+      await new Promise((done) => setTimeout(done, 5));
+      job = await host.jobs.get(receipt.jobId);
+    }
+    const verificationId = (await import("zod")).z
+      .object({ verificationId: (await import("zod")).z.uuid() })
+      .parse(job.output?.value).verificationId;
+    const environmentId = randomUUID(),
+      stepId = randomUUID(),
+      capturedAt = new Date().toISOString();
+    await writeFile(
+      join(directory, "state/environments", `${environmentId}.json`),
+      JSON.stringify(
+        environmentSchema.parse({
+          schemaVersion: 1,
+          environmentId,
+          projectRef: host.projectRef,
+          commit: "0".repeat(40),
+          checkout: directory,
+          mode: "desktop",
+          dataMode: "fixture",
+          state: "prepared",
+          apiOrigin: "http://test.invalid",
+          components: {},
+        }),
+      ),
+    );
+    const { stepSchema } = await import("../contracts/resources.js");
+    await writeFile(
+      join(directory, "state/steps", `${stepId}.json`),
+      JSON.stringify(
+        stepSchema.parse({
+          schemaVersion: 1,
+          stepId,
+          verificationId,
+          environmentId,
+          subjectRef: "subject",
+          description: "External capture",
+          driver: "computerUse",
+          state: "ended",
+          startedAt: capturedAt,
+          startSnapshotId: randomUUID(),
+          startCursors: {},
+          endCursors: {},
+          generations: {},
+          coverage: "complete",
+          gaps: [],
+          events: [],
+        }),
+      ),
+    );
+    const bytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+      path = join(directory, "capture.png");
+    await writeFile(path, bytes);
+    const file = await host.evidence.attachFile({
+      verificationId,
+      environmentId,
+      stepId,
+      path,
+      kind: "screenshot",
+      source: "externalCU",
+      capturedAt,
+      colorScheme: "light",
+    });
+    expect(file).toMatchObject({
+      coverage: "complete",
+      capturedAt,
+      colorScheme: "light",
+    });
+    expect((await host.evidence.read(file.evidenceId)).bytes).toEqual(bytes);
+    const memory = await host.evidence.attachImage({
+      verificationId,
+      environmentId,
+      stepId,
+      data: bytes.toString("base64"),
+      mediaType: "image/png",
+      source: "externalCU",
+      capturedAt,
+      colorScheme: "light",
+    });
+    expect((await host.evidence.read(memory.evidenceId)).bytes).toEqual(bytes);
+    await expect(
+      host.evidence.attachFile({
+        verificationId,
+        path,
+        kind: "screenshot",
+        source: "externalCU",
+      }),
+    ).rejects.toMatchObject({ problem: { code: "invalidInput" } });
+  } finally {
+    await host.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

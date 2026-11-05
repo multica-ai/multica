@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { inspectDevice, type DeviceCheck } from "./device-inspect.js";
 import { problem, VerificationError } from "../host/problem.js";
 
 export type ProbeResult =
@@ -10,7 +11,7 @@ export type ProbeResult =
 export type Probe = (
   executable: string,
   args: string[],
-  options: { cwd: string; signal?: AbortSignal },
+  options: { cwd: string; signal?: AbortSignal; env?: NodeJS.ProcessEnv },
 ) => Promise<ProbeResult>;
 export const probeTool: Probe = (executable, args, options) =>
   new Promise((resolve) => {
@@ -24,6 +25,7 @@ export const probeTool: Probe = (executable, args, options) =>
         maxBuffer: 16_384,
         env: {
           ...process.env,
+          ...options.env,
           COREPACK_ENABLE_NETWORK: "0",
           COREPACK_ENABLE_PROJECT_SPEC: "0",
           COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
@@ -58,7 +60,7 @@ export interface ToolCheck {
   status: "ready" | "missing" | "incompatible" | "unknown";
 }
 export interface Inspection {
-  inspectionScope: "toolchain";
+  inspectionScope: "device";
   mode: "renderer" | "desktop";
   platform: string;
   arch: string;
@@ -66,6 +68,8 @@ export interface Inspection {
   toolchainStatus: "ready" | "blocked" | "unknown";
   applicationReady: "notChecked";
   checks: ToolCheck[];
+  deviceChecks: DeviceCheck[];
+  preparationPlan: { name: string; status: string; action: string }[];
   notChecked: string[];
 }
 
@@ -157,8 +161,14 @@ export class SetupInspector {
       this.check("git", true, "available", git, git ? true : null, gitProbe),
     ];
     const required = checks.filter((check) => check.required);
+    const deviceChecks = await inspectDevice(
+      this.projectRoot,
+      mode,
+      this.probe,
+      signal,
+    );
     return {
-      inspectionScope: "toolchain",
+      inspectionScope: "device",
       mode,
       platform: process.platform,
       arch: process.arch,
@@ -177,13 +187,28 @@ export class SetupInspector {
           : "ready",
       applicationReady: "notChecked",
       checks,
+      deviceChecks,
+      preparationPlan: [
+        ...required
+          .filter((check) => check.status !== "ready")
+          .map((check) => ({
+            name: check.name,
+            status: check.status,
+            action: ["node", "pnpm", "go"].includes(check.name)
+              ? "setup_prepare installs the declared toolchain in private storage"
+              : "Install the missing system prerequisite",
+          })),
+        ...deviceChecks
+          .filter((check) => check.status !== "ready" && check.action)
+          .map((check) => ({
+            name: check.name,
+            status: check.status,
+            action: check.action!,
+          })),
+      ],
       notChecked: [
         "dependencyInstallation",
         "electronBuild",
-        "graphicalSession",
-        "systemPermissions",
-        "database",
-        "ports",
         "login",
         "dataBinding",
         "applicationHealth",

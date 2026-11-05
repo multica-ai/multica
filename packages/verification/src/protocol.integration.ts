@@ -59,10 +59,29 @@ async function operation(name: string, input: Json) {
   if (job.state !== "completed") throw new Error(JSON.stringify(job.problem));
   return object.parse(job.output?.value);
 }
-async function record(title: string) {
+async function record(title: string, page = false) {
   const value = await operation("verification.create", {
     title,
     kind: "smoke",
+    plan: {
+      scenario: "integration/v1",
+      scope: [title],
+      providerScript: "controlled/v1",
+      checks: [
+        {
+          key: "target",
+          purpose: "target",
+          kind: page ? "page.text" : "queue.itemCount",
+          operator: "eq",
+          expected: page ? "Saved" : 0,
+          temporal: "eventually",
+        },
+      ],
+      ui: {
+        required: page,
+        colorSchemes: page ? ["light", "dark"] : ["light"],
+      },
+    },
   });
   const verificationId = z.uuid().parse(value.verificationId);
   await host.evidence.bindEnvironment(verificationId, environmentId, "smoke");
@@ -339,6 +358,7 @@ describe("manual verification protocol integration", () => {
       environmentId,
       subjectRef,
       stepId: step.stepId,
+      comparisonKey: "target",
       predicate: { kind: "queue.itemCount", operator: "eq", expected: 0 },
       temporal: { mode: "eventually", timeoutMs: 2000 },
     });
@@ -383,6 +403,7 @@ describe("manual verification protocol integration", () => {
       verificationId,
       environmentId,
       subjectRef: "missing",
+      comparisonKey: "target",
       predicate: { kind: "queue.itemCount", operator: "eq", expected: 0 },
       temporal: { mode: "now" },
     });
@@ -426,8 +447,10 @@ describe("manual verification protocol integration", () => {
       (value) => value.state === "unknown",
     );
     interceptor.mockRestore();
-    expect(job.resourceRefs).toHaveLength(1);
-    const datasetId = job.resourceRefs[0]!;
+    expect(job.resourceRefs).toContain(environmentId);
+    const datasets = job.resourceRefs.filter((ref) => ref !== environmentId);
+    expect(datasets).toHaveLength(1);
+    const datasetId = datasets[0]!;
     expect(await host.data.get(datasetId)).toMatchObject({
       state: "partial",
       restoreVersion: 1,
@@ -508,49 +531,33 @@ describe("manual verification protocol integration", () => {
     );
   });
 
-  it("stops a read-only reference environment without stopping or mutating its source", async () => {
+  it("rejects an unsupported read-only page source before installing or launching, and protects its source", async () => {
     const readOnly = {
       ...binding,
       ref: "read-only-original",
       access: "readOnly" as const,
     };
     host.environments.bindings.add(readOnly);
-    const prepared = await operation("setup.prepare", {
-      gitRef: "HEAD",
-      mode: "desktop",
-      dataMode: "liveReadOnly",
-      sourceRef: readOnly.ref,
-    });
-    const id = z.uuid().parse(prepared.environmentId);
-    expect(prepared.components).toMatchObject({
-      referenceOnly: true,
-      applicationReady: "notApplicable",
-    });
-    const original = host.environments.bindings.request.bind(
-      host.environments.bindings,
+    const receipt = await host.jobs.submit(
+      "setup.prepare",
+      {
+        gitRef: "HEAD",
+        mode: "desktop",
+        dataMode: "liveReadOnly",
+        sourceRef: readOnly.ref,
+      },
+      randomUUID(),
     );
-    const calls: string[] = [];
-    const interceptor = vi
-      .spyOn(host.environments.bindings, "request")
-      .mockImplementation((ref, path, method, body) => {
-        calls.push(`${method ?? "GET"} ${path}`);
-        return original(ref, path, method, body);
-      });
-    expect(await operation("setup.start", { environmentId: id })).toMatchObject(
-      { state: "ready" },
+    if (receipt.kind !== "accepted") throw new Error("Expected receipt");
+    const job = await eventually(
+      () => host.jobs.get(receipt.jobId),
+      (job) => job.state === "failed",
     );
-    expect(await operation("setup.stop", { environmentId: id })).toMatchObject({
-      state: "stopped",
-    });
-    interceptor.mockRestore();
-    expect(calls).toEqual(["GET /health"]);
-    expect(await request("/health")).toMatchObject({ status: "running" });
-    await expect(host.pages.windows(id)).rejects.toMatchObject({
-      problem: { code: "unsupportedCapability" },
-    });
+    expect(job.problem?.code).toBe("unsupportedCapability");
     await expect(
       host.environments.bindings.request(readOnly.ref, "/shutdown", "POST", {}),
     ).rejects.toMatchObject({ problem: { code: "forbidden" } });
+    expect(await request("/health")).toMatchObject({ status: "running" });
   });
 
   it("operates actual CDP pages, rejects used references, waits for semantic locators and reads real screenshot bytes", async () => {
@@ -577,7 +584,7 @@ describe("manual verification protocol integration", () => {
     vi.spyOn(host.environments, "desktopRequest").mockResolvedValue({
       environmentId,
     });
-    const verificationId = await record("Page adapter protocol smoke"),
+    const verificationId = await record("Page adapter protocol smoke", true),
       dataset = await host.data.fixture(environmentId),
       subjectRef = dataset.refs.conversationId!;
     const step = await host.sources.begin({
@@ -616,6 +623,7 @@ describe("manual verification protocol integration", () => {
       environmentId,
       subjectRef,
       stepId: step.stepId,
+      comparisonKey: "target",
       predicate: {
         kind: "page.text",
         operator: "eq",
@@ -631,6 +639,14 @@ describe("manual verification protocol integration", () => {
       "page.visible",
     );
     expect(hidden).toBe(false);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await host.pages.capture(
+      verificationId,
+      environmentId,
+      step.stepId,
+      windowRef,
+    );
+    await page.emulateMedia({ colorScheme: "light" });
     const image = await host.pages.capture(
       verificationId,
       environmentId,

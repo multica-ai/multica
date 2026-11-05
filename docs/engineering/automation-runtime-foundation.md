@@ -520,10 +520,8 @@ pnpm --filter @multica/verification test:manual
 
 ## 16. 首版实现与验收边界
 
-实现工作树为 `.worktrees/verification-tooling`，分支 `codex/verification-tooling`，基于远端 main 的 `29b01f9eb1bc63ec773cb6732df92433db4dcb9b`。独立宿主、20 个 MCP 工具、Setup、真实会话快照/恢复、来源采集、有限谓词检查、Playwright 页面适配和证据报告均已有代码。[验证包说明](../../packages/verification/README.md)给出实际工具和命令。
+统一入口是 `packages/verification`，MCP 复用同一个宿主。当前接口、准备/运行方式、数据格式及报告门槛见[验证包说明](../../packages/verification/README.md)，逐项证据见[验收清单](verification-foundation-acceptance.md)。
 
-开发 Electron 的 userData、daemon profile/SQLite、注册目录与工作目录按环境分开；基线和候选串行启动。覆盖只进入 dev 构建，未增加生产多实例协议。`liveReadOnly` 是来源引用观察环境，不启动或停止来源应用，也没有测试页面；写入与页面验证使用 `realSnapshot` 副本。后端项目/事项当前只形成参考样本，跨工作区完整恢复需补齐成员、工作流和附件等语义映射，不能当作已实现的全账号复制。
+完整验证使用独立 dev Electron、bundled daemon、测试数据库/profile 和受控 provider；设备锁跨项目共用。只读页面使用独立 Web/Chromium 和宿主授权的 backend 来源，业务写请求被阻止，不把 Web 页面覆盖声明成 Electron 覆盖。真实副本恢复具有显式格式和转换清单，不承诺全账号或执行环境复制。
 
-手动集成使用真实 Go service/SQLite/Local API、HTTP/WS、正常队列和受控 provider，以及独立 Chromium 的真实 Playwright/CDP 页面。覆盖历史分页、附件字节、复制/重置不改源、接收次数检查、响应丢失恢复、事件缺口拒绝通过、只读停止边界、截图/摘要与报告导出、保留策略。生产 Electron 构建已生成，并检查验证专用字符串不进入 JavaScript 产物；Go 生产路由测试在验证环境变量开启时仍返回 404。
-
-实际 Setup prepare 已完成 worktree、工具链/依赖、环境配置与开发 CLI 构建，随后停止该已准备环境。当前设备存在活动的正常 Desktop，启动按设计返回 instanceBusy，未另起 Electron/托管后端，因此未执行专用干净 Mac 的首次准备与完整 Electron GUI 流程。未读取用户真实业务数据、调用真实模型、修改智能体全局配置，或上传/发布报告。原生权限、首次设备安装耗时及整机资源开销需在该验收环境实际测量。未新增 CI 场景。
+自动化检查与专用干净 Mac 的原生验收分别记录。原生入口 `test:desktop` 在发现日常 Desktop 时返回 instanceBusy 并保存 inconclusive；该结果不等于整机通过。首次工具安装、正常登录/权限、真实 Electron 全链路、资源峰值和采集开销需在可运行的专用设备上实测。默认不调用真实模型，不自动上传或发布证据，不新增 CI 场景。

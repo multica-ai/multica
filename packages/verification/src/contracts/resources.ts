@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { jsonSchema, resourceIdSchema, problemSchema } from "./index.js";
+import {
+  jsonSchema,
+  resourceIdSchema,
+  problemSchema,
+  predicateKindSchema,
+} from "./index.js";
 
 export const scopeSchema = z
   .object({
@@ -15,6 +20,7 @@ export const bindingSchema = z
     baseUrl: z.url(),
     scope: scopeSchema,
     tokenFile: z.string().min(1),
+    verificationTokenFile: z.string().optional(),
     access: z.enum(["readOnly", "test"]),
     identity: z
       .object({
@@ -26,6 +32,7 @@ export const bindingSchema = z
       .strict(),
     databaseFile: z.string().optional(),
     filesRoot: z.string().optional(),
+    attachmentOrigins: z.array(z.url()).max(10).optional(),
   })
   .strict();
 export type SourceBinding = z.infer<typeof bindingSchema>;
@@ -87,6 +94,7 @@ export const evidenceSchema = z
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     bytes: z.number().int().nonnegative(),
     mediaType: z.string(),
+    colorScheme: z.enum(["light", "dark"]).optional(),
     capturedAt: z.string(),
     receivedAt: z.string(),
     coverage: z.enum(["complete", "partial", "unknown"]),
@@ -95,7 +103,7 @@ export const evidenceSchema = z
 export type Evidence = z.infer<typeof evidenceSchema>;
 export const observationSchema = z
   .object({
-    source: z.enum(["daemon", "main", "renderer", "backend"]),
+    source: z.enum(["daemon", "main", "renderer", "backend", "page"]),
     status: z.enum(["available", "partial", "unavailable"]),
     startedAt: z.string(),
     endedAt: z.string(),
@@ -142,7 +150,11 @@ export const stepSchema = z
     environmentId: resourceIdSchema,
     subjectRef: z.string(),
     description: z.string(),
+    dataGeneration: z.string().default("initial"),
     driver: z.enum(["playwright", "computerUse", "api"]),
+    optionalSources: z
+      .array(z.enum(["daemon", "main", "renderer", "backend", "page"]))
+      .default([]),
     state: z.enum(["observing", "ended", "interrupted"]),
     startedAt: z.string(),
     endedAt: z.string().optional(),
@@ -191,26 +203,82 @@ export const pageTargetSchema = z
   .strict();
 export const predicateSchema = z
   .object({
-    kind: z.enum([
-      "queue.itemCount",
-      "queue.paused",
-      "turn.status",
-      "providerFixture.receivedCount",
-      "diagnostic.errorCount",
-      "page.visible",
-      "page.text",
-      "page.controlState",
-    ]),
+    kind: predicateKindSchema,
     operator: z.enum(["eq", "contains", "gte", "lte"]),
     expected: jsonSchema,
     target: z.union([z.string(), pageTargetSchema]).optional(),
   })
   .strict();
+export function predicateDefinition(kind: z.infer<typeof predicateKindSchema>) {
+  const count = [
+    "queue.itemCount",
+    "providerFixture.receivedCount",
+    "diagnostic.errorCount",
+  ].includes(kind);
+  const boolean = [
+    "queue.paused",
+    "page.visible",
+    "page.controlState",
+  ].includes(kind);
+  const page = kind.startsWith("page.");
+  const operators = count
+    ? (["eq", "gte", "lte"] as const)
+    : boolean || kind === "turn.status"
+      ? (["eq"] as const)
+      : (["eq", "contains"] as const);
+  const interval = [
+    "providerFixture.receivedCount",
+    "diagnostic.errorCount",
+  ].includes(kind);
+  return {
+    source: page
+      ? "page"
+      : kind === "diagnostic.errorCount"
+        ? "main"
+        : "daemon",
+    operators,
+    temporal:
+      kind === "diagnostic.errorCount"
+        ? ["throughout"]
+        : interval
+          ? ["now", "eventually", "throughout"]
+          : ["now", "eventually"],
+    completeness: interval
+      ? "Complete ended observation interval with confirmed source watermarks"
+      : "A valid current source observation",
+    schema: predicateSchema.extend({
+      kind: z.literal(kind),
+      operator: z.enum(operators),
+      expected: count
+        ? z.number().int().nonnegative()
+        : boolean
+          ? z.boolean()
+          : kind === "turn.status"
+            ? z.enum([
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted",
+              ])
+            : z.string(),
+      target: page
+        ? z.union([z.string().min(1), pageTargetSchema])
+        : kind === "turn.status"
+          ? z.string().min(1)
+          : z.string().optional(),
+    }),
+  };
+}
 export const checkSchema = z
   .object({
     schemaVersion: z.literal(1),
     checkId: resourceIdSchema,
     comparisonKey: z.string().min(1).max(160).optional(),
+    datasetId: resourceIdSchema.optional(),
+    dataSnapshotId: resourceIdSchema.optional(),
+    restoreVersion: z.number().int().positive().optional(),
     verificationId: resourceIdSchema,
     environmentId: resourceIdSchema,
     stepId: resourceIdSchema.optional(),
@@ -233,6 +301,27 @@ export const dataSnapshotSchema = z
     sourceId: resourceIdSchema,
     format: z.enum(["multica.local-conversation/v1", "multica.workspace/v1"]),
     capturedAt: z.string(),
+    captureStartedAt: z.iso.datetime(),
+    sourceVersion: z.string().nullable(),
+    sourceScope: scopeSchema,
+    capabilities: z.array(z.string()),
+    entities: z.array(
+      z.object({ type: z.string(), originalId: z.string() }).strict(),
+    ),
+    relationships: z.array(
+      z.object({ from: z.string(), to: z.string(), kind: z.string() }).strict(),
+    ),
+    attachments: z.array(
+      z
+        .object({
+          originalId: z.string(),
+          relativePath: z.string(),
+          bytes: z.number().int().nonnegative(),
+          sha256: z.string(),
+        })
+        .strict(),
+    ),
+    missing: z.array(z.string()),
     consistency: z.enum(["perConversation", "perEntity"]),
     content: jsonSchema,
     sha256: z.string(),
@@ -253,6 +342,7 @@ export const datasetSchema = z
     refs: z.record(z.string(), z.string()),
     state: z.enum(["ready", "partial"]),
     resources: z.array(z.string()),
+    providerScript: z.literal("controlled/v1").optional(),
   })
   .strict();
 export type Dataset = z.infer<typeof datasetSchema>;

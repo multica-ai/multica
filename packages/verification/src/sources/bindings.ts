@@ -99,6 +99,13 @@ export class Bindings {
       );
     return {
       Authorization: `Bearer ${token}`,
+      ...(binding.verificationTokenFile
+        ? {
+            "X-Multica-Verification-Token": (
+              await readPrivateFile(binding.verificationTokenFile)
+            ).trim(),
+          }
+        : {}),
       "X-Multica-API-Origin": binding.scope.apiOrigin,
       "X-Multica-User-ID": binding.scope.userId,
       "X-Workspace-ID": binding.scope.workspaceId,
@@ -147,6 +154,45 @@ export class Bindings {
         ),
       );
     }
+    if (
+      method === "GET" &&
+      response.status >= 300 &&
+      response.status < 400 &&
+      /^\/api\/attachments\/[^/]+\/download$/.test(path)
+    ) {
+      const location = response.headers.get("location");
+      if (!location)
+        throw new VerificationError(
+          problem("sourceUnavailable", "The attachment redirect has no target"),
+        );
+      const target = new URL(location, binding.baseUrl);
+      const origins = [
+        new URL(binding.baseUrl).origin,
+        ...(binding.attachmentOrigins ?? []).map(
+          (value) => new URL(value).origin,
+        ),
+      ];
+      if (
+        !origins.includes(target.origin) ||
+        target.username ||
+        target.password ||
+        (target.protocol !== "https:" &&
+          target.origin !== new URL(binding.baseUrl).origin)
+      )
+        throw new VerificationError(
+          problem(
+            "forbidden",
+            "The attachment storage origin is not authorized by this host binding",
+            "userAction",
+          ),
+        );
+      // A signed storage URL is a download capability. Application credentials
+      // must never be forwarded to object storage or another origin.
+      response = await fetch(target, {
+        redirect: "error",
+        signal: AbortSignal.timeout(10000),
+      });
+    }
     if (!response.ok)
       throw new VerificationError(
         problem(
@@ -156,11 +202,22 @@ export class Bindings {
               ? "forbidden"
               : response.status === 409
                 ? "requestConflict"
-                : response.status === 404
-                  ? "unsupportedCapability"
-                  : "sourceUnavailable",
+                : response.status === 400
+                  ? "invalidInput"
+                  : response.status === 422
+                    ? "unsupportedVersion"
+                    : response.status === 404
+                      ? "unsupportedCapability"
+                      : "sourceUnavailable",
           `Source request failed with HTTP ${response.status}`,
           "inspect",
+        ),
+      );
+    if (response.headers.get("X-Comments-Truncated") === "true")
+      throw new VerificationError(
+        problem(
+          "coverageIncomplete",
+          "The source returned a truncated comment list",
         ),
       );
     const chunks: Uint8Array[] = [];

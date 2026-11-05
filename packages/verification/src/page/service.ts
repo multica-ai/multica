@@ -52,18 +52,9 @@ export class Pages {
     private readonly sources: Sources,
   ) {}
   private async session(environmentId: string): Promise<Session> {
-    if (
-      (await this.environments.get(environmentId)).components.referenceOnly ===
-      true
-    )
-      throw new VerificationError(
-        problem(
-          "unsupportedCapability",
-          "Read-only reference environments have no application pages; restore a test copy for page verification",
-        ),
-      );
+    const environment = await this.environments.get(environmentId);
     const descriptor = await this.environments.descriptor(environmentId),
-      identity = `${descriptor.ownerId}:${descriptor.pid}`;
+      identity = `${descriptor.ownerId}:${descriptor.pid}:${environment.components.dataGeneration ?? "initial"}`;
     const existing = this.sessions.get(environmentId);
     if (
       existing &&
@@ -82,7 +73,10 @@ export class Pages {
           "The dev application did not publish its page debugging port",
         ),
       );
-    await this.environments.desktopRequest(environmentId, "/capabilities");
+    if (
+      (await this.environments.get(environmentId)).dataMode !== "liveReadOnly"
+    )
+      await this.environments.desktopRequest(environmentId, "/capabilities");
     const browser = await chromium.connectOverCDP(
       `http://127.0.0.1:${descriptor.debugPort}`,
       { timeout: 10000 },
@@ -257,14 +251,7 @@ export class Pages {
     const next = (this.actions.get(input.environmentId) ?? Promise.resolve())
       .catch(() => undefined)
       .then(async () => {
-        const environment = await this.environments.get(input.environmentId);
-        if (environment.dataMode === "liveReadOnly")
-          throw new VerificationError(
-            problem(
-              "forbidden",
-              "Interact with a test copy; live-source page tools only observe and capture",
-            ),
-          );
+        await this.environments.get(input.environmentId);
         const step = await this.sources.get(input.stepId);
         if (
           step.verificationId !== input.verificationId ||
@@ -303,6 +290,32 @@ export class Pages {
               "reobserve",
             ),
           );
+        const sensitive = await element.evaluate(
+          (node) =>
+            node instanceof HTMLInputElement &&
+            (node.type === "password" ||
+              /password|token|secret/i.test(node.name)),
+        );
+        const intent = await this.evidence.attach({
+          verificationId: input.verificationId,
+          environmentId: input.environmentId,
+          stepId: input.stepId,
+          kind: "data",
+          source: "playwright.actionIntent",
+          mediaType: "application/json",
+          coverage: "complete",
+          bytes: Buffer.from(
+            JSON.stringify({
+              observationId: input.observationId,
+              targetRef: input.targetRef,
+              windowRef: input.windowRef,
+              action:
+                sensitive && input.action.kind === "fill"
+                  ? { kind: "fill", text: "[REDACTED]" }
+                  : input.action,
+            }),
+          ),
+        });
         try {
           const action = pageActionSchema.parse(input.action);
           if (action.kind === "click") await element.click({ timeout: 5000 });
@@ -328,11 +341,23 @@ export class Pages {
             input.stepId,
             input.windowRef,
           ).catch(() => null);
-          return {
+          const outcome = {
             actionCompleted: true,
             businessOutcome: "notChecked",
+            intentEvidenceId: intent.evidenceId,
             evidenceId: screenshot?.evidenceId ?? null,
           };
+          const evidence = await this.evidence.attach({
+            verificationId: input.verificationId,
+            environmentId: input.environmentId,
+            stepId: input.stepId,
+            kind: "data",
+            source: "playwright.actionOutcome",
+            mediaType: "application/json",
+            coverage: "complete",
+            bytes: Buffer.from(JSON.stringify(outcome)),
+          });
+          return { ...outcome, outcomeEvidenceId: evidence.evidenceId };
         } catch {
           throw new VerificationError(
             problem(
@@ -364,6 +389,16 @@ export class Pages {
       kind: "screenshot",
       source: "playwright",
       mediaType: "image/png",
+      colorScheme: await page.evaluate(() => {
+        const root = document.documentElement,
+          scheme = getComputedStyle(root).colorScheme;
+        if (root.classList.contains("dark") || scheme === "dark") return "dark";
+        if (root.classList.contains("light") || scheme === "light")
+          return "light";
+        return matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }),
       coverage: "complete",
       bytes: await page.screenshot({ type: "png", fullPage, timeout: 10000 }),
     });

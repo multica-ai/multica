@@ -48,13 +48,13 @@ describe("checkout toolchain inspection", () => {
     );
     const result = await new SetupInspector(root, probe).inspect("desktop");
     expect(result).toMatchObject({
-      inspectionScope: "toolchain",
+      inspectionScope: "device",
       toolchainStatus: "ready",
       applicationReady: "notChecked",
       project: { commit: "a".repeat(40) },
     });
     expect(result.notChecked).toContain("applicationHealth");
-    expect(probe.mock.calls.map(([command]) => command)).toEqual([
+    expect(probe.mock.calls.slice(0, 5).map(([command]) => command)).toEqual([
       process.execPath,
       "pnpm",
       "go",

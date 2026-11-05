@@ -1,20 +1,29 @@
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { jsonSchema, resourceIdSchema, type Json } from "../contracts/index.js";
+import {
+  jsonSchema,
+  resourceIdSchema,
+  toJson,
+  type Json,
+} from "../contracts/index.js";
 import {
   dataSnapshotSchema,
   datasetSchema,
   sourceSchema,
   type DataSnapshot,
   type Dataset,
+  stepSchema,
 } from "../contracts/resources.js";
 import { canonicalJson, digest, type HostStorage } from "../host/storage.js";
 import { problem, VerificationError } from "../host/problem.js";
 import type { OperationContext } from "../host/jobs.js";
 import type { Environments } from "../setup/environments.js";
+import { contentManifest } from "./manifest.js";
+import { exportWorkspace, workspaceContentSchema } from "./workspace.js";
 import { exportSQLite } from "./sqlite-source.js";
 
-const object = z.record(z.string(), jsonSchema);
 const turnSchema = z
   .object({
     id: z.string(),
@@ -124,7 +133,15 @@ export class DataService {
         source.kind === "daemon"
           ? ["multica.local-conversation/v1"]
           : ["multica.workspace/v1"],
-      restorable: source.kind === "daemon",
+      restorable: source.kind === "daemon" || source.kind === "backend",
+      restorePhase: "onlineAfterServiceReady",
+      limits:
+        source.kind === "backend"
+          ? [
+              "Selected content only; no account or credential clone",
+              "Execution source contexts, custom property definitions and project execution resources require a newer format",
+            ]
+          : ["Provider sessions and running execution are not resumed"],
       consistency: source.kind === "daemon" ? "perConversation" : "perEntity",
     };
   }
@@ -136,6 +153,7 @@ export class DataService {
       issueIds?: string[];
     },
   ): Promise<DataSnapshot> {
+    const captureStartedAt = new Date().toISOString();
     const source = await this.source(sourceId),
       bindings = this.environments.bindings,
       binding = bindings.get(source.bindingRef);
@@ -306,37 +324,7 @@ export class DataService {
       content = jsonSchema.parse({ schemaVersion: 1, conversations });
       format = "multica.local-conversation/v1";
     } else if (source.kind === "backend") {
-      const issues: Json[] = [],
-        projects: Json[] = [],
-        projectIds = new Set(selection.projectIds ?? []);
-      if (
-        (selection.issueIds?.length ?? 0) + projectIds.size === 0 ||
-        (selection.issueIds?.length ?? 0) + projectIds.size > 100
-      )
-        throw new VerificationError(
-          problem("invalidInput", "Select between 1 and 100 workspace objects"),
-        );
-      for (const id of selection.issueIds ?? []) {
-        const issue = object.parse(
-          await bindings.request(
-            source.bindingRef,
-            `/api/issues/${encodeURIComponent(id)}`,
-          ),
-        );
-        issues.push(issue);
-        if (typeof issue.project_id === "string")
-          projectIds.add(issue.project_id);
-      }
-      for (const id of projectIds)
-        projects.push(
-          jsonSchema.parse(
-            await bindings.request(
-              source.bindingRef,
-              `/api/projects/${encodeURIComponent(id)}`,
-            ),
-          ),
-        );
-      content = { schemaVersion: 1, projects, issues };
+      content = await exportWorkspace(bindings, source.bindingRef, selection);
       format = "multica.workspace/v1";
     } else
       throw new VerificationError(
@@ -345,26 +333,29 @@ export class DataService {
           "Select a daemon or backend data source",
         ),
       );
-    return this.saveSnapshot(
-      sourceId,
-      format,
-      content,
-      format === "multica.local-conversation/v1",
-    );
+    return this.saveSnapshot(sourceId, format, content, true, captureStartedAt);
   }
   private async saveSnapshot(
     sourceId: string,
     format: DataSnapshot["format"],
     content: Json,
     complete: boolean,
+    captureStartedAt = new Date().toISOString(),
   ) {
     assertSize(Buffer.byteLength(canonicalJson(content)));
+    const source = await this.source(sourceId);
+    const binding = this.environments.bindings.get(source.bindingRef);
     const snapshot = dataSnapshotSchema.parse({
       schemaVersion: 1,
       dataSnapshotId: randomUUID(),
       sourceId,
       format,
       capturedAt: new Date().toISOString(),
+      captureStartedAt,
+      sourceVersion: binding.identity.commit ?? null,
+      sourceScope: source.scope,
+      capabilities: [format, "boundedSnapshot", "attachmentChecksums"],
+      ...contentManifest(content),
       consistency:
         format === "multica.local-conversation/v1"
           ? "perConversation"
@@ -373,6 +364,28 @@ export class DataService {
       sha256: digest(canonicalJson(content)),
       complete,
     });
+    for (const attachment of snapshot.attachments) {
+      const pointer = attachment.relativePath.split("/").slice(1);
+      let value: Json = snapshot.content;
+      for (const segment of pointer)
+        value = Array.isArray(value)
+          ? value[Number(segment)]!
+          : (value as Record<string, Json>)[segment]!;
+      const bytes = Buffer.from(
+        z.object({ data: z.string() }).parse(value).data,
+        "base64",
+      );
+      const directory = `data-snapshots/${snapshot.dataSnapshotId}.files`;
+      await mkdir(join(this.storage.root, directory), {
+        recursive: true,
+        mode: 0o700,
+      });
+      attachment.relativePath = `${directory}/${digest(attachment.originalId)}`;
+      await writeFile(join(this.storage.root, attachment.relativePath), bytes, {
+        mode: 0o600,
+        flag: "wx",
+      });
+    }
     await this.storage.write(
       `data-snapshots/${snapshot.dataSnapshotId}.json`,
       snapshot,
@@ -392,7 +405,52 @@ export class DataService {
       throw new VerificationError(
         problem("identityMismatch", "The data snapshot checksum changed"),
       );
+    for (const attachment of snapshot.attachments) {
+      const expected = `data-snapshots/${snapshot.dataSnapshotId}.files/${digest(attachment.originalId)}`;
+      if (attachment.relativePath !== expected)
+        throw new VerificationError(
+          problem("identityMismatch", "The snapshot attachment path changed"),
+        );
+      const bytes = await readFile(join(this.storage.root, expected));
+      if (
+        bytes.length !== attachment.bytes ||
+        createHash("sha256").update(bytes).digest("hex") !== attachment.sha256
+      )
+        throw new VerificationError(
+          problem("identityMismatch", "The snapshot attachment bytes changed"),
+        );
+    }
     return snapshot;
+  }
+  async describeSnapshot(
+    id: string,
+    section: "entities" | "relationships" | "attachments" = "entities",
+    cursor = 0,
+    limit = 50,
+  ) {
+    z.number().int().nonnegative().parse(cursor);
+    z.number().int().min(1).max(100).parse(limit);
+    const snapshot = await this.getSnapshot(id);
+    const {
+      content: _,
+      entities,
+      relationships,
+      attachments,
+      ...metadata
+    } = snapshot;
+    const items = { entities, relationships, attachments }[section];
+    return {
+      ...metadata,
+      counts: {
+        entities: entities.length,
+        relationships: relationships.length,
+        attachments: attachments.length,
+      },
+      section,
+      items: items.slice(cursor, cursor + limit),
+      nextCursor: Math.min(items.length, cursor + limit),
+      hasMore: cursor + limit < items.length,
+    };
   }
   async get(id: string): Promise<Dataset> {
     const dataset = await this.storage.read(
@@ -446,6 +504,14 @@ export class DataService {
         problem("forbidden", "Snapshots cannot be imported into live data"),
       );
     const snapshot = await this.getSnapshot(dataSnapshotId);
+    if (snapshot.format === "multica.workspace/v1" && snapshot.complete)
+      return this.restoreWorkspace(
+        environmentId,
+        snapshot,
+        existing,
+        context,
+        resume,
+      );
     if (
       snapshot.format !== "multica.local-conversation/v1" ||
       !snapshot.complete
@@ -456,6 +522,7 @@ export class DataService {
           "Only complete conversation snapshots can be restored; workspace samples are read-only reference evidence",
         ),
       );
+    if (!resume) await this.advanceDataGeneration(environmentId);
     const content = contentSchema.parse(snapshot.content),
       datasetId = existing?.datasetId ?? randomUUID();
     const restoreVersion =
@@ -469,6 +536,7 @@ export class DataService {
       datasetId,
       environmentId,
       mode: existing?.mode ?? "realSnapshot",
+      providerScript: "controlled/v1",
       dataSnapshotId,
       restoreVersion,
       refs: {},
@@ -502,6 +570,93 @@ export class DataService {
     await this.storage.write(`datasets/${datasetId}.json`, dataset);
     return dataset;
   }
+  private async restoreWorkspace(
+    environmentId: string,
+    snapshot: DataSnapshot,
+    existing?: Dataset,
+    context?: OperationContext,
+    resume = false,
+  ): Promise<Dataset> {
+    const content = workspaceContentSchema.parse(snapshot.content);
+    const ref = await this.environments.connection(environmentId, "backend");
+    const binding = this.environments.bindings.assertTest(ref);
+    const capability = z
+      .object({
+        environmentId: z.string(),
+        format: z.literal("multica.workspace/v1"),
+        restorePhase: z.literal("onlineAfterServiceReady"),
+      })
+      .parse(
+        await this.environments.bindings.request(
+          ref,
+          "/api/verification/capabilities",
+        ),
+      );
+    if (
+      capability.environmentId !== environmentId ||
+      binding.scope.apiOrigin !==
+        (await this.environments.get(environmentId)).apiOrigin
+    )
+      throw new VerificationError(
+        problem(
+          "identityMismatch",
+          "Workspace import capability does not belong to the target environment",
+        ),
+      );
+    if (!resume) await this.advanceDataGeneration(environmentId);
+    const dataset = datasetSchema.parse({
+      schemaVersion: 1,
+      datasetId: existing?.datasetId ?? randomUUID(),
+      environmentId,
+      mode: existing?.mode ?? "realSnapshot",
+      dataSnapshotId: snapshot.dataSnapshotId,
+      restoreVersion:
+        resume && existing
+          ? existing.restoreVersion
+          : (existing?.restoreVersion ?? 0) + 1,
+      refs: {},
+      resources: [],
+      state: "partial",
+    });
+    await context?.addResource(dataset.datasetId);
+    await this.storage.write(`datasets/${dataset.datasetId}.json`, dataset);
+    const result = z
+      .object({
+        schemaVersion: z.literal(1),
+        mapping: z.record(z.string(), z.string()),
+        transformations: z.array(z.string()),
+      })
+      .parse(
+        await this.environments.bindings.request(
+          ref,
+          "/api/verification/import",
+          "POST",
+          {
+            restoreId: `${dataset.datasetId}:${dataset.restoreVersion}`,
+            content,
+          },
+        ),
+      );
+    dataset.refs = result.mapping;
+    dataset.refs.workspaceId = binding.scope.workspaceId;
+    if (content.projects[0])
+      dataset.refs.projectId = z
+        .string()
+        .min(1)
+        .parse(result.mapping[content.projects[0].id]);
+    if (content.issues[0])
+      dataset.refs.issueId = z
+        .string()
+        .min(1)
+        .parse(result.mapping[content.issues[0].id]);
+    dataset.resources = [...content.projects, ...content.issues].map((item) =>
+      z.string().min(1).parse(result.mapping[item.id]),
+    );
+    dataset.transformations = result.transformations;
+    dataset.state = "ready";
+    await this.storage.write(`datasets/${dataset.datasetId}.json`, dataset);
+    return dataset;
+  }
   resume(datasetId: string, context?: OperationContext): Promise<Dataset> {
     return this.serialize(datasetId, async () => {
       const dataset = await this.get(datasetId);
@@ -526,6 +681,25 @@ export class DataService {
           problem("forbidden", "Only an owned snapshot copy can be reset"),
         );
       const snapshot = await this.getSnapshot(dataset.dataSnapshotId);
+      await this.advanceDataGeneration(dataset.environmentId);
+      if (snapshot.format === "multica.workspace/v1") {
+        const ref = await this.environments.connection(
+          dataset.environmentId,
+          "backend",
+        );
+        this.environments.bindings.assertTest(ref);
+        await this.environments.bindings.request(
+          ref,
+          "/api/verification/reset",
+          "POST",
+          { restoreId: `${dataset.datasetId}:${dataset.restoreVersion}` },
+        );
+        return this.restore(
+          dataset.environmentId,
+          dataset.dataSnapshotId,
+          dataset,
+        );
+      }
       if (snapshot.format !== "multica.local-conversation/v1")
         throw new VerificationError(
           problem(
@@ -566,6 +740,128 @@ export class DataService {
         );
       return restored;
     });
+  }
+  async workspaceFixture(
+    environmentId: string,
+    issueCount = 3,
+    context?: OperationContext,
+  ): Promise<Dataset> {
+    z.number().int().min(0).max(20).parse(issueCount);
+    const ref = await this.environments.connection(environmentId, "backend");
+    const binding = this.environments.bindings.assertTest(ref);
+    const { sourceId } = await this.bind(ref);
+    const catalog = z
+      .object({
+        statuses: z.array(
+          z
+            .object({
+              key: z.string(),
+              name: z.string(),
+              description: z.string(),
+              category: z.string(),
+              color: z.string(),
+              icon: z.string(),
+              position: z.number(),
+            })
+            .passthrough(),
+        ),
+      })
+      .parse(
+        await this.environments.bindings.request(ref, "/api/issue-statuses"),
+      );
+    const id = (key: string) => {
+      const hex = digest(`workspace.basic/v1:${key}`);
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+    };
+    const keys = [
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "done",
+      "blocked",
+      "cancelled",
+    ];
+    const statuses = keys.map((key) => {
+      const status = catalog.statuses.find((item) => item.key === key);
+      if (!status)
+        throw new VerificationError(
+          problem(
+            "unsupportedCapability",
+            `The target catalog cannot create workspace.basic/v1: ${key} is missing`,
+          ),
+        );
+      return {
+        id: id(`status:${key}`),
+        key,
+        name: status.name,
+        description: status.description,
+        category: status.category,
+        color: status.color,
+        icon: status.icon,
+        position: status.position,
+      };
+    });
+    const projectId = id("project"),
+      workflowId = id("workflow"),
+      workspaceId = id("workspace");
+    const snapshot = await this.saveSnapshot(
+      sourceId,
+      "multica.workspace/v1",
+      toJson({
+        schemaVersion: 1,
+        sourceOrigin: "http://fixture.invalid",
+        workspace: {
+          id: workspaceId,
+          name: "Verification workspace",
+          slug: "verification",
+        },
+        statuses,
+        workflows: [
+          {
+            id: workflowId,
+            name: "Verification workflow",
+            description: "Controlled workspace fixture",
+            steps: keys.map((status_key) => ({
+              status_key,
+              handler: { type: "none" },
+              instructions: "",
+            })),
+          },
+        ],
+        projects: [
+          {
+            id: projectId,
+            title: "Verification project",
+            status: "planned",
+            priority: "none",
+            workflow_id: workflowId,
+          },
+        ],
+        issues: Array.from({ length: issueCount }, (_, index) => ({
+          id: id(`issue:${index}`),
+          project_id: projectId,
+          title: `Verification issue ${index + 1}`,
+          description: "Controlled workspace content",
+          status: index === 0 ? "todo" : "backlog",
+          priority: "none",
+        })),
+        comments: [],
+        labels: [],
+        attachments: [],
+      }),
+      true,
+    );
+    const dataset = await this.restoreWorkspace(
+      environmentId,
+      snapshot,
+      undefined,
+      context,
+    );
+    dataset.mode = "fixture";
+    dataset.refs.workspaceId = binding.scope.workspaceId;
+    await this.storage.write(`datasets/${dataset.datasetId}.json`, dataset);
+    return dataset;
   }
   async fixture(
     environmentId: string,
@@ -690,6 +986,21 @@ export class DataService {
             expectedRequestId,
           },
         );
+  }
+  private async advanceDataGeneration(environmentId: string): Promise<void> {
+    for (const name of await this.storage.list("steps")) {
+      const step = await this.storage.read(`steps/${name}`, stepSchema);
+      if (step?.environmentId === environmentId && step.state === "observing")
+        throw new VerificationError(
+          problem(
+            "instanceBusy",
+            "End active observation steps before replacing the dataset",
+            "inspect",
+            [step.stepId],
+          ),
+        );
+    }
+    await this.environments.advanceDataGeneration(environmentId);
   }
   private serialize<T>(id: string, run: () => Promise<T>): Promise<T> {
     const result = (this.updates.get(id) ?? Promise.resolve())
