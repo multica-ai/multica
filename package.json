@@ -64,7 +64,7 @@
     "@types/pg": "^8.20.0",
     "knip": "^6.32.2",
     "pg": "^8.20.0",
-    "turbo": "^2.5.4",
+    "turbo": "^2.11.10",
     "typescript": "catalog:"
   }
 }

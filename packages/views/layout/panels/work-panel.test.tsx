@@ -20,7 +20,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
-const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn(), getAgentTaskSnapshot: vi.fn(), getBaseUrl: () => "" }));
 const actions = vi.hoisted(() => ({
   sidebar: {
     items: [
@@ -137,13 +137,14 @@ function renderPanel(
   pins: PinnedItem[] = [],
   projects: Project[] = [],
   unreadIssueIds: string[] = [],
+  seedAgentTasks = true,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(projectListOptions("ws-1").queryKey, { projects, total: projects.length });
   qc.setQueryData(pinListOptions("ws-1", "u1").queryKey, pins);
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
   qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, EMPTY_ISSUE_VIEW_PREFERENCE);
-  qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+  if (seedAgentTasks) qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
   qc.setQueryData(
     issueUnreadOptions("ws-1").queryKey,
     unreadIssueIds.map((issue_id) => ({
@@ -395,5 +396,28 @@ describe("WorkPanel starred Unread view after its last issue is read", () => {
     await screen.findByRole("link", { name: "All issues" });
     expect(unreadRow()).not.toBeNull();
     await waitFor(() => expect(screen.queryByRole("link", { name: ISSUE.title })).toBeNull());
+  });
+});
+
+describe("WorkPanel render-phase updates", () => {
+  it("does not update WorkPanel while a sidebar row first reads its agent state during render", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    apiMock.getAgentTaskSnapshot.mockResolvedValue([
+      { id: "task-1", issue_id: ISSUE.id, agent_id: "agent-1", status: "running", wakeup_id: null },
+    ]);
+    try {
+      renderPanel("/acme/my-issues", [], [], [], false);
+      await waitFor(() => expect(apiMock.getAgentTaskSnapshot).toHaveBeenCalled());
+      await screen.findByRole("link", { name: ISSUE.title });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+      process.stdout.write("DIAG calls=" + consoleError.mock.calls.length + " first=" + JSON.stringify(consoleError.mock.calls.slice(0,3).map((a) => String(a[0]).slice(0,160))) + " avatarRendered=" + String(document.querySelectorAll(".rounded-full").length) + "\n");
+      const renderPhaseWarnings = consoleError.mock.calls.filter((args) =>
+        args.some((arg) => typeof arg === "string" && arg.includes("Cannot update a component")),
+      );
+      expect(renderPhaseWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
