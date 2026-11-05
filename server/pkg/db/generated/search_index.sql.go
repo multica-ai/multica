@@ -76,7 +76,7 @@ type GetSearchIndexManifestRow struct {
 // Local search index sync (MUL-7754). Web and Desktop copy the issue, comment,
 // and project text of a workspace, then catch up through search_index_change.
 // Snapshots are exchanged as pg_snapshot text; see migration 561. Chat sessions
-// and their messages (migration 589) are copied per creator: a session is
+// and their messages (migration 615) are copied per creator: a session is
 // readable only by its creator (loadChatSessionForUser), so chat queries take
 // creator_id alongside workspace_id.
 // Taken before any snapshot page, so every write the pages might miss is newer
